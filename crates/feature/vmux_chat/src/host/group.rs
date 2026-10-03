@@ -1,7 +1,7 @@
 use vmux_api::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
+use vmux_api::conversation::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_api::protocol::{AgentAttachment, AgentPromptEnvelope};
-use vmux_api::room::{AssistantBlock, Message, PlanStep, SubagentBlock};
 
 pub(super) struct ChatItemPage {
     pub items: Vec<ChatItem>,

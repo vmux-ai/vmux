@@ -24,5 +24,5 @@ mod managed_mcp;
 mod mcp;
 #[cfg(all(host, feature = "app"))]
 mod policy;
-#[cfg(host)]
+#[cfg(all(host, feature = "app"))]
 pub(crate) mod route;

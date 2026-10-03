@@ -1,5 +1,5 @@
 use unicode_segmentation::UnicodeSegmentation;
-use vmux_api::room::Message;
+use vmux_api::conversation::Message;
 
 pub struct ConversationTitle;
 

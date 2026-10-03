@@ -16,7 +16,7 @@ use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::profile::{Profile as StoredProfile, ProfileId, ProfileLabel, SessionEnvironment};
 use vmux_ecs::team::{Agent, Profile, Tester, User};
-use vmux_ecs::{ActivateRequest, Active, PageMetadata};
+use vmux_ecs::{ActivateRequest, Active, EntityTarget, PageMetadata};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::HostedUiPlugin;
 use vmux_layout::profile::Profile as SpaceProfile;
@@ -24,7 +24,7 @@ use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, SpaceHierarchy};
 use vmux_layout::stack::{OpenRequest, Stack};
 use vmux_layout::window::WindowHierarchy;
-use vmux_session::AgentRunState;
+use vmux_session::{RunState, Session};
 use vmux_space::Spaces;
 
 use crate::projection::TeamStateProjection;
@@ -133,7 +133,7 @@ struct TeamProjector<'w, 's> {
             Entity,
             &'static Profile,
             &'static Agent,
-            Option<&'static AgentRunState>,
+            Option<&'static RunState>,
             Option<&'static AgentDoneUnseen>,
         ),
     >,
@@ -142,6 +142,7 @@ struct TeamProjector<'w, 's> {
     space_hierarchy: SpaceHierarchy<'w, 's>,
     metadata: Query<'w, 's, &'static PageMetadata>,
     children: Query<'w, 's, &'static Children>,
+    session_views: Query<'w, 's, (Entity, &'static EntityTarget<Session>)>,
     profile_labels:
         Query<'w, 's, (&'static ProfileId, &'static Name, Has<Active>), With<ProfileLabel>>,
 }
@@ -160,8 +161,17 @@ impl TeamProjector<'_, '_> {
         })
     }
 
-    fn page(&self, entity: Entity) -> (String, String) {
+    fn page(&self, entity: Entity) -> (String, String, String) {
         let mut candidates = vec![entity];
+        for (stack, target) in &self.session_views {
+            if target.entity() != entity {
+                continue;
+            }
+            candidates.push(stack);
+            if let Ok(children) = self.children.get(stack) {
+                candidates.extend(children.iter());
+            }
+        }
         if let Ok(children) = self.children.get(entity) {
             candidates.extend(children.iter());
         }
@@ -173,18 +183,31 @@ impl TeamProjector<'_, '_> {
             }
         }
         let mut icon = String::new();
+        let mut url = String::new();
         let mut title = String::new();
         for candidate in candidates {
             if let Ok(metadata) = self.metadata.get(candidate) {
                 if icon.is_empty() && !metadata.icon.favicon_url().is_empty() {
                     icon = metadata.icon.favicon_url().to_string();
                 }
+                if url.is_empty() && !metadata.url.is_empty() {
+                    url = metadata.url.clone();
+                }
                 if title.is_empty() && !metadata.title.is_empty() {
                     title = metadata.title.clone();
                 }
             }
         }
-        (icon, title)
+        (icon, url, title)
+    }
+
+    fn belongs_to(&self, entity: Entity, space: Entity) -> bool {
+        if self.space_hierarchy.get(entity) == Some(space) {
+            return true;
+        }
+        self.session_views.iter().any(|(stack, target)| {
+            target.entity() == entity && self.space_hierarchy.get(stack) == Some(space)
+        })
     }
 
     fn members(&self, active_space: Option<Entity>) -> Vec<TeamMemberRow> {
@@ -203,15 +226,10 @@ impl TeamProjector<'_, '_> {
             return members;
         };
         for (entity, profile, agent, run, done) in &self.agents {
-            if self.space_hierarchy.get(entity) != Some(active_space) {
+            if !self.belongs_to(entity, active_space) {
                 continue;
             }
-            let (icon, title) = self.page(entity);
-            let url = self
-                .metadata
-                .get(entity)
-                .map(|metadata| metadata.url.clone())
-                .unwrap_or_default();
+            let (icon, url, title) = self.page(entity);
             members.push(TeamMemberRow {
                 id: entity.to_bits().to_string(),
                 name: profile.name.clone(),
@@ -222,7 +240,7 @@ impl TeamProjector<'_, '_> {
                 title,
                 sid: agent.sid.clone(),
                 is_user: false,
-                is_running: matches!(run, Some(AgentRunState::Streaming)),
+                is_running: matches!(run, Some(RunState::Streaming)),
                 is_done_unseen: done.is_some(),
             });
         }
@@ -679,5 +697,52 @@ mod tests {
         assert_eq!(agent.name, "Mistral Vibe");
         assert_eq!(agent.icon, "https://cdn.example/vibe.svg");
         assert_eq!(agent.url, "vmux://sessions/mistral-vibe");
+    }
+
+    #[test]
+    fn session_agent_appears_in_the_space_that_contains_its_view() {
+        let mut app = App::new();
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
+        app.world_mut().spawn((Profile::user(), User));
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                Profile::registry("Codex", "codex-acp"),
+                Agent {
+                    sid: "session-1".into(),
+                },
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                EntityTarget::<Session>::new(session),
+                PageMetadata {
+                    url: "vmux://sessions/session-1".into(),
+                    icon: vmux_ecs::PageIcon::favicon("https://cdn.example/codex.svg"),
+                    ..default()
+                },
+                ChildOf(space),
+            ))
+            .id();
+        app.world_mut().spawn((
+            PageMetadata {
+                url: "vmux://sessions/session-1".into(),
+                title: "Task".into(),
+                ..default()
+            },
+            ChildOf(stack),
+        ));
+
+        let rows = app
+            .world_mut()
+            .run_system_once(|projector: TeamProjector| projector.members(projector.current()))
+            .unwrap();
+
+        let agent = rows.iter().find(|row| !row.is_user).unwrap();
+        assert_eq!(agent.name, "Codex");
+        assert_eq!(agent.url, "vmux://sessions/session-1");
+        assert_eq!(agent.title, "Task");
     }
 }

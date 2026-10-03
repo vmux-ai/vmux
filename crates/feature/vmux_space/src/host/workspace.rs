@@ -7,15 +7,17 @@ use vmux_api::protocol::ClientMessage;
 use vmux_chat::event::ChatChoiceSelected;
 use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_command::WriteCommandRequests;
-use vmux_ecs::AgentWorkingDir;
+#[cfg(test)]
+use vmux_ecs::ProcessAnchor;
 use vmux_ecs::agent::{AgentContinuationRequest, AgentSessionRoot};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::{Cwd, EntityTarget};
 use vmux_git::worktree::CheckoutInfo;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
 };
-use vmux_session::AcpSession;
+use vmux_session::{Session, SessionId};
 
 use super::agent_workspace::AgentWorkspaceRequestSet;
 use vmux_ecs::profile::ProjectsDirectory;
@@ -234,7 +236,8 @@ pub(super) struct AgentWorkspaceState<'w, 's> {
     pub(super) workspaces: Query<'w, 's, &'static TabWorkspace>,
     pub(super) pending_projects: Query<'w, 's, &'static PendingProject>,
     pub(super) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
-    acp_sessions: Query<'w, 's, &'static mut AcpSession>,
+    sessions: Query<'w, 's, (&'static SessionId, &'static mut Cwd), With<Session>>,
+    session_targets: Query<'w, 's, &'static EntityTarget<Session>>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
 
@@ -262,7 +265,7 @@ impl AgentWorkspaceState<'_, '_> {
             .remove::<PendingProject>()
             .remove::<RepositoryNeedsWorktree>()
             .remove::<TabWorktreeUnavailable>();
-        let rebind = self.rebind_acp_workspace(agent_entity, &execution_dir, commands);
+        let rebind = self.rebind_acp_workspace(agent_entity, &execution_dir);
         Ok((execution_dir, rebind))
     }
 
@@ -288,7 +291,7 @@ impl AgentWorkspaceState<'_, '_> {
             .remove::<TabWorktree>()
             .remove::<TabWorktreeReady>()
             .remove::<TabWorktreeUnavailable>();
-        Ok(self.rebind_acp_workspace(agent_entity, execution_dir, commands))
+        Ok(self.rebind_acp_workspace(agent_entity, execution_dir))
     }
 
     fn activate_selected(
@@ -334,32 +337,24 @@ impl AgentWorkspaceState<'_, '_> {
         Ok(())
     }
 
-    fn rebind_acp_workspace(
-        &mut self,
-        agent_entity: Entity,
-        cwd: &Path,
-        commands: &mut Commands,
-    ) -> Option<ClientMessage> {
-        let stack = self.ancestor_acp_stack(agent_entity)?;
-        let Ok(mut session) = self.acp_sessions.get_mut(stack) else {
+    fn rebind_acp_workspace(&mut self, agent_entity: Entity, cwd: &Path) -> Option<ClientMessage> {
+        let session_entity = self.ancestor_session(agent_entity)?;
+        let Ok((session_id, mut session_cwd)) = self.sessions.get_mut(session_entity) else {
             return None;
         };
-        session.cwd = cwd.to_path_buf();
-        commands
-            .entity(stack)
-            .insert(AgentWorkingDir(cwd.to_path_buf()));
+        session_cwd.0 = cwd.to_path_buf();
         let cwd = cwd.to_string_lossy().into_owned();
         Some(ClientMessage::RebindAcpWorkspace {
-            sid: session.sid.clone(),
+            sid: session_id.0.clone(),
             cwd,
         })
     }
 
-    fn ancestor_acp_stack(&self, entity: Entity) -> Option<Entity> {
+    fn ancestor_session(&self, entity: Entity) -> Option<Entity> {
         let mut current = entity;
         loop {
-            if self.acp_sessions.contains(current) {
-                return Some(current);
+            if let Ok(target) = self.session_targets.get(current) {
+                return Some(target.entity());
             }
             current = self.child_of.get(current).ok()?.parent();
         }
@@ -694,19 +689,18 @@ mod tests {
             ))
             .id();
         let pane = app.world_mut().spawn(ChildOf(tab)).id();
-        let stack = app
+        let session = app
             .world_mut()
             .spawn((
-                AcpSession {
-                    agent_id: "claude".into(),
-                    sid: "routing-session".into(),
-                    cwd: projects.clone(),
-                    anchor,
-                    resume: None,
-                },
-                AgentWorkingDir(projects.clone()),
-                ChildOf(pane),
+                Session,
+                SessionId("routing-session".into()),
+                Cwd(projects.clone()),
+                ProcessAnchor(anchor),
             ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((EntityTarget::<Session>::new(session), ChildOf(pane)))
             .id();
         let view = app
             .world_mut()
@@ -747,14 +741,12 @@ mod tests {
         );
         assert!(app.world().get::<TabWorktreeReady>(tab).is_some());
         assert!(app.world().get::<PendingProject>(tab).is_none());
-        let session = app.world().get::<AcpSession>(stack).unwrap();
-        assert_eq!(session.sid, "routing-session");
-        assert_eq!(session.anchor, anchor);
-        assert_eq!(session.cwd, execution_dir);
         assert_eq!(
-            app.world().get::<AgentWorkingDir>(stack).unwrap().0,
-            execution_dir
+            app.world().get::<SessionId>(session).unwrap().0,
+            "routing-session"
         );
+        assert_eq!(app.world().get::<ProcessAnchor>(session).unwrap().0, anchor);
+        assert_eq!(app.world().get::<Cwd>(session).unwrap().0, execution_dir);
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
         assert!(app.world().get::<ChatView>(view).is_some());
         assert!(matches!(

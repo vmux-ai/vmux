@@ -19,7 +19,7 @@ use super::toast::ToastPlugin;
 use crate::host::command_bar::CommandBarPlugin;
 use crate::host::event::{AgentRequestInput, AgentToolCallRequest};
 use crate::host::runtime::AgentRuntimePlugin;
-use crate::route::AcpRoute;
+use crate::route::SessionRoute;
 
 pub struct AgentPlugin;
 
@@ -60,7 +60,7 @@ fn spawn_store_validator(mut commands: Commands) {
         Name::new("Agent workspace-store validator"),
         WorkspaceStoreValidator {
             name: "agent URL",
-            rejects: AcpRoute::rejects_persisted_store,
+            rejects: SessionRoute::rejects_persisted_store,
         },
     ));
 }

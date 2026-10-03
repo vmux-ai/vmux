@@ -1,8 +1,10 @@
+pub use crate::component;
+pub use crate::persistence;
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
 pub use component::{
-    ActivateRequest, Active, AgentWorkingDir, Bookmark, BookmarkOrder, Collapsed, CreatedAt,
+    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Cwd, Description,
     EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
     LastActivatedAt, LastVisitedAt, Order, Pin, ProcessAnchor, Ready, RegistrationOrder,
     TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
@@ -25,7 +27,6 @@ pub use plugin::EcsPlugin;
 pub use ui_state::{UiState, UiStatePlugin, UiStateWrite};
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
 
-pub mod component;
 pub mod plugin;
 
 pub mod agent;
@@ -39,7 +40,6 @@ pub mod notify;
 pub mod overlay;
 pub mod page;
 pub mod page_open;
-pub mod persistence;
 pub mod profile;
 pub mod team;
 pub mod terminal;

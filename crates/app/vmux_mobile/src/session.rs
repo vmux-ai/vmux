@@ -11,7 +11,7 @@ use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::{Commands, NonSendMut, Query, Single};
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
-use vmux_api::room::{NewChatRequest, RemoteEvent, RemoteSession};
+use vmux_api::conversation::{NewChatRequest, RemoteEvent, RemoteSession};
 use vmux_chat::host::{ChatRuntime, Conversation, LiveTurn, Log, Reported};
 
 use crate::pairing::ConnectionState;
@@ -104,7 +104,7 @@ impl Session {
             .read()
             .current
             .as_ref()
-            .map(|session| session.sid.clone())
+            .map(|session| session.id.0.clone())
             .unwrap_or_default()
     }
 }
@@ -143,16 +143,16 @@ impl SessionStream {
                 api.reset_transport().await;
             }
             loop {
-                tracing::info!(%sid, "room stream dialling");
+                tracing::info!(%sid, "session stream dialling");
                 match api.subscribe(&sid).await {
                     Ok(mut subscription) => {
-                        tracing::info!(%sid, "room stream open");
+                        tracing::info!(%sid, "session stream open");
                         if sender.send(SessionStreamOutput::Connected(true)).is_err() {
                             return;
                         }
                         while let Some(event) = subscription.next().await {
                             let Some(event) = Api::event(event) else {
-                                tracing::warn!("room event not understood");
+                                tracing::warn!("session event not understood");
                                 continue;
                             };
                             let kind = match &event {
@@ -162,20 +162,20 @@ impl SessionStream {
                                 RemoteEvent::Status { .. } => "status",
                                 RemoteEvent::Approval { .. } => "approval",
                             };
-                            tracing::info!(kind, "room event");
+                            tracing::info!(kind, "session event");
                             if sender.send(SessionStreamOutput::Event(event)).is_err() {
                                 return;
                             }
                         }
-                        tracing::warn!(%sid, "room stream ended");
+                        tracing::warn!(%sid, "session stream ended");
                     }
                     Err(ApiError::Unauthorized | ApiError::NotFound) => {
-                        tracing::warn!(%sid, "room stream refused for good");
+                        tracing::warn!(%sid, "session stream refused for good");
                         let _ = sender.send(SessionStreamOutput::Connected(false));
                         return;
                     }
                     Err(ApiError::Message(error)) => {
-                        tracing::warn!(%sid, %error, "room stream failed; retrying");
+                        tracing::warn!(%sid, %error, "session stream failed; retrying");
                     }
                 }
                 if sender.send(SessionStreamOutput::Connected(false)).is_err() {
@@ -216,7 +216,7 @@ fn start_chats(
         let known = connection
             .sessions()
             .iter()
-            .map(|session| session.sid.clone())
+            .map(|session| session.id.0.clone())
             .collect::<HashSet<_>>();
         let agent_url = request.agent_url.clone();
         let api = api.clone();
@@ -236,7 +236,7 @@ fn start_chats(
                 };
                 let created = sessions
                     .iter()
-                    .find(|candidate| !known.contains(&candidate.sid))
+                    .find(|candidate| !known.contains(&candidate.id.0))
                     .cloned();
                 if let Some(created) = created {
                     return Some((sessions, created));
@@ -295,12 +295,12 @@ fn open(
         state.view.generation = state.view.generation.wrapping_add(1);
         commands.entity(entity).insert(SessionStream::spawn(
             api.clone(),
-            request.0.sid.clone(),
+            request.0.id.0.clone(),
             state.view.generation,
             false,
         ));
         *log = Log {
-            room_id: Some(request.0.room_id.clone()),
+            session_id: Some(request.0.id.clone()),
             ..Log::default()
         };
         *live = LiveTurn::default();
@@ -358,7 +358,7 @@ fn restart(
     let Some(api) = connection.api() else {
         return;
     };
-    let sid = current.sid.clone();
+    let sid = current.id.0.clone();
     state.view.connected = false;
     state.view.generation = state.view.generation.wrapping_add(1);
     commands

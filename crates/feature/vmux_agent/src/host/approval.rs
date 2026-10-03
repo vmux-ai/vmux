@@ -8,9 +8,8 @@ use crate::host::event::{AgentApprovalReply, ApprovalDecision};
 use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_chat::event::ChatApproval;
 use vmux_ecs::service::ServiceRequest;
-use vmux_session::AcpSession;
-use vmux_session::AgentApprovalPolicy;
-use vmux_session::AgentRunState;
+use vmux_ecs::{Cwd, EntityTarget};
+use vmux_session::{AgentId, ApprovalPolicy, RunState, Session, SessionId};
 
 pub struct Plugin;
 
@@ -27,14 +26,22 @@ impl bevy::app::Plugin for Plugin {
     }
 }
 
-fn receive(trigger: On<UiInput<ChatApproval>>, child_of: Query<&ChildOf>, mut commands: Commands) {
+fn receive(
+    trigger: On<UiInput<ChatApproval>>,
+    child_of: Query<&ChildOf>,
+    targets: Query<&EntityTarget<Session>>,
+    mut commands: Commands,
+) {
     let webview = trigger.event().webview;
     let payload = &trigger.event().payload;
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
+    let Ok(target) = targets.get(parent.parent()) else {
+        return;
+    };
     commands.trigger(AgentApprovalReply {
-        session: parent.parent(),
+        session: target.entity(),
         call_id: payload.call_id.clone(),
         decision: payload.decision,
     });
@@ -75,7 +82,7 @@ impl AgentApprovalStore {
         Self { path, grants }
     }
 
-    fn policy_for(&self, agent: &str, cwd: &Path) -> AgentApprovalPolicy {
+    fn policy_for(&self, agent: &str, cwd: &Path) -> ApprovalPolicy {
         let agent = Self::agent_id(agent);
         let auto = Self::scope(cwd)
             .and_then(|repository| {
@@ -88,7 +95,7 @@ impl AgentApprovalStore {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        AgentApprovalPolicy { auto }
+        ApprovalPolicy { auto }
     }
 
     fn remember(&mut self, agent: &str, cwd: &Path, tool: &str) {
@@ -102,7 +109,7 @@ impl AgentApprovalStore {
             .or_default()
             .entry(scope)
             .or_default()
-            .insert(AgentApprovalPolicy::tool_key(tool));
+            .insert(ApprovalPolicy::tool_key(tool));
         if inserted && let Err(error) = self.save() {
             warn!("failed to save agent approvals: {error}");
         }
@@ -128,47 +135,59 @@ impl AgentApprovalStore {
 
 fn policy(
     store: Single<&AgentApprovalStore>,
-    mut sessions: Query<(&AcpSession, &mut AgentApprovalPolicy), Changed<AcpSession>>,
+    mut sessions: Query<
+        (&AgentId, &Cwd, &mut ApprovalPolicy),
+        (With<Session>, Or<(Changed<AgentId>, Changed<Cwd>)>),
+    >,
 ) {
-    for (session, mut policy) in &mut sessions {
-        *policy = store.policy_for(&session.agent_id, &session.cwd);
+    for (agent_id, cwd, mut policy) in &mut sessions {
+        *policy = store.policy_for(&agent_id.0, &cwd.0);
     }
 }
 
 #[allow(clippy::type_complexity)]
 fn reply(
     trigger: On<AgentApprovalReply>,
-    mut q: Query<(&mut AgentRunState, &mut AgentApprovalPolicy, &AcpSession)>,
+    mut q: Query<
+        (
+            &mut RunState,
+            &mut ApprovalPolicy,
+            &SessionId,
+            &AgentId,
+            &Cwd,
+        ),
+        With<Session>,
+    >,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut store: Option<Single<&mut AgentApprovalStore>>,
 ) {
     let reply = trigger.event();
-    let Ok((mut state, mut policy, session)) = q.get_mut(reply.session) else {
+    let Ok((mut state, mut policy, session_id, agent_id, cwd)) = q.get_mut(reply.session) else {
         return;
     };
     let matches_call = matches!(
         &*state,
-        AgentRunState::AwaitingApproval { call_id, .. } if call_id == &reply.call_id
+        RunState::AwaitingApproval { call_id, .. } if call_id == &reply.call_id
     );
     if !matches_call {
         return;
     }
     if reply.decision == ApprovalDecision::AllowAlways
-        && let AgentRunState::AwaitingApproval { name, .. } = &*state
+        && let RunState::AwaitingApproval { name, .. } = &*state
     {
         policy.allow(name);
         if let Some(store) = store.as_deref_mut() {
-            store.remember(&session.agent_id, &session.cwd, name);
+            store.remember(&agent_id.0, &cwd.0, name);
         }
     }
     service_requests.write(ServiceRequest(ClientMessage::Shared(
         SharedMessage::AgentApprove {
-            sid: session.sid.clone(),
+            sid: session_id.0.clone(),
             call_id: reply.call_id.clone(),
             decision: reply.decision,
         },
     )));
-    *state = AgentRunState::Streaming;
+    *state = RunState::Streaming;
 }
 
 #[cfg(test)]
@@ -176,16 +195,19 @@ mod tests {
     use super::*;
     use serde_json::json;
     use vmux_api::protocol::ProcessId;
+    use vmux_ecs::ProcessAnchor;
 
-    use vmux_session::AcpSession;
+    struct TestSession;
 
-    fn session() -> AcpSession {
-        AcpSession {
-            agent_id: "anthropic".into(),
-            sid: "s".into(),
-            cwd: PathBuf::from("/tmp"),
-            anchor: ProcessId::new(),
-            resume: None,
+    impl TestSession {
+        fn bundle(agent: &str) -> impl Bundle {
+            (
+                Session,
+                SessionId("s".into()),
+                AgentId(agent.into()),
+                Cwd(PathBuf::from("/tmp")),
+                ProcessAnchor(ProcessId::new()),
+            )
         }
     }
 
@@ -212,9 +234,9 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                session(),
-                AgentApprovalPolicy::default(),
-                AgentRunState::AwaitingApproval {
+                TestSession::bundle("anthropic"),
+                ApprovalPolicy::default(),
+                RunState::AwaitingApproval {
                     call_id: "abc".into(),
                     name: "run_shell".into(),
                     args: json!({}),
@@ -228,8 +250,8 @@ mod tests {
         });
         app.update();
         assert!(matches!(
-            app.world().get::<AgentRunState>(entity),
-            Some(AgentRunState::Streaming)
+            app.world().get::<RunState>(entity),
+            Some(RunState::Streaming)
         ));
     }
 
@@ -239,15 +261,9 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                AcpSession {
-                    agent_id: "vibe-acp".into(),
-                    sid: "s".into(),
-                    cwd: std::path::PathBuf::from("/tmp"),
-                    anchor: vmux_ecs::ProcessId::new(),
-                    resume: None,
-                },
-                AgentApprovalPolicy::default(),
-                AgentRunState::AwaitingApproval {
+                TestSession::bundle("vibe-acp"),
+                ApprovalPolicy::default(),
+                RunState::AwaitingApproval {
                     call_id: "abc".into(),
                     name: "edit".into(),
                     args: json!({}),
@@ -261,8 +277,8 @@ mod tests {
         });
         app.update();
         assert!(matches!(
-            app.world().get::<AgentRunState>(entity),
-            Some(AgentRunState::Streaming)
+            app.world().get::<RunState>(entity),
+            Some(RunState::Streaming)
         ));
     }
 
@@ -272,9 +288,9 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                session(),
-                AgentApprovalPolicy::default(),
-                AgentRunState::AwaitingApproval {
+                TestSession::bundle("anthropic"),
+                ApprovalPolicy::default(),
+                RunState::AwaitingApproval {
                     call_id: "abc".into(),
                     name: "run_shell".into(),
                     args: json!({}),
@@ -287,7 +303,7 @@ mod tests {
             decision: ApprovalDecision::AllowAlways,
         });
         app.update();
-        let policy = app.world().get::<AgentApprovalPolicy>(entity).unwrap();
+        let policy = app.world().get::<ApprovalPolicy>(entity).unwrap();
         assert!(policy.allows("run_shell"));
     }
 

@@ -10,15 +10,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
+use vmux_api::conversation::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_api::protocol::{
     AcpSessionConfig, AcpSessionConfigValue, AgentAttachment, AgentFileTouched, AgentRequest,
     AgentRequestId, AgentRunStatus, ManagedMcpServer, ManagedMcpTransport, ServiceMessage,
     SharedEvent,
 };
-use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
-use vmux_ecs::agent::SessionId;
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
+use vmux_session::SessionId;
 
 use agent_client_protocol::schema::v1::{
     EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
@@ -1318,9 +1318,8 @@ fn list(
         {
             let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
             result.push(RemoteSession {
-                sid: sid.0.clone(),
-                url: format!("{}{}", vmux_chat::ChatPlugin::URL, sid.0),
-                room_id: vmux_api::room::RoomId::for_session(&sid.0),
+                id: sid.clone(),
+                url: vmux_session::Route::Session(sid.clone()).url(),
                 title: vmux_session::ConversationTitle::from_messages(projector.messages(), &name),
                 name,
                 runtime: "acp".to_string(),
@@ -1349,9 +1348,8 @@ fn list(
             if sid.0 == request.sid {
                 let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
                 result = Some(RemoteSession {
-                    sid: sid.0.clone(),
-                    url: format!("{}{}", vmux_chat::ChatPlugin::URL, sid.0),
-                    room_id: vmux_api::room::RoomId::for_session(&sid.0),
+                    id: sid.clone(),
+                    url: vmux_session::Route::Session(sid.clone()).url(),
                     title: vmux_session::ConversationTitle::from_messages(
                         projector.messages(),
                         &name,

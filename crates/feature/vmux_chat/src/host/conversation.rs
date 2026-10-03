@@ -3,18 +3,18 @@ use super::presentation::ChatPresentation;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::chat::ChatItem;
-use vmux_api::room::{
-    AssistantBlock, Message as RoomMessage, RemoteAgent, RemoteApproval, RemoteEvent,
-    RemoteSession, RemoteStatus, RoomEvent, RoomId,
+use vmux_api::conversation::{
+    AssistantBlock, ConversationEvent, Message as ConversationMessage, RemoteAgent, RemoteApproval,
+    RemoteEvent, RemoteSession, RemoteStatus, SessionId,
 };
 
 use super::prompt::AttachmentPreviews;
 use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
 use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
 
-pub struct ChatRoomPlugin;
+pub struct ChatConversationPlugin;
 
-impl Plugin for ChatRoomPlugin {
+impl Plugin for ChatConversationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(all(ui, host))]
         app.add_plugins(crate::ui::ChatPage::plugin());
@@ -24,10 +24,10 @@ impl Plugin for ChatRoomPlugin {
             .add_systems(
                 Update,
                 (
-                    receive_agents.before(RoomProjection),
-                    fold_conversation.before(RoomProjection),
-                    project_snapshot.in_set(RoomProjection),
-                    emit_snapshot.after(RoomProjection),
+                    receive_agents.before(ConversationProjection),
+                    fold.before(ConversationProjection),
+                    project_snapshot.in_set(ConversationProjection),
+                    emit_snapshot.after(ConversationProjection),
                 ),
             );
     }
@@ -40,7 +40,7 @@ pub struct Reported(pub RemoteEvent);
 pub struct Submitted;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct RoomProjection;
+struct ConversationProjection;
 
 #[derive(Component, PartialEq)]
 pub struct Conversation {
@@ -59,7 +59,7 @@ impl Default for Conversation {
     }
 }
 
-fn fold_conversation(
+fn fold(
     mut submitted: MessageReader<Submitted>,
     mut reported: MessageReader<Reported>,
     mut runtimes: Query<(&mut Conversation, &mut Log, &mut LiveTurn), With<ChatRuntime>>,
@@ -76,9 +76,9 @@ fn fold_conversation(
         match event {
             RemoteEvent::Session { session } => {
                 if log
-                    .room_id
+                    .session_id
                     .as_ref()
-                    .is_some_and(|room_id| room_id != &session.room_id)
+                    .is_some_and(|session_id| session_id != &session.id)
                 {
                     *log = Log::default();
                 }
@@ -87,33 +87,33 @@ fn fold_conversation(
                 conversation.session = Some(session.as_ref().clone());
             }
             RemoteEvent::Snapshot {
-                room_id,
+                session_id,
                 through_seq,
                 events,
             } => {
                 let matches_session = conversation
                     .session
                     .as_ref()
-                    .is_none_or(|session| &session.room_id == room_id);
+                    .is_none_or(|session| &session.id == session_id);
                 let has_newer_projection =
-                    log.room_id.as_ref() == Some(room_id) && log.through_seq > *through_seq;
+                    log.session_id.as_ref() == Some(session_id) && log.through_seq > *through_seq;
                 if matches_session && !has_newer_projection {
                     *log = Log {
-                        room_id: Some(room_id.clone()),
+                        session_id: Some(session_id.clone()),
                         through_seq: *through_seq,
                         events: events.clone(),
                     };
                     live.0.clear();
                 }
             }
-            RemoteEvent::Delta { room_id, text } => {
+            RemoteEvent::Delta { session_id, text } => {
                 let accepts_delta = log
-                    .room_id
+                    .session_id
                     .as_ref()
-                    .is_none_or(|current| current == room_id);
+                    .is_none_or(|current| current == session_id);
                 if accepts_delta {
-                    if log.room_id.is_none() {
-                        log.room_id = Some(room_id.clone());
+                    if log.session_id.is_none() {
+                        log.session_id = Some(session_id.clone());
                     }
                     live.0.push_str(text);
                 }
@@ -131,9 +131,9 @@ fn fold_conversation(
 
 #[derive(Component, Default, PartialEq)]
 pub struct Log {
-    pub room_id: Option<RoomId>,
+    pub session_id: Option<SessionId>,
     pub through_seq: u64,
-    pub events: Vec<RoomEvent>,
+    pub events: Vec<ConversationEvent>,
 }
 
 #[derive(Component, Default, PartialEq)]
@@ -146,8 +146,8 @@ pub struct Agents(pub Vec<RemoteAgent>);
 pub struct Snapshot(pub ChatSnapshot);
 
 #[derive(Component, Default)]
-pub(crate) struct RoomTranscript {
-    room_id: Option<RoomId>,
+pub(crate) struct ConversationTranscript {
+    session_id: Option<SessionId>,
     state: ChatTranscriptState,
 }
 
@@ -156,7 +156,7 @@ type ChatProjectionOutput<'w, 's> = Query<
     's,
     (
         Ref<'static, Snapshot>,
-        Ref<'static, RoomTranscript>,
+        Ref<'static, ConversationTranscript>,
         &'static mut ChatUiStateProjection,
     ),
     With<ChatRuntime>,
@@ -172,7 +172,7 @@ type ChangedChatProjection<'w, 's> = Query<
         &'static Agents,
         &'static AttachmentPreviews,
         &'static mut Snapshot,
-        &'static mut RoomTranscript,
+        &'static mut ConversationTranscript,
     ),
     (
         With<ChatRuntime>,
@@ -209,7 +209,7 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
     };
     let Some(session) = conversation.session.as_ref() else {
         snapshot.0 = ChatSnapshot::default();
-        transcript.room_id = None;
+        transcript.session_id = None;
         transcript.state = ChatTranscriptState::default();
         return;
     };
@@ -234,12 +234,12 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         Some(agent) => (agent.id.clone(), agent.icon.clone()),
         None => (session.name.clone(), String::new()),
     };
-    let generation = if transcript.room_id.as_ref() == Some(&session.room_id) {
+    let generation = if transcript.session_id.as_ref() == Some(&session.id) {
         transcript.state.generation.max(1)
     } else {
         transcript.state.generation.wrapping_add(1).max(1)
     };
-    transcript.room_id = Some(session.room_id.clone());
+    transcript.session_id = Some(session.id.clone());
     let (active_subagents, active_tasks) =
         super::projection::ChatTurnProjection::activity_counts(&items);
     transcript.state = ChatTranscriptState {
@@ -295,7 +295,7 @@ impl Log {
             timestamps.push(event.created_at_ms);
         }
         if !live_turn.is_empty() {
-            messages.push(RoomMessage::Assistant {
+            messages.push(ConversationMessage::Assistant {
                 blocks: vec![AssistantBlock::Text(live_turn.to_string())],
             });
             timestamps.push(0);
@@ -331,7 +331,10 @@ mod tests {
     impl Started {
         fn open() -> Self {
             let mut app = App::new();
-            app.add_plugins((crate::host::state::ChatUiStatePlugin, ChatRoomPlugin));
+            app.add_plugins((
+                crate::host::state::ChatUiStatePlugin,
+                ChatConversationPlugin,
+            ));
             app.update();
             let mut started = Self(app);
             started.insert(Conversation::with_agent("ada"));
@@ -344,7 +347,7 @@ mod tests {
         }
 
         fn transcript(&self) -> &ChatTranscriptState {
-            &self.component::<RoomTranscript>().state
+            &self.component::<ConversationTranscript>().state
         }
 
         fn items(&self) -> Vec<ChatItem> {
@@ -391,12 +394,12 @@ mod tests {
 
         fn snapshot_of(seq: u64, text: &str) -> RemoteEvent {
             RemoteEvent::Snapshot {
-                room_id: RoomId::from("r"),
+                session_id: SessionId::from("s"),
                 through_seq: seq,
-                events: vmux_session::room::RoomEvents::from_messages(
-                    "s",
+                events: ConversationEvent::from_messages(
+                    &SessionId::from("s"),
                     seq,
-                    &[RoomMessage::user(text)],
+                    &[ConversationMessage::user(text)],
                 ),
             }
         }
@@ -406,9 +409,8 @@ mod tests {
         fn with_agent(name: &str) -> Self {
             Self {
                 session: Some(RemoteSession {
-                    sid: "s".to_string(),
+                    id: SessionId::from("s"),
                     url: "vmux://sessions/s".to_string(),
-                    room_id: RoomId::from("r"),
                     title: String::new(),
                     name: name.to_string(),
                     runtime: String::new(),
@@ -441,22 +443,22 @@ mod tests {
     impl Log {
         fn sample() -> Self {
             Self {
-                room_id: None,
+                session_id: None,
                 through_seq: 0,
-                events: vmux_session::room::RoomEvents::from_messages(
-                    "s",
+                events: ConversationEvent::from_messages(
+                    &SessionId::from("s"),
                     0,
                     &[
-                        RoomMessage::user("hello"),
-                        RoomMessage::Assistant {
+                        ConversationMessage::user("hello"),
+                        ConversationMessage::Assistant {
                             blocks: vec![AssistantBlock::Thinking("working".to_string())],
                         },
-                        RoomMessage::ToolResult {
+                        ConversationMessage::ToolResult {
                             call_id: "tool-1".to_string(),
                             content: "done".to_string(),
                             is_error: false,
                         },
-                        RoomMessage::Assistant {
+                        ConversationMessage::Assistant {
                             blocks: vec![AssistantBlock::Text("answer".to_string())],
                         },
                     ],
@@ -495,12 +497,12 @@ mod tests {
     #[test]
     fn live_turn_without_an_agent_event_has_no_timestamp() {
         let log = Log {
-            room_id: None,
+            session_id: None,
             through_seq: 0,
-            events: vmux_session::room::RoomEvents::from_messages(
-                "s",
+            events: ConversationEvent::from_messages(
+                &SessionId::from("s"),
                 100,
-                &[RoomMessage::user("hello")],
+                &[ConversationMessage::user("hello")],
             ),
         };
 
@@ -565,7 +567,7 @@ mod tests {
     fn a_snapshot_retires_the_tokens_it_now_contains() {
         let mut started = Started::open();
         started.report(RemoteEvent::Delta {
-            room_id: RoomId::from("r"),
+            session_id: SessionId::from("s"),
             text: "partial".to_string(),
         });
         assert_eq!(started.component::<LiveTurn>().0, "partial");
@@ -594,19 +596,19 @@ mod tests {
     }
 
     #[test]
-    fn switching_rooms_drops_the_log_the_previous_one_built() {
+    fn switching_sessions_drops_the_previous_log() {
         let mut started = Started::open();
         started.report(Started::snapshot_of(4, "before"));
         assert!(!started.log().events.is_empty());
 
         let mut moved = Conversation::with_agent("ada");
         let session = moved.session.as_mut().expect("a session");
-        session.room_id = RoomId::from("elsewhere");
+        session.id = SessionId::from("elsewhere");
         started.report(RemoteEvent::Session {
             session: Box::new(session.clone()),
         });
         assert!(started.log().events.is_empty());
-        assert_eq!(started.log().room_id, None);
+        assert_eq!(started.log().session_id, None);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use tokio::sync::{mpsc, oneshot};
-use vmux_api::room::ClientOpId;
+use vmux_api::conversation::ClientOpId;
 
 const MAX_CLIENT_OPERATIONS: usize = 4096;
 

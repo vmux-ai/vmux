@@ -6,7 +6,7 @@ use vmux_chat::event::ModelOptionEntry;
 use vmux_ecs::profile::ProfilePaths;
 use vmux_path::AtomicFile;
 
-use crate::route::AcpRoute;
+use crate::route::SessionRoute;
 
 pub(super) struct ModelSelectionPlugin;
 
@@ -108,8 +108,8 @@ fn load_model_selections(mut models: Single<&mut AgentModelSelections>) {
     };
     for (agent, entry) in saved {
         let mut memory = AgentModelMemory::from(entry);
-        if !memory.url.is_empty() {
-            memory.url = AcpRoute::agent(&agent).url();
+        if !memory.url.is_empty() && SessionRoute::parse(&memory.url).is_none() {
+            memory.url.clear();
         }
         models.by_agent.insert(agent, memory);
     }
@@ -126,7 +126,9 @@ fn load_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
         return;
     };
     for (agent, mut memory) in saved {
-        memory.url = AcpRoute::agent(&agent).url();
+        if !memory.url.is_empty() && SessionRoute::parse(&memory.url).is_none() {
+            memory.url.clear();
+        }
         modes.by_agent.insert(agent, memory);
     }
     modes.dirty = false;

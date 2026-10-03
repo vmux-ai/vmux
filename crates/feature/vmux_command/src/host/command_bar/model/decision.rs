@@ -537,11 +537,12 @@ impl AgentSegment {
     }
 
     pub fn in_url(url: &str) -> Option<String> {
-        let path = url
-            .strip_prefix("vmux://sessions/")
-            .or_else(|| url.strip_prefix("vmux://agent/"))?;
-        let segment = path.split('/').next()?;
-        (!segment.is_empty()).then(|| segment.to_string())
+        let route = vmux_api::VmuxRoute::parse(url)?;
+        if !route.is_host("sessions") || !route.is_root() {
+            return None;
+        }
+        url::form_urlencoded::parse(route.query()?.as_bytes())
+            .find_map(|(key, value)| (key == "agent" && !value.is_empty()).then(|| value.into()))
     }
 }
 

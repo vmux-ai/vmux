@@ -5,18 +5,47 @@ pub use vmux_api::chat::{
     ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession, SlashCommand,
     SlashCommandEntry, SlashCommands,
 };
+pub use vmux_api::conversation::ModelOptionEntry;
 use vmux_api::json::JsonValue;
 pub use vmux_api::prompt_media::{
     ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
     ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
 };
 pub use vmux_api::protocol::ApprovalDecision;
-pub use vmux_api::room::ModelOptionEntry;
 pub use vmux_ecs::event::ProjectBranch as ChatBranch;
 
 pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
+
+#[vmux_api::ui_event(Default)]
+pub struct SessionsCreate {
+    pub name: String,
+    pub description: String,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct SessionsRename {
+    pub id: String,
+    pub name: String,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct SessionsDescriptionUpdate {
+    pub id: String,
+    pub description: String,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct SessionsStageChange {
+    pub id: String,
+    pub stage: String,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct SessionsCleanup {
+    pub id: String,
+}
 
 #[vmux_api::contract(Default, Eq)]
 pub struct QueuedPromptSnapshot {

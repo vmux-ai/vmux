@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::ProcessId;
+use vmux_api::conversation::Message;
 use vmux_api::protocol::{AcpSessionConfig, AgentRequestId, JsonValue};
 
 pub use vmux_api::protocol::ApprovalDecision;
@@ -25,6 +26,12 @@ pub struct UiAgentWorkspaceChanged {
     pub branch: String,
     pub cwd: String,
     pub workspace_cwd: String,
+}
+
+#[vmux_api::service_message(SharedEvent::AgentMessagesSnapshot)]
+pub struct UiAgentMessagesSnapshot {
+    pub sid: String,
+    pub messages: Vec<Message>,
 }
 
 #[vmux_api::service_message(AcpSessionConfigState)]

@@ -712,10 +712,21 @@ pub struct ActiveSessionState {
 #[vmux_api::contract]
 pub struct ActiveSession {
     pub page: StackNode,
+    #[serde(default)]
+    pub task: Option<ActiveTask>,
     pub agent: Option<vmux_ecs::event::team::TeamMemberRow>,
     pub project: Option<ActiveWorkspaceProject>,
     pub boundary: Option<TabBoundary>,
     pub pane_id: u64,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ActiveTask {
+    pub name: String,
+    pub description: String,
+    pub stage: String,
+    pub stage_name: String,
+    pub runtime: String,
 }
 
 #[vmux_api::contract]

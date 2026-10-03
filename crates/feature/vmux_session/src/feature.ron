@@ -1,0 +1,11 @@
+(
+    session: (
+        default_stage: "in_progress",
+        stages: [
+            (id: "in_progress", name: "session-stage-in-progress", terminal: false, order: 10),
+            (id: "in_review", name: "session-stage-in-review", terminal: false, order: 20),
+            (id: "done", name: "session-stage-done", terminal: true, order: 30),
+            (id: "canceled", name: "session-stage-canceled", terminal: true, order: 40),
+        ],
+    ),
+)

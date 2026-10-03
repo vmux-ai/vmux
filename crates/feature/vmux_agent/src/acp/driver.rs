@@ -37,13 +37,13 @@ use super::projector::{AcpToolTitle, ApprovalDetailsQuery};
 use super::{
     AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpTranscriptInput,
 };
+#[cfg(test)]
+use vmux_api::conversation::AssistantBlock;
+use vmux_api::conversation::{Message, RemoteApproval};
 use vmux_api::protocol::{
     AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ServiceMessage,
     SharedEvent,
 };
-#[cfg(test)]
-use vmux_api::room::AssistantBlock;
-use vmux_api::room::{Message, RemoteApproval};
 #[cfg(test)]
 use vmux_process::{Process, ProcessManager};
 use vmux_process::{ProcessCreated, ProcessLaunch, ProcessRuntime, ProcessUpdate};
@@ -1482,7 +1482,7 @@ mod tests {
             let entity = app
                 .world_mut()
                 .spawn((
-                    vmux_ecs::agent::SessionId("s1".into()),
+                    vmux_session::SessionId("s1".into()),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
                     projection_inboxes,
                     AcpProjector::default(),

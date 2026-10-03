@@ -61,10 +61,12 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let handoff_truncated = chat.handoff.truncated();
     let agent = chat.agent();
     let agent_name = chat.header_name();
-    let agent_avatar = FaviconSource::resolve(
-        &chat.identity.icon(),
-        &format!("{}{agent}", crate::ChatPlugin::URL),
-    );
+    let icon = chat.identity.icon();
+    let agent_avatar = if icon.is_empty() {
+        FaviconSource::agent(&agent)
+    } else {
+        Some(icon)
+    };
     let agent_color = chat.accent().css;
     let user_name = chat.user.name();
     let user_color = chat.user.color();

@@ -2,16 +2,27 @@
 
 use bevy_app::{App, Plugin};
 
-pub use acp::AcpSession;
-pub use run_state::{AgentRunState, AgentTurnMeta};
-pub use session::{
-    AgentApprovalPolicy, AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue,
-    QueuedPrompt,
+pub use catalog::{CatalogSnapshot, SessionSummary, StageSummary};
+pub use conversation::{
+    ConversationEvent, Document, DocumentKind, EventIdentity, MaterializedEvent, Member,
+    MessageContent, MessageDelivery, OperationCommitted, OperationReceived, SnapshotReceived,
+    Transcript, Transcripts,
 };
+pub use model::{
+    AcpSessionId, AgentId, Cleanup, CleanupRequest, CreateRequest, Created,
+    DescriptionUpdateRequest, LocalTask, RenameRequest, Session, Stage, StageChangeRequest,
+    StageChangedAt, StageDefinition, StageId,
+};
+pub use route::Route;
+pub use run_state::{AgentTurnMeta, RunState};
+pub use session::{AgentConversationTitle, ApprovalPolicy, PromptQueue, QueuedPrompt};
 pub use title::ConversationTitle;
+pub use vmux_api::conversation::SessionId;
 
-pub mod acp;
-pub mod room;
+mod catalog;
+mod conversation;
+mod model;
+mod route;
 pub mod run_state;
 pub mod session;
 mod title;
@@ -20,6 +31,12 @@ pub struct SessionPlugin;
 
 impl Plugin for SessionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(room::RoomPlugin);
+        app.add_plugins((
+            model::EntityPlugin,
+            model::MetadataPlugin,
+            model::StagePlugin,
+            catalog::CatalogPlugin,
+            conversation::ConversationPlugin,
+        ));
     }
 }

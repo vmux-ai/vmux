@@ -9,8 +9,9 @@ use vmux_api::protocol::{ClientMessage, ManagedMcpServer};
 use vmux_ecs::event::InstallPhase;
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
+use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
 use vmux_editor::lsp::store::PackageStore;
-use vmux_session::AcpSession;
+use vmux_session::{AcpSessionId, AgentId, Session, SessionId};
 use vmux_setting::{AcpAgentConfig, AppSettings};
 use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_tool::{
@@ -22,7 +23,7 @@ use self::environment::AcpEnvironment;
 use self::install::AgentInstaller;
 use self::registry::Registry;
 pub(super) use config::AcpSessionConfigPlugin;
-use vmux_session::AgentRunState;
+use vmux_session::RunState;
 
 mod config;
 mod environment;
@@ -166,7 +167,7 @@ pub(crate) struct AcpPackageChanged {
 
 #[derive(Component)]
 struct AcpInstallJob {
-    progress: Receiver<AcpInstallProgress>,
+    progress: Receiver<InstallState>,
     thread: Option<JoinHandle<AcpInstallOutcome>>,
     outcome: Option<AcpInstallOutcome>,
     package_reported: bool,
@@ -201,11 +202,10 @@ struct AcpInstallRequest {
     shell: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct AcpInstallProgress {
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct InstallState {
     pct: Option<u8>,
     message: String,
-    errored: bool,
 }
 
 #[derive(Clone)]
@@ -225,13 +225,14 @@ struct AcpLaunch {
 
 #[derive(Clone)]
 struct AcpInstallProgressSink {
-    pending: Sender<AcpInstallProgress>,
+    pending: Sender<InstallState>,
     wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
 }
 
 fn start_installs(
     mut commands: Commands,
-    sessions: Query<(Entity, &AcpSession), Without<AcpLaunchStarted>>,
+    sessions: Query<(Entity, &SessionId, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
+    targets: Query<&EntityTarget<Session>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
     focused: vmux_layout::stack::FocusedStack,
     settings: Option<Res<AppSettings>>,
@@ -249,18 +250,22 @@ fn start_installs(
         .iter()
         .map(|(entity, key)| (key.clone(), entity))
         .collect();
-    for (entity, session) in &sessions {
-        if focused.stack != Some(entity) {
+    let focused_session = focused
+        .stack
+        .and_then(|stack| targets.get(stack).ok())
+        .map(EntityTarget::entity);
+    for (entity, session_id, agent_id) in &sessions {
+        if focused_session != Some(entity) {
             continue;
         }
         let fallback = settings
             .agent
             .acp
             .iter()
-            .find(|config| config.id == session.agent_id)
+            .find(|config| config.id == agent_id.0)
             .cloned();
         let request = AcpInstallRequest {
-            agent_id: session.agent_id.clone(),
+            agent_id: agent_id.0.clone(),
             fallback,
             shell: shell.clone(),
         };
@@ -277,6 +282,7 @@ fn start_installs(
                     .spawn((
                         name,
                         key.clone(),
+                        InstallState::preparing(),
                         start_acp_install_job(request, wake.clone()),
                     ))
                     .id();
@@ -288,12 +294,8 @@ fn start_installs(
             AcpLaunchStarted,
             AcpInstallWaiter {
                 job,
-                sid: session.sid.clone(),
-                agent_id: session.agent_id.clone(),
-            },
-            AgentRunState::Installing {
-                pct: None,
-                message: "Preparing agent…".to_string(),
+                sid: session_id.0.clone(),
+                agent_id: agent_id.0.clone(),
             },
         ));
     }
@@ -307,38 +309,49 @@ fn poll_installs(
         Entity,
         &AcpInstallKey,
         &mut AcpInstallJob,
+        &mut InstallState,
         Option<&AcpInstallWaiters>,
     )>,
-    mut waiters: Query<(Entity, &AcpSession, &AcpInstallWaiter, &mut AgentRunState)>,
+    targets: Query<&EntityTarget<Session>>,
+    mut waiters: Query<
+        (
+            Entity,
+            &SessionId,
+            &AgentId,
+            &Cwd,
+            &ProcessAnchor,
+            Option<&AcpSessionId>,
+            &AcpInstallWaiter,
+            &mut RunState,
+        ),
+        With<Session>,
+    >,
     mut package_changes: MessageWriter<AcpPackageChanged>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let swapping: std::collections::HashSet<Entity> =
-        swaps.read().map(|request| request.stack).collect();
+    let swapping: std::collections::HashSet<Entity> = swaps
+        .read()
+        .filter_map(|request| targets.get(request.stack).ok().map(EntityTarget::entity))
+        .collect();
     let mut invalid_waiters = std::collections::HashSet::new();
-    for (entity, session, waiter, _) in &mut waiters {
-        if swapping.contains(&entity) || !waiter.matches(session) || !jobs.contains(waiter.job) {
+    for (entity, session_id, agent_id, _, _, _, waiter, _) in &mut waiters {
+        if swapping.contains(&entity)
+            || !waiter.matches(session_id, agent_id)
+            || !jobs.contains(waiter.job)
+        {
             invalid_waiters.insert(entity);
             commands
                 .entity(entity)
                 .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
         }
     }
-    for (job_entity, key, mut job, related_waiters) in &mut jobs {
+    for (job_entity, key, mut job, mut install_state, related_waiters) in &mut jobs {
         let related_waiters = related_waiters
             .map(|related| related.iter().collect::<Vec<_>>())
             .unwrap_or_default();
         if let Some(progress) = job.take_progress() {
-            for entity in related_waiters.iter().copied() {
-                let Ok((_, session, waiter, mut state)) = waiters.get_mut(entity) else {
-                    continue;
-                };
-                if invalid_waiters.contains(&entity) || !waiter.matches(session) {
-                    continue;
-                }
-                *state = (&progress).into();
-            }
+            *install_state = progress;
         }
         if job.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             let thread = job.thread.take().unwrap();
@@ -361,47 +374,58 @@ fn poll_installs(
             job.package_reported = true;
         }
         let has_waiters = related_waiters.iter().any(|entity| {
-            waiters.get(*entity).is_ok_and(|(_, session, waiter, _)| {
-                !invalid_waiters.contains(entity) && waiter.matches(session)
-            })
+            waiters
+                .get(*entity)
+                .is_ok_and(|(_, session_id, agent_id, _, _, _, waiter, _)| {
+                    !invalid_waiters.contains(entity) && waiter.matches(session_id, agent_id)
+                })
         });
         if has_waiters && launch_ready && connected.is_none() {
             continue;
         }
         let outcome = job.outcome.take().unwrap();
         for entity in related_waiters {
-            let Ok((_, session, waiter, mut state)) = waiters.get_mut(entity) else {
+            let Ok((_, session_id, agent_id, cwd, anchor, resume, waiter, mut state)) =
+                waiters.get_mut(entity)
+            else {
                 continue;
             };
-            if invalid_waiters.contains(&entity) || !waiter.matches(session) {
+            if invalid_waiters.contains(&entity) || !waiter.matches(session_id, agent_id) {
                 continue;
             }
             match &outcome.launch {
                 Ok(launch) => {
-                    let message = launch.message_for(session, settings.as_deref());
+                    let message = launch.message_for(
+                        session_id,
+                        agent_id,
+                        cwd,
+                        anchor,
+                        resume,
+                        settings.as_deref(),
+                    );
                     match vmux_ecs::profile::mcp_credentials::McpCredentialAccess::with_revision(
                         launch.mcp_revision,
                         || (),
                     ) {
                         Ok(Some(())) => {
                             service_requests.write(ServiceRequest(message));
-                            *state = AcpInstallProgress::ready(session.resume.as_deref()).into();
+                            *state = RunState::Idle;
                             commands.entity(entity).remove::<AcpInstallWaiter>();
                         }
                         Ok(None) => {
-                            *state = AcpInstallProgress::preparing().into();
+                            *state = RunState::Idle;
                             commands
                                 .entity(entity)
                                 .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
                         }
                         Err(error) => {
-                            *state = AcpInstallProgress::error(error).into();
+                            *state = RunState::Errored(error);
                             commands.entity(entity).remove::<AcpInstallWaiter>();
                         }
                     }
                 }
                 Err(message) => {
-                    *state = AcpInstallProgress::error(message.clone()).into();
+                    *state = RunState::Errored(message.clone());
                     commands.entity(entity).remove::<AcpInstallWaiter>();
                 }
             }
@@ -410,24 +434,14 @@ fn poll_installs(
     }
 }
 
-fn cancel_install_on_remove(trigger: On<Remove, AcpSession>, mut commands: Commands) {
+fn cancel_install_on_remove(trigger: On<Remove, ProcessAnchor>, mut commands: Commands) {
     if let Ok(mut entity) = commands.get_entity(trigger.event_target()) {
         entity.remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
     }
 }
 
-impl AcpLaunchStarted {
-    fn ready_message(resume: Option<&str>) -> &'static str {
-        if resume.is_some() {
-            "Loading session history…"
-        } else {
-            "Starting agent…"
-        }
-    }
-}
-
 impl AcpInstallJob {
-    fn take_progress(&self) -> Option<AcpInstallProgress> {
+    fn take_progress(&self) -> Option<InstallState> {
         self.progress.try_iter().last()
     }
 }
@@ -466,7 +480,7 @@ fn resolve_acp_install(
         &request.agent_id,
         pinned_version,
         |phase, pct, message| {
-            progress.publish(AcpInstallProgress::from_phase(phase, pct, message));
+            progress.publish(InstallState::from_phase(phase, pct, message));
         },
     );
     let package_added = resolved
@@ -529,17 +543,25 @@ impl AcpInstallRequest {
 }
 
 impl AcpInstallWaiter {
-    fn matches(&self, session: &AcpSession) -> bool {
-        self.sid == session.sid && self.agent_id == session.agent_id
+    fn matches(&self, session_id: &SessionId, agent_id: &AgentId) -> bool {
+        self.sid == session_id.0 && self.agent_id == agent_id.0
     }
 }
 
 impl AcpLaunch {
-    fn message_for(&self, session: &AcpSession, settings: Option<&AppSettings>) -> ClientMessage {
+    fn message_for(
+        &self,
+        session_id: &SessionId,
+        agent_id: &AgentId,
+        cwd: &Cwd,
+        anchor: &ProcessAnchor,
+        resume: Option<&AcpSessionId>,
+        settings: Option<&AppSettings>,
+    ) -> ClientMessage {
         let shell = settings
             .map(|settings| vmux_terminal::AgentTerminalShell::configured(settings).into_string())
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
-        let mcp = crate::mcp::McpLaunchSpec::acp(&session.cwd, session.anchor, &shell)
+        let mcp = crate::mcp::McpLaunchSpec::acp(&cwd.0, anchor.0, &shell)
             .resolve()
             .inspect_err(|error| {
                 bevy::log::warn!(
@@ -548,23 +570,23 @@ impl AcpLaunch {
             })
             .ok();
         ClientMessage::SpawnAcpAgent {
-            sid: session.sid.clone(),
-            agent_id: session.agent_id.clone(),
+            sid: session_id.0.clone(),
+            agent_id: agent_id.0.clone(),
             command: self.command.clone(),
             args: self.args.clone(),
             env: self.env.clone(),
-            cwd: session.cwd.to_string_lossy().into_owned(),
-            anchor: session.anchor,
+            cwd: cwd.0.to_string_lossy().into_owned(),
+            anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
             mcp_args: mcp.map(|mcp| mcp.args).unwrap_or_default(),
-            resume_acp_session_id: session.resume.clone(),
+            resume_acp_session_id: resume.map(|resume| resume.0.clone()),
             managed_mcp_servers: self.managed_mcp_servers.clone(),
         }
     }
 }
 
 impl AcpInstallProgressSink {
-    fn publish(&self, progress: AcpInstallProgress) {
+    fn publish(&self, progress: InstallState) {
         let _ = self.pending.send(progress);
         self.notify();
     }
@@ -576,28 +598,18 @@ impl AcpInstallProgressSink {
     }
 }
 
-impl AcpInstallProgress {
+impl InstallState {
     fn from_phase(phase: InstallPhase, pct: Option<u8>, message: &str) -> Self {
         if matches!(phase, InstallPhase::Done) {
             Self {
                 pct: None,
                 message: "Starting agent…".to_string(),
-                errored: false,
             }
         } else {
             Self {
                 pct,
                 message: message.to_string(),
-                errored: false,
             }
-        }
-    }
-
-    fn ready(resume: Option<&str>) -> Self {
-        Self {
-            pct: None,
-            message: AcpLaunchStarted::ready_message(resume).to_string(),
-            errored: false,
         }
     }
 
@@ -605,35 +617,7 @@ impl AcpInstallProgress {
         Self {
             pct: None,
             message: "Preparing agent…".to_string(),
-            errored: false,
         }
-    }
-
-    fn error(message: impl Into<String>) -> Self {
-        Self {
-            pct: None,
-            message: message.into(),
-            errored: true,
-        }
-    }
-}
-
-impl From<AcpInstallProgress> for AgentRunState {
-    fn from(progress: AcpInstallProgress) -> Self {
-        if progress.errored {
-            Self::Errored(progress.message)
-        } else {
-            Self::Installing {
-                pct: progress.pct,
-                message: progress.message,
-            }
-        }
-    }
-}
-
-impl From<&AcpInstallProgress> for AgentRunState {
-    fn from(progress: &AcpInstallProgress) -> Self {
-        progress.clone().into()
     }
 }
 
@@ -669,31 +653,29 @@ mod tests {
         .key()
     }
 
-    fn acp_session(agent_id: &str, sid: &str) -> AcpSession {
-        AcpSession {
-            agent_id: agent_id.to_string(),
-            sid: sid.to_string(),
-            cwd: PathBuf::from("/workspace"),
-            anchor: vmux_ecs::ProcessId::new(),
-            resume: None,
+    struct TestSession;
+
+    impl TestSession {
+        fn bundle(agent_id: &str, sid: &str) -> impl Bundle {
+            (
+                Session,
+                SessionId(sid.to_string()),
+                AgentId(agent_id.to_string()),
+                Cwd(PathBuf::from("/workspace")),
+                ProcessAnchor(vmux_ecs::ProcessId::new()),
+            )
         }
     }
 
     #[test]
     fn completed_install_progress_describes_agent_startup() {
-        let progress = AcpInstallProgress::from_phase(InstallPhase::Done, Some(100), "ready");
+        let progress = InstallState::from_phase(InstallPhase::Done, Some(100), "ready");
         assert_eq!(progress.pct, None);
         assert_eq!(progress.message, "Starting agent…");
 
-        let progress =
-            AcpInstallProgress::from_phase(InstallPhase::Downloading, Some(42), "downloading");
+        let progress = InstallState::from_phase(InstallPhase::Downloading, Some(42), "downloading");
         assert_eq!(progress.pct, Some(42));
         assert_eq!(progress.message, "downloading");
-        assert_eq!(AcpLaunchStarted::ready_message(None), "Starting agent…");
-        assert_eq!(
-            AcpLaunchStarted::ready_message(Some("session-1")),
-            "Loading session history…"
-        );
     }
 
     #[test]
@@ -718,22 +700,23 @@ mod tests {
         let mut app = install_test_app();
         let job = app
             .world_mut()
-            .spawn((install_key("claude"), completed_job("stale failure")))
+            .spawn((
+                install_key("claude"),
+                InstallState::preparing(),
+                completed_job("stale failure"),
+            ))
             .id();
         let stack = app
             .world_mut()
             .spawn((
-                acp_session("codex", "new-session"),
+                TestSession::bundle("codex", "new-session"),
                 AcpLaunchStarted,
                 AcpInstallWaiter {
                     job,
                     sid: "old-session".to_string(),
                     agent_id: "claude".to_string(),
                 },
-                AgentRunState::Installing {
-                    pct: None,
-                    message: "Preparing agent…".to_string(),
-                },
+                RunState::Idle,
             ))
             .id();
 
@@ -742,44 +725,45 @@ mod tests {
         assert!(app.world().get::<AcpInstallWaiter>(stack).is_none());
         assert!(app.world().get::<AcpLaunchStarted>(stack).is_none());
         assert!(matches!(
-            app.world().get::<AgentRunState>(stack),
-            Some(AgentRunState::Installing { .. })
+            app.world().get::<RunState>(stack),
+            Some(RunState::Idle)
         ));
         assert!(app.world().get_entity(job).is_err());
     }
 
     #[test]
-    fn removing_acp_session_clears_install_waiter() {
+    fn removing_process_anchor_clears_install_waiter() {
         let mut app = install_test_app();
         let job = app
             .world_mut()
-            .spawn((install_key("claude"), completed_job("stale failure")))
+            .spawn((
+                install_key("claude"),
+                InstallState::preparing(),
+                completed_job("stale failure"),
+            ))
             .id();
         let stack = app
             .world_mut()
             .spawn((
-                acp_session("claude", "old-session"),
+                TestSession::bundle("claude", "old-session"),
                 AcpLaunchStarted,
                 AcpInstallWaiter {
                     job,
                     sid: "old-session".to_string(),
                     agent_id: "claude".to_string(),
                 },
-                AgentRunState::Installing {
-                    pct: None,
-                    message: "Preparing agent…".to_string(),
-                },
+                RunState::Idle,
             ))
             .id();
 
-        app.world_mut().entity_mut(stack).remove::<AcpSession>();
+        app.world_mut().entity_mut(stack).remove::<ProcessAnchor>();
         app.update();
 
         assert!(app.world().get::<AcpInstallWaiter>(stack).is_none());
         assert!(app.world().get::<AcpLaunchStarted>(stack).is_none());
         assert!(matches!(
-            app.world().get::<AgentRunState>(stack),
-            Some(AgentRunState::Installing { .. })
+            app.world().get::<RunState>(stack),
+            Some(RunState::Idle)
         ));
         assert!(app.world().get_entity(job).is_err());
     }

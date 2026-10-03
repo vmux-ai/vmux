@@ -10,7 +10,7 @@ use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
 
 use crate::host::event::AgentRequestInput;
-use vmux_ecs::agent::SessionId;
+use vmux_session::SessionId;
 
 pub(super) struct AttentionPlugin;
 
