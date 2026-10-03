@@ -1,5 +1,7 @@
 use crate::DaemonBinary;
-use crate::bundle::{AppBundle, EMBEDDED_AGENT_PLIST};
+use crate::bundle::AppBundle;
+#[cfg(target_os = "macos")]
+use crate::bundle::EMBEDDED_AGENT_PLIST;
 
 #[derive(Debug)]
 pub enum Backend {

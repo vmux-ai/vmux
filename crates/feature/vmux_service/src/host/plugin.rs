@@ -201,7 +201,7 @@ fn register(
         };
         #[cfg(not(target_os = "macos"))]
         let result: Result<(), RegistrationError> = {
-            let _ = (binary, registration);
+            let _ = (binary, &registration.0);
             Ok(())
         };
         let mut service = commands.entity(entity);

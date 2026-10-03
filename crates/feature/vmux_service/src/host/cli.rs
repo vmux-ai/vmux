@@ -248,7 +248,7 @@ fn pair(
         })();
         #[cfg(not(target_os = "macos"))]
         let result = {
-            let _ = request;
+            let _ = request.reset;
             eprintln!("vmux remote is currently macOS-only");
             Ok(2)
         };
@@ -298,7 +298,7 @@ fn revoke(
         };
         #[cfg(not(target_os = "macos"))]
         let result = {
-            let _ = request;
+            let _ = &request.0;
             eprintln!("vmux remote is currently macOS-only");
             Ok(2)
         };
