@@ -298,6 +298,7 @@ fn workspace(
             if session_id.0 != event.sid {
                 continue;
             }
+            session_cwd.0.clone_from(&cwd);
             let Some(stack) = session_views
                 .iter()
                 .find(|(_, target)| target.entity() == session_entity)
@@ -308,7 +309,6 @@ fn workspace(
             let Some(tab_entity) = ancestor_tab(stack, &child_of, &tab_entities) else {
                 continue;
             };
-            session_cwd.0.clone_from(&cwd);
             if let Ok(mut tab) = tabs.get_mut(tab_entity) {
                 tab.startup_dir = Some(cwd.to_string_lossy().into_owned());
             }
@@ -909,6 +909,27 @@ mod tests {
                 .as_deref(),
             Some(project_dir.to_string_lossy().as_ref())
         );
+
+        let background = app
+            .world_mut()
+            .spawn(TestSession::bundle(
+                "mistral-vibe",
+                "background-sid",
+                project_dir.clone(),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<crate::host::event::UiAgentWorkspaceChanged>>()
+            .write(crate::host::event::UiAgentWorkspaceChanged {
+                sid: "background-sid".into(),
+                branch: "vibe/quiet-amber-wolf".into(),
+                cwd: worktree_dir.to_string_lossy().into_owned(),
+                workspace_cwd: project_dir.to_string_lossy().into_owned(),
+            });
+
+        app.update();
+
+        assert_eq!(app.world().get::<Cwd>(background).unwrap().0, worktree_dir);
     }
 
     #[test]

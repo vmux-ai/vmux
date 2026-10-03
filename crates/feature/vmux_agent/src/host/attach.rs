@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
-use vmux_ecs::agent::SessionId;
 use vmux_ecs::{Cwd, EntityTarget, PageIcon, PageMetadata, ProcessAnchor};
+use vmux_session::{PromptQueue, SessionId};
 
 pub(super) struct AttachPlugin;
 
@@ -98,6 +98,7 @@ fn attach(
         ),
         Added<PendingAcpAgentAttachment>,
     >,
+    queues: Query<(), With<PromptQueue>>,
     mut commands: Commands,
 ) {
     for (
@@ -133,10 +134,14 @@ fn attach(
             ProcessAnchor(anchor),
             vmux_session::RunState::default(),
             vmux_session::ApprovalPolicy::default(),
-            vmux_session::PromptQueue::default(),
             vmux_ecs::team::Profile::registry(agent_name, agent_id),
             vmux_ecs::team::Agent { sid: sid.clone() },
         ));
+        if !queues.contains(*session_entity) {
+            commands
+                .entity(*session_entity)
+                .insert(PromptQueue::default());
+        }
         if let Some(resume) = resume.clone() {
             commands
                 .entity(*session_entity)
@@ -168,6 +173,9 @@ fn attach(
             anchor,
             vmux_chat::host::ChatView,
         ));
+        commands
+            .entity(view)
+            .remove::<vmux_chat::host::SessionManagerView>();
         if webview.is_some() {
             commands.entity(view).remove::<(
                 vmux_start::StartInlineTransitionView,
@@ -219,5 +227,32 @@ mod tests {
                 .entity(),
             session
         );
+    }
+
+    #[test]
+    fn acp_attach_preserves_queued_prompts() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AttachPlugin));
+        let mut queue = PromptQueue::default();
+        queue.enqueue("first".into());
+        let session = app.world_mut().spawn(queue).id();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(AcpAgentAttachment::new(
+            session,
+            stack,
+            "codex",
+            "Task",
+            "Codex",
+            "sid-1",
+            std::path::PathBuf::from("/tmp"),
+            None,
+            None,
+        ));
+
+        app.update();
+
+        let queue = app.world().get::<PromptQueue>(session).unwrap();
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items.front().unwrap().text, "first");
     }
 }

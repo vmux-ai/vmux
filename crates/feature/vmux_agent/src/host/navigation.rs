@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_api::protocol::AgentAttachment;
-use vmux_chat::host::{ChatView, ImportedConversation};
+use vmux_chat::host::{ChatView, ImportedConversation, SessionManagerView};
 use vmux_ecs::agent::SwapStackSession;
 use vmux_ecs::host::persistence::PageRestore;
 use vmux_ecs::terminal::TerminalLaunch;
@@ -15,8 +15,7 @@ use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
 use vmux_session::{
-    AcpSessionId, AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId,
-    SessionMutationSet,
+    AcpSessionId, AgentConversationTitle, AgentId, Cleanup, PromptQueue, Route, Session, SessionId,
 };
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
@@ -66,13 +65,14 @@ pub struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, swap).add_systems(
-            Update,
-            (release_transition, prepare, open)
-                .chain()
-                .after(SessionMutationSet)
-                .in_set(PageOpenSet::HandleKnownPages),
-        );
+        app.add_observer(cleanup)
+            .add_systems(Update, swap)
+            .add_systems(
+                Update,
+                (release_transition, prepare, open)
+                    .chain()
+                    .in_set(PageOpenSet::HandleKnownPages),
+            );
     }
 }
 
@@ -123,8 +123,10 @@ impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
         match Route::parse(url)? {
             Route::Manager => Some(Self {
-                url: vmux_chat::ChatPlugin::URL.to_string(),
-                title: "Sessions".to_string(),
+                url: Route::requested_agent(url)
+                    .map(|agent| Route::manager_for_agent(&agent))
+                    .unwrap_or_else(|| Route::Manager.url()),
+                title: translate("sessions-title"),
             }),
             Route::Session(id) => Some(Self {
                 url: Route::Session(id.clone()).url(),
@@ -182,10 +184,7 @@ fn prepare(
         .collect();
     let mut opened_stacks = std::collections::HashSet::new();
     for (task_entity, task) in &tasks {
-        if Route::parse(&task.url).is_none() {
-            continue;
-        }
-        let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
+        let Some(route) = Route::parse(&task.url) else {
             continue;
         };
         if !preparing_by_stack.contains_key(&task.stack)
@@ -225,6 +224,12 @@ fn prepare(
                 .insert((PageOpenDeferred, AwaitingAgentTransitionPaint));
             continue;
         }
+        if matches!(route, Route::Manager) {
+            continue;
+        }
+        let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
+            continue;
+        };
         if pending.contains(tab_entity) {
             commands.entity(task_entity).insert((
                 PageOpenDeferred,
@@ -346,42 +351,46 @@ fn open(
         .map(|(entity, task, restoring)| (entity, task.clone(), restoring))
         .collect();
     for (entity, task, restoring) in tasks {
-        if Route::parse(&task.url).is_none() {
+        let Some(route) = Route::parse(&task.url) else {
             continue;
-        }
-        let tab = workspace.tab(task.stack);
-        let tab_dir = tab
-            .as_ref()
-            .and_then(|(_, startup_dir)| startup_dir.clone());
-        let space_startup_dir = workspace.startup_dir(task.stack, &opener.settings);
-        let restored_cwd = restoring
-            .then(|| launches.get(task.stack).ok())
-            .flatten()
-            .map(|launch| PathBuf::from(&launch.cwd));
-        let default_cwd = if let Some(cwd) = restored_cwd {
-            cwd
+        };
+        let default_cwd = if matches!(route, Route::Manager) {
+            PathBuf::new()
         } else {
-            match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
-                Ok(Some(path)) => path,
-                Ok(None) => match space_startup_dir {
-                    Some(dir) => dir.path,
-                    None => match AgentCwd::projects() {
-                        Ok(path) => path,
-                        Err(message) => {
-                            opener
-                                .commands
-                                .entity(entity)
-                                .insert(PageOpenError { message });
-                            continue;
-                        }
+            let tab = workspace.tab(task.stack);
+            let tab_dir = tab
+                .as_ref()
+                .and_then(|(_, startup_dir)| startup_dir.clone());
+            let space_startup_dir = workspace.startup_dir(task.stack, &opener.settings);
+            let restored_cwd = restoring
+                .then(|| launches.get(task.stack).ok())
+                .flatten()
+                .map(|launch| PathBuf::from(&launch.cwd));
+            if let Some(cwd) = restored_cwd {
+                cwd
+            } else {
+                match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
+                    Ok(Some(path)) => path,
+                    Ok(None) => match space_startup_dir {
+                        Some(dir) => dir.path,
+                        None => match AgentCwd::projects() {
+                            Ok(path) => path,
+                            Err(message) => {
+                                opener
+                                    .commands
+                                    .entity(entity)
+                                    .insert(PageOpenError { message });
+                                continue;
+                            }
+                        },
                     },
-                },
-                Err(message) => {
-                    opener
-                        .commands
-                        .entity(entity)
-                        .insert(PageOpenError { message });
-                    continue;
+                    Err(message) => {
+                        opener
+                            .commands
+                            .entity(entity)
+                            .insert(PageOpenError { message });
+                        continue;
+                    }
                 }
             }
         };
@@ -474,17 +483,7 @@ fn swap(
             )
         });
 
-        commands
-            .entity(session_entity)
-            .remove::<AcpSessionId>()
-            .remove::<vmux_ecs::ProcessAnchor>()
-            .remove::<crate::host::acp::AcpLaunchStarted>()
-            .remove::<vmux_session::ApprovalPolicy>()
-            .remove::<vmux_session::RunState>()
-            .remove::<ImportedConversation>()
-            .remove::<super::handoff::PendingHandoff>()
-            .remove::<vmux_ecs::team::Agent>()
-            .remove::<vmux_ecs::team::Profile>();
+        SessionRuntime::detach(&mut commands.entity(session_entity));
         commands.entity(ev.stack).despawn_children();
         let cwd = if ev.cwd.as_os_str().is_empty() {
             cwd.0.clone()
@@ -514,6 +513,52 @@ fn swap(
     }
 }
 
+struct SessionRuntime;
+
+impl SessionRuntime {
+    fn detach(entity: &mut EntityCommands) {
+        entity.remove::<(
+            AcpSessionId,
+            vmux_ecs::ProcessAnchor,
+            crate::host::acp::AcpLaunchStarted,
+            crate::host::runtime::AcpSessionConfigState,
+            crate::host::run_state_kind::LastRunStateKind,
+            vmux_session::ApprovalPolicy,
+            vmux_session::RunState,
+            vmux_session::AgentTurnMeta,
+            ImportedConversation,
+            super::handoff::PendingHandoff,
+            vmux_ecs::agent::AgentSessionRoot,
+            vmux_ecs::team::Agent,
+            vmux_ecs::team::Profile,
+        )>();
+    }
+
+    fn cleanup(entity: &mut EntityCommands) {
+        Self::detach(entity);
+        entity.remove::<PromptQueue>();
+    }
+}
+
+fn cleanup(
+    trigger: On<Cleanup>,
+    stacks: Query<(Entity, &EntityTarget<Session>)>,
+    mut opens: MessageWriter<vmux_ecs::PageOpenRequest>,
+    mut commands: Commands,
+) {
+    let session = trigger.event_target();
+    SessionRuntime::cleanup(&mut commands.entity(session));
+    for (stack, target) in &stacks {
+        if target.entity() == session {
+            opens.write(vmux_ecs::PageOpenRequest {
+                target: vmux_ecs::PageOpenTarget::Stack(stack),
+                url: Route::Manager.url(),
+                request_id: None,
+            });
+        }
+    }
+}
+
 #[derive(SystemParam)]
 struct PageOpener<'w, 's> {
     sessions: Query<
@@ -530,6 +575,8 @@ struct PageOpener<'w, 's> {
         ),
         With<Session>,
     >,
+    children: Query<'w, 's, &'static Children>,
+    queues: Query<'w, 's, &'static mut PromptQueue>,
     commands: Commands<'w, 's>,
     settings: Res<'w, AppSettings>,
     catalog: AcpCatalog<'w, 's>,
@@ -550,7 +597,10 @@ impl PageOpener<'_, '_> {
         };
         match target {
             Route::Manager => {
-                self.open_manager(task.stack, transition_webview);
+                let url = Route::requested_agent(&task.url)
+                    .map(|agent| Route::manager_for_agent(&agent))
+                    .unwrap_or_else(|| Route::Manager.url());
+                self.open_manager(task.stack, transition_webview, &url);
                 Ok(())
             }
             Route::Session(id) => {
@@ -597,6 +647,8 @@ impl PageOpener<'_, '_> {
                 if config.is_none() && self.catalog.agent(&agent_id).is_none() {
                     return Err(format!("ACP agent unavailable for '{agent_id}'"));
                 }
+                let icon = self.catalog.icon(&agent_id);
+                let agent_name = self.catalog.profile_name(&agent_id, config);
                 let cwd = if stored_cwd.as_os_str().is_empty() {
                     self.commands
                         .entity(session_entity)
@@ -611,13 +663,16 @@ impl PageOpener<'_, '_> {
                         url: Route::Session(id.clone()).url(),
                         title: session_name.clone(),
                         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-                        icon: self
-                            .catalog
-                            .icon(&agent_id)
-                            .map(PageIcon::favicon)
-                            .unwrap_or_default(),
+                        icon: icon.clone().map(PageIcon::favicon).unwrap_or_default(),
                     },
                 ));
+                self.replace_children(task.stack, transition_webview);
+                self.enqueue_initial_prompt(
+                    session_entity,
+                    task.stack,
+                    initial_prompt,
+                    initial_attachments,
+                );
                 if let Some(anchor) = active {
                     self.open_session_view(
                         task.stack,
@@ -629,11 +684,6 @@ impl PageOpener<'_, '_> {
                     );
                     return Ok(());
                 }
-                if transition_webview.is_none() {
-                    self.commands.entity(task.stack).despawn_children();
-                }
-                let icon = self.catalog.icon(&agent_id);
-                let agent_name = self.catalog.profile_name(&agent_id, config);
                 let request = AcpAgentAttachment::new(
                     session_entity,
                     task.stack,
@@ -654,25 +704,20 @@ impl PageOpener<'_, '_> {
                         .entity(operation)
                         .insert(EntityTarget::<ChatView>::new(webview));
                 }
-                insert_initial_prompt_queue(
-                    session_entity,
-                    initial_prompt,
-                    initial_attachments,
-                    &mut self.commands,
-                );
                 Ok(())
             }
         }
     }
 
-    fn open_manager(&mut self, stack: Entity, transition_webview: Option<Entity>) {
+    fn open_manager(&mut self, stack: Entity, transition_webview: Option<Entity>, url: &str) {
         let title = translate("sessions-title");
+        self.replace_children(stack, transition_webview);
         self.commands
             .entity(stack)
             .remove::<EntityTarget<Session>>()
             .remove::<vmux_command::CommandBarWorkDirectory>()
             .insert(PageMetadata {
-                url: Route::Manager.url(),
+                url: url.to_string(),
                 title: title.clone(),
                 bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
                 icon: default(),
@@ -680,20 +725,20 @@ impl PageOpener<'_, '_> {
         let view = transition_webview.unwrap_or_else(|| {
             self.commands
                 .spawn((
-                    vmux_layout::Browser::native_page(&Route::Manager.url(), &title),
-                    ChatView,
+                    vmux_layout::Browser::native_page(url, &title),
+                    SessionManagerView,
                     ChildOf(stack),
                 ))
                 .id()
         });
-        self.commands.entity(view).insert((
+        self.commands.entity(view).remove::<ChatView>().insert((
             PageMetadata {
-                url: Route::Manager.url(),
+                url: url.to_string(),
                 title,
                 bg_color: None,
                 icon: default(),
             },
-            ChatView,
+            SessionManagerView,
         ));
     }
 
@@ -735,31 +780,48 @@ impl PageOpener<'_, '_> {
             ChatView,
             anchor,
         ));
+        self.commands.entity(view).remove::<SessionManagerView>();
         self.commands
             .entity(stack)
             .insert(EntityTarget::<Session>::new(session));
     }
-}
 
-fn insert_initial_prompt_queue(
-    stack: Entity,
-    initial_prompt: Option<String>,
-    initial_attachments: Vec<AgentAttachment>,
-    commands: &mut Commands,
-) {
-    let prompt = initial_prompt.unwrap_or_default();
-    if prompt.trim().is_empty() && initial_attachments.is_empty() {
-        return;
+    fn replace_children(&mut self, stack: Entity, keep: Option<Entity>) {
+        let Ok(children) = self.children.get(stack) else {
+            return;
+        };
+        for child in children.iter() {
+            if Some(child) != keep {
+                self.commands.entity(child).despawn();
+            }
+        }
     }
-    if let Some(title) = AgentConversationTitle::from_prompt(&prompt) {
-        commands.entity(stack).insert(title);
+
+    fn enqueue_initial_prompt(
+        &mut self,
+        session: Entity,
+        stack: Entity,
+        initial_prompt: Option<String>,
+        initial_attachments: Vec<AgentAttachment>,
+    ) {
+        let prompt = initial_prompt.unwrap_or_default();
+        if prompt.trim().is_empty() && initial_attachments.is_empty() {
+            return;
+        }
+        if let Some(title) = AgentConversationTitle::from_prompt(&prompt) {
+            self.commands.entity(session).insert(title);
+        }
+        if let Ok(mut queue) = self.queues.get_mut(session) {
+            queue.enqueue_with_attachments(prompt, initial_attachments);
+        } else {
+            let mut queue = PromptQueue::default();
+            queue.enqueue_with_attachments(prompt, initial_attachments);
+            self.commands.entity(session).insert(queue);
+        }
+        self.commands
+            .entity(stack)
+            .remove::<(PendingPrompt, PendingPromptAttachments)>();
     }
-    let mut queue = PromptQueue::default();
-    queue.enqueue_with_attachments(prompt, initial_attachments);
-    commands
-        .entity(stack)
-        .insert(queue)
-        .remove::<(PendingPrompt, PendingPromptAttachments)>();
 }
 
 #[cfg(test)]
@@ -837,5 +899,144 @@ mod tests {
         assert_eq!(names.0, "Claude");
         assert_eq!(names.1, "Configured Claude");
         assert_eq!(names.2, "fallback");
+    }
+
+    #[test]
+    fn manager_target_preserves_requested_agent() {
+        let url = Route::manager_for_agent(&AgentId("codex".into()));
+        let target = AgentChatTarget::parse(&url).unwrap();
+
+        assert_eq!(target.url, url);
+    }
+
+    #[test]
+    fn runtime_cleanup_removes_every_transient_component() {
+        let mut world = World::new();
+        let session = world
+            .spawn((
+                AcpSessionId("acp-session".into()),
+                vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
+                crate::host::acp::AcpLaunchStarted,
+                vmux_session::ApprovalPolicy::default(),
+                vmux_session::RunState::default(),
+                vmux_session::AgentTurnMeta::default(),
+                PromptQueue::default(),
+                crate::host::runtime::AcpSessionConfigState::default(),
+                crate::host::run_state_kind::LastRunStateKind::default(),
+                ImportedConversation {
+                    source_agent: "codex".into(),
+                    source_sid: "source".into(),
+                    messages: Vec::new(),
+                    truncated: false,
+                    first_prompt: None,
+                },
+                super::super::handoff::PendingHandoff {
+                    context: String::new(),
+                    sent: false,
+                },
+                vmux_ecs::agent::AgentSessionRoot,
+                vmux_ecs::team::Agent { sid: "sid".into() },
+                vmux_ecs::team::Profile::registry("Codex", "codex"),
+            ))
+            .id();
+
+        world
+            .run_system_once(move |mut commands: Commands| {
+                SessionRuntime::cleanup(&mut commands.entity(session));
+            })
+            .unwrap();
+        world.flush();
+
+        assert!(world.get::<AcpSessionId>(session).is_none());
+        assert!(world.get::<vmux_ecs::ProcessAnchor>(session).is_none());
+        assert!(
+            world
+                .get::<crate::host::acp::AcpLaunchStarted>(session)
+                .is_none()
+        );
+        assert!(world.get::<vmux_session::ApprovalPolicy>(session).is_none());
+        assert!(world.get::<vmux_session::RunState>(session).is_none());
+        assert!(world.get::<vmux_session::AgentTurnMeta>(session).is_none());
+        assert!(world.get::<PromptQueue>(session).is_none());
+        assert!(
+            world
+                .get::<crate::host::runtime::AcpSessionConfigState>(session)
+                .is_none()
+        );
+        assert!(
+            world
+                .get::<crate::host::run_state_kind::LastRunStateKind>(session)
+                .is_none()
+        );
+        assert!(world.get::<ImportedConversation>(session).is_none());
+        assert!(
+            world
+                .get::<super::super::handoff::PendingHandoff>(session)
+                .is_none()
+        );
+        assert!(
+            world
+                .get::<vmux_ecs::agent::AgentSessionRoot>(session)
+                .is_none()
+        );
+        assert!(world.get::<vmux_ecs::team::Agent>(session).is_none());
+        assert!(world.get::<vmux_ecs::team::Profile>(session).is_none());
+    }
+
+    #[test]
+    fn runtime_detach_preserves_queued_prompts() {
+        let mut world = World::new();
+        let mut queue = PromptQueue::default();
+        queue.enqueue("keep me".into());
+        let session = world
+            .spawn((
+                vmux_session::RunState::default(),
+                vmux_session::AgentTurnMeta::default(),
+                queue,
+            ))
+            .id();
+
+        world
+            .run_system_once(move |mut commands: Commands| {
+                SessionRuntime::detach(&mut commands.entity(session));
+            })
+            .unwrap();
+        world.flush();
+
+        let queue = world.get::<PromptQueue>(session).unwrap();
+        assert_eq!(queue.items.front().unwrap().text, "keep me");
+        assert!(world.get::<vmux_session::RunState>(session).is_none());
+        assert!(world.get::<vmux_session::AgentTurnMeta>(session).is_none());
+    }
+
+    #[test]
+    fn cleanup_detaches_runtime_and_redirects_open_views() {
+        let mut app = App::new();
+        app.add_message::<vmux_ecs::PageOpenRequest>()
+            .add_observer(cleanup);
+        let session = app
+            .world_mut()
+            .spawn((Session, PromptQueue::default()))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+
+        app.world_mut().trigger(Cleanup { entity: session });
+        app.world_mut().flush();
+
+        assert!(app.world().get::<PromptQueue>(session).is_none());
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url, Route::Manager.url());
+        assert!(matches!(
+            requests[0].target,
+            vmux_ecs::PageOpenTarget::Stack(entity) if entity == stack
+        ));
     }
 }

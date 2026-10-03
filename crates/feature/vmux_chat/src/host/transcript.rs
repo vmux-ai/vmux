@@ -17,9 +17,10 @@ use crate::host::{
     TranscriptTail,
 };
 use vmux_ecs::team::{Profile, User};
-use vmux_ecs::{EntityTarget, PageMetadata};
+use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};
 use vmux_session::{
-    AgentConversationTitle, AgentId, PromptQueue, Session, Transcript, Transcripts,
+    AgentConversationTitle, AgentId, ConversationEvent, EventIdentity, MessageContent, PromptQueue,
+    Session, Transcripts,
 };
 use vmux_session::{AgentTurnMeta, RunState};
 
@@ -59,7 +60,23 @@ type ChangedSession = (
     Ref<'static, PromptQueue>,
     Option<Ref<'static, ImportedConversation>>,
     Option<Ref<'static, AgentConversationTitle>>,
+    Ref<'static, Children>,
 );
+
+type ChangedConversationEvents<'w, 's> = Query<
+    'w,
+    's,
+    &'static ChildOf,
+    (
+        With<ConversationEvent>,
+        Or<(
+            Added<ConversationEvent>,
+            Changed<EventIdentity>,
+            Changed<MessageContent>,
+            Changed<CreatedAt>,
+        )>,
+    ),
+>;
 
 type ProjectionView = (
     &'static mut ChatTranscriptProjection,
@@ -83,6 +100,7 @@ struct PushWorld<'w, 's> {
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     user_profiles: Query<'w, 's, Ref<'static, Profile>, With<User>>,
     transcripts: Transcripts<'w, 's>,
+    changed_events: ChangedConversationEvents<'w, 's>,
 }
 
 type ReadyView = (
@@ -150,7 +168,6 @@ fn track_turn_duration(
 fn push_to_page(
     mut world: PushWorld,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
-    mut last_transcripts: Local<std::collections::HashMap<Entity, Transcript>>,
     mut owed: Local<std::collections::HashSet<Entity>>,
     mut commands: Commands,
 ) {
@@ -158,9 +175,17 @@ fn push_to_page(
     let user_moved = user_profile
         .as_ref()
         .is_some_and(|profile| profile.is_changed());
-    for (stack, agent_id, state, turn_meta, profile, queue, imported, title) in &world.sessions {
-        let conversation = world.transcripts.get(stack);
-        let conversation_changed = last_transcripts.get(&stack) != Some(&conversation);
+    let changed_transcripts = world
+        .changed_events
+        .iter()
+        .map(ChildOf::parent)
+        .collect::<std::collections::HashSet<_>>();
+    last_push.retain(|session, _| world.sessions.contains(*session));
+    owed.retain(|session| world.sessions.contains(*session));
+    for (session, agent_id, state, turn_meta, profile, queue, imported, title, children) in
+        &world.sessions
+    {
+        let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
         let moved = user_moved
             || state.is_changed()
             || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
@@ -170,11 +195,12 @@ fn push_to_page(
                 .as_ref()
                 .is_some_and(|imported| imported.is_changed())
             || title.as_ref().is_some_and(|title| title.is_changed());
-        if !moved && !conversation_changed && !owed.contains(&stack) {
+        if !moved && !conversation_changed && !owed.contains(&session) {
             continue;
         }
+        let conversation = world.transcripts.get(session);
         let Some((webview, meta)) = world.stacks.iter().find_map(|(target, children, meta)| {
-            if target.entity() != stack {
+            if target.entity() != session {
                 return None;
             }
             children
@@ -182,18 +208,18 @@ fn push_to_page(
                 .find(|&entity| world.chat_views.contains(entity))
                 .map(|webview| (webview, meta))
         }) else {
-            owed.insert(stack);
+            owed.insert(session);
             continue;
         };
         let now = std::time::Instant::now();
         let elapsed = last_push
-            .get(&stack)
+            .get(&session)
             .map(|last| now.saturating_duration_since(*last));
         if !chat_snapshot_due(matches!(*state, RunState::Streaming), moved, elapsed) {
-            owed.insert(stack);
+            owed.insert(session);
             continue;
         }
-        owed.remove(&stack);
+        owed.remove(&session);
         let mut projection = ChatProjection::new(
             agent_id,
             &conversation.messages,
@@ -210,7 +236,7 @@ fn push_to_page(
         );
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
         else {
-            owed.insert(stack);
+            owed.insert(session);
             continue;
         };
         let mut transcript_changed = transcript.merge_tail(projection.transcript);
@@ -219,7 +245,7 @@ fn push_to_page(
         snapshot.0 = projection.snapshot;
         if !matches!(*state, RunState::Streaming) {
             info!(
-                ?stack,
+                ?session,
                 ?webview,
                 error = %snapshot.0.error,
                 items = conversation.messages.len(),
@@ -244,8 +270,7 @@ fn push_to_page(
         if !paths.is_empty() {
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
-        last_push.insert(stack, now);
-        last_transcripts.insert(stack, conversation);
+        last_push.insert(session, now);
     }
 }
 

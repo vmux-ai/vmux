@@ -1,4 +1,5 @@
 use crate::{AgentId, SessionId};
+use percent_encoding::percent_decode_str;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
@@ -15,7 +16,10 @@ impl Route {
         let segments = route.path_segments().collect::<Vec<_>>();
         match segments.as_slice() {
             [] => Some(Self::Manager),
-            [id] if !id.is_empty() => Some(Self::Session(SessionId((*id).to_string()))),
+            [id] if route.query().is_none() && route.fragment().is_none() => {
+                let id = percent_decode_str(id).decode_utf8().ok()?;
+                (!id.is_empty()).then(|| Self::Session(SessionId(id.into_owned())))
+            }
             _ => None,
         }
     }
@@ -23,7 +27,14 @@ impl Route {
     pub fn url(&self) -> String {
         match self {
             Self::Manager => "vmux://sessions/".to_string(),
-            Self::Session(id) => format!("vmux://sessions/{}", id.0),
+            Self::Session(id) => {
+                let mut url = url::Url::parse("vmux://sessions/")
+                    .expect("static Session route must be valid");
+                url.path_segments_mut()
+                    .expect("Session route must support path segments")
+                    .push(&id.0);
+                url.into()
+            }
         }
     }
 
@@ -45,15 +56,25 @@ impl Route {
     }
 
     pub fn rejects_persisted_store(body: &str) -> bool {
-        if body.contains("vmux://agent") {
-            return true;
-        }
-        let root = "vmux://sessions/";
-        for tail in body.split(root).skip(1) {
-            let suffix = tail.split('"').next().unwrap_or_default();
-            let url = format!("{root}{suffix}");
-            if Self::parse(url.trim_end_matches('/')).is_none() {
+        let mut in_page_metadata = false;
+        for line in body.lines() {
+            let line = line.trim();
+            if line.starts_with("\"vmux_header::system::PageMetadata\":") {
+                in_page_metadata = true;
+                continue;
+            }
+            if !in_page_metadata {
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("url: \"")
+                && let Some((url, _)) = value.split_once('"')
+                && (url.starts_with("vmux://agent")
+                    || (url.starts_with("vmux://sessions") && Self::parse(url).is_none()))
+            {
                 return true;
+            }
+            if line == ")," {
+                in_page_metadata = false;
             }
         }
         false
@@ -96,9 +117,42 @@ mod tests {
     }
 
     #[test]
+    fn session_ids_round_trip_as_one_encoded_segment() {
+        let id = SessionId("task/name?draft#1".into());
+        let url = Route::Session(id.clone()).url();
+
+        assert_eq!(Route::parse(&url), Some(Route::Session(id)));
+        assert!(!url.contains("?draft"));
+        assert!(!url.contains("#1"));
+    }
+
+    #[test]
     fn rejects_legacy_agent_urls_in_persisted_state() {
         assert!(Route::rejects_persisted_store(
-            r#"url: "vmux://agent/codex/session-1""#
+            r#""vmux_header::system::PageMetadata": (
+                url: "vmux://agent/codex/session-1",
+            ),"#
+        ));
+    }
+
+    #[test]
+    fn persisted_text_outside_page_metadata_does_not_reject_the_store() {
+        assert!(!Route::rejects_persisted_store(
+            r#""vmux_ecs::Description": ("see vmux://agent/codex/session-1"),"#
+        ));
+    }
+
+    #[test]
+    fn rejects_only_malformed_session_page_urls() {
+        assert!(Route::rejects_persisted_store(
+            r#""vmux_header::system::PageMetadata": (
+                url: "vmux://sessions/a/b",
+            ),"#
+        ));
+        assert!(!Route::rejects_persisted_store(
+            r#""vmux_header::system::PageMetadata": (
+                url: "vmux://sessions/task%2Fname",
+            ),"#
         ));
     }
 }

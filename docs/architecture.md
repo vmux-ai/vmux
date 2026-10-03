@@ -1033,15 +1033,20 @@ And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated co
 staying flat.
 
 `vmux_session` owns the durable unit of work: one canonical Session entity with its stable ID,
-task metadata, working directory, stage, conversation-event children, and optional agent identity.
-Layout Stacks reference that entity and may close without deleting it. `vmux://sessions/` opens the
-manager; `vmux://sessions/{session_id}` opens a Session independently of its agent or provider
-conversation identity.
+task metadata, working directory, data-driven stage, conversation-event children, optional agent
+identity, and the derived Session catalog. Session creation generates its ID inside the typed
+request and emits a typed creation event before navigation. Layout Stacks reference the Session
+entity and may close without deleting it. `vmux://sessions/` opens the manager;
+`vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
+identity. Session IDs are encoded as one URL path segment.
 
-`vmux_agent` attaches transient runtime and ACP capability state to Session entities.
-`vmux_chat` owns the Sessions page and Dioxus conversation UI. The service carries serialized
-agent protocol messages and runs persistent daemon sessions; `vmux_agent` owns the client-host
-Bevy messages produced when those wire messages enter ECS.
+`vmux_agent` attaches transient runtime and ACP capability state to Session entities and owns the
+single runtime detach path used by cleanup and agent replacement. `vmux_chat` renders the Sessions
+page and Dioxus conversation UI. A dedicated manager-view marker is the authorization and
+publication boundary for Session catalog and mutation UI events; ordinary chat views receive only
+their bound Session state. The service carries serialized agent protocol messages and runs
+persistent daemon sessions; `vmux_agent` owns the client-host Bevy messages produced when those
+wire messages enter ECS.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a

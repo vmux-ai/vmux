@@ -1,14 +1,15 @@
+use std::collections::HashMap;
+
 use bevy_app::{App, Plugin, PostUpdate};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
-use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::{
-    CreatedAt, Cwd, Description, LastActivatedAt, Order, PageOpenRequest, PageOpenTarget,
-};
+use bevy_ecs::system::SystemParam;
+use vmux_ecs::host::{UiState, UiStateWrite};
+use vmux_ecs::page::PageReady;
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_session::{
-    AgentId, CatalogSnapshot, RunState, Session, SessionCleanupRequest, SessionCreateRequest,
-    SessionDescriptionUpdateRequest, SessionId, SessionRenameRequest, SessionStageChangeRequest,
-    SessionSummary, Stage, StageChangedAt, StageDefinition, StageId, StageSummary,
+    AgentId, CatalogSnapshot, CleanupRequest, CreateRequest, Created, DescriptionUpdateRequest,
+    RenameRequest, Route, SessionId, StageChangeRequest, StageId,
 };
 
 use crate::event::{
@@ -20,49 +21,104 @@ pub(super) struct CatalogPlugin;
 
 impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            SessionsCreate,
-            SessionsRename,
-            SessionsDescriptionUpdate,
-            SessionsStageChange,
-            SessionsCleanup,
-        )>::default())
+        app.init_resource::<PendingOpens>()
+            .init_resource::<CatalogSnapshot>()
+            .add_plugins(UiEventPlugin::<(
+                SessionsCreate,
+                SessionsRename,
+                SessionsDescriptionUpdate,
+                SessionsStageChange,
+                SessionsCleanup,
+            )>::default())
             .add_observer(create)
+            .add_observer(open_created)
             .add_observer(rename)
             .add_observer(update_description)
             .add_observer(change_stage)
             .add_observer(cleanup)
-            .add_systems(PostUpdate, project);
+            .add_observer(ready)
+            .add_systems(PostUpdate, publish);
+    }
+}
+
+#[derive(Component)]
+#[require(SessionManagerUiState)]
+pub struct SessionManagerView;
+
+type SessionManagerUiState = UiState<ChatUiState>;
+
+#[derive(Resource, Default)]
+struct PendingOpens(HashMap<SessionId, Entity>);
+
+#[derive(SystemParam)]
+struct ManagerViews<'w, 's> {
+    views: Query<'w, 's, Option<&'static PageMetadata>, With<SessionManagerView>>,
+}
+
+impl ManagerViews<'_, '_> {
+    fn contains(&self, entity: Entity) -> bool {
+        self.views.contains(entity)
+    }
+
+    fn agent(&self, entity: Entity) -> Option<AgentId> {
+        self.views
+            .get(entity)
+            .ok()
+            .flatten()
+            .and_then(|metadata| Route::requested_agent(&metadata.url))
     }
 }
 
 fn create(
     trigger: On<UiInput<SessionsCreate>>,
     parents: Query<&ChildOf>,
-    mut requests: MessageWriter<SessionCreateRequest>,
-    mut opens: MessageWriter<PageOpenRequest>,
+    managers: ManagerViews,
+    mut pending: ResMut<PendingOpens>,
+    mut requests: MessageWriter<CreateRequest>,
 ) {
-    let request = &trigger.event().payload;
-    let id = SessionId(request.id.clone());
-    requests.write(SessionCreateRequest {
-        id: id.clone(),
-        name: request.name.clone(),
-        description: request.description.clone(),
-        cwd: std::path::PathBuf::new(),
-        agent: None,
-    });
-    if let Ok(parent) = parents.get(trigger.event().webview) {
-        opens.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(parent.parent()),
-            url: vmux_session::Route::Session(id).url(),
-            request_id: None,
-        });
+    if !managers.contains(trigger.event().webview) {
+        return;
     }
+    let Ok(parent) = parents.get(trigger.event().webview) else {
+        return;
+    };
+    let request = &trigger.event().payload;
+    let request = CreateRequest::new(
+        request.name.clone(),
+        request.description.clone(),
+        std::path::PathBuf::new(),
+        managers.agent(trigger.event().webview),
+    );
+    pending.0.insert(request.id().clone(), parent.parent());
+    requests.write(request);
 }
 
-fn rename(trigger: On<UiInput<SessionsRename>>, mut requests: MessageWriter<SessionRenameRequest>) {
+fn open_created(
+    trigger: On<Created>,
+    mut pending: ResMut<PendingOpens>,
+    mut opens: MessageWriter<PageOpenRequest>,
+) {
+    let event = trigger.event();
+    let Some(stack) = pending.0.remove(&event.id) else {
+        return;
+    };
+    opens.write(PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url: vmux_session::Route::Session(event.id.clone()).url(),
+        request_id: None,
+    });
+}
+
+fn rename(
+    trigger: On<UiInput<SessionsRename>>,
+    managers: ManagerViews,
+    mut requests: MessageWriter<RenameRequest>,
+) {
+    if !managers.contains(trigger.event().webview) {
+        return;
+    }
     let request = &trigger.event().payload;
-    requests.write(SessionRenameRequest {
+    requests.write(RenameRequest {
         id: SessionId(request.id.clone()),
         name: request.name.clone(),
     });
@@ -70,10 +126,14 @@ fn rename(trigger: On<UiInput<SessionsRename>>, mut requests: MessageWriter<Sess
 
 fn update_description(
     trigger: On<UiInput<SessionsDescriptionUpdate>>,
-    mut requests: MessageWriter<SessionDescriptionUpdateRequest>,
+    managers: ManagerViews,
+    mut requests: MessageWriter<DescriptionUpdateRequest>,
 ) {
+    if !managers.contains(trigger.event().webview) {
+        return;
+    }
     let request = &trigger.event().payload;
-    requests.write(SessionDescriptionUpdateRequest {
+    requests.write(DescriptionUpdateRequest {
         id: SessionId(request.id.clone()),
         description: request.description.clone(),
     });
@@ -81,10 +141,14 @@ fn update_description(
 
 fn change_stage(
     trigger: On<UiInput<SessionsStageChange>>,
-    mut requests: MessageWriter<SessionStageChangeRequest>,
+    managers: ManagerViews,
+    mut requests: MessageWriter<StageChangeRequest>,
 ) {
+    if !managers.contains(trigger.event().webview) {
+        return;
+    }
     let request = &trigger.event().payload;
-    requests.write(SessionStageChangeRequest {
+    requests.write(StageChangeRequest {
         id: SessionId(request.id.clone()),
         stage: StageId(request.stage.clone()),
     });
@@ -92,94 +156,39 @@ fn change_stage(
 
 fn cleanup(
     trigger: On<UiInput<SessionsCleanup>>,
-    mut requests: MessageWriter<SessionCleanupRequest>,
+    managers: ManagerViews,
+    mut requests: MessageWriter<CleanupRequest>,
 ) {
-    requests.write(SessionCleanupRequest {
+    if !managers.contains(trigger.event().webview) {
+        return;
+    }
+    requests.write(CleanupRequest {
         id: SessionId(trigger.event().payload.id.clone()),
     });
 }
 
-type SessionCatalog<'w, 's> = Query<
-    'w,
-    's,
-    (
-        &'static SessionId,
-        &'static Name,
-        &'static Description,
-        &'static Cwd,
-        &'static Stage,
-        &'static CreatedAt,
-        &'static LastActivatedAt,
-        &'static StageChangedAt,
-        Option<&'static AgentId>,
-        Option<&'static RunState>,
-    ),
-    With<Session>,
->;
-
-fn project(
-    sessions: SessionCatalog,
-    stages: Query<
-        (&StageId, &Name, &Order, Has<vmux_ecs::component::Terminal>),
-        With<StageDefinition>,
-    >,
-    targets: Query<(Entity, Ref<super::session::ChatView>)>,
-    mut previous: Local<Option<CatalogSnapshot>>,
+fn publish(
+    catalog: Res<CatalogSnapshot>,
+    targets: Query<Entity, (With<SessionManagerView>, With<PageReady>)>,
     mut commands: Commands,
 ) {
-    let mut snapshot = CatalogSnapshot {
-        stages: stages
-            .iter()
-            .map(|(id, name, order, terminal)| StageSummary {
-                id: id.0.clone(),
-                name: name.as_str().to_string(),
-                order: order.0,
-                terminal,
-            })
-            .collect(),
-        sessions: sessions
-            .iter()
-            .map(
-                |(
-                    id,
-                    name,
-                    description,
-                    cwd,
-                    stage,
-                    created_at,
-                    last_activated_at,
-                    stage_changed_at,
-                    agent,
-                    runtime,
-                )| SessionSummary {
-                    id: id.0.clone(),
-                    name: name.as_str().to_string(),
-                    description: description.0.clone(),
-                    cwd: cwd.0.to_string_lossy().into_owned(),
-                    stage: stage.0.0.clone(),
-                    created_at: created_at.0,
-                    last_activated_at: last_activated_at.0,
-                    stage_changed_at: stage_changed_at.0,
-                    agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
-                    runtime: runtime
-                        .map(RunState::status)
-                        .unwrap_or("inactive")
-                        .to_string(),
-                },
-            )
-            .collect(),
-    };
-    snapshot.stages.sort_by_key(|stage| stage.order);
-    snapshot
-        .sessions
-        .sort_by_key(|session| std::cmp::Reverse(session.last_activated_at));
-    let target_added = targets.iter().any(|(_, view)| view.is_added());
-    if !target_added && previous.as_ref() == Some(&snapshot) {
+    if !catalog.is_changed() {
         return;
     }
-    *previous = Some(snapshot.clone());
-    for (target, _) in &targets {
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, &snapshot));
+    for target in &targets {
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, &*catalog));
+    }
+}
+
+fn ready(
+    trigger: On<UiInput<PageReady>>,
+    managers: ManagerViews,
+    catalog: Res<CatalogSnapshot>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    if managers.contains(target) {
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, &*catalog));
     }
 }
 
@@ -187,19 +196,34 @@ fn project(
 mod tests {
     use super::*;
 
+    #[derive(Resource, Default)]
+    struct Published(Vec<Entity>);
+
+    impl Published {
+        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut published: ResMut<Published>) {
+            if trigger.event().patch().sessions.is_some() {
+                published.0.push(trigger.event().webview());
+            }
+        }
+    }
+
     #[test]
     fn create_requests_a_session_and_opens_its_canonical_route() {
         let mut app = App::new();
-        app.add_message::<SessionCreateRequest>()
+        app.init_resource::<PendingOpens>()
+            .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
-            .add_observer(create);
+            .add_observer(create)
+            .add_observer(open_created);
         let stack = app.world_mut().spawn_empty().id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+        let webview = app
+            .world_mut()
+            .spawn((ChildOf(stack), SessionManagerView))
+            .id();
 
         app.world_mut().trigger(UiInput {
             webview,
             payload: SessionsCreate {
-                id: "session-1".into(),
                 name: "Task".into(),
                 description: "Description".into(),
             },
@@ -207,21 +231,112 @@ mod tests {
 
         let created = app
             .world_mut()
-            .resource_mut::<Messages<SessionCreateRequest>>()
+            .resource_mut::<Messages<CreateRequest>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(created.len(), 1);
-        assert_eq!(created[0].id.0, "session-1");
+        let id = created[0].id().clone();
+        assert!(!id.0.is_empty());
+        let session = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(Created {
+            entity: session,
+            id: id.clone(),
+        });
         let opened = app
             .world_mut()
             .resource_mut::<Messages<PageOpenRequest>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(opened.len(), 1);
-        assert_eq!(opened[0].url, "vmux://sessions/session-1");
+        assert_eq!(opened[0].url, vmux_session::Route::Session(id).url());
         assert!(matches!(
             opened[0].target,
             PageOpenTarget::Stack(entity) if entity == stack
         ));
+    }
+
+    #[test]
+    fn session_view_cannot_create_sessions() {
+        let mut app = App::new();
+        app.init_resource::<PendingOpens>()
+            .add_message::<CreateRequest>()
+            .add_observer(create);
+        let webview = app.world_mut().spawn(super::super::session::ChatView).id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: SessionsCreate {
+                name: "Task".into(),
+                description: String::new(),
+            },
+        });
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<CreateRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn manager_creation_uses_the_requested_agent() {
+        let mut app = App::new();
+        app.init_resource::<PendingOpens>()
+            .add_message::<CreateRequest>()
+            .add_observer(create);
+        let stack = app.world_mut().spawn_empty().id();
+        let webview = app
+            .world_mut()
+            .spawn((
+                SessionManagerView,
+                ChildOf(stack),
+                PageMetadata {
+                    url: Route::manager_for_agent(&AgentId("codex".into())),
+                    title: String::new(),
+                    icon: Default::default(),
+                    bg_color: None,
+                },
+            ))
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: SessionsCreate {
+                name: "Task".into(),
+                description: String::new(),
+            },
+        });
+
+        let created = app
+            .world_mut()
+            .resource_mut::<Messages<CreateRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(created[0].agent, Some(AgentId("codex".into())));
+    }
+
+    #[test]
+    fn page_ready_republishes_catalog_only_to_manager_views() {
+        let mut app = App::new();
+        app.init_resource::<CatalogSnapshot>()
+            .init_resource::<Published>()
+            .add_observer(Published::record)
+            .add_observer(ready);
+        let manager = app.world_mut().spawn(SessionManagerView).id();
+        let session = app.world_mut().spawn(super::super::session::ChatView).id();
+
+        app.world_mut().trigger(UiInput {
+            webview: session,
+            payload: PageReady {},
+        });
+        app.world_mut().trigger(UiInput {
+            webview: manager,
+            payload: PageReady {},
+        });
+        app.world_mut().flush();
+
+        assert_eq!(app.world().resource::<Published>().0, vec![manager]);
     }
 }

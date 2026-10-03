@@ -62,10 +62,38 @@ impl std::fmt::Display for SessionId {
     }
 }
 
-#[string_id]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[cfg_attr(
+    feature = "bevy",
+    derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
+)]
+#[cfg_attr(feature = "bevy", reflect(Component))]
+#[cfg_attr(feature = "bevy", type_path = "vmux_api")]
+#[serde(transparent)]
 pub struct MemberId(pub String);
 
 impl MemberId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn local(session_id: &SessionId) -> Self {
         Self::new(format!("session:{}:member:local", session_id.as_str()))
     }
@@ -75,12 +103,36 @@ impl MemberId {
     }
 }
 
+impl From<String> for MemberId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for MemberId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl std::fmt::Display for MemberId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[string_id]
 pub struct EventId(pub String);
 
 #[string_id]
 pub struct ClientOpId(pub String);
 #[vmux_api::contract(Copy, Eq)]
+#[cfg_attr(
+    feature = "bevy",
+    derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
+)]
+#[cfg_attr(feature = "bevy", reflect(Component))]
+#[cfg_attr(feature = "bevy", type_path = "vmux_api")]
 #[serde(rename_all = "snake_case")]
 pub enum MemberRole {
     Owner,
@@ -89,6 +141,12 @@ pub enum MemberRole {
 }
 
 #[vmux_api::contract(Copy, Eq)]
+#[cfg_attr(
+    feature = "bevy",
+    derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
+)]
+#[cfg_attr(feature = "bevy", reflect(Component))]
+#[cfg_attr(feature = "bevy", type_path = "vmux_api")]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
     Human,

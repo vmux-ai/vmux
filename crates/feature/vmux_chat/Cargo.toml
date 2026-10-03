@@ -31,6 +31,7 @@ unicode-segmentation = "1"
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_command = { path = "../vmux_command" }
 vmux_native = { path = "../../util/vmux_native" }
+vmux_session = { path = "../vmux_session" }
 vmux_ui = { path = "../../util/vmux_ui" }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 
@@ -44,7 +45,6 @@ rfd = { workspace = true }
 uuid = { workspace = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_session = { path = "../vmux_session" }
 vmux_tool = { path = "../vmux_tool" }
 
 [lints]

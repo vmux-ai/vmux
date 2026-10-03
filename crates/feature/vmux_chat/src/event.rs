@@ -20,7 +20,6 @@ pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
 
 #[vmux_api::ui_event(Default)]
 pub struct SessionsCreate {
-    pub id: String,
     pub name: String,
     pub description: String,
 }

@@ -1482,7 +1482,7 @@ mod tests {
             let entity = app
                 .world_mut()
                 .spawn((
-                    vmux_ecs::agent::SessionId("s1".into()),
+                    vmux_session::SessionId("s1".into()),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
                     projection_inboxes,
                     AcpProjector::default(),
