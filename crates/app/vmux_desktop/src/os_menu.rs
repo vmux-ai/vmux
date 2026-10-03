@@ -21,13 +21,14 @@ use vmux_command::{
     BindCommands, CommandDefinition, CommandInvocation, DispatchCommandInvocations,
     WriteCommandRequests,
 };
+#[cfg(target_os = "macos")]
 use vmux_ecs::host::page::BindsEditingChords;
 use vmux_ecs::team::User;
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
-use vmux_native::menu::{
-    OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet, TransientOsMenuEntry,
-};
+#[cfg(target_os = "macos")]
+use vmux_native::menu::{OsContextMenu, OsMenuSeparator};
+use vmux_native::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet, TransientOsMenuEntry};
 use vmux_setting::{AppSettings, SettingsLoadSet};
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 

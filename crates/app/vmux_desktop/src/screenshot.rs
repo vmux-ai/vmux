@@ -6,7 +6,9 @@ use std::sync::Arc;
 use vmux_input::{ScreenshotRequest, ScreenshotResponse};
 use vmux_setting::AppSettings;
 
-use crate::capture_output::{CaptureOutput, CaptureSize, CaptureSource, CropRect};
+#[cfg(any(target_os = "macos", test))]
+use crate::capture_output::CaptureSize;
+use crate::capture_output::{CaptureOutput, CaptureSource, CropRect};
 
 pub(crate) struct ScreenshotPlugin;
 

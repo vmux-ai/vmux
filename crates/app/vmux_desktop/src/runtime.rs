@@ -281,6 +281,7 @@ fn resolve_quit_confirmation(
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     use bevy::ecs::schedule::{NodeId, Schedules};
     use std::path::Path;
 

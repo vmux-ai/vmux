@@ -1,17 +1,27 @@
 use bevy::prelude::*;
 use vmux_ecs::notify::OsNotify;
 
+#[cfg(target_os = "macos")]
 use block2::RcBlock;
+#[cfg(target_os = "macos")]
 use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
 use objc2::runtime::Bool;
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSBundle;
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSError;
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
+#[cfg(target_os = "macos")]
 use objc2_user_notifications::UNAuthorizationOptions;
+#[cfg(target_os = "macos")]
 use objc2_user_notifications::UNUserNotificationCenter;
+#[cfg(target_os = "macos")]
 use objc2_user_notifications::{
     UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
 };
+#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) struct NotificationPlugin;

@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use vmux_service::sm_app_service::{AgentService, MainAppService, Status};
 
 #[cfg(target_os = "macos")]

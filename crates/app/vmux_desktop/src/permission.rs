@@ -4,8 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
+#[cfg(target_os = "macos")]
 use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSImage};
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
 
 pub struct PermissionsPlugin;
