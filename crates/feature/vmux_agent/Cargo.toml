@@ -69,6 +69,7 @@ serde_json = { workspace = true }
 rkyv = { workspace = true }
 vmux_chat = { path = "../vmux_chat", optional = true }
 vmux_api = { path = "../../util/vmux_api" }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = true }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 vmux_command = { path = "../vmux_command", optional = true }
@@ -109,7 +110,6 @@ vmux_tool = { path = "../vmux_tool", optional = true }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true, optional = true }
-vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = true }
 
 [dev-dependencies]
 mockito = "1"
