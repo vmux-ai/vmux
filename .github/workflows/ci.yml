@@ -247,7 +247,7 @@ jobs:
         run: cargo build --locked -p vmux_mobile --target aarch64-apple-ios --features mobile --bin vmux_mobile
 
       - name: Test the phone app
-        run: cargo test --locked -p vmux_mobile --features mobile --bin vmux_mobile
+        run: cargo test --locked -p vmux_mobile --target aarch64-apple-darwin --features mobile --bin vmux_mobile
 
       - name: Check the pages that ship on the phone
         run: |
