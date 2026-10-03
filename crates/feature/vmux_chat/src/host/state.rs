@@ -1,6 +1,6 @@
+use super::conversation::{Agents, Conversation, ConversationTranscript, LiveTurn, Log, Snapshot};
 use super::model::{Models, Picker};
 use super::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
-use super::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
 use crate::event::ChatComposerEffect;
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use bevy_app::{App, Last, Plugin, Startup, Update};
@@ -67,7 +67,7 @@ fn spawn_runtime(mut commands: Commands) {
         LiveTurn::default(),
         Agents::default(),
         Snapshot::default(),
-        RoomTranscript::default(),
+        ConversationTranscript::default(),
     ));
 }
 

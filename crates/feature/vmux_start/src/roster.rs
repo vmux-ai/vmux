@@ -5,8 +5,8 @@ use vmux_api::command_bar::{
 };
 use vmux_api::page::UiStateEmit;
 
+use vmux_api::conversation::{RemoteAgent, RemoteSession};
 use vmux_api::icon::PageIcon;
-use vmux_api::room::{RemoteAgent, RemoteSession};
 
 pub struct Plugin;
 
@@ -140,7 +140,7 @@ impl Launcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::room::{RemoteStatus, RoomId};
+    use vmux_api::conversation::{RemoteStatus, SessionId};
 
     impl Roster {
         fn one() -> Self {
@@ -164,9 +164,8 @@ mod tests {
 
         fn session(name: &str) -> RemoteSession {
             RemoteSession {
-                sid: format!("sid-{name}"),
+                id: SessionId::new(format!("sid-{name}")),
                 url: format!("vmux://sessions/sid-{name}"),
-                room_id: RoomId::for_session(name),
                 title: String::new(),
                 name: name.into(),
                 runtime: "claude".into(),

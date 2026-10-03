@@ -1,7 +1,8 @@
 use crate::host::event::{
     AgentApprovalRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin,
-    UiAgentAcpTerminalCreated, UiAgentInfo, UiAgentSessionConfigSelectionResult,
-    UiAgentSessionConfigState, UiAgentSessionCreated, UiAgentWorkspaceChanged,
+    UiAgentAcpTerminalCreated, UiAgentInfo, UiAgentMessagesSnapshot,
+    UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
+    UiAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
@@ -9,7 +10,7 @@ use vmux_ecs::agent::AgentCommandResponse;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_session::AcpSession;
+use vmux_session::{Session, SessionId};
 
 #[vmux_api::service_message(AgentRequest)]
 struct InboundAgentRequest {
@@ -34,6 +35,7 @@ impl Plugin for AgentIngressPlugin {
             .add_service_message::<InboundAgentAwaitingApproval>()
             .add_service_message::<UiAgentInfo>()
             .add_service_message::<UiAgentWorkspaceChanged>()
+            .add_service_message::<UiAgentMessagesSnapshot>()
             .add_service_message::<UiAgentSessionConfigState>()
             .add_service_message::<UiAgentSessionConfigSelectionResult>()
             .add_service_message::<UiAgentSessionCreated>()
@@ -41,14 +43,28 @@ impl Plugin for AgentIngressPlugin {
             .add_message::<ServiceRequest>()
             .add_message::<AgentCommandResponse>()
             .add_message::<AgentRequestInput>()
+            .add_message::<vmux_session::ConversationSnapshotReceived>()
             .add_systems(
                 Update,
                 (
                     subscribe_commands,
-                    (route_requests, route_approval_requests).in_set(ServiceMessageSet),
+                    (route_requests, route_approval_requests, route_messages)
+                        .in_set(ServiceMessageSet),
                 ),
             )
             .add_systems(Last, forward_command_responses);
+    }
+}
+
+fn route_messages(
+    mut inbound: MessageReader<UiAgentMessagesSnapshot>,
+    mut snapshots: MessageWriter<vmux_session::ConversationSnapshotReceived>,
+) {
+    for inbound in inbound.read() {
+        snapshots.write(vmux_session::ConversationSnapshotReceived {
+            session: SessionId(inbound.sid.clone()),
+            messages: inbound.messages.clone(),
+        });
     }
 }
 
@@ -92,13 +108,13 @@ fn route_requests(
 
 fn route_approval_requests(
     mut inbound: MessageReader<InboundAgentAwaitingApproval>,
-    sessions: Query<(Entity, &AcpSession)>,
+    sessions: Query<(Entity, &SessionId), With<Session>>,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
         let Some(session) = sessions
             .iter()
-            .find_map(|(entity, session)| (session.sid == inbound.sid).then_some(entity))
+            .find_map(|(entity, session_id)| (session_id.0 == inbound.sid).then_some(entity))
         else {
             continue;
         };

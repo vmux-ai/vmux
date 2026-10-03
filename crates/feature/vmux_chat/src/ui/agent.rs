@@ -48,10 +48,12 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
 fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     let agent = chat.agent();
     let accent = chat.identity.accent();
-    let src = FaviconSource::resolve(
-        &chat.identity.icon(),
-        &format!("{}{agent}", crate::ChatPlugin::URL),
-    );
+    let icon = chat.identity.icon();
+    let src = if icon.is_empty() {
+        FaviconSource::agent(&agent)
+    } else {
+        Some(icon)
+    };
     let fallback = if accent.is_empty() {
         "#6366f1"
     } else {

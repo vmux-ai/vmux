@@ -7,12 +7,14 @@ use vmux_command::ClaimedUrls;
 use vmux_command::{
     ClaimedUrl, CommandBarWorkDirectory, ContributedPage, WriteCommandBarSnapshots,
 };
-use vmux_ecs::{AgentWorkingDir, ArchivedPage, LastActivatedAt};
-use vmux_session::AcpSession;
+use vmux_ecs::{Cwd, EntityTarget, LastActivatedAt};
+#[cfg(test)]
+use vmux_session::SessionId;
+use vmux_session::{AgentId, Session};
 
 use super::acp::AcpPackageChanged;
 use super::acp::registry::RegistryAgent;
-use crate::route::AcpRoute;
+use crate::route::SessionRoute;
 
 pub(crate) struct CommandBarPlugin;
 
@@ -45,18 +47,27 @@ fn claim(mut commands: Commands) {
 }
 
 fn sync_work_directories(
-    changed: Query<(Entity, &AgentWorkingDir), Changed<AgentWorkingDir>>,
-    mut removed: RemovedComponents<AgentWorkingDir>,
+    sessions: Query<Ref<Cwd>, With<Session>>,
+    stacks: Query<(
+        Entity,
+        Ref<EntityTarget<Session>>,
+        Option<&CommandBarWorkDirectory>,
+    )>,
     mut commands: Commands,
 ) {
-    for (entity, directory) in &changed {
-        commands.entity(entity).insert(CommandBarWorkDirectory(
-            directory.0.to_string_lossy().into_owned(),
-        ));
-    }
-    for entity in removed.read() {
-        if let Ok(mut entity) = commands.get_entity(entity) {
-            entity.remove::<CommandBarWorkDirectory>();
+    for (stack, target, current) in &stacks {
+        let Ok(cwd) = sessions.get(target.entity()) else {
+            if current.is_some() {
+                commands.entity(stack).remove::<CommandBarWorkDirectory>();
+            }
+            continue;
+        };
+        if !target.is_added() && !cwd.is_changed() {
+            continue;
+        }
+        let next = CommandBarWorkDirectory(cwd.0.to_string_lossy().into_owned());
+        if current != Some(&next) {
+            commands.entity(stack).insert(next);
         }
     }
 }
@@ -87,35 +98,25 @@ fn sync_installed(
 
 fn publish(
     agents: Query<(Entity, &RegistryAgent, Option<&ContributedPage>), With<InstalledAgent>>,
-    sessions: Query<(&AcpSession, Option<&LastActivatedAt>)>,
-    archived: Query<&ArchivedPage>,
+    sessions: Query<(&AgentId, Option<&LastActivatedAt>), With<Session>>,
     mut commands: Commands,
 ) {
     let mut recent = Vec::<(String, i64)>::new();
-    for (session, timestamp) in &sessions {
-        let url = AcpRoute::agent(&session.agent_id).url();
+    for (agent_id, timestamp) in &sessions {
         let timestamp = timestamp.map_or(i64::MIN, |timestamp| timestamp.0);
-        if let Some((_, current)) = recent.iter_mut().find(|(candidate, _)| *candidate == url) {
+        if let Some((_, current)) = recent
+            .iter_mut()
+            .find(|(candidate, _)| candidate == &agent_id.0)
+        {
             *current = (*current).max(timestamp);
         } else {
-            recent.push((url, timestamp));
+            recent.push((agent_id.0.clone(), timestamp));
         }
     }
-    for page in &archived {
-        let Some(AcpRoute::Acp { id, .. }) = AcpRoute::parse(&page.url) else {
-            continue;
-        };
-        let url = AcpRoute::agent(id).url();
-        if let Some((_, current)) = recent.iter_mut().find(|(candidate, _)| *candidate == url) {
-            *current = (*current).max(page.closed_at);
-        } else {
-            recent.push((url, page.closed_at));
-        }
-    }
-    recent.sort_by(|(left_url, left_time), (right_url, right_time)| {
+    recent.sort_by(|(left_agent, left_time), (right_agent, right_time)| {
         Reverse(*left_time)
             .cmp(&Reverse(*right_time))
-            .then_with(|| left_url.cmp(right_url))
+            .then_with(|| left_agent.cmp(right_agent))
     });
 
     let mut pages = Vec::new();
@@ -126,7 +127,7 @@ fn publish(
                 id: agent.id.clone(),
                 rank: 0,
                 page: CommandBarPage {
-                    url: AcpRoute::agent(&agent.id).url(),
+                    url: SessionRoute::manager_for_agent(&AgentId(agent.id.clone())),
                     title: agent.name.clone(),
                     keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
                     icon: agent
@@ -144,11 +145,11 @@ fn publish(
     pages.sort_by(|(_, left), (_, right)| {
         let left_rank = recent
             .iter()
-            .position(|(url, _)| url == &left.page.url)
+            .position(|(agent_id, _)| agent_id == &left.id)
             .unwrap_or(usize::MAX);
         let right_rank = recent
             .iter()
-            .position(|(url, _)| url == &right.page.url)
+            .position(|(agent_id, _)| agent_id == &right.id)
             .unwrap_or(usize::MAX);
         left_rank.cmp(&right_rank).then_with(|| {
             left.page
@@ -205,13 +206,11 @@ mod tests {
         app.world_mut()
             .spawn((RegistryAgent::test("codex", "Codex", None), InstalledAgent));
         app.world_mut().spawn((
-            AcpSession {
-                agent_id: "codex".to_string(),
-                sid: "session".to_string(),
-                cwd: std::path::PathBuf::new(),
-                anchor: ProcessId::new(),
-                resume: None,
-            },
+            Session,
+            SessionId("session".into()),
+            AgentId("codex".into()),
+            Cwd::default(),
+            vmux_ecs::ProcessAnchor(ProcessId::new()),
             LastActivatedAt(20),
         ));
 
@@ -223,6 +222,8 @@ mod tests {
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].id, "codex");
         assert_eq!(pages[1].id, "claude-acp");
+        assert_eq!(pages[0].page.url, "vmux://sessions/?agent=codex");
+        assert_eq!(pages[1].page.url, "vmux://sessions/?agent=claude-acp");
         assert!(matches!(
             pages[1].page.icon,
             vmux_ecs::PageIcon::Favicon(ref icon)
@@ -252,7 +253,7 @@ mod tests {
 
         assert_eq!(
             claimed,
-            [true, true, true, true, false, false, false, false]
+            [true, true, false, false, false, false, false, false]
         );
     }
 }

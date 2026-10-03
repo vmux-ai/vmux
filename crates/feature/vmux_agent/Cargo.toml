@@ -21,6 +21,7 @@ service = [
     "dep:vmux_ecs",
     "dep:vmux_path",
     "dep:vmux_process",
+    "dep:vmux_session",
 ]
 app = [
     "dep:base64",

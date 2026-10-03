@@ -1,7 +1,9 @@
 use crate::host::run_state_kind::{AgentRunStateKind, LastRunStateKind};
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
-use vmux_session::{AcpSession, AgentRunState};
+#[cfg(test)]
+use vmux_session::Session;
+use vmux_session::{RunState, SessionId};
 
 pub(crate) struct ToastPlugin;
 
@@ -28,7 +30,7 @@ pub struct AgentToast {
 }
 
 fn initialize(
-    sessions: Query<Entity, (Added<AcpSession>, Without<LastRunStateKind>)>,
+    sessions: Query<Entity, (Added<RunState>, Without<LastRunStateKind>)>,
     mut commands: Commands,
 ) {
     for entity in &sessions {
@@ -38,7 +40,7 @@ fn initialize(
 
 fn surface_errors(
     mut writer: MessageWriter<AgentToast>,
-    mut sessions: Query<(&AgentRunState, &mut LastRunStateKind, &AcpSession)>,
+    mut sessions: Query<(&RunState, &mut LastRunStateKind, &SessionId)>,
 ) {
     for (state, mut last, session) in &mut sessions {
         let current = AgentRunStateKind::from(state);
@@ -49,11 +51,11 @@ fn surface_errors(
         if current != AgentRunStateKind::Errored {
             continue;
         }
-        let AgentRunState::Errored(message) = state else {
+        let RunState::Errored(message) = state else {
             continue;
         };
         writer.write(AgentToast {
-            session_sid: session.sid.clone(),
+            session_sid: session.0.clone(),
             level: ToastLevel::Error,
             message: message.clone(),
         });
@@ -63,7 +65,6 @@ fn surface_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::ProcessId;
 
     struct TestApp;
 
@@ -76,14 +77,8 @@ mod tests {
             app
         }
 
-        fn session() -> AcpSession {
-            AcpSession {
-                agent_id: "mock".into(),
-                sid: "abc".into(),
-                cwd: std::path::PathBuf::from("/tmp"),
-                anchor: ProcessId::new(),
-                resume: None,
-            }
+        fn session() -> impl Bundle {
+            (Session, SessionId("abc".into()))
         }
 
         fn toasts(app: &mut App) -> Vec<AgentToast> {
@@ -115,7 +110,7 @@ mod tests {
         app.world_mut().spawn((
             TestApp::session(),
             LastRunStateKind::default(),
-            AgentRunState::Errored("boom".into()),
+            RunState::Errored("boom".into()),
         ));
         app.update();
         let events = TestApp::toasts(&mut app);
@@ -129,15 +124,10 @@ mod tests {
     fn acp_errored_transition_fires_toast() {
         let mut app = TestApp::app();
         app.world_mut().spawn((
-            AcpSession {
-                agent_id: "mistral-vibe".into(),
-                sid: "acp1".into(),
-                cwd: std::path::PathBuf::from("/tmp"),
-                anchor: vmux_ecs::ProcessId::new(),
-                resume: None,
-            },
+            Session,
+            SessionId("acp1".into()),
             LastRunStateKind::default(),
-            AgentRunState::Errored("kaboom".into()),
+            RunState::Errored("kaboom".into()),
         ));
         app.update();
         let events = TestApp::toasts(&mut app);
@@ -152,7 +142,7 @@ mod tests {
         app.world_mut().spawn((
             TestApp::session(),
             LastRunStateKind(AgentRunStateKind::Errored),
-            AgentRunState::Errored("old".into()),
+            RunState::Errored("old".into()),
         ));
         app.update();
         assert!(TestApp::toasts(&mut app).is_empty());

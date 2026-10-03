@@ -123,7 +123,7 @@ impl MenuSelection {
         self.activate(index);
     }
 
-    fn model(self, models: &[vmux_api::room::ModelOptionEntry], id: &str) {
+    fn model(self, models: &[vmux_api::conversation::ModelOptionEntry], id: &str) {
         let Some(index) = models.iter().position(|model| model.id == id) else {
             return;
         };
@@ -232,7 +232,7 @@ pub fn CommandComposerMenus(
                         index: index as u32,
                     });
                 },
-                on_select: move |(_index, model): (usize, vmux_api::room::ModelOptionEntry)| {
+                on_select: move |(_index, model): (usize, vmux_api::conversation::ModelOptionEntry)| {
                     selection.model(&models, &model.id);
                 },
                 on_dismiss: move |()| {

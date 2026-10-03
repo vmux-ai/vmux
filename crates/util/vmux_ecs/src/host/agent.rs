@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 
+pub use vmux_api::conversation::SessionId;
 use vmux_api::protocol::{AgentCommandResult, AgentRequest, AgentRequestId};
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -200,9 +201,6 @@ impl AgentReply {
     }
 }
 
-#[derive(Component, Debug, Clone)]
-pub struct SessionId(pub String);
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpServerConfig {
     pub command: String,
@@ -214,7 +212,7 @@ pub struct McpServerConfig {
 pub struct StackSessionHandoff {
     pub source_agent: String,
     pub source_sid: String,
-    pub messages: Vec<vmux_api::room::Message>,
+    pub messages: Vec<vmux_api::conversation::Message>,
     pub context: String,
     pub truncated: bool,
 }
@@ -222,7 +220,7 @@ pub struct StackSessionHandoff {
 #[derive(Message, Debug, Clone)]
 pub struct SwapStackSession {
     pub stack: Entity,
-    pub target_url: String,
+    pub target_agent: String,
     pub cwd: PathBuf,
     pub handoff: Option<StackSessionHandoff>,
 }

@@ -239,18 +239,14 @@ mod tests {
     }
 
     #[test]
-    fn canonical_and_legacy_agent_urls_reuse_the_same_session() {
+    fn canonical_session_urls_reuse_the_same_session() {
         assert!(PageKind::reuses(
-            "vmux://sessions/codex/session-1",
-            "vmux://agent/codex/session-1"
-        ));
-        assert!(PageKind::reuses(
-            "vmux://agent/codex/session-1",
-            "vmux://sessions/codex/session-1"
+            "vmux://sessions/session-1",
+            "vmux://sessions/session-1/"
         ));
         assert!(!PageKind::reuses(
-            "vmux://sessions/codex/session-1",
-            "vmux://agent/codex/session-2"
+            "vmux://sessions/session-1",
+            "vmux://sessions/session-2"
         ));
     }
 

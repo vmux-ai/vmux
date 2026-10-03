@@ -1,6 +1,6 @@
 use bevy::prelude::Component;
 
-use vmux_session::AgentRunState;
+use vmux_session::RunState;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AgentRunStateKind {
@@ -10,14 +10,13 @@ pub enum AgentRunStateKind {
     Errored,
 }
 
-impl From<&AgentRunState> for AgentRunStateKind {
-    fn from(state: &AgentRunState) -> Self {
+impl From<&RunState> for AgentRunStateKind {
+    fn from(state: &RunState) -> Self {
         match state {
-            AgentRunState::Idle => AgentRunStateKind::Idle,
-            AgentRunState::Installing { .. } => AgentRunStateKind::Idle,
-            AgentRunState::Streaming => AgentRunStateKind::Streaming,
-            AgentRunState::AwaitingApproval { .. } => AgentRunStateKind::AwaitingApproval,
-            AgentRunState::Errored(_) => AgentRunStateKind::Errored,
+            RunState::Idle => AgentRunStateKind::Idle,
+            RunState::Streaming => AgentRunStateKind::Streaming,
+            RunState::AwaitingApproval { .. } => AgentRunStateKind::AwaitingApproval,
+            RunState::Errored(_) => AgentRunStateKind::Errored,
         }
     }
 }
@@ -37,13 +36,13 @@ mod tests {
 
     #[test]
     fn from_state_idle() {
-        let s = AgentRunState::Idle;
+        let s = RunState::Idle;
         assert_eq!(AgentRunStateKind::from(&s), AgentRunStateKind::Idle);
     }
 
     #[test]
     fn from_state_errored() {
-        let s = AgentRunState::Errored("oops".into());
+        let s = RunState::Errored("oops".into());
         assert_eq!(AgentRunStateKind::from(&s), AgentRunStateKind::Errored);
     }
 

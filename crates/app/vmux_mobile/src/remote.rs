@@ -1,11 +1,12 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use vmux_api::protocol::{SharedMessage, SharedResponse};
-use vmux_api::room::{
-    ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval,
-    RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
+use vmux_api::conversation::{
+    ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteAgent,
+    RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
+    SessionId,
 };
+use vmux_api::protocol::{SharedMessage, SharedResponse};
 use vmux_ui::i18n::translate;
 
 use crate::quic::QuicError;
@@ -208,7 +209,7 @@ impl Api {
     pub(crate) fn event(event: vmux_api::protocol::SharedEvent) -> Option<RemoteEvent> {
         match event {
             Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
-                room_id: vmux_api::room::RoomId::for_session(&sid),
+                session_id: SessionId::from(sid),
                 text,
             }),
             Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
@@ -228,10 +229,10 @@ impl Api {
             }),
             Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
             Shared::AgentMessagesSnapshot { sid, messages } => {
-                let room_id = vmux_api::room::RoomId::for_session(&sid);
-                let events = vmux_session::room::RoomEvents::from_messages(&sid, 0, &messages);
+                let session_id = SessionId::from(sid);
+                let events = ConversationEvent::from_messages(&session_id, 0, &messages);
                 Some(RemoteEvent::Snapshot {
-                    room_id,
+                    session_id,
                     through_seq: events.len() as u64,
                     events,
                 })

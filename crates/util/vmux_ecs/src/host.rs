@@ -2,7 +2,7 @@ pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
 pub use component::{
-    ActivateRequest, Active, AgentWorkingDir, Bookmark, BookmarkOrder, Collapsed, CreatedAt,
+    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Cwd, Description,
     EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
     LastActivatedAt, LastVisitedAt, Order, Pin, ProcessAnchor, Ready, RegistrationOrder,
     TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,

@@ -580,10 +580,10 @@ mod tests {
         OpenRequest, PickRequest, PromptRequest, SearchEngine, SwitchSpaceRequest,
         SwitchTabRequest,
     };
+    use vmux_api::conversation::ModelOptionEntry;
     use vmux_api::open_target::OpenTarget;
     use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
     use vmux_api::protocol::AcpModeOption;
-    use vmux_api::room::ModelOptionEntry;
     use vmux_api::space::ProjectRow;
 
     impl<'a> Completions<'a> {
@@ -643,7 +643,7 @@ mod tests {
                         startup: false,
                     },
                     CommandBarPage {
-                        url: "vmux://sessions/vibe/".into(),
+                        url: "vmux://sessions/?agent=vibe".into(),
                         title: "Vibe".into(),
                         keywords: vec!["vibe".into()],
                         icon: vmux_api::PageIcon::None,
@@ -652,7 +652,7 @@ mod tests {
                         startup: false,
                     },
                     CommandBarPage {
-                        url: "vmux://sessions/codex/cli".into(),
+                        url: "vmux://sessions/?agent=codex".into(),
                         title: "Codex".into(),
                         keywords: vec!["codex".into()],
                         icon: vmux_api::PageIcon::None,
@@ -734,7 +734,7 @@ mod tests {
             CommandBarOpenEvent {
                 tabs: vec![CommandBarTab {
                     title: "Docs".into(),
-                    url: "vmux://sessions/codex/def".into(),
+                    url: "vmux://sessions/session-codex".into(),
                     pane_id: 8,
                     tab_index: 1,
                     is_active: false,
@@ -984,16 +984,16 @@ mod tests {
         let defaulted = PaletteState::start(&state, PaletteDraft::typed("fix the failing test"));
         assert_eq!(
             PageRows::prompt_target_url(&defaulted.rows[0]),
-            Some("vmux://sessions/vibe/")
+            Some("vmux://sessions/?agent=vibe")
         );
 
         let chosen = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/?agent=codex"),
         );
         assert_eq!(
             PageRows::prompt_target_url(&chosen.rows[0]),
-            Some("vmux://sessions/codex/cli")
+            Some("vmux://sessions/?agent=codex")
         );
         assert_eq!(chosen.composer.agent_title, "Codex");
         assert_eq!(chosen.accent_agent.as_deref(), Some("codex"));
@@ -1417,7 +1417,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: "fix the failing test".to_string(),
-                    target_url: Some("vmux://sessions/vibe/".to_string()),
+                    target_url: Some("vmux://sessions/?agent=vibe".to_string()),
                     attachments: Vec::new(),
                 },
             }
@@ -1429,7 +1429,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/?agent=codex"),
         );
 
         let submitted = palette.submit_start(&[]);
@@ -1440,7 +1440,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: "fix the failing test".to_string(),
-                    target_url: Some("vmux://sessions/codex/cli".to_string()),
+                    target_url: Some("vmux://sessions/?agent=codex".to_string()),
                     attachments: Vec::new(),
                 },
             }
@@ -1459,7 +1459,7 @@ mod tests {
             PaletteDecision::Open {
                 close: true,
                 request: OpenRequest {
-                    value: "vmux://sessions/vibe/".to_string(),
+                    value: "vmux://sessions/?agent=vibe".to_string(),
                     open: palette.open_target,
                 },
             }
@@ -1486,7 +1486,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: String::new(),
-                    target_url: Some("vmux://sessions/vibe/".to_string()),
+                    target_url: Some("vmux://sessions/?agent=vibe".to_string()),
                     attachments: vec![ChatSubmitAttachment::from(&attached[0])],
                 },
             }
@@ -1626,7 +1626,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/?agent=codex"),
         );
 
         assert_eq!(
@@ -1635,7 +1635,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: "fix the failing test".to_string(),
-                    target_url: Some("vmux://sessions/codex/cli".to_string()),
+                    target_url: Some("vmux://sessions/?agent=codex".to_string()),
                     attachments: Vec::new(),
                 },
             }
@@ -1659,7 +1659,7 @@ mod tests {
         let mut state = Launcher::state();
         state.agent_models = vec![AgentModels {
             agent_key: "vibe".into(),
-            url: "vmux://sessions/vibe/".into(),
+            url: "vmux://sessions/?agent=vibe".into(),
             selected: "big".into(),
             models: vec![
                 ModelOptionEntry {
@@ -1682,7 +1682,7 @@ mod tests {
 
         let codex = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix it").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix it").targeting("vmux://sessions/?agent=codex"),
         );
         assert!(codex.composer.model_name.is_empty());
         assert!(codex.composer.model_options.is_empty());
@@ -1693,7 +1693,7 @@ mod tests {
         let mut state = Launcher::state();
         state.agent_modes = vec![AgentModes {
             agent_key: "vibe".into(),
-            url: "vmux://sessions/vibe".into(),
+            url: "vmux://sessions/?agent=vibe".into(),
             selected: "agent".into(),
             modes: vec![AcpModeOption {
                 id: "agent".into(),
@@ -1760,7 +1760,10 @@ mod tests {
 
         assert_eq!(
             urls,
-            vec!["vmux://sessions/vibe/", "vmux://sessions/codex/cli"]
+            vec![
+                "vmux://sessions/?agent=vibe",
+                "vmux://sessions/?agent=codex"
+            ]
         );
     }
 }

@@ -3,9 +3,11 @@ use crate::event::{
     ChatListSelectionState, ChatMediaState, ChatPromptFocusEffect, ChatResumeState,
     ChatSelectorState, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState,
 };
+use vmux_session::CatalogSnapshot;
 
 #[vmux_api::ui_state_patch(Default)]
 pub struct ChatUiStatePatch {
+    pub sessions: Option<Box<CatalogSnapshot>>,
     pub snapshot: Option<Box<ChatSnapshot>>,
     pub composer: Option<ComposerContext>,
     pub mode: Option<ModeState>,

@@ -40,7 +40,7 @@ fn samples() -> Vec<SharedMessage> {
         },
         SharedMessage::ListSessions,
         SharedMessage::AgentNewChat {
-            client_op_id: vmux_api::room::ClientOpId::new("o"),
+            client_op_id: vmux_api::conversation::ClientOpId::new("o"),
             prompt: "p".into(),
             agent_url: None,
         },

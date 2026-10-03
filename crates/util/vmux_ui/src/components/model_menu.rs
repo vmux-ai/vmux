@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_api::room::ModelOptionEntry;
+use vmux_api::conversation::ModelOptionEntry;
 
 use crate::class::ClassList;
 use crate::components::prompt_box::{

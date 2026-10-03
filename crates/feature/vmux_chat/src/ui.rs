@@ -23,6 +23,16 @@ pub(crate) struct ChatPage;
 
 #[component]
 pub fn Page() -> Element {
+    let route = try_consume_context::<vmux_ecs::PageMetadata>()
+        .and_then(|metadata| vmux_session::Route::parse(&metadata.url));
+    if matches!(route, Some(vmux_session::Route::Manager)) {
+        return rsx! { manager::SessionsManager {} };
+    }
+    rsx! { SessionDetail {} }
+}
+
+#[component]
+fn SessionDetail() -> Element {
     let chat = use_chat();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
@@ -49,6 +59,7 @@ pub mod composer;
 mod error;
 mod item;
 mod keys;
+mod manager;
 mod scroll;
 mod state;
 mod transcript;

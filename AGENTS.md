@@ -71,6 +71,7 @@ Combinators are fine where they stay small and local — `map_err` to convert an
 - Never show literal loading copy such as "Loading..." or "Loading data..." in product UI. Use a skeleton for structured content or matrix rain for a full-surface transition.
 - Reserve `Chrome` for Google Chrome or Chromium compatibility code. Never use `chrome` to mean application UI, window controls, a panel, a toolbar, a shell, or presentation state.
 - Do not use generic `Action` names for vmux-owned types, fields, functions, sets, or modules. Use `Request` for an intent entering a feature, `Operation` for accepted work being executed, `Effect` for a versioned UI-side effect, or a concrete domain noun such as `Selection`, `Decision`, or `Transition`. Externally fixed protocol vocabulary and standard domain terms such as LSP `CodeAction` are exempt at their boundaries; translate them when they enter vmux-owned state.
+- Do not repeat a crate, module, feature, or owning entity name in a type when the namespace already makes ownership clear. Prefer `Stage`, `Description`, and `AgentId` inside `vmux_session` over `SessionStage`, `SessionDescription`, and `SessionAgentId`; retain a prefix only at shared or serialized boundaries where it prevents a real collision.
 - When constructing a Bevy entity, first compose it from existing shared components such as `Name`, ID components, `Active`, `Order`, and timestamps. Add a feature-specific marker component when the entity needs a distinct role. Do not introduce a new aggregate component or row struct that duplicates fields already represented by common components.
 - Route every new user-facing UI string through Fluent (`vmux_ui::i18n`). Add the message to `en-US.ftl` and every bundled locale with identical IDs and variables. Do not ship untranslated English literals or rely on English fallback for bundled locales. Dynamic external content and raw diagnostic output are exempt.
 - No comments in Rust sources. Not `//`, not `///`, not `//!`. Names and types carry what the code does; `docs/architecture.md` carries why the system is shaped the way it is. A *why* worth writing down goes there, where a reader finds it without opening a file and where one paragraph serves the ten call sites that would each have grown their own. This does not apply to `patches/`, which is vendored third-party code we re-apply on every version bump.
@@ -111,6 +112,12 @@ When taking a Linear issue (e.g. "take VMX-XX"), immediately move it to **In Pro
 6. Remember: if the worktree is deleted while your shell is inside it, `cd` back to the repo root — `../..` won't work.
 
 Worktree directory: `.worktrees/` (already in `.gitignore`).
+
+## Pull Request Scope
+
+Deliver user-facing work as an end-to-end vertical slice. A core-only PR is incomplete when the requested use case cannot be exercised through the product UI.
+
+Do not stack PRs by default. Stack only when the work genuinely depends on another unmerged PR and cannot be based on `main`; state that dependency in the PR. Keep the dependent PR as one coherent end-to-end change rather than splitting it into implementation-layer PRs.
 
 ## Merging
 

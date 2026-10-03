@@ -12,8 +12,8 @@ use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
 use vmux_agent::acp::AcpSessions;
 use vmux_agent::broker::AgentBroker;
+use vmux_api::conversation::Message;
 use vmux_api::protocol::AgentAttachment;
-use vmux_api::room::Message;
 
 pub(crate) struct RemotePlugin;
 

@@ -29,13 +29,29 @@ use vmux_ecs::host::UiState;
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::team::Profile;
 use vmux_ecs::{
-    PageIcon, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
+    EntityTarget, PageIcon, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
     PendingPromptAttachments,
 };
 use vmux_layout::stack::OpenRequest;
-use vmux_session::{AcpSession, AgentConversationTitle, AgentMessages, AgentRunState};
+use vmux_session::{
+    AgentConversationTitle, AgentId, Route, RunState, Session, SessionCreateRequest, SessionId,
+    Transcripts,
+};
 
 type ChatUiStateUpdates = UiState<ChatUiState>;
+
+#[derive(SystemParam)]
+pub(crate) struct SessionViews<'w, 's> {
+    child_of: Query<'w, 's, &'static ChildOf>,
+    targets: Query<'w, 's, &'static EntityTarget<Session>>,
+}
+
+impl SessionViews<'_, '_> {
+    pub(crate) fn session(&self, webview: Entity) -> Option<Entity> {
+        let stack = self.child_of.get(webview).ok()?.parent();
+        self.targets.get(stack).ok().map(EntityTarget::entity)
+    }
+}
 
 #[vmux_api::agent]
 pub(crate) struct AgentRequestUserChoice {
@@ -74,6 +90,7 @@ impl Plugin for ChatHostPlugin {
 fn submit_from_command_bar(
     trigger: On<UiInput<PromptRequest>>,
     target: PromptTarget,
+    mut session_requests: MessageWriter<SessionCreateRequest>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -101,10 +118,24 @@ fn submit_from_command_bar(
     let mut opened = false;
     if (!prompt.is_empty() || !attachments.is_empty())
         && let Some(stack) = target.workspace.stack
-        && let Some(url) = target
+        && let Some(mut url) = target
             .contributed_pages
             .prompt_url(request.target_url.as_deref())
     {
+        if let Some(agent) = Route::requested_agent(&url) {
+            let id = SessionId(uuid::Uuid::new_v4().to_string());
+            let name = AgentConversationTitle::from_prompt(prompt)
+                .map(|title| title.0)
+                .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-new"));
+            session_requests.write(SessionCreateRequest {
+                id: id.clone(),
+                name,
+                description: String::new(),
+                cwd: target.cwd(stack),
+                agent: Some(agent),
+            });
+            url = Route::Session(id).url();
+        }
         if inline_stack == Some(stack)
             && vmux_api::VmuxRoute::parse(&url)
                 .is_some_and(|route| route.supports_inline_transition())
@@ -139,7 +170,19 @@ struct PromptTarget<'w, 's> {
     launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     contributed_pages: ContributedPages<'w, 's>,
+    work_directories: Query<'w, 's, &'static vmux_command::CommandBarWorkDirectory>,
     workspace: Single<'w, 's, &'static CommandBarWorkspaceSnapshot>,
+}
+
+impl PromptTarget<'_, '_> {
+    fn cwd(&self, stack: Entity) -> std::path::PathBuf {
+        self.work_directories
+            .get(stack)
+            .map(|cwd| std::path::PathBuf::from(&cwd.0))
+            .ok()
+            .or_else(|| self.workspace.project_root.as_deref().map(Into::into))
+            .unwrap_or_default()
+    }
 }
 
 struct ChatAgentPlugin;
@@ -173,6 +216,7 @@ pub struct ResumeAgentChoice;
 struct AgentChatTarget<'w, 's> {
     anchors: Query<'w, 's, (Entity, &'static ProcessId)>,
     child_of: Query<'w, 's, &'static ChildOf>,
+    targets: Query<'w, 's, &'static EntityTarget<Session>>,
     session_roots: Query<'w, 's, (), With<AgentSessionRoot>>,
 }
 
@@ -182,13 +226,11 @@ impl AgentChatTarget<'_, '_> {
             .anchors
             .iter()
             .find_map(|(entity, process_id)| (*process_id == anchor).then_some(entity))?;
-        let mut current = agent;
-        loop {
-            if self.session_roots.contains(current) {
-                return Some((agent, current));
-            }
-            current = self.child_of.get(current).ok()?.parent();
-        }
+        let stack = self.child_of.get(agent).ok()?.parent();
+        let session = self.targets.get(stack).ok()?.entity();
+        self.session_roots
+            .contains(session)
+            .then_some((agent, session))
     }
 }
 
@@ -300,55 +342,59 @@ type ChangedChatSessions<'w, 's> = Query<
     'w,
     's,
     (
-        &'static Children,
+        Entity,
         Option<&'static AgentConversationTitle>,
-        &'static AgentMessages,
-        &'static AgentRunState,
+        &'static RunState,
         Option<&'static Profile>,
-        &'static AcpSession,
+        &'static AgentId,
     ),
-    Or<(
-        Changed<AgentConversationTitle>,
-        Changed<AgentMessages>,
-        Changed<AgentRunState>,
-        Changed<Profile>,
-    )>,
+    With<Session>,
 >;
 
 fn report_tab_identity(
     sessions: ChangedChatSessions,
+    stacks: Query<(&EntityTarget<Session>, &Children)>,
+    transcripts: Transcripts,
     views: Query<Option<&PageIdentity>, With<ChatView>>,
     mut commands: Commands,
 ) {
-    for (children, title, messages, state, profile, session) in &sessions {
-        for child in children.iter() {
-            let Ok(reported) = views.get(child) else {
+    for (session_entity, title, state, profile, agent_id) in &sessions {
+        let transcript = transcripts.get(session_entity);
+        for (target, children) in &stacks {
+            if target.entity() != session_entity {
                 continue;
-            };
-            let mut reported = reported.cloned().unwrap_or_default();
-            if let Some(title) = title {
-                reported.title = Some(title.0.clone());
             }
-            reported.icon = tab_activity_icon(messages, state, profile, session);
-            commands.entity(child).insert(reported);
+            for child in children.iter() {
+                let Ok(current) = views.get(child) else {
+                    continue;
+                };
+                let mut reported = current.cloned().unwrap_or_default();
+                if let Some(title) = title {
+                    reported.title = Some(title.0.clone());
+                }
+                reported.icon = tab_activity_icon(&transcript.messages, state, profile, agent_id);
+                if current != Some(&reported) {
+                    commands.entity(child).insert(reported);
+                }
+            }
         }
     }
 }
 
 fn tab_activity_icon(
-    messages: &AgentMessages,
-    state: &AgentRunState,
+    messages: &[vmux_api::conversation::Message],
+    state: &RunState,
     profile: Option<&Profile>,
-    session: &AcpSession,
+    agent_id: &AgentId,
 ) -> Option<PageIcon> {
-    let running = matches!(state, AgentRunState::Streaming);
-    let page = ChatMessages::new(&[], &messages.0, &[], &[], running).tail(TAB_ACTIVITY_TAIL_ITEMS);
+    let running = matches!(state, RunState::Streaming);
+    let page = ChatMessages::new(&[], messages, &[], &[], running).tail(TAB_ACTIVITY_TAIL_ITEMS);
     let activity = ChatTurnProjection::current_activity(&page.items, state.status())?;
     let accent = crate::tab::Accent::for_agent(
         profile
             .map(|profile| profile.avatar.color.as_str())
             .unwrap_or_default(),
-        &session.agent_id,
+        &agent_id.0,
     );
     Some(PageIcon::favicon(
         ActivityIcon::from(activity).favicon(&accent.css),
@@ -592,7 +638,6 @@ mod tests {
     use super::*;
     use vmux_api::chat::{ChatBlock, ChatTurn};
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
-    use vmux_ecs::ProcessId;
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 
     struct Conversation {
@@ -606,18 +651,17 @@ mod tests {
             let session = app
                 .world_mut()
                 .spawn((
-                    AcpSession {
-                        agent_id: "mock".into(),
-                        sid: "session".into(),
-                        cwd: std::path::PathBuf::from("/tmp"),
-                        anchor: ProcessId::new(),
-                        resume: None,
-                    },
-                    vmux_session::AgentMessages::default(),
-                    vmux_session::AgentRunState::default(),
+                    Session,
+                    vmux_session::SessionId("session".into()),
+                    AgentId("mock".into()),
+                    vmux_session::RunState::default(),
                 ))
                 .id();
-            let view = app.world_mut().spawn((ChatView, ChildOf(session))).id();
+            let stack = app
+                .world_mut()
+                .spawn(vmux_ecs::EntityTarget::<Session>::new(session))
+                .id();
+            let view = app.world_mut().spawn((ChatView, ChildOf(stack))).id();
             Self { view, session }
         }
 
@@ -628,7 +672,7 @@ mod tests {
             app.update();
         }
 
-        fn run(&self, app: &mut App, state: vmux_session::AgentRunState) {
+        fn run(&self, app: &mut App, state: vmux_session::RunState) {
             app.world_mut().entity_mut(self.session).insert(state);
             app.update();
         }
@@ -675,7 +719,7 @@ mod tests {
     fn an_idle_agent_reports_no_icon_so_its_own_shows_through() {
         let mut app = App::new();
         let conversation = Conversation::start(&mut app);
-        conversation.run(&mut app, vmux_session::AgentRunState::Idle);
+        conversation.run(&mut app, vmux_session::RunState::Idle);
 
         assert_eq!(conversation.reported(&app).icon, None);
     }
@@ -687,7 +731,7 @@ mod tests {
 
         conversation.run(
             &mut app,
-            vmux_session::AgentRunState::AwaitingApproval {
+            vmux_session::RunState::AwaitingApproval {
                 call_id: "1".into(),
                 name: "run".into(),
                 args: serde_json::Value::Null,
@@ -696,13 +740,10 @@ mod tests {
         let awaiting = conversation.reported(&app).icon;
         assert!(awaiting.is_some());
 
-        conversation.run(
-            &mut app,
-            vmux_session::AgentRunState::Errored("boom".into()),
-        );
+        conversation.run(&mut app, vmux_session::RunState::Errored("boom".into()));
         assert_ne!(conversation.reported(&app).icon, awaiting);
 
-        conversation.run(&mut app, vmux_session::AgentRunState::Idle);
+        conversation.run(&mut app, vmux_session::RunState::Idle);
         assert_eq!(conversation.reported(&app).icon, None);
     }
 
@@ -743,8 +784,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(ChatAgentPlugin);
         let anchor = ProcessId::new();
-        let session = app.world_mut().spawn(AgentSessionRoot).id();
-        app.world_mut().spawn((anchor, ChatView, ChildOf(session)));
+        let session = app.world_mut().spawn((Session, AgentSessionRoot)).id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        app.world_mut().spawn((anchor, ChatView, ChildOf(stack)));
         app.world_mut().write_message(AgentRequestInput {
             request_id: AgentRequestId::new(),
             origin: CommandOrigin::Agent {
@@ -771,10 +816,14 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(ChatAgentPlugin);
         let anchor = ProcessId::new();
-        let session = app.world_mut().spawn(AgentSessionRoot).id();
+        let session = app.world_mut().spawn((Session, AgentSessionRoot)).id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
         let webview = app
             .world_mut()
-            .spawn((anchor, ChatView, ChatSynced, ChildOf(session)))
+            .spawn((anchor, ChatView, ChatSynced, ChildOf(stack)))
             .id();
         app.world_mut().write_message(AgentRequestInput {
             request_id: AgentRequestId::new(),

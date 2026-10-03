@@ -5,9 +5,9 @@ use super::persistence::PersistenceAppExt;
 use crate::PageMetadata;
 use crate::archive::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PaneStep, SplitAxis};
 use crate::component::{
-    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Folder,
-    LastActivatedAt, LastVisitedAt, Order, Pin, TransitionType, Url, Uuid, Visit, VisitCount,
-    VisitedUrl,
+    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Cwd, Description,
+    Folder, LastActivatedAt, LastVisitedAt, Order, Pin, Terminal, TransitionType, Url, Uuid, Visit,
+    VisitCount, VisitedUrl,
 };
 use crate::icon::{BuiltinIcon, PageIcon};
 use vmux_api::bookmark::SmartBookmarkFolder;
@@ -29,6 +29,8 @@ impl Plugin for EcsPlugin {
             .register_type::<Vec<PaneStep>>()
             .register_persisted::<CreatedAt>()
             .register_persisted::<LastActivatedAt>()
+            .register_persisted::<Cwd>()
+            .register_persisted::<Description>()
             .register_persisted::<Visit>()
             .register_persisted::<Url>()
             .register_persisted::<VisitCount>()
@@ -36,6 +38,7 @@ impl Plugin for EcsPlugin {
             .register_persisted::<VisitedUrl>()
             .register_persisted::<TransitionType>()
             .register_persisted::<Order>()
+            .register_type::<Terminal>()
             .register_type::<Active>()
             .register_type::<BookmarkOrder>()
             .register_type::<Pin>()

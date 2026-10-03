@@ -1,14 +1,17 @@
 use std::collections::HashSet;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
 use vmux_ecs::event::team::{TeamEvent, TeamMemberRow};
+use vmux_ecs::{Description, EntityTarget};
+use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
 
 use crate::cef::LayoutCef;
 use crate::event::{
-    ActiveSession, ActiveSessionState, ActiveWorkspaceProject, BookmarkEntryState,
+    ActiveSession, ActiveSessionState, ActiveTask, ActiveWorkspaceProject, BookmarkEntryState,
     BookmarkFolderState, BookmarkPinState, BookmarkTreeState, BookmarkUiState, HeaderState,
     PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
     StackRevealTarget, TabBoundaryState, TabListState, TabStripRow, TabStripState,
@@ -282,6 +285,7 @@ impl ActiveSession {
             .find(|stack| stack.is_active && !stack.url.is_empty())?
             .clone();
         Some(Self {
+            task: None,
             agent: Self::agent_for(&page, &team.members),
             project: ActiveWorkspaceProject::active(&projects.projects),
             boundary: projects.boundary.clone(),
@@ -302,6 +306,46 @@ impl ActiveSession {
             .filter(|member| !member.is_user && !member.url.is_empty())
             .find(|member| page.url.trim_end_matches('/') == member.url.trim_end_matches('/'))
             .cloned()
+    }
+}
+
+#[derive(SystemParam)]
+struct SessionProjection<'w, 's> {
+    targets: Query<'w, 's, &'static EntityTarget<Session>>,
+    sessions: Query<
+        'w,
+        's,
+        (
+            &'static Name,
+            &'static Description,
+            &'static Stage,
+            Option<&'static RunState>,
+        ),
+        With<Session>,
+    >,
+    stages: Query<'w, 's, (&'static StageId, &'static Name), With<StageDefinition>>,
+}
+
+impl SessionProjection<'_, '_> {
+    fn task(&self, page: &StackNode) -> Option<ActiveTask> {
+        let stack = Entity::from_bits(page.id);
+        let target = self.targets.get(stack).ok()?;
+        let (name, description, stage, runtime) = self.sessions.get(target.entity()).ok()?;
+        let stage_name = self
+            .stages
+            .iter()
+            .find_map(|(id, name)| (id == &stage.0).then(|| name.as_str().to_string()))
+            .unwrap_or_else(|| stage.0.0.clone());
+        Some(ActiveTask {
+            name: name.as_str().to_string(),
+            description: description.0.clone(),
+            stage: stage.0.0.clone(),
+            stage_name,
+            runtime: runtime
+                .map(RunState::status)
+                .unwrap_or("inactive")
+                .to_string(),
+        })
     }
 }
 
@@ -466,6 +510,7 @@ fn publish_active_session(
         ),
         With<LayoutCef>,
     >,
+    sessions: SessionProjection,
     mut last: Local<std::collections::HashMap<Entity, ActiveSessionState>>,
     mut commands: Commands,
 ) {
@@ -480,9 +525,11 @@ fn publish_active_session(
             .map(|projection| &projection.0)
             .unwrap_or(&empty_projects);
         let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
-        let event = ActiveSessionState {
-            session: ActiveSession::from_projections(panes, projects, team),
-        };
+        let session = ActiveSession::from_projections(panes, projects, team).map(|mut active| {
+            active.task = sessions.task(&active.page);
+            active
+        });
+        let event = ActiveSessionState { session };
         if last.get(&entity) == Some(&event) {
             continue;
         }
@@ -654,6 +701,49 @@ fn publish_bookmark_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn session_projection_reads_task_stage_and_runtime_from_the_target() {
+        let mut world = World::new();
+        let session = world
+            .spawn((
+                Session,
+                Name::new("Ship session manager"),
+                Description("End-to-end slice".into()),
+                Stage(StageId("in_review".into())),
+                RunState::Streaming,
+            ))
+            .id();
+        let stack = world.spawn(EntityTarget::<Session>::new(session)).id();
+        world.spawn((
+            StageDefinition,
+            StageId("in_review".into()),
+            Name::new("session-stage-in-review"),
+        ));
+        let page = StackNode {
+            id: stack.to_bits(),
+            agent_id: None,
+            title: String::new(),
+            url: "vmux://sessions/session-1".into(),
+            icon: Default::default(),
+            is_active: true,
+            is_loading: false,
+            is_dirty: false,
+            bg_color: None,
+        };
+
+        let task = world
+            .run_system_once(move |sessions: SessionProjection| sessions.task(&page))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(task.name, "Ship session manager");
+        assert_eq!(task.description, "End-to-end slice");
+        assert_eq!(task.stage, "in_review");
+        assert_eq!(task.stage_name, "session-stage-in-review");
+        assert_eq!(task.runtime, "streaming");
+    }
 
     #[test]
     fn tab_strip_projection_resolves_render_state_before_ui_delivery() {

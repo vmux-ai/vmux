@@ -1,9 +1,9 @@
 use super::{CommandBarPick, CommandBarPicker, SearchEngine};
 use crate::PageIcon;
 use crate::chat::ResumableSessionEntry;
+use crate::conversation::ModelOptionEntry;
 use crate::mcp::McpServerEntry;
 use crate::protocol::AcpModeOption;
-use crate::room::ModelOptionEntry;
 use crate::space::ProjectRow;
 
 #[vmux_api::contract(Copy, Default, Eq)]

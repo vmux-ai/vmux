@@ -1,9 +1,9 @@
 use vmux_agent::acp::AcpInput;
+use vmux_api::conversation::RemoteSession;
 use vmux_api::protocol::{
     AgentCommandResult, AgentListAgents, AgentListModels, AgentListTeam, AgentNewChat,
     AgentRequest, AgentSelectModel, AgentSetEffort, SharedFailure, SharedMessage, SharedResponse,
 };
-use vmux_api::room::RemoteSession;
 
 use super::super::server::{
     MAX_PROMPT_BYTES, RemoteAttachments, RemoteClientOpId, RemoteMediaQuery, RemoteState,
@@ -103,7 +103,7 @@ impl RemoteState {
     async fn sessions(&self) -> Vec<RemoteSession> {
         let mut sessions = self.acp.remote_sessions().await;
         for session in &mut sessions {
-            if let Some(messages) = self.session_messages(&session.sid).await {
+            if let Some(messages) = self.session_messages(&session.id.0).await {
                 session.title =
                     vmux_session::ConversationTitle::from_messages(&messages, &session.name);
             }
@@ -169,7 +169,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::sync::broadcast;
-    use vmux_api::room::ClientOpId;
+    use vmux_api::conversation::ClientOpId;
 
     fn empty_state() -> RemoteState {
         let (agent_tx, _) = broadcast::channel(8);

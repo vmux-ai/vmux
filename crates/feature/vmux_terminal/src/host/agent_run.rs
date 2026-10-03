@@ -642,7 +642,8 @@ pub(super) struct AgentRunContext<'w, 's> {
         ),
     >,
     terminals: RunTerminals<'w, 's>,
-    acp_sessions: Query<'w, 's, &'static vmux_session::AcpSession>,
+    session_targets: Query<'w, 's, &'static vmux_ecs::EntityTarget<vmux_session::Session>>,
+    sessions: Query<'w, 's, &'static vmux_ecs::Cwd, With<vmux_session::Session>>,
     panes: AgentPanes<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,
     next_pane_sequence: NextPaneSpawnSequence<'w, 's>,
@@ -673,8 +674,10 @@ impl AgentRunContext<'_, '_> {
         self.terminals.cwd(terminal).or_else(|| {
             let mut current = terminal;
             loop {
-                if let Ok(session) = self.acp_sessions.get(current) {
-                    return Some(session.cwd.to_string_lossy().into_owned());
+                if let Ok(target) = self.session_targets.get(current)
+                    && let Ok(cwd) = self.sessions.get(target.entity())
+                {
+                    return Some(cwd.0.to_string_lossy().into_owned());
                 }
                 current = self.panes.placement.child_of_q.get(current).ok()?.parent();
             }

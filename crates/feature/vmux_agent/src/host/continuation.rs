@@ -5,7 +5,7 @@ use vmux_api::protocol::SharedMessage;
 use vmux_command::WriteCommandRequests;
 use vmux_ecs::agent::AgentContinuationRequest;
 use vmux_ecs::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
-use vmux_session::{AcpSession, AgentRunState};
+use vmux_session::{RunState, SessionId};
 
 pub(super) struct AgentContinuationPlugin;
 
@@ -41,8 +41,8 @@ fn send_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
-        Option<&AcpSession>,
-        Option<&mut AgentRunState>,
+        Option<&SessionId>,
+        Option<&mut RunState>,
     )>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
@@ -52,15 +52,15 @@ fn send_continuations(
         if connected.is_none() {
             continue;
         }
-        let (Some(session), Some(mut state)) = (acp, state) else {
+        let (Some(session_id), Some(mut state)) = (acp, state) else {
             continue;
         };
-        if !matches!(*state, AgentRunState::Idle | AgentRunState::Errored(_)) {
+        if !matches!(*state, RunState::Idle | RunState::Errored(_)) {
             continue;
         }
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
-                sid: session.sid.clone(),
+                sid: session_id.0.clone(),
                 text: String::new(),
                 context: Some(continuation.0.clone()),
                 attachments: Vec::new(),
@@ -68,7 +68,7 @@ fn send_continuations(
             }
             .into(),
         ));
-        *state = AgentRunState::Streaming;
+        *state = RunState::Streaming;
         commands.entity(entity).remove::<PendingAgentContinuation>();
     }
 }

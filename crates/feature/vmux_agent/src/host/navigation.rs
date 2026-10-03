@@ -8,19 +8,22 @@ use vmux_ecs::agent::SwapStackSession;
 use vmux_ecs::host::persistence::PageRestore;
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
-    PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
-    PendingPrompt, PendingPromptAttachments,
+    Cwd, EntityTarget, PageIcon, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
+    PageOpenSet, PageOpenTask, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
-use vmux_session::{AcpSession, AgentConversationTitle, PromptQueue};
+use vmux_session::{
+    AcpSessionId, AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId,
+    SessionMutationSet,
+};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
+use vmux_ui::i18n::translate;
 
 use super::attach::AcpAgentAttachment;
 use crate::host::acp::registry::RegistryAgent;
-use crate::route::AcpRoute;
 use vmux_terminal::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
@@ -67,6 +70,7 @@ impl Plugin for NavigationPlugin {
             Update,
             (release_transition, prepare, open)
                 .chain()
+                .after(SessionMutationSet)
                 .in_set(PageOpenSet::HandleKnownPages),
         );
     }
@@ -117,21 +121,15 @@ struct AgentChatTarget {
 
 impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
-        match AcpRoute::parse(url)? {
-            AcpRoute::AcpDefault => Some(Self {
+        match Route::parse(url)? {
+            Route::Manager => Some(Self {
                 url: vmux_chat::ChatPlugin::URL.to_string(),
-                title: "Agent".to_string(),
+                title: "Sessions".to_string(),
             }),
-            AcpRoute::Acp { id, sid } => {
-                let url = match sid {
-                    Some(sid) => format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL),
-                    None => format!("{}{id}", vmux_chat::ChatPlugin::URL),
-                };
-                Some(Self {
-                    url,
-                    title: id.to_string(),
-                })
-            }
+            Route::Session(id) => Some(Self {
+                url: Route::Session(id.clone()).url(),
+                title: id.0,
+            }),
         }
     }
 }
@@ -184,7 +182,7 @@ fn prepare(
         .collect();
     let mut opened_stacks = std::collections::HashSet::new();
     for (task_entity, task) in &tasks {
-        if AcpRoute::parse(&task.url).is_none() {
+        if Route::parse(&task.url).is_none() {
             continue;
         }
         let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
@@ -348,7 +346,7 @@ fn open(
         .map(|(entity, task, restoring)| (entity, task.clone(), restoring))
         .collect();
     for (entity, task, restoring) in tasks {
-        if !vmux_api::VmuxRoute::parse(&task.url).is_some_and(|route| route.is_agent()) {
+        if Route::parse(&task.url).is_none() {
             continue;
         }
         let tab = workspace.tab(task.stack);
@@ -441,23 +439,25 @@ fn swap(
     mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
     catalog: AcpCatalog,
+    targets: Query<&EntityTarget<Session>>,
+    sessions: Query<(&SessionId, &Name, &Cwd), With<Session>>,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
-        let target = match AcpRoute::parse(&ev.target_url) {
-            Some(target @ AcpRoute::Acp { .. }) => target,
-            other => {
-                bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
-                continue;
-            }
-        };
-        if let AcpRoute::Acp { id, .. } = &target
-            && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
-            && catalog.agent(id).is_none()
-        {
+        let id = ev.target_agent.as_str();
+        if !settings.agent.acp.iter().any(|cfg| cfg.id == id) && catalog.agent(id).is_none() {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
             continue;
-        }
+        };
+        let Ok(target) = targets.get(ev.stack) else {
+            bevy::log::warn!("swap: stack has no Session target");
+            continue;
+        };
+        let session_entity = target.entity();
+        let Ok((session_id, session_name, cwd)) = sessions.get(session_entity) else {
+            bevy::log::warn!("swap: Session target is unavailable");
+            continue;
+        };
         let imported = ev.handoff.as_ref().map(|handoff| {
             (
                 ImportedConversation {
@@ -475,40 +475,61 @@ fn swap(
         });
 
         commands
-            .entity(ev.stack)
-            .remove::<AcpSession>()
+            .entity(session_entity)
+            .remove::<AcpSessionId>()
+            .remove::<vmux_ecs::ProcessAnchor>()
             .remove::<crate::host::acp::AcpLaunchStarted>()
-            .remove::<vmux_session::AgentMessages>()
-            .remove::<vmux_session::AgentApprovalPolicy>()
-            .remove::<vmux_session::AgentRunState>()
+            .remove::<vmux_session::ApprovalPolicy>()
+            .remove::<vmux_session::RunState>()
             .remove::<ImportedConversation>()
             .remove::<super::handoff::PendingHandoff>()
-            .remove::<vmux_ecs::AgentWorkingDir>()
             .remove::<vmux_ecs::team::Agent>()
             .remove::<vmux_ecs::team::Profile>();
         commands.entity(ev.stack).despawn_children();
-
-        match target {
-            AcpRoute::Acp { id, sid } => {
-                let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
-                let routing_sid = uuid::Uuid::new_v4().to_string();
-                let icon = catalog.icon(&id);
-                let name = catalog.profile_name(&id, cfg);
-                let request =
-                    AcpAgentAttachment::new(id, name, routing_sid, ev.cwd.clone(), icon, sid);
-                commands.entity(ev.stack).insert(request);
-                if let Some((imported, pending)) = imported {
-                    commands.entity(ev.stack).insert((imported, pending));
-                }
-            }
-            _ => unreachable!(),
+        let cwd = if ev.cwd.as_os_str().is_empty() {
+            cwd.0.clone()
+        } else {
+            ev.cwd.clone()
+        };
+        commands
+            .entity(session_entity)
+            .insert((AgentId(id.to_string()), Cwd(cwd.clone())));
+        let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
+        let icon = catalog.icon(id);
+        let agent_name = catalog.profile_name(id, cfg);
+        commands.spawn(AcpAgentAttachment::new(
+            session_entity,
+            ev.stack,
+            id,
+            session_name.as_str(),
+            agent_name,
+            session_id.0.clone(),
+            cwd,
+            icon,
+            None,
+        ));
+        if let Some((imported, pending)) = imported {
+            commands.entity(session_entity).insert((imported, pending));
         }
     }
 }
 
 #[derive(SystemParam)]
 struct PageOpener<'w, 's> {
-    sessions: Query<'w, 's, &'static AcpSession>,
+    sessions: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SessionId,
+            &'static Name,
+            &'static Cwd,
+            Option<&'static AgentId>,
+            Option<&'static AcpSessionId>,
+            Option<&'static vmux_ecs::ProcessAnchor>,
+        ),
+        With<Session>,
+    >,
     commands: Commands<'w, 's>,
     settings: Res<'w, AppSettings>,
     catalog: AcpCatalog<'w, 's>,
@@ -523,69 +544,200 @@ impl PageOpener<'_, '_> {
         transition_webview: Option<Entity>,
         default_cwd: &Path,
     ) -> Result<(), String> {
-        let target = match AcpRoute::parse(&task.url) {
-            Some(AcpRoute::AcpDefault) => {
-                let id = self
-                    .settings
-                    .agent
-                    .acp
-                    .first()
-                    .map(|config| config.id.clone())
-                    .or_else(|| self.catalog.installed_id())
-                    .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
-                AcpRoute::Acp { id, sid: None }
-            }
+        let target = match Route::parse(&task.url) {
             Some(target) => target,
             None => return Err(format!("malformed agent URL '{}'", task.url)),
         };
         match target {
-            AcpRoute::Acp { id, sid } => {
+            Route::Manager => {
+                self.open_manager(task.stack, transition_webview);
+                Ok(())
+            }
+            Route::Session(id) => {
+                let Some((
+                    session_entity,
+                    session_name,
+                    stored_cwd,
+                    selected_agent,
+                    resume,
+                    active,
+                )) = self
+                    .sessions
+                    .iter()
+                    .find(|(_, candidate, ..)| *candidate == &id)
+                    .map(|(entity, _, name, cwd, agent, resume, active)| {
+                        (
+                            entity,
+                            name.as_str().to_string(),
+                            cwd.0.clone(),
+                            agent.map(|agent| agent.0.clone()),
+                            resume.map(|resume| resume.0.clone()),
+                            active.map(|active| active.0),
+                        )
+                    })
+                else {
+                    return Err(format!("Session '{}' was not found", id.0));
+                };
+                let agent_id = selected_agent
+                    .or_else(|| {
+                        self.settings
+                            .agent
+                            .acp
+                            .first()
+                            .map(|config| config.id.clone())
+                    })
+                    .or_else(|| self.catalog.installed_id())
+                    .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
                 let config = self
                     .settings
                     .agent
                     .acp
                     .iter()
-                    .find(|config| config.id == id);
-                if config.is_none() && self.catalog.agent(&id).is_none() {
-                    return Err(format!("ACP agent unavailable for '{id}'"));
+                    .find(|config| config.id == agent_id);
+                if config.is_none() && self.catalog.agent(&agent_id).is_none() {
+                    return Err(format!("ACP agent unavailable for '{agent_id}'"));
                 }
-                if self
-                    .sessions
-                    .get(task.stack)
-                    .is_ok_and(|session| session.agent_id == id)
-                {
+                let cwd = if stored_cwd.as_os_str().is_empty() {
+                    self.commands
+                        .entity(session_entity)
+                        .insert(Cwd(default_cwd.to_path_buf()));
+                    default_cwd.to_path_buf()
+                } else {
+                    stored_cwd
+                };
+                self.commands.entity(task.stack).insert((
+                    EntityTarget::<Session>::new(session_entity),
+                    PageMetadata {
+                        url: Route::Session(id.clone()).url(),
+                        title: session_name.clone(),
+                        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+                        icon: self
+                            .catalog
+                            .icon(&agent_id)
+                            .map(PageIcon::favicon)
+                            .unwrap_or_default(),
+                    },
+                ));
+                if let Some(anchor) = active {
+                    self.open_session_view(
+                        task.stack,
+                        session_entity,
+                        &session_name,
+                        &agent_id,
+                        anchor,
+                        transition_webview,
+                    );
                     return Ok(());
                 }
                 if transition_webview.is_none() {
                     self.commands.entity(task.stack).despawn_children();
                 }
-                let routing_sid = uuid::Uuid::new_v4().to_string();
-                let icon = self.catalog.icon(&id);
-                let name = self.catalog.profile_name(&id, config);
+                let icon = self.catalog.icon(&agent_id);
+                let agent_name = self.catalog.profile_name(&agent_id, config);
                 let request = AcpAgentAttachment::new(
-                    id,
-                    name,
-                    routing_sid,
-                    default_cwd.to_path_buf(),
+                    session_entity,
+                    task.stack,
+                    agent_id.clone(),
+                    &session_name,
+                    agent_name,
+                    id.0.clone(),
+                    cwd,
                     icon,
-                    sid,
+                    resume,
                 );
-                self.commands.entity(task.stack).insert(request);
+                self.commands
+                    .entity(session_entity)
+                    .insert(AgentId(agent_id));
+                let operation = self.commands.spawn(request).id();
                 if let Some(webview) = transition_webview {
                     self.commands
-                        .entity(task.stack)
-                        .insert(vmux_ecs::EntityTarget::<ChatView>::new(webview));
+                        .entity(operation)
+                        .insert(EntityTarget::<ChatView>::new(webview));
                 }
                 insert_initial_prompt_queue(
-                    task.stack,
+                    session_entity,
                     initial_prompt,
                     initial_attachments,
                     &mut self.commands,
                 );
                 Ok(())
             }
-            AcpRoute::AcpDefault => unreachable!(),
         }
+    }
+
+    fn open_manager(&mut self, stack: Entity, transition_webview: Option<Entity>) {
+        let title = translate("sessions-title");
+        self.commands
+            .entity(stack)
+            .remove::<EntityTarget<Session>>()
+            .remove::<vmux_command::CommandBarWorkDirectory>()
+            .insert(PageMetadata {
+                url: Route::Manager.url(),
+                title: title.clone(),
+                bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+                icon: default(),
+            });
+        let view = transition_webview.unwrap_or_else(|| {
+            self.commands
+                .spawn((
+                    vmux_layout::Browser::native_page(&Route::Manager.url(), &title),
+                    ChatView,
+                    ChildOf(stack),
+                ))
+                .id()
+        });
+        self.commands.entity(view).insert((
+            PageMetadata {
+                url: Route::Manager.url(),
+                title,
+                bg_color: None,
+                icon: default(),
+            },
+            ChatView,
+        ));
+    }
+
+    fn open_session_view(
+        &mut self,
+        stack: Entity,
+        session: Entity,
+        name: &str,
+        agent_id: &str,
+        anchor: vmux_ecs::ProcessId,
+        transition_webview: Option<Entity>,
+    ) {
+        let url = self
+            .sessions
+            .get(session)
+            .map(|(_, id, ..)| Route::Session(id.clone()).url())
+            .unwrap_or_else(|_| Route::Manager.url());
+        let view = transition_webview.unwrap_or_else(|| {
+            self.commands
+                .spawn((
+                    vmux_layout::Browser::native_page(&url, name),
+                    ChatView,
+                    ChildOf(stack),
+                    anchor,
+                ))
+                .id()
+        });
+        self.commands.entity(view).insert((
+            PageMetadata {
+                url,
+                title: name.to_string(),
+                bg_color: None,
+                icon: self
+                    .catalog
+                    .icon(agent_id)
+                    .map(PageIcon::favicon)
+                    .unwrap_or_default(),
+            },
+            ChatView,
+            anchor,
+        ));
+        self.commands
+            .entity(stack)
+            .insert(EntityTarget::<Session>::new(session));
     }
 }
 

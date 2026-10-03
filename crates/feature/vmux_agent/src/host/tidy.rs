@@ -4,6 +4,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::LastActivatedAt;
+use vmux_ecs::ProcessAnchor;
 use vmux_ecs::ProcessId;
 use vmux_ecs::event::{FileTidyPromptEvent, FileTidyRequest, TidyChoice};
 use vmux_ecs::host::FileUiStateWrite;
@@ -13,7 +14,7 @@ use vmux_git::GitRepository;
 use vmux_layout::CloseStackRequest;
 use vmux_layout::stack::ComputeFocusSet;
 use vmux_path::FileUrl;
-use vmux_session::{AcpSession, AgentRunState};
+use vmux_session::RunState;
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::host::follow::AgentFileLayout;
@@ -221,7 +222,7 @@ fn attention(
 
 fn idle(
     settings: Option<Res<AppSettings>>,
-    sessions: Query<(&AcpSession, &AgentRunState), Changed<AgentRunState>>,
+    sessions: Query<(&ProcessAnchor, &RunState), Changed<RunState>>,
     mut tidy: TidyFiles,
 ) {
     let Some(settings) = settings else {
@@ -230,11 +231,11 @@ fn idle(
     if !settings.agent.tidy_files {
         return;
     }
-    for (session, state) in &sessions {
-        if !matches!(state, AgentRunState::Idle) {
+    for (anchor, state) in &sessions {
+        if !matches!(state, RunState::Idle) {
             continue;
         }
-        let Some(agent_pane) = tidy.layout.agent_pane(session.anchor) else {
+        let Some(agent_pane) = tidy.layout.agent_pane(anchor.0) else {
             continue;
         };
         tidy.run(agent_pane, &settings);
