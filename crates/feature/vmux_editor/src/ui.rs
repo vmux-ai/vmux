@@ -2,8 +2,8 @@
 
 pub(crate) use input::EditorFocus;
 pub(crate) use lsp::LspPage;
-pub use page::Page;
-pub(super) use page::{HOVER_DELAY_MS, Mode, SCROLL_ID};
+pub use workspace::Page;
+pub(super) use workspace::{HOVER_DELAY_MS, Mode, SCROLL_ID};
 
 mod breadcrumb;
 mod diagnostic;
@@ -18,13 +18,13 @@ mod markdown;
 mod menu;
 mod note;
 mod note_text;
-mod page;
 mod sidebar;
 mod state;
 mod status;
 mod text_geometry;
 mod text_style;
 mod toolbar;
+mod workspace;
 
 #[vmux_native::page(
     component = Page,

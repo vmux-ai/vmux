@@ -260,7 +260,7 @@ fn activate_revealed_window(
         if !should_attempt_activation(glass.revealed, glass.active_confirmed, elapsed) {
             continue;
         }
-        if crate::macos::ensure_key_window(entity) {
+        if crate::macos::MacWindow::ensure_key(entity) {
             glass.active_confirmed = true;
         } else if let Some(proxy) = proxy.as_ref() {
             let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);

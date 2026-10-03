@@ -115,7 +115,7 @@ fn grab_key_window_on_pane_hover(
     if !window.visible {
         return;
     }
-    ensure_key_window(window_entity);
+    MacWindow::ensure_key(window_entity);
 }
 
 fn app_is_frontmost() -> bool {
@@ -150,33 +150,46 @@ fn activate_window(window_entity: Entity) {
     });
 }
 
-pub(crate) fn ensure_key_window(window_entity: Entity) -> bool {
-    let Some(mtm) = objc2::MainThreadMarker::new() else {
-        return false;
-    };
-    WINIT_WINDOWS.with_borrow(|winit_windows| {
-        let Some(winit_window) = winit_windows.get_window(window_entity) else {
+pub(crate) struct MacWindow;
+
+impl MacWindow {
+    pub(crate) fn ensure_key(window_entity: Entity) -> bool {
+        let Some(mtm) = objc2::MainThreadMarker::new() else {
             return false;
         };
-        let Ok(handle) = winit_window.window_handle() else {
-            return false;
-        };
-        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
-            return false;
-        };
-        let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
-        let Some(window) = view.window() else {
-            return false;
-        };
-        let app = NSApp(mtm);
-        if app.isActive() && window.isKeyWindow() {
-            return true;
-        }
-        #[allow(deprecated)]
-        app.activateIgnoringOtherApps(true);
-        window.makeKeyAndOrderFront(None);
-        false
-    })
+        WINIT_WINDOWS.with_borrow(|winit_windows| {
+            let Some(winit_window) = winit_windows.get_window(window_entity) else {
+                return false;
+            };
+            let Ok(handle) = winit_window.window_handle() else {
+                return false;
+            };
+            let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+                return false;
+            };
+            let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
+            let Some(window) = view.window() else {
+                return false;
+            };
+            let app = NSApp(mtm);
+            if app.isActive() && window.isKeyWindow() {
+                return true;
+            }
+            #[allow(deprecated)]
+            app.activateIgnoringOtherApps(true);
+            window.makeKeyAndOrderFront(None);
+            false
+        })
+    }
+
+    pub(crate) fn live_resize_active() -> bool {
+        IN_LIVE_RESIZE.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn pointer_inside_windowed_page() -> bool {
+        vmux_browser::NativeLayout::pointer_is_inside()
+            || WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed)
+    }
 }
 
 const APP_ACTIVATION_BUDGET: Duration = Duration::from_secs(10);
@@ -649,13 +662,4 @@ fn mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
         right: pressed & (1 << 1) != 0,
         middle: pressed & (1 << 2) != 0,
     }
-}
-
-pub(super) fn live_resize_active() -> bool {
-    IN_LIVE_RESIZE.load(Ordering::Relaxed)
-}
-
-pub(super) fn pointer_inside_windowed_page() -> bool {
-    vmux_browser::NativeLayout::pointer_is_inside()
-        || WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed)
 }

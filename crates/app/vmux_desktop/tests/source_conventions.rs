@@ -97,6 +97,106 @@ fn audit_private_systems(path: &Path, items: &[Item], scope: &str, violations: &
 }
 
 #[test]
+fn private_plugins_are_not_single_system_wrappers() {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates dir");
+    let mut violations = Vec::new();
+
+    walk(crates_dir, &mut |path, source| {
+        let Ok(file) = syn::parse_file(source) else {
+            return;
+        };
+        audit_plugin_sizes(path, &file.items, "crate", &mut violations);
+    });
+
+    assert!(
+        violations.is_empty(),
+        "private plugins with one system belong in their owning plugin:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_plugin_sizes(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {
+    let visibility = items
+        .iter()
+        .filter_map(|item| {
+            let Item::Struct(item) = item else {
+                return None;
+            };
+            Some((item.ident.to_string(), &item.vis))
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for item in items {
+        let Item::Impl(item) = item else {
+            continue;
+        };
+        let Some((_, trait_path, _)) = &item.trait_ else {
+            continue;
+        };
+        if trait_path
+            .segments
+            .last()
+            .is_none_or(|segment| segment.ident != "Plugin")
+        {
+            continue;
+        }
+        let Type::Path(self_type) = item.self_ty.as_ref() else {
+            continue;
+        };
+        let Some(name) = self_type.path.segments.last() else {
+            continue;
+        };
+        let Some(plugin_visibility) = visibility.get(&name.ident.to_string()) else {
+            continue;
+        };
+        if !matches!(plugin_visibility, Visibility::Inherited) {
+            continue;
+        }
+        let mut systems = RegisteredSystems::default();
+        let mut composition = PluginComposition::default();
+        for member in &item.items {
+            let ImplItem::Fn(method) = member else {
+                continue;
+            };
+            systems.visit_block(&method.block);
+            composition.visit_block(&method.block);
+        }
+        if systems.0.len() == 1 && !composition.found {
+            violations.push(format!("{} ({scope}): {}", path.display(), name.ident));
+        }
+    }
+
+    for item in items {
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        let Some((_, nested)) = &module.content else {
+            continue;
+        };
+        let nested_scope = format!("{scope}::{}", module.ident);
+        audit_plugin_sizes(path, nested, &nested_scope, violations);
+    }
+}
+
+#[derive(Default)]
+struct PluginComposition {
+    found: bool,
+}
+
+impl<'ast> Visit<'ast> for PluginComposition {
+    fn visit_expr_method_call(&mut self, call: &'ast ExprMethodCall) {
+        self.found |= matches!(
+            call.method.to_string().as_str(),
+            "add_plugins" | "set_runner"
+        );
+        visit::visit_expr_method_call(self, call);
+    }
+}
+
+#[test]
 fn modules_follow_the_workspace_physical_layout() {
     let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -156,6 +256,13 @@ fn audit_module_layout(dir: &Path, violations: &mut Vec<String>) {
                     | "utils.rs"
                     | "view.rs"
             )
+        {
+            violations.push(path.display().to_string());
+        }
+        if matches!(name, "page.rs" | "ui_state.rs")
+            && path
+                .components()
+                .any(|component| component.as_os_str() == "feature")
         {
             violations.push(path.display().to_string());
         }

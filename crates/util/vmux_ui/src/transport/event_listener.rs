@@ -49,24 +49,28 @@ where
     Host::emit(T::id(), &bytes)
 }
 
-pub(crate) fn listen_ui_state<T, F>(on_event: F) -> Result<(), EventListenerError>
-where
-    T: UiState + rkyv::Archive + 'static,
-    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-    F: FnMut(T) + 'static,
-{
-    let mut on_event = on_event;
-    Host::listen(
-        T::id(),
-        Box::new(move |bytes| {
-            if let Some(msg) = HostPayload::new(bytes).decode::<T>() {
-                on_event(msg);
-            }
-        }),
-    )
-}
+impl Host {
+    pub(crate) fn listen_state<T, F>(on_event: F) -> Result<(), EventListenerError>
+    where
+        T: UiState + rkyv::Archive + 'static,
+        T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+            + for<'a> rkyv::bytecheck::CheckBytes<
+                rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
+            >,
+        F: FnMut(T) + 'static,
+    {
+        let mut on_event = on_event;
+        Self::listen(
+            T::id(),
+            Box::new(move |bytes| {
+                if let Some(msg) = HostPayload::new(bytes).decode::<T>() {
+                    on_event(msg);
+                }
+            }),
+        )
+    }
 
-pub(crate) fn try_emit_page_ready() -> Result<(), EventListenerError> {
-    send(&PageReady)
+    pub(crate) fn announce_ready() -> Result<(), EventListenerError> {
+        send(&PageReady)
+    }
 }

@@ -5,11 +5,11 @@ use super::session::{
     ChatSnapshotProjection, ChatTranscriptProjection, ChatView, PendingAgentChoice,
 };
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatCancel, ChatChoiceSelected,
-    ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatEscape,
-    ChatGoToBranch, ChatListChooseRequest, ChatListKind, ChatListSelectionChanged,
-    ChatListSelectionState, ChatSelectWorkspace, ChatSelectorState, ChatSlashCommandRequest,
-    ChatSubmit, ResumeSession, SelectMode, SelectModel, SetAgentEffort,
+    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatBranchesRequest, ChatCancel,
+    ChatChoiceSelected, ChatComposerMenuKind, ChatComposerMenuRequest, ChatComposerMenuState,
+    ChatDismissSelectorRequest, ChatEscape, ChatGoToBranch, ChatListChooseRequest, ChatListKind,
+    ChatListSelectionChanged, ChatListSelectionState, ChatSelectWorkspace, ChatSelectorState,
+    ChatSlashCommandRequest, ChatSubmit, ResumeSession, SelectMode, SelectModel, SetAgentEffort,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_cef::prelude::UiInput;
@@ -38,7 +38,8 @@ impl Plugin for ChatKeyPlugin {
         app.add_plugins(bevy_cef::prelude::UiEventPlugin::<(
             ChatListSelectionChanged,
             ChatListChooseRequest,
-            ChatComposerMenuChanged,
+            ChatComposerMenuRequest,
+            ChatDismissSelectorRequest,
         )>::default())
             .add_systems(Startup, bind_commands.in_set(BindCommands))
             .add_systems(Update, project_selector)
@@ -51,7 +52,9 @@ impl Plugin for ChatKeyPlugin {
             .add_observer(composer_menu)
             .add_observer(move_history)
             .add_observer(submit)
-            .add_observer(dismiss_selector)
+            .add_observer(dismiss_command)
+            .add_observer(dismiss_input)
+            .add_observer(dismiss)
             .add_observer(interrupt)
             .add_observer(cancel);
     }
@@ -128,6 +131,12 @@ struct ChooseList {
     #[event_target]
     target: Entity,
     index: Option<usize>,
+}
+
+#[derive(EntityEvent)]
+struct DismissSelector {
+    #[event_target]
+    target: Entity,
 }
 
 #[derive(Component)]
@@ -815,15 +824,21 @@ fn select_list(
 }
 
 fn composer_menu(
-    trigger: On<UiInput<ChatComposerMenuChanged>>,
+    trigger: On<UiInput<ChatComposerMenuRequest>>,
     mut menus: Query<&mut ActiveComposerMenu>,
     mut selections: Query<&mut ChatListSelection>,
+    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let Ok(mut menu) = menus.get_mut(webview) else {
         return;
     };
-    menu.menu = trigger.event().payload.menu;
+    let requested = trigger.event().payload.menu;
+    menu.menu = match requested {
+        Some(requested) if menu.menu == Some(requested) => None,
+        requested => requested,
+    };
     menu.index = trigger.event().payload.index as usize;
     if let Ok(mut selection) = selections.get_mut(webview) {
         match menu.menu {
@@ -833,6 +848,30 @@ fn composer_menu(
             }
             None => selection.close_composer_menu(),
         }
+    }
+    if menu.menu.is_some()
+        && let Ok(mut composer) = composers.get_mut(webview)
+        && let Some(effect) = composer.dismiss_selector()
+    {
+        commands.trigger(
+            vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
+        );
+        commands.trigger(ComposerChanged::new(webview));
+    }
+    commands.trigger(
+        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            webview,
+            &ChatComposerMenuState {
+                menu: menu.menu,
+                index: menu.index as u32,
+            },
+        ),
+    );
+    if menu.menu == Some(ChatComposerMenuKind::Branch) {
+        commands.trigger(UiInput {
+            webview,
+            payload: ChatBranchesRequest,
+        });
     }
 }
 
@@ -932,18 +971,33 @@ fn submit(
     });
 }
 
-fn dismiss_selector(
+fn dismiss_command(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ChatDismissSelectorBinding>>,
-    menus: Query<&ActiveComposerMenu>,
-    mut composers: Query<&mut ComposerState, With<ChatView>>,
-    mut selections: Query<&mut ChatListSelection>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
         return;
     }
-    let caller = trigger.event().invocation().caller;
+    commands.trigger(DismissSelector {
+        target: trigger.event().invocation().caller,
+    });
+}
+
+fn dismiss_input(trigger: On<UiInput<ChatDismissSelectorRequest>>, mut commands: Commands) {
+    commands.trigger(DismissSelector {
+        target: trigger.event().webview,
+    });
+}
+
+fn dismiss(
+    trigger: On<DismissSelector>,
+    menus: Query<&ActiveComposerMenu>,
+    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut selections: Query<&mut ChatListSelection>,
+    mut commands: Commands,
+) {
+    let caller = trigger.event_target();
     if let Ok(menu) = menus.get(caller)
         && menu.menu.is_some()
     {
@@ -1018,7 +1072,7 @@ fn cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{ModelOptionEntry, ModelState};
+    use crate::event::{ChatComposerEffect, ModelOptionEntry, ModelState};
     use crate::state::ChatUiState;
     use bevy::MinimalPlugins;
     use vmux_command::CommandInvocation;
@@ -1049,6 +1103,39 @@ mod tests {
         }
     }
 
+    #[derive(Resource, Default)]
+    struct ComposerEffects(Vec<(Entity, ChatComposerEffect)>);
+
+    impl ComposerEffects {
+        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut effects: ResMut<Self>) {
+            let Some(effect) = trigger.event().patch().composer_effect.clone() else {
+                return;
+            };
+            effects.0.push((trigger.event().webview(), effect));
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct ComposerMenus(Vec<(Entity, ChatComposerMenuState)>);
+
+    impl ComposerMenus {
+        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut menus: ResMut<Self>) {
+            let Some(menu) = trigger.event().patch().composer_menu.clone() else {
+                return;
+            };
+            menus.0.push((trigger.event().webview(), menu));
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct BranchRequests(Vec<Entity>);
+
+    impl BranchRequests {
+        fn record(trigger: On<UiInput<ChatBranchesRequest>>, mut requests: ResMut<Self>) {
+            requests.0.push(trigger.event().webview);
+        }
+    }
+
     struct Echo;
 
     impl Echo {
@@ -1062,8 +1149,14 @@ mod tests {
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .init_resource::<ListSelections>()
             .init_resource::<ChoiceNumbers>()
+            .init_resource::<ComposerEffects>()
+            .init_resource::<ComposerMenus>()
+            .init_resource::<BranchRequests>()
             .add_observer(ListSelections::record)
-            .add_observer(ChoiceNumbers::record);
+            .add_observer(ChoiceNumbers::record)
+            .add_observer(ComposerEffects::record)
+            .add_observer(ComposerMenus::record)
+            .add_observer(BranchRequests::record);
             app.update();
             app
         }
@@ -1222,5 +1315,58 @@ mod tests {
         assert_eq!(selector.active, Some(ChatListKind::Model));
         assert_eq!(selector.models.len(), 1);
         assert_eq!(selector.models[0].id, "claude-sonnet");
+    }
+
+    #[test]
+    fn ui_dismissal_uses_host_composer_state() {
+        let mut app = Echo::app();
+        let page = app.world_mut().spawn(ChatView).id();
+        app.world_mut()
+            .get_mut::<ComposerState>(page)
+            .unwrap()
+            .update("/resume previous");
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: ChatDismissSelectorRequest,
+        });
+        app.world_mut().flush();
+
+        let effects = &app.world().resource::<ComposerEffects>().0;
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].0, page);
+        assert!(effects[0].1.draft.is_empty());
+        assert!(effects[0].1.focus);
+    }
+
+    #[test]
+    fn composer_menu_is_host_authoritative() {
+        let mut app = Echo::app();
+        let page = app.world_mut().spawn(ChatView).id();
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: ChatComposerMenuRequest {
+                menu: Some(ChatComposerMenuKind::Branch),
+                index: 2,
+            },
+        });
+        app.world_mut().flush();
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: ChatComposerMenuRequest {
+                menu: Some(ChatComposerMenuKind::Branch),
+                index: 2,
+            },
+        });
+        app.world_mut().flush();
+
+        let menus = &app.world().resource::<ComposerMenus>().0;
+        assert_eq!(menus.len(), 2);
+        assert_eq!(menus[0].0, page);
+        assert_eq!(menus[0].1.menu, Some(ChatComposerMenuKind::Branch));
+        assert_eq!(menus[0].1.index, 2);
+        assert_eq!(menus[1].1.menu, None);
+        assert_eq!(app.world().resource::<BranchRequests>().0, vec![page]);
     }
 }

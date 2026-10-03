@@ -1,5 +1,5 @@
 #[cfg(target_os = "macos")]
-use crate::macos::{live_resize_active, pointer_inside_windowed_page};
+use crate::macos::MacWindow;
 
 use bevy::prelude::*;
 #[cfg(feature = "tray")]
@@ -14,13 +14,17 @@ use std::time::Duration;
 use vmux_terminal::{PtyExited, Terminal};
 
 #[cfg(not(target_os = "macos"))]
-fn live_resize_active() -> bool {
-    false
-}
+struct MacWindow;
 
 #[cfg(not(target_os = "macos"))]
-fn pointer_inside_windowed_page() -> bool {
-    false
+impl MacWindow {
+    fn live_resize_active() -> bool {
+        false
+    }
+
+    fn pointer_inside_windowed_page() -> bool {
+        false
+    }
 }
 
 pub struct RuntimePlugin;
@@ -172,8 +176,8 @@ fn sync_winit_power_mode(
     let all_hidden = windows.iter().all(|w| !w.visible);
     let any_visible = windows.iter().any(|w| w.visible);
     let any_focused = windows.iter().any(|w| w.visible && w.focused);
-    let live_resize = live_resize_active();
-    let pointer_inside_windowed_page = pointer_inside_windowed_page();
+    let live_resize = MacWindow::live_resize_active();
+    let pointer_inside_windowed_page = MacWindow::pointer_inside_windowed_page();
     let next = if all_hidden {
         WakePolicy::hidden()
     } else {

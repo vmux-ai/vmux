@@ -14,7 +14,7 @@ mod follow;
 mod handoff;
 mod ingress;
 mod model_selection;
-mod page;
+mod navigation;
 mod run_state_kind;
 mod runtime;
 mod toast;

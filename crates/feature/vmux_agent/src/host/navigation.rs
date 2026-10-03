@@ -59,9 +59,9 @@ impl AcpCatalog<'_, '_> {
     }
 }
 
-pub struct PagePlugin;
+pub struct NavigationPlugin;
 
-impl Plugin for PagePlugin {
+impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, swap).add_systems(
             Update,

@@ -239,6 +239,9 @@ pub struct ChatCancelQueuedPrompt {
 #[vmux_api::ui_event]
 pub struct ChatEscape;
 
+#[vmux_api::ui_event]
+pub struct ChatDismissSelectorRequest;
+
 #[vmux_api::ui_event(Default)]
 pub struct ChatSlashCommandRequest {
     pub command: SlashCommand,
@@ -308,7 +311,7 @@ pub enum ChatComposerMenuKind {
 }
 
 #[vmux_api::ui_event(Default)]
-pub struct ChatComposerMenuChanged {
+pub struct ChatComposerMenuRequest {
     pub menu: Option<ChatComposerMenuKind>,
     pub index: u32,
 }

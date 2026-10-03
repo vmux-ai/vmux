@@ -1,18 +1,18 @@
 use super::format::{ImportedMessages, ResumeMenuState};
 use super::scroll;
-use crate::event::ChatResumeState;
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatAttachments, ChatBranchesRequest, ChatBranchesState,
-    ChatComposerEffect, ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState,
-    ChatDraftChanged, ChatHistoryMoreRequest, ChatListChooseRequest, ChatListKind,
-    ChatListSelectionChanged, ChatListSelectionState, ChatMediaState, ChatRemoveAttachment,
-    ChatSelectorState, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState, ComposerContext,
-    ModelOptionEntry, QueuedPromptSnapshot, SelectMode, SlashCommandEntry,
+    ApprovalDecision, ChatApproval, ChatAttachments, ChatBranchesState, ChatComposerEffect,
+    ChatComposerMenuKind, ChatComposerMenuRequest, ChatComposerMenuState, ChatDraftChanged,
+    ChatHistoryMoreRequest, ChatListChooseRequest, ChatListKind, ChatListSelectionChanged,
+    ChatListSelectionState, ChatMediaState, ChatRemoveAttachment, ChatSelectorState, ChatSnapshot,
+    ChatStop, ChatSubmit, ChatTranscriptState, ComposerContext, ModelOptionEntry,
+    QueuedPromptSnapshot, SelectMode, SlashCommandEntry,
 };
+use crate::event::{ChatDismissSelectorRequest, ChatResumeState};
 use crate::state::ChatUiState;
 use crate::tab::Accent;
 use dioxus::prelude::*;
-use vmux_api::prompt_media::{InlineMediaQuery, PromptComposerAttachment, PromptMediaOption};
+use vmux_api::prompt_media::{PromptComposerAttachment, PromptMediaOption};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
 use vmux_ui::components::composer_bar::{
     ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
@@ -195,19 +195,6 @@ impl Chat {
     fn watch(&self) {
         let chat = *self;
         use_effect(move || PromptFocus::end(PROMPT_INPUT_ID));
-        use_effect(move || {
-            let menu = match chat.menu.opened() {
-                Some(ComposerMenuKind::Effort) => Some(ChatComposerMenuKind::Effort),
-                Some(ComposerMenuKind::Permission) => Some(ChatComposerMenuKind::Permission),
-                Some(ComposerMenuKind::Project) => Some(ChatComposerMenuKind::Project),
-                Some(ComposerMenuKind::Branch) => Some(ChatComposerMenuKind::Branch),
-                Some(ComposerMenuKind::Agent | ComposerMenuKind::Model) | None => None,
-            };
-            let _ = send(&ChatComposerMenuChanged {
-                menu,
-                index: chat.menu.cursor() as u32,
-            });
-        });
         use_effect(move || {
             let _ = chat.transcript.state.read().items.len();
             let _ = chat.run.status();
@@ -423,10 +410,7 @@ impl Chat {
         };
         let chat = *self;
         let open = EventHandler::new(move |()| {
-            let mut menu_sel = chat.slash.menu_sel;
-            chat.menu.close();
-            chat.set_draft("/model ".to_string());
-            menu_sel.set(0);
+            chat.edit_draft("/model ".to_string());
             PromptFocus::end(PROMPT_INPUT_ID);
         });
         Some(ComposerChip::ready(label, translate("agent-change-model")).opens(open))
@@ -536,9 +520,6 @@ impl Chat {
         let chat = *self;
         let open = EventHandler::new(move |()| {
             chat.open_menu(ComposerMenuKind::Branch);
-            if chat.menu.is(ComposerMenuKind::Branch) {
-                let _ = send(&ChatBranchesRequest);
-            }
         });
         if context.branch.is_empty() {
             return Some(
@@ -616,29 +597,29 @@ impl Chat {
         if self.selector_open() {
             self.dismiss_selector();
         }
-        self.menu.toggle_at(kind, index);
+        let menu = match kind {
+            ComposerMenuKind::Effort => ChatComposerMenuKind::Effort,
+            ComposerMenuKind::Permission => ChatComposerMenuKind::Permission,
+            ComposerMenuKind::Project => ChatComposerMenuKind::Project,
+            ComposerMenuKind::Branch => ChatComposerMenuKind::Branch,
+            ComposerMenuKind::Agent | ComposerMenuKind::Model => return,
+        };
+        let _ = send(&ChatComposerMenuRequest {
+            menu: Some(menu),
+            index: index as u32,
+        });
     }
 
     pub fn dismiss_selector(&self) {
-        if self.menu.opened().is_some() {
-            self.menu.close();
-            PromptFocus::end(PROMPT_INPUT_ID);
-            return;
-        }
-        let mut menu_sel = self.slash.menu_sel;
-        let value = self.composer.draft.peek().clone();
-        if let Some(query) = InlineMediaQuery::parse(&value) {
-            self.set_draft(query.replace(&value, ""));
-            PromptFocus::end(PROMPT_INPUT_ID);
-        } else {
-            self.set_draft(String::new());
-        }
-        menu_sel.set(0);
+        let _ = send(&ChatDismissSelectorRequest);
     }
 
     pub fn edit_draft(&self, value: String) {
         let mut menu_sel = self.slash.menu_sel;
-        self.menu.close();
+        let _ = send(&ChatComposerMenuRequest {
+            menu: None,
+            index: 0,
+        });
         self.set_draft(value);
         menu_sel.set(0);
     }

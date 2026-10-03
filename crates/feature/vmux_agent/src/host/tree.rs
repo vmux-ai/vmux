@@ -13,7 +13,7 @@ use super::continuation::AgentContinuationPlugin;
 use super::follow::FollowPlugin;
 use super::handoff::Plugin as HandoffPlugin;
 use super::ingress::AgentIngressPlugin;
-use super::page::PagePlugin;
+use super::navigation::NavigationPlugin;
 use super::tidy::Plugin as TidyPlugin;
 use super::toast::ToastPlugin;
 use crate::host::command_bar::CommandBarPlugin;
@@ -39,7 +39,7 @@ impl Plugin for AgentPlugin {
             FollowPlugin,
             HandoffPlugin,
             AgentIngressPlugin,
-            PagePlugin,
+            NavigationPlugin,
             TidyPlugin,
             ToastPlugin,
         ))

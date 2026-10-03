@@ -1,6 +1,6 @@
 use crate::listener_guard::GuardedListener;
 use crate::transport::Host;
-use crate::transport::event_listener::{EventListenerError, listen_ui_state, try_emit_page_ready};
+use crate::transport::event_listener::EventListenerError;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
 use std::cell::Cell;
@@ -24,7 +24,7 @@ impl PageReadyAnnouncement {
         if self.0.get() {
             return Ok(());
         }
-        try_emit_page_ready()?;
+        Host::announce_ready()?;
         self.0.set(true);
         Ok(())
     }
@@ -73,7 +73,7 @@ where
             return;
         };
         let scope = current_scope_id();
-        match listen_ui_state::<T, _>(move |state| {
+        match Host::listen_state::<T, _>(move |state| {
             let listener = listener.clone();
             runtime.in_scope(scope, || listener.call(state));
         }) {
