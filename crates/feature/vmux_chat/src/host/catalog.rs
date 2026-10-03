@@ -104,7 +104,7 @@ fn open_created(
     };
     opens.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
-        url: vmux_session::Route::Session(event.id.clone()).url(),
+        url: Route::Session(event.id.clone()).url(),
         request_id: None,
     });
 }
@@ -248,7 +248,7 @@ mod tests {
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(opened.len(), 1);
-        assert_eq!(opened[0].url, vmux_session::Route::Session(id).url());
+        assert_eq!(opened[0].url, Route::Session(id).url());
         assert!(matches!(
             opened[0].target,
             PageOpenTarget::Stack(entity) if entity == stack

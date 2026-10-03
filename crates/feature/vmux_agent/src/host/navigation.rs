@@ -358,7 +358,7 @@ fn swap(
     catalog: AcpCatalog,
     targets: Query<&EntityTarget<Session>>,
     sessions: Query<(&SessionId, &Name, &Cwd), With<Session>>,
-    mut commands: Commands,
+    mut runtime: SessionRuntime,
 ) {
     for ev in reader.read() {
         let id = ev.target_agent.as_str();
@@ -391,20 +391,21 @@ fn swap(
             )
         });
 
-        SessionRuntime::detach(&mut commands.entity(session_entity));
-        commands.entity(ev.stack).despawn_children();
+        runtime.detach(session_entity);
+        runtime.commands.entity(ev.stack).despawn_children();
         let cwd = if ev.cwd.as_os_str().is_empty() {
             cwd.0.clone()
         } else {
             ev.cwd.clone()
         };
-        commands
+        runtime
+            .commands
             .entity(session_entity)
             .insert((AgentId(id.to_string()), Cwd(cwd.clone())));
         let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
         let icon = catalog.icon(id);
         let agent_name = catalog.profile_name(id, cfg);
-        commands.spawn(AcpAgentAttachment::new(
+        runtime.commands.spawn(AcpAgentAttachment::new(
             session_entity,
             ev.stack,
             id,
@@ -416,7 +417,10 @@ fn swap(
             None,
         ));
         if let Some((imported, pending)) = imported {
-            commands.entity(session_entity).insert((imported, pending));
+            runtime
+                .commands
+                .entity(session_entity)
+                .insert((imported, pending));
         }
     }
 }
@@ -538,8 +542,8 @@ mod tests {
             .id();
 
         world
-            .run_system_once(move |mut commands: Commands| {
-                SessionRuntime::cleanup(&mut commands.entity(session));
+            .run_system_once(move |mut runtime: SessionRuntime| {
+                runtime.cleanup(session);
             })
             .unwrap();
         world.flush();
@@ -594,8 +598,8 @@ mod tests {
             .id();
 
         world
-            .run_system_once(move |mut commands: Commands| {
-                SessionRuntime::detach(&mut commands.entity(session));
+            .run_system_once(move |mut runtime: SessionRuntime| {
+                runtime.detach(session);
             })
             .unwrap();
         world.flush();
