@@ -15,6 +15,7 @@ use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, Start
 use vmux_ui::i18n::translate;
 
 use dioxus::mobile::tao::event::Event;
+#[cfg(target_os = "ios")]
 use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
 
 mod credentials;
