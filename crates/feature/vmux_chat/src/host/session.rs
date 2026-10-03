@@ -83,7 +83,7 @@ impl Plugin for ChatHostPlugin {
             ))
             .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
             .add_observer(open_page)
-            .add_observer(open_created_session)
+            .add_observer(open_created)
             .add_observer(submit_from_command_bar)
             .add_systems(Update, report_tab_identity);
     }
@@ -92,7 +92,7 @@ impl Plugin for ChatHostPlugin {
 #[derive(Resource, Default)]
 struct PendingCreatedSessions(std::collections::HashMap<SessionId, Entity>);
 
-fn open_created_session(
+fn open_created(
     trigger: On<Created>,
     mut pending: ResMut<PendingCreatedSessions>,
     mut requests: MessageWriter<PageOpenRequest>,

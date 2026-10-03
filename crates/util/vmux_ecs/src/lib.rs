@@ -1,3 +1,10 @@
+pub use component::{
+    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Cwd, Description,
+    EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
+    LastActivatedAt, LastVisitedAt, Order, Pin, ProcessAnchor, Ready, RegistrationOrder, Terminal,
+    TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
+    WindowFullscreenSet,
+};
 #[cfg(all(host, feature = "host"))]
 pub use host::{
     AgentAttention, AgentDoneUnseen, ArchivedPage, ArchivedPagePosition, ArchivedTabPage,
@@ -29,10 +36,3 @@ pub mod service;
 
 #[cfg(all(host, feature = "host"))]
 pub mod host;
-pub use component::{
-    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Cwd, Description,
-    EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
-    LastActivatedAt, LastVisitedAt, Order, Pin, ProcessAnchor, Ready, RegistrationOrder, Terminal,
-    TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
-    WindowFullscreenSet,
-};

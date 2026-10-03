@@ -246,7 +246,7 @@ fn materialize(
         (Entity, &EventIdentity, &CreatedAt, Has<SnapshotEvent>),
         (With<ConversationEvent>, With<MaterializedEvent>),
     >,
-    mut commands: Commands,
+    mut materializer: EventMaterializer,
 ) {
     if snapshots.is_empty() && received.is_empty() && committed.is_empty() {
         return;
@@ -305,11 +305,11 @@ fn materialize(
         let now = vmux_ecs::UnixMillis::now().0.max(0) as u64;
         for event in SerializedEvent::from_messages(&request.session, now, &request.messages) {
             stale.remove(&event.event_id);
-            index.materialize(
+            materializer.apply(
+                &mut index,
                 event,
                 MessageDelivery::Committed,
                 MaterializationSource::Snapshot,
-                &mut commands,
             );
         }
         for (event_id, (entity, client_op_id)) in stale {
@@ -318,23 +318,23 @@ fn materialize(
                 index.operations.remove(&(session, client_op_id));
             }
             index.entity_keys.remove(&entity);
-            commands.entity(entity).despawn();
+            materializer.commands.entity(entity).despawn();
         }
     }
     for operation in received {
-        index.materialize(
+        materializer.apply(
+            &mut index,
             operation.0.clone(),
             MessageDelivery::Committed,
             MaterializationSource::Operation,
-            &mut commands,
         );
     }
     for operation in committed {
-        index.materialize(
+        materializer.apply(
+            &mut index,
             operation.0.clone(),
             MessageDelivery::Committed,
             MaterializationSource::Operation,
-            &mut commands,
         );
     }
 }
@@ -354,18 +354,23 @@ enum MaterializationSource {
     Operation,
 }
 
-impl EventIndex {
-    fn materialize(
+#[derive(SystemParam)]
+struct EventMaterializer<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl EventMaterializer<'_, '_> {
+    fn apply(
         &mut self,
+        index: &mut EventIndex,
         event: SerializedEvent,
         delivery: MessageDelivery,
         source: MaterializationSource,
-        commands: &mut Commands,
     ) {
-        let Some(&session) = self.sessions.get(&event.session_id) else {
+        let Some(&session) = index.sessions.get(&event.session_id) else {
             return;
         };
-        let existing = self
+        let existing = index
             .events
             .get(&(session, event.event_id.clone()))
             .copied()
@@ -373,23 +378,23 @@ impl EventIndex {
                 event
                     .client_op_id
                     .as_ref()
-                    .and_then(|id| self.operations.get(&(session, id.clone())).copied())
+                    .and_then(|id| index.operations.get(&(session, id.clone())).copied())
             });
         let identity = EventIdentity::from_event(&event);
         let timestamp = CreatedAt(i64::try_from(event.created_at_ms).unwrap_or(i64::MAX));
         let entity = if let Some(entity) = existing {
-            if let Some((event_id, client_op_id)) = self.entity_keys.remove(&entity) {
-                self.events.remove(&(session, event_id));
+            if let Some((event_id, client_op_id)) = index.entity_keys.remove(&entity) {
+                index.events.remove(&(session, event_id));
                 if let Some(client_op_id) = client_op_id {
-                    self.operations.remove(&(session, client_op_id));
+                    index.operations.remove(&(session, client_op_id));
                 }
             }
             let timestamp = if source == MaterializationSource::Snapshot {
-                self.timestamps.get(&entity).copied().unwrap_or(timestamp)
+                index.timestamps.get(&entity).copied().unwrap_or(timestamp)
             } else {
                 timestamp
             };
-            let mut entity_commands = commands.entity(entity);
+            let mut entity_commands = self.commands.entity(entity);
             entity_commands.insert((
                 identity.clone(),
                 timestamp,
@@ -403,7 +408,7 @@ impl EventIndex {
             }
             entity
         } else {
-            let mut entity_commands = commands.spawn((
+            let mut entity_commands = self.commands.spawn((
                 ConversationEvent,
                 MaterializedEvent,
                 identity.clone(),
@@ -417,19 +422,22 @@ impl EventIndex {
             }
             entity_commands.id()
         };
-        self.events
+        index
+            .events
             .insert((session, event.event_id.clone()), entity);
         if let Some(client_op_id) = event.client_op_id.clone() {
-            self.operations.insert((session, client_op_id), entity);
+            index.operations.insert((session, client_op_id), entity);
         }
-        self.timestamps.insert(entity, timestamp);
+        index.timestamps.insert(entity, timestamp);
         if source == MaterializationSource::Snapshot {
-            self.snapshot_events
+            index
+                .snapshot_events
                 .entry(session)
                 .or_default()
                 .insert(event.event_id.clone(), (entity, event.client_op_id.clone()));
         }
-        self.entity_keys
+        index
+            .entity_keys
             .insert(entity, (event.event_id, event.client_op_id));
     }
 }

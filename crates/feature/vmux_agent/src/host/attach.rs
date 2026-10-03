@@ -116,7 +116,7 @@ fn attach(
     ) in &attachments
     {
         let agent_id = agent_id.as_str();
-        let url = vmux_session::Route::Session(vmux_session::SessionId(sid.clone())).url();
+        let url = vmux_session::Route::Session(SessionId(sid.clone())).url();
         commands.entity(*stack).insert((
             EntityTarget::<vmux_session::Session>::new(*session_entity),
             PageMetadata {
