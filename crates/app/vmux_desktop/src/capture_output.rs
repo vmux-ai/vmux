@@ -2,7 +2,7 @@ use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
 };
-#[cfg(feature = "recording")]
+#[cfg(all(feature = "recording", any(target_os = "macos", test)))]
 use std::path::Path;
 use std::path::PathBuf;
 
