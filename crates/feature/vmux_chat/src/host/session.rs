@@ -33,8 +33,8 @@ use vmux_ecs::{
 };
 use vmux_layout::stack::OpenRequest;
 use vmux_session::{
-    AgentConversationTitle, AgentId, Route, RunState, Session, SessionCreateRequest, SessionId,
-    Transcripts,
+    AgentConversationTitle, AgentId, ConversationEvent, CreateRequest, Created, EventIdentity,
+    MessageContent, Route, RunState, Session, SessionId, Transcripts,
 };
 
 type ChatUiStateUpdates = UiState<ChatUiState>;
@@ -71,97 +71,133 @@ pub(super) struct ChatHostPlugin;
 #[cfg(host)]
 impl Plugin for ChatHostPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            ChatAgentPlugin,
-            super::key::ChatKeyPlugin,
-            super::media::ChatMediaPlugin,
-            super::tool::ChatToolPlugin,
-            super::composer::ChatComposerPlugin,
-            super::prompt::ChatPromptInputPlugin,
-        ))
-        .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
-        .add_observer(open_page)
-        .add_observer(submit_from_command_bar)
-        .add_systems(Update, report_tab_identity);
+        app.init_resource::<PendingCreatedSessions>()
+            .add_plugins((
+                ChatAgentPlugin,
+                super::key::ChatKeyPlugin,
+                super::media::ChatMediaPlugin,
+                super::tool::ChatToolPlugin,
+                super::composer::ChatComposerPlugin,
+                super::prompt::ChatPromptInputPlugin,
+            ))
+            .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
+            .add_observer(open_page)
+            .add_observer(open_created_session)
+            .add_observer(submit_from_command_bar)
+            .add_systems(Update, report_tab_identity);
     }
+}
+
+#[derive(Resource, Default)]
+struct PendingCreatedSessions(std::collections::HashMap<SessionId, Entity>);
+
+fn open_created_session(
+    trigger: On<Created>,
+    mut pending: ResMut<PendingCreatedSessions>,
+    mut requests: MessageWriter<PageOpenRequest>,
+) {
+    let Some(stack) = pending.0.remove(&trigger.event().id) else {
+        return;
+    };
+    requests.write(PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url: Route::Session(trigger.event().id.clone()).url(),
+        request_id: None,
+    });
 }
 
 fn submit_from_command_bar(
     trigger: On<UiInput<PromptRequest>>,
     target: PromptTarget,
-    mut session_requests: MessageWriter<SessionCreateRequest>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut inline_transition: MessageWriter<InlineTransitionRequested>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
+    mut submission: PromptSubmission,
 ) {
     let webview = trigger.event().webview;
     let request = &trigger.event().payload;
-    let prompt = request.text.trim();
-    let attachments = request
-        .attachments
-        .iter()
-        .filter(|attachment| !attachment.path.is_empty())
-        .map(|attachment| vmux_api::protocol::AgentAttachment {
-            path: attachment.path.clone(),
-            name: attachment.name.clone(),
-            mime_type: attachment.mime_type.clone(),
-            size: attachment.size,
-        })
-        .collect::<Vec<_>>();
-    let inline_stack = target
-        .launcher_hosts
-        .contains(webview)
-        .then(|| target.child_of.get(webview).ok().map(|parent| parent.0))
-        .flatten();
-    let mut opened = false;
-    if (!prompt.is_empty() || !attachments.is_empty())
-        && let Some(stack) = target.workspace.stack
-        && let Some(mut url) = target
-            .contributed_pages
-            .prompt_url(request.target_url.as_deref())
-    {
-        if let Some(agent) = Route::requested_agent(&url) {
-            let id = SessionId(uuid::Uuid::new_v4().to_string());
-            let name = AgentConversationTitle::from_prompt(prompt)
-                .map(|title| title.0)
-                .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-new"));
-            session_requests.write(SessionCreateRequest {
-                id: id.clone(),
-                name,
-                description: String::new(),
-                cwd: target.cwd(stack),
-                agent: Some(agent),
-            });
-            url = Route::Session(id).url();
-        }
-        if inline_stack == Some(stack)
-            && vmux_api::VmuxRoute::parse(&url)
-                .is_some_and(|route| route.supports_inline_transition())
+    submission.submit(webview, request, &target);
+}
+
+#[derive(SystemParam)]
+struct PromptSubmission<'w, 's> {
+    session_requests: MessageWriter<'w, CreateRequest>,
+    pending: ResMut<'w, PendingCreatedSessions>,
+    page_open_requests: MessageWriter<'w, PageOpenRequest>,
+    inline_transition: MessageWriter<'w, InlineTransitionRequested>,
+    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+    commands: Commands<'w, 's>,
+}
+
+impl PromptSubmission<'_, '_> {
+    fn submit(&mut self, webview: Entity, request: &PromptRequest, target: &PromptTarget) {
+        let prompt = request.text.trim();
+        let attachments = request
+            .attachments
+            .iter()
+            .filter(|attachment| !attachment.path.is_empty())
+            .map(|attachment| vmux_api::protocol::AgentAttachment {
+                path: attachment.path.clone(),
+                name: attachment.name.clone(),
+                mime_type: attachment.mime_type.clone(),
+                size: attachment.size,
+            })
+            .collect::<Vec<_>>();
+        let inline_stack = target
+            .launcher_hosts
+            .contains(webview)
+            .then(|| target.child_of.get(webview).ok().map(|parent| parent.0))
+            .flatten();
+        let mut opened = false;
+        if (!prompt.is_empty() || !attachments.is_empty())
+            && let Some(stack) = target.workspace.stack
+            && let Some(url) = target
+                .contributed_pages
+                .prompt_url(request.target_url.as_deref())
         {
-            inline_transition.write(InlineTransitionRequested { stack, webview });
-            if let Some(proxy) = proxy.as_deref() {
-                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+            let mut created = false;
+            if let Some(agent) = Route::requested_agent(&url) {
+                let name = AgentConversationTitle::from_prompt(prompt)
+                    .map(|title| title.0)
+                    .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-new"));
+                let create =
+                    CreateRequest::new(name, String::new(), target.cwd(stack), Some(agent));
+                let id = create.id().clone();
+                self.session_requests.write(create);
+                self.pending.0.insert(id, stack);
+                created = true;
             }
-        }
-        commands
-            .entity(stack)
-            .insert(PendingPrompt(prompt.to_string()));
-        if attachments.is_empty() {
-            commands.entity(stack).remove::<PendingPromptAttachments>();
-        } else {
-            commands
+            if inline_stack == Some(stack)
+                && vmux_api::VmuxRoute::parse(&url)
+                    .is_some_and(|route| route.supports_inline_transition())
+            {
+                self.inline_transition
+                    .write(InlineTransitionRequested { stack, webview });
+                if let Some(proxy) = self.proxy.as_deref() {
+                    let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+                }
+            }
+            self.commands
                 .entity(stack)
-                .insert(PendingPromptAttachments(attachments));
+                .insert(PendingPrompt(prompt.to_string()));
+            if attachments.is_empty() {
+                self.commands
+                    .entity(stack)
+                    .remove::<PendingPromptAttachments>();
+            } else {
+                self.commands
+                    .entity(stack)
+                    .insert(PendingPromptAttachments(attachments));
+            }
+            if !created {
+                self.page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url,
+                    request_id: None,
+                });
+            }
+            opened = true;
         }
-        page_open_requests.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url,
-            request_id: None,
-        });
-        opened = true;
+        self.commands
+            .trigger(CommandBarDismiss::new(webview, !opened));
     }
-    commands.trigger(CommandBarDismiss::new(webview, !opened));
 }
 
 #[derive(SystemParam)]
@@ -337,7 +373,7 @@ fn open_page(trigger: On<UiInput<ChatOpenPage>>, mut requests: MessageWriter<Ope
 
 const TAB_ACTIVITY_TAIL_ITEMS: usize = 1;
 
-type ChangedChatSessions<'w, 's> = Query<
+type ChatSessions<'w, 's> = Query<
     'w,
     's,
     (
@@ -350,14 +386,53 @@ type ChangedChatSessions<'w, 's> = Query<
     With<Session>,
 >;
 
+type ChangedChatSessions<'w, 's> = Query<
+    'w,
+    's,
+    Entity,
+    (
+        With<Session>,
+        Or<(
+            Changed<AgentConversationTitle>,
+            Changed<RunState>,
+            Changed<Profile>,
+            Changed<AgentId>,
+            Changed<Children>,
+        )>,
+    ),
+>;
+
+type ChangedConversationEvents<'w, 's> = Query<
+    'w,
+    's,
+    &'static ChildOf,
+    (
+        With<ConversationEvent>,
+        Or<(
+            Added<ConversationEvent>,
+            Changed<EventIdentity>,
+            Changed<MessageContent>,
+        )>,
+    ),
+>;
+
 fn report_tab_identity(
-    sessions: ChangedChatSessions,
+    sessions: ChatSessions,
+    changed_sessions: ChangedChatSessions,
+    changed_events: ChangedConversationEvents,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
     transcripts: Transcripts,
     views: Query<Option<&PageIdentity>, With<ChatView>>,
     mut commands: Commands,
 ) {
-    for (session_entity, title, state, profile, agent_id) in &sessions {
+    let mut changed = changed_sessions
+        .iter()
+        .collect::<std::collections::HashSet<_>>();
+    changed.extend(changed_events.iter().map(ChildOf::parent));
+    for session_entity in changed {
+        let Ok((_, title, state, profile, agent_id)) = sessions.get(session_entity) else {
+            continue;
+        };
         let transcript = transcripts.get(session_entity);
         for (target, children) in &stacks {
             if target.entity() != session_entity {

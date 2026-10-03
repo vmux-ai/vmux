@@ -75,6 +75,7 @@ pub mod process_id;
 #[cfg(host)]
 pub mod profile;
 pub mod scroll;
+#[cfg(all(host, feature = "host"))]
 pub mod service;
 #[cfg(host)]
 pub mod team;

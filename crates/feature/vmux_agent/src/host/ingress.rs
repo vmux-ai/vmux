@@ -66,10 +66,10 @@ pub(super) fn add(app: &mut App) {
 
 fn route_messages(
     mut inbound: MessageReader<UiAgentMessagesSnapshot>,
-    mut snapshots: MessageWriter<vmux_session::ConversationSnapshotReceived>,
+    mut snapshots: MessageWriter<vmux_session::SnapshotReceived>,
 ) {
     for inbound in inbound.read() {
-        snapshots.write(vmux_session::ConversationSnapshotReceived {
+        snapshots.write(vmux_session::SnapshotReceived {
             session: SessionId(inbound.sid.clone()),
             messages: inbound.messages.clone(),
         });

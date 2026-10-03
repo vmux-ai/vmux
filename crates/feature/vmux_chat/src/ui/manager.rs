@@ -159,7 +159,6 @@ fn Editor(
                                 });
                             } else {
                                 let _ = send(&SessionsCreate {
-                                    id: uuid::Uuid::new_v4().to_string(),
                                     name: value,
                                     description: description(),
                                 });

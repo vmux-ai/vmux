@@ -6,7 +6,26 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+default = ["host"]
+host = [
+    "dep:bevy",
+    "dep:bevy_cef",
+    "dep:bevy_cef_core",
+    "dep:ron",
+    "dep:sha2",
+    "dep:toml",
+    "dep:url",
+    "dep:vmux_flex",
+    "dep:zip",
+]
+
 [dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+bevy_world_serialization = { workspace = true }
+moonshine-save = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

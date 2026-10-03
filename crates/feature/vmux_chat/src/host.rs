@@ -2,6 +2,8 @@ use bevy_app::{App, Plugin};
 #[cfg(host)]
 use vmux_ecs::manifest::FeaturePlugin;
 
+#[cfg(host)]
+pub use catalog::SessionManagerView;
 pub use conversation::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
 #[cfg(host)]
 pub use handoff::ImportedConversation;

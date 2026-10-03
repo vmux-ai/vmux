@@ -13,7 +13,7 @@ use vmux_layout::stack::Stack;
 
 use super::attention_driver::AttentionContext;
 use crate::host::event::AgentRequestInput;
-use vmux_ecs::agent::SessionId;
+use vmux_session::SessionId;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct TurnEndedSet;

@@ -22,6 +22,7 @@ use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::agent::SessionId;
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
+use vmux_session::SessionId;
 
 use agent_client_protocol::schema::v1::McpServer;
 

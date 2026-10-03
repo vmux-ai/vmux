@@ -89,10 +89,7 @@ fn prepare(
         .collect();
     let mut opened_stacks = std::collections::HashSet::new();
     for (task_entity, task) in &tasks {
-        if Route::parse(&task.url).is_none() {
-            continue;
-        }
-        let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
+        let Some(route) = Route::parse(&task.url) else {
             continue;
         };
         if !preparing_by_stack.contains_key(&task.stack)
@@ -147,6 +144,12 @@ fn prepare(
                 .insert((PageOpenDeferred, AwaitingAgentTransitionPaint));
             continue;
         }
+        if matches!(route, Route::Manager) {
+            continue;
+        }
+        let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
+            continue;
+        };
         if pending.contains(tab_entity) {
             commands.entity(task_entity).insert((
                 PageOpenDeferred,
@@ -269,20 +272,11 @@ fn open(
         .map(|(entity, task, restoring)| (entity, task.clone(), restoring))
         .collect();
     for (entity, task, restoring) in tasks {
-        if Route::parse(&task.url).is_none() {
+        let Some(route) = Route::parse(&task.url) else {
             continue;
-        }
-        let tab = workspace.tab(task.stack);
-        let tab_dir = tab
-            .as_ref()
-            .and_then(|(_, startup_dir)| startup_dir.clone());
-        let space_startup_dir = workspace.startup_dir(task.stack, &opener.settings);
-        let restored_cwd = restoring
-            .then(|| launches.get(task.stack).ok())
-            .flatten()
-            .map(|launch| PathBuf::from(&launch.cwd));
-        let default_cwd = if let Some(cwd) = restored_cwd {
-            cwd
+        };
+        let default_cwd = if matches!(route, Route::Manager) {
+            PathBuf::new()
         } else {
             match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
                 Ok(Some(path)) => path,
@@ -298,13 +292,13 @@ fn open(
                             continue;
                         }
                     },
-                },
-                Err(message) => {
-                    opener
-                        .commands
-                        .entity(entity)
-                        .insert(PageOpenError { message });
-                    continue;
+                    Err(message) => {
+                        opener
+                            .commands
+                            .entity(entity)
+                            .insert(PageOpenError { message });
+                        continue;
+                    }
                 }
             }
         };
@@ -397,17 +391,7 @@ fn swap(
             )
         });
 
-        commands
-            .entity(session_entity)
-            .remove::<AcpSessionId>()
-            .remove::<vmux_ecs::ProcessAnchor>()
-            .remove::<crate::host::acp::AcpLaunchStarted>()
-            .remove::<vmux_session::ApprovalPolicy>()
-            .remove::<vmux_session::RunState>()
-            .remove::<ImportedConversation>()
-            .remove::<super::handoff::PendingHandoff>()
-            .remove::<vmux_ecs::team::Agent>()
-            .remove::<vmux_ecs::team::Profile>();
+        SessionRuntime::detach(&mut commands.entity(session_entity));
         commands.entity(ev.stack).despawn_children();
         let cwd = if ev.cwd.as_os_str().is_empty() {
             cwd.0.clone()
@@ -512,5 +496,144 @@ mod tests {
         assert_eq!(names.0, "Claude");
         assert_eq!(names.1, "Configured Claude");
         assert_eq!(names.2, "fallback");
+    }
+
+    #[test]
+    fn manager_target_preserves_requested_agent() {
+        let url = Route::manager_for_agent(&AgentId("codex".into()));
+        let target = AgentChatTarget::parse(&url).unwrap();
+
+        assert_eq!(target.url, url);
+    }
+
+    #[test]
+    fn runtime_cleanup_removes_every_transient_component() {
+        let mut world = World::new();
+        let session = world
+            .spawn((
+                AcpSessionId("acp-session".into()),
+                vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
+                crate::host::acp::AcpLaunchStarted,
+                vmux_session::ApprovalPolicy::default(),
+                vmux_session::RunState::default(),
+                vmux_session::AgentTurnMeta::default(),
+                PromptQueue::default(),
+                crate::host::runtime::AcpSessionConfigState::default(),
+                crate::host::run_state_kind::LastRunStateKind::default(),
+                ImportedConversation {
+                    source_agent: "codex".into(),
+                    source_sid: "source".into(),
+                    messages: Vec::new(),
+                    truncated: false,
+                    first_prompt: None,
+                },
+                super::super::handoff::PendingHandoff {
+                    context: String::new(),
+                    sent: false,
+                },
+                vmux_ecs::agent::AgentSessionRoot,
+                vmux_ecs::team::Agent { sid: "sid".into() },
+                vmux_ecs::team::Profile::registry("Codex", "codex"),
+            ))
+            .id();
+
+        world
+            .run_system_once(move |mut commands: Commands| {
+                SessionRuntime::cleanup(&mut commands.entity(session));
+            })
+            .unwrap();
+        world.flush();
+
+        assert!(world.get::<AcpSessionId>(session).is_none());
+        assert!(world.get::<vmux_ecs::ProcessAnchor>(session).is_none());
+        assert!(
+            world
+                .get::<crate::host::acp::AcpLaunchStarted>(session)
+                .is_none()
+        );
+        assert!(world.get::<vmux_session::ApprovalPolicy>(session).is_none());
+        assert!(world.get::<vmux_session::RunState>(session).is_none());
+        assert!(world.get::<vmux_session::AgentTurnMeta>(session).is_none());
+        assert!(world.get::<PromptQueue>(session).is_none());
+        assert!(
+            world
+                .get::<crate::host::runtime::AcpSessionConfigState>(session)
+                .is_none()
+        );
+        assert!(
+            world
+                .get::<crate::host::run_state_kind::LastRunStateKind>(session)
+                .is_none()
+        );
+        assert!(world.get::<ImportedConversation>(session).is_none());
+        assert!(
+            world
+                .get::<super::super::handoff::PendingHandoff>(session)
+                .is_none()
+        );
+        assert!(
+            world
+                .get::<vmux_ecs::agent::AgentSessionRoot>(session)
+                .is_none()
+        );
+        assert!(world.get::<vmux_ecs::team::Agent>(session).is_none());
+        assert!(world.get::<vmux_ecs::team::Profile>(session).is_none());
+    }
+
+    #[test]
+    fn runtime_detach_preserves_queued_prompts() {
+        let mut world = World::new();
+        let mut queue = PromptQueue::default();
+        queue.enqueue("keep me".into());
+        let session = world
+            .spawn((
+                vmux_session::RunState::default(),
+                vmux_session::AgentTurnMeta::default(),
+                queue,
+            ))
+            .id();
+
+        world
+            .run_system_once(move |mut commands: Commands| {
+                SessionRuntime::detach(&mut commands.entity(session));
+            })
+            .unwrap();
+        world.flush();
+
+        let queue = world.get::<PromptQueue>(session).unwrap();
+        assert_eq!(queue.items.front().unwrap().text, "keep me");
+        assert!(world.get::<vmux_session::RunState>(session).is_none());
+        assert!(world.get::<vmux_session::AgentTurnMeta>(session).is_none());
+    }
+
+    #[test]
+    fn cleanup_detaches_runtime_and_redirects_open_views() {
+        let mut app = App::new();
+        app.add_message::<vmux_ecs::PageOpenRequest>()
+            .add_observer(cleanup);
+        let session = app
+            .world_mut()
+            .spawn((Session, PromptQueue::default()))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+
+        app.world_mut().trigger(Cleanup { entity: session });
+        app.world_mut().flush();
+
+        assert!(app.world().get::<PromptQueue>(session).is_none());
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_ecs::PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url, Route::Manager.url());
+        assert!(matches!(
+            requests[0].target,
+            vmux_ecs::PageOpenTarget::Stack(entity) if entity == stack
+        ));
     }
 }

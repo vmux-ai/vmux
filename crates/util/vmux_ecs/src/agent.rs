@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 
-pub use vmux_api::conversation::SessionId;
 use vmux_api::protocol::{AgentCommandResult, AgentRequest, AgentRequestId};
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]

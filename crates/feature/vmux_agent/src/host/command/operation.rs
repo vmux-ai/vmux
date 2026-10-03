@@ -4,7 +4,7 @@ use vmux_api::protocol::{
     AgentTurnEnded,
 };
 use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
-use vmux_session::{AgentConversationTitle, SessionCreateRequest, SessionId};
+use vmux_session::{AgentConversationTitle, CreateRequest, Created, SessionId};
 
 use super::CommandSet;
 use crate::host::acp::registry::RegistryAgent;
@@ -22,6 +22,30 @@ pub(super) fn add(app: &mut App) {
         )
             .in_set(CommandSet::Commands),
     );
+}
+
+#[derive(Resource, Default)]
+struct PendingNewChats(std::collections::HashMap<SessionId, PendingNewChat>);
+
+struct PendingNewChat {
+    request_id: vmux_api::protocol::AgentRequestId,
+    prompt: String,
+}
+
+fn open_created_chat(
+    trigger: On<Created>,
+    mut pending: ResMut<PendingNewChats>,
+    mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) {
+    let Some(pending) = pending.0.remove(&trigger.event().id) else {
+        return;
+    };
+    new_tabs.write(vmux_layout::NewTabRequest {
+        url: SessionRoute::Session(trigger.event().id.clone()).url(),
+        pending_prompt: Some(pending.prompt),
+    });
+    responses.write(AgentReply::new(pending.request_id).ok());
 }
 
 fn acknowledge_file_touched(
@@ -60,8 +84,8 @@ fn acknowledge_turn_ended(
 fn new_chat(
     mut requests: MessageReader<AgentRequestInput>,
     contributed_pages: vmux_command::ContributedPages,
-    mut session_requests: MessageWriter<SessionCreateRequest>,
-    mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
+    mut session_requests: MessageWriter<CreateRequest>,
+    mut pending: ResMut<PendingNewChats>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -73,22 +97,21 @@ fn new_chat(
             .and_then(|url| SessionRoute::requested_agent(&url).map(|agent| (url, agent)))
         {
             Some((_, agent)) => {
-                let id = SessionId(uuid::Uuid::new_v4().to_string());
                 let name = AgentConversationTitle::from_prompt(&payload.prompt)
                     .map(|title| title.0)
                     .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-new"));
-                session_requests.write(SessionCreateRequest {
-                    id: id.clone(),
-                    name,
-                    description: String::new(),
-                    cwd: std::path::PathBuf::new(),
-                    agent: Some(agent),
-                });
-                new_tabs.write(vmux_layout::NewTabRequest {
-                    url: SessionRoute::Session(id).url(),
-                    pending_prompt: Some(payload.prompt),
-                });
-                AgentCommandResult::Ok
+                let create =
+                    CreateRequest::new(name, String::new(), std::path::PathBuf::new(), Some(agent));
+                let id = create.id().clone();
+                session_requests.write(create);
+                pending.0.insert(
+                    id,
+                    PendingNewChat {
+                        request_id: request.request_id,
+                        prompt: payload.prompt,
+                    },
+                );
+                continue;
             }
             None => AgentCommandResult::Error("no agent is installed".to_string()),
         };
