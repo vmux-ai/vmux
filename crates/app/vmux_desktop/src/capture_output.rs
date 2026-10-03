@@ -23,7 +23,7 @@ impl CaptureOutput {
             .unwrap_or_else(|| vmux_ecs::profile::ProfilePaths::current().recording())
     }
 
-    #[cfg(feature = "recording")]
+    #[cfg(all(feature = "recording", any(target_os = "macos", test)))]
     pub(crate) fn paths(
         directory: Option<&str>,
         name: Option<&str>,
@@ -54,6 +54,7 @@ impl CaptureSize {
         Self { width, height }
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn downscaled(self, max_edge: u32) -> Self {
         let long = self.width.max(self.height);
         if long == 0 {

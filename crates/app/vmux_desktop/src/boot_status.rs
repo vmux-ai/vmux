@@ -88,6 +88,10 @@ impl BootPhase {
 #[derive(Component)]
 pub struct SplashStatus {
     pub phase: BootPhase,
+    #[cfg_attr(
+        not(all(target_os = "macos", feature = "native-glass")),
+        allow(dead_code)
+    )]
     pub reveal_ready: bool,
 }
 

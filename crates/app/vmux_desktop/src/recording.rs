@@ -284,7 +284,7 @@ mod capture {
     use vmux_input::RecordStartResponse;
 
     #[derive(Default)]
-    pub(crate) struct CaptureRuntime;
+    pub(crate) struct CaptureRuntime {}
 
     impl CaptureRuntime {
         #[allow(clippy::too_many_arguments)]
