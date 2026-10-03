@@ -71,6 +71,27 @@ impl BookmarkPersistencePath {
     fn resource_filter() -> WorldFilter {
         WorldFilter::deny_all().allow::<OfferedBookmarkDefaults>()
     }
+
+    fn load(&self) -> std::io::Result<LoadWorld<BookmarkFilter>> {
+        let mut source = std::fs::read_to_string(&self.0)?;
+        for (legacy, current) in [
+            (
+                "vmux_desktop::bookmark_persistence::OfferedBookmarkDefaults",
+                "vmux_bookmark::OfferedBookmarkDefaults",
+            ),
+            ("vmux_core::BookmarkOrder", "vmux_ecs::BookmarkOrder"),
+            ("vmux_core::Pin", "vmux_ecs::Pin"),
+            ("vmux_core::Bookmark", "vmux_ecs::Bookmark"),
+            ("vmux_core::Folder", "vmux_ecs::Folder"),
+            ("vmux_core::Collapsed", "vmux_ecs::Collapsed"),
+            ("vmux_core::Uuid", "vmux_ecs::Uuid"),
+        ] {
+            source = source.replace(legacy, current);
+        }
+        Ok(LoadWorld::<BookmarkFilter>::from_stream(
+            std::io::Cursor::new(source.into_bytes()),
+        ))
+    }
 }
 
 fn load_bookmarks_on_startup(
@@ -81,13 +102,19 @@ fn load_bookmarks_on_startup(
     if SessionEnvironment::is_test() {
         return;
     }
-    let path = path.0.clone();
-    if !path.exists() {
+    if !path.0.exists() {
         commands.trigger(SeedBookmarkDefaults);
         return;
     }
+    let load = match path.load() {
+        Ok(load) => load,
+        Err(error) => {
+            error!(path = %path.0.display(), %error, "bookmark load failed");
+            return;
+        }
+    };
     commands.entity(*persistence).insert(BookmarkLoadPending);
-    commands.trigger_load(LoadWorld::<BookmarkFilter>::from_file(path));
+    commands.trigger_load(load);
 }
 
 fn seed_defaults(
@@ -110,10 +137,13 @@ struct BookmarkLoadPending;
 
 #[derive(Resource, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Resource)]
+#[type_path = "vmux_bookmark"]
 struct OfferedBookmarkDefaults {
     urls: Vec<String>,
     #[reflect(default)]
     folders: Vec<String>,
+    #[reflect(default)]
+    folder_bookmarks: Vec<String>,
 }
 
 impl OfferedBookmarkDefaults {
@@ -194,7 +224,10 @@ fn insert_defaults(
     );
     let claimed_urls = seed.offered.claim_new_urls(defaults.urls);
     let claimed_folders = seed.offered.claim_new_folders(defaults.folders);
-    let mut changed = !claimed_urls.is_empty() || !claimed_folders.is_empty();
+    let legacy_folder_bookmarks = !seed.offered.folder_bookmarks.is_empty();
+    seed.offered.folder_bookmarks.clear();
+    let mut changed =
+        !claimed_urls.is_empty() || !claimed_folders.is_empty() || legacy_folder_bookmarks;
     let mut pinned = seed
         .pins
         .iter()

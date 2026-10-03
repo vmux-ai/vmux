@@ -420,6 +420,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             ) {
                 return;
             }
+            if e.key() == Key::Escape && !projection.menus.is_open() && !projection.mcp_open {
+                e.prevent_default();
+                on_close.call(());
+                return;
+            }
             let ctrl = e.modifiers().contains(Modifiers::CONTROL);
             if !ctrl
                 && projection.space_switch

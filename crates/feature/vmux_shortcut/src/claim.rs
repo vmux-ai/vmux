@@ -26,11 +26,23 @@ fn spawn(pages: Query<Entity, MissingKeyContext>, mut commands: Commands) {
     }
 }
 
-fn receive(trigger: On<UiInput<UiKeyContext>>, mut contexts: Query<&mut KeyContext>) {
-    let Ok(mut current) = contexts.get_mut(trigger.event_target()) else {
-        return;
-    };
-    current.set_if_neq(trigger.payload.keys.iter().cloned().collect());
+fn receive(
+    trigger: On<UiInput<UiKeyContext>>,
+    mut contexts: Query<&mut KeyContext>,
+    mut commands: Commands,
+) {
+    let target = trigger.event_target();
+    let next = trigger.payload.keys.iter().cloned().collect::<KeyContext>();
+    match contexts.get_mut(target) {
+        Ok(mut current) => {
+            current.set_if_neq(next);
+        }
+        Err(_) => {
+            commands
+                .entity(target)
+                .insert((next, UiState::<KeyClaims>::default()));
+        }
+    }
 }
 
 fn publish(

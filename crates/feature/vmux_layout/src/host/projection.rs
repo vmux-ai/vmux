@@ -291,6 +291,9 @@ impl ActiveSession {
     }
 
     fn agent_for(page: &StackNode, team: &[TeamMemberRow]) -> Option<TeamMemberRow> {
+        if !vmux_api::VmuxRoute::parse(&page.url).is_some_and(|route| route.is_agent()) {
+            return None;
+        }
         if let Some(agent_id) = page.agent_id.as_deref()
             && let Some(agent) = team
                 .iter()
@@ -726,6 +729,28 @@ mod tests {
         let agent = ActiveSession::agent_for(&page, &team).unwrap();
 
         assert_eq!(agent.id, "second");
+    }
+
+    #[test]
+    fn active_terminal_does_not_present_a_stale_agent() {
+        let page = StackNode {
+            id: 1,
+            agent_id: Some("agent".into()),
+            title: "Terminal".into(),
+            url: "vmux://terminal/15284".into(),
+            icon: Default::default(),
+            is_active: true,
+            is_loading: false,
+            is_dirty: false,
+            bg_color: None,
+        };
+        let team = vec![TeamMemberRow {
+            id: "agent".into(),
+            name: "Codex".into(),
+            ..Default::default()
+        }];
+
+        assert_eq!(ActiveSession::agent_for(&page, &team), None);
     }
 
     #[test]

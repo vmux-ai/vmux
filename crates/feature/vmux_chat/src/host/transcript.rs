@@ -17,6 +17,7 @@ use crate::host::{
     TranscriptTail,
 };
 use vmux_ecs::PageMetadata;
+use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Profile, User};
 use vmux_session::{
     AcpSession, AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue,
@@ -40,7 +41,8 @@ impl bevy::prelude::Plugin for Plugin {
                     bevy::ecs::schedule::ApplyDeferred,
                     apply_results,
                 )
-                    .chain(),
+                    .chain()
+                    .after(ServiceMessageSet),
             );
     }
 }

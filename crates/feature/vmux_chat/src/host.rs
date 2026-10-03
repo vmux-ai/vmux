@@ -56,6 +56,7 @@ impl Plugin for ChatPlugin {
         #[cfg(host)]
         app.add_plugins((
             FeaturePlugin::<crate::Feature>::default(),
+            Self::MANIFEST.plugin(),
             session::ChatHostPlugin,
             transcript::Plugin,
         ));

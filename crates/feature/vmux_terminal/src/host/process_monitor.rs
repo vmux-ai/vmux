@@ -112,6 +112,7 @@ pub(crate) struct ServiceProcessSnapshot(pub(crate) Vec<vmux_api::protocol::Proc
 struct ProcessMonitor {
     process_poll: Timer,
     sysinfo_poll: Timer,
+    discovery_poll: Timer,
     system: sysinfo::System,
 }
 
@@ -119,9 +120,45 @@ impl Default for ProcessMonitor {
     fn default() -> Self {
         Self {
             process_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
-            sysinfo_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
+            sysinfo_poll: Timer::from_seconds(2.0, TimerMode::Repeating),
+            discovery_poll: Timer::from_seconds(30.0, TimerMode::Repeating),
             system: sysinfo::System::new(),
         }
+    }
+}
+
+impl ProcessMonitor {
+    fn refresh(
+        &mut self,
+        delta: std::time::Duration,
+        immediate: bool,
+        service_roots: impl IntoIterator<Item = u32>,
+    ) -> Option<MonitoredProcesses> {
+        self.sysinfo_poll.tick(delta);
+        self.discovery_poll.tick(delta);
+        if !immediate && !self.sysinfo_poll.just_finished() {
+            return None;
+        }
+        if immediate || self.system.processes().is_empty() || self.discovery_poll.just_finished() {
+            self.discovery_poll.reset();
+            self.system.refresh_processes_specifics(
+                sysinfo::ProcessesToUpdate::All,
+                true,
+                sysinfo::ProcessRefreshKind::nothing(),
+            );
+        }
+        self.sysinfo_poll.reset();
+        let monitored = MonitoredProcesses::new(&self.system, service_roots);
+        self.system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&monitored.pids),
+            true,
+            sysinfo::ProcessRefreshKind::nothing()
+                .with_memory()
+                .with_cpu()
+                .with_exe(sysinfo::UpdateKind::OnlyIfNotSet)
+                .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet),
+        );
+        Some(monitored)
     }
 }
 
@@ -244,6 +281,69 @@ struct ProcSample {
     mem: u64,
 }
 
+struct MonitoredProcesses {
+    pids: Vec<sysinfo::Pid>,
+}
+
+impl MonitoredProcesses {
+    fn new(system: &sysinfo::System, service_roots: impl IntoIterator<Item = u32>) -> Self {
+        let mut roots = service_roots
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let mut children = HashMap::<u32, Vec<u32>>::new();
+        for (pid, process) in system.processes() {
+            let pid = pid.as_u32();
+            if let Some(parent) = process.parent() {
+                children.entry(parent.as_u32()).or_default().push(pid);
+            }
+            let name = process.name().to_string_lossy();
+            let executable = process
+                .exe()
+                .map(|path| path.to_string_lossy())
+                .unwrap_or_default();
+            if LocalVmuxProcess::matches(&name, &executable) {
+                roots.insert(pid);
+            }
+        }
+        let mut selected = roots.clone();
+        let mut pending = roots.into_iter().collect::<Vec<_>>();
+        while let Some(parent) = pending.pop() {
+            let Some(descendants) = children.get(&parent) else {
+                continue;
+            };
+            for child in descendants {
+                if selected.insert(*child) {
+                    pending.push(*child);
+                }
+            }
+        }
+        let mut pids = selected
+            .into_iter()
+            .map(sysinfo::Pid::from_u32)
+            .collect::<Vec<_>>();
+        pids.sort_by_key(|pid| pid.as_u32());
+        Self { pids }
+    }
+
+    fn samples(&self, system: &sysinfo::System) -> HashMap<u32, ProcSample> {
+        let mut samples = HashMap::new();
+        for pid in &self.pids {
+            let Some(process) = system.process(*pid) else {
+                continue;
+            };
+            samples.insert(
+                pid.as_u32(),
+                ProcSample {
+                    parent: process.parent().map(|parent| parent.as_u32()),
+                    cpu: process.cpu_usage(),
+                    mem: process.memory(),
+                },
+            );
+        }
+        samples
+    }
+}
+
 fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Process monitor"), ProcessMonitor::default()));
 }
@@ -287,7 +387,7 @@ fn request_process_list(
     time: Res<Time>,
     mut runtime: Query<&mut ProcessMonitor>,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    monitors: Query<(), With<ProcessMonitorView>>,
+    monitors: Query<(), (With<ProcessMonitorView>, With<KeyboardOwner>)>,
     claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -306,7 +406,7 @@ fn request_process_list(
 fn sample_process_usage(
     time: Res<Time>,
     mut runtime: Query<(Entity, &mut ProcessMonitor)>,
-    monitors: Query<(), With<ProcessMonitorView>>,
+    monitors: Query<(), (With<ProcessMonitorView>, With<KeyboardOwner>)>,
     claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
     mut service_processes: Query<(&ProcessPid, &mut Usage), With<ServiceProcess>>,
     local_processes: Query<(Entity, &ProcessPid), With<LocalVmuxProcess>>,
@@ -318,32 +418,14 @@ fn sample_process_usage(
     let Ok((runtime_entity, mut runtime)) = runtime.single_mut() else {
         return;
     };
-    runtime.sysinfo_poll.tick(time.delta());
-    if claimed.is_empty() && !runtime.sysinfo_poll.just_finished() {
+    let service_roots = service_processes
+        .iter_mut()
+        .map(|(pid, _)| pid.0)
+        .collect::<Vec<_>>();
+    let Some(monitored) = runtime.refresh(time.delta(), !claimed.is_empty(), service_roots) else {
         return;
-    }
-
-    runtime.system.refresh_processes_specifics(
-        sysinfo::ProcessesToUpdate::All,
-        true,
-        sysinfo::ProcessRefreshKind::nothing()
-            .with_memory()
-            .with_cpu()
-            .with_exe(sysinfo::UpdateKind::OnlyIfNotSet)
-            .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet),
-    );
-
-    let mut samples = HashMap::new();
-    for (pid, process) in runtime.system.processes() {
-        samples.insert(
-            pid.as_u32(),
-            ProcSample {
-                parent: process.parent().map(|parent| parent.as_u32()),
-                cpu: process.cpu_usage(),
-                mem: process.memory(),
-            },
-        );
-    }
+    };
+    let samples = monitored.samples(&runtime.system);
 
     for (pid, mut usage) in &mut service_processes {
         *usage = Usage::subtree(pid.0, &samples);
@@ -353,7 +435,10 @@ fn sample_process_usage(
     for (entity, pid) in &local_processes {
         existing.insert(pid.0, entity);
     }
-    for (pid, process) in runtime.system.processes() {
+    for pid in &monitored.pids {
+        let Some(process) = runtime.system.process(*pid) else {
+            continue;
+        };
         let name = process.name().to_string_lossy().into_owned();
         let executable = process
             .exe()
@@ -401,7 +486,14 @@ fn broadcast_to_monitors(
     service_processes: Query<(&ProcessId, &ProcessPid, &ServiceProcess, &Usage, &Order)>,
     local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    monitors: Query<Entity, (With<ProcessMonitorView>, With<PageReady>)>,
+    monitors: Query<
+        Entity,
+        (
+            With<ProcessMonitorView>,
+            With<PageReady>,
+            With<KeyboardOwner>,
+        ),
+    >,
     claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,

@@ -48,8 +48,13 @@ impl Plugin for McpPlugin {
             .add_systems(
                 Update,
                 (
-                    receive_requests.in_set(McpSet::Route),
-                    route_request.in_set(McpSet::Route),
+                    (
+                        receive_requests,
+                        bevy_ecs::schedule::ApplyDeferred,
+                        route_request,
+                    )
+                        .chain()
+                        .in_set(McpSet::Route),
                     (
                         finish_tool_errors,
                         start_list_tools,
@@ -59,6 +64,7 @@ impl Plugin for McpPlugin {
                         start_tasks,
                         bevy_ecs::schedule::ApplyDeferred,
                         poll_tool_tasks,
+                        bevy_ecs::schedule::ApplyDeferred,
                     )
                         .chain()
                         .in_set(McpSet::StartTasks),
@@ -506,6 +512,7 @@ fn start_tool_queries(
 
 fn start_tasks(
     runtimes: Query<&McpRuntime>,
+    wake: Res<vmux_ecs::cli::CliWake>,
     mut pending: Query<(Entity, &mut McpExecution), Added<McpExecution>>,
     mut commands: Commands,
 ) {
@@ -520,8 +527,10 @@ fn start_tasks(
             .take()
             .expect("pending MCP task must own its future");
         let (sender, receiver) = tokio::sync::oneshot::channel();
+        let wake = wake.as_ref().clone();
         drop(runtime.0.spawn(async move {
             let _ = sender.send(future.await);
+            wake.wake();
         }));
         commands
             .entity(entity)

@@ -11,6 +11,11 @@ pub fn CommandBarPanel() -> Element {
     let close = EventHandler::new(move |()| {
         let _ = send(&CommandBarPanelRequest { active: false });
     });
+    use_effect(move || {
+        if state().open_id.is_open() {
+            let _ = send(&CommandBarPanelRequest { active: true });
+        }
+    });
     use_drop(move || close.call(()));
 
     if !state().open_id.is_open() {
@@ -20,11 +25,14 @@ pub fn CommandBarPanel() -> Element {
     rsx! {
         div {
             class: "pointer-events-auto fixed inset-0",
-            onclick: move |_| close.call(()),
+            onmousedown: move |event| {
+                event.prevent_default();
+                close.call(());
+            },
             div {
                 class: "absolute left-1/2 top-1/2 w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
                 "data-command-bar-card": "",
-                onclick: move |e| e.stop_propagation(),
+                onmousedown: move |event| event.stop_propagation(),
                 div {
                     id: "command-bar-shell",
                     class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",

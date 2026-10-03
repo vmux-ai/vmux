@@ -37,12 +37,12 @@ impl Plugin for KeyboardPlugin {
                     .after(NativeKeyClaimSet)
                     .before(NativeKeyInputSet),
             )
+            .add_systems(Update, dispatch_commands.in_set(WriteCommandRequests))
             .add_systems(
                 Update,
-                dispatch
+                dispatch_inputs
                     .after(sync_context)
-                    .in_set(NativeKeyInputSet)
-                    .in_set(WriteCommandRequests),
+                    .in_set(NativeKeyInputSet),
             )
             .add_systems(
                 Update,
@@ -490,16 +490,18 @@ fn sync_context(
         .is_some_and(|context| context.text_entry_owns_keys);
 }
 
-fn dispatch(
+fn dispatch_commands(
     inbox: Single<&KeyboardInbox>,
     mut invocations: MessageWriter<CommandInvocation>,
-    mut inputs: MessageWriter<NativeKeyInput>,
     user: Query<Entity, With<User>>,
 ) {
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     for command in inbox.commands.try_iter() {
         invocations.write(CommandInvocation::new(caller, command));
     }
+}
+
+fn dispatch_inputs(inbox: Single<&KeyboardInbox>, mut inputs: MessageWriter<NativeKeyInput>) {
     for input in inbox.inputs.try_iter() {
         inputs.write(input);
     }

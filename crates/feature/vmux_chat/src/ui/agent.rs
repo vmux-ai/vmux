@@ -47,6 +47,11 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
 #[component]
 fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     let agent = chat.agent();
+    if agent.is_empty() {
+        return rsx! {
+            span { class: "{size_class} invisible" }
+        };
+    }
     let accent = chat.identity.accent();
     let src = FaviconSource::resolve(
         &chat.identity.icon(),

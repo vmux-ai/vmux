@@ -708,6 +708,10 @@ impl ServiceConnection {
                             let mut w = writer.lock().await;
                             ServiceCodec::write_service(&mut *w, &config_state).await?;
                         }
+                        if let Some(status) = acp_sessions.status(sid.clone()).await {
+                            let mut w = writer.lock().await;
+                            ServiceCodec::write_service(&mut *w, &status).await?;
+                        }
                         if let Some(old) = agent_forwarders.remove(&sid) {
                             old.abort();
                         }
@@ -878,6 +882,10 @@ impl ServiceConnection {
                         if let Some(config_state) = acp_sessions.config_state(sid.clone()).await {
                             let mut w = writer.lock().await;
                             ServiceCodec::write_service(&mut *w, &config_state).await?;
+                        }
+                        if let Some(status) = acp_sessions.status(sid.clone()).await {
+                            let mut w = writer.lock().await;
+                            ServiceCodec::write_service(&mut *w, &status).await?;
                         }
                         if let Some(old) = agent_forwarders.remove(&sid) {
                             old.abort();

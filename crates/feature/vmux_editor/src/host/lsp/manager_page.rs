@@ -1,164 +1,36 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashSet;
-use vmux_ecs::event::{
-    InstallPhase, LspCatalog, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
-    LspManagerUiState, LspPackage, LspPackageStatus, LspPkgStatus, LspUninstallRequest,
-    LspUpdateRequest,
-};
-use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_ecs::page::PageReady;
-use vmux_layout::native_open::HostedUiPlugin;
+use vmux_ecs::event::{InstallPhase, LspInstallProgress, LspPackageStatus, LspPkgStatus};
 #[cfg(test)]
 use vmux_path::Executable;
 
-use crate::lsp::catalog::{CatalogOutput, CatalogReady, CatalogSearch, Package};
+use crate::lsp::catalog::{CatalogReady, Package};
 use crate::lsp::registry::ServerSpec;
 use crate::lsp::{store, target::PlatformTarget};
 
-#[vmux_native::page(page = "lsp")]
 pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(HostedUiPlugin::<LspManagerPage>::new(Self::MANIFEST))
-            .add_plugins(UiStatePlugin::<LspManagerUiState>::default())
-            .add_message::<PackageInstallRequest>()
-            .add_plugins(UiEventPlugin::<(
-                LspCatalogRequest,
-                LspInstallRequest,
-                LspUninstallRequest,
-                LspUpdateRequest,
-            )>::default())
-            .add_observer(page_ready)
-            .add_observer(catalog_request)
-            .add_observer(install_request)
-            .add_observer(uninstall_request)
-            .add_observer(update_request)
+        app.add_message::<PackageInstallRequest>()
             .add_systems(
                 Update,
-                (
-                    enqueue_package_installs,
-                    start_install_jobs,
-                    start_uninstall_jobs,
-                )
-                    .chain(),
+                (enqueue_package_installs, start_install_jobs).chain(),
             )
-            .add_systems(Update, (poll_install_jobs, poll_uninstall_jobs))
+            .add_systems(Update, poll_install_jobs)
             .add_systems(
                 PostUpdate,
-                (
-                    deliver_catalog_outputs,
-                    deliver_progress_outputs,
-                    deliver_status_outputs,
-                    publish_manager_state,
-                )
-                    .chain(),
+                (deliver_progress_outputs, deliver_status_outputs).chain(),
             );
     }
-}
-
-fn page_ready(
-    trigger: On<UiInput<PageReady>>,
-    pages: Query<&vmux_ecs::PageMetadata>,
-    mut commands: Commands,
-) {
-    let target = trigger.event().webview;
-    let Ok(page) = pages.get(target) else {
-        return;
-    };
-    if page.url.trim_end_matches('/') != ManagerPlugin::MANIFEST.url.trim_end_matches('/') {
-        return;
-    }
-    commands.spawn((
-        Name::new("LSP catalog"),
-        CatalogSearch {
-            target,
-            request: LspCatalogRequest::for_query("", false),
-        },
-    ));
 }
 
 #[derive(Clone, Message)]
 pub(crate) struct PackageInstallRequest {
     pub target: Entity,
     pub name: String,
-}
-
-#[derive(Component, Default)]
-#[require(ManagerState, UiState<LspManagerUiState>)]
-struct LspManagerPage;
-
-#[derive(Component)]
-struct ManagerState {
-    packages: Vec<LspPackage>,
-    progress: Vec<LspInstallProgress>,
-    loading: bool,
-}
-
-impl Default for ManagerState {
-    fn default() -> Self {
-        Self {
-            packages: Vec::new(),
-            progress: Vec::new(),
-            loading: true,
-        }
-    }
-}
-
-impl ManagerState {
-    fn start_loading(&mut self) {
-        self.loading = true;
-    }
-
-    fn apply_catalog(&mut self, event: LspCatalog) {
-        self.packages = event.packages;
-        self.loading = false;
-    }
-
-    fn apply_progress(&mut self, event: LspInstallProgress) {
-        let name = event.name.clone();
-        let phase = event.phase;
-        match self.progress.iter_mut().find(|item| item.name == name) {
-            Some(current) => *current = event,
-            None => self.progress.push(event),
-        }
-        let Some(package) = self
-            .packages
-            .iter_mut()
-            .find(|package| package.name == name)
-        else {
-            return;
-        };
-        package.status = match phase {
-            InstallPhase::Failed => LspPkgStatus::Failed,
-            InstallPhase::Done => LspPkgStatus::Installed,
-            _ => LspPkgStatus::Installing,
-        };
-    }
-
-    fn apply_status(&mut self, event: LspPackageStatus) {
-        let name = event.name;
-        if let Some(package) = self
-            .packages
-            .iter_mut()
-            .find(|package| package.name == name)
-        {
-            package.status = event.status;
-            package.version = event.version;
-        }
-        self.progress.retain(|item| item.name != name);
-    }
-
-    fn event(&self) -> LspManagerUiState {
-        LspManagerUiState {
-            packages: self.packages.clone(),
-            progress: self.progress.clone(),
-            loading: self.loading,
-        }
-    }
 }
 
 #[derive(Component)]
@@ -207,23 +79,10 @@ struct PendingPackageInstall {
 }
 
 #[derive(Component)]
-struct PendingPackageUninstall {
-    target: Entity,
-    name: String,
-}
-
-#[derive(Component)]
 struct PackageInstallJob {
     target: Entity,
     name: String,
     progress: Receiver<LspInstallProgress>,
-    task: Task<Result<LspPackageStatus, LspInstallProgress>>,
-}
-
-#[derive(Component)]
-struct PackageUninstallJob {
-    target: Entity,
-    name: String,
     task: Task<Result<LspPackageStatus, LspInstallProgress>>,
 }
 
@@ -258,42 +117,11 @@ fn install_package(
     }
 }
 
-fn uninstall_package(name: String) -> Result<LspPackageStatus, LspInstallProgress> {
-    let store = store::PackageStore::lsp();
-    let Ok(package) = crate::lsp::package_path::PackageName::parse(&name) else {
-        return Err(LspInstallProgress {
-            name,
-            phase: InstallPhase::Failed,
-            pct: None,
-            message: "invalid package name".to_string(),
-        });
-    };
-    if let Err(error) = store.remove(&package) {
-        return Err(LspInstallProgress {
-            name,
-            phase: InstallPhase::Failed,
-            pct: None,
-            message: format!("uninstall failed: {error}"),
-        });
-    }
-    let status = if matches!(store.resolve_command(&name), store::Resolution::OnPath) {
-        LspPkgStatus::OnPath
-    } else {
-        LspPkgStatus::Available
-    };
-    Ok(LspPackageStatus {
-        name,
-        status,
-        version: None,
-    })
-}
-
 fn start_install_jobs(
     pending: Query<(Entity, &PendingPackageInstall)>,
     catalogs: Query<(), With<CatalogReady>>,
     packages: Query<&Package>,
     install_jobs: Query<&PackageInstallJob>,
-    uninstall_jobs: Query<&PackageUninstallJob>,
     mut commands: Commands,
 ) {
     if catalogs.is_empty() {
@@ -303,7 +131,6 @@ fn start_install_jobs(
         .iter()
         .map(|job| job.name.clone())
         .collect::<HashSet<_>>();
-    names.extend(uninstall_jobs.iter().map(|job| job.name.clone()));
     for (entity, request) in &pending {
         commands.entity(entity).despawn();
         if !names.insert(request.name.clone()) {
@@ -341,80 +168,6 @@ fn start_install_jobs(
     }
 }
 
-fn start_uninstall_jobs(
-    pending: Query<(Entity, &PendingPackageUninstall), Added<PendingPackageUninstall>>,
-    install_jobs: Query<&PackageInstallJob>,
-    uninstall_jobs: Query<&PackageUninstallJob>,
-    mut commands: Commands,
-) {
-    let mut names = install_jobs
-        .iter()
-        .map(|job| job.name.clone())
-        .collect::<HashSet<_>>();
-    names.extend(uninstall_jobs.iter().map(|job| job.name.clone()));
-    for (entity, request) in &pending {
-        commands.entity(entity).despawn();
-        if !names.insert(request.name.clone()) {
-            continue;
-        }
-        let name = request.name.clone();
-        let task_name = name.clone();
-        let task = IoTaskPool::get().spawn(async move { uninstall_package(task_name) });
-        commands.spawn((
-            Name::new(format!("LSP uninstall: {name}")),
-            PackageUninstallJob {
-                target: request.target,
-                name,
-                task,
-            },
-        ));
-    }
-}
-
-fn catalog_request(
-    trigger: On<UiInput<LspCatalogRequest>>,
-    mut states: Query<&mut ManagerState>,
-    searches: Query<(Entity, &CatalogSearch)>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    if let Ok(mut state) = states.get_mut(entity) {
-        state.start_loading();
-    }
-    for (search_entity, search) in &searches {
-        if search.target == entity {
-            commands.entity(search_entity).despawn();
-        }
-    }
-    commands.spawn((
-        Name::new("LSP catalog"),
-        CatalogSearch {
-            target: entity,
-            request: trigger.event().payload.clone(),
-        },
-    ));
-}
-
-fn install_request(
-    trigger: On<UiInput<LspInstallRequest>>,
-    mut requests: MessageWriter<PackageInstallRequest>,
-) {
-    requests.write(PackageInstallRequest {
-        target: trigger.event().webview,
-        name: trigger.event().payload.name.clone(),
-    });
-}
-
-fn update_request(
-    trigger: On<UiInput<LspUpdateRequest>>,
-    mut requests: MessageWriter<PackageInstallRequest>,
-) {
-    requests.write(PackageInstallRequest {
-        target: trigger.event().webview,
-        name: trigger.event().payload.name.clone(),
-    });
-}
-
 fn enqueue_package_installs(
     mut requests: MessageReader<PackageInstallRequest>,
     mut commands: Commands,
@@ -425,13 +178,6 @@ fn enqueue_package_installs(
             name: request.name.clone(),
         });
     }
-}
-
-fn uninstall_request(trigger: On<UiInput<LspUninstallRequest>>, mut commands: Commands) {
-    commands.spawn(PendingPackageUninstall {
-        target: trigger.event().webview,
-        name: trigger.event().payload.name.clone(),
-    });
 }
 
 impl crate::host::editor::FileView {
@@ -473,55 +219,12 @@ fn poll_install_jobs(mut jobs: Query<(Entity, &mut PackageInstallJob)>, mut comm
     }
 }
 
-fn poll_uninstall_jobs(
-    mut jobs: Query<(Entity, &mut PackageUninstallJob)>,
-    mut commands: Commands,
-) {
-    for (entity, mut job) in &mut jobs {
-        let Some(result) = block_on(future::poll_once(&mut job.task)) else {
-            continue;
-        };
-        match result {
-            Ok(status) => {
-                commands.spawn(PackageStatusOutput {
-                    target: job.target,
-                    status,
-                });
-            }
-            Err(progress) => {
-                commands.spawn(PackageProgressOutput {
-                    target: job.target,
-                    progress,
-                });
-            }
-        }
-        commands.entity(entity).despawn();
-    }
-}
-
-fn deliver_catalog_outputs(
-    outputs: Query<(Entity, &CatalogOutput)>,
-    mut managers: Query<&mut ManagerState>,
-    mut commands: Commands,
-) {
-    for (output_entity, output) in &outputs {
-        if let Ok(mut state) = managers.get_mut(output.target) {
-            state.apply_catalog(output.catalog.clone());
-        }
-        commands.entity(output_entity).despawn();
-    }
-}
-
 fn deliver_progress_outputs(
     outputs: Query<(Entity, &PackageProgressOutput)>,
     targets: PackageTargets,
-    mut managers: Query<&mut ManagerState>,
     mut commands: Commands,
 ) {
     for (output_entity, output) in &outputs {
-        if let Ok(mut state) = managers.get_mut(output.target) {
-            state.apply_progress(output.progress.clone());
-        }
         for target in targets.matching(output.target, &output.progress.name) {
             if targets.contains(target) {
                 commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
@@ -537,13 +240,9 @@ fn deliver_progress_outputs(
 fn deliver_status_outputs(
     outputs: Query<(Entity, &PackageStatusOutput)>,
     targets: PackageTargets,
-    mut managers: Query<&mut ManagerState>,
     mut commands: Commands,
 ) {
     for (output_entity, output) in &outputs {
-        if let Ok(mut state) = managers.get_mut(output.target) {
-            state.apply_status(output.status.clone());
-        }
         let matching = targets.matching(output.target, &output.status.name);
         if output.status.status == LspPkgStatus::Installed {
             for target in matching.iter().copied() {
@@ -567,50 +266,10 @@ fn deliver_status_outputs(
     }
 }
 
-fn publish_manager_state(
-    pages: Query<(Entity, Ref<ManagerState>), With<LspManagerPage>>,
-    mut commands: Commands,
-) {
-    for (entity, state) in &pages {
-        if !state.is_changed() {
-            continue;
-        }
-        commands.trigger(UiStateWrite::<LspManagerUiState>::from_event(
-            entity,
-            &state.event(),
-        ));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lsp::catalog::Package;
-
-    #[test]
-    fn page_ready_starts_initial_catalog_job() {
-        let mut app = App::new();
-        app.add_observer(page_ready);
-        let webview = app
-            .world_mut()
-            .spawn(vmux_ecs::PageMetadata {
-                url: "vmux://tools/lsp".to_string(),
-                ..Default::default()
-            })
-            .id();
-
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: PageReady {},
-        });
-        app.update();
-
-        let mut searches = app.world_mut().query::<&CatalogSearch>();
-        let search = searches.single(app.world()).unwrap();
-        assert_eq!(search.target, webview);
-        assert!(search.request.query.is_empty());
-        assert!(!search.request.refresh);
-    }
 
     fn pkg(name: &str, source_id: &str) -> Package {
         Package {
@@ -668,42 +327,5 @@ mod tests {
         let lp = pkg("foo", "pkg:github/x/foo@2.0").snapshot(&store);
         assert_eq!(lp.status, LspPkgStatus::Outdated);
         assert_eq!(lp.version.as_deref(), Some("1.0"));
-    }
-
-    #[test]
-    fn manager_state_applies_progress_and_final_status() {
-        let mut state = ManagerState {
-            packages: vec![LspPackage {
-                name: "rust-analyzer".into(),
-                description: String::new(),
-                languages: vec!["Rust".into()],
-                categories: Vec::new(),
-                status: LspPkgStatus::Available,
-                version: None,
-                installable: true,
-                requires: None,
-            }],
-            ..Default::default()
-        };
-
-        state.apply_progress(LspInstallProgress {
-            name: "rust-analyzer".into(),
-            phase: InstallPhase::Downloading,
-            pct: Some(50),
-            message: "Downloading".into(),
-        });
-
-        assert_eq!(state.packages[0].status, LspPkgStatus::Installing);
-        assert_eq!(state.progress.len(), 1);
-
-        state.apply_status(LspPackageStatus {
-            name: "rust-analyzer".into(),
-            status: LspPkgStatus::Installed,
-            version: Some("1.0".into()),
-        });
-
-        assert_eq!(state.packages[0].status, LspPkgStatus::Installed);
-        assert_eq!(state.packages[0].version.as_deref(), Some("1.0"));
-        assert!(state.progress.is_empty());
     }
 }

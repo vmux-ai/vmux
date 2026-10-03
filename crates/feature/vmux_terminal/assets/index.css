@@ -41,9 +41,9 @@
 
 @layer base {
   :root {
-    --term-fg: rgb(205, 214, 244);
-    --term-bg: rgb(30, 30, 46);
-    --term-cursor: rgb(245, 224, 220);
+    --term-fg: var(--foreground);
+    --term-bg: var(--background);
+    --term-cursor: var(--foreground);
     --ansi-0: rgb(69, 71, 90);
     --ansi-1: rgb(243, 139, 168);
     --ansi-2: rgb(166, 227, 161);

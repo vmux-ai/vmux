@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiInput};
 use std::sync::{LazyLock, Mutex};
+use vmux_ecs::host::page::HostsPage;
 use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
 use vmux_flex::prelude::{ComputedNode, LayoutSystems};
 use vmux_layout::event::WindowDragRegionEvent;
@@ -110,7 +111,7 @@ fn initialize_regions(
     webviews: Query<
         Entity,
         (
-            Added<bevy_cef::prelude::WebviewSource>,
+            Or<(Added<bevy_cef::prelude::WebviewSource>, Added<HostsPage>)>,
             Without<ReportedWindowDragRegions>,
         ),
     >,

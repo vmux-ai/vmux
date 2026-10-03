@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::ProcessId;
-use vmux_api::protocol::{AcpSessionConfig, AgentRequestId, JsonValue};
+use vmux_api::protocol::{AcpSessionConfig, AgentRequestId, AgentRunStatus, JsonValue};
 
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
@@ -11,6 +11,30 @@ pub struct AgentToolCallRequest {
     pub sid: String,
     pub name: String,
     pub args: JsonValue,
+}
+
+#[vmux_api::service_message(SharedEvent::AgentDelta)]
+pub struct UiAgentDelta {
+    pub sid: String,
+    pub text: String,
+}
+
+#[vmux_api::service_message(SharedEvent::AgentRunStatusChanged)]
+pub struct UiAgentRunStatus {
+    pub sid: String,
+    pub status: AgentRunStatus,
+}
+
+#[vmux_api::service_message(SharedEvent::AgentApprovalResolved)]
+pub struct UiAgentApprovalResolved {
+    pub sid: String,
+    pub call_id: String,
+}
+
+#[vmux_api::service_message(SharedEvent::AgentMessagesSnapshot)]
+pub struct UiAgentSnapshot {
+    pub sid: String,
+    pub messages: Vec<vmux_api::room::Message>,
 }
 
 #[vmux_api::service_message(SharedEvent::AcpAgentInfo)]

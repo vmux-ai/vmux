@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::CommandBar;
-use vmux_api::command_bar::CommandBarPanelRequest;
+use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPanelRequest, CommandBarUiState};
+use vmux_ecs::host::UiStateWrite;
 use vmux_ecs::overlay::OverlayShownInline;
 
 pub(super) struct PanelPlugin;
@@ -44,6 +45,10 @@ fn active(trigger: On<UiInput<CommandBarPanelRequest>>, mut commands: Commands) 
         webview.insert(CommandBarPanelActive);
     } else {
         webview.remove::<CommandBarPanelActive>();
+        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            trigger.event().webview,
+            &CommandBarOpenEvent::default(),
+        ));
     }
 }
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 use bevy_app::{App, AppExit, First, Last, Plugin, PreUpdate};
 use bevy_ecs::prelude::*;
 use clap::error::ErrorKind;
-use vmux_ecs::cli::{CliInvocation, CliResult};
+use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
 use vmux_ecs::host::manifest::FeatureManifest;
 
 use catalog::CliCatalog;
@@ -32,6 +32,7 @@ impl CliRunner {
     fn run(mut app: App) -> AppExit {
         app.finish();
         app.cleanup();
+        app.world_mut().insert_resource(CliWake::current());
         app.world_mut()
             .spawn(CliArguments(std::env::args_os().collect()));
         loop {
@@ -39,7 +40,7 @@ impl CliRunner {
             if let Some(exit) = app.should_exit() {
                 return exit;
             }
-            std::thread::park_timeout(Duration::from_millis(1));
+            std::thread::park_timeout(Duration::from_secs(1));
         }
     }
 }

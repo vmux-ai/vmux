@@ -29,6 +29,7 @@ pub fn PromptComposer(
     #[props(default)] footer: Option<Element>,
     #[props(default)] shared_transition: bool,
     #[props(default = true)] show_send_button: bool,
+    #[props(default = true)] caret_visible: bool,
     #[props(default = PROMPT_INPUT_ID.to_string())] input_id: String,
     #[props(default = translate("composer-attach-files"))] attach_title: String,
     #[props(default = translate("composer-remove-attachment"))] remove_attachment_title: String,
@@ -69,9 +70,15 @@ pub fn PromptComposer(
     };
     let prompt_box_class =
         ClassList::join(["vmux-prompt-composer flex-wrap", shared_transition_class]);
+    let caret_class = if caret_visible {
+        "caret-[var(--vmux-prompt-accent)]"
+    } else {
+        "caret-transparent"
+    };
     let textarea_class = ClassList::join([
-        "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 caret-[var(--vmux-prompt-accent)] outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
+        "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
         typed_text_class,
+        caret_class,
     ]);
 
     rsx! {

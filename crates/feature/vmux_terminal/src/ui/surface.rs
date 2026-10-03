@@ -173,9 +173,10 @@ pub fn Page() -> Element {
         match t {
             Some(t) => {
                 let [fr, fg, fb] = t.foreground.components();
+                let [br, bg, bb] = t.background.components();
                 let [cr, cg, cb] = t.cursor.components();
                 let mut s = format!(
-                    "--term-fg:rgb({fr},{fg},{fb});--term-bg:var(--background);--term-cursor:rgb({cr},{cg},{cb});"
+                    "--term-fg:rgb({fr},{fg},{fb});--term-bg:rgb({br},{bg},{bb});--term-cursor:rgb({cr},{cg},{cb});"
                 );
                 for (i, color) in t.ansi.iter().enumerate() {
                     let [r, g, b] = color.components();

@@ -149,7 +149,18 @@ fn open(world: &mut World) {
     let mut wanted = Vec::new();
     for registration in registered {
         for entity in claim_native_pages(world, registration) {
-            wanted.push((entity, registration));
+            let priority = registration_priority(world, entity, registration);
+            let existing = wanted
+                .iter_mut()
+                .find(|(candidate, _, _)| *candidate == entity);
+            if let Some((_, current_registration, current_priority)) = existing {
+                if *current_priority < priority {
+                    *current_registration = registration;
+                    *current_priority = priority;
+                }
+            } else {
+                wanted.push((entity, registration, priority));
+            }
         }
     }
     if wanted.is_empty() {
@@ -172,7 +183,7 @@ fn open(world: &mut World) {
         world.insert_non_send(HostedPages::default());
     }
 
-    for (entity, registration) in wanted {
+    for (entity, registration, _) in wanted {
         let page = registration.page();
         let placement = registration.placement();
         let Some(window_entity) = host_window_for(world, entity).or(primary_window) else {
@@ -190,7 +201,9 @@ fn open(world: &mut World) {
         }
         let instance = registration.instance(world, entity);
         if current.is_some_and(|(current, window)| {
-            current.transparent == page.transparent && window == window_entity
+            current.transparent == page.transparent
+                && current.document_url() == page.document_url()
+                && window == window_entity
         }) {
             let remounted = {
                 let mut hosted = world.non_send_mut::<HostedPages>();
@@ -260,6 +273,27 @@ fn open(world: &mut World) {
             }
         }
     }
+}
+
+fn registration_priority(
+    world: &World,
+    entity: Entity,
+    registration: NativePageRegistration,
+) -> (u8, usize) {
+    let page = registration.page();
+    let Some(url) = world
+        .get::<PageMetadata>(entity)
+        .map(|metadata| metadata.url.as_str())
+    else {
+        return (3, page.url.len());
+    };
+    if url == page.url {
+        return (2, page.url.len());
+    }
+    if page.answers_for(url) {
+        return (1, page.url.len());
+    }
+    (3, page.url.len())
 }
 
 fn place(

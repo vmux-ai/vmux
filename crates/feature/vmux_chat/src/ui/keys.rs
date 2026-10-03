@@ -30,6 +30,11 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
 impl ChatKeys {
     pub fn on_prompt_keydown(&self, event: KeyboardEvent) {
         event.stop_propagation();
+        if self.handler.submits(&event) {
+            event.prevent_default();
+            self.handler.0.submit();
+            return;
+        }
         if self.claim.resolves() {
             self.claim
                 .on_keydown(&event, |stroke| self.handler.wanted_locally(stroke));
@@ -55,6 +60,17 @@ impl ChatKeys {
 struct ChatKeyHandler(Chat);
 
 impl ChatKeyHandler {
+    fn submits(&self, event: &KeyboardEvent) -> bool {
+        let modifiers = event.modifiers();
+        event.key() == Key::Enter
+            && !modifiers.shift()
+            && !modifiers.ctrl()
+            && !modifiers.alt()
+            && !modifiers.meta()
+            && self.0.menu.opened().is_none()
+            && self.0.selector.value.read().active.is_none()
+    }
+
     fn wanted_locally(&self, stroke: &KeyStroke) -> bool {
         if Self::copies(stroke) {
             return EventSelection::in_document();

@@ -7,7 +7,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use vmux_ecs::ProcessId;
-use vmux_ecs::cli::{CliInvocation, CliResult};
+use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
 use vmux_ecs::host::manifest::FeaturePlugin;
 
 use crate::protocol::{McpConfig, McpInput, McpOutput, McpPlugin, McpRuntime, McpServer, McpSet};
@@ -89,6 +89,7 @@ enum McpStdin {
 
 fn start_stdio(
     invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
+    wake: Res<CliWake>,
     mut commands: Commands,
 ) {
     for (entity, invocation) in &invocations {
@@ -106,6 +107,7 @@ fn start_stdio(
             unsafe { std::env::set_var("VMUX_PROFILE", profile) };
         }
         let (sender, receiver) = std::sync::mpsc::sync_channel(64);
+        let wake = wake.as_ref().clone();
         let worker = std::thread::Builder::new()
             .name("mcp-stdin".into())
             .spawn(move || {
@@ -117,13 +119,16 @@ fn start_stdio(
                             if sender.send(McpStdin::Input(value)).is_err() {
                                 return;
                             }
+                            wake.wake();
                         }
                         Ok(None) => {
                             let _ = sender.send(McpStdin::Eof);
+                            wake.wake();
                             return;
                         }
                         Err(error) => {
                             let _ = sender.send(McpStdin::Error(error.to_string()));
+                            wake.wake();
                             return;
                         }
                     }

@@ -97,7 +97,7 @@ impl ToolInventoryItem {
         if self.status == ToolStatus::Outdated {
             operations.push(ToolOperationKind::Update);
         }
-        if self.status == ToolStatus::Missing {
+        if matches!(self.status, ToolStatus::Available | ToolStatus::Missing) {
             operations.push(ToolOperationKind::Install);
         }
         if self.removable {

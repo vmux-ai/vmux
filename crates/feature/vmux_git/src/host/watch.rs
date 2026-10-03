@@ -98,12 +98,13 @@ struct RepoInfoCacheEntry {
     loaded: bool,
     dirty: bool,
     watched: bool,
-    idle_syncs: u8,
+    last_accessed: Instant,
     pending: Option<Task<Option<super::worktree::RepoInfo>>>,
     ignore_events_until: Option<Instant>,
 }
 
 const UNRESOLVED_RETRY: Duration = Duration::from_secs(1);
+const REPO_INFO_IDLE_TTL: Duration = Duration::from_secs(300);
 
 struct GuessedPath {
     guess: PathBuf,
@@ -144,11 +145,11 @@ impl RepoInfoCache {
                 loaded: false,
                 dirty: true,
                 watched: false,
-                idle_syncs: 0,
+                last_accessed: Instant::now(),
                 pending: None,
                 ignore_events_until: None,
             });
-        entry.idle_syncs = 0;
+        entry.last_accessed = Instant::now();
         entry.info.clone()
     }
 
@@ -187,8 +188,7 @@ impl RepoInfoCache {
             if entry.pending.is_some() {
                 continue;
             }
-            entry.idle_syncs = entry.idle_syncs.saturating_add(1);
-            if entry.idle_syncs > 1 {
+            if entry.last_accessed.elapsed() >= REPO_INFO_IDLE_TTL {
                 inactive.push(path.clone());
             }
         }
@@ -601,7 +601,6 @@ fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
             entry.info = info;
             entry.loaded = true;
             entry.watched = false;
-            entry.idle_syncs = 0;
             entry.pending = None;
             entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
         }
@@ -769,7 +768,7 @@ mod tests {
                         loaded: true,
                         dirty: false,
                         watched: true,
-                        idle_syncs: 0,
+                        last_accessed: Instant::now(),
                         pending: None,
                         ignore_events_until: None,
                     },
@@ -781,7 +780,7 @@ mod tests {
                         loaded: true,
                         dirty: false,
                         watched: true,
-                        idle_syncs: 0,
+                        last_accessed: Instant::now() - REPO_INFO_IDLE_TTL,
                         pending: None,
                         ignore_events_until: None,
                     },
@@ -795,8 +794,6 @@ mod tests {
         assert!(watch.subscribe_repo_info(&active_path, Some(&active_info)));
         assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
 
-        assert!(cache.lookup(&active_path).is_some());
-        watch.evict_inactive_repo_info(&mut cache);
         assert!(cache.lookup(&active_path).is_some());
         watch.evict_inactive_repo_info(&mut cache);
 
@@ -962,7 +959,7 @@ mod tests {
                     loaded: false,
                     dirty: false,
                     watched: false,
-                    idle_syncs: 0,
+                    last_accessed: Instant::now(),
                     pending: Some(IoTaskPool::get().spawn(async move { stale })),
                     ignore_events_until: None,
                 },

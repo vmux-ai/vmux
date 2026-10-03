@@ -51,7 +51,7 @@ impl Plugin for AgentRuntimePlugin {
         .add_systems(
             Update,
             (
-                input,
+                input.after(ServiceMessageSet),
                 receive_catalog,
                 (
                     info,

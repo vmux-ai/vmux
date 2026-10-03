@@ -113,23 +113,33 @@ fn scan_tools(
         if installed.contains(package.name.as_str()) {
             continue;
         }
+        let snapshot = package.snapshot(&store);
         let on_path = package.bin.keys().any(|command| {
             matches!(
                 store.resolve_command(command.as_str()),
                 store::Resolution::OnPath
             )
         });
-        if on_path {
-            inventory.push(ToolInventoryItem {
-                id: package.name.as_str().to_string(),
-                name: package.name.as_str().to_string(),
-                icon: None,
-                version: None,
-                detail: "Available on PATH".to_string(),
-                status: ToolStatus::Installed,
-                removable: false,
-            });
+        if !snapshot.installable && !on_path {
+            continue;
         }
+        inventory.push(ToolInventoryItem {
+            id: package.name.as_str().to_string(),
+            name: package.name.as_str().to_string(),
+            icon: None,
+            version: snapshot.version,
+            detail: if on_path {
+                "Available on PATH".to_string()
+            } else {
+                package.description.clone()
+            },
+            status: if on_path {
+                ToolStatus::Installed
+            } else {
+                ToolStatus::Available
+            },
+            removable: false,
+        });
     }
     Ok(ToolInventory::new(ToolProvider::Lsp, inventory)
         .reconcile(manifest)

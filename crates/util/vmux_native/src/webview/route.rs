@@ -27,7 +27,7 @@ impl PageRoutes {
     ) {
         let url = request.uri().to_string();
         let page = self.page.get();
-        let route = Route::from(url.as_str());
+        let route = Route::for_page(&url, page);
         if !route.is_served_by(&url, page) {
             responder.respond(
                 wry::http::Response::builder()
@@ -55,6 +55,15 @@ enum Route {
 }
 
 impl Route {
+    fn for_page(url: &str, page: &NativePage) -> Self {
+        if Self::belongs_to(url, page.document_url())
+            && Self::path_of(url) == Self::path_of(page.document_url())
+        {
+            return Self::Document;
+        }
+        Self::from(url)
+    }
+
     fn is_served_by(self, request: &str, page: &NativePage) -> bool {
         if Self::belongs_to(request, page.document_url()) {
             return true;
@@ -112,6 +121,20 @@ mod tests {
                 "{url} should ask for the document"
             );
         }
+    }
+
+    #[test]
+    fn a_nested_page_url_asks_for_its_document() {
+        let page = NativePage::pane("vmux://tools/lsp", || unreachable!());
+
+        assert!(matches!(
+            Route::for_page("vmux://tools/lsp", &page),
+            Route::Document
+        ));
+        assert!(matches!(
+            Route::for_page("vmux://tools/lsp/asset.svg", &page),
+            Route::Asset
+        ));
     }
 
     #[test]

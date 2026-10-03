@@ -338,6 +338,7 @@ pub struct AcpSessions {
     snapshots: mpsc::UnboundedSender<SnapshotAcpSession>,
     agent_infos: mpsc::UnboundedSender<AcpSessionAgentInfo>,
     config_states: mpsc::UnboundedSender<AcpSessionConfigRequest>,
+    statuses: mpsc::UnboundedSender<AcpSessionStatusRequest>,
     messages: mpsc::UnboundedSender<AcpSessionMessages>,
     lists: mpsc::UnboundedSender<ListAcpSessions>,
     lookups: mpsc::UnboundedSender<FindAcpSession>,
@@ -354,6 +355,7 @@ impl AcpSessions {
         let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
         let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
         let (config_states, config_state_inbox) = mpsc::unbounded_channel();
+        let (statuses, status_inbox) = mpsc::unbounded_channel();
         let (messages, message_inbox) = mpsc::unbounded_channel();
         let (lists, list_inbox) = mpsc::unbounded_channel();
         let (lookups, lookup_inbox) = mpsc::unbounded_channel();
@@ -367,6 +369,7 @@ impl AcpSessions {
                 snapshots,
                 agent_infos,
                 config_states,
+                statuses,
                 messages,
                 lists,
                 lookups,
@@ -384,6 +387,7 @@ impl AcpSessions {
                     snapshots: snapshot_inbox,
                     agent_infos: agent_info_inbox,
                     config_states: config_state_inbox,
+                    statuses: status_inbox,
                     messages: message_inbox,
                     lists: list_inbox,
                     lookups: lookup_inbox,
@@ -498,6 +502,18 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
+    pub async fn status(&self, sid: String) -> Option<ServiceMessage> {
+        let (response, receiver) = oneshot::channel();
+        self.statuses
+            .send(AcpSessionStatusRequest {
+                sid,
+                response: Some(response),
+            })
+            .ok()?;
+        self.wake.send(()).ok()?;
+        receiver.await.ok().flatten()
+    }
+
     pub async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
         let (response, receiver) = oneshot::channel();
         self.messages
@@ -578,6 +594,7 @@ struct AcpSessionReceivers {
     snapshots: mpsc::UnboundedReceiver<SnapshotAcpSession>,
     agent_infos: mpsc::UnboundedReceiver<AcpSessionAgentInfo>,
     config_states: mpsc::UnboundedReceiver<AcpSessionConfigRequest>,
+    statuses: mpsc::UnboundedReceiver<AcpSessionStatusRequest>,
     messages: mpsc::UnboundedReceiver<AcpSessionMessages>,
     lists: mpsc::UnboundedReceiver<ListAcpSessions>,
     lookups: mpsc::UnboundedReceiver<FindAcpSession>,
@@ -636,6 +653,12 @@ struct AcpSessionAgentInfo {
 
 #[derive(Component)]
 struct AcpSessionConfigRequest {
+    sid: String,
+    response: Option<oneshot::Sender<Option<ServiceMessage>>>,
+}
+
+#[derive(Component)]
+struct AcpSessionStatusRequest {
     sid: String,
     response: Option<oneshot::Sender<Option<ServiceMessage>>>,
 }
@@ -753,6 +776,9 @@ fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
         commands.spawn(request);
     }
     while let Ok(request) = inbox.0.config_states.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.0.statuses.try_recv() {
         commands.spawn(request);
     }
     while let Ok(request) = inbox.0.messages.try_recv() {
@@ -1226,16 +1252,18 @@ fn read(
         &AcpProjector,
         &AcpAgentName,
         &AcpSessionConfigs,
+        &AcpRunState,
     )>,
     mut snapshots: Query<(Entity, &mut SnapshotAcpSession)>,
     mut agent_infos: Query<(Entity, &mut AcpSessionAgentInfo)>,
     mut config_states: Query<(Entity, &mut AcpSessionConfigRequest)>,
+    mut statuses: Query<(Entity, &mut AcpSessionStatusRequest)>,
     mut messages: Query<(Entity, &mut AcpSessionMessages)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut snapshots {
         let mut result = None;
-        for (sid, shared, projector, _, _) in &sessions {
+        for (sid, shared, projector, _, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(shared.0.snapshot_message(projector.messages()));
                 break;
@@ -1248,7 +1276,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut agent_infos {
         let mut result = None;
-        for (sid, _, _, agent_name, _) in &sessions {
+        for (sid, _, _, agent_name, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = agent_name.0.as_ref().map(|name| {
                     ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
@@ -1266,7 +1294,7 @@ fn read(
     }
     for (request_entity, mut request) in &mut config_states {
         let mut result = None;
-        for (sid, _, _, _, configs) in &sessions {
+        for (sid, _, _, _, configs, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(ServiceMessage::AcpSessionConfigState {
                     sid: sid.0.clone(),
@@ -1280,9 +1308,25 @@ fn read(
         }
         commands.entity(request_entity).despawn();
     }
+    for (request_entity, mut request) in &mut statuses {
+        let mut result = None;
+        for (sid, _, _, _, _, status) in &sessions {
+            if sid.0 == request.sid {
+                result = Some(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
+                    sid: sid.0.clone(),
+                    status: status.0.clone(),
+                }));
+                break;
+            }
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(result);
+        }
+        commands.entity(request_entity).despawn();
+    }
     for (request_entity, mut request) in &mut messages {
         let mut result = None;
-        for (sid, _, projector, _, _) in &sessions {
+        for (sid, _, projector, _, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(projector.messages().to_vec());
                 break;

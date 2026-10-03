@@ -1,10 +1,24 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::thread;
 
 use bevy_ecs::prelude::*;
 use ron::value::RawValue;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+
+#[derive(Clone, Resource)]
+pub struct CliWake(thread::Thread);
+
+impl CliWake {
+    pub fn current() -> Self {
+        Self(thread::current())
+    }
+
+    pub fn wake(&self) {
+        self.0.unpark();
+    }
+}
 
 #[derive(Clone, Component, Debug, Deserialize, PartialEq, Eq)]
 pub struct CliManifest {

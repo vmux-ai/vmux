@@ -1,15 +1,17 @@
 use crate::host::event::{
     AgentApprovalRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin,
-    UiAgentAcpTerminalCreated, UiAgentInfo, UiAgentSessionConfigSelectionResult,
-    UiAgentSessionConfigState, UiAgentSessionCreated, UiAgentWorkspaceChanged,
+    UiAgentAcpTerminalCreated, UiAgentApprovalResolved, UiAgentDelta, UiAgentInfo,
+    UiAgentRunStatus, UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState,
+    UiAgentSessionCreated, UiAgentSnapshot, UiAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
-use vmux_api::protocol::ClientMessage;
+use vmux_api::protocol::{AgentRunStatus, ClientMessage, JsonValue};
+use vmux_api::room::{AssistantBlock, Message};
 use vmux_ecs::agent::AgentCommandResponse;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_session::AcpSession;
+use vmux_session::{AcpSession, AgentMessageTimes, AgentMessages, AgentRunState, PromptQueue};
 
 #[vmux_api::service_message(AgentRequest)]
 struct InboundAgentRequest {
@@ -23,6 +25,7 @@ struct InboundAgentAwaitingApproval {
     sid: String,
     call_id: String,
     name: String,
+    args: JsonValue,
 }
 
 pub(crate) struct AgentIngressPlugin;
@@ -31,7 +34,11 @@ impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
         app.add_service_message::<InboundAgentRequest>()
             .add_service_message::<AgentToolCallRequest>()
+            .add_service_message::<UiAgentDelta>()
+            .add_service_message::<UiAgentRunStatus>()
             .add_service_message::<InboundAgentAwaitingApproval>()
+            .add_service_message::<UiAgentApprovalResolved>()
+            .add_service_message::<UiAgentSnapshot>()
             .add_service_message::<UiAgentInfo>()
             .add_service_message::<UiAgentWorkspaceChanged>()
             .add_service_message::<UiAgentSessionConfigState>()
@@ -45,7 +52,16 @@ impl Plugin for AgentIngressPlugin {
                 Update,
                 (
                     subscribe_commands,
-                    (route_requests, route_approval_requests).in_set(ServiceMessageSet),
+                    (
+                        route_requests,
+                        route_approval_requests,
+                        project_deltas,
+                        project_snapshots,
+                        project_statuses,
+                        project_approval_resolutions,
+                    )
+                        .chain()
+                        .in_set(ServiceMessageSet),
                 ),
             )
             .add_systems(Last, forward_command_responses);
@@ -92,21 +108,114 @@ fn route_requests(
 
 fn route_approval_requests(
     mut inbound: MessageReader<InboundAgentAwaitingApproval>,
-    sessions: Query<(Entity, &AcpSession)>,
+    mut sessions: Query<(Entity, &AcpSession, &mut AgentRunState)>,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
-        let Some(session) = sessions
-            .iter()
-            .find_map(|(entity, session)| (session.sid == inbound.sid).then_some(entity))
-        else {
-            continue;
-        };
-        commands.trigger(AgentApprovalRequest {
-            session,
-            call_id: inbound.call_id.clone(),
-            name: inbound.name.clone(),
-        });
+        let args = serde_json::Value::try_from(&inbound.args)
+            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
+        for (session, acp, mut state) in &mut sessions {
+            if acp.sid != inbound.sid {
+                continue;
+            }
+            *state = AgentRunState::AwaitingApproval {
+                call_id: inbound.call_id.clone(),
+                name: inbound.name.clone(),
+                args: args.clone(),
+            };
+            commands.trigger(AgentApprovalRequest {
+                session,
+                call_id: inbound.call_id.clone(),
+                name: inbound.name.clone(),
+            });
+        }
+    }
+}
+
+fn project_deltas(
+    mut inbound: MessageReader<UiAgentDelta>,
+    mut sessions: Query<(&AcpSession, &mut AgentMessages, &mut AgentMessageTimes)>,
+) {
+    for inbound in inbound.read() {
+        for (session, mut messages, mut times) in &mut sessions {
+            if session.sid != inbound.sid {
+                continue;
+            }
+            let before = messages.0.clone();
+            match messages.0.last_mut() {
+                Some(Message::Assistant { blocks }) => match blocks.last_mut() {
+                    Some(AssistantBlock::Text(text)) => text.push_str(&inbound.text),
+                    _ => blocks.push(AssistantBlock::Text(inbound.text.clone())),
+                },
+                _ => messages.0.push(Message::Assistant {
+                    blocks: vec![AssistantBlock::Text(inbound.text.clone())],
+                }),
+            }
+            times.reconcile(&before, &messages.0);
+        }
+    }
+}
+
+fn project_snapshots(
+    mut inbound: MessageReader<UiAgentSnapshot>,
+    mut sessions: Query<(&AcpSession, &mut AgentMessages, &mut AgentMessageTimes)>,
+) {
+    for inbound in inbound.read() {
+        for (session, mut messages, mut times) in &mut sessions {
+            if session.sid != inbound.sid {
+                continue;
+            }
+            times.reconcile(&messages.0, &inbound.messages);
+            messages.0.clone_from(&inbound.messages);
+        }
+    }
+}
+
+fn project_statuses(
+    mut inbound: MessageReader<UiAgentRunStatus>,
+    mut sessions: Query<(&AcpSession, &mut AgentRunState, &mut PromptQueue)>,
+) {
+    for inbound in inbound.read() {
+        for (session, mut state, mut queue) in &mut sessions {
+            if session.sid != inbound.sid {
+                continue;
+            }
+            match &inbound.status {
+                AgentRunStatus::Idle => *state = AgentRunState::Idle,
+                AgentRunStatus::Streaming => *state = AgentRunState::Streaming,
+                AgentRunStatus::Interrupted => {
+                    *state = AgentRunState::Idle;
+                    if !queue.flush_pending() {
+                        queue.paused = true;
+                    }
+                }
+                AgentRunStatus::Errored(message) => {
+                    if queue.flush_pending() {
+                        *state = AgentRunState::Idle;
+                    } else {
+                        *state = AgentRunState::Errored(message.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn project_approval_resolutions(
+    mut inbound: MessageReader<UiAgentApprovalResolved>,
+    mut sessions: Query<(&AcpSession, &mut AgentRunState)>,
+) {
+    for inbound in inbound.read() {
+        for (session, mut state) in &mut sessions {
+            if session.sid == inbound.sid
+                && matches!(
+                    &*state,
+                    AgentRunState::AwaitingApproval { call_id, .. } if call_id == &inbound.call_id
+                )
+            {
+                *state = AgentRunState::Streaming;
+            }
+        }
     }
 }
 

@@ -10,7 +10,9 @@ use crate::registry::RegistrationStep;
 use crate::registry::{Backend, RegistrationError};
 use vmux_api::protocol::ClientMessage;
 use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::service::{ServiceConnected, ServiceInbound, ServiceRequest, ServiceUnavailable};
+use vmux_ecs::service::{
+    ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest, ServiceUnavailable,
+};
 
 use super::client::{ServiceClient, ServiceHandle, ServiceWake};
 
@@ -86,7 +88,7 @@ impl Plugin for ServicePlugin {
             .add_systems(
                 Update,
                 (
-                    receive_messages,
+                    receive_messages.in_set(ServiceMessageIngressSet),
                     reconnect_disconnected,
                     finish_connection,
                     start_connection,

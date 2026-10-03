@@ -1,33 +1,12 @@
 use crate::listener_guard::GuardedListener;
 use crate::transport::Host;
-use crate::transport::event_listener::EventListenerError;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
-use std::cell::Cell;
 use std::marker::PhantomData;
-use std::rc::Rc;
 use vmux_api::{BatchedUiState, UiState, UiStatePatch};
 
 struct UiStateListener {
     error: Signal<Option<String>>,
-}
-
-#[derive(Clone)]
-struct PageReadyAnnouncement(Rc<Cell<bool>>);
-
-impl PageReadyAnnouncement {
-    fn new() -> Self {
-        use_root_context(|| Self(Rc::new(Cell::new(false))))
-    }
-
-    fn announce(&self) -> Result<(), EventListenerError> {
-        if self.0.get() {
-            return Ok(());
-        }
-        Host::announce_ready()?;
-        self.0.set(true);
-        Ok(())
-    }
 }
 
 pub struct UiStatePatchBatch<S, T> {
@@ -59,14 +38,12 @@ where
     let mut error = use_signal(|| None::<String>);
     let mut listening = use_signal(|| false);
     let retry_tick = use_signal(|| 0u32);
-    let announcement = PageReadyAnnouncement::new();
 
     use_effect(move || {
         let current_retry = retry_tick();
         if listening() {
             return;
         }
-        let announcement = announcement.clone();
         let listener = listener.clone();
         let Some(runtime) = Runtime::try_current() else {
             error.set(Some("use_ui_state: no Dioxus runtime".into()));
@@ -80,7 +57,7 @@ where
             Ok(()) => {
                 listening.set(true);
                 error.set(None);
-                if let Err(cause) = announcement.announce() {
+                if let Err(cause) = Host::announce_ready() {
                     error.set(Some(format!("page ready emit failed: {cause}")));
                 }
             }

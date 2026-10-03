@@ -203,6 +203,10 @@ impl Browser {
     }
 
     pub fn native_page(url: &str, title: &str) -> impl Bundle {
+        Self::native_page_with_icon(url, title, PageIcon::None)
+    }
+
+    pub fn native_page_with_icon(url: &str, title: &str, icon: PageIcon) -> impl Bundle {
         (
             Self,
             WebviewWindowed,
@@ -210,7 +214,7 @@ impl Browser {
             PageMetadata {
                 title: title.to_string(),
                 url: url.to_string(),
-                icon: PageIcon::None,
+                icon,
                 bg_color: None,
             },
             WebviewSize(Vec2::new(1280.0, 720.0)),

@@ -307,7 +307,9 @@ impl CatalogSource {
             serde_json::from_str(source).map_err(|error| error.to_string())?;
         let mut packages = Vec::with_capacity(entries.len());
         for entry in &entries {
-            packages.push(Package::parse(entry)?);
+            if let Ok(package) = Package::parse(entry) {
+                packages.push(package);
+            }
         }
         Ok(packages)
     }

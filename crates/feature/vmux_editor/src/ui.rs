@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 pub(crate) use input::EditorFocus;
-pub(crate) use lsp::LspPage;
 pub use workspace::Page;
 pub(super) use workspace::{HOVER_DELAY_MS, Mode, SCROLL_ID};
 
@@ -13,7 +12,6 @@ mod editor;
 mod explorer;
 mod input;
 mod key;
-mod lsp;
 mod markdown;
 mod menu;
 mod note;

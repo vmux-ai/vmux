@@ -104,9 +104,14 @@ fn request_more(
     mut commands: Commands,
 ) {
     for (target, input, mut resume, mut snapshot) in &mut palettes {
-        if let Some(request) = resume.maybe_request_page(input.selected, target, &mut snapshot) {
-            commands.trigger(request);
-        }
+        let Some(offset) = resume.next_offset(input.selected, snapshot.bypass_change_detection())
+        else {
+            continue;
+        };
+        let Some(request) = resume.request_page(target, offset, &mut snapshot) else {
+            continue;
+        };
+        commands.trigger(request);
     }
 }
 
@@ -159,12 +164,7 @@ impl PaletteResume {
         }
     }
 
-    fn maybe_request_page(
-        &mut self,
-        selected: usize,
-        target: Entity,
-        snapshot: &mut PaletteSnapshot,
-    ) -> Option<UiInput<ResumeListRequest>> {
+    fn next_offset(&self, selected: usize, snapshot: &PaletteSnapshot) -> Option<u32> {
         if !self.active || self.inflight.is_some() {
             return None;
         }
@@ -175,7 +175,7 @@ impl PaletteResume {
         if (selected as u32).saturating_add(10) < loaded {
             return None;
         }
-        self.request_page(target, loaded, snapshot)
+        Some(loaded)
     }
 }
 

@@ -655,7 +655,8 @@ fn project(mut palettes: Query<ProjectionRow>) {
         branch_menu,
     ) in &mut palettes
     {
-        if input.open_id != opened.0.open_id || snapshot.0.open_id != opened.0.open_id {
+        let current = snapshot.bypass_change_detection();
+        if input.open_id != opened.0.open_id || current.0.open_id != opened.0.open_id {
             continue;
         }
         let draft = PaletteDraft {
@@ -663,12 +664,12 @@ fn project(mut palettes: Query<ProjectionRow>) {
             selected: input.selected,
             nav_mode: input.navigating,
             target_url: input.target_url.clone(),
-            completions: snapshot.0.completions.clone(),
-            completions_partial: snapshot.0.completions_partial,
-            completions_total: snapshot.0.completions_total as usize,
-            history: snapshot.0.history.clone(),
-            sessions: snapshot.0.sessions.clone(),
-            sessions_pending: snapshot.0.sessions_loading,
+            completions: current.0.completions.clone(),
+            completions_partial: current.0.completions_partial,
+            completions_total: current.0.completions_total as usize,
+            history: current.0.history.clone(),
+            sessions: current.0.sessions.clone(),
+            sessions_pending: current.0.sessions_loading,
         };
         let surface = match input.start {
             true => CommandPaletteSurface::Start,
@@ -715,7 +716,7 @@ fn project(mut palettes: Query<ProjectionRow>) {
         if *context != next_context {
             *context = next_context;
         }
-        if snapshot.0.projection == projection {
+        if current.0.projection == projection {
             continue;
         }
         snapshot.0.projection = projection;

@@ -374,27 +374,6 @@ fn ProcessTable(processes: Vec<ProcessEntry>) -> Element {
 }
 
 #[component]
-fn ServiceIcon() -> Element {
-    rsx! {
-        svg {
-            width: "20",
-            height: "20",
-            view_box: "0 0 24 24",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "2",
-            stroke_linecap: "round",
-            stroke_linejoin: "round",
-            "aria-hidden": "true",
-            rect { width: "20", height: "8", x: "2", y: "2", rx: "2" }
-            rect { width: "20", height: "8", x: "2", y: "14", rx: "2" }
-            line { x1: "6", x2: "6.01", y1: "6", y2: "6" }
-            line { x1: "6", x2: "6.01", y1: "18", y2: "18" }
-        }
-    }
-}
-
-#[component]
 fn StatusBadge(connected: bool) -> Element {
     let (tone, color, text) = if connected {
         (
@@ -430,6 +409,10 @@ fn ProcessRow(process: ProcessEntry) -> Element {
         .unwrap_or(&process.shell)
         .to_string();
     let managed = process.managed;
+    let cwd = match process.cwd.as_str() {
+        "" | "/" => None,
+        cwd => Some(cwd.to_string()),
+    };
     let nav_id = process.id.clone();
     let kill_id = process.id.clone();
     let onclick = move |_| {
@@ -460,22 +443,15 @@ fn ProcessRow(process: ProcessEntry) -> Element {
             },
             onclick,
             span { class: "font-mono text-[9px] tabular-nums text-muted-foreground", "{process.pid}" }
-            div { class: "flex min-w-0 items-center gap-2",
-                div { class: if process.attached {
-                        "flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary ring-1 ring-inset ring-primary/20"
-                    } else {
-                        "flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05] text-muted-foreground ring-1 ring-inset ring-foreground/[0.08]"
-                    },
-                    ServiceIcon {}
-                }
-                div { class: "min-w-0 flex-1",
-                    div { class: "flex min-w-0 items-center gap-1.5",
-                        span { class: "min-w-0 truncate font-mono text-[10px] font-semibold text-foreground", "{shell_name}" }
-                        if process.attached {
-                            span { class: "size-1.5 shrink-0 rounded-full bg-primary shadow-[0_0_7px_color-mix(in_oklab,var(--primary)_60%,transparent)]" }
-                        }
+            div { class: "min-w-0",
+                div { class: "flex min-w-0 items-center gap-1.5",
+                    span { class: "min-w-0 truncate font-mono text-[10px] font-semibold text-foreground", title: "{process.shell}", "{shell_name}" }
+                    if process.attached {
+                        span { class: "size-1.5 shrink-0 rounded-full bg-primary shadow-[0_0_7px_color-mix(in_oklab,var(--primary)_60%,transparent)]" }
                     }
-                    div { class: "truncate font-mono text-[8px] text-muted-foreground/65", title: "{process.cwd}", "{process.cwd}" }
+                }
+                if let Some(cwd) = cwd {
+                    div { class: "truncate font-mono text-[8px] text-muted-foreground/65", title: "{cwd}", "{cwd}" }
                 }
             }
             span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_percent:.1}" }

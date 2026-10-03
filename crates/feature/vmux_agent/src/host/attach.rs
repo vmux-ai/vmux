@@ -113,7 +113,7 @@ fn attach(
         } else {
             commands
                 .spawn((
-                    vmux_layout::Browser::native_page(&url, name),
+                    vmux_layout::Browser::native_page_with_icon(&url, name, icon.clone()),
                     vmux_chat::host::ChatView,
                     ChildOf(entity),
                     anchor,
@@ -121,6 +121,7 @@ fn attach(
                 .id()
         };
         commands.entity(view).insert((
+            ChildOf(entity),
             PageMetadata {
                 url,
                 title: name.to_string(),

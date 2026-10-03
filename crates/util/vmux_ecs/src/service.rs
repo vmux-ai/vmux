@@ -23,10 +23,21 @@ impl ServiceMessageAppExt for App {
     {
         self.add_message::<ServiceInbound>()
             .add_message::<M>()
-            .configure_sets(Update, (ServiceMessageDecodeSet, ServiceMessageSet).chain())
+            .configure_sets(
+                Update,
+                (
+                    ServiceMessageIngressSet,
+                    ServiceMessageDecodeSet,
+                    ServiceMessageSet,
+                )
+                    .chain(),
+            )
             .add_systems(Update, route_message::<M>.in_set(ServiceMessageDecodeSet))
     }
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ServiceMessageIngressSet;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ServiceMessageSet;
