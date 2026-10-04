@@ -1,35 +1,36 @@
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::HostWindow;
 use crossbeam_channel::{Receiver, Sender};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use vmux_agent::{
+use vmux_input::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
 };
-use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
+
+use crate::capture_output::{CaptureOutput, CaptureSource};
 
 pub(crate) struct RecordingPlugin;
 
 impl Plugin for RecordingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RecordingBridge>()
-            .init_resource::<RecordingStatus>()
-            .add_message::<RecordingControl>()
+        app.add_message::<RecordingControl>()
+            .add_systems(Startup, spawn_runtime)
             .add_systems(
                 Update,
-                (
-                    start_recording,
-                    handle_recording_control,
-                    auto_stop_recordings,
-                    drain_recordings,
-                )
+                (start, control, auto_stop_recordings, drain_recordings)
                     .chain()
-                    .after(vmux_command::WriteAppCommands),
+                    .after(vmux_command::WriteCommandRequests),
             );
     }
+}
+
+fn spawn_runtime(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Recording capture"),
+        RecordingBridge::default(),
+        RecordingStatus::default(),
+    ));
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -50,20 +51,25 @@ pub(crate) struct RecordOutcome {
     pub result: Result<RecordingInfo, String>,
 }
 
-#[derive(Resource)]
-pub(crate) struct RecordingBridge {
+#[derive(Component)]
+struct RecordingBridge {
     pub(crate) tx: Sender<RecordOutcome>,
     rx: Receiver<RecordOutcome>,
+    capture: capture::CaptureRuntime,
 }
 
 impl Default for RecordingBridge {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
-        Self { tx, rx }
+        Self {
+            tx,
+            rx,
+            capture: capture::CaptureRuntime::default(),
+        }
     }
 }
 
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum RecordingStatus {
     #[default]
     Idle,
@@ -78,79 +84,77 @@ pub(crate) enum RecordingControl {
     Done,
 }
 
-fn handle_recording_control(
+fn control(
     _non_send: NonSendMarker,
     mut reader: MessageReader<RecordingControl>,
-    mut status: ResMut<RecordingStatus>,
+    mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
 ) {
+    let Ok((mut bridge, mut status)) = runtime.single_mut() else {
+        return;
+    };
     for ctrl in reader.read() {
         match ctrl {
             RecordingControl::Pause => {
-                capture::pause();
+                bridge.capture.pause();
                 *status = RecordingStatus::Paused;
             }
             RecordingControl::Resume => {
-                capture::resume();
+                bridge.capture.resume();
                 *status = RecordingStatus::Recording;
             }
             RecordingControl::Done => {
-                capture::done();
+                bridge.capture.done();
             }
         }
     }
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn start_err(request_id: [u8; 16], message: impl Into<String>) -> RecordStartResponse {
-    RecordStartResponse {
-        request_id,
-        result: Err(message.into()),
-    }
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn resolve_output_paths(
-    dir: Option<&str>,
-    name: Option<&str>,
-    gif: bool,
-    timestamp: &str,
-    default_dir: &Path,
-) -> (PathBuf, Option<PathBuf>) {
-    let base_dir = dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_dir.to_path_buf());
-    let base_name = name
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("vmux-{timestamp}"));
-    let mp4 = base_dir.join(format!("{base_name}.mp4"));
-    let gif_path = gif.then(|| base_dir.join(format!("{base_name}.gif")));
-    (mp4, gif_path)
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn should_sample_gif_frame(
+pub(crate) struct GifSampling {
     elapsed_ms: u64,
     last_sampled_ms: Option<u64>,
     fps: u32,
-) -> bool {
-    let interval = (1000 / fps.max(1)) as u64;
-    match last_sampled_ms {
-        None => true,
-        Some(last) => elapsed_ms.saturating_sub(last) >= interval,
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl GifSampling {
+    pub(crate) fn new(elapsed_ms: u64, last_sampled_ms: Option<u64>, fps: u32) -> Self {
+        Self {
+            elapsed_ms,
+            last_sampled_ms,
+            fps,
+        }
+    }
+
+    pub(crate) fn should_sample(&self) -> bool {
+        let interval = (1000 / self.fps.max(1)) as u64;
+        match self.last_sampled_ms {
+            None => true,
+            Some(last) => self.elapsed_ms.saturating_sub(last) >= interval,
+        }
     }
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
-    let mut out = vec![0u8; bgra.len()];
-    for (i, px) in bgra.chunks_exact(4).enumerate() {
-        let o = i * 4;
-        out[o] = px[2];
-        out[o + 1] = px[1];
-        out[o + 2] = px[0];
-        out[o + 3] = px[3];
+pub(crate) struct BgraFrame(Vec<u8>);
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl BgraFrame {
+    pub(crate) fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
     }
-    out
+
+    pub(crate) fn rgba(&self) -> Vec<u8> {
+        let mut output = vec![0u8; self.0.len()];
+        for (index, pixel) in self.0.chunks_exact(4).enumerate() {
+            let offset = index * 4;
+            output[offset] = pixel[2];
+            output[offset + 1] = pixel[1];
+            output[offset + 2] = pixel[0];
+            output[offset + 3] = pixel[3];
+        }
+        output
+    }
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -159,109 +163,30 @@ pub(crate) const RECORDING_MAX_EDGE: u32 = 1280;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const RECORDING_BITRATE_BPS: i32 = 800_000;
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn downscale_to(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
-    let long = w.max(h);
-    if long == 0 {
-        return (1, 1);
-    }
-    if long <= max_edge {
-        return (w.max(1), h.max(1));
-    }
-    let scale = max_edge as f64 / long as f64;
-    (
-        ((w as f64 * scale).round() as u32).max(1),
-        ((h as f64 * scale).round() as u32).max(1),
-    )
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) struct CropRect {
-    pub x: u32,
-    pub y: u32,
-    pub w: u32,
-    pub h: u32,
-}
-
-impl CropRect {
-    pub(crate) fn of(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
-        let min = rect.min();
-        let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
-        let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
-        let w = (rect.size.x.round().max(1.0) as u32).min(img_w - left);
-        let h = (rect.size.y.round().max(1.0) as u32).min(img_h - top);
-        Self {
-            x: left,
-            y: top,
-            w,
-            h,
-        }
-    }
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn resolve_crop(
-    id: &str,
-    node_q: &Query<&ComputedNode>,
-    child_of_q: &Query<&ChildOf>,
-    img_w: u32,
-    img_h: u32,
-) -> Option<CropRect> {
-    use bevy::ecs::relationship::Relationship;
-    let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-    let mut entity = Entity::from_bits(bits);
-    for _ in 0..8 {
-        if let Ok(&computed) = node_q.get(entity) {
-            return Some(CropRect::of(computed, img_w, img_h));
-        }
-        entity = child_of_q.get(entity).ok()?.get();
-    }
-    None
-}
-
-fn start_recording(
+fn start(
     _non_send: NonSendMarker,
     mut start_reader: MessageReader<RecordStartRequest>,
     mut stop_reader: MessageReader<RecordStopRequest>,
     mut start_responses: MessageWriter<RecordStartResponse>,
-    bridge: Res<RecordingBridge>,
+    mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
     settings: Res<AppSettings>,
-    mut status: ResMut<RecordingStatus>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
-    window_q: Query<(Entity, &Window)>,
-    host_windows: Query<&HostWindow>,
-    node_q: Query<&ComputedNode>,
-    child_of_q: Query<&ChildOf>,
+    source: CaptureSource,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    let default_dir = crate::capture_output::output_dir(&settings);
+    let Ok((mut bridge, mut status)) = runtime.single_mut() else {
+        return;
+    };
+    let default_dir = CaptureOutput::directory(&settings);
     for req in start_reader.read() {
-        let pane_window = req.pane.as_deref().and_then(|id| {
-            let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-            vmux_layout::window::host_window_of(Entity::from_bits(bits), &child_of_q, &host_windows)
-        });
-        let Some(window_entity) = pane_window.or(focused_window.0) else {
-            start_responses.write(start_err(req.request_id, "no focused vmux window"));
-            continue;
-        };
-        let Ok((_, window)) = window_q.get(window_entity) else {
-            start_responses.write(start_err(req.request_id, "focused vmux window not found"));
-            continue;
-        };
-        let img_w = window.resolution.physical_width();
-        let img_h = window.resolution.physical_height();
-        let scale = window.resolution.scale_factor() as f64;
-        let crop = match &req.pane {
-            Some(id) => match resolve_crop(id, &node_q, &child_of_q, img_w, img_h) {
-                Some(rect) => Some(rect),
-                None => {
-                    start_responses
-                        .write(start_err(req.request_id, format!("pane not found: {id}")));
-                    continue;
-                }
-            },
-            None => None,
+        let capture = match source.resolve(req.pane.as_deref()) {
+            Ok(capture) => capture,
+            Err(message) => {
+                start_responses.write(RecordStartResponse {
+                    request_id: req.request_id,
+                    result: Err(message),
+                });
+                continue;
+            }
         };
         let wake: Option<WakeFn> = proxy.as_ref().map(|p| {
             let proxy = (***p).clone();
@@ -269,17 +194,18 @@ fn start_recording(
                 let _ = proxy.send_event(WinitUserEvent::WakeUp);
             }) as WakeFn
         });
-        let resp = capture::start(
-            window_entity,
-            img_w,
-            img_h,
-            crop,
+        let tx = bridge.tx.clone();
+        let resp = bridge.capture.start(
+            capture.window,
+            capture.size.width,
+            capture.size.height,
+            capture.crop,
             req.request_id,
             req.gif,
             req.max_secs,
             default_dir.clone(),
-            scale,
-            bridge.tx.clone(),
+            capture.scale,
+            tx,
             wake,
         );
         if resp.result.is_ok() {
@@ -289,21 +215,29 @@ fn start_recording(
     }
 
     for req in stop_reader.read() {
-        capture::stop(req.request_id, req.dir.clone(), req.name.clone());
+        bridge
+            .capture
+            .stop(req.request_id, req.dir.clone(), req.name.clone());
     }
 }
 
-fn auto_stop_recordings(_non_send: NonSendMarker) {
-    capture::poll_auto_stop();
+fn auto_stop_recordings(_non_send: NonSendMarker, mut runtime: Query<&mut RecordingBridge>) {
+    let Ok(mut bridge) = runtime.single_mut() else {
+        return;
+    };
+    bridge.capture.poll_auto_stop();
 }
 
 fn drain_recordings(
-    bridge: Res<RecordingBridge>,
+    mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
     mut last_auto: Local<Option<RecordingInfo>>,
-    mut status: ResMut<RecordingStatus>,
     mut stop_responses: MessageWriter<RecordStopResponse>,
 ) {
+    let Ok((mut bridge, mut status)) = runtime.single_mut() else {
+        return;
+    };
     while let Ok(outcome) = bridge.rx.try_recv() {
+        bridge.capture.complete();
         *status = RecordingStatus::Idle;
         match outcome.request_id {
             Some(request_id) => {
@@ -327,107 +261,71 @@ mod tests {
     use super::*;
 
     #[test]
-    fn output_paths_default_dir_and_name() {
-        let default_dir = Path::new("/tmp/def");
-        let (mp4, gif) =
-            resolve_output_paths(None, None, false, "20260623-101010-001", default_dir);
-        assert_eq!(mp4, PathBuf::from("/tmp/def/vmux-20260623-101010-001.mp4"));
-        assert!(gif.is_none());
-    }
-
-    #[test]
-    fn output_paths_custom_dir_name_and_gif() {
-        let (mp4, gif) = resolve_output_paths(
-            Some("/tmp/out"),
-            Some("feature-x"),
-            true,
-            "ts",
-            Path::new("/tmp/def"),
-        );
-        assert_eq!(mp4, PathBuf::from("/tmp/out/feature-x.mp4"));
-        assert_eq!(gif, Some(PathBuf::from("/tmp/out/feature-x.gif")));
-    }
-
-    #[test]
     fn gif_sampling_respects_fps() {
-        assert!(should_sample_gif_frame(0, None, 12));
-        assert!(!should_sample_gif_frame(40, Some(0), 12));
-        assert!(should_sample_gif_frame(90, Some(0), 12));
+        assert!(GifSampling::new(0, None, 12).should_sample());
+        assert!(!GifSampling::new(40, Some(0), 12).should_sample());
+        assert!(GifSampling::new(90, Some(0), 12).should_sample());
     }
 
     #[test]
     fn bgra_to_rgba_swaps_channels() {
         let bgra = vec![1u8, 2, 3, 4];
-        assert_eq!(bgra_to_rgba(&bgra), vec![3, 2, 1, 4]);
-    }
-
-    #[test]
-    fn crop_rect_clamps_to_image() {
-        let r = CropRect::of(
-            ComputedNode {
-                size: Vec2::new(80.0, 60.0),
-                center: Vec2::new(100.0, 100.0),
-                ..default()
-            },
-            1000,
-            1000,
-        );
-        assert_eq!(
-            r,
-            CropRect {
-                x: 60,
-                y: 70,
-                w: 80,
-                h: 60
-            }
-        );
-    }
-
-    #[test]
-    fn downscale_caps_long_edge_without_upscaling() {
-        assert_eq!(downscale_to(800, 600, 800), (800, 600));
-        assert_eq!(downscale_to(1600, 800, 800), (800, 400));
-        assert_eq!(downscale_to(0, 0, 800), (1, 1));
+        assert_eq!(BgraFrame::new(bgra).rgba(), vec![3, 2, 1, 4]);
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 mod capture {
-    use super::{CropRect, RecordOutcome, WakeFn};
+    use super::{RecordOutcome, WakeFn};
+    use crate::capture_output::CropRect;
     use bevy::prelude::Entity;
     use crossbeam_channel::Sender;
     use std::path::PathBuf;
-    use vmux_agent::RecordStartResponse;
+    use vmux_input::RecordStartResponse;
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn start(
-        _window_entity: Entity,
-        _img_w: u32,
-        _img_h: u32,
-        _crop: Option<CropRect>,
-        request_id: [u8; 16],
-        _gif: bool,
-        _max_secs: u32,
-        _default_dir: PathBuf,
-        _scale: f64,
-        _tx: Sender<RecordOutcome>,
-        _wake: Option<WakeFn>,
-    ) -> RecordStartResponse {
-        RecordStartResponse {
-            request_id,
-            result: Err("recording is only supported on macOS".to_string()),
+    #[derive(Default)]
+    pub(crate) struct CaptureRuntime {}
+
+    impl CaptureRuntime {
+        #[allow(clippy::too_many_arguments)]
+        pub(crate) fn start(
+            &mut self,
+            _window_entity: Entity,
+            _img_w: u32,
+            _img_h: u32,
+            _crop: Option<CropRect>,
+            request_id: [u8; 16],
+            _gif: bool,
+            _max_secs: u32,
+            _default_dir: PathBuf,
+            _scale: f64,
+            _tx: Sender<RecordOutcome>,
+            _wake: Option<WakeFn>,
+        ) -> RecordStartResponse {
+            RecordStartResponse {
+                request_id,
+                result: Err("recording is only supported on macOS".to_string()),
+            }
         }
+
+        pub(crate) fn stop(
+            &mut self,
+            _request_id: [u8; 16],
+            _dir: Option<String>,
+            _name: Option<String>,
+        ) {
+        }
+
+        pub(crate) fn poll_auto_stop(&mut self) {}
+
+        pub(crate) fn pause(&mut self) {}
+
+        pub(crate) fn resume(&mut self) {}
+
+        pub(crate) fn done(&mut self) {}
+
+        pub(crate) fn complete(&mut self) {}
     }
-
-    pub(crate) fn stop(_request_id: [u8; 16], _dir: Option<String>, _name: Option<String>) {}
-
-    pub(crate) fn poll_auto_stop() {}
-
-    pub(crate) fn pause() {}
-
-    pub(crate) fn resume() {}
-
-    pub(crate) fn done() {}
 }
 
 #[cfg(target_os = "macos")]

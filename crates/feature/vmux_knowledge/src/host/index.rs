@@ -1,0 +1,160 @@
+use std::path::Path;
+use std::sync::mpsc;
+
+use crate::{KnowledgeIndex, KnowledgeVault};
+use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+pub(super) struct KnowledgeIndexPlugin;
+
+impl Plugin for KnowledgeIndexPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_non_send(KnowledgeWatch::default())
+            .add_systems(Startup, initialize)
+            .add_systems(Update, (drain_watch, start, finish).chain());
+    }
+}
+
+fn initialize(
+    mut commands: Commands,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut watch: NonSendMut<KnowledgeWatch>,
+) {
+    let vault = KnowledgeVault::user();
+    commands.spawn((
+        Name::new("Knowledge index"),
+        KnowledgeIndexRuntime::default(),
+        KnowledgeIndex::default(),
+        vault.clone(),
+    ));
+    if let Err(error) = vault.ensure() {
+        warn!("knowledge vault initialization failed: {error}");
+        return;
+    }
+    if let Err(error) = vault.ensure_repository() {
+        warn!("knowledge Git initialization failed: {error}");
+    }
+    if let Err(error) = vault.sync_agent_configs() {
+        warn!("external agent Knowledge sync failed: {error}");
+    }
+    let wake = wake.map(|wrapper| (**wrapper).clone());
+    match KnowledgeWatcher::watching(vault.root(), wake) {
+        Ok(watcher) => watch.0 = Some(watcher),
+        Err(error) => warn!("knowledge watcher init failed: {error}"),
+    }
+}
+
+#[derive(Component)]
+struct KnowledgeIndexRuntime {
+    dirty: bool,
+    generation: u64,
+}
+
+impl Default for KnowledgeIndexRuntime {
+    fn default() -> Self {
+        Self {
+            dirty: true,
+            generation: 1,
+        }
+    }
+}
+
+impl KnowledgeIndexRuntime {
+    fn invalidate(&mut self) {
+        self.dirty = true;
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
+
+#[derive(Default)]
+struct KnowledgeWatch(Option<KnowledgeWatcher>);
+
+struct KnowledgeWatcher {
+    _watcher: RecommendedWatcher,
+    receiver: mpsc::Receiver<notify::Result<notify::Event>>,
+}
+
+impl KnowledgeWatcher {
+    fn watching(root: &Path, wake: Option<EventLoopProxy<WinitUserEvent>>) -> notify::Result<Self> {
+        let (sender, receiver) = mpsc::channel();
+        let mut watcher = notify::recommended_watcher(move |result| {
+            if sender.send(result).is_ok()
+                && let Some(wake) = wake.as_ref()
+            {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+        })?;
+        watcher.watch(root, RecursiveMode::Recursive)?;
+        Ok(Self {
+            _watcher: watcher,
+            receiver,
+        })
+    }
+}
+
+fn drain_watch(watch: NonSend<KnowledgeWatch>, mut runtime: Single<&mut KnowledgeIndexRuntime>) {
+    let Some(watch) = watch.0.as_ref() else {
+        return;
+    };
+    if watch
+        .receiver
+        .try_iter()
+        .any(|result| result.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_))))
+    {
+        runtime.invalidate();
+    }
+}
+
+fn start(
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
+    vault: Single<&KnowledgeVault>,
+    pending: Query<(), With<KnowledgeIndexTask>>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    if !runtime.dirty || !pending.is_empty() {
+        return;
+    }
+    let generation = runtime.generation;
+    let root = vault.root().to_path_buf();
+    let wake = wake.map(|wrapper| (**wrapper).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let result = KnowledgeIndex::build(&root).map_err(|error| error.to_string());
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        result
+    });
+    runtime.dirty = false;
+    commands.spawn(KnowledgeIndexTask { generation, task });
+}
+
+#[derive(Component)]
+struct KnowledgeIndexTask {
+    generation: u64,
+    task: Task<Result<KnowledgeIndex, String>>,
+}
+
+fn finish(
+    mut tasks: Query<(Entity, &mut KnowledgeIndexTask)>,
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
+    mut index: Single<&mut KnowledgeIndex>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        if task.generation != runtime.generation {
+            runtime.dirty = true;
+            continue;
+        }
+        match result {
+            Ok(next) => **index = next,
+            Err(error) => warn!("knowledge index refresh failed: {error}"),
+        }
+    }
+}

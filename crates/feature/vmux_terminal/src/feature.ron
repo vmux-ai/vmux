@@ -1,0 +1,244 @@
+(
+    settings: Some((
+        defaults: (
+            terminal: Some((
+                default_theme: "default",
+                confirm_close: true,
+                themes: [(
+                    name: "default",
+                    color_scheme: "catppuccin-mocha",
+                    font_family: "",
+                    font_size: 14.0,
+                    line_height: 1.2,
+                    padding: 4.0,
+                    cursor_style: "block",
+                    cursor_blink: true,
+                )],
+            )),
+        ),
+        sections: [(
+            id: "terminal",
+            title: "schema-terminal",
+            root_path: "terminal",
+            order: 50,
+        )],
+        fields: [
+            (
+                path: "terminal",
+                order: [
+                    "shell",
+                    "font_family",
+                    "startup_dir",
+                    "confirm_close",
+                    "default_theme",
+                    "themes",
+                    "custom_themes",
+                ],
+            ),
+            (path: "terminal.shell", label: Some("schema-shell")),
+            (path: "terminal.font_family", label: Some("schema-font-family")),
+            (path: "terminal.startup_dir", label: Some("schema-startup-directory")),
+            (
+                path: "terminal.confirm_close",
+                label: Some("schema-confirm-close"),
+                hint: Some("schema-confirm-close-detail"),
+            ),
+            (
+                path: "terminal.default_theme",
+                label: Some("schema-default-theme"),
+                hint: Some("schema-default-theme-detail"),
+                placeholder: Some("default"),
+            ),
+            (path: "terminal.themes", label: Some("schema-themes")),
+            (path: "terminal.themes[].name", label: Some("schema-name")),
+            (
+                path: "terminal.themes[].color_scheme",
+                label: Some("schema-color-scheme"),
+            ),
+            (
+                path: "terminal.themes[].font_family",
+                label: Some("schema-font-family"),
+            ),
+            (
+                path: "terminal.themes[].font_size",
+                label: Some("schema-font-size"),
+            ),
+            (
+                path: "terminal.themes[].line_height",
+                label: Some("schema-line-height"),
+            ),
+            (path: "terminal.themes[].padding", label: Some("schema-padding")),
+            (
+                path: "terminal.themes[].cursor_style",
+                label: Some("schema-cursor-style"),
+            ),
+            (
+                path: "terminal.themes[].cursor_blink",
+                label: Some("schema-cursor-blink"),
+            ),
+            (path: "terminal.themes[].shell", label: Some("schema-shell")),
+            (
+                path: "terminal.custom_themes",
+                label: Some("schema-custom-themes"),
+            ),
+            (
+                path: "terminal.custom_themes[].name",
+                label: Some("schema-name"),
+            ),
+            (
+                path: "terminal.custom_themes[].foreground",
+                label: Some("schema-foreground"),
+            ),
+            (
+                path: "terminal.custom_themes[].background",
+                label: Some("schema-background"),
+            ),
+            (
+                path: "terminal.custom_themes[].cursor",
+                label: Some("schema-cursor"),
+            ),
+            (
+                path: "terminal.custom_themes[].ansi",
+                label: Some("schema-ansi-colors"),
+            ),
+        ],
+    )),
+    pages: [
+        (
+            url: "vmux://terminal/",
+            title: "Terminal",
+            title_message_id: "command-terminal",
+            keywords: ["shell", "console"],
+            icon: "Terminal",
+            command_bar: true,
+            bookmark: Some(20),
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "TerminalUiState",
+                "TermScrollEvent",
+                "TermMouseEvent",
+                "TermLinkOpenRequest",
+                "TermResizeEvent",
+                "UiKeyContext",
+                "KeyStroke",
+                "KeyClaims",
+            ],
+        )
+        ,
+        (
+            name: "process_monitor",
+            url: "vmux://services/",
+            title: "Services",
+            title_message_id: "services-title",
+            replaces_command: "service_open",
+            keywords: ["processes", "monitor"],
+            icon: "Activity",
+            command_bar: true,
+            bookmark: Some(70),
+            manifest: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "ProcessesUiState",
+                "ProcessNavigateEvent",
+                "ProcessKillEvent",
+                "ProcessKillAllEvent",
+            ],
+        ),
+    ],
+    tools: [
+            (
+                name: "run",
+                description: r#"Run a shell command in a visible terminal pane the user can watch live and take over. Blocks until the command finishes and returns its full output plus the exit code (`terminal: <id>`, `exit: <code>`, `output: ...`). If it reaches the configured wait limit, returns the output so far with a note to call read_terminal for the rest.
+
+        PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` into your project on every run; the shell stays where it was. The first `run` opens it; later ones run in that same shell. Rule of thumb: don't open a new pane unless you actually need one. Placement overrides are disabled by default: omit `mode`, `direction`, and `beside`. If vmux rejects them, retry the bare run. Users can enable overrides with `agent.allow_run_placement_override`. When enabled, override only when you mean to:
+        - `mode`: `auto` (default, reuse your one persistent shell) | `split` (force a NEW pane) | `stack` (force a new stacked terminal in the anchor's pane).
+        - `beside`: anchor to a specific page — a terminal id a previous run returned, or "self" for your own pane. With `beside` set, `stack` tabs into that page's pane and `split` splits off it.
+        - `direction`: only for `split`; Omit `direction` in auto mode so vmux keeps terminal runs in the terminal bucket and spirals new panes predictably.
+        - `terminal: <id>`: instead of opening anything, run IN that existing terminal (best for dependent / sequential steps that share one shell, in order).
+
+        `focus` (default false = keep focus on your own pane) applies when opening a new terminal. The command is typed into an interactive shell, so the terminal stays usable afterwards.
+
+        `shell`: hand the command to a named interpreter instead of writing it in the user's shell — `bash`, `sh`, `python3`, `node`, `ruby`, anything on PATH. Name the program ALONE: vmux adds the flag that makes it read a script (`-c`, `-e`, `eval`) and quotes the script for the user's shell, so `command` is the script itself, newlines and all, and never carries `-c` or `-e` of its own. Omit `shell` to write in the user's own shell."#,
+                input_schema: (
+                    type: Object,
+                    required: ["command"],
+                    properties: {
+                        "command": (type: String),
+                        "shell": (type: String),
+                        "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                        "focus": (type: Boolean),
+                        "terminal": (type: String),
+                        "beside": (type: String),
+                        "mode": (type: String, values: ["auto", "split", "stack"]),
+                    },
+                ),
+                availability: without_acp_terminals,
+                shell_aware: true,
+            ),
+            (
+                name: "read_terminal",
+                description: r#"Return the current visible scrollback text of a terminal (the same text the user sees). Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."#,
+                input_schema: (
+                    type: Object,
+                    required: ["terminal"],
+                    properties: {"terminal": (type: String)},
+                ),
+                availability: without_acp_terminals,
+            ),
+            (
+                name: "terminal_send",
+                description: "Send text to a terminal. Target by terminal process ID or omit it to use the active terminal. Set enter to true to append a carriage return.",
+                input_schema: (
+                    type: Object,
+                    required: ["text"],
+                    properties: {
+                        "text": (type: String),
+                        "terminal": (type: String),
+                        "enter": (type: Boolean),
+                    },
+                ),
+            ),
+    ],
+    commands: [
+            (
+                id: "terminal_close",
+                label: "Close Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Close Terminal", allow_agent: true)),
+            ),
+            (
+                id: "terminal_next",
+                label: "Next Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Next Terminal")),
+            ),
+            (
+                id: "terminal_prev",
+                label: "Previous Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Previous Terminal")),
+            ),
+            (
+                id: "terminal_clear",
+                label: "Clear Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Clear Terminal", allow_agent: true)),
+            ),
+            (
+                id: "terminal_copy_mode",
+                label: "Visual Mode",
+                group: "Terminal",
+                hidden: true,
+                shortcuts: [(shortcut: Chord("Ctrl+b, ["), when: None)],
+                mcp: Some((description: "Visual Mode", allow_agent: true)),
+            ),
+            (
+                id: "service_open",
+                label: "Open Service Monitor",
+                group: "Service",
+                mcp: Some((description: "Open Service Monitor")),
+            ),
+    ],
+)

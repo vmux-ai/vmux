@@ -1,38 +1,43 @@
-use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::HostWindow;
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
-use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
-use vmux_flex::prelude::*;
+use vmux_input::{ScreenshotRequest, ScreenshotResponse};
 use vmux_setting::AppSettings;
+
+#[cfg(any(target_os = "macos", test))]
+use crate::capture_output::CaptureSize;
+use crate::capture_output::{CaptureOutput, CaptureSource, CropRect};
 
 pub(crate) struct ScreenshotPlugin;
 
 impl Plugin for ScreenshotPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ScreenshotBridge>().add_systems(
+        app.add_systems(Startup, spawn_bridge).add_systems(
             Update,
             (start_screenshots, drain_screenshots)
                 .chain()
-                .after(vmux_command::WriteAppCommands),
+                .after(vmux_command::WriteCommandRequests),
         );
     }
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) const MAX_INLINE_EDGE: u32 = 1568;
+fn spawn_bridge(mut commands: Commands) {
+    commands.spawn((Name::new("Screenshot capture"), ScreenshotBridge::default()));
+}
 
-pub(crate) type WakeFn = Arc<dyn Fn() + Send + Sync>;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const MAX_INLINE_EDGE: u32 = 1568;
+
+type WakeFn = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const PERMISSION_MSG: &str = "Screen Recording permission required - grant it in System Settings > \
 Privacy & Security > Screen Recording, then call screenshot again.";
 
-#[derive(Resource)]
-pub(crate) struct ScreenshotBridge {
+#[derive(Component)]
+struct ScreenshotBridge {
     tx: Sender<ScreenshotResponse>,
     rx: Receiver<ScreenshotResponse>,
 }
@@ -51,70 +56,25 @@ fn err_response(request_id: [u8; 16], message: impl Into<String>) -> ScreenshotR
     }
 }
 
-fn resolve_crop(
-    id: &str,
-    node_q: &Query<&ComputedNode>,
-    child_of_q: &Query<&ChildOf>,
-    img_w: u32,
-    img_h: u32,
-) -> Option<CropRect> {
-    let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-    let mut entity = Entity::from_bits(bits);
-    for _ in 0..8 {
-        if let Ok(&computed) = node_q.get(entity) {
-            return Some(CropRect::of(computed, img_w, img_h));
-        }
-        entity = child_of_q.get(entity).ok()?.get();
-    }
-    None
-}
-
 fn start_screenshots(
     _non_send: NonSendMarker,
     mut reader: MessageReader<ScreenshotRequest>,
-    bridge: Res<ScreenshotBridge>,
+    bridge: Query<&ScreenshotBridge>,
     settings: Res<AppSettings>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
-    window_q: Query<(Entity, &Window)>,
-    host_windows: Query<&HostWindow>,
-    node_q: Query<&ComputedNode>,
-    child_of_q: Query<&ChildOf>,
+    source: CaptureSource,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    let base_dir = crate::capture_output::output_dir(&settings);
+    let Ok(bridge) = bridge.single() else {
+        return;
+    };
+    let base_dir = CaptureOutput::directory(&settings);
     for req in reader.read() {
-        let pane_window = req.pane.as_deref().and_then(|id| {
-            let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-            vmux_layout::window::host_window_of(Entity::from_bits(bits), &child_of_q, &host_windows)
-        });
-        let Some(window_entity) = pane_window.or(focused_window.0) else {
-            let _ = bridge
-                .tx
-                .send(err_response(req.request_id, "no focused vmux window"));
-            continue;
-        };
-        let Ok((_, window)) = window_q.get(window_entity) else {
-            let _ = bridge.tx.send(err_response(
-                req.request_id,
-                "focused vmux window not found",
-            ));
-            continue;
-        };
-        let img_w = window.resolution.physical_width();
-        let img_h = window.resolution.physical_height();
-
-        let crop = match &req.pane {
-            Some(id) => match resolve_crop(id, &node_q, &child_of_q, img_w, img_h) {
-                Some(rect) => Some(rect),
-                None => {
-                    let _ = bridge.tx.send(err_response(
-                        req.request_id,
-                        format!("pane not found: {id}"),
-                    ));
-                    continue;
-                }
-            },
-            None => None,
+        let capture = match source.resolve(req.pane.as_deref()) {
+            Ok(capture) => capture,
+            Err(message) => {
+                let _ = bridge.tx.send(err_response(req.request_id, message));
+                continue;
+            }
         };
 
         let tx = bridge.tx.clone();
@@ -125,10 +85,10 @@ fn start_screenshots(
             }) as WakeFn
         });
         capture::capture(
-            window_entity,
-            img_w,
-            img_h,
-            crop,
+            capture.window,
+            capture.size.width,
+            capture.size.height,
+            capture.crop,
             req.request_id,
             base_dir.clone(),
             tx,
@@ -137,127 +97,44 @@ fn start_screenshots(
     }
 }
 
-fn drain_screenshots(bridge: Res<ScreenshotBridge>, mut writer: MessageWriter<ScreenshotResponse>) {
+fn drain_screenshots(
+    bridge: Query<&ScreenshotBridge>,
+    mut writer: MessageWriter<ScreenshotResponse>,
+) {
+    let Ok(bridge) = bridge.single() else {
+        return;
+    };
     while let Ok(response) = bridge.rx.try_recv() {
         writer.write(response);
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CropRect {
-    pub x: u32,
-    pub y: u32,
-    pub w: u32,
-    pub h: u32,
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
-    let long = w.max(h);
-    if long == 0 {
-        return (1, 1);
-    }
-    if long <= max_edge {
-        return (w.max(1), h.max(1));
-    }
-    let scale = max_edge as f64 / long as f64;
-    (
-        ((w as f64 * scale).round() as u32).max(1),
-        ((h as f64 * scale).round() as u32).max(1),
-    )
-}
-
-impl CropRect {
-    pub(crate) fn of(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
-        let min = rect.min();
-        let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
-        let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
-        let w = (rect.size.x.round().max(1.0) as u32).min(img_w - left);
-        let h = (rect.size.y.round().max(1.0) as u32).min(img_h - top);
-        Self {
-            x: left,
-            y: top,
-            w,
-            h,
-        }
-    }
-}
-
 #[cfg(any(target_os = "macos", test))]
-pub(crate) fn encode_downscaled_png(
+fn encode_downscaled_png(
     img: &image::RgbaImage,
     max_edge: u32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    let (dw, dh) = downscale_dims(img.width(), img.height(), max_edge);
+    let size = CaptureSize::new(img.width(), img.height()).downscaled(max_edge);
     let dynimg = image::DynamicImage::ImageRgba8(img.clone());
-    let scaled = if (dw, dh) == (img.width(), img.height()) {
+    let scaled = if (size.width, size.height) == (img.width(), img.height()) {
         dynimg
     } else {
-        dynimg.resize_exact(dw, dh, image::imageops::FilterType::Lanczos3)
+        dynimg.resize_exact(
+            size.width,
+            size.height,
+            image::imageops::FilterType::Lanczos3,
+        )
     };
     let mut buf = std::io::Cursor::new(Vec::new());
     scaled
         .write_to(&mut buf, image::ImageFormat::Png)
         .map_err(|e| format!("png encode failed: {e}"))?;
-    Ok((buf.into_inner(), dw, dh))
+    Ok((buf.into_inner(), size.width, size.height))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn downscale_never_upscales() {
-        assert_eq!(downscale_dims(800, 600, 1568), (800, 600));
-        assert_eq!(downscale_dims(0, 0, 1568), (1, 1));
-    }
-
-    #[test]
-    fn downscale_caps_long_edge() {
-        assert_eq!(downscale_dims(3136, 1568, 1568), (1568, 784));
-        assert_eq!(downscale_dims(1568, 3136, 1568), (784, 1568));
-    }
-
-    #[test]
-    fn crop_rect_clamps_to_image() {
-        let r = CropRect::of(
-            ComputedNode {
-                size: Vec2::new(80.0, 60.0),
-                center: Vec2::new(100.0, 100.0),
-                ..default()
-            },
-            1000,
-            1000,
-        );
-        assert_eq!(
-            r,
-            CropRect {
-                x: 60,
-                y: 70,
-                w: 80,
-                h: 60
-            }
-        );
-
-        let r = CropRect::of(
-            ComputedNode {
-                size: Vec2::splat(40.0),
-                center: Vec2::splat(990.0),
-                ..default()
-            },
-            1000,
-            1000,
-        );
-        assert_eq!(
-            r,
-            CropRect {
-                x: 970,
-                y: 970,
-                w: 30,
-                h: 30
-            }
-        );
-    }
 
     #[test]
     fn encode_downscaled_png_emits_png_header() {
@@ -278,14 +155,21 @@ mod capture {
     use crossbeam_channel::Sender;
     use objc2::AllocAnyThread;
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-    use objc2_core_graphics::{CGBitmapContextCreate, CGImage, CGImageAlphaInfo};
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
+    };
     use objc2_foundation::NSError;
     use objc2_screen_capture_kit::{
         SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
     };
     use std::ffi::c_void;
     use std::path::PathBuf;
-    use vmux_agent::{ScreenshotImage, ScreenshotResponse};
+    use vmux_input::{ScreenshotImage, ScreenshotResponse};
+
+    use bevy::winit::WINIT_WINDOWS;
+    use objc2_app_kit::NSView;
+    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     unsafe extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
@@ -304,10 +188,6 @@ mod capture {
     }
 
     fn window_number(window_entity: Entity) -> Option<u32> {
-        use bevy::winit::WINIT_WINDOWS;
-        use objc2_app_kit::NSView;
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
         WINIT_WINDOWS.with_borrow(|winit_windows| {
             let win = winit_windows.get_window(window_entity)?;
             let handle = win.window_handle().ok()?;
@@ -320,19 +200,15 @@ mod capture {
         })
     }
 
-    #[allow(deprecated)]
     fn cgimage_to_rgba(image: &CGImage) -> Result<image::RgbaImage, String> {
-        use objc2_core_graphics::{
-            CGColorSpaceCreateDeviceRGB, CGContextDrawImage, CGImageGetHeight, CGImageGetWidth,
-        };
-        let width = CGImageGetWidth(Some(image)) as u32;
-        let height = CGImageGetHeight(Some(image)) as u32;
+        let width = CGImage::width(Some(image)) as u32;
+        let height = CGImage::height(Some(image)) as u32;
         if width == 0 || height == 0 {
             return Err("captured image has zero dimension".into());
         }
         let bytes_per_row = width as usize * 4;
         let mut buf = vec![0u8; bytes_per_row * height as usize];
-        let color_space = CGColorSpaceCreateDeviceRGB().ok_or("failed to create color space")?;
+        let color_space = CGColorSpace::new_device_rgb().ok_or("failed to create color space")?;
         let ctx = unsafe {
             CGBitmapContextCreate(
                 buf.as_mut_ptr() as *mut c_void,
@@ -349,7 +225,7 @@ mod capture {
             CGPoint::new(0.0, 0.0),
             CGSize::new(width as f64, height as f64),
         );
-        CGContextDrawImage(Some(&ctx), rect, Some(image));
+        CGContext::draw_image(Some(&ctx), rect, Some(image));
         drop(ctx);
         image::RgbaImage::from_raw(width, height, buf).ok_or_else(|| "pixel buffer mismatch".into())
     }
@@ -389,7 +265,6 @@ mod capture {
     }
 
     fn os_at_least_14() -> bool {
-        use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
         let version = NSOperatingSystemVersion {
             majorVersion: 14,
             minorVersion: 0,
@@ -511,7 +386,7 @@ mod capture {
     use bevy::prelude::Entity;
     use crossbeam_channel::Sender;
     use std::path::PathBuf;
-    use vmux_agent::ScreenshotResponse;
+    use vmux_input::ScreenshotResponse;
 
     pub(crate) fn capture(
         _window_entity: Entity,

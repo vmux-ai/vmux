@@ -1,0 +1,61 @@
+(
+    pages: [
+        (
+            url: "vmux://knowledge/",
+            title: "Knowledge",
+            bookmark: Some(40),
+            owns_subtree: true,
+            title_message_id: "layout-knowledge",
+            keywords: ["knowledge", "notes", "markdown"],
+            icon: "Brain",
+            command_bar: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "UiKeyContext",
+                "KeyStroke",
+                "KeyClaims",
+            ],
+        ),
+    ],
+    tools: [
+            (
+                name: "search_knowledge",
+                description: r#"Search every Markdown note in the user's vmux Knowledge base. Returns ranked source references as path:line with titles and matching previews. Use this before read_knowledge when the relevant note is unknown. No permission is required."#,
+                input_schema: (
+                    type: Object,
+                    required: ["query"],
+                    properties: {
+                        "query": (type: String),
+                        "limit": (type: Integer, minimum: Some(1), maximum: Some(100)),
+                    },
+                ),
+            ),
+            (
+                name: "read_knowledge",
+                description: r#"Read a Markdown note from the user's vmux Knowledge base by relative path, title, or alias. line is 1-based and defaults to 1; limit defaults to 200 lines. Use source references returned by search_knowledge. No permission is required."#,
+                input_schema: (
+                    type: Object,
+                    required: ["path"],
+                    properties: {
+                        "path": (type: String),
+                        "line": (type: Integer, minimum: Some(1)),
+                        "limit": (type: Integer, minimum: Some(1), maximum: Some(2000)),
+                    },
+                ),
+            ),
+            (
+                name: "write_knowledge",
+                description: r#"Create or replace a Markdown note in the user's vmux Knowledge base, then open it beside the conversation. Use this when the user asks to save, copy, or organize information in Knowledge. Provide a relative path under skills/, memories/, projects/, meetings/, or handbook/; omit path to create projects/<title-slug>.md. Never write directly to ~/.vmux/knowledge with shell commands."#,
+                input_schema: (
+                    type: Object,
+                    required: ["title", "content"],
+                    properties: {
+                        "path": (type: String),
+                        "title": (type: String),
+                        "content": (type: String),
+                    },
+                ),
+            ),
+    ],
+)

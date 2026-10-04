@@ -1,0 +1,24 @@
+(
+    pages: [
+        (
+            url: "vmux://history/",
+            title: "History",
+            bookmark: Some(110),
+            title_message_id: "history-title",
+            replaces_command: "browser_open_history",
+            keywords: ["recent", "visited"],
+            icon: "Clock",
+            command_bar: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "HistoryUiState",
+                "HistoryQueryRequest",
+                "HistoryLoadMoreRequest",
+                "HistoryDeleteRequest",
+                "HistoryClearAllRequest",
+                "HistoryOpenRequest",
+            ],
+        ),
+    ],
+)

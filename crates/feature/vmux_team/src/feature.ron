@@ -1,0 +1,34 @@
+(
+    pages: [
+        (
+            url: "vmux://team/",
+            title: "Team",
+            bookmark: Some(100),
+            title_message_id: "team-title",
+            keywords: ["team", "agents", "profile"],
+            icon: "Users",
+            command_bar: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "TeamEvent",
+                "TeamOpenRequest",
+                "TeamMemberFocusRequest",
+                "TeamProfileCreateRequest",
+                "TeamProfileSwitchRequest",
+                "TeamProfileUpdateRequest",
+            ],
+        ),
+    ],
+    tools: [
+            (
+                name: "rename_profile",
+                description: "Rename the active profile display name without changing its storage.",
+                input_schema: (
+                    type: Object,
+                    required: ["name"],
+                    properties: {"name": (type: String)},
+                ),
+            ),
+    ],
+)

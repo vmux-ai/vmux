@@ -1,0 +1,31 @@
+name: Setup Rust
+description: Load pinned tool versions and install the repository Rust toolchain
+inputs:
+  components:
+    description: Comma-separated rustup components
+    required: false
+    default: ""
+  targets:
+    description: Comma-separated rustup targets
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Load pinned tool versions
+      shell: bash
+      run: cat tool-versions.env >> "$GITHUB_ENV"
+
+    - name: Resolve Rust toolchain
+      id: rust
+      shell: bash
+      run: |
+        channel="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
+        test -n "$channel"
+        echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.rust.outputs.channel }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}

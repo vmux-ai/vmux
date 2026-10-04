@@ -1,14 +1,160 @@
 # Vmux — Architecture
 
-An agent-first workspace that ships with a browser and an IDE.
+> Cross-platform should mean the same architecture, not just the same language.
 
-Vmux is a native **Rust** host. Its own UI runs as native Dioxus components in the host
-process; Chromium is embedded through **CEF** as a guest surface for the pages you browse.
-That inversion is the whole thesis: instead of the app living inside a web sandbox, the web
-lives inside a native host that reaches straight to the OS and the GPU.
+A common cross-platform stack uses Electron for desktop, React Native for mobile, Next.js for the
+web, a separate service for background work, and another API for automation. The pieces may share
+TypeScript packages and visual components, but each has its own state model, lifecycle, routing,
+permissions, extension points, and application architecture.
 
-The host runs on **Bevy**, a data-oriented ECS. Surfaces composite into a `tmux`-style
-tiling tree, and agents drive all of it over **MCP** — the workspace is an API.
+That fragmentation appears every time a feature crosses a surface. A small change can require a
+renderer implementation, preload bridge, IPC handler, main-process service, daemon protocol, CLI
+command, mobile implementation, and agent schema. Each boundary can be engineered well. The cost
+is recreating and synchronizing the same feature across several applications.
+
+Vmux gives the feature one owner and gives every runtime the same composition model. The desktop
+app, mobile app, background service, CLI, and MCP server are all Rust programs composed as Bevy
+apps. They share the same ECS vocabulary, typed contracts, feature plugins, and scheduling model.
+They differ by composition, not architecture.
+
+```text
+Typical cross-platform stack = Shared types + Separate applications
+Vmux                         = Shared application architecture + Platform adapters
+```
+
+```text
+Feature = State + Systems + UI + Commands + Tools + Protocol
+Runtime = Shared Feature Plugins + Platform Adapters
+Boundary = One Rust Type + Transport Adapter
+```
+
+One feature crate owns the complete vertical slice. Its state is components and resources. Its
+behavior is systems. Its interfaces are typed messages, commands, MCP tools, pages, and wire
+contracts. A protocol change, new command, or new agent tool lands beside the behavior it exposes
+instead of creating another parallel implementation in an application-wide registry.
+
+For each contract, one Rust type is the source of truth across every boundary it crosses. That
+type can enter the ECS as a message, leave a page as a UI event, cross a process over rkyv, cross a
+network over QUIC, or back a CLI or MCP operation. Attributes derive the required serialization,
+wire identity, and boundary metadata. The transport adapter changes; the domain type and meaning do
+not. There is no mirror DTO, second request enum, or hand-maintained schema for each hop.
+
+ECS turns integration from dependencies into data. A system declares the components and messages
+it reads and writes; it does not need to know who created an entity or which other systems may act
+on it. Adding a component gives an existing entity another capability. Installing a plugin adds a
+whole set of capabilities. Removing or replacing either does not require rewiring the rest of the
+application.
+
+Features therefore meet in the world, not in each other's internals. Their dependencies are typed
+data, messages, and explicit schedule constraints rather than imported callbacks or shared service
+objects. New UI, automation, persistence, or platform behavior can attach to an existing feature
+without turning that feature into the integration point for everything around it.
+
+```mermaid
+flowchart TB
+    features["typed feature plugins<br/>state · systems · pages · commands · tools · contracts"]
+    profiles["composition profiles"]
+    adapters["platform adapter plugins"]
+    desktop["desktop"]
+    mobile["mobile"]
+    service["daemon / service"]
+    cli["CLI"]
+    mcp["MCP / headless"]
+
+    features --> profiles
+    adapters --> profiles
+    profiles --> desktop
+    profiles --> mobile
+    profiles --> service
+    profiles --> cli
+    profiles --> mcp
+```
+
+The promise is not zero platform-specific code. The promise is that platform code ends at
+an adapter. Product semantics remain in reusable Rust plugins.
+
+That changes what scales:
+
+- **Across features.** A plugin can add behavior to entities created by another plugin by matching
+  typed components and messages. Neither side needs to know the other's implementation.
+- **Across platforms.** Desktop and mobile select from the same feature graph and add only
+  their window, input, notification, persistence, and lifecycle adapters.
+- **Across processes.** GUI, daemon, CLI, and MCP are different Bevy app compositions. Typed
+  contracts cross process and network boundaries without creating another domain model or DTO
+  layer.
+- **Across interfaces.** A human gesture, CLI command, or agent tool converges on the same
+  feature-owned request and systems instead of three implementations of the operation.
+- **Across teams and agents.** New code has a constrained destination. State is a component
+  or resource, behavior is a system, coordination is a message, capability is a plugin, and
+  presentation is a surface. The implementation shape is predictable before code is written.
+
+Electron applications can build daemons, mobile companions, CLIs, and automation APIs. Vmux's
+difference is that these are not parallel architectures assembled around the desktop app. They
+are consumers of the same typed feature plugins. **Rust is the application. Bevy is the
+composition model. A boundary changes transport, not type. Web is a surface.**
+
+---
+
+## One platform, every runtime
+
+```text
+Application = Plugin Graph
+Target      = Composition Profile
+Boundary    = Rust Type
+```
+
+The same feature is composed differently for each target.
+
+```text
+Feature
+├── Core systems
+├── UI plugin
+├── Service plugin
+├── Persistence plugin
+├── CLI plugin
+├── MCP plugin
+└── Platform adapters
+```
+
+Desktop, mobile, web, daemon, server, CLI, MCP, tools, and games are not separate architectures.
+They are different plugin compositions of the same kind of Bevy application. `vmux_app` provides
+the shared composition boundary; application crates select feature plugins and add the adapters
+required by their platform and lifecycle.
+
+The IDE and agent harness are the platform's creation and control plane. They can inspect the
+running ECS, edit the real feature plugins, build another composition, and operate or test the
+result without switching to a separate application architecture.
+
+```text
+Vmux Platform
+├── Runtime
+├── Plugin framework
+├── Typed contracts
+├── Build and package system
+├── IDE
+└── Agent harness
+```
+
+This is broader than a self-hosting platform:
+
+> A composable application platform for every runtime.
+
+> One architecture, from pixels to servers.
+
+> Every executable is a plugin composition.
+
+> Build the whole product with one application model.
+
+The current repository already applies this model to desktop, mobile, the daemon, CLI, and MCP.
+Web hosts, games, and other application forms are possible composition targets, not claims about
+current packaging support; the current status is listed under Platforms.
+
+Self-hosting is a strong proof of the platform. Instead of limiting users to a dynamic scripting
+API, Vmux can let an agent edit the real Rust composition, type-check it, and produce a complete
+application. A future custom build channel can select an immutable artifact for a profile and
+retain its source revision and previous artifact for inspection and rollback.
+
+> Vmux can build itself because Vmux itself is just another composition.
 
 ---
 
@@ -29,6 +175,11 @@ flowchart LR
 
 Close the window and the shell keeps reading, the build keeps building, the agent keeps
 streaming. Reopen and the app reconnects, re-subscribes, and replays a snapshot.
+
+The daemon executable and its composition root live in `vmux_service`. Shared wire values live in
+`vmux_api`, connection state in `vmux_ecs`, framing and client connections in `vmux_transport`, and
+profile-scoped filesystem paths in `vmux_profile`; feature crates do not depend on the daemon
+package.
 
 launchd relaunches the daemon **on crash, not on exit**, and `RunAtLoad` is false — it is
 not a login item. The app starts it on demand.
@@ -111,6 +262,16 @@ rkyv with a 64 MiB cap. A remote client opens one bidirectional QUIC stream per 
 carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control connection is
 the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
+Remote agent operations are flat `SharedMessage` variants rather than a nested request enum.
+The QUIC application protocol is `vmux/8`; changing the positional rkyv wire contract requires
+another ALPN version.
+
+Agent commands and queries use the same routed `AgentRequest` envelope. Each operation is a
+separate `#[vmux_api::agent]` payload identified by its typed protocol ID; there is no aggregate
+query enum. Feature crates define those payloads beside their handlers and return the generic
+`AgentQueryResult` transport envelope. The service and MCP runtime route that envelope without
+knowing which browser, simulator, or other feature produced it.
+
 The hellos are JSON and everything after is rkyv, deliberately. rkyv encodes enum variants
 **positionally** — a peer one release behind does not fail to decode a reordered variant,
 it decodes the *wrong* one. Fine on the unix socket, where both sides ship together. Not
@@ -148,6 +309,51 @@ shell the moment a `Terminal` component is added — no subclass, no base class.
 each system declares the data it touches, Bevy runs non-conflicting systems across cores
 for you.
 
+The entity's creator does not need to predict every behavior it may gain. The system adding that
+behavior does not need a reference back to the creator. Components are the contract between them,
+so either side can be reused, replaced, or omitted independently. Composition changes by changing
+data and plugins, not by editing a growing call graph.
+
+That vocabulary also narrows the implementation search space. A new feature cannot hide
+state in an arbitrary object graph or invent a private integration mechanism: its data,
+behavior, messages, ownership, and composition point have known forms. Code remains
+navigable as the number of features and authors grows, including when the author is an
+agent generating the implementation.
+
+A custom `SystemParam` names a coherent capability over the world. Use one when related
+queries, commands, or message access would exceed Bevy's system-parameter arity or when it
+makes a system materially easier to read and follow, especially when lookup and validation
+rules are shared by several systems. Its methods may synchronously inspect or update the ECS
+data it contains. The calling system still owns request iteration,
+lifecycle transitions, asynchronous task boundaries, cross-feature dispatch, and schedule
+ordering. A miscellaneous parameter bundle or a large hidden `run`/`dispatch` workflow is not
+a capability and stays as ordinary system logic.
+
+Asynchronous work remains explicit ECS state. A finite filesystem, process, or compute operation
+is a task component on the entity whose lifecycle it advances; one system starts it and another
+consumes its result. Long-lived runtime-specific I/O, streams, retries, and timers belong to a
+transport actor that exchanges typed inputs and outputs with ECS. Coroutine runtimes with ambient
+world access are not the default because they hide scheduling and lifecycle state from queries.
+Use one only for isolated sequential UI choreography where the sequence itself is the behavior,
+never for blocking work, transport ownership, or ordinary domain transitions.
+
+System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
+`request_definition` inside the owning module over names that repeat the feature, module,
+transport, and request type. Keep a longer name only when two systems in the same module would
+otherwise be ambiguous.
+
+Not every Rust value is ECS state. Use a component when a value has identity, lifecycle,
+independent mutation, observation, or scheduling significance. Use a message when ordering or
+cross-system delivery matters. Keep immutable specifications, parsed manifests, serialization
+adapters, validated values, and deterministic transformations as plain Rust types. Promote one
+to ECS only when the world must address, observe, replace, or schedule it independently; wrapping
+a temporary function input in an entity adds indirection without composition.
+
+Keep those non-ECS values in the owning feature's noun module, and put external side effects in a
+named boundary module such as `acp/install.rs` or `transport.rs`. Do not create a generic `util`
+drawer. `host.rs` and its root plugin remain the composition entrypoint; private systems call the
+boundary adapter and project its result back onto ECS entities.
+
 ### Plugins
 
 One crate, one capability, one `build()`. A plugin bundles its components, systems,
@@ -160,7 +366,104 @@ app.add_plugins((TerminalPlugin, EditorPlugin, ServicePlugin, BrowserPlugin, ...
 
 Plugins do not call each other. Cross-crate behaviour flows through messages and
 components. Composition all the way up: components compose an entity, plugins compose the
-app.
+app. Large capabilities follow the same rule internally: their root plugin is a table of
+contents that composes lifecycle, interaction, presentation, and persistence plugins. A
+system stays private beside the plugin that schedules it, so ordering and run conditions
+cannot be bypassed by another module.
+
+`vmux_app` is the platform-neutral composition boundary. Applications select a profile and
+override feature availability through one builder; individual feature plugins remain usable
+without the facade.
+
+Every product feature appears exactly once in that graph and exposes one crate-level plugin.
+That root plugin installs only its own manifest, components, systems, and private subplugins. It
+never installs a sibling feature plugin. Cross-feature requirements belong to the `vmux_app`
+builder. `vmux_desktop` and `vmux_mobile` add only platform adapters and select a shared profile;
+they do not become alternate feature registries.
+
+```rust
+app.add_plugins(
+    VmuxPlugin::builder()
+        .desktop()
+        .git(false)
+        .simulator(false)
+        .build(),
+);
+```
+
+Cargo features decide which integrations are compiled. Builder options decide which compiled
+plugins are installed. Desktop and mobile are official consumers of this same API; platform
+windows, menus, persistence, notifications, and device lifecycle remain adapter plugins in the
+application crates. Third-party features integrate by publishing a plugin that owns its pages,
+commands, tools, contracts, systems, and platform capabilities.
+
+Page crates use one physical layout. `host.rs` composes Bevy plugins and `host/` owns ECS
+components and systems. `ui.rs` exposes the Dioxus page entry point and `ui/` owns its UI
+subtrees. `state.rs` owns shared UI snapshots and patches; `event.rs` owns transient UI-to-host
+and host-to-UI operations. Generic `page.rs`, `page_state.rs`, `ui_state.rs`, and `view.rs` modules
+are not used because their ownership is ambiguous.
+
+Page manifests are static plugin registration data. Their registration entities exist during
+plugin construction so the browser can build the complete embedded-host allowlist before CEF
+initializes. Runtime page state and behavior still initialize through ECS schedules.
+
+Each feature keeps one `src/feature.ron`. `pages`, `tools`, application `commands`, and settings
+schema contributions are owned beside the feature that implements them; `cli` is the optional
+command tree. The settings feature aggregates those contributions into the `SettingsSchema`
+component on each settings page entity. String-keyed pseudo-sections are not namespaces. A
+crate declares one `FeatureManifestSource` marker. Feature entry paths install the generic
+`FeaturePlugin`, which parses the runtime sections once and registers one ECS entity containing their
+typed metadata. Repeated composition reuses that entity. Tool, command, CLI, and MCP catalog consumers
+read only the metadata they own from it. Page attributes read the same file at compile time. Feature
+plugins bind typed behavior without reparsing a named subsection or teaching an application crate
+which features exist. The first page is the feature's default page; only additional pages need a
+`name` for an explicit `page = "..."` selection.
+
+`vmux_app` exposes reusable feature-plugin composition without owning executable policy. Page
+manifests, hosted-page plugins, command-bar contributions, and typed MCP tools remain in their
+owning feature crates. A custom
+MCP binary builds a Bevy `App` with `McpPlugin` and its tool plugins, then gives that app to the
+stdio transport adapter. The runtime entity carries the `McpServer` component; tool handlers own
+their typed manifest variant and return a typed command or query dispatch target.
+
+Names describe domain semantics before transport mechanics. Implementing Bevy `Message`
+does not add a `Message` suffix. An operation to perform is a `Request`. A validated,
+deterministic internal state change is a `Mutation`. Something that occurred is named in
+the past tense or uses `Event`. Current state is a `Snapshot`; an operation outcome is a
+`Result`. `Command` is reserved for application, agent, and service command protocols or
+actual Bevy world commands. `Message` is reserved for protocol envelopes and conversation
+content.
+
+Shared API values use `#[vmux_api::contract]`, which supplies the serde and rkyv representation
+plus the common value derives. Unit contracts infer `Copy`, `Default`, and `Eq`; contracts with
+fields opt into only the additional traits their fields and semantics support. Binary events use
+one directional attribute instead:
+`#[vmux_api::ui_event]` marks an event emitted by Dioxus and consumed by the Bevy host, while
+`#[vmux_api::host_event]` marks the reverse direction. Both event attributes include the contract
+derives and define the complete wire name, version, and allowed page hosts. `BookmarkMenuPinRequest`
+therefore has the wire id `bookmark_menu_pin@1`, with its module-local `Events` family supplying
+the `layout` target. A namespace would duplicate the target and the type prefix. Both UI-to-host
+decoding and host-to-UI delivery reject a mismatched host before decoding the data.
+
+`#[vmux_api::ui_state]` is the state-specific host-to-UI contract. It includes the contract,
+`HostEvent`, and `UiState` implementations, while `#[vmux_api::ui_state_patch]` supplies the
+serializable typed patch mapping. `#[vmux_api::host_event]` remains for one-shot notifications and
+responses that are not page state.
+
+Command palette queries are UI input, while filtered rows, completion text, prompt targets, and
+mode are a host-owned ECS projection on the page entity. Dioxus renders that projection; immediate
+text entry, selection, submission, focus, caret, and IME behavior remain local until the input and
+effect audit is complete.
+
+Command-bar requests implement `CommandRequest` and are registered through `CommandTypePlugin`.
+Their definitions become ECS entities with targeted dispatch observers; no callback registry owns
+their behavior.
+
+Commands, MCP tools, and tool-store actions share one extension shape. A runtime plugin owns only
+generic catalog, routing, scheduling, and completion mechanics. Each feature plugin owns its typed
+request or operation, definition manifest, parsing, and dispatch systems. Root plugins compose the
+built-ins, while another crate can install the runtime plus only its own typed plugins; application
+crates contain composition and platform adapters, not provider-specific routing tables.
 
 ---
 
@@ -240,8 +543,8 @@ Two engines, and which one draws a surface depends on what the surface *is*.
 flowchart TB
     win["Vmux window"]
     native["Vmux's own pages — 17 of them<br/>native Dioxus components in this process<br/>painted by a transparent wry WKWebView"]
-    layout["the layout: header · URL bar · sidebar<br/>NativePagePlugin::as_layout"]
-    pane["everything in a pane: terminal, files,<br/>settings, agents, start, spaces …<br/>NativePagePlugin::in_pane"]
+    layout["the layout: header · URL bar · sidebar<br/>owned by vmux_layout"]
+    pane["everything in a pane: terminal, files,<br/>settings, agents, start, spaces …<br/>owned by its feature crate"]
     cef["content you browse — https://<br/>full Chromium via CEF"]
 
     win --> native
@@ -274,7 +577,7 @@ better part of a second on roughly one press in five, worst on the chip whose to
 carries a whole worktree path, because that offers the longest range to snapshot. The
 press was delivered, the thread then stopped, and mousedown, mouseup and click all arrived
 together when it came back — which is why it reads as a dropped click rather than a slow
-one. No page here wants force-click inside its own chrome.
+one. No page here wants force-click inside its own UI.
 
 **Content pages are still CEF.** `Browser::new` is the leaf that carries them — windowed,
 natively focused — so scrolling an `https://` page costs what Chrome costs. CEF also still
@@ -299,7 +602,7 @@ and permission prompts. An event carries coordinates relative to *its* window, s
 a click on one of those against the shell's drag region silently reads a point tens of
 pixels down as a titlebar hit and swallows it into `performWindowDragWithEvent` — an
 autofill suggestion that highlights on hover and does nothing when clicked. Only the window
-that actually wears the chrome may be measured against it.
+that actually owns the window controls may be measured against it.
 
 Dioxus is React-shaped either way — `rsx!` markup, signals and hooks — styled with Tailwind
 and shadcn tokens. The content you open is full Chromium; any React or Vue app renders
@@ -314,6 +617,14 @@ game engine.
 ## How a native page works
 
 This is the part that changed most, and the part worth understanding.
+
+Each feature declares its own native page with `#[vmux_native::page(...)]`. The marker type
+owns the route, renderer description and registration plugin. Building the feature plugin
+spawns that registration as an ECS entity. `vmux_browser` only discovers registrations and
+runs the native-page lifecycle; it has no catalog of which product pages exist.
+Static route, title, icon, keyword, and command-bar metadata may live in a crate-relative RON
+file selected with `file = "src/ui.ron"`; renderer components and typed ECS capabilities remain
+in the Rust attribute.
 
 A page's components are ordinary Dioxus — the *same* code the phone runs. What differs is
 who executes them. There is no renderer and no `dioxus-desktop`: `PageDom` owns a
@@ -392,6 +703,11 @@ are both native panes, so anything keyed on `HostFocusIntent::NativePane` alone 
 answer to two pages that want opposite things. Absence of the marker means platform text
 editing, which is the default a new page wants.
 
+The AppKit keyboard callback is only a transport adapter. It sends typed values through an
+inbox component; `vmux_input` normalizes platform input and `vmux_shortcut` owns keymap sync,
+chord state, page key claims, and command dispatch. AppKit does not retain pending application
+state.
+
 ---
 
 ## Pages, and the trust boundary
@@ -406,6 +722,11 @@ What fills a pane is decided by its URL scheme.
 
 `vmux://` pages are not fetched from a server. They are answered from embedded assets by a
 custom protocol handler, so a page loads instantly and offline.
+
+`vmux_api::VmuxRoute` is the single parser and canonicalizer for those URLs. Browser dispatch,
+history, layout placement, native-page ownership, and agent routing compare its host and path
+boundaries instead of string prefixes. Legacy aliases are accepted at ingress and rewritten to
+their canonical route before they enter page state.
 
 "The workspace is an API" invites the obvious question: can a random website drive it?
 
@@ -431,7 +752,13 @@ A second layer adds least privilege *among* trusted pages: each message type is 
 the pages that may emit it, so a compromised page cannot pivot to another's handlers. The
 full Bevy Remote Protocol is locked to the `debug` page alone.
 
-### Chrome extensions
+### Browser extensions
+
+`vmux_extension` owns package metadata, installation, permissions, enabled state, catalog ECS,
+runtime preparation, bridge transport, service workers, browser API projection, extension
+popups, web-store injection, conformance tooling, and the manager page. `vmux_browser` exposes
+only generic CEF primitives and lifecycle boundaries used by browser-backed features; it neither
+depends on nor installs extension behavior.
 
 An installed extension is never handed to CEF as it shipped. Vmux copies the package into a
 generated runtime directory and patches the manifest so the service worker becomes a stable
@@ -472,6 +799,8 @@ output through `alacritty_terminal`'s VTE engine into a cell grid. Each poll dif
 by row hash and broadcasts only the **changed lines**. The page applies each patch to
 per-row signals, so only those lines repaint. The daemon also owns what should outlive a
 frame: OSC 133 command tracking, per-shell integration, copy-mode motions.
+Host input is one ordered ECS entity per write, related to its terminal until the process is
+ready. Multiple producers cannot overwrite one another through a singleton mailbox.
 
 **Editor.** `syntect` plus `two-face` — the ~200 grammars from `bat` — highlight line by
 line into `StyledSpan`s. The file viewer, the preview and git diffs all emit the same
@@ -520,10 +849,15 @@ than at each of nine handlers.
 ### Pairing
 
 No CA signs for a Mac, so the host mints its own certificate. The QR deep link carries the
-relay endpoint, a 256-bit bearer token, and the certificate's SHA-256. The client pins that
-fingerprint and trusts nothing else — narrower than the public root set. A pairing link
-without a fingerprint is **refused rather than downgraded**, because there is no unpinned
-transport left to fall back to.
+relay routing credential, a one-use pairing credential, and the certificate's SHA-256. The
+client pins that fingerprint and trusts nothing else — narrower than the public root set. A
+pairing link without a fingerprint is **refused rather than downgraded**, because there is no
+unpinned transport left to fall back to.
+
+Successful pairing gives that client ID its own device credential and immediately rotates the
+pairing credential. The host stores only device-credential hashes. Revoking one client removes
+only its authorization and closes its live inner QUIC session; other clients and the desktop's
+relay registration remain valid.
 
 Discovery is manual by design. No mDNS, no zeroconf.
 
@@ -559,11 +893,40 @@ there to ask.
 ## Agents
 
 Every action a person can take is also an **MCP tool**. Vmux ships a stdio MCP server —
-line-delimited JSON-RPC in `crates/host/vmux_mcp` — so any MCP-capable agent drives the
+line-delimited JSON-RPC in `crates/util/vmux_mcp` — so any MCP-capable agent drives the
 workspace the way a person does.
 
 The server is a thin front end: it forwards each call to the daemon over the unix socket.
 The daemon owns the sessions, so work keeps running even if the agent process exits.
+
+The MCP server is a headless Bevy app. Each decoded JSON-RPC request becomes an entity carrying
+its id, method, parameters, and FIFO sequence; systems route it, attach an asynchronous task when
+needed, build the response, and despawn it after stdout delivery. The runtime entity owns the
+`McpServer` component and request sequence. Stdio framing stays outside the world as the transport
+adapter.
+
+Tools are long-lived entities. Their name, aliases, schema, availability, and publication order
+are components seeded from feature-local RON manifests by the shared tool registry system. A
+feature marks each typed argument component with `#[vmux_tool::input]`; the type name supplies the
+manifest key, so plugin registration is `register_tool::<T>()` without a second string name. Each
+handwritten feature exposes only its plugin; its private update systems consume matching tool-call
+components, validate typed arguments, and produce command or query dispatch.
+Publication and execution query those entities directly; there is no separate runtime registry or
+central function-pointer table. ACP sessions install the same tool plugin into the application's
+world and submit tool-call entities there; they do not maintain a nested or thread-local Bevy app.
+`vmux_agent` carries only the generic ACP and query envelopes. Browser, capture, bookmark, vault,
+simulator, and other feature plugins decode their own query contracts, emit their own ECS requests,
+and map their results back to the service boundary. Feature-specific agent instructions and
+disabled skill roots are components registered by those same plugins. ACP and CLI launch boundaries
+aggregate that policy without enumerating or naming the features installed beside them.
+
+Application commands follow the same ownership rule. The shared command registry seeds
+command-definition entities from each registered feature manifest. Feature systems bind their
+typed Bevy requests or observer markers to those entities through `CommandRegistry`. Optional MCP
+metadata lives on that same definition. The MCP process asks the running application for its
+command tools and forwards calls back to the command-definition entities. Systems query those
+entities directly to resolve aliases, validate authorization and arguments, and emit the typed
+request. There is no command-catalog resource, second command enum, or MCP-only command catalog.
 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
@@ -591,6 +954,17 @@ React-style, in one atomic transaction.
 | Android | remote client | configured, no platform code yet |
 
 A remote client is strictly a client — the server half of `vmux_service` is compiled out.
+`vmux_service` also owns its local connection, daemon control, paths, pairing, and authorization
+APIs; these are facets of one service boundary rather than a separate generic client domain.
+Persistent processes and their query runtime belong to this service boundary. Terminal pages
+render and control those processes, but the service names and exposes process operations without
+depending on terminal page concepts.
+
+The CLI uses Clap only to parse argv. Feature crates contribute command metadata through local RON
+manifests and own the typed request components and systems that execute those commands;
+`vmux_app` only composes those plugins. A finite command runs in a short-lived Bevy app and
+`AppExit` follows a typed result. Long-running MCP stdio remains a dedicated runtime over the same
+feature-composed tool registry.
 
 Two cfg aliases decide that split, emitted by `crates/build_platform_cfg.rs`: **`ui`** is
 iOS or macOS, the surfaces that run pages; **`host`** is everything that is not iOS, the
@@ -608,43 +982,71 @@ crates/
 │   ├── vmux_cli
 │   ├── vmux_desktop
 │   └── vmux_mobile
-├── host/                   runtime with no UI, owns state
-│   ├── vmux_client
-│   ├── vmux_command_mcp
-│   ├── vmux_mcp
-│   ├── vmux_remote
-│   └── vmux_service
-├── page/                   answers a URL, one per page
+├── feature/                user-facing capability and page ownership
 │   ├── vmux_agent
 │   ├── vmux_chat
 │   ├── vmux_command
 │   ├── vmux_editor
+│   ├── vmux_extension
+│   ├── vmux_git
 │   ├── vmux_history
 │   ├── vmux_knowledge
 │   ├── vmux_layout
+│   ├── vmux_service
 │   ├── vmux_setting
+│   ├── vmux_shortcut
+│   ├── vmux_simulator
 │   ├── vmux_space
 │   ├── vmux_start
 │   ├── vmux_team
-│   └── vmux_terminal
-├── vmux_browser            composes pages into the desktop shell
-├── vmux_clipboard
-├── vmux_core
-├── vmux_flex
-├── vmux_git
-├── vmux_macro
-├── vmux_native             the VirtualDom driver and its wry webview
-├── vmux_profile
-├── vmux_session
-├── vmux_ui
-└── vmux_wire
+│   ├── vmux_terminal
+│   ├── vmux_tool
+│   └── vmux_vault
+└── util/                   reusable infrastructure without its own page
+    ├── vmux_api
+    ├── vmux_app            platform-neutral application plugin facade
+    ├── vmux_browser        browser runtime and native-page renderer
+    ├── vmux_clipboard
+    ├── vmux_ecs
+    ├── vmux_flex
+    ├── vmux_macro
+    ├── vmux_mcp
+    ├── vmux_native         the VirtualDom driver and its wry webview
+    ├── vmux_path           canonical and scoped path identities
+    ├── vmux_profile
+    ├── vmux_session
+    ├── vmux_transport
+    └── vmux_ui
 ```
 
-Everything not in the three directories stays flat: shared libraries, plus `vmux_browser`,
-which sits above `page/` and below `app/` — a `page/` crate must never depend on it, and
-nothing but `app/vmux_desktop` may.
+Directory placement follows ownership, not dependency depth. A feature owns its page registration,
+UI, host ECS, and domain behavior. Utilities may provide transport, rendering, shared types, or
+application composition without owning a user-facing page. The `host` cfg alias describes compiled
+code and has no directory counterpart.
 
-Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depends on
-`host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
+Agent requests follow the same boundary. `#[vmux_api::agent]` generates only the opaque contract
+for the type declared in a feature crate. That feature owns its manifest, registration, ECS routing,
+handling, and result projection. `vmux_agent`, `vmux_mcp`, and `vmux_tool` transport and dispatch
+opaque requests; they never enumerate browser, simulator, vault, layout, or other feature requests.
+Only the application composition root knows which feature plugins are installed.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
+
+`vmux_agent` owns session, runtime, and orchestration ECS. `vmux_chat` owns reusable chat state
+and Dioxus UI. Shared transcript grouping and projection live in `vmux_ecs`; neither feature
+reaches through the other's internals or through `vmux_service` for reusable chat behavior.
+The service carries serialized agent protocol messages and runs persistent daemon sessions;
+`vmux_agent` owns the client-host Bevy messages produced when those wire messages enter ECS.
+
+`vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
+capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
+`vmux_ecs` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,
+operation sequencing, and built-in Homebrew, NPM, MCP, and dotfile providers. Feature crates
+register their own provider entities, such as ACP in `vmux_agent` and LSP in `vmux_editor`;
+application crates only compose plugins. `vmux_path` gives filesystem boundaries one shared
+identity rule and rejects scoped paths that traverse or resolve outside their root.
+
+Repository tool versions live in `tool-versions.env`; CI loads the same values used by local
+scripts and the Makefile. Release asset names and URLs come from
+`scripts/release-artifacts.sh`, while the standalone installer selects the matching asset from
+the published release instead of reconstructing its name.

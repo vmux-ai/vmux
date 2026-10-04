@@ -1,0 +1,142 @@
+use bevy::prelude::Component;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use vmux_ecs::host::manifest::FeatureManifest;
+
+#[derive(Deserialize)]
+struct BrowserFeaturePolicy {
+    extension: CapabilityMatrix,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CapabilityKind {
+    Method,
+    Event,
+    Property,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CapabilityStatus {
+    Native,
+    Bridged,
+    Unsupported { reason: String },
+    Untested,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityEntry {
+    pub platform: String,
+    pub namespace: String,
+    pub member: String,
+    pub kind: CapabilityKind,
+    pub status: CapabilityStatus,
+    pub owner: Option<String>,
+    pub scenario: Option<String>,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityMatrix {
+    pub chromium_major: u32,
+    pub entries: Vec<CapabilityEntry>,
+}
+
+impl CapabilityMatrix {
+    pub(super) fn from_manifest(manifest: &FeatureManifest) -> Result<Option<Self>, String> {
+        let Some(policy) = manifest.policy::<BrowserFeaturePolicy>()? else {
+            return Ok(None);
+        };
+        policy.extension.validate()?;
+        Ok(Some(policy.extension))
+    }
+
+    #[cfg(test)]
+    pub fn embedded() -> Result<Self, String> {
+        FeatureManifest::of::<crate::Feature>()
+            .policy::<BrowserFeaturePolicy>()?
+            .map(|policy| policy.extension)
+            .ok_or_else(|| "browser feature manifest has no extension policy".to_string())
+    }
+
+    pub fn lookup(
+        &self,
+        platform: &str,
+        namespace: &str,
+        member: &str,
+        kind: CapabilityKind,
+    ) -> Option<&CapabilityEntry> {
+        self.entries.iter().find(|entry| {
+            entry.platform == platform
+                && entry.namespace == namespace
+                && entry.member == member
+                && entry.kind == kind
+        })
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let mut keys = HashSet::new();
+        for entry in &self.entries {
+            let key = (
+                entry.platform.as_str(),
+                entry.namespace.as_str(),
+                entry.member.as_str(),
+                entry.kind,
+            );
+            if !keys.insert(key) {
+                return Err(format!(
+                    "duplicate capability {}.{} on {}",
+                    entry.namespace, entry.member, entry.platform
+                ));
+            }
+            if matches!(
+                entry.status,
+                CapabilityStatus::Native | CapabilityStatus::Bridged
+            ) && entry.scenario.as_deref().is_none_or(str::is_empty)
+            {
+                return Err(format!(
+                    "{}.{} on {} is {:?} without a scenario",
+                    entry.namespace, entry.member, entry.platform, entry.status
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_matrix_has_unique_entries_for_chromium_148() {
+        let matrix = CapabilityMatrix::embedded().unwrap();
+        assert_eq!(matrix.chromium_major, 148);
+        assert_eq!(
+            matrix
+                .lookup("macos", "runtime", "sendMessage", CapabilityKind::Method)
+                .unwrap()
+                .status,
+            CapabilityStatus::Untested
+        );
+        matrix.validate().unwrap();
+    }
+
+    #[test]
+    fn advertised_entries_require_scenarios() {
+        let matrix = CapabilityMatrix {
+            chromium_major: 148,
+            entries: vec![CapabilityEntry {
+                platform: "macos".into(),
+                namespace: "runtime".into(),
+                member: "sendMessage".into(),
+                kind: CapabilityKind::Method,
+                status: CapabilityStatus::Native,
+                owner: Some("cef".into()),
+                scenario: None,
+            }],
+        };
+        assert_eq!(
+            matrix.validate().unwrap_err(),
+            "runtime.sendMessage on macos is Native without a scenario"
+        );
+    }
+}

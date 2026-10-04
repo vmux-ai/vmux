@@ -911,6 +911,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "vmux_api",
  "zeroize",
 ]
 
@@ -10148,6 +10149,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vmux_agent"
 version = "0.0.35"
 dependencies = [
+ "agent-client-protocol",
  "base64 0.22.1",
  "bevy",
  "bevy_cef",
@@ -10157,83 +10159,81 @@ dependencies = [
  "crossbeam-channel",
  "dioxus",
  "futures-lite",
- "futures-util",
  "image",
  "mockito",
  "notify",
  "reqwest",
  "rfd 0.15.4",
  "rkyv",
+ "ron 0.12.1",
  "serde",
  "serde_json",
  "serial_test",
- "similar",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toml",
+ "tracing",
  "url",
  "uuid",
+ "vmux_api",
  "vmux_chat",
- "vmux_clipboard",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_editor",
  "vmux_git",
- "vmux_history",
  "vmux_layout",
+ "vmux_mcp",
+ "vmux_path",
+ "vmux_process",
+ "vmux_session",
+ "vmux_setting",
+ "vmux_space",
+ "vmux_start",
+ "vmux_terminal",
+ "vmux_tool",
+ "vmux_ui",
+]
+
+[[package]]
+name = "vmux_api"
+version = "0.0.35"
+dependencies = [
+ "bevy_ecs",
+ "bevy_reflect",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "url",
+ "uuid",
+ "vmux_macro",
+]
+
+[[package]]
+name = "vmux_app"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "vmux_agent",
+ "vmux_bookmark",
+ "vmux_browser",
+ "vmux_chat",
+ "vmux_command",
+ "vmux_ecs",
+ "vmux_editor",
+ "vmux_extension",
+ "vmux_flex",
+ "vmux_git",
+ "vmux_history",
+ "vmux_input",
+ "vmux_knowledge",
+ "vmux_layout",
+ "vmux_macro",
  "vmux_mcp",
  "vmux_remote",
  "vmux_service",
  "vmux_session",
- "vmux_setting",
- "vmux_simulator",
- "vmux_space",
- "vmux_start",
- "vmux_terminal",
- "vmux_ui",
- "vmux_wire",
-]
-
-[[package]]
-name = "vmux_browser"
-version = "0.0.35"
-dependencies = [
- "async-channel",
- "base64 0.22.1",
- "bevy",
- "bevy_cef",
- "bevy_cef_core",
- "chrono",
- "crossbeam-channel",
- "image",
- "libc",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-quartz-core 0.3.2",
- "polling",
- "raw-window-handle 0.6.2",
- "reqwest",
- "rkyv",
- "ron 0.8.1",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "tungstenite",
- "url",
- "uuid",
- "vmux_agent",
- "vmux_chat",
- "vmux_command",
- "vmux_core",
- "vmux_editor",
- "vmux_flex",
- "vmux_git",
- "vmux_history",
- "vmux_layout",
- "vmux_native",
- "vmux_service",
  "vmux_setting",
  "vmux_shortcut",
  "vmux_simulator",
@@ -10241,8 +10241,69 @@ dependencies = [
  "vmux_start",
  "vmux_team",
  "vmux_terminal",
+ "vmux_tool",
+ "vmux_vault",
+]
+
+[[package]]
+name = "vmux_bookmark"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_world_serialization",
+ "moonshine-save",
+ "raw-window-handle 0.6.2",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_setting",
+ "vmux_shortcut",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
+]
+
+[[package]]
+name = "vmux_browser"
+version = "0.0.35"
+dependencies = [
+ "async-channel",
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "image",
+ "libc",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "raw-window-handle 0.6.2",
+ "rkyv",
+ "ron 0.12.1",
+ "serde",
+ "serde_json",
+ "url",
+ "vmux_api",
+ "vmux_command",
+ "vmux_ecs",
+ "vmux_editor",
+ "vmux_flex",
+ "vmux_git",
+ "vmux_history",
+ "vmux_input",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_path",
+ "vmux_setting",
+ "vmux_space",
+ "vmux_start",
+ "vmux_terminal",
+ "vmux_tool",
+ "vmux_ui",
  "wry",
  "zip",
 ]
@@ -10251,21 +10312,33 @@ dependencies = [
 name = "vmux_chat"
 version = "0.0.35"
 dependencies = [
+ "base64 0.22.1",
+ "bevy",
  "bevy_app",
+ "bevy_cef",
  "bevy_ecs",
  "chrono",
  "dioxus",
  "dioxus-primitives",
+ "futures-lite",
+ "image",
  "pulldown-cmark",
+ "rfd 0.15.4",
  "rkyv",
  "serde",
  "serde_json",
  "similar",
  "unicode-segmentation",
- "vmux_core",
- "vmux_service",
+ "uuid",
+ "vmux_api",
+ "vmux_clipboard",
+ "vmux_command",
+ "vmux_ecs",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_session",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10273,29 +10346,14 @@ name = "vmux_cli"
 version = "0.0.35"
 dependencies = [
  "assert_cmd",
+ "bevy_app",
+ "bevy_ecs",
  "clap",
  "predicates",
- "serde_json",
  "tempfile",
  "tokio",
- "vmux_client",
- "vmux_mcp",
- "vmux_profile",
-]
-
-[[package]]
-name = "vmux_client"
-version = "0.0.35"
-dependencies = [
- "chrono",
- "libc",
- "rkyv",
- "tokio",
- "tracing",
- "url",
- "vmux_profile",
- "vmux_remote",
- "vmux_wire",
+ "vmux_app",
+ "vmux_ecs",
 ]
 
 [[package]]
@@ -10323,46 +10381,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "url",
- "vmux_core",
+ "vmux_api",
+ "vmux_ecs",
  "vmux_flex",
  "vmux_history",
  "vmux_macro",
+ "vmux_path",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
-]
-
-[[package]]
-name = "vmux_command_mcp"
-version = "0.0.35"
-dependencies = [
- "serde_json",
- "vmux_command",
- "vmux_macro",
-]
-
-[[package]]
-name = "vmux_core"
-version = "0.0.35"
-dependencies = [
- "bevy",
- "bevy_cef",
- "bevy_cef_core",
- "bevy_ecs",
- "bevy_reflect",
- "moonshine-save",
- "percent-encoding",
- "rkyv",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "toml",
- "url",
- "uuid",
- "vmux_flex",
- "vmux_profile",
- "vmux_wire",
- "zip",
 ]
 
 [[package]]
@@ -10373,7 +10399,6 @@ dependencies = [
  "bevy_cef",
  "bevy_cef_core",
  "bevy_utils",
- "bevy_world_serialization",
  "block2 0.6.2",
  "cargo-packager-updater",
  "chrono",
@@ -10383,7 +10408,6 @@ dependencies = [
  "gif",
  "image",
  "libc",
- "moonshine-save",
  "muda 0.19.2",
  "notify",
  "objc2 0.6.4",
@@ -10399,44 +10423,71 @@ dependencies = [
  "objc2-quartz-core 0.3.2",
  "objc2-screen-capture-kit",
  "objc2-user-notifications 0.3.2",
- "parking_lot",
+ "proc-macro2",
  "raw-window-handle 0.6.2",
- "reqwest",
  "rfd 0.15.4",
- "ring",
  "rkyv",
- "ron 0.8.1",
+ "ron 0.12.1",
  "semver",
  "serde",
  "serde_json",
+ "syn 2.0.117",
  "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "tray-icon 0.24.0",
  "url",
- "uuid",
  "vmux_agent",
+ "vmux_api",
+ "vmux_app",
  "vmux_browser",
- "vmux_clipboard",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_editor",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_input",
  "vmux_knowledge",
  "vmux_layout",
- "vmux_service",
+ "vmux_native",
+ "vmux_profile",
  "vmux_setting",
- "vmux_shortcut",
  "vmux_simulator",
  "vmux_space",
  "vmux_start",
  "vmux_team",
  "vmux_terminal",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
+]
+
+[[package]]
+name = "vmux_ecs"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "bevy_ecs",
+ "bevy_reflect",
+ "bevy_world_serialization",
+ "moonshine-save",
+ "rkyv",
+ "ron 0.12.1",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "toml",
+ "url",
+ "uuid",
+ "vmux_api",
+ "vmux_flex",
+ "vmux_path",
+ "vmux_profile",
+ "zip",
 ]
 
 [[package]]
@@ -10463,7 +10514,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rkyv",
- "ron 0.8.1",
+ "ron 0.12.1",
  "ropey",
  "serde",
  "serde_json",
@@ -10476,15 +10527,54 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "url",
+ "vmux_api",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_flex",
  "vmux_git",
+ "vmux_knowledge",
  "vmux_layout",
+ "vmux_mcp",
+ "vmux_native",
+ "vmux_path",
  "vmux_setting",
  "vmux_space",
+ "vmux_tool",
+ "vmux_transport",
  "vmux_ui",
- "vmux_wire",
+ "zip",
+]
+
+[[package]]
+name = "vmux_extension"
+version = "0.0.35"
+dependencies = [
+ "base64 0.22.1",
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "crossbeam-channel",
+ "dioxus",
+ "libc",
+ "polling",
+ "reqwest",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tungstenite",
+ "url",
+ "uuid",
+ "vmux_api",
+ "vmux_browser",
+ "vmux_ecs",
+ "vmux_flex",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_tool",
+ "vmux_ui",
  "zip",
 ]
 
@@ -10515,8 +10605,10 @@ dependencies = [
  "tempfile",
  "two-face",
  "url",
- "vmux_core",
+ "vmux_api",
+ "vmux_ecs",
  "vmux_native",
+ "vmux_path",
  "vmux_ui",
 ]
 
@@ -10532,11 +10624,34 @@ dependencies = [
  "dioxus",
  "moonshine-save",
  "rkyv",
- "ron 0.8.1",
+ "ron 0.12.1",
  "serde",
- "vmux_core",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_native",
  "vmux_ui",
- "vmux_wire",
+]
+
+[[package]]
+name = "vmux_input"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "block2 0.6.2",
+ "crossbeam-channel",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "parking_lot",
+ "raw-window-handle 0.6.2",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "vmux_api",
+ "vmux_command",
+ "vmux_ecs",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10544,17 +10659,22 @@ name = "vmux_knowledge"
 version = "0.0.35"
 dependencies = [
  "bevy",
- "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
  "notify",
  "rkyv",
  "serde",
+ "serde_json",
  "tempfile",
- "vmux_core",
+ "toml",
+ "vmux_api",
+ "vmux_ecs",
  "vmux_git",
  "vmux_layout",
+ "vmux_native",
+ "vmux_path",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10570,34 +10690,37 @@ dependencies = [
  "dioxus",
  "libc",
  "moonshine-save",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
  "qrcode",
  "raw-window-handle 0.6.2",
  "rfd 0.15.4",
  "rkyv",
- "ron 0.8.1",
+ "ron 0.12.1",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "uuid",
+ "vmux_api",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_input",
+ "vmux_native",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
 name = "vmux_macro"
 version = "0.0.35"
 dependencies = [
- "muda 0.19.2",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
+ "ron 0.12.1",
+ "serde",
  "syn 2.0.117",
 ]
 
@@ -10606,13 +10729,15 @@ name = "vmux_mcp"
 version = "0.0.35"
 dependencies = [
  "base64 0.22.1",
- "serde",
+ "bevy_app",
+ "bevy_ecs",
  "serde_json",
  "tempfile",
  "tokio",
- "vmux_client",
- "vmux_command_mcp",
- "vmux_macro",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_tool",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10624,6 +10749,7 @@ dependencies = [
  "bevy_tasks",
  "bevy_window",
  "block2 0.6.2",
+ "crossbeam-channel",
  "dioxus",
  "dispatch2",
  "futures-util",
@@ -10642,13 +10768,17 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "url",
+ "uuid",
+ "vmux_api",
+ "vmux_app",
  "vmux_chat",
- "vmux_remote",
- "vmux_service",
+ "vmux_ecs",
+ "vmux_path",
+ "vmux_session",
  "vmux_start",
  "vmux_team",
+ "vmux_transport",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10656,6 +10786,8 @@ name = "vmux_native"
 version = "0.0.35"
 dependencies = [
  "base64 0.22.1",
+ "bevy_app",
+ "bevy_ecs",
  "dioxus",
  "dioxus-core",
  "dioxus-html",
@@ -10669,9 +10801,37 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "vmux_api",
  "vmux_clipboard",
+ "vmux_macro",
  "vmux_ui",
  "wry",
+]
+
+[[package]]
+name = "vmux_path"
+version = "0.0.35"
+dependencies = [
+ "percent-encoding",
+ "tempfile",
+ "url",
+]
+
+[[package]]
+name = "vmux_process"
+version = "0.0.35"
+dependencies = [
+ "alacritty_terminal",
+ "bevy",
+ "libc",
+ "portable-pty",
+ "rkyv",
+ "serde",
+ "tokio",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_profile",
+ "vte",
 ]
 
 [[package]]
@@ -10681,7 +10841,7 @@ dependencies = [
  "chrono",
  "libc",
  "ring",
- "ron 0.8.1",
+ "ron 0.12.1",
  "security-framework",
  "security-framework-sys",
  "serde",
@@ -10689,7 +10849,8 @@ dependencies = [
  "tempfile",
  "toml",
  "url",
- "vmux_wire",
+ "vmux_api",
+ "vmux_path",
  "zeroize",
 ]
 
@@ -10697,40 +10858,32 @@ dependencies = [
 name = "vmux_remote"
 version = "0.0.35"
 dependencies = [
- "bytes",
- "quinn",
- "rcgen",
- "ring",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "webpki-roots",
+ "bevy",
+ "bevy_cef",
+ "uuid",
+ "vmux_clipboard",
+ "vmux_ecs",
+ "vmux_layout",
+ "vmux_service",
 ]
 
 [[package]]
 name = "vmux_service"
 version = "0.0.35"
 dependencies = [
- "agent-client-protocol",
- "alacritty_terminal",
  "base64 0.22.1",
+ "bevy",
  "bevy_app",
  "bevy_ecs",
  "chrono",
  "crossbeam-channel",
- "dioxus",
- "futures-util",
  "image",
  "libc",
  "mockito",
  "objc2-foundation 0.3.2",
  "objc2-service-management",
- "portable-pty",
  "quinn",
- "reqwest",
+ "ring",
  "rkyv",
  "rustls-pemfile",
  "serde",
@@ -10738,19 +10891,19 @@ dependencies = [
  "serial_test",
  "tempfile",
  "tokio",
- "tokio-util",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "url",
  "uuid",
- "vmux_client",
- "vmux_core",
- "vmux_git",
- "vmux_remote",
- "vmux_ui",
- "vmux_wire",
- "vte",
+ "vmux_agent",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_path",
+ "vmux_process",
+ "vmux_profile",
+ "vmux_session",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10761,7 +10914,9 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "serde",
- "vmux_wire",
+ "serde_json",
+ "unicode-segmentation",
+ "vmux_api",
 ]
 
 [[package]]
@@ -10774,15 +10929,19 @@ dependencies = [
  "dioxus",
  "notify",
  "rkyv",
- "ron 0.8.1",
+ "ron 0.12.1",
  "serde",
  "serde_json",
  "tempfile",
+ "vmux_api",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_native",
+ "vmux_path",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -10796,9 +10955,13 @@ dependencies = [
  "dioxus",
  "rkyv",
  "serde",
+ "vmux_api",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
+ "vmux_input",
  "vmux_layout",
+ "vmux_native",
+ "vmux_setting",
  "vmux_ui",
 ]
 
@@ -10819,9 +10982,13 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
- "vmux_core",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_input",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10833,22 +11000,28 @@ dependencies = [
  "bevy_cef_core",
  "bevy_ecs",
  "bevy_reflect",
+ "bevy_world_serialization",
  "dioxus",
  "moonshine-save",
+ "rfd 0.15.4",
  "rkyv",
- "ron 0.8.1",
+ "ron 0.12.1",
  "serde",
  "serde_json",
  "tempfile",
+ "vmux_api",
+ "vmux_chat",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
  "vmux_layout",
+ "vmux_native",
+ "vmux_session",
  "vmux_setting",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10865,14 +11038,15 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "vmux_api",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
+ "vmux_native",
  "vmux_space",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10885,17 +11059,18 @@ dependencies = [
  "bevy_ecs",
  "dioxus",
  "rkyv",
- "ron 0.8.1",
+ "ron 0.12.1",
  "serde",
  "serde_json",
- "vmux_agent",
+ "vmux_api",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_layout",
- "vmux_service",
+ "vmux_native",
+ "vmux_session",
  "vmux_space",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10908,24 +11083,82 @@ dependencies = [
  "dioxus",
  "libc",
  "portable-pty",
- "rfd 0.15.4",
  "rkyv",
  "serde",
+ "serde_json",
  "sysinfo",
  "tempfile",
+ "tokio",
  "tracing",
  "unicode-width",
  "url",
+ "vmux_api",
  "vmux_clipboard",
  "vmux_command",
- "vmux_core",
+ "vmux_ecs",
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
- "vmux_service",
+ "vmux_mcp",
+ "vmux_native",
+ "vmux_path",
+ "vmux_process",
+ "vmux_session",
  "vmux_setting",
  "vmux_space",
+ "vmux_tool",
+ "vmux_transport",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_tool"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "bevy_app",
+ "bevy_cef",
+ "bevy_ecs",
+ "bevy_tasks",
+ "dioxus",
+ "parking_lot",
+ "reqwest",
+ "ring",
+ "rkyv",
+ "ron 0.8.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "url",
+ "uuid",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_macro",
+ "vmux_native",
+ "vmux_path",
+ "vmux_profile",
+ "vmux_ui",
+]
+
+[[package]]
+name = "vmux_transport"
+version = "0.0.35"
+dependencies = [
+ "bytes",
+ "quinn",
+ "rcgen",
+ "ring",
+ "rkyv",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vmux_api",
+ "vmux_profile",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -10941,24 +11174,31 @@ dependencies = [
  "sys-locale",
  "tokio",
  "unic-langid",
+ "vmux_api",
  "vmux_clipboard",
- "vmux_core",
- "vmux_wire",
+ "vmux_ecs",
 ]
 
 [[package]]
-name = "vmux_wire"
+name = "vmux_vault"
 version = "0.0.35"
 dependencies = [
+ "bevy",
+ "bevy_cef",
  "bevy_ecs",
- "bevy_reflect",
+ "dioxus",
+ "notify",
+ "parking_lot",
+ "rfd 0.15.4",
  "rkyv",
  "serde",
  "serde_json",
- "unicode-segmentation",
- "url",
- "uuid",
- "vmux_macro",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_tool",
+ "vmux_ui",
 ]
 
 [[package]]

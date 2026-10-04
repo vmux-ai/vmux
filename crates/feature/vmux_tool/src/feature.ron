@@ -1,0 +1,115 @@
+(
+    pages: [
+        (
+            url: "vmux://tools/",
+            title: "Tools",
+            bookmark: Some(50),
+            title_message_id: "tools-title",
+            keywords: [
+                "packages",
+                "tools",
+                "dotfiles",
+                "homebrew",
+                "npm",
+                "mcp",
+                "import",
+            ],
+            icon: "Hammer",
+            command_bar: true,
+            manifest: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "AgentToast",
+                "AgentInstallRunRequest",
+                "AgentSetupPrereqRequest",
+                "AgentSetupUiState",
+                "ToolsUiState",
+                "ToolsRefreshRequest",
+                "ToolOpenRequest",
+                "ToolsNavigateRequest",
+                "ToolInstallRequest",
+                "ToolUpdateRequest",
+                "ToolUninstallRequest",
+                "ToolForgetRequest",
+                "ToolAdoptRequest",
+                "ToolLinkRequest",
+                "ToolUnlinkRequest",
+                "ToolApplyRequest",
+                "ToolImportRequest",
+            ],
+        ),
+    ],
+    cli: Some((
+        commands: [
+            (
+                id: "tool",
+                name: "tools",
+                about: Some("Manage vmux tools and dotfiles"),
+                subcommand_required: true,
+                commands: [
+                    (id: "tool.status", name: "status"),
+                    (id: "tool.apply", name: "apply"),
+                    (
+                        id: "tool.import",
+                        name: "import",
+                        subcommand_required: true,
+                        commands: [
+                            (
+                                id: "tool.import.homebrew",
+                                name: "homebrew",
+                                arguments: [
+                                    (id: "path", index: Some(1), required: true, value_name: Some("BREWFILE")),
+                                ],
+                            ),
+                            (
+                                id: "tool.import.npm",
+                                name: "npm",
+                                arguments: [
+                                    (id: "path", index: Some(1), required: true, value_name: Some("PACKAGE_JSON")),
+                                ],
+                            ),
+                            (
+                                id: "tool.import.mcp",
+                                name: "mcp",
+                                arguments: [
+                                    (id: "path", index: Some(1), value_name: Some("CONFIG")),
+                                ],
+                            ),
+                            (
+                                id: "tool.import.dotfiles",
+                                name: "dotfiles",
+                                arguments: [
+                                    (id: "path", index: Some(1), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                        ],
+                    ),
+                    (
+                        id: "tool.adopt",
+                        name: "adopt",
+                        arguments: [
+                            (id: "path", index: Some(1), required: true, value_name: Some("PATH")),
+                            (id: "package", long: Some("package"), required: true, value_name: Some("PACKAGE")),
+                        ],
+                    ),
+                    (
+                        id: "tool.unlink",
+                        name: "unlink",
+                        arguments: [
+                            (id: "package", index: Some(1), required: true, value_name: Some("PACKAGE")),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )),
+    mcp_servers: [
+        (
+            id: "linear",
+            name: "Linear",
+            url: "https://mcp.linear.app/mcp",
+            scopes: ["read", "write"],
+        ),
+    ],
+)

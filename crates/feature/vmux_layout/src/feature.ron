@@ -1,0 +1,683 @@
+(
+    settings: Some((
+        defaults: (
+            layout: Some((
+                window: (padding: 8.0),
+            )),
+        ),
+        sections: [(
+            id: "layout",
+            title: "schema-layout",
+            description: Some("schema-layout-detail"),
+            root_path: "layout",
+            order: 20,
+        )],
+        fields: [
+            (
+                path: "layout",
+                order: ["radius", "window", "pane", "side_sheet", "focus_ring"],
+            ),
+            (path: "layout.radius", label: Some("schema-radius")),
+            (
+                path: "layout.window",
+                label: Some("schema-window"),
+                order: ["padding"],
+            ),
+            (path: "layout.window.padding", label: Some("schema-padding")),
+            (
+                path: "layout.pane",
+                label: Some("schema-pane"),
+                order: ["gap"],
+            ),
+            (path: "layout.pane.gap", label: Some("schema-gap")),
+            (
+                path: "layout.side_sheet",
+                label: Some("schema-side-sheet"),
+                order: ["width"],
+            ),
+            (path: "layout.side_sheet.width", label: Some("schema-width")),
+            (
+                path: "layout.focus_ring",
+                label: Some("schema-focus-ring"),
+                order: ["width", "color"],
+            ),
+            (path: "layout.focus_ring.width", label: Some("schema-width")),
+            (
+                path: "layout.focus_ring.color",
+                label: Some("schema-color"),
+                order: ["r", "g", "b"],
+            ),
+            (path: "layout.focus_ring.color.r", label: Some("schema-red")),
+            (path: "layout.focus_ring.color.g", label: Some("schema-green")),
+            (path: "layout.focus_ring.color.b", label: Some("schema-blue")),
+        ],
+    )),
+    pages: [
+        (
+            url: "vmux://layout/",
+            title: "vmux",
+            manifest_title: "Layout",
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "LayoutUiState",
+                "SideSheetResizeEvent",
+                "WindowDragRegionEvent",
+                "HeaderBackRequest",
+                "HeaderForwardRequest",
+                "HeaderReloadRequest",
+                "HeaderAddressFocusRequest",
+                "TabCreateRequest",
+                "TabCloseRequest",
+                "TabActivateRequest",
+                "TabReorderRequest",
+                "SideSheetStackActivateRequest",
+                "SideSheetStackCloseRequest",
+                "SideSheetStackCreateRequest",
+                "SideSheetProjectOpenRequest",
+                "SideSheetSectionRequest",
+                "RemoteRequest",
+                "RemotePairingShowRequest",
+                "RemotePairingDismissRequest",
+                "LayoutOverlayEvent",
+                "RemoteCopyEvent",
+                "RemoteRevokeRequest",
+                "CommandBarPanelRequest",
+                "BookmarkToggleRequest",
+                "BookmarkMenuRootRequest",
+                "BookmarkMenuPinRequest",
+                "BookmarkMenuEntryRequest",
+                "BookmarkMenuFolderRequest",
+                "BookmarkOpenRequest",
+                "BookmarkAddRequest",
+                "BookmarkPinUrlRequest",
+                "BookmarkRemoveRequest",
+                "BookmarkRenameRequest",
+                "BookmarkMoveRequest",
+                "BookmarkDropRequest",
+                "BookmarkPinRequest",
+                "BookmarkUnpinRequest",
+                "BookmarkFolderToggleRequest",
+                "BookmarkFolderCreateRequest",
+                "BookmarkFolderMoveRequest",
+                "BookmarkFolderRenameRequest",
+                "BookmarkFolderRemoveRequest",
+                "BookmarkTextInputRequest",
+                "BookmarkContextMenuRequest",
+                "TeamEvent",
+                "TeamOpenRequest",
+                "TeamMemberFocusRequest",
+                "TeamProfileCreateRequest",
+                "TeamProfileSwitchRequest",
+                "TeamProfileUpdateRequest",
+                "SpaceOpenPageRequest",
+                "SpaceAttachRequest",
+                "SpaceDeleteRequest",
+                "SpaceRenameRequest",
+                "SpaceCreateRequest",
+                "ProjectActivateRequest",
+                "ProjectTreeToggle",
+                "ExtensionsEvent",
+                "ExtensionPopupOpenRequest",
+                "ExtensionPopupBoundsRequest",
+                "ExtensionPopupCloseRequest",
+                "ExtPinRequest",
+                "ExtOpenManagerRequest",
+                "RelaunchRequest",
+                "CommandBarReadyEvent",
+                "CommandBarRenderedEvent",
+                "CommandBarSizeEvent",
+                "PathCompleteRequest",
+                "PromptRequest",
+                "OpenRequest",
+                "TerminalRequest",
+                "InvokeRequest",
+                "SwitchSpaceRequest",
+                "SwitchTabRequest",
+                "ExRequest",
+                "PickRequest",
+                "DismissRequest",
+                "CommandPaletteDraftRequest",
+                "CommandPaletteHighlightRequest",
+                "CommandPaletteHistoryMoveRequest",
+                "CommandPaletteSubmitRequest",
+                "CommandPaletteActivateRequest",
+                "CommandPaletteAgentMenuToggleRequest",
+                "CommandPaletteModelMenuToggleRequest",
+                "CommandPalettePermissionMenuToggleRequest",
+                "CommandPaletteProjectMenuToggleRequest",
+                "CommandPaletteBranchMenuToggleRequest",
+                "CommandPaletteMenuMoveRequest",
+                "CommandPaletteMenuHighlightRequest",
+                "CommandPaletteMenuActivateRequest",
+                "CommandPaletteMenuDismissRequest",
+                "CommandPaletteMediaMoveRequest",
+                "CommandPaletteMediaHighlightRequest",
+                "CommandPaletteMediaActivateRequest",
+                "CommandPaletteMediaDismissRequest",
+                "CommandPaletteRemoveAttachmentRequest",
+                "CommandBarUiState",
+                "CommandPaletteUiState",
+                "HistorySuggestionsRequest",
+                "McpServersRequest",
+                "McpServerRequest",
+                "McpServers",
+                "ChatPickFiles",
+                "ChatPasteMedia",
+                "ChatMediaListRequest",
+                "ChatAttachPaths",
+                "UiKeyContext",
+                "KeyStroke",
+                "KeyClaims",
+            ],
+        )
+        ,
+        (
+            name: "error",
+            url: "vmux://error/",
+            title: "Error",
+            asset_host: "error",
+            permissions: ["PageReady", "ThemeEvent"],
+        ),
+    ],
+    tools: [
+            (
+                name: "open_page",
+                description: r#"Open a page using vmux auto placement. Omit `direction` so vmux reuses the existing matching bucket first (terminal pages with terminals, browser pages with browsers) and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate (vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false."#,
+                input_schema: (
+                    type: Object,
+                    required: ["url"],
+                    properties: {
+                        "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                        "url": (type: String),
+                        "focus": (type: Boolean),
+                    },
+                ),
+            ),
+            (
+                name: "read_layout",
+                description: r#"Returns the full vmux layout (tabs, recursive pane tree, focused). Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. Useful for: answering questions about what's open; finding the focused tab/pane/stack; reading a stack's url/kind so you can duplicate it elsewhere. Terminal stacks appear as stacks with kind="terminal"; browser stacks use kind="browser"."#,
+                input_schema: (type: Object),
+            ),
+            (
+                name: "update_layout",
+                description: r#"Submit the desired layout tree; vmux diffs against current state and reconciles by id (React-style). Use this for compound or structural changes that the per-action tools can't express.
+        
+        Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here.
+        
+        Recipes:
+        - Add a new pane to a tab: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the tab's root split is always present.
+        - Duplicate/mirror a stack: add a new pane (id: null) under the same parent, with a stack carrying the source stack's url.
+        - Swap two panes: reorder their entries in the parent split's children array.
+        - Move a stack to another pane: remove from source pane's stacks, add (same id) to target pane's stacks.
+        - Close a pane/stack: omit it from the submitted tree.
+        - Resize a split: change flex_weights on the parent split.
+        - Equalize a split: set all flex_weights to the same value.
+        - Group an agent's parallel terminals (keep the agent's own pane readable): make the tab root a row split with two children - the agent's own pane on one side, and on the other either a split holding the terminal panes (when there are a few, so all are visible) or a single pane whose stacks are all the terminals (tabs, when there are many). Move existing terminal stacks by id into the grouped pane(s) rather than recreating them, and set flex_weights so the agent keeps a fair share (e.g. [1, 1] or [2, 3]).
+        - Change focus: set the top-level focused triple.
+        - Toggle zoom: flip the pane's is_zoomed flag.
+        
+        Atomicity: all changes apply as one transaction. If validation fails (duplicate ids, malformed payload), nothing is applied.
+        
+        Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to create a new node; a new stack needs url (use vmux://terminal/ for a terminal, anything else loads as a browser), a new pane needs at least one stack, a new tab needs name."#,
+                input_schema: (
+                    type: Object,
+                    required: ["tabs", "focused"],
+                    definitions: {
+                        "Tab": (
+                            type: Object,
+                            required: ["name", "root"],
+                            properties: {
+                                "id": (
+                                    type: String,
+                                    description: Some("tab:<id>; omit to create"),
+                                ),
+                                "name": (type: String),
+                                "is_active": (type: Boolean),
+                                "root": (reference: Some("#/$defs/LayoutNode")),
+                            },
+                        ),
+                        "LayoutNode": (
+                            one_of: [
+                                (
+                                    type: Object,
+                                    required: ["kind", "direction", "children"],
+                                    properties: {
+                                        "kind": (constant: Some("split")),
+                                        "id": (
+                                            type: String,
+                                            description: Some("split:<id>; omit to create"),
+                                        ),
+                                        "direction": (type: String, values: ["row", "column"]),
+                                        "flex_weights": (
+                                            type: Array,
+                                            items: (type: Number),
+                                        ),
+                                        "children": (
+                                            type: Array,
+                                            items: (
+                                                reference: Some("#/$defs/LayoutNode"),
+                                            ),
+                                        ),
+                                    },
+                                ),
+                                (
+                                    type: Object,
+                                    required: ["kind"],
+                                    properties: {
+                                        "kind": (constant: Some("pane")),
+                                        "id": (
+                                            type: String,
+                                            description: Some("pane:<id>; omit to create"),
+                                        ),
+                                        "is_zoomed": (type: Boolean),
+                                        "stacks": (
+                                            type: Array,
+                                            items: (
+                                                reference: Some("#/$defs/Stack"),
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ],
+                        ),
+                        "Stack": (
+                            type: Object,
+                            properties: {
+                                "id": (
+                                    type: String,
+                                    description: Some("stack:<id>; omit to create"),
+                                ),
+                                "title": (type: String),
+                                "url": (
+                                    type: String,
+                                    description: Some("Required when id is omitted"),
+                                ),
+                                "kind": (type: String),
+                                "is_loading": (type: Boolean),
+                                "icon": (description: Some("Serialized vmux page icon.")),
+                                "is_self": (type: Boolean),
+                                "process_id": (type: String),
+                            },
+                        ),
+                    },
+                    properties: {
+                        "tabs": (
+                            type: Array,
+                            items: (reference: Some("#/$defs/Tab")),
+                        ),
+                        "focused": (
+                            type: Object,
+                            properties: {
+                                "tab": (type: String),
+                                "pane": (type: String),
+                                "stack": (type: String),
+                            },
+                        ),
+                    },
+                ),
+            ),
+            (
+                name: "select_tab",
+                description: "Select a tab by index from 1 through 8.",
+                input_schema: (
+                    type: Object,
+                    required: ["index"],
+                    properties: {
+                        "index": (type: Integer, minimum: Some(1), maximum: Some(8)),
+                    },
+                ),
+            ),
+    ],
+    commands: [
+            (
+                id: "stack_reopen",
+                label: "Reopen Closed Page",
+                group: "Layout > Stack",
+                accelerator: Some("super+shift+t"),
+                shortcuts: [(shortcut: Direct("Ctrl+Shift+T"), when: None)],
+            ),
+            (
+                id: "bookmark_toggle_active",
+                label: "Toggle Active",
+                group: "Bookmark",
+                shortcuts: [(shortcut: Direct("Super+d"), when: None)],
+            ),
+            (id: "bookmark_pin_active", label: "Pin Active", group: "Bookmark"),
+            (
+                id: "bookmark_new_folder",
+                label: "New Folder",
+                group: "Bookmark",
+                hidden: true,
+            ),
+            (
+                id: "open_in_pane_top",
+                label: "Open in Pane Top",
+                group: "Browser > Open",
+                shortcuts: [(shortcut: Direct("Super+Shift+K"), when: None)],
+            ),
+            (
+                id: "open_in_pane_right",
+                aliases: ["split_v"],
+                label: "Open in Pane Right",
+                group: "Browser > Open",
+                shortcuts: [
+                    (shortcut: Direct("Super+Shift+L"), when: None),
+                    (shortcut: Chord("Ctrl+b, %"), when: None),
+                ],
+            ),
+            (
+                id: "open_in_pane_bottom",
+                aliases: ["split_h"],
+                label: "Open in Pane Bottom",
+                group: "Browser > Open",
+                shortcuts: [
+                    (shortcut: Direct("Super+Shift+J"), when: None),
+                    (shortcut: Chord("Ctrl+b, \""), when: None),
+                ],
+            ),
+            (
+                id: "open_in_pane_left",
+                label: "Open in Pane Left",
+                group: "Browser > Open",
+                shortcuts: [(shortcut: Direct("Super+Shift+H"), when: None)],
+            ),
+            (
+                id: "close_pane",
+                label: "Close Pane",
+                group: "Layout > Pane",
+                shortcuts: [(shortcut: Chord("Ctrl+b, x"), when: None)],
+            ),
+            (
+                id: "toggle_pane",
+                label: "Next Pane",
+                group: "Layout > Pane",
+                hidden: true,
+                shortcuts: [(shortcut: Chord("Ctrl+b, o"), when: None)],
+            ),
+            (
+                id: "select_pane_left",
+                label: "Select Left Pane",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, h"), when: None),
+                    (shortcut: Chord("Ctrl+b, ArrowLeft"), when: None),
+                ],
+            ),
+            (
+                id: "select_pane_right",
+                label: "Select Right Pane",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, l"), when: None),
+                    (shortcut: Chord("Ctrl+b, ArrowRight"), when: None),
+                ],
+            ),
+            (
+                id: "select_pane_up",
+                label: "Select Up Pane",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, k"), when: None),
+                    (shortcut: Chord("Ctrl+b, ArrowUp"), when: None),
+                ],
+            ),
+            (
+                id: "select_pane_down",
+                label: "Select Down Pane",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, j"), when: None),
+                    (shortcut: Chord("Ctrl+b, ArrowDown"), when: None),
+                ],
+            ),
+            (
+                id: "swap_pane_prev",
+                label: "Swap Pane Previous",
+                group: "Layout > Pane",
+                shortcuts: [(shortcut: Chord("Ctrl+b, {"), when: None)],
+            ),
+            (
+                id: "swap_pane_next",
+                label: "Swap Pane Next",
+                group: "Layout > Pane",
+                shortcuts: [(shortcut: Chord("Ctrl+b, }"), when: None)],
+            ),
+            (
+                id: "rotate_forward",
+                label: "Rotate Forward",
+                group: "Layout > Pane",
+                hidden: true,
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, r"), when: None),
+                    (shortcut: Chord("Ctrl+b, Ctrl+o"), when: None),
+                ],
+            ),
+            (
+                id: "rotate_backward",
+                label: "Rotate Backward",
+                group: "Layout > Pane",
+                hidden: true,
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, Shift+r"), when: None),
+                    (shortcut: Chord("Ctrl+b, Alt+o"), when: None),
+                ],
+            ),
+            (
+                id: "mirror_panes",
+                label: "Mirror Panes",
+                group: "Layout > Pane",
+                shortcuts: [(shortcut: Chord("Ctrl+b, m"), when: None)],
+            ),
+            (
+                id: "mirror_panes_horizontal",
+                label: "Mirror Panes Horizontally",
+                group: "Layout > Pane",
+                shortcuts: [(shortcut: Chord("Ctrl+b, Alt+h"), when: None)],
+            ),
+            (
+                id: "mirror_panes_vertical",
+                label: "Mirror Panes Vertically",
+                group: "Layout > Pane",
+                shortcuts: [(shortcut: Chord("Ctrl+b, Alt+v"), when: None)],
+            ),
+            (
+                id: "equalize_pane_size",
+                label: "Equalize Pane Size",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, Shift+e"), when: None),
+                    (shortcut: Chord("Ctrl+b, ="), when: None),
+                ],
+            ),
+            (
+                id: "resize_pane_left",
+                label: "Resize Pane Left",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, Ctrl+ArrowLeft"), when: None),
+                    (shortcut: Chord("Ctrl+b, Alt+ArrowLeft"), when: None),
+                ],
+            ),
+            (
+                id: "resize_pane_right",
+                label: "Resize Pane Right",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, Ctrl+ArrowRight"), when: None),
+                    (shortcut: Chord("Ctrl+b, Alt+ArrowRight"), when: None),
+                ],
+            ),
+            (
+                id: "resize_pane_up",
+                label: "Resize Pane Up",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, Ctrl+ArrowUp"), when: None),
+                    (shortcut: Chord("Ctrl+b, Alt+ArrowUp"), when: None),
+                ],
+            ),
+            (
+                id: "resize_pane_down",
+                label: "Resize Pane Down",
+                group: "Layout > Pane",
+                shortcuts: [
+                    (shortcut: Chord("Ctrl+b, Ctrl+ArrowDown"), when: None),
+                    (shortcut: Chord("Ctrl+b, Alt+ArrowDown"), when: None),
+                ],
+            ),
+            (
+                id: "zoom_pane",
+                label: "Zoom Pane",
+                group: "Layout > Pane",
+                hidden: true,
+                shortcuts: [(shortcut: Chord("Ctrl+b, z"), when: None)],
+            ),
+            (
+                id: "open_in_new_stack",
+                label: "Open in New Stack",
+                group: "Browser > Open",
+                accelerator: Some("super+n"),
+                mcp: Some((
+                    description: "Open the URL as a new stack inside the currently focused pane. Stacks are the in-pane tab strip: the current stack stays alive and a new one is added next to it, becoming active. Use when the user wants to preserve the current page and view a new one alongside, in the same pane.",
+                    input_schema: Some((
+                        type: Object,
+                        properties: {
+                            "url": (
+                                type: String,
+                                description: Some("Absolute URL to open in the new stack. If omitted, opens the startup URL."),
+                            ),
+                        },
+                    )),
+                )),
+            ),
+            (
+                id: "stack_close",
+                label: "Close Stack",
+                group: "Layout > Stack",
+                accelerator: Some("super+w"),
+                shortcuts: [(shortcut: Chord("Ctrl+b, Shift+x"), when: None)],
+            ),
+            (
+                id: "stack_next",
+                label: "Next Stack",
+                group: "Layout > Stack",
+                accelerator: Some("super+shift+n"),
+                shortcuts: [(shortcut: Direct("Super+Shift+J"), when: None)],
+            ),
+            (
+                id: "stack_previous",
+                label: "Previous Stack",
+                group: "Layout > Stack",
+                accelerator: Some("super+shift+p"),
+                shortcuts: [(shortcut: Direct("Super+Shift+K"), when: None)],
+            ),
+            (
+                id: "stack_swap_prev",
+                label: "Move Stack Left",
+                group: "Layout > Stack",
+                shortcuts: [(shortcut: Chord("Ctrl+b, <"), when: None)],
+            ),
+            (
+                id: "stack_swap_next",
+                label: "Move Stack Right",
+                group: "Layout > Stack",
+                shortcuts: [(shortcut: Chord("Ctrl+b, >"), when: None)],
+            ),
+            (
+                id: "open_in_new_tab",
+                label: "Open in New Tab",
+                group: "Browser > Open",
+                accelerator: Some("super+t"),
+                shortcuts: [(shortcut: Chord("Ctrl+b, c"), when: None)],
+                mcp: Some((
+                    description: "Open a page in a brand-new Tab within the current Space. Tabs are the workspace-tab strip (one level above panes); creating one gives the user a fresh layout container.",
+                    input_schema: Some((
+                        type: Object,
+                        properties: {
+                            "url": (
+                                type: String,
+                                description: Some("Absolute URL to open in the new Tab. If omitted, opens the startup URL."),
+                            ),
+                        },
+                    )),
+                )),
+            ),
+            (id: "new_task", label: "New Task…", group: "Layout > Tab"),
+            (
+                id: "close_tab",
+                label: "Close Tab",
+                group: "Layout > Tab",
+                shortcuts: [(shortcut: Chord("Ctrl+b, &"), when: None)],
+            ),
+            (
+                id: "next_tab",
+                label: "Next Tab",
+                group: "Layout > Tab",
+                accelerator: Some("super+shift+]"),
+                shortcuts: [
+                    (shortcut: Direct("Super+Shift+L"), when: None),
+                    (shortcut: Direct("Super+Alt+ArrowRight"), when: None),
+                    (shortcut: Direct("Super+Shift+BracketRight"), when: None),
+                    (shortcut: Chord("Ctrl+b, n"), when: None),
+                ],
+            ),
+            (
+                id: "prev_tab",
+                label: "Previous Tab",
+                group: "Layout > Tab",
+                accelerator: Some("super+shift+["),
+                shortcuts: [
+                    (shortcut: Direct("Super+Shift+H"), when: None),
+                    (shortcut: Direct("Super+Alt+ArrowLeft"), when: None),
+                    (shortcut: Direct("Super+Shift+BracketLeft"), when: None),
+                    (shortcut: Chord("Ctrl+b, p"), when: None),
+                ],
+            ),
+            (id: "tab_select_1", label: "Select Tab 1", group: "Layout > Tab", accelerator: Some("super+1")),
+            (id: "tab_select_2", label: "Select Tab 2", group: "Layout > Tab", accelerator: Some("super+2")),
+            (id: "tab_select_3", label: "Select Tab 3", group: "Layout > Tab", accelerator: Some("super+3")),
+            (id: "tab_select_4", label: "Select Tab 4", group: "Layout > Tab", accelerator: Some("super+4")),
+            (id: "tab_select_5", label: "Select Tab 5", group: "Layout > Tab", accelerator: Some("super+5")),
+            (id: "tab_select_6", label: "Select Tab 6", group: "Layout > Tab", accelerator: Some("super+6")),
+            (id: "tab_select_7", label: "Select Tab 7", group: "Layout > Tab", accelerator: Some("super+7")),
+            (id: "tab_select_8", label: "Select Tab 8", group: "Layout > Tab", accelerator: Some("super+8")),
+            (id: "tab_select_last", label: "Select Last Tab", group: "Layout > Tab", accelerator: Some("super+9")),
+            (id: "swap_tab_prev", label: "Move Tab Left", group: "Layout > Tab", hidden: true),
+            (id: "swap_tab_next", label: "Move Tab Right", group: "Layout > Tab", hidden: true),
+            (
+                id: "toggle_layout",
+                label: "Toggle Layout",
+                group: "Layout > Layout",
+                shortcuts: [(shortcut: Direct("Super+Shift+S"), when: None)],
+            ),
+            (
+                id: "minimize_window",
+                label: "Minimize Window",
+                group: "Layout > Window",
+                shortcuts: [(shortcut: Direct("Super+m"), when: None)],
+            ),
+            (
+                id: "new_window",
+                label: "New Window",
+                group: "Layout > Window",
+                accelerator: Some("super+n"),
+                hidden: true,
+                shortcuts: [(shortcut: Direct("Super+N"), when: None)],
+            ),
+            (
+                id: "close_window",
+                label: "Close Window",
+                group: "Layout > Window",
+                accelerator: Some("super+shift+w"),
+                hidden: true,
+            ),
+            (
+                id: "toggle_fullscreen",
+                label: "Toggle Fullscreen",
+                group: "Layout > Window",
+                accelerator: Some("ctrl+super+f"),
+                hidden: true,
+            ),
+    ],
+)

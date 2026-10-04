@@ -1,0 +1,116 @@
+(
+    settings: Some((
+        defaults: (
+            auto_update: Some(true),
+            update_channel: Some(stable),
+            appearance: Some((
+                mode: device,
+                locale: "system",
+            )),
+        ),
+        sections: [
+            (
+                id: "general",
+                title: "schema-general",
+                synthetic_keys: ["update_channel", "auto_update"],
+                root_path: "",
+                order: 0,
+            ),
+            (
+                id: "appearance",
+                title: "schema-appearance",
+                root_path: "appearance",
+                order: 10,
+            ),
+        ],
+        fields: [
+            (
+                path: "",
+                order: ["update_channel", "auto_update"],
+            ),
+            (
+                path: "update_channel",
+                label: Some("schema-update-channel"),
+                hint: Some("schema-update-channel-detail"),
+                widget: Some(Select),
+                options: [
+                    (value: "stable", label: "schema-update-channel-stable"),
+                    (value: "preview", label: "schema-update-channel-preview"),
+                ],
+            ),
+            (
+                path: "auto_update",
+                label: Some("schema-auto-update"),
+                hint: Some("schema-auto-update-detail"),
+            ),
+            (
+                path: "appearance",
+                order: ["mode", "locale"],
+            ),
+            (
+                path: "appearance.mode",
+                label: Some("schema-mode"),
+                hint: Some("schema-mode-detail"),
+                widget: Some(Select),
+                options: [
+                    (value: "device", label: "schema-device"),
+                    (value: "light", label: "schema-light"),
+                    (value: "dark", label: "schema-dark"),
+                ],
+            ),
+            (
+                path: "appearance.locale",
+                label: Some("schema-language"),
+                hint: Some("schema-language-detail"),
+                widget: Some(Select),
+                options_source: Some(Locale),
+            ),
+        ],
+    )),
+    pages: [
+        (
+            url: "vmux://settings/",
+            title: "Settings",
+            title_message_id: "settings-title",
+            keywords: ["preferences", "config"],
+            icon: "Settings",
+            command_bar: true,
+            bookmark: Some(130),
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "SettingsUiState",
+                "CheckForUpdatesEvent",
+                "SettingsRequest",
+            ],
+        ),
+    ],
+    tools: [
+            (
+                name: "get_settings",
+                description: "Return the full vmux settings as a JSON snapshot.",
+                input_schema: (type: Object),
+            ),
+            (
+                name: "update_settings",
+                description: "Update one vmux setting by dot path. Use get_settings to discover available paths and current values. Nested arrays use bracket indexing such as terminal.themes[0].font_size.",
+                input_schema: (
+                    type: Object,
+                    required: ["path", "value"],
+                    properties: {
+                        "path": (type: String),
+                        "value": (description: Some("JSON-compatible setting value.")),
+                    },
+                ),
+            ),
+    ],
+    commands: [
+            (
+                id: "open_settings",
+                label: "Settings",
+                group: "Layout > Window",
+                hidden: true,
+                shortcuts: [(shortcut: Direct("Super+,"), when: None)],
+            ),
+    ],
+)

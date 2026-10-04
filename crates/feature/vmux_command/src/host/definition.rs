@@ -1,0 +1,987 @@
+use std::collections::HashSet;
+
+use bevy::{ecs::system::SystemParam, prelude::*};
+use vmux_api::JsonSchema;
+use vmux_api::json::JsonValue;
+use vmux_api::protocol::AgentCommandTool;
+use vmux_ecs::JsonArguments;
+use vmux_ecs::host::manifest::{self, FeatureManifest};
+use vmux_ui::i18n::Locale;
+
+use crate::host::shortcut::{Binding, KeyCombo, Shortcut, Source, When};
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WriteCommandRequests;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ReadCommandRequests;
+
+pub struct CommandRuntimePlugin;
+
+impl Plugin for CommandRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<CommandInvocation>()
+            .configure_sets(
+                Startup,
+                (
+                    CommandStartupSet::Manifest,
+                    CommandStartupSet::Flush,
+                    BindCommands,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Startup,
+                (
+                    spawn.before(BindCommands),
+                    register.in_set(CommandStartupSet::Manifest),
+                    ApplyDeferred.in_set(CommandStartupSet::Flush),
+                ),
+            )
+            .configure_sets(
+                Update,
+                (
+                    WriteCommandRequests,
+                    DispatchCommandInvocations,
+                    crate::host::snapshot::WriteCommandBarSnapshots,
+                    ReadCommandRequests,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (validate, dispatch, bevy::ecs::schedule::ApplyDeferred)
+                    .chain()
+                    .in_set(DispatchCommandInvocations),
+            );
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShortcutDefinition {
+    Direct(String),
+    Chord(String),
+}
+
+impl From<manifest::ShortcutKind> for ShortcutDefinition {
+    fn from(shortcut: manifest::ShortcutKind) -> Self {
+        match shortcut {
+            manifest::ShortcutKind::Direct(value) => Self::Direct(value),
+            manifest::ShortcutKind::Chord(value) => Self::Chord(value),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommandShortcut {
+    pub shortcut: ShortcutDefinition,
+    pub when: Option<String>,
+}
+
+impl From<manifest::Shortcut> for CommandShortcut {
+    fn from(shortcut: manifest::Shortcut) -> Self {
+        Self {
+            shortcut: shortcut.shortcut.into(),
+            when: shortcut.when,
+        }
+    }
+}
+
+pub struct CommandManifest(Vec<manifest::Command>);
+
+impl CommandManifest {
+    pub fn for_feature<M: manifest::FeatureManifestSource>() -> Self {
+        Self(FeatureManifest::of::<M>().commands)
+    }
+
+    pub fn from_feature_ron(source: &str) -> Self {
+        Self(FeatureManifest::parse(source).commands)
+    }
+
+    pub fn into_vec(self) -> Vec<CommandDefinition> {
+        self.0.into_iter().map(CommandDefinition::from).collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentAccess {
+    Denied,
+    Allowed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommandMcp {
+    pub description: String,
+    pub input_schema: JsonSchema,
+    agent_access: AgentAccess,
+}
+
+impl From<manifest::CommandMcp> for CommandMcp {
+    fn from(mcp: manifest::CommandMcp) -> Self {
+        let definition = Self::new(
+            mcp.description,
+            mcp.input_schema.unwrap_or_else(JsonSchema::object),
+        );
+        if mcp.allow_agent {
+            return definition.allow_agent();
+        }
+        definition
+    }
+}
+
+impl CommandMcp {
+    pub fn new(description: impl Into<String>, input_schema: JsonSchema) -> Self {
+        Self {
+            description: description.into(),
+            input_schema,
+            agent_access: AgentAccess::Denied,
+        }
+    }
+
+    pub fn allow_agent(mut self) -> Self {
+        self.agent_access = AgentAccess::Allowed;
+        self
+    }
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct CommandDefinition {
+    pub id: String,
+    pub aliases: Vec<String>,
+    pub label: String,
+    pub group: String,
+    pub accelerator: Option<String>,
+    pub hidden: bool,
+    pub native_menu: bool,
+    pub shortcut_label: Option<String>,
+    pub shortcuts: Vec<CommandShortcut>,
+    pub mcp: Option<CommandMcp>,
+}
+
+impl From<manifest::Command> for CommandDefinition {
+    fn from(command: manifest::Command) -> Self {
+        Self {
+            id: command.id,
+            aliases: command.aliases,
+            label: command.label,
+            group: command.group,
+            accelerator: command.accelerator,
+            hidden: command.hidden,
+            native_menu: command.native_menu,
+            shortcut_label: command.shortcut_label,
+            shortcuts: command.shortcuts.into_iter().map(Into::into).collect(),
+            mcp: command.mcp.map(Into::into),
+        }
+    }
+}
+
+impl CommandDefinition {
+    pub fn new(id: impl Into<String>, label: impl Into<String>, group: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            aliases: Vec::new(),
+            label: label.into(),
+            group: group.into(),
+            accelerator: None,
+            hidden: false,
+            native_menu: true,
+            shortcut_label: None,
+            shortcuts: Vec::new(),
+            mcp: None,
+        }
+    }
+
+    pub fn alias(mut self, alias: impl Into<String>) -> Self {
+        self.aliases.push(alias.into());
+        self
+    }
+
+    #[cfg(test)]
+    fn message<T>(self) -> (Self, CommandMessage)
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        (self, CommandMessage::of::<T>())
+    }
+
+    pub fn agent_tool(&self) -> Option<AgentCommandTool> {
+        let mcp = self.mcp.as_ref()?;
+        Some(AgentCommandTool {
+            name: self.id.clone(),
+            description: mcp.description.clone(),
+            input_schema: JsonValue::from(mcp.input_schema.to_json()),
+        })
+    }
+
+    pub fn matches(&self, id: &str) -> bool {
+        self.id == id || self.aliases.iter().any(|alias| alias == id)
+    }
+
+    pub fn user_invocation(
+        &self,
+        caller: Entity,
+        arguments: serde_json::Value,
+    ) -> Result<CommandInvocation, String> {
+        self.validated_invocation(caller, arguments, false)
+    }
+
+    pub fn agent_invocation(
+        &self,
+        caller: Entity,
+        arguments: serde_json::Value,
+    ) -> Result<CommandInvocation, String> {
+        self.validated_invocation(caller, arguments, true)
+    }
+
+    fn validated_invocation(
+        &self,
+        caller: Entity,
+        arguments: serde_json::Value,
+        require_agent_access: bool,
+    ) -> Result<CommandInvocation, String> {
+        let Some(mcp) = &self.mcp else {
+            return Err(format!("unknown app command: {}", self.id));
+        };
+        if require_agent_access && mcp.agent_access != AgentAccess::Allowed {
+            return Err("focus-changing app command is disabled for agents".to_string());
+        }
+        self.validate_arguments(&arguments)?;
+        Ok(CommandInvocation::new(caller, &self.id).with_arguments(arguments))
+    }
+
+    pub fn mcp(mut self, definition: CommandMcp) -> Self {
+        self.mcp = Some(definition);
+        self
+    }
+
+    pub fn expose_to_mcp(mut self) -> Self {
+        self.mcp = Some(CommandMcp::new(self.label.clone(), JsonSchema::object()));
+        self
+    }
+
+    pub fn allow_agent(mut self) -> Self {
+        let mcp = self
+            .mcp
+            .as_mut()
+            .expect("agent access requires an MCP command definition");
+        mcp.agent_access = AgentAccess::Allowed;
+        self
+    }
+
+    fn validate_arguments(&self, arguments: &serde_json::Value) -> Result<(), String> {
+        let Some(mcp) = &self.mcp else {
+            return Err(format!("unknown app command: {}", self.id));
+        };
+        mcp.input_schema
+            .validate_value(arguments)
+            .map_err(|error| format!("{}: invalid arguments: {error}", self.id))
+    }
+
+    pub fn accelerator(mut self, accelerator: impl Into<String>) -> Self {
+        self.accelerator = Some(accelerator.into());
+        self
+    }
+
+    pub fn hidden(mut self) -> Self {
+        self.hidden = true;
+        self
+    }
+
+    pub fn native_menu(mut self, native_menu: bool) -> Self {
+        self.native_menu = native_menu;
+        self
+    }
+
+    pub fn with_shortcut_label(mut self, shortcut_label: impl Into<String>) -> Self {
+        self.shortcut_label = Some(shortcut_label.into());
+        self
+    }
+
+    pub fn direct(self, shortcut: impl Into<String>) -> Self {
+        self.direct_when(shortcut, None::<String>)
+    }
+
+    pub fn direct_when(
+        mut self,
+        shortcut: impl Into<String>,
+        when: Option<impl Into<String>>,
+    ) -> Self {
+        self.shortcuts.push(CommandShortcut {
+            shortcut: ShortcutDefinition::Direct(shortcut.into()),
+            when: when.map(Into::into),
+        });
+        self
+    }
+
+    pub fn chord(self, shortcut: impl Into<String>) -> Self {
+        self.chord_when(shortcut, None::<String>)
+    }
+
+    pub fn chord_when(
+        mut self,
+        shortcut: impl Into<String>,
+        when: Option<impl Into<String>>,
+    ) -> Self {
+        self.shortcuts.push(CommandShortcut {
+            shortcut: ShortcutDefinition::Chord(shortcut.into()),
+            when: when.map(Into::into),
+        });
+        self
+    }
+
+    pub fn command_bar_name(&self) -> String {
+        format!("{} > {}", self.group, self.label)
+    }
+
+    pub fn localized_name(&self, locale: &str) -> String {
+        let locale = Locale::from(locale);
+        let message_id = format!("command-{}", self.id.replace('_', "-"));
+        let translated = locale.translate(&message_id);
+        if translated == message_id {
+            return self.command_bar_name();
+        }
+        let mut segments = translated
+            .split(" > ")
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let group_count = self.group.split(" > ").count();
+        if segments.len() <= group_count {
+            return translated;
+        }
+        for (index, group) in self.group.split(" > ").enumerate() {
+            let prefix = if index == 0 { "menu" } else { "command-group" };
+            let group_id = format!("{prefix}-{}", Self::kebab_case(group));
+            let localized = locale.translate(&group_id);
+            if localized != group_id {
+                segments[index] = localized;
+            }
+        }
+        segments.join(" > ")
+    }
+
+    fn kebab_case(value: &str) -> String {
+        value
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>()
+            .join("-")
+    }
+
+    pub fn shortcut_label(&self) -> String {
+        if let Some(label) = &self.shortcut_label {
+            return label.clone();
+        }
+        self.bindings()
+            .into_iter()
+            .next()
+            .map(|binding| binding.shortcut.display())
+            .unwrap_or_default()
+    }
+
+    pub fn bindings(&self) -> Vec<Binding> {
+        let mut bindings = Vec::new();
+        for definition in &self.shortcuts {
+            let shortcut = match &definition.shortcut {
+                ShortcutDefinition::Direct(value) => {
+                    let Some(combo) = KeyCombo::parse(value) else {
+                        continue;
+                    };
+                    Shortcut::Direct(combo)
+                }
+                ShortcutDefinition::Chord(value) => {
+                    let Some((prefix, second)) = value.split_once(',') else {
+                        continue;
+                    };
+                    let (Some(prefix), Some(second)) = (
+                        KeyCombo::parse(prefix.trim()),
+                        KeyCombo::parse(second.trim()),
+                    ) else {
+                        continue;
+                    };
+                    Shortcut::Chord(prefix, second)
+                }
+            };
+            bindings.push(Binding {
+                shortcut,
+                command: self.id.to_string(),
+                when: definition.when.as_deref().and_then(When::parse),
+            });
+        }
+        if let Some(accelerator) = &self.accelerator
+            && let Some(combo) = KeyCombo::parse(accelerator)
+        {
+            let shortcut = Shortcut::Direct(combo);
+            if !bindings.iter().any(|binding| binding.shortcut == shortcut) {
+                bindings.push(Binding {
+                    shortcut,
+                    command: self.id.to_string(),
+                    when: None,
+                });
+            }
+        }
+        bindings
+    }
+
+    pub fn default_shortcuts(definitions: &[Self]) -> Vec<Binding> {
+        let mut bindings = Vec::new();
+        for definition in definitions {
+            bindings.extend(definition.bindings());
+        }
+        bindings
+    }
+
+    pub fn extend_keymap(definitions: &[Self], keymap: &mut crate::host::shortcut::Keymap) {
+        for definition in definitions {
+            keymap.register(
+                std::iter::once(definition.id.as_str())
+                    .chain(definition.aliases.iter().map(String::as_str)),
+            );
+        }
+        keymap.extend(Source::Default, Self::default_shortcuts(definitions));
+    }
+
+    pub fn append_native_menus(
+        definitions: &[Self],
+        menu: &mut muda::Menu,
+    ) -> Result<(), muda::Error> {
+        for definition in definitions {
+            if definition.hidden || !definition.native_menu {
+                continue;
+            }
+            let mut path = definition.group.split(" > ");
+            let Some(root_name) = path.next() else {
+                continue;
+            };
+            let existing = menu
+                .items()
+                .into_iter()
+                .filter_map(|item| item.as_submenu().cloned())
+                .find(|submenu| submenu.text() == root_name);
+            let mut submenu = if let Some(existing) = existing {
+                existing
+            } else {
+                let created = muda::Submenu::new(root_name, true);
+                menu.append(&created)?;
+                created
+            };
+            for name in path {
+                let existing = submenu
+                    .items()
+                    .into_iter()
+                    .filter_map(|item| item.as_submenu().cloned())
+                    .find(|child| child.text() == name);
+                submenu = if let Some(existing) = existing {
+                    existing
+                } else {
+                    let created = muda::Submenu::new(name, true);
+                    submenu.append(&created)?;
+                    created
+                };
+            }
+            let accelerator = definition
+                .accelerator
+                .as_deref()
+                .or_else(|| {
+                    definition.shortcuts.iter().find_map(|shortcut| {
+                        if shortcut.when.is_some() {
+                            return None;
+                        }
+                        let ShortcutDefinition::Direct(value) = &shortcut.shortcut else {
+                            return None;
+                        };
+                        Some(value.as_str())
+                    })
+                })
+                .and_then(|value| value.parse::<muda::accelerator::Accelerator>().ok());
+            let item =
+                muda::MenuItem::with_id(&definition.id, &definition.label, true, accelerator);
+            submenu.append(&item)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Message, Clone, Debug, PartialEq)]
+pub struct CommandInvocation {
+    pub caller: Entity,
+    pub id: String,
+    pub arguments: JsonArguments,
+}
+
+#[derive(Component, Clone, Copy)]
+struct CommandMessage(fn(&CommandInvocation, &mut Commands));
+
+pub trait CommandBinding: Bundle + Sized {
+    fn for_command(id: &str) -> Option<Self>;
+}
+
+impl CommandMessage {
+    fn of<T>() -> Self
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        Self(write_command_message::<T>)
+    }
+}
+
+fn write_command_message<T>(invocation: &CommandInvocation, commands: &mut Commands)
+where
+    T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+{
+    let Ok(message) = T::try_from(invocation) else {
+        warn!(command = %invocation.id, "command message rejected its registered definition");
+        return;
+    };
+    commands.write_message(message);
+}
+
+impl CommandInvocation {
+    pub fn new(caller: Entity, id: impl Into<String>) -> Self {
+        Self {
+            caller,
+            id: id.into(),
+            arguments: JsonArguments(serde_json::json!({})),
+        }
+    }
+
+    pub fn with_arguments(mut self, arguments: serde_json::Value) -> Self {
+        self.arguments = JsonArguments(arguments);
+        self
+    }
+
+    pub fn argument<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
+        serde_json::from_value(self.arguments.0.get(name)?.clone()).ok()
+    }
+}
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DispatchCommandInvocations;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BindCommands;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+enum CommandStartupSet {
+    Manifest,
+    Flush,
+}
+
+#[derive(SystemParam)]
+pub struct CommandRegistry<'w, 's> {
+    definitions: Query<'w, 's, (Entity, &'static CommandDefinition)>,
+}
+
+impl CommandRegistry<'_, '_> {
+    pub fn bind<B: CommandBinding>(&self, commands: &mut Commands) {
+        for (entity, definition) in &self.definitions {
+            if let Some(bundle) = B::for_command(&definition.id) {
+                commands.entity(entity).insert(bundle);
+            }
+        }
+    }
+
+    pub fn message<T>(&self, commands: &mut Commands)
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        for (entity, definition) in &self.definitions {
+            let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &definition.id);
+            if T::try_from(&invocation).is_ok() {
+                commands.entity(entity).insert(CommandMessage::of::<T>());
+            }
+        }
+    }
+}
+
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Command keymap"),
+        crate::host::shortcut::Keymap::default(),
+    ));
+}
+
+fn register(manifests: Query<&FeatureManifest>, mut commands: Commands) {
+    for manifest in &manifests {
+        for definition in manifest
+            .commands
+            .iter()
+            .cloned()
+            .map(CommandDefinition::from)
+        {
+            commands.spawn(definition);
+        }
+    }
+}
+
+fn validate(
+    added: Query<(Entity, &CommandDefinition), Added<CommandDefinition>>,
+    definitions: Query<(Entity, &CommandDefinition)>,
+    mut commands: Commands,
+) {
+    for (entity, definition) in &added {
+        let mut ids = Vec::with_capacity(definition.aliases.len() + 1);
+        ids.push(definition.id.clone());
+        ids.extend(definition.aliases.iter().cloned());
+        let mut unique_ids = HashSet::with_capacity(ids.len());
+        for id in &ids {
+            assert!(unique_ids.insert(id.as_str()), "duplicate command id: {id}");
+            for (other_entity, other) in &definitions {
+                assert!(
+                    other_entity == entity || !other.matches(id),
+                    "duplicate command id: {id}"
+                );
+            }
+        }
+        commands
+            .entity(entity)
+            .insert(Name::new(definition.id.clone()));
+    }
+}
+
+#[derive(EntityEvent)]
+pub struct CommandDispatch {
+    #[event_target]
+    command: Entity,
+    invocation: CommandInvocation,
+}
+
+impl CommandDispatch {
+    pub fn command(&self) -> Entity {
+        self.command
+    }
+
+    pub fn invocation(&self) -> &CommandInvocation {
+        &self.invocation
+    }
+}
+
+fn dispatch(
+    mut invocations: MessageReader<CommandInvocation>,
+    definitions: Query<(Entity, &CommandDefinition, Option<&CommandMessage>)>,
+    mut commands: Commands,
+) {
+    for invocation in invocations.read() {
+        let Some((command, definition, message)) = definitions
+            .iter()
+            .find(|(_, definition, _)| definition.matches(&invocation.id))
+        else {
+            continue;
+        };
+        let mut invocation = invocation.clone();
+        invocation.id.clone_from(&definition.id);
+        if let Some(mcp) = &definition.mcp
+            && let Err(error) = mcp.input_schema.validate_value(&invocation.arguments.0)
+        {
+            warn!(command = %definition.id, %error, "invalid command arguments");
+            continue;
+        }
+        if let Some(message) = message {
+            (message.0)(&invocation, &mut commands);
+        }
+        commands.trigger(CommandDispatch {
+            command,
+            invocation,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_commands_from_feature_manifest() {
+        let definitions = CommandManifest::from_feature_ron(
+            r#"(
+                commands: [(id: "test", label: "Test", group: "Test")],
+                ignored: true,
+            )"#,
+        )
+        .into_vec();
+
+        assert_eq!(definitions[0].id, "test");
+    }
+
+    #[derive(Message)]
+    struct TestToggleRequest;
+
+    impl TryFrom<&CommandInvocation> for TestToggleRequest {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            (invocation.id == "test_toggle").then_some(Self).ok_or(())
+        }
+    }
+
+    #[derive(Message)]
+    struct AgentVisibleRequest;
+
+    impl TryFrom<&CommandInvocation> for AgentVisibleRequest {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            (invocation.id == "agent_visible").then_some(Self).ok_or(())
+        }
+    }
+
+    #[derive(Message)]
+    struct UserOnlyRequest;
+
+    impl TryFrom<&CommandInvocation> for UserOnlyRequest {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            (invocation.id == "user_only").then_some(Self).ok_or(())
+        }
+    }
+
+    #[derive(Message)]
+    struct DuplicateCommandA;
+
+    impl TryFrom<&CommandInvocation> for DuplicateCommandA {
+        type Error = ();
+
+        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Err(())
+        }
+    }
+
+    #[derive(Message)]
+    struct DuplicateCommandB;
+
+    impl TryFrom<&CommandInvocation> for DuplicateCommandB {
+        type Error = ();
+
+        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Err(())
+        }
+    }
+
+    #[derive(Message, Debug, PartialEq, Eq)]
+    struct AliasedCommand(String);
+
+    impl TryFrom<&CommandInvocation> for AliasedCommand {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Ok(Self(invocation.id.clone()))
+        }
+    }
+
+    #[derive(Message)]
+    struct DuplicateAlias;
+
+    impl TryFrom<&CommandInvocation> for DuplicateAlias {
+        type Error = ();
+
+        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Err(())
+        }
+    }
+
+    struct CommandTestApp;
+
+    impl CommandTestApp {
+        fn empty() -> App {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, CommandRuntimePlugin));
+            app
+        }
+
+        fn register<T>(app: &mut App, definition: CommandDefinition)
+        where
+            T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+        {
+            app.add_message::<T>();
+            app.world_mut().spawn(definition.message::<T>());
+        }
+
+        fn test_toggle() -> App {
+            let mut app = Self::empty();
+            Self::register::<TestToggleRequest>(
+                &mut app,
+                CommandDefinition::new("test_toggle", "Toggle", "Test").direct("Super+t"),
+            );
+            app
+        }
+
+        fn agent_commands() -> App {
+            let mut app = Self::empty();
+            Self::register::<AgentVisibleRequest>(
+                &mut app,
+                CommandDefinition::new("agent_visible", "Visible", "Agent")
+                    .mcp(CommandMcp::new("Visible", vmux_api::JsonSchema::object()).allow_agent()),
+            );
+            Self::register::<UserOnlyRequest>(
+                &mut app,
+                CommandDefinition::new("user_only", "Only", "User")
+                    .mcp(CommandMcp::new("User only", vmux_api::JsonSchema::object())),
+            );
+            app
+        }
+    }
+
+    #[test]
+    fn registered_command_dispatches_to_its_typed_message() {
+        let mut app = CommandTestApp::test_toggle();
+        let caller = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(CommandInvocation::new(caller, "test_toggle"));
+
+        app.update();
+
+        let request_count = app
+            .world_mut()
+            .resource_mut::<Messages<TestToggleRequest>>()
+            .drain()
+            .count();
+        assert_eq!(request_count, 1);
+    }
+
+    #[test]
+    fn registered_command_contributes_metadata_and_shortcuts() {
+        let mut app = CommandTestApp::test_toggle();
+        app.update();
+        let mut query = app.world_mut().query::<&CommandDefinition>();
+        let definitions = query.iter(app.world()).cloned().collect::<Vec<_>>();
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id == "test_toggle")
+            .unwrap();
+
+        assert_eq!(definition.command_bar_name(), "Test > Toggle");
+        assert_eq!(definition.shortcut_label(), "⌘T");
+        assert_eq!(
+            CommandDefinition::default_shortcuts(&definitions)[0].command,
+            "test_toggle"
+        );
+    }
+
+    #[test]
+    fn alias_dispatches_with_the_canonical_id() {
+        let mut app = CommandTestApp::empty();
+        CommandTestApp::register::<AliasedCommand>(
+            &mut app,
+            CommandDefinition::new("canonical", "Canonical", "Test").alias("legacy"),
+        );
+        let caller = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(CommandInvocation::new(caller, "legacy"));
+
+        app.update();
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<AliasedCommand>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests, [AliasedCommand("canonical".to_string())]);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate command id: duplicate")]
+    fn duplicate_command_ids_are_rejected() {
+        let mut app = CommandTestApp::empty();
+        CommandTestApp::register::<DuplicateCommandA>(
+            &mut app,
+            CommandDefinition::new("duplicate", "First", "Test"),
+        );
+        CommandTestApp::register::<DuplicateCommandB>(
+            &mut app,
+            CommandDefinition::new("duplicate", "Second", "Test"),
+        );
+        app.update();
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate command id: duplicate")]
+    fn aliases_cannot_collide_with_command_ids() {
+        let mut app = CommandTestApp::empty();
+        CommandTestApp::register::<DuplicateCommandA>(
+            &mut app,
+            CommandDefinition::new("duplicate", "First", "Test"),
+        );
+        CommandTestApp::register::<DuplicateAlias>(
+            &mut app,
+            CommandDefinition::new("alias_owner", "Alias", "Test").alias("duplicate"),
+        );
+        app.update();
+    }
+
+    #[test]
+    fn command_entities_expose_and_dispatch_the_registered_request_definition() {
+        let mut app = CommandTestApp::agent_commands();
+        app.update();
+
+        let definitions = {
+            let mut query = app.world_mut().query::<&CommandDefinition>();
+            query.iter(app.world()).cloned().collect::<Vec<_>>()
+        };
+        let mut tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["agent_visible", "user_only"],
+        );
+
+        let caller = app.world_mut().spawn_empty().id();
+        let invocation = definitions
+            .iter()
+            .find(|definition| definition.matches("agent_visible"))
+            .unwrap()
+            .agent_invocation(caller, serde_json::json!({}))
+            .unwrap();
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(invocation);
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<AgentVisibleRequest>>()
+                .drain()
+                .count(),
+            1,
+        );
+    }
+
+    #[test]
+    fn command_entities_reject_unlisted_access_and_malformed_arguments() {
+        let mut app = CommandTestApp::agent_commands();
+        app.update();
+        let caller = app.world_mut().spawn_empty().id();
+        let definitions = {
+            let mut query = app.world_mut().query::<&CommandDefinition>();
+            query.iter(app.world()).cloned().collect::<Vec<_>>()
+        };
+
+        let denied = definitions
+            .iter()
+            .find(|definition| definition.matches("user_only"))
+            .unwrap()
+            .agent_invocation(caller, serde_json::json!({}))
+            .unwrap_err();
+        assert_eq!(
+            denied,
+            "focus-changing app command is disabled for agents".to_string(),
+        );
+
+        let malformed = definitions
+            .iter()
+            .find(|definition| definition.matches("agent_visible"))
+            .unwrap()
+            .agent_invocation(caller, serde_json::json!({"unexpected": true}))
+            .unwrap_err();
+        assert_eq!(
+            malformed,
+            "agent_visible: invalid arguments: unknown argument unexpected".to_string(),
+        );
+    }
+}

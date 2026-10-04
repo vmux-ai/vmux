@@ -1,0 +1,289 @@
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
+use bevy_cef::prelude::{
+    CefShutdownState, PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
+};
+use std::collections::HashSet;
+use vmux_flex::prelude::*;
+
+use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
+use super::load::PreparedExtensions;
+
+pub(crate) struct ExtensionBridgePagePlugin;
+
+impl Plugin for ExtensionBridgePagePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (stop_bridge_pages, spawn_bridge_pages)
+                .chain()
+                .before(bevy_cef::prelude::CefSystems::CreateAndResize),
+        );
+    }
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ExtensionBridgeWebview {
+    pub extension_id: String,
+    pub role: ExtensionBridgeRole,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum ExtensionBridgeRole {
+    Transport,
+    ConformanceEcho,
+}
+
+#[derive(Component)]
+struct ExtensionBridgeStopping;
+
+#[derive(SystemParam)]
+struct BridgePages<'w, 's> {
+    primary_window: Query<'w, 's, (), With<PrimaryWindow>>,
+    added_primary_window: Query<'w, 's, (), Added<PrimaryWindow>>,
+    pages: Query<'w, 's, (Entity, &'static ExtensionBridgeWebview)>,
+    removed_pages: RemovedComponents<'w, 's, ExtensionBridgeWebview>,
+    stopping: Query<'w, 's, (), With<ExtensionBridgeStopping>>,
+}
+
+fn stop_bridge_pages(
+    mut exits: MessageReader<AppExit>,
+    pages: Query<Entity, With<ExtensionBridgeWebview>>,
+    stopping: Query<(), With<ExtensionBridgeStopping>>,
+    mut commands: Commands,
+) {
+    if exits.read().count() == 0 {
+        return;
+    }
+    if stopping.is_empty() {
+        commands.spawn(ExtensionBridgeStopping);
+    }
+    for entity in &pages {
+        commands.spawn(vmux_browser::RetiredInfrastructureWebview::new(entity));
+        commands.entity(entity).despawn();
+    }
+}
+
+fn spawn_bridge_pages(
+    mut commands: Commands,
+    runtime: Single<(Ref<PreparedExtensions>, &ExtensionBridgeServer)>,
+    mut world: BridgePages,
+    shutdown: Option<Res<CefShutdownState>>,
+    mut initialized: Local<bool>,
+) {
+    let (prepared, server) = runtime.into_inner();
+    let should_reconcile = !*initialized
+        || prepared.is_changed()
+        || !world.added_primary_window.is_empty()
+        || world.removed_pages.read().count() > 0
+        || shutdown.as_ref().is_some_and(|state| state.is_changed());
+    *initialized = true;
+    if !should_reconcile {
+        return;
+    }
+    if !world.stopping.is_empty()
+        || shutdown.is_some_and(|state| state.started())
+        || world.primary_window.is_empty()
+    {
+        return;
+    }
+    let conformance = super::broker::ExtensionEnvironment::conformance_enabled();
+    let mut desired = prepared
+        .0
+        .iter()
+        .flat_map(|runtime| {
+            let mut roles = vec![(runtime.extension_id.clone(), ExtensionBridgeRole::Transport)];
+            if conformance {
+                roles.push((
+                    runtime.extension_id.clone(),
+                    ExtensionBridgeRole::ConformanceEcho,
+                ));
+            }
+            roles
+        })
+        .collect::<HashSet<_>>();
+    for (entity, page) in &world.pages {
+        let key = (page.extension_id.clone(), page.role);
+        if desired.remove(&key) {
+            continue;
+        }
+        commands.spawn(vmux_browser::RetiredInfrastructureWebview::new(entity));
+        commands.entity(entity).despawn();
+    }
+    for runtime in &prepared.0 {
+        let identity = server
+            .identity(&runtime.extension_id)
+            .unwrap_or_else(|| panic!("missing bridge identity for {}", runtime.extension_id));
+        for role in [
+            ExtensionBridgeRole::Transport,
+            ExtensionBridgeRole::ConformanceEcho,
+        ] {
+            if role == ExtensionBridgeRole::ConformanceEcho && !conformance {
+                continue;
+            }
+            let key = (runtime.extension_id.clone(), role);
+            if !desired.remove(&key) {
+                continue;
+            }
+            let mut entity = commands.spawn((
+                ExtensionBridgeWebview {
+                    extension_id: runtime.extension_id.clone(),
+                    role,
+                },
+                vmux_browser::InfrastructureWebview,
+                WebviewSize(Vec2::ONE),
+                WebviewMaxFrameRate(1),
+                Visibility::Hidden,
+            ));
+            match role {
+                ExtensionBridgeRole::Transport => {
+                    entity.insert((
+                        WebviewSource::new(format!(
+                            "chrome-extension://{}/vmux_bridge.html",
+                            runtime.extension_id
+                        )),
+                        PrivatePreloadScripts::from([bridge_config_source(
+                            server,
+                            identity,
+                            conformance,
+                        )]),
+                    ));
+                }
+                ExtensionBridgeRole::ConformanceEcho => {
+                    entity.insert(WebviewSource::new(format!(
+                        "chrome-extension://{}/echo.html",
+                        runtime.extension_id
+                    )));
+                }
+            }
+        }
+    }
+}
+
+fn bridge_config_source(
+    server: &ExtensionBridgeServer,
+    identity: &BridgeIdentity,
+    conformance: bool,
+) -> String {
+    super::runtime::BridgeConfig {
+        endpoint: server.endpoint().to_string(),
+        extension: identity.extension_id.clone(),
+        profile: identity.profile_id.clone(),
+        token: identity.token.clone(),
+        conformance,
+    }
+    .source()
+    .expect("valid embedded extension bridge template")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::bridge::ExtensionBridgeServer;
+    use crate::host::load::PreparedExtensions;
+    use crate::host::runtime::PreparedRuntime;
+    use bevy::window::PrimaryWindow;
+    use bevy_cef::prelude::{
+        PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
+    };
+
+    const EXTENSION_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    fn spawns_hidden_non_layout_bridge_webview() {
+        let mut app = App::new();
+        let runtime = PreparedRuntime {
+            extension_id: EXTENSION_ID.into(),
+            dir: std::path::PathBuf::from("runtime"),
+            runtime_hash: "runtime-hash".into(),
+            source_hash: "source-hash".into(),
+            permissions: Vec::new(),
+            optional_permissions: Vec::new(),
+            host_permissions: Vec::new(),
+            optional_host_permissions: Vec::new(),
+            granted_permissions: Vec::new(),
+            granted_host_permissions: Vec::new(),
+        };
+        let bridge = ExtensionBridgeServer::start("personal", [EXTENSION_ID]).unwrap();
+        let identity = bridge.identity(EXTENSION_ID).unwrap().clone();
+        let endpoint = bridge.endpoint().to_string();
+        app.world_mut()
+            .spawn((PreparedExtensions(vec![runtime]), bridge));
+        app.add_message::<AppExit>()
+            .add_systems(Update, (stop_bridge_pages, spawn_bridge_pages).chain());
+
+        app.update();
+        assert!(
+            app.world_mut()
+                .query::<&ExtensionBridgeWebview>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+
+        app.world_mut().spawn(PrimaryWindow);
+        app.update();
+        app.update();
+
+        let mut query = app.world_mut().query::<(
+            Entity,
+            &ExtensionBridgeWebview,
+            &WebviewSource,
+            &PrivatePreloadScripts,
+            &WebviewSize,
+            &WebviewMaxFrameRate,
+            &Visibility,
+        )>();
+        let (entity, bridge, source, preload, size, frame_rate, visibility) =
+            query.single(app.world()).unwrap();
+        assert_eq!(bridge.extension_id, EXTENSION_ID);
+        assert_eq!(bridge.role, ExtensionBridgeRole::Transport);
+        assert!(
+            matches!(source, WebviewSource(url) if url == &format!("chrome-extension://{EXTENSION_ID}/vmux_bridge.html"))
+        );
+        let [config] = preload.0.as_slice() else {
+            panic!("expected one bridge preload script");
+        };
+        assert!(!config.contains("globalThis.__vmuxBridgeConfig"));
+        assert!(config.contains(&endpoint));
+        assert!(config.contains(&identity.extension_id));
+        assert!(config.contains(&identity.profile_id));
+        assert!(config.contains(&identity.token));
+        assert_eq!(size.0, Vec2::ONE);
+        assert_eq!(frame_rate.0, 1);
+        assert_eq!(*visibility, Visibility::Hidden);
+        assert!(app.world().get::<vmux_layout::Browser>(entity).is_none());
+        assert!(
+            app.world()
+                .get::<vmux_browser::InfrastructureWebview>(entity)
+                .is_some()
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&ExtensionBridgeWebview>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        app.world_mut()
+            .resource_mut::<Messages<AppExit>>()
+            .write(AppExit::Success);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&ExtensionBridgeWebview>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert!(
+            app.world_mut()
+                .query::<&vmux_browser::RetiredInfrastructureWebview>()
+                .iter(app.world())
+                .any(|retired| retired.contains(entity))
+        );
+    }
+}

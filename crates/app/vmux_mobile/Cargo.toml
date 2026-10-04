@@ -19,6 +19,7 @@ bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = "0.19"
 bevy_window = { workspace = true }
+crossbeam-channel = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
@@ -34,14 +35,18 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 url = { workspace = true }
+uuid = { workspace = true }
 quinn = { workspace = true }
-vmux_remote = { path = "../../host/vmux_remote" }
-vmux_service = { path = "../../host/vmux_service" }
-vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
-vmux_chat = { path = "../../page/vmux_chat" }
-vmux_start = { path = "../../page/vmux_start" }
-vmux_team = { path = "../../page/vmux_team" }
-vmux_ui = { path = "../../vmux_ui" }
+vmux_transport = { path = "../../util/vmux_transport" }
+vmux_app = { path = "../../util/vmux_app", features = ["mobile"] }
+vmux_path = { path = "../../util/vmux_path" }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_chat = { path = "../../feature/vmux_chat" }
+vmux_session = { path = "../../feature/vmux_session" }
+vmux_start = { path = "../../feature/vmux_start" }
+vmux_team = { path = "../../feature/vmux_team" }
+vmux_ui = { path = "../../util/vmux_ui" }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 block2 = "0.6"

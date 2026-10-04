@@ -16,6 +16,7 @@ APP_BUNDLE="${VMUX_APP_BUNDLE:-$RELEASE_DIR/Vmux.app}"
 BUNDLE_ID_BASE="${VMUX_BUNDLE_ID:-ai.vmux.desktop}"
 CEF_FRAMEWORK="${CEF_FRAMEWORK:-${HOME}/.local/share/Chromium Embedded Framework.framework}"
 HELPER_BIN="${VMUX_CEF_HELPER_BIN:-$RELEASE_DIR/bevy_cef_debug_render_process}"
+BEVY_CEF_BUNDLE_APP_BIN="${BEVY_CEF_BUNDLE_APP_BIN:-$(command -v bevy_cef_bundle_app 2>/dev/null || echo "$HOME/.cargo/bin/bevy_cef_bundle_app")}"
 
 if [[ ! -d "$APP_BUNDLE" ]]; then
     echo "inject-cef: .app not found at $APP_BUNDLE, skipping"
@@ -38,7 +39,7 @@ if [[ -d "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework"
     exit 0
 fi
 
-if ! command -v bevy_cef_bundle_app >/dev/null 2>&1; then
+if [[ ! -x "$BEVY_CEF_BUNDLE_APP_BIN" ]]; then
     echo "inject-cef: bevy_cef_bundle_app not found. Install with: cargo install bevy_cef_bundle_app" >&2
     exit 1
 fi
@@ -50,7 +51,7 @@ if [[ ! -f "$HELPER_BIN" ]]; then
 fi
 
 echo "==> inject-cef: running bevy_cef_bundle_app"
-bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --bin-name vmux_desktop --cef-framework "$CEF_FRAMEWORK" --helper-bin "$HELPER_BIN" --no-sign
+"$BEVY_CEF_BUNDLE_APP_BIN" --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --bin-name vmux_desktop --cef-framework "$CEF_FRAMEWORK" --helper-bin "$HELPER_BIN" --no-sign
 
 CEF_RESOURCES="$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework/Resources"
 if [[ -d "$CEF_RESOURCES" ]]; then

@@ -12,9 +12,9 @@ crates/vmux_header/assets/status.css
 # Cargo artifacts when building inside the crate (e.g. `dx build`, `cargo build -p vmux_header`)
 crates/vmux_header/target/
 
-# Tailwind output (run `npm run build:css` in crates/vmux_ui)
-crates/vmux_ui/assets/ui_library.css
-crates/vmux_ui/target/
+# Tailwind output (run `npm run build:css` in crates/util/vmux_ui)
+crates/util/vmux_ui/assets/ui_library.css
+crates/util/vmux_ui/target/
 crates/app/vmux_mobile/assets/tailwind.out.css
 
 .superpowers/

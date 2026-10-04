@@ -1,0 +1,131 @@
+[package]
+name = "vmux_app"
+version.workspace = true
+edition.workspace = true
+description = "Composable cross-platform vmux application framework"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+conformance = ["extension", "vmux_extension/conformance"]
+cli = [
+    "agent",
+    "bookmark",
+    "browser",
+    "capture",
+    "editor",
+    "knowledge",
+    "layout",
+    "service",
+    "simulator",
+    "space",
+    "team",
+    "terminal",
+    "tool",
+    "vault",
+    "dep:bevy_ecs",
+    "dep:vmux_mcp",
+]
+desktop = [
+    "agent",
+    "bookmark",
+    "browser",
+    "capture",
+    "chat",
+    "command",
+    "editor",
+    "extension",
+    "git",
+    "history",
+    "knowledge",
+    "layout",
+    "remote",
+    "tool",
+    "service",
+    "session",
+    "setting",
+    "shortcut",
+    "simulator",
+    "space",
+    "start",
+    "team",
+    "terminal",
+    "vault",
+]
+mobile = ["chat", "dep:vmux_start", "dep:vmux_team"]
+tool = ["dep:vmux_tool"]
+capture = ["tool", "dep:vmux_input"]
+bookmark = ["layout", "dep:vmux_bookmark"]
+ecs = [
+    "dep:vmux_ecs",
+    "dep:vmux_flex",
+]
+chat = ["dep:vmux_chat"]
+command = ["ecs", "dep:vmux_command"]
+setting = ["ecs", "dep:vmux_setting"]
+session = ["dep:vmux_session"]
+layout = ["command", "setting", "dep:vmux_layout"]
+browser = ["command", "layout", "dep:vmux_browser"]
+extension = ["browser", "dep:vmux_extension"]
+terminal = ["layout", "service", "dep:vmux_terminal"]
+editor = ["layout", "dep:vmux_editor"]
+git = ["layout", "dep:vmux_git"]
+agent = [
+    "chat",
+    "command",
+    "editor",
+    "history",
+    "knowledge",
+    "service",
+    "session",
+    "space",
+    "terminal",
+    "dep:vmux_agent",
+]
+knowledge = ["ecs", "dep:vmux_knowledge"]
+history = ["ecs", "dep:vmux_history"]
+simulator = ["layout", "dep:vmux_simulator"]
+shortcut = ["ecs", "dep:vmux_shortcut"]
+team = ["ecs", "dep:vmux_team"]
+space = ["layout", "dep:vmux_space"]
+service = ["ecs", "dep:vmux_service"]
+remote = ["layout", "service", "dep:vmux_remote"]
+start = ["ecs", "dep:vmux_start"]
+vault = ["layout", "dep:vmux_vault"]
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true, optional = true }
+vmux_agent = { path = "../../feature/vmux_agent", optional = true }
+vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
+vmux_browser = { path = "../vmux_browser", optional = true }
+vmux_chat = { path = "../../feature/vmux_chat", optional = true }
+vmux_command = { path = "../../feature/vmux_command", optional = true }
+vmux_ecs = { path = "../vmux_ecs", optional = true }
+vmux_editor = { path = "../../feature/vmux_editor", optional = true }
+vmux_extension = { path = "../../feature/vmux_extension", optional = true }
+vmux_flex = { path = "../vmux_flex", optional = true }
+vmux_git = { path = "../../feature/vmux_git", optional = true }
+vmux_history = { path = "../../feature/vmux_history", optional = true }
+vmux_input = { path = "../../feature/vmux_input", optional = true }
+vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
+vmux_layout = { path = "../../feature/vmux_layout", optional = true }
+vmux_mcp = { path = "../vmux_mcp", optional = true }
+vmux_macro = { path = "../vmux_macro" }
+vmux_remote = { path = "../../feature/vmux_remote", optional = true }
+vmux_service = { path = "../../feature/vmux_service", optional = true }
+vmux_session = { path = "../../feature/vmux_session", optional = true }
+vmux_setting = { path = "../../feature/vmux_setting", optional = true }
+vmux_shortcut = { path = "../../feature/vmux_shortcut", optional = true }
+vmux_simulator = { path = "../../feature/vmux_simulator", optional = true }
+vmux_space = { path = "../../feature/vmux_space", optional = true }
+vmux_start = { path = "../../feature/vmux_start", optional = true }
+vmux_team = { path = "../../feature/vmux_team", optional = true }
+vmux_terminal = { path = "../../feature/vmux_terminal", optional = true }
+vmux_tool = { path = "../../feature/vmux_tool", optional = true }
+vmux_vault = { path = "../../feature/vmux_vault", optional = true }
+
+[lints]
+workspace = true

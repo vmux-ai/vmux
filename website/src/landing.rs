@@ -1,3 +1,12 @@
+use browser::Browser;
+use coworking::Coworking;
+use cta::Cta;
+use dioxus::prelude::*;
+use hero::Hero;
+use ide::Ide;
+use platform::Platform;
+use visit::Visit;
+
 mod browser;
 mod coworking;
 mod cta;
@@ -9,15 +18,6 @@ mod platform;
 mod scroll;
 mod showcase;
 mod visit;
-
-use browser::Browser;
-use coworking::Coworking;
-use cta::Cta;
-use dioxus::prelude::*;
-use hero::Hero;
-use ide::Ide;
-use platform::Platform;
-use visit::Visit;
 
 pub const ICON: Asset = asset!("/assets/icon.png");
 pub const GITHUB_URL: &str = "https://github.com/vmux-ai/vmux";

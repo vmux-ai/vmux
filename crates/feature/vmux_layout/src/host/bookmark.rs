@@ -1,0 +1,2067 @@
+use crate::stack::{ActiveTabParam, LayoutFocus, Stack};
+use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_api::bookmark::{
+    BookmarkAddRequest as BookmarkAddUiRequest, BookmarkContextMenuRequest, BookmarkDropRequest,
+    BookmarkDropSource, BookmarkDropTarget,
+    BookmarkFolderCreateRequest as BookmarkFolderCreateUiRequest,
+    BookmarkFolderMoveRequest as BookmarkFolderMoveUiRequest,
+    BookmarkFolderRemoveRequest as BookmarkFolderRemoveUiRequest,
+    BookmarkFolderRenameRequest as BookmarkFolderRenameUiRequest,
+    BookmarkFolderToggleRequest as BookmarkFolderToggleUiRequest, BookmarkMenuEntryRequest,
+    BookmarkMenuFolderRequest, BookmarkMenuPinRequest, BookmarkMenuRootRequest,
+    BookmarkMoveRequest as BookmarkMoveUiRequest, BookmarkOpenRequest,
+    BookmarkPinRequest as BookmarkPinUiRequest, BookmarkPinUrlRequest as BookmarkPinUrlUiRequest,
+    BookmarkRemoveRequest as BookmarkRemoveUiRequest,
+    BookmarkRenameRequest as BookmarkRenameUiRequest, BookmarkTextInputRequest,
+    BookmarkToggleRequest, BookmarkUnpinRequest as BookmarkUnpinUiRequest,
+};
+use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
+#[cfg(test)]
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::page::PageManifest;
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
+
+use super::{command::LayoutRequestSet, stack::OpenRequest};
+
+pub struct BookmarkPlugin;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BookmarkRequestSet;
+
+impl Plugin for BookmarkPlugin {
+    fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_message::<BookmarkToggleActiveRequest>()
+            .add_message::<BookmarkPinActiveRequest>()
+            .add_message::<CreateFolderRequest>()
+            .add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_message::<ShowBookmarkMenuRequest>()
+            .add_plugins(UiEventPlugin::<(
+                BookmarkToggleRequest,
+                BookmarkMenuRootRequest,
+                BookmarkMenuPinRequest,
+                BookmarkMenuEntryRequest,
+                BookmarkMenuFolderRequest,
+                BookmarkOpenRequest,
+                BookmarkAddUiRequest,
+                BookmarkPinUrlUiRequest,
+                BookmarkRemoveUiRequest,
+                BookmarkRenameUiRequest,
+                BookmarkMoveUiRequest,
+            )>::default())
+            .add_plugins(UiEventPlugin::<(
+                BookmarkPinUiRequest,
+                BookmarkUnpinUiRequest,
+                BookmarkFolderToggleUiRequest,
+                BookmarkFolderCreateUiRequest,
+                BookmarkFolderMoveUiRequest,
+                BookmarkFolderRenameUiRequest,
+                BookmarkFolderRemoveUiRequest,
+                BookmarkTextInputRequest,
+                BookmarkContextMenuRequest,
+                BookmarkDropRequest,
+            )>::default())
+            .add_observer(request_toggle)
+            .add_observer(request_menu::<BookmarkMenuRootRequest>)
+            .add_observer(request_menu::<BookmarkMenuPinRequest>)
+            .add_observer(request_menu::<BookmarkMenuEntryRequest>)
+            .add_observer(request_menu::<BookmarkMenuFolderRequest>)
+            .add_observer(request_open)
+            .add_observer(request_add)
+            .add_observer(request_pin_url)
+            .add_observer(request_remove)
+            .add_observer(request_rename)
+            .add_observer(request_move)
+            .add_observer(request_pin)
+            .add_observer(request_unpin)
+            .add_observer(toggle_folder)
+            .add_observer(create_folder)
+            .add_observer(request_folder_move)
+            .add_observer(rename_folder)
+            .add_observer(request_remove_folder)
+            .add_observer(text_input)
+            .add_observer(open_context_menu)
+            .add_observer(request_drop)
+            .add_systems(
+                Update,
+                (
+                    commands.in_set(LayoutRequestSet::Handle),
+                    (
+                        toggle,
+                        add,
+                        remove,
+                        rename,
+                        move_entry,
+                        move_pin,
+                        reorder_pin,
+                        add_folder,
+                        move_folder,
+                        remove_folder,
+                        rename_folder_request,
+                        toggle_folder_request,
+                        pin,
+                        pin_url,
+                        unpin,
+                    )
+                        .chain()
+                        .in_set(BookmarkRequestSet),
+                    sync_metadata,
+                )
+                    .chain(),
+            );
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct BookmarkToggleActiveRequest;
+
+impl TryFrom<&CommandInvocation> for BookmarkToggleActiveRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "bookmark_toggle_active")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct BookmarkPinActiveRequest;
+
+impl TryFrom<&CommandInvocation> for BookmarkPinActiveRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "bookmark_pin_active")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
+
+#[vmux_api::agent(Eq, Message)]
+pub struct CreateFolderRequest {
+    pub name: String,
+    pub parent: Option<String>,
+}
+
+impl CreateFolderRequest {
+    pub fn root(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            parent: None,
+        }
+    }
+
+    pub fn child(name: impl Into<String>, parent: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            parent: Some(parent.into()),
+        }
+    }
+}
+
+impl TryFrom<&CommandInvocation> for CreateFolderRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "bookmark_new_folder")
+            .then(|| Self::root("New Folder"))
+            .ok_or(())
+    }
+}
+
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<BookmarkToggleActiveRequest>(&mut commands);
+    registry.message::<BookmarkPinActiveRequest>(&mut commands);
+    registry.message::<CreateFolderRequest>(&mut commands);
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct ToggleForUrlRequest {
+    pub metadata: PageMetadata,
+}
+
+#[vmux_api::agent(Eq, Message)]
+pub struct AddRequest {
+    pub metadata: PageMetadata,
+    pub folder: Option<String>,
+}
+
+#[vmux_api::agent(Eq, Message)]
+pub struct RemoveRequest {
+    pub uuid: String,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct RenameRequest {
+    pub uuid: String,
+    pub name: String,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct MoveRequest {
+    pub uuid: String,
+    pub folder: Option<String>,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct MovePinRequest {
+    pub uuid: String,
+    pub folder: Option<String>,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct ReorderPinRequest {
+    pub uuid: String,
+    pub target_uuid: String,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct MoveFolderRequest {
+    pub uuid: String,
+    pub parent: Option<String>,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct RemoveFolderRequest {
+    pub uuid: String,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct RenameFolderRequest {
+    pub uuid: String,
+    pub name: String,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct ToggleFolderRequest {
+    pub uuid: String,
+}
+
+#[vmux_api::agent(Eq, Message)]
+pub struct PinRequest {
+    pub uuid: String,
+}
+
+#[vmux_api::agent(Eq, Message)]
+pub struct PinUrlRequest {
+    pub metadata: PageMetadata,
+}
+
+#[vmux_api::agent(Eq, Message)]
+pub struct UnpinRequest {
+    pub uuid: String,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct ShowBookmarkMenuRequest {
+    pub webview: Entity,
+    pub target: BookmarkMenuTarget,
+}
+
+#[derive(Clone, Debug)]
+pub enum BookmarkMenuTarget {
+    Root,
+    Pin {
+        uuid: String,
+    },
+    Entry {
+        uuid: String,
+    },
+    Folder {
+        uuid: String,
+        active_page: Option<PageMetadata>,
+    },
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BookmarkTextInputActive;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BookmarkContextMenuActive;
+
+fn open_context_menu(trigger: On<UiInput<BookmarkContextMenuRequest>>, mut commands: Commands) {
+    let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
+        return;
+    };
+    if trigger.event().payload.active {
+        webview.insert(BookmarkContextMenuActive);
+    } else {
+        webview.remove::<BookmarkContextMenuActive>();
+    }
+}
+
+fn text_input(trigger: On<UiInput<BookmarkTextInputRequest>>, mut commands: Commands) {
+    let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
+        return;
+    };
+    if trigger.event().payload.active {
+        webview.insert(BookmarkTextInputActive);
+    } else {
+        webview.remove::<BookmarkTextInputActive>();
+    }
+}
+
+#[derive(SystemParam)]
+struct BookmarkEntities<'w, 's> {
+    ids: Query<'w, 's, (Entity, &'static Uuid)>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    orders: Query<'w, 's, &'static BookmarkOrder>,
+}
+
+impl BookmarkEntities<'_, '_> {
+    fn new_uuid(&self) -> Uuid {
+        Uuid(uuid::Uuid::new_v4().to_string())
+    }
+
+    fn next_order(&self) -> BookmarkOrder {
+        BookmarkOrder(
+            self.orders
+                .iter()
+                .map(|order| order.0)
+                .max()
+                .map(|order| order + 1)
+                .unwrap_or(0),
+        )
+    }
+
+    fn find(&self, target: &str) -> Option<Entity> {
+        self.ids
+            .iter()
+            .find(|(_, id)| id.0 == target)
+            .map(|(entity, _)| entity)
+    }
+
+    fn parent(&self, entity: Entity) -> Option<Entity> {
+        self.parents.get(entity).ok().map(Relationship::get)
+    }
+
+    fn can_parent(&self, folder: Entity, parent: Entity) -> bool {
+        let mut current = Some(parent);
+        let mut seen = std::collections::HashSet::new();
+        while let Some(entity) = current {
+            if entity == folder || !seen.insert(entity) {
+                return false;
+            }
+            current = self.parent(entity);
+        }
+        true
+    }
+}
+
+fn toggle(
+    mut reader: MessageReader<ToggleForUrlRequest>,
+    entities: BookmarkEntities,
+    bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
+    pinned: Query<(Entity, &PageMetadata), With<Pin>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let metadata = &request.metadata;
+        let existing = bookmarks
+            .iter()
+            .find(|(_, candidate)| candidate.url == metadata.url)
+            .map(|(entity, _)| entity);
+        if let Some(entity) = existing {
+            if pinned.get(entity).is_ok() {
+                commands
+                    .entity(entity)
+                    .remove::<Bookmark>()
+                    .remove::<ChildOf>();
+            } else {
+                commands.entity(entity).despawn();
+            }
+        } else if let Some((entity, _)) = pinned
+            .iter()
+            .find(|(_, candidate)| candidate.url == metadata.url)
+        {
+            commands.entity(entity).insert((Bookmark, metadata.clone()));
+        } else {
+            commands.spawn((
+                Bookmark,
+                entities.new_uuid(),
+                metadata.clone(),
+                entities.next_order(),
+            ));
+        }
+    }
+}
+
+fn add(
+    mut reader: MessageReader<AddRequest>,
+    entities: BookmarkEntities,
+    bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
+    pinned: Query<(Entity, &PageMetadata), With<Pin>>,
+    folders: Query<(), With<Folder>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let folder_entity = request.folder.as_ref().and_then(|folder_uuid| {
+            let entity = entities.find(folder_uuid)?;
+            folders.get(entity).ok().map(|_| entity)
+        });
+        if request.folder.is_some() && folder_entity.is_none() {
+            continue;
+        }
+        if let Some((entity, _)) = bookmarks
+            .iter()
+            .find(|(_, metadata)| metadata.url == request.metadata.url)
+        {
+            let mut entity_commands = commands.entity(entity);
+            entity_commands.insert(request.metadata.clone());
+            if let Some(folder_entity) = folder_entity {
+                entity_commands.insert(ChildOf(folder_entity));
+            }
+            continue;
+        }
+        if let Some((entity, _)) = pinned
+            .iter()
+            .find(|(_, metadata)| metadata.url == request.metadata.url)
+        {
+            let mut entity_commands = commands.entity(entity);
+            entity_commands.insert((Bookmark, request.metadata.clone()));
+            if let Some(folder_entity) = folder_entity {
+                entity_commands.insert(ChildOf(folder_entity));
+            }
+            continue;
+        }
+        let mut entity = commands.spawn((
+            Bookmark,
+            entities.new_uuid(),
+            request.metadata.clone(),
+            entities.next_order(),
+        ));
+        if let Some(folder_entity) = folder_entity {
+            entity.insert(ChildOf(folder_entity));
+        }
+    }
+}
+
+fn remove(
+    mut reader: MessageReader<RemoveRequest>,
+    entities: BookmarkEntities,
+    bookmarks: Query<(), With<Bookmark>>,
+    pinned: Query<(), With<Pin>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if let Some(entity) = entities.find(&request.uuid)
+            && (bookmarks.get(entity).is_ok() || pinned.get(entity).is_ok())
+        {
+            if bookmarks.get(entity).is_ok() && pinned.get(entity).is_ok() {
+                commands
+                    .entity(entity)
+                    .remove::<Bookmark>()
+                    .remove::<ChildOf>();
+            } else {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+fn rename(
+    mut reader: MessageReader<RenameRequest>,
+    entities: BookmarkEntities,
+    bookmarks: Query<&PageMetadata, With<Bookmark>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let name = request.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(entity) = entities.find(&request.uuid)
+            && let Ok(metadata) = bookmarks.get(entity)
+        {
+            let mut metadata = metadata.clone();
+            metadata.title = name.to_string();
+            commands.entity(entity).insert(metadata);
+        }
+    }
+}
+
+fn move_entry(
+    mut reader: MessageReader<MoveRequest>,
+    entities: BookmarkEntities,
+    bookmarks: Query<(), With<Bookmark>>,
+    folders: Query<(), With<Folder>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if let Some(entity) = entities.find(&request.uuid)
+            && bookmarks.get(entity).is_ok()
+        {
+            if let Some(folder_uuid) = &request.folder
+                && let Some(folder_entity) = entities.find(folder_uuid)
+                && folders.get(folder_entity).is_ok()
+            {
+                commands.entity(entity).insert(ChildOf(folder_entity));
+            } else if request.folder.is_none() {
+                commands.entity(entity).remove::<ChildOf>();
+            }
+        }
+    }
+}
+
+fn move_pin(
+    mut reader: MessageReader<MovePinRequest>,
+    entities: BookmarkEntities,
+    pinned: Query<(), With<Pin>>,
+    folders: Query<(), With<Folder>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let folder_entity = request.folder.as_ref().and_then(|folder_uuid| {
+            let entity = entities.find(folder_uuid)?;
+            folders.get(entity).ok().map(|_| entity)
+        });
+        if request.folder.is_some() && folder_entity.is_none() {
+            continue;
+        }
+        if let Some(entity) = entities.find(&request.uuid)
+            && pinned.get(entity).is_ok()
+        {
+            let mut entity_commands = commands.entity(entity);
+            entity_commands.insert(Bookmark);
+            if let Some(folder_entity) = folder_entity {
+                entity_commands.insert(ChildOf(folder_entity));
+            } else {
+                entity_commands.remove::<ChildOf>();
+            }
+        }
+    }
+}
+
+fn reorder_pin(
+    mut reader: MessageReader<ReorderPinRequest>,
+    pin_orders: Query<(Entity, &Uuid, &BookmarkOrder), With<Pin>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let mut pins = pin_orders
+            .iter()
+            .map(|(entity, uuid, order)| (entity, uuid.0.clone(), order.0))
+            .collect::<Vec<_>>();
+        pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
+        let Some(source_index) = pins.iter().position(|(_, id, _)| id == &request.uuid) else {
+            continue;
+        };
+        let Some(target_index) = pins
+            .iter()
+            .position(|(_, id, _)| id == &request.target_uuid)
+        else {
+            continue;
+        };
+        if source_index == target_index {
+            continue;
+        }
+        let order_values = pins.iter().map(|(_, _, order)| *order).collect::<Vec<_>>();
+        let moved = pins.remove(source_index);
+        pins.insert(target_index, moved);
+        for ((entity, _, _), order) in pins.into_iter().zip(order_values) {
+            commands.entity(entity).insert(BookmarkOrder(order));
+        }
+    }
+}
+
+fn add_folder(
+    mut reader: MessageReader<CreateFolderRequest>,
+    entities: BookmarkEntities,
+    folders: Query<(), With<Folder>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let name = request.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let parent_entity = if let Some(parent) = &request.parent {
+            let Some(parent_entity) = entities.find(parent) else {
+                continue;
+            };
+            if folders.get(parent_entity).is_err() {
+                continue;
+            }
+            Some(parent_entity)
+        } else {
+            None
+        };
+        let mut entity = commands.spawn((
+            Folder,
+            entities.new_uuid(),
+            Name::new(name.to_string()),
+            entities.next_order(),
+        ));
+        if let Some(parent_entity) = parent_entity {
+            entity.insert(ChildOf(parent_entity));
+        }
+    }
+}
+
+fn move_folder(
+    mut reader: MessageReader<MoveFolderRequest>,
+    entities: BookmarkEntities,
+    folders: Query<(), With<Folder>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let Some(folder_entity) = entities.find(&request.uuid) else {
+            continue;
+        };
+        if folders.get(folder_entity).is_err() {
+            continue;
+        }
+        if let Some(parent_uuid) = &request.parent {
+            let Some(parent_entity) = entities.find(parent_uuid) else {
+                continue;
+            };
+            if folders.get(parent_entity).is_ok()
+                && entities.can_parent(folder_entity, parent_entity)
+            {
+                commands
+                    .entity(folder_entity)
+                    .insert(ChildOf(parent_entity));
+            }
+        } else {
+            commands.entity(folder_entity).remove::<ChildOf>();
+        }
+    }
+}
+
+fn remove_folder(
+    mut reader: MessageReader<RemoveFolderRequest>,
+    entities: BookmarkEntities,
+    folders: Query<(), With<Folder>>,
+    children: Query<&Children>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if let Some(folder_entity) = entities.find(&request.uuid)
+            && folders.get(folder_entity).is_ok()
+        {
+            let parent = entities.parent(folder_entity);
+            if let Ok(folder_children) = children.get(folder_entity) {
+                for child in folder_children.iter() {
+                    if let Some(parent) = parent {
+                        commands.entity(child).insert(ChildOf(parent));
+                    } else {
+                        commands.entity(child).remove::<ChildOf>();
+                    }
+                }
+            }
+            commands.entity(folder_entity).remove::<ChildOf>().despawn();
+        }
+    }
+}
+
+fn rename_folder_request(
+    mut reader: MessageReader<RenameFolderRequest>,
+    entities: BookmarkEntities,
+    folders: Query<(), With<Folder>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let name = request.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(folder_entity) = entities.find(&request.uuid)
+            && folders.get(folder_entity).is_ok()
+        {
+            commands
+                .entity(folder_entity)
+                .insert(Name::new(name.to_string()));
+        }
+    }
+}
+
+fn toggle_folder_request(
+    mut reader: MessageReader<ToggleFolderRequest>,
+    entities: BookmarkEntities,
+    folders: Query<(), With<Folder>>,
+    collapsed: Query<(), With<Collapsed>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if let Some(folder_entity) = entities.find(&request.uuid)
+            && folders.get(folder_entity).is_ok()
+        {
+            if collapsed.get(folder_entity).is_ok() {
+                commands.entity(folder_entity).remove::<Collapsed>();
+            } else {
+                commands.entity(folder_entity).insert(Collapsed);
+            }
+        }
+    }
+}
+
+fn pin(
+    mut reader: MessageReader<PinRequest>,
+    entities: BookmarkEntities,
+    bookmarks: Query<(), With<Bookmark>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if let Some(entity) = entities.find(&request.uuid)
+            && bookmarks.get(entity).is_ok()
+        {
+            commands.entity(entity).insert(Pin);
+        }
+    }
+}
+
+fn pin_url(
+    mut reader: MessageReader<PinUrlRequest>,
+    entities: BookmarkEntities,
+    pinned: Query<(Entity, &PageMetadata), With<Pin>>,
+    bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if let Some((entity, _)) = pinned
+            .iter()
+            .find(|(_, metadata)| metadata.url == request.metadata.url)
+        {
+            commands.entity(entity).insert(request.metadata.clone());
+            continue;
+        }
+        if let Some((entity, _)) = bookmarks
+            .iter()
+            .find(|(_, metadata)| metadata.url == request.metadata.url)
+        {
+            commands
+                .entity(entity)
+                .insert((Pin, request.metadata.clone()));
+            continue;
+        }
+        commands.spawn((
+            Pin,
+            entities.new_uuid(),
+            request.metadata.clone(),
+            entities.next_order(),
+        ));
+    }
+}
+
+fn unpin(
+    mut reader: MessageReader<UnpinRequest>,
+    entities: BookmarkEntities,
+    pinned: Query<(), With<Pin>>,
+    bookmarks: Query<(), With<Bookmark>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if let Some(entity) = entities.find(&request.uuid)
+            && pinned.get(entity).is_ok()
+        {
+            if bookmarks.get(entity).is_ok() {
+                commands.entity(entity).remove::<Pin>();
+            } else {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+fn sync_metadata(
+    pages: Query<
+        &PageMetadata,
+        (
+            With<Stack>,
+            Changed<PageMetadata>,
+            Without<Bookmark>,
+            Without<Pin>,
+        ),
+    >,
+    manifests: Query<Ref<PageManifest>>,
+    bookmarks: Query<
+        (Entity, Ref<PageMetadata>),
+        (Or<(With<Bookmark>, With<Pin>)>, Without<Stack>),
+    >,
+    mut commands: Commands,
+) {
+    let manifests_changed = manifests
+        .iter()
+        .any(|manifest| manifest.is_added() || manifest.is_changed());
+    let mut metadata_by_url = std::collections::HashMap::new();
+    for page in &pages {
+        if page.url.is_empty() {
+            continue;
+        }
+        metadata_by_url.insert(page.url.clone(), page.clone());
+    }
+    for (entity, bookmark) in &bookmarks {
+        let mut metadata = PageMetadata::clone(&bookmark);
+        if let Some(page) = metadata_by_url.get(&bookmark.url) {
+            if bookmark.title == bookmark.url && !page.title.is_empty() {
+                metadata.title.clone_from(&page.title);
+            }
+            if !page.icon.is_none() && bookmark.icon != page.icon {
+                metadata.icon.clone_from(&page.icon);
+            }
+        }
+        if !manifests_changed
+            && !bookmark.is_added()
+            && !bookmark.is_changed()
+            && metadata == *bookmark
+        {
+            continue;
+        }
+        let Some(manifest) = manifests
+            .iter()
+            .find(|manifest| manifest.answers_for(&metadata.url))
+        else {
+            if metadata != *bookmark {
+                commands.entity(entity).insert(metadata);
+            }
+            continue;
+        };
+        if metadata.title == metadata.url {
+            metadata.title = manifest.title.to_string();
+        }
+        if let Some(icon) = manifest.icon
+            && metadata.icon != PageIcon::Builtin(icon)
+        {
+            metadata.icon = PageIcon::Builtin(icon);
+        }
+        if metadata != *bookmark {
+            commands.entity(entity).insert(metadata);
+        }
+    }
+}
+
+fn request_toggle(
+    _trigger: On<UiInput<BookmarkToggleRequest>>,
+    mut requests: MessageWriter<BookmarkToggleActiveRequest>,
+) {
+    requests.write(BookmarkToggleActiveRequest);
+}
+
+fn request_open(
+    trigger: On<UiInput<BookmarkOpenRequest>>,
+    mut requests: MessageWriter<OpenRequest>,
+) {
+    requests.write(OpenRequest {
+        url: Some(trigger.event().payload.url.clone()),
+    });
+}
+
+fn request_menu<R>(trigger: On<UiInput<R>>, mut menu_req: MessageWriter<ShowBookmarkMenuRequest>)
+where
+    R: Clone + Send + Sync + 'static,
+    BookmarkMenuTarget: From<R>,
+{
+    menu_req.write(ShowBookmarkMenuRequest {
+        webview: trigger.event().webview,
+        target: trigger.event().payload.clone().into(),
+    });
+}
+
+fn request_add(
+    trigger: On<UiInput<BookmarkAddUiRequest>>,
+    mut requests: MessageWriter<AddRequest>,
+) {
+    requests.write(AddRequest {
+        metadata: trigger.event().payload.metadata.clone(),
+        folder: trigger.event().payload.folder.clone(),
+    });
+}
+
+fn request_pin_url(
+    trigger: On<UiInput<BookmarkPinUrlUiRequest>>,
+    mut requests: MessageWriter<PinUrlRequest>,
+) {
+    requests.write(PinUrlRequest {
+        metadata: trigger.event().payload.metadata.clone(),
+    });
+}
+
+fn request_remove(
+    trigger: On<UiInput<BookmarkRemoveUiRequest>>,
+    mut requests: MessageWriter<RemoveRequest>,
+) {
+    requests.write(RemoveRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+    });
+}
+
+fn request_rename(
+    trigger: On<UiInput<BookmarkRenameUiRequest>>,
+    mut requests: MessageWriter<RenameRequest>,
+) {
+    let name = trigger.event().payload.name.trim();
+    if name.is_empty() {
+        return;
+    }
+    requests.write(RenameRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+        name: name.to_string(),
+    });
+}
+
+fn request_move(
+    trigger: On<UiInput<BookmarkMoveUiRequest>>,
+    mut requests: MessageWriter<MoveRequest>,
+) {
+    requests.write(MoveRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+        folder: trigger.event().payload.folder.clone(),
+    });
+}
+
+fn request_drop(
+    trigger: On<UiInput<BookmarkDropRequest>>,
+    mut add_requests: MessageWriter<AddRequest>,
+    mut move_requests: MessageWriter<MoveRequest>,
+    mut move_pin_requests: MessageWriter<MovePinRequest>,
+    mut reorder_pin_requests: MessageWriter<ReorderPinRequest>,
+    mut move_folder_requests: MessageWriter<MoveFolderRequest>,
+) {
+    let request = &trigger.event().payload;
+    match (&request.source, &request.target) {
+        (BookmarkDropSource::Page { metadata }, BookmarkDropTarget::Root) => {
+            add_requests.write(AddRequest {
+                metadata: metadata.clone(),
+                folder: None,
+            });
+        }
+        (BookmarkDropSource::Page { metadata }, BookmarkDropTarget::Folder { uuid: folder }) => {
+            add_requests.write(AddRequest {
+                metadata: metadata.clone(),
+                folder: Some(folder.clone()),
+            });
+        }
+        (BookmarkDropSource::Bookmark { uuid }, BookmarkDropTarget::Root) => {
+            move_requests.write(MoveRequest {
+                uuid: uuid.clone(),
+                folder: None,
+            });
+        }
+        (BookmarkDropSource::Bookmark { uuid }, BookmarkDropTarget::Folder { uuid: folder }) => {
+            move_requests.write(MoveRequest {
+                uuid: uuid.clone(),
+                folder: Some(folder.clone()),
+            });
+        }
+        (BookmarkDropSource::Pin { uuid }, BookmarkDropTarget::Root) => {
+            move_pin_requests.write(MovePinRequest {
+                uuid: uuid.clone(),
+                folder: None,
+            });
+        }
+        (BookmarkDropSource::Pin { uuid }, BookmarkDropTarget::Folder { uuid: folder }) => {
+            move_pin_requests.write(MovePinRequest {
+                uuid: uuid.clone(),
+                folder: Some(folder.clone()),
+            });
+        }
+        (BookmarkDropSource::Pin { uuid }, BookmarkDropTarget::Pin { uuid: target_uuid })
+            if uuid != target_uuid =>
+        {
+            reorder_pin_requests.write(ReorderPinRequest {
+                uuid: uuid.clone(),
+                target_uuid: target_uuid.clone(),
+            });
+        }
+        (BookmarkDropSource::Folder { uuid }, BookmarkDropTarget::Root) => {
+            move_folder_requests.write(MoveFolderRequest {
+                uuid: uuid.clone(),
+                parent: None,
+            });
+        }
+        (BookmarkDropSource::Folder { uuid }, BookmarkDropTarget::Folder { uuid: parent })
+            if uuid != parent =>
+        {
+            move_folder_requests.write(MoveFolderRequest {
+                uuid: uuid.clone(),
+                parent: Some(parent.clone()),
+            });
+        }
+        _ => {}
+    }
+}
+
+fn request_pin(
+    trigger: On<UiInput<BookmarkPinUiRequest>>,
+    mut requests: MessageWriter<PinRequest>,
+) {
+    requests.write(PinRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+    });
+}
+
+fn request_unpin(
+    trigger: On<UiInput<BookmarkUnpinUiRequest>>,
+    mut requests: MessageWriter<UnpinRequest>,
+) {
+    requests.write(UnpinRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+    });
+}
+
+fn toggle_folder(
+    trigger: On<UiInput<BookmarkFolderToggleUiRequest>>,
+    mut requests: MessageWriter<ToggleFolderRequest>,
+) {
+    requests.write(ToggleFolderRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+    });
+}
+
+fn create_folder(
+    trigger: On<UiInput<BookmarkFolderCreateUiRequest>>,
+    mut requests: MessageWriter<CreateFolderRequest>,
+) {
+    let name = trigger.event().payload.name.trim();
+    if name.is_empty() {
+        return;
+    }
+    requests.write(CreateFolderRequest {
+        name: name.to_string(),
+        parent: trigger.event().payload.parent.clone(),
+    });
+}
+
+fn request_folder_move(
+    trigger: On<UiInput<BookmarkFolderMoveUiRequest>>,
+    mut requests: MessageWriter<MoveFolderRequest>,
+) {
+    requests.write(MoveFolderRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+        parent: trigger.event().payload.parent.clone(),
+    });
+}
+
+fn rename_folder(
+    trigger: On<UiInput<BookmarkFolderRenameUiRequest>>,
+    mut rename_requests: MessageWriter<RenameFolderRequest>,
+    mut remove_requests: MessageWriter<RemoveFolderRequest>,
+) {
+    let request = &trigger.event().payload;
+    let name = request.name.trim();
+    if name.is_empty() {
+        remove_requests.write(RemoveFolderRequest {
+            uuid: request.uuid.clone(),
+        });
+        return;
+    }
+    rename_requests.write(RenameFolderRequest {
+        uuid: request.uuid.clone(),
+        name: name.to_string(),
+    });
+}
+
+fn request_remove_folder(
+    trigger: On<UiInput<BookmarkFolderRemoveUiRequest>>,
+    mut requests: MessageWriter<RemoveFolderRequest>,
+) {
+    requests.write(RemoveFolderRequest {
+        uuid: trigger.event().payload.uuid.clone(),
+    });
+}
+
+impl From<BookmarkMenuRootRequest> for BookmarkMenuTarget {
+    fn from(_: BookmarkMenuRootRequest) -> Self {
+        Self::Root
+    }
+}
+
+impl From<BookmarkMenuPinRequest> for BookmarkMenuTarget {
+    fn from(request: BookmarkMenuPinRequest) -> Self {
+        Self::Pin { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkMenuEntryRequest> for BookmarkMenuTarget {
+    fn from(request: BookmarkMenuEntryRequest) -> Self {
+        Self::Entry { uuid: request.uuid }
+    }
+}
+
+impl From<BookmarkMenuFolderRequest> for BookmarkMenuTarget {
+    fn from(request: BookmarkMenuFolderRequest) -> Self {
+        Self::Folder {
+            uuid: request.uuid,
+            active_page: request.active_page,
+        }
+    }
+}
+
+fn commands(
+    mut toggles: MessageReader<BookmarkToggleActiveRequest>,
+    mut pins: MessageReader<BookmarkPinActiveRequest>,
+    active_tab_param: ActiveTabParam,
+    focus: LayoutFocus,
+    stack_meta: Query<&PageMetadata, With<Stack>>,
+    mut toggle_requests: MessageWriter<ToggleForUrlRequest>,
+    mut pin_requests: MessageWriter<PinUrlRequest>,
+) {
+    let toggle_count = toggles.read().count();
+    let pin_count = pins.read().count();
+    if toggle_count == 0 && pin_count == 0 {
+        return;
+    }
+    let (_, _, Some(stack)) = focus.resolve(active_tab_param.get()) else {
+        return;
+    };
+    let Ok(meta) = stack_meta.get(stack) else {
+        return;
+    };
+    if meta.url.is_empty() {
+        return;
+    }
+    for _ in 0..toggle_count {
+        toggle_requests.write(ToggleForUrlRequest {
+            metadata: meta.clone(),
+        });
+    }
+    for _ in 0..pin_count {
+        pin_requests.write(PinUrlRequest {
+            metadata: meta.clone(),
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_ecs::PageIcon;
+
+    #[test]
+    fn command_id_dispatches_the_typed_bookmark_request() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            FeaturePlugin::<crate::Feature>::default(),
+            vmux_command::CommandRuntimePlugin,
+        ))
+        .add_message::<BookmarkToggleActiveRequest>()
+        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands));
+        let caller = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<vmux_command::CommandInvocation>>()
+            .write(vmux_command::CommandInvocation::new(
+                caller,
+                "bookmark_toggle_active",
+            ));
+
+        app.update();
+
+        let request_count = app
+            .world_mut()
+            .resource_mut::<Messages<BookmarkToggleActiveRequest>>()
+            .drain()
+            .count();
+        assert_eq!(request_count, 1);
+    }
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::LayoutContractPlugin))
+            .add_systems(
+                Update,
+                (
+                    toggle,
+                    add,
+                    remove,
+                    rename,
+                    move_entry,
+                    move_pin,
+                    reorder_pin,
+                    add_folder,
+                    move_folder,
+                    remove_folder,
+                    rename_folder_request,
+                    toggle_folder_request,
+                    pin,
+                    pin_url,
+                    unpin,
+                    sync_metadata,
+                )
+                    .chain(),
+            );
+        app
+    }
+
+    struct TestRequest;
+
+    impl TestRequest {
+        fn send<M: Message>(app: &mut App, request: M) {
+            app.world_mut().resource_mut::<Messages<M>>().write(request);
+            app.update();
+        }
+    }
+
+    fn count<F: bevy::ecs::query::QueryFilter>(app: &mut App) -> usize {
+        app.world_mut()
+            .query_filtered::<Entity, F>()
+            .iter(app.world())
+            .count()
+    }
+
+    fn metadata(title: &str) -> PageMetadata {
+        PageMetadata {
+            title: title.to_string(),
+            url: "https://a.test".to_string(),
+            ..default()
+        }
+    }
+
+    #[test]
+    fn open_event_requests_new_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<ShowBookmarkMenuRequest>()
+            .add_message::<OpenRequest>()
+            .add_observer(request_open);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
+            webview,
+            payload: BookmarkOpenRequest {
+                url: "https://a.test".into(),
+            },
+        });
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            requests,
+            vec![OpenRequest {
+                url: Some("https://a.test".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn drop_event_routes_domain_requests() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AddRequest>()
+            .add_message::<MoveRequest>()
+            .add_message::<MovePinRequest>()
+            .add_message::<ReorderPinRequest>()
+            .add_message::<MoveFolderRequest>()
+            .add_observer(request_drop);
+        let webview = app.world_mut().spawn_empty().id();
+        for payload in [
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Page {
+                    metadata: metadata("Page"),
+                },
+                target: BookmarkDropTarget::Folder {
+                    uuid: "folder".into(),
+                },
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Bookmark {
+                    uuid: "bookmark".into(),
+                },
+                target: BookmarkDropTarget::Root,
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Pin { uuid: "pin".into() },
+                target: BookmarkDropTarget::Folder {
+                    uuid: "folder".into(),
+                },
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Pin { uuid: "pin".into() },
+                target: BookmarkDropTarget::Pin {
+                    uuid: "target".into(),
+                },
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Folder {
+                    uuid: "folder".into(),
+                },
+                target: BookmarkDropTarget::Folder {
+                    uuid: "parent".into(),
+                },
+            },
+        ] {
+            app.world_mut().trigger(UiInput { webview, payload });
+        }
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<AddRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [AddRequest {
+                metadata: metadata("Page"),
+                folder: Some("folder".into()),
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MoveRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [MoveRequest {
+                uuid: "bookmark".into(),
+                folder: None,
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MovePinRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [MovePinRequest {
+                uuid: "pin".into(),
+                folder: Some("folder".into()),
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ReorderPinRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [ReorderPinRequest {
+                uuid: "pin".into(),
+                target_uuid: "target".into(),
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MoveFolderRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [MoveFolderRequest {
+                uuid: "folder".into(),
+                parent: Some("parent".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn text_input_event_toggles_layout_keyboard_marker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_observer(text_input);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(UiInput::<BookmarkTextInputRequest> {
+                webview,
+                payload: BookmarkTextInputRequest { active: true },
+            });
+        app.update();
+        assert!(
+            app.world()
+                .entity(webview)
+                .contains::<BookmarkTextInputActive>()
+        );
+        app.world_mut()
+            .trigger(UiInput::<BookmarkTextInputRequest> {
+                webview,
+                payload: BookmarkTextInputRequest { active: false },
+            });
+        app.update();
+        assert!(
+            !app.world()
+                .entity(webview)
+                .contains::<BookmarkTextInputActive>()
+        );
+    }
+
+    #[test]
+    fn context_menu_event_toggles_layout_pointer_marker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_observer(open_context_menu);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(UiInput::<BookmarkContextMenuRequest> {
+                webview,
+                payload: BookmarkContextMenuRequest { active: true },
+            });
+        app.update();
+        assert!(
+            app.world()
+                .entity(webview)
+                .contains::<BookmarkContextMenuActive>()
+        );
+        app.world_mut()
+            .trigger(UiInput::<BookmarkContextMenuRequest> {
+                webview,
+                payload: BookmarkContextMenuRequest { active: false },
+            });
+        app.update();
+        assert!(
+            !app.world()
+                .entity(webview)
+                .contains::<BookmarkContextMenuActive>()
+        );
+    }
+
+    #[test]
+    fn add_creates_bookmark_entity() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: None,
+            },
+        );
+        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+    }
+
+    #[test]
+    fn add_accepts_any_page_url() {
+        let mut app = test_app();
+        for url in [
+            "vmux://projects/",
+            "https://example.com/docs",
+            "file:///tmp/readme.md",
+        ] {
+            TestRequest::send(
+                &mut app,
+                AddRequest {
+                    metadata: PageMetadata {
+                        title: url.into(),
+                        url: url.into(),
+                        ..default()
+                    },
+                    folder: None,
+                },
+            );
+        }
+        let mut urls = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
+            .iter(app.world())
+            .map(|metadata| metadata.url.clone())
+            .collect::<Vec<_>>();
+        urls.sort();
+        assert_eq!(
+            urls,
+            [
+                "file:///tmp/readme.md",
+                "https://example.com/docs",
+                "vmux://projects/",
+            ]
+        );
+    }
+
+    #[test]
+    fn reorder_pin_moves_source_to_target_slot() {
+        let mut app = test_app();
+        for (uuid, order) in [("a", 2), ("b", 5), ("c", 9)] {
+            app.world_mut()
+                .spawn((Pin, Uuid(uuid.into()), metadata(uuid), BookmarkOrder(order)));
+        }
+
+        TestRequest::send(
+            &mut app,
+            ReorderPinRequest {
+                uuid: "a".into(),
+                target_uuid: "c".into(),
+            },
+        );
+
+        let mut pins = app
+            .world_mut()
+            .query_filtered::<(&Uuid, &BookmarkOrder), With<Pin>>()
+            .iter(app.world())
+            .map(|(uuid, order)| (order.0, uuid.0.clone()))
+            .collect::<Vec<_>>();
+        pins.sort();
+        assert_eq!(pins, [(2, "b".into()), (5, "c".into()), (9, "a".into())]);
+    }
+
+    #[test]
+    fn bookmark_entities_are_not_space_save_entities() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: None,
+            },
+        );
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        assert_eq!(count::<With<moonshine_save::prelude::Save>>(&mut app), 0);
+    }
+
+    #[test]
+    fn add_preserves_page_metadata() {
+        let mut app = test_app();
+        let expected = PageMetadata {
+            title: "Start".into(),
+            url: "vmux://start/".into(),
+            icon: PageIcon::Builtin(vmux_ecs::BuiltinIcon::Sparkles),
+            bg_color: Some("#111111".into()),
+        };
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: expected.clone(),
+                folder: None,
+            },
+        );
+        let actual = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(actual, &expected);
+    }
+
+    #[test]
+    fn live_page_icon_replaces_the_bookmark_icon_without_renaming_it() {
+        let mut app = test_app();
+        let bookmark = app
+            .world_mut()
+            .spawn((
+                Bookmark,
+                PageMetadata {
+                    title: "Renamed bookmark".into(),
+                    url: "https://a.test".into(),
+                    icon: PageIcon::Favicon("https://old.test/icon.png".into()),
+                    bg_color: None,
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                title: "Live title".into(),
+                url: "https://a.test".into(),
+                icon: PageIcon::Favicon("https://a.test/favicon.ico".into()),
+                bg_color: None,
+            },
+        ));
+
+        app.update();
+
+        let metadata = app.world().get::<PageMetadata>(bookmark).unwrap();
+        assert_eq!(metadata.title, "Renamed bookmark");
+        assert_eq!(
+            metadata.icon,
+            PageIcon::Favicon("https://a.test/favicon.ico".into())
+        );
+    }
+
+    #[test]
+    fn live_page_title_replaces_a_seeded_url_title() {
+        let mut app = test_app();
+        let bookmark = app
+            .world_mut()
+            .spawn((
+                Pin,
+                PageMetadata {
+                    title: "vmux://history/".into(),
+                    url: "vmux://history/".into(),
+                    icon: PageIcon::None,
+                    bg_color: None,
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                title: "History".into(),
+                url: "vmux://history/".into(),
+                icon: PageIcon::Favicon("vmux://history/assets/favicons/history.svg".into()),
+                bg_color: None,
+            },
+        ));
+
+        app.update();
+
+        let metadata = app.world().get::<PageMetadata>(bookmark).unwrap();
+        assert_eq!(metadata.title, "History");
+        assert_eq!(
+            metadata.icon,
+            PageIcon::Favicon("vmux://history/assets/favicons/history.svg".into())
+        );
+    }
+
+    #[test]
+    fn manifest_fills_seeded_internal_bookmark_metadata() {
+        let mut app = test_app();
+        let bookmark = app
+            .world_mut()
+            .spawn((
+                Pin,
+                PageMetadata {
+                    title: "vmux://simulator/".into(),
+                    url: "vmux://simulator/".into(),
+                    icon: PageIcon::None,
+                    bg_color: None,
+                },
+            ))
+            .id();
+        app.world_mut().spawn(PageManifest {
+            url: "vmux://simulator/",
+            asset_host: "simulator",
+            owns_subtree: true,
+            title: "Simulator",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: Some(vmux_ecs::BuiltinIcon::Smartphone),
+            command_bar: true,
+            startup: false,
+        });
+
+        app.update();
+
+        let metadata = app.world().get::<PageMetadata>(bookmark).unwrap();
+        assert_eq!(metadata.title, "Simulator");
+        assert_eq!(
+            metadata.icon,
+            PageIcon::Builtin(vmux_ecs::BuiltinIcon::Smartphone)
+        );
+    }
+
+    #[test]
+    fn live_page_without_an_icon_keeps_the_bookmark_stable_while_loading() {
+        let mut app = test_app();
+        let bookmark = app
+            .world_mut()
+            .spawn((
+                Bookmark,
+                PageMetadata {
+                    title: "A".into(),
+                    url: "https://a.test".into(),
+                    icon: PageIcon::Favicon("https://old.test/icon.png".into()),
+                    bg_color: None,
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                title: "A".into(),
+                url: "https://a.test".into(),
+                icon: PageIcon::None,
+                bg_color: None,
+            },
+        ));
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PageMetadata>(bookmark).unwrap().icon,
+            PageIcon::Favicon("https://old.test/icon.png".into())
+        );
+    }
+
+    #[test]
+    fn toggle_for_url_is_idempotent_add_then_remove() {
+        let mut app = test_app();
+        let op = || ToggleForUrlRequest {
+            metadata: metadata("A"),
+        };
+        TestRequest::send(&mut app, op());
+        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        TestRequest::send(&mut app, op());
+        assert_eq!(count::<With<Bookmark>>(&mut app), 0);
+    }
+
+    #[test]
+    fn remove_despawns_by_uuid() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: None,
+            },
+        );
+        let uuid = app
+            .world_mut()
+            .query_filtered::<&Uuid, With<Bookmark>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        TestRequest::send(&mut app, RemoveRequest { uuid });
+        assert_eq!(count::<With<Bookmark>>(&mut app), 0);
+    }
+
+    #[test]
+    fn remove_bookmark_keeps_pin() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            PinUrlRequest {
+                metadata: metadata("A"),
+            },
+        );
+        let uuid = app
+            .world_mut()
+            .query_filtered::<&Uuid, With<Pin>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        TestRequest::send(
+            &mut app,
+            ToggleForUrlRequest {
+                metadata: metadata("A"),
+            },
+        );
+        TestRequest::send(&mut app, RemoveRequest { uuid });
+        assert_eq!(count::<With<Bookmark>>(&mut app), 0);
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+    }
+
+    fn folder_uuid(app: &mut App) -> String {
+        app.world_mut()
+            .query_filtered::<&Uuid, With<Folder>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone()
+    }
+
+    fn folder_named(app: &mut App, target: &str) -> (Entity, String) {
+        app.world_mut()
+            .query_filtered::<(Entity, &Name, &Uuid), With<Folder>>()
+            .iter(app.world())
+            .find(|(_, name, _)| name.as_str() == target)
+            .map(|(entity, _, uuid)| (entity, uuid.0.clone()))
+            .unwrap()
+    }
+
+    fn bookmark_uuid(app: &mut App) -> String {
+        app.world_mut()
+            .query_filtered::<&Uuid, With<Bookmark>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone()
+    }
+
+    #[test]
+    fn add_into_folder_sets_childof() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let fid = folder_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: Some(fid),
+            },
+        );
+        assert_eq!(count::<(With<Bookmark>, With<ChildOf>)>(&mut app), 1);
+    }
+
+    #[test]
+    fn folders_can_be_nested() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("Work"));
+        let (parent, parent_uuid) = folder_named(&mut app, "Work");
+        TestRequest::send(&mut app, CreateFolderRequest::child("PRs", parent_uuid));
+        let (child, _) = folder_named(&mut app, "PRs");
+        assert_eq!(app.world().get::<ChildOf>(child).unwrap().get(), parent);
+    }
+
+    #[test]
+    fn moving_folder_rejects_descendant_cycle() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("Work"));
+        let (parent, parent_uuid) = folder_named(&mut app, "Work");
+        TestRequest::send(
+            &mut app,
+            CreateFolderRequest::child("PRs", parent_uuid.clone()),
+        );
+        let (_, child_uuid) = folder_named(&mut app, "PRs");
+        TestRequest::send(
+            &mut app,
+            MoveFolderRequest {
+                uuid: parent_uuid,
+                parent: Some(child_uuid),
+            },
+        );
+        assert!(app.world().get::<ChildOf>(parent).is_none());
+    }
+
+    #[test]
+    fn removing_nested_folder_reparents_children_to_parent() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("Work"));
+        let (parent, parent_uuid) = folder_named(&mut app, "Work");
+        TestRequest::send(&mut app, CreateFolderRequest::child("PRs", parent_uuid));
+        let (_, child_uuid) = folder_named(&mut app, "PRs");
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: Some(child_uuid.clone()),
+            },
+        );
+        TestRequest::send(&mut app, RemoveFolderRequest { uuid: child_uuid });
+        let bookmark = app
+            .world_mut()
+            .query_filtered::<Entity, With<Bookmark>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(app.world().get::<ChildOf>(bookmark).unwrap().get(), parent);
+    }
+
+    #[test]
+    fn add_existing_bookmark_moves_it_into_folder() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: None,
+            },
+        );
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let fid = folder_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A updated"),
+                folder: Some(fid),
+            },
+        );
+        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        assert_eq!(count::<(With<Bookmark>, With<ChildOf>)>(&mut app), 1);
+        let title = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
+            .single(app.world())
+            .unwrap()
+            .title
+            .clone();
+        assert_eq!(title, "A updated");
+    }
+
+    #[test]
+    fn add_existing_bookmark_without_folder_preserves_parent() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let fid = folder_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: Some(fid),
+            },
+        );
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A updated"),
+                folder: None,
+            },
+        );
+        assert_eq!(count::<(With<Bookmark>, With<ChildOf>)>(&mut app), 1);
+    }
+
+    #[test]
+    fn rename_updates_bookmark_title() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: None,
+            },
+        );
+        let uuid = bookmark_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            RenameRequest {
+                uuid,
+                name: "  Renamed  ".into(),
+            },
+        );
+        let title = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
+            .single(app.world())
+            .unwrap()
+            .title
+            .clone();
+        assert_eq!(title, "Renamed");
+    }
+
+    #[test]
+    fn move_reparents_bookmark_and_returns_it_to_root() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let fid = folder_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: None,
+            },
+        );
+        let uuid = bookmark_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            MoveRequest {
+                uuid: uuid.clone(),
+                folder: Some(fid),
+            },
+        );
+        assert_eq!(count::<(With<Bookmark>, With<ChildOf>)>(&mut app), 1);
+        TestRequest::send(&mut app, MoveRequest { uuid, folder: None });
+        assert_eq!(count::<(With<Bookmark>, Without<ChildOf>)>(&mut app), 1);
+    }
+
+    #[test]
+    fn remove_folder_reparents_children_to_top_level() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let fid = folder_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: Some(fid.clone()),
+            },
+        );
+        TestRequest::send(&mut app, RemoveFolderRequest { uuid: fid });
+        assert_eq!(count::<With<Folder>>(&mut app), 0);
+        assert_eq!(count::<(With<Bookmark>, Without<ChildOf>)>(&mut app), 1);
+    }
+
+    #[test]
+    fn toggle_folder_adds_then_removes_collapsed() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let fid = folder_uuid(&mut app);
+        TestRequest::send(&mut app, ToggleFolderRequest { uuid: fid.clone() });
+        assert_eq!(count::<With<Collapsed>>(&mut app), 1);
+        TestRequest::send(&mut app, ToggleFolderRequest { uuid: fid });
+        assert_eq!(count::<With<Collapsed>>(&mut app), 0);
+    }
+
+    #[test]
+    fn pin_keeps_bookmark_in_its_folder() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let folder = folder_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: Some(folder),
+            },
+        );
+        let uuid = app
+            .world_mut()
+            .query_filtered::<&Uuid, With<Bookmark>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        TestRequest::send(&mut app, PinRequest { uuid: uuid.clone() });
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+        assert_eq!(
+            count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
+        TestRequest::send(&mut app, UnpinRequest { uuid });
+        assert_eq!(
+            count::<(With<Bookmark>, Without<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
+    }
+
+    #[test]
+    fn pin_url_promotes_existing_bookmark_without_duplication() {
+        let mut app = test_app();
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let folder = folder_uuid(&mut app);
+        TestRequest::send(
+            &mut app,
+            AddRequest {
+                metadata: metadata("A"),
+                folder: Some(folder),
+            },
+        );
+        TestRequest::send(
+            &mut app,
+            PinUrlRequest {
+                metadata: metadata("A"),
+            },
+        );
+        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+        assert_eq!(
+            count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
+    }
+
+    #[test]
+    fn toggle_bookmark_on_pin_reuses_the_pin_entity() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            PinUrlRequest {
+                metadata: metadata("A"),
+            },
+        );
+        TestRequest::send(
+            &mut app,
+            ToggleForUrlRequest {
+                metadata: metadata("A"),
+            },
+        );
+        assert_eq!(count::<With<PageMetadata>>(&mut app), 1);
+        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+        TestRequest::send(
+            &mut app,
+            ToggleForUrlRequest {
+                metadata: metadata("A"),
+            },
+        );
+        assert_eq!(count::<With<PageMetadata>>(&mut app), 1);
+        assert_eq!(count::<With<Bookmark>>(&mut app), 0);
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+    }
+
+    #[test]
+    fn move_pin_adds_it_to_a_folder_without_unpinning() {
+        let mut app = test_app();
+        TestRequest::send(
+            &mut app,
+            PinUrlRequest {
+                metadata: metadata("A"),
+            },
+        );
+        TestRequest::send(&mut app, CreateFolderRequest::root("PRs"));
+        let folder = folder_uuid(&mut app);
+        let uuid = app
+            .world_mut()
+            .query_filtered::<&Uuid, With<Pin>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        TestRequest::send(
+            &mut app,
+            MovePinRequest {
+                uuid,
+                folder: Some(folder),
+            },
+        );
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+        assert_eq!(
+            count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
+    }
+}

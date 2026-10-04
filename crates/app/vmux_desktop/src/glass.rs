@@ -1,31 +1,44 @@
 use std::collections::HashMap;
+use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
+use bevy::winit::WINIT_WINDOWS;
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
+use objc2_app_kit::{
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
+    NSGlassEffectViewStyle, NSPanel, NSView, NSWindowCollectionBehavior,
+    NSWindowDidMoveNotification, NSWindowDidResizeNotification, NSWindowOrderingMode,
+    NSWindowStyleMask,
+};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use vmux_layout::window::ToggleFullscreenRequest;
 
 pub(crate) struct GlassPlugin;
 
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<GlassState>()
-            .add_systems(PreUpdate, install_window_glass)
+            .add_message::<vmux_input::ExitFullscreenShortcut>()
+            .add_systems(PreUpdate, install_window)
             .add_systems(
                 Update,
                 (
-                    sync_window_glass_visibility,
-                    keep_window_surface_layer_transparent,
+                    sync_window_visibility.in_set(vmux_ecs::WindowFullscreenSet),
+                    keep_surface_transparent,
                 ),
             )
             .add_systems(
                 Update,
-                handle_toggle_fullscreen_command.in_set(vmux_command::ReadAppCommands),
+                toggle_fullscreen.in_set(vmux_command::ReadCommandRequests),
             )
             .add_systems(
                 Last,
                 (
-                    reveal_window_after_layout_ready,
+                    reveal_window,
                     restore_fullscreen_after_reveal,
-                    ensure_window_active_after_reveal,
+                    activate_revealed_window,
                 )
                     .chain(),
             );
@@ -44,18 +57,13 @@ struct WindowGlass {
     revealed: bool,
     revealed_at: Option<Instant>,
     active_confirmed: bool,
-    _glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
-    _backdrop_window: Option<objc2::rc::Retained<objc2_app_kit::NSPanel>>,
-    _parent_window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>>,
+    _glass: Option<Retained<NSGlassEffectView>>,
+    _backdrop_window: Option<Retained<NSPanel>>,
+    _parent_window: Option<Retained<objc2_app_kit::NSWindow>>,
 }
 
 impl WindowGlass {
     fn track_parent_frame(&self) {
-        use objc2::ClassType;
-        use objc2_app_kit::{NSWindowDidMoveNotification, NSWindowDidResizeNotification};
-        use objc2_foundation::{NSNotification, NSNotificationCenter};
-        use std::ptr::NonNull;
-
         let (Some(backdrop), Some(parent)) = (&self._backdrop_window, &self._parent_window) else {
             return;
         };
@@ -81,17 +89,7 @@ impl WindowGlass {
     }
 }
 
-fn install_window_glass(mut state: NonSendMut<GlassState>, windows: Query<(Entity, &Window)>) {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
-    use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
-        NSGlassEffectViewStyle, NSPanel, NSView, NSWindowCollectionBehavior, NSWindowOrderingMode,
-        NSWindowStyleMask,
-    };
-    use objc2_foundation::{NSPoint, NSRect, NSSize};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
+fn install_window(mut state: NonSendMut<GlassState>, windows: Query<(Entity, &Window)>) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -183,10 +181,10 @@ fn install_window_glass(mut state: NonSendMut<GlassState>, windows: Query<(Entit
     }
 }
 
-fn reveal_window_after_layout_ready(
+fn reveal_window(
     mut state: NonSendMut<GlassState>,
     mut windows: Query<(Entity, &mut Window)>,
-    status: Res<crate::boot_status::SplashStatus>,
+    status: Single<&crate::boot_status::SplashStatus>,
 ) {
     if !status.reveal_ready {
         return;
@@ -206,20 +204,16 @@ fn reveal_window_after_layout_ready(
 
 fn restore_fullscreen_after_reveal(
     state: NonSend<GlassState>,
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
-    pending: Option<Res<crate::window_state::PendingFullscreenRestore>>,
+    primary_window: Query<
+        (Entity, &crate::window::PendingFullscreenRestore),
+        With<bevy::window::PrimaryWindow>,
+    >,
     mut commands: Commands,
 ) {
-    use objc2_app_kit::NSWindowStyleMask;
-
-    let Some(pending) = pending else {
+    let Ok((window, pending)) = primary_window.single() else {
         return;
     };
-    let Some(glass) = primary_window
-        .single()
-        .ok()
-        .and_then(|window| state.0.get(&window))
-    else {
+    let Some(glass) = state.0.get(&window) else {
         return;
     };
     if !glass.revealed {
@@ -233,8 +227,10 @@ fn restore_fullscreen_after_reveal(
     {
         parent_window.toggleFullScreen(None);
     }
-    commands.remove_resource::<crate::window_state::PendingFullscreenRestore>();
-    commands.insert_resource(crate::window_state::WindowRestoreComplete);
+    commands
+        .entity(window)
+        .remove::<crate::window::PendingFullscreenRestore>()
+        .insert(crate::window::WindowRestoreComplete);
 }
 
 fn should_attempt_activation(
@@ -251,7 +247,7 @@ fn should_attempt_activation(
     }
 }
 
-fn ensure_window_active_after_reveal(
+fn activate_revealed_window(
     mut state: NonSendMut<GlassState>,
     windows: Query<Entity, With<Window>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -264,7 +260,7 @@ fn ensure_window_active_after_reveal(
         if !should_attempt_activation(glass.revealed, glass.active_confirmed, elapsed) {
             continue;
         }
-        if crate::runtime::ensure_native_window_active(entity) {
+        if crate::macos::MacWindow::ensure_key(entity) {
             glass.active_confirmed = true;
         } else if let Some(proxy) = proxy.as_ref() {
             let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -272,22 +268,15 @@ fn ensure_window_active_after_reveal(
     }
 }
 
-fn handle_toggle_fullscreen_command(
+fn toggle_fullscreen(
     state: NonSend<GlassState>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
-    mut reader: MessageReader<vmux_command::AppCommand>,
+    focused_window: vmux_layout::window::FocusedWindow,
+    mut reader: MessageReader<ToggleFullscreenRequest>,
 ) {
-    use vmux_command::{AppCommand, LayoutCommand, WindowCommand};
-
-    let toggle = reader.read().any(|cmd| {
-        matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::Window(WindowCommand::ToggleFullscreen))
-        )
-    });
+    let toggle = reader.read().next().is_some();
     if toggle
         && let Some(parent_window) = focused_window
-            .0
+            .entity()
             .and_then(|window| state.0.get(&window))
             .and_then(|glass| glass._parent_window.as_ref())
     {
@@ -295,20 +284,23 @@ fn handle_toggle_fullscreen_command(
     }
 }
 
-fn sync_window_glass_visibility(
+fn sync_window_visibility(
     mut state: NonSendMut<GlassState>,
     mut clear_color: ResMut<vmux_layout::window::WindowBackground>,
-    mut window_q: Query<(Entity, &mut bevy::window::Window)>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
-    mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
+    mut window_q: Query<(
+        Entity,
+        &mut bevy::window::Window,
+        &mut vmux_ecs::WindowFullscreen,
+    )>,
+    focused_window: vmux_layout::window::FocusedWindow,
+    mut exit_fullscreen: MessageReader<crate::window::ExitFullscreenRequest>,
+    mut shortcut: MessageReader<vmux_input::ExitFullscreenShortcut>,
 ) {
-    use objc2::ClassType;
-    use objc2_app_kit::NSWindowStyleMask;
-
     let mut focused_fullscreen = false;
-    let exit_fullscreen = crate::native_keyboard::take_exit_fullscreen_request();
+    let exit_fullscreen =
+        exit_fullscreen.read().next().is_some() || shortcut.read().next().is_some();
     state.0.retain(|entity, _| window_q.contains(*entity));
-    for (entity, mut window) in &mut window_q {
+    for (entity, mut window, mut window_fullscreen) in &mut window_q {
         let Some(glass) = state.0.get_mut(&entity) else {
             continue;
         };
@@ -322,7 +314,7 @@ fn sync_window_glass_visibility(
             .as_ref()
             .is_some_and(|window| window.styleMask().contains(NSWindowStyleMask::FullScreen));
         let fullscreen = bevy_fullscreen || native_fullscreen;
-        if focused_window.0 == Some(entity) {
+        if focused_window.entity() == Some(entity) {
             focused_fullscreen = fullscreen;
             if exit_fullscreen {
                 if native_fullscreen {
@@ -334,6 +326,9 @@ fn sync_window_glass_visibility(
                 }
             }
         }
+        if window_fullscreen.0 != fullscreen {
+            window_fullscreen.0 = fullscreen;
+        }
 
         let visible = !fullscreen;
         if let (Some(backdrop_window), Some(parent_window)) =
@@ -341,8 +336,11 @@ fn sync_window_glass_visibility(
         {
             let backdrop_window: &objc2_app_kit::NSWindow = backdrop_window.as_super();
             backdrop_window.setFrame_display(parent_window.frame(), false);
-            let shadowed =
-                focus_shadow_visible(focused_window.0 == Some(entity), window.visible, fullscreen);
+            let shadowed = focus_shadow_visible(
+                focused_window.entity() == Some(entity),
+                window.visible,
+                fullscreen,
+            );
             if glass.shadowed != shadowed {
                 backdrop_window.setHasShadow(shadowed);
                 backdrop_window.invalidateShadow();
@@ -353,14 +351,10 @@ fn sync_window_glass_visibility(
             continue;
         }
         if let Some(effect) = &glass._glass {
-            let glass_view: &objc2_app_kit::NSView = effect;
+            let glass_view: &NSView = effect;
             glass_view.setHidden(!visible);
         }
         glass.visible = visible;
-    }
-
-    if window_fullscreen.0 != focused_fullscreen {
-        window_fullscreen.0 = focused_fullscreen;
     }
 
     let [r, g, b] = vmux_layout::window::WINDOW_BACKGROUND_SRGB;
@@ -372,8 +366,6 @@ fn sync_window_glass_visibility(
     if clear_color.0 != want_clear {
         clear_color.0 = want_clear;
     }
-
-    crate::native_keyboard::set_window_fullscreen(focused_fullscreen);
 }
 
 fn focus_shadow_visible(focused: bool, visible: bool, fullscreen: bool) -> bool {
@@ -381,8 +373,6 @@ fn focus_shadow_visible(focused: bool, visible: bool, fullscreen: bool) -> bool 
 }
 
 fn content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
-    use bevy::winit::WINIT_WINDOWS;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     WINIT_WINDOWS.with_borrow(|windows| {
         let id = windows.entity_to_winit.get(&entity)?;
         let wrapper = windows.windows.get(id)?;
@@ -394,10 +384,7 @@ fn content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
     })
 }
 
-fn keep_window_surface_layer_transparent(windows: Query<Entity, With<Window>>) {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSColor, NSView};
-
+fn keep_surface_transparent(windows: Query<Entity, With<Window>>) {
     if MainThreadMarker::new().is_none() {
         return;
     }
@@ -420,82 +407,9 @@ fn keep_window_surface_layer_transparent(windows: Query<Entity, With<Window>>) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn glass_install_does_not_reveal_window() {
-        let source = include_str!("glass.rs");
-        let install = source
-            .split("fn install_window_glass")
-            .nth(1)
-            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
-            .unwrap_or_default();
-
-        assert!(!install.contains("window.visible = true"));
-        assert!(!install.contains("activate_native_window"));
-    }
-
-    #[test]
-    fn window_backdrop_uses_clear_glass_style() {
-        let source = include_str!("glass.rs");
-        let install = source
-            .split("fn install_window_glass")
-            .nth(1)
-            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
-            .unwrap_or_default();
-
-        assert!(install.contains("NSGlassEffectViewStyle::Clear"));
-        assert!(!install.contains("NSGlassEffectViewStyle::Regular"));
-    }
-
-    #[test]
-    fn window_backdrop_uses_clear_glass_tint() {
-        let source = include_str!("glass.rs");
-        let install = source
-            .split("fn install_window_glass")
-            .nth(1)
-            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
-            .unwrap_or_default();
-
-        assert!(install.contains("glass.setTintColor(Some(&NSColor::clearColor()))"));
-    }
-
-    #[test]
-    fn window_backdrop_lives_in_nonactivating_child_window() {
-        let source = include_str!("glass.rs");
-        let install = source
-            .split("fn install_window_glass")
-            .nth(1)
-            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
-            .unwrap_or_default();
-
-        assert!(install.contains("NSPanel"));
-        assert!(install.contains("NSWindowStyleMask::NonactivatingPanel"));
-        assert!(install.contains("setIgnoresMouseEvents(true)"));
-        assert!(install.contains("addChildWindow_ordered"));
-        assert!(install.contains("NSWindowOrderingMode::Below"));
-    }
-
-    #[test]
-    fn window_backdrop_tracks_parent_window_frame() {
-        let source = include_str!("glass.rs");
-        let sync = source
-            .split("fn sync_window_glass_visibility")
-            .nth(1)
-            .and_then(|tail| tail.split("fn content_view_ptr").next())
-            .unwrap_or_default();
-
-        assert!(sync.contains("backdrop_window.setFrame_display(parent_window.frame(), false)"));
-    }
-
-    #[test]
-    fn desktop_enables_nspanel_binding_for_glass_backdrop() {
-        let manifest = include_str!("../Cargo.toml");
-
-        assert!(manifest.contains("\"objc2-app-kit/NSPanel\""));
-    }
-
     fn reveal_test_app(reveal_ready: bool) -> App {
         let mut app = App::new();
-        app.add_systems(Update, reveal_window_after_layout_ready);
+        app.add_systems(Update, reveal_window);
         let window = app
             .world_mut()
             .spawn((
@@ -509,7 +423,7 @@ mod tests {
         let mut state = GlassState::default();
         state.0.insert(window, WindowGlass::default());
         app.world_mut().insert_non_send(state);
-        app.insert_resource(crate::boot_status::SplashStatus {
+        app.world_mut().spawn(crate::boot_status::SplashStatus {
             phase: crate::boot_status::BootPhase::Starting,
             reveal_ready,
         });
@@ -584,55 +498,5 @@ mod tests {
         assert!(!focus_shadow_visible(false, true, false));
         assert!(!focus_shadow_visible(true, false, false));
         assert!(!focus_shadow_visible(true, true, true));
-    }
-
-    #[test]
-    fn reveal_does_not_activate_inline() {
-        let source = include_str!("glass.rs");
-        let reveal = source
-            .split("fn reveal_window_after_layout_ready")
-            .nth(1)
-            .and_then(|tail| tail.split("fn should_attempt_activation").next())
-            .unwrap_or_default();
-
-        assert!(!reveal.contains("activate_native_window"));
-        assert!(reveal.contains("glass.revealed_at = Some(Instant::now())"));
-    }
-
-    #[test]
-    fn activation_retry_system_is_registered() {
-        let source = include_str!("glass.rs");
-        let build = source
-            .split("fn build(&self, app: &mut App)")
-            .nth(1)
-            .and_then(|tail| tail.split("#[derive(Default)]").next())
-            .unwrap_or_default();
-
-        assert!(build.contains("ensure_window_active_after_reveal"));
-    }
-
-    #[test]
-    fn surface_transparency_system_is_registered() {
-        let source = include_str!("glass.rs");
-        let build = source
-            .split("fn build(&self, app: &mut App)")
-            .nth(1)
-            .and_then(|tail| tail.split("#[derive(Default)]").next())
-            .unwrap_or_default();
-
-        assert!(build.contains("keep_window_surface_layer_transparent"));
-    }
-
-    #[test]
-    fn surface_layer_kept_non_opaque_and_clear() {
-        let source = include_str!("glass.rs");
-        let func = source
-            .split("fn keep_window_surface_layer_transparent")
-            .nth(1)
-            .and_then(|tail| tail.split("#[cfg(test)]").next())
-            .unwrap_or_default();
-
-        assert!(func.contains("layer.setOpaque(false)"));
-        assert!(func.contains("layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
     }
 }

@@ -1,0 +1,954 @@
+use crate::{
+    ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest,
+    ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView,
+    ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
+};
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+#[cfg(test)]
+use bevy_cef::prelude::HostWindow;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use std::collections::{BTreeMap, HashMap};
+use vmux_command::{CommandDefinition, ResolvedLocale};
+use vmux_command::{KeyCombo, KeyContext, Keymap, Shortcut};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::page::PageReady;
+use vmux_ecs::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
+use vmux_input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
+use vmux_layout::native_open::HostedUiPlugin;
+use vmux_layout::stack::FocusedStack;
+use vmux_layout::window::WindowHierarchy;
+use vmux_ui::i18n::Locale;
+
+#[vmux_native::page]
+pub struct ShortcutPlugin;
+
+impl Plugin for ShortcutPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        #[cfg(ui)]
+        app.add_plugins(crate::ui::ShortcutPage::plugin());
+        app.add_plugins((
+            crate::claim::ClaimPlugin,
+            crate::input::InputPlugin,
+            HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
+            UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
+            vmux_ecs::host::UiStatePlugin::<ShortcutUiState>::default(),
+        ))
+        .add_message::<NativeKeyInput>()
+        .add_observer(send_shortcuts)
+        .add_observer(probe_press_request)
+        .add_observer(probe_clear_request)
+        .add_observer(probe_press)
+        .add_systems(Update, normalize_alias.in_set(PageOpenSet::ResolveTarget))
+        .add_systems(
+            Update,
+            sync_capture
+                .in_set(ShortcutCaptureSet)
+                .after(ComputeFocusSet),
+        )
+        .add_systems(Update, capture_native_keys.after(NativeKeyInputSet))
+        .add_systems(Update, (expire_probe, publish_state).chain());
+    }
+}
+
+#[derive(Component, Default)]
+#[require(ShortcutUiStateUpdates, ShortcutCapture)]
+struct Shortcuts {
+    catalog: ShortcutCatalog,
+    probe: ShortcutProbe,
+}
+
+#[derive(Default)]
+struct ShortcutProbe {
+    sequence: Vec<ShortcutStroke>,
+    pending: bool,
+    pending_at_ms: Option<i64>,
+    contextual: bool,
+    missed: bool,
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ShortcutCapture;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ShortcutCaptureSet;
+
+#[derive(SystemParam)]
+struct ShortcutCaptureFocus<'w, 's> {
+    views: Query<'w, 's, (Entity, &'static ChildOf), With<Shortcuts>>,
+    hierarchy: WindowHierarchy<'w, 's>,
+    windows: Query<'w, 's, &'static Window>,
+    focus: FocusedStack<'w, 's>,
+}
+
+impl ShortcutCaptureFocus<'_, '_> {
+    fn holds(&self, webview: Entity) -> bool {
+        let Ok((_, parent)) = self.views.get(webview) else {
+            return false;
+        };
+        if self.focus.stack != Some(parent.parent()) {
+            return false;
+        }
+        let Some(window) = self.hierarchy.get(webview) else {
+            return false;
+        };
+        self.windows
+            .get(window)
+            .is_ok_and(|window| window.visible && window.focused)
+    }
+
+    fn active(&self) -> Option<Entity> {
+        self.views
+            .iter()
+            .find_map(|(webview, _)| self.holds(webview).then_some(webview))
+    }
+}
+
+impl Shortcuts {
+    fn project(&self) -> ShortcutUiState {
+        let active = !self.probe.sequence.is_empty();
+        let mut groups = Vec::new();
+        for group in &self.catalog.groups {
+            let mut entries = Vec::new();
+            for entry in &group.entries {
+                if !entry
+                    .shortcuts
+                    .iter()
+                    .any(|shortcut| self.probe.accepts(shortcut))
+                {
+                    continue;
+                }
+                let mut entry = entry.clone();
+                for shortcut in &mut entry.shortcuts {
+                    shortcut.emphasized = active && self.probe.accepts(shortcut);
+                }
+                entries.push(entry);
+            }
+            if !entries.is_empty() {
+                groups.push(ShortcutGroup {
+                    name: group.name.clone(),
+                    entries,
+                });
+            }
+        }
+        let shortcut_count = self
+            .catalog
+            .groups
+            .iter()
+            .flat_map(|group| &group.entries)
+            .map(|entry| entry.shortcuts.len() as u32)
+            .sum();
+        ShortcutUiState {
+            groups,
+            probe: ShortcutProbeView {
+                sequence: self.probe.sequence.clone(),
+                status: self.probe.status(&self.catalog),
+            },
+            shortcut_count,
+        }
+    }
+}
+
+impl ShortcutProbe {
+    fn capture(&mut self, stroke: ShortcutStroke, shortcuts: &ShortcutCatalog, pressed_at_ms: i64) {
+        if stroke.is_plain_escape() {
+            self.clear();
+            return;
+        }
+        self.press(stroke, shortcuts, pressed_at_ms);
+    }
+
+    fn press(&mut self, stroke: ShortcutStroke, shortcuts: &ShortcutCatalog, pressed_at_ms: i64) {
+        if self.pending
+            && self.pending_at_ms.is_some_and(|started| {
+                pressed_at_ms > started.saturating_add(shortcuts.chord_timeout_ms as i64)
+            })
+        {
+            self.clear();
+        }
+        let sequence = if self.pending {
+            let second = stroke.after(&self.sequence[0]);
+            vec![self.sequence[0].clone(), second]
+        } else {
+            vec![stroke.clone()]
+        };
+        if self.resolve(&sequence, shortcuts, pressed_at_ms) {
+            return;
+        }
+        if self.pending && self.resolve(std::slice::from_ref(&stroke), shortcuts, pressed_at_ms) {
+            return;
+        }
+        self.sequence = vec![stroke];
+        self.pending = false;
+        self.pending_at_ms = None;
+        self.contextual = false;
+        self.missed = true;
+    }
+
+    fn resolve(
+        &mut self,
+        sequence: &[ShortcutStroke],
+        shortcuts: &ShortcutCatalog,
+        pressed_at_ms: i64,
+    ) -> bool {
+        if let Some((_, shortcut)) = shortcuts.resolutions().find(|(_, shortcut)| {
+            shortcut.strokes.len() > sequence.len() && shortcut.starts_with(sequence)
+        }) {
+            self.sequence = shortcut.strokes[..sequence.len()].to_vec();
+            self.pending = true;
+            self.pending_at_ms = Some(pressed_at_ms);
+            self.contextual = false;
+            self.missed = false;
+            return true;
+        }
+        if let Some((_, shortcut)) = shortcuts
+            .resolutions()
+            .find(|(_, shortcut)| shortcut.matches(sequence))
+        {
+            self.sequence = shortcut.strokes.clone();
+            self.pending = false;
+            self.pending_at_ms = None;
+            self.contextual = false;
+            self.missed = false;
+            return true;
+        }
+        if let Some((_, shortcut)) = shortcuts.bindings().find(|(_, shortcut)| {
+            shortcut.strokes.len() > sequence.len() && shortcut.starts_with(sequence)
+        }) {
+            self.sequence = shortcut.strokes[..sequence.len()].to_vec();
+            self.pending = true;
+            self.pending_at_ms = Some(pressed_at_ms);
+            self.contextual = true;
+            self.missed = false;
+            return true;
+        }
+        if let Some((_, shortcut)) = shortcuts
+            .bindings()
+            .find(|(_, shortcut)| shortcut.matches(sequence))
+        {
+            self.sequence = shortcut.strokes.clone();
+            self.pending = false;
+            self.pending_at_ms = None;
+            self.contextual = true;
+            self.missed = false;
+            return true;
+        }
+        false
+    }
+
+    fn clear(&mut self) {
+        self.sequence.clear();
+        self.pending = false;
+        self.pending_at_ms = None;
+        self.contextual = false;
+        self.missed = false;
+    }
+
+    fn expire(&mut self, now: i64, timeout_ms: u64) -> bool {
+        if !self.pending
+            || !self.pending_at_ms.is_some_and(|started| {
+                now >= started.saturating_add(timeout_ms.min(i64::MAX as u64) as i64)
+            })
+        {
+            return false;
+        }
+        self.clear();
+        true
+    }
+
+    fn accepts(&self, shortcut: &ShortcutBinding) -> bool {
+        if self.sequence.is_empty() {
+            return true;
+        }
+        if self.missed {
+            return false;
+        }
+        if !self.contextual && !shortcut.resolves {
+            return false;
+        }
+        if self.pending {
+            shortcut.starts_with(&self.sequence)
+        } else {
+            shortcut.matches(&self.sequence)
+        }
+    }
+
+    fn status(&self, shortcuts: &ShortcutCatalog) -> ShortcutProbeStatus {
+        if self.sequence.is_empty() {
+            return ShortcutProbeStatus::Idle;
+        }
+        if self.missed {
+            return ShortcutProbeStatus::Miss;
+        }
+        if self.pending {
+            return ShortcutProbeStatus::Pending;
+        }
+        if self.contextual {
+            let mut labels = Vec::new();
+            for (entry, shortcut) in shortcuts.bindings() {
+                if !shortcut.matches(&self.sequence) {
+                    continue;
+                }
+                let contexts = shortcut.contexts.join(" / ");
+                let label = if contexts.is_empty() {
+                    entry.name.clone()
+                } else {
+                    format!("{} · {}", entry.name, contexts)
+                };
+                if !labels.contains(&label) {
+                    labels.push(label);
+                }
+            }
+            return ShortcutProbeStatus::Contextual(labels);
+        }
+        let mut names = Vec::new();
+        for (entry, shortcut) in shortcuts.resolutions() {
+            if shortcut.matches(&self.sequence) && !names.contains(&entry.name) {
+                names.push(entry.name.clone());
+            }
+        }
+        ShortcutProbeStatus::Match(names)
+    }
+}
+
+impl ShortcutStroke {
+    fn is_plain_escape(&self) -> bool {
+        self.code == "Escape" && !self.ctrl && !self.shift && !self.alt && !self.super_key
+    }
+}
+
+fn send_shortcuts(
+    trigger: On<UiInput<PageReady>>,
+    mut views: Query<(&mut Shortcuts, Option<&KeyContext>)>,
+    keymap: Single<&Keymap>,
+    definitions: Query<&CommandDefinition>,
+    locale: Option<Res<ResolvedLocale>>,
+) {
+    let webview = trigger.event().webview;
+    let Ok((mut view, context)) = views.get_mut(webview) else {
+        return;
+    };
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    let context = context.unwrap_or(KeyContext::NONE);
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
+    view.catalog = ShortcutCatalog::build(&keymap, context, &locale, &definitions);
+}
+
+fn probe_press_request(
+    trigger: On<UiInput<ShortcutProbePressRequest>>,
+    mut views: Query<&mut Shortcuts>,
+) {
+    let webview = trigger.event_target();
+    let Ok(mut view) = views.get_mut(webview) else {
+        return;
+    };
+    let catalog = view.catalog.clone();
+    view.probe.capture(
+        trigger.event().payload.stroke.clone(),
+        &catalog,
+        vmux_ecs::UnixMillis::now().0,
+    );
+}
+
+fn probe_clear_request(
+    trigger: On<UiInput<ShortcutProbeClearRequest>>,
+    mut views: Query<&mut Shortcuts>,
+) {
+    let Ok(mut view) = views.get_mut(trigger.event_target()) else {
+        return;
+    };
+    view.probe.clear();
+}
+
+fn probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>) {
+    let Ok(mut view) = views.get_mut(trigger.event_target()) else {
+        return;
+    };
+    let catalog = view.catalog.clone();
+    view.probe.capture(
+        trigger.event().stroke().clone(),
+        &catalog,
+        trigger.event().pressed_at_ms(),
+    );
+}
+
+fn sync_capture(
+    focus: ShortcutCaptureFocus,
+    captures: Query<(Entity, Has<NativeKeyCapture>), With<ShortcutCapture>>,
+    mut commands: Commands,
+) {
+    let next = focus.active();
+    for (entity, active) in &captures {
+        let should_capture = next == Some(entity);
+        if active == should_capture {
+            continue;
+        }
+        if should_capture {
+            commands.entity(entity).insert(NativeKeyCapture);
+        } else {
+            commands.entity(entity).remove::<NativeKeyCapture>();
+        }
+    }
+}
+
+fn capture_native_keys(
+    mut inputs: MessageReader<NativeKeyInput>,
+    captures: Query<Entity, (With<ShortcutCapture>, With<NativeKeyCapture>)>,
+    mut commands: Commands,
+) {
+    let Some(target) = captures.iter().next() else {
+        inputs.clear();
+        return;
+    };
+    for input in inputs.read() {
+        if !input.captured || input.repeat {
+            continue;
+        }
+        if input.releases_capture() {
+            commands.entity(target).remove::<NativeKeyCapture>();
+            continue;
+        }
+        commands.trigger(ShortcutProbePress::new(
+            target,
+            ShortcutStroke::from_native_input(input),
+            input.pressed_at_ms,
+        ));
+    }
+}
+
+fn expire_probe(mut views: Query<&mut Shortcuts>) {
+    let now = vmux_ecs::UnixMillis::now().0;
+    for mut view in &mut views {
+        let timeout_ms = view.catalog.chord_timeout_ms;
+        if view.bypass_change_detection().probe.expire(now, timeout_ms) {
+            view.set_changed();
+        }
+    }
+}
+
+fn publish_state(views: Query<(Entity, &Shortcuts), Changed<Shortcuts>>, mut commands: Commands) {
+    for (entity, view) in &views {
+        commands.trigger(vmux_ecs::host::UiStateWrite::<ShortcutUiState>::from_event(
+            entity,
+            &view.project(),
+        ));
+    }
+}
+
+fn normalize_alias(mut tasks: Query<&mut PageOpenTask, Changed<PageOpenTask>>) {
+    for mut task in &mut tasks {
+        if let Some(canonical) = ShortcutUrl::canonical(&task.url) {
+            task.url = canonical.to_string();
+        }
+    }
+}
+
+impl ShortcutCatalog {
+    fn build(
+        keymap: &Keymap,
+        context: &KeyContext,
+        locale: &Locale,
+        definitions: &[CommandDefinition],
+    ) -> Self {
+        let mut labels = HashMap::new();
+        for definition in definitions {
+            labels.insert(
+                definition.id.as_str(),
+                definition.localized_name(locale.as_str()),
+            );
+        }
+
+        let mut grouped: BTreeMap<String, BTreeMap<(String, String), Vec<ShortcutBinding>>> =
+            BTreeMap::new();
+        let view = keymap.in_context(context);
+        for binding in keymap.bindings() {
+            let Some(label) = labels.get(binding.command.as_str()) else {
+                continue;
+            };
+            let (group, name) = label
+                .split_once(" > ")
+                .map(|(group, name)| (group.to_string(), name.to_string()))
+                .unwrap_or_else(|| (locale.translate("shortcuts-general"), label.clone()));
+            let shortcuts = grouped
+                .entry(group)
+                .or_default()
+                .entry((name, binding.command.clone()))
+                .or_default();
+            let mut shortcut = ShortcutBinding::from(&binding.shortcut);
+            shortcut.resolves = view.resolves(&binding.shortcut, &binding.command);
+            if let Some(context) = binding.when.as_ref() {
+                shortcut.contexts.push(context.to_string());
+            }
+            if let Some(existing) = shortcuts
+                .iter_mut()
+                .find(|existing| existing.strokes == shortcut.strokes)
+            {
+                existing.resolves |= shortcut.resolves;
+                for context in shortcut.contexts {
+                    if !existing.contexts.contains(&context) {
+                        existing.contexts.push(context);
+                    }
+                }
+            } else {
+                shortcuts.push(shortcut);
+            }
+        }
+
+        let groups = grouped
+            .into_iter()
+            .map(|(name, entries)| ShortcutGroup {
+                name,
+                entries: entries
+                    .into_iter()
+                    .map(|((name, id), shortcuts)| ShortcutEntry {
+                        id,
+                        name,
+                        shortcuts,
+                    })
+                    .collect(),
+            })
+            .collect();
+        Self {
+            groups,
+            chord_timeout_ms: keymap.chord_timeout_ms,
+        }
+    }
+}
+
+impl From<&Shortcut> for ShortcutBinding {
+    fn from(shortcut: &Shortcut) -> Self {
+        let strokes = match shortcut {
+            Shortcut::Direct(combo) => vec![ShortcutStroke::from_key_combo(combo)],
+            Shortcut::Chord(prefix, second) => {
+                vec![
+                    ShortcutStroke::from_key_combo(prefix),
+                    ShortcutStroke::from_key_combo(second),
+                ]
+            }
+        };
+        Self {
+            label: shortcut.display(),
+            strokes,
+            resolves: false,
+            contexts: Vec::new(),
+            emphasized: false,
+        }
+    }
+}
+
+impl ShortcutStroke {
+    fn from_key_combo(combo: &KeyCombo) -> Self {
+        Self {
+            code: combo.code(),
+            label: combo.key_label(),
+            ctrl: combo.modifiers.ctrl,
+            shift: combo.modifiers.shift,
+            alt: combo.modifiers.alt,
+            super_key: combo.modifiers.super_key,
+        }
+    }
+
+    fn from_native_input(input: &NativeKeyInput) -> Self {
+        let modifiers = vmux_command::Modifiers {
+            ctrl: input.modifiers.ctrl,
+            shift: input.modifiers.shift,
+            alt: input.modifiers.alt,
+            super_key: input.modifiers.super_key,
+        };
+        let resolved = input
+            .key
+            .map(|key| KeyCombo { key, modifiers })
+            .or_else(|| {
+                vmux_command::ResolvedKey::parse(&input.text).map(|key| KeyCombo {
+                    key: key.key,
+                    modifiers,
+                })
+            });
+        if let Some(combo) = resolved {
+            return Self::from_key_combo(&combo);
+        }
+        Self {
+            code: format!("NativeKeyCode{}", input.native_code),
+            label: if input.text.is_empty() {
+                format!("0x{:02X}", input.native_code)
+            } else {
+                input.text.to_uppercase()
+            },
+            ctrl: modifiers.ctrl,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+            super_key: modifiers.super_key,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::input::keyboard::KeyCode;
+    use vmux_api::input::KeyModifiers;
+    use vmux_command::CommandManifest;
+    use vmux_command::{Binding, Modifiers, Source, When};
+    use vmux_ecs::{PageMetadata, PageOpenId, PageOpenTask};
+    use vmux_layout::native_open::NativeOpenPlugin;
+
+    struct LayoutCommandFixture;
+
+    impl LayoutCommandFixture {
+        fn definitions(panes: bool, tabs: bool) -> Vec<CommandDefinition> {
+            CommandManifest::from_feature_ron(include_str!("../../vmux_layout/src/feature.ron"))
+                .into_vec()
+                .into_iter()
+                .filter(|definition| {
+                    panes && matches!(definition.id.as_str(), "close_pane" | "rotate_forward")
+                        || tabs && definition.id == "open_in_new_tab"
+                })
+                .collect()
+        }
+    }
+
+    fn stroke(code: &str, ctrl: bool) -> ShortcutStroke {
+        ShortcutStroke {
+            code: code.to_string(),
+            label: code.to_string(),
+            ctrl,
+            ..Default::default()
+        }
+    }
+
+    fn probe_catalog() -> ShortcutCatalog {
+        ShortcutCatalog {
+            groups: vec![ShortcutGroup {
+                name: "Stack".into(),
+                entries: vec![ShortcutEntry {
+                    id: "stack_close".into(),
+                    name: "Close Stack".into(),
+                    shortcuts: vec![ShortcutBinding {
+                        label: "⌃G, X".into(),
+                        strokes: vec![stroke("KeyG", true), stroke("KeyX", false)],
+                        resolves: true,
+                        contexts: Vec::new(),
+                        emphasized: false,
+                    }],
+                }],
+            }],
+            chord_timeout_ms: 1000,
+        }
+    }
+
+    #[test]
+    fn probe_waits_for_and_resolves_a_chord() {
+        let shortcuts = probe_catalog();
+        let mut probe = ShortcutProbe::default();
+
+        probe.press(stroke("KeyG", true), &shortcuts, 1_000);
+        assert!(probe.pending);
+        assert_eq!(probe.status(&shortcuts), ShortcutProbeStatus::Pending);
+
+        probe.press(stroke("KeyX", true), &shortcuts, 1_500);
+        assert!(!probe.pending);
+        assert!(matches!(
+            probe.status(&shortcuts),
+            ShortcutProbeStatus::Match(_)
+        ));
+    }
+
+    #[test]
+    fn probe_restarts_from_a_failed_chord_second_key() {
+        let mut shortcuts = probe_catalog();
+        shortcuts.groups[0].entries.push(ShortcutEntry {
+            id: "new".into(),
+            name: "New".into(),
+            shortcuts: vec![ShortcutBinding {
+                label: "N".into(),
+                strokes: vec![stroke("KeyN", false)],
+                resolves: true,
+                contexts: Vec::new(),
+                emphasized: false,
+            }],
+        });
+        let mut probe = ShortcutProbe::default();
+
+        probe.press(stroke("KeyG", true), &shortcuts, 1_000);
+        probe.press(stroke("KeyN", false), &shortcuts, 1_500);
+
+        assert_eq!(probe.sequence, [stroke("KeyN", false)]);
+        assert!(!probe.missed);
+    }
+
+    #[test]
+    fn chord_prefix_wins_over_a_direct_binding() {
+        let mut shortcuts = probe_catalog();
+        shortcuts.groups[0].entries[0].shortcuts[0].strokes[0] = stroke("KeyB", true);
+        shortcuts.groups[0].entries.push(ShortcutEntry {
+            id: "leader".into(),
+            name: "Leader".into(),
+            shortcuts: vec![ShortcutBinding {
+                label: "⌃B".into(),
+                strokes: vec![stroke("KeyB", true)],
+                resolves: true,
+                contexts: Vec::new(),
+                emphasized: false,
+            }],
+        });
+        let mut probe = ShortcutProbe::default();
+
+        probe.press(stroke("KeyB", true), &shortcuts, 1_000);
+        assert!(probe.pending);
+        probe.press(stroke("KeyX", false), &shortcuts, 1_500);
+
+        assert!(!probe.pending);
+        assert!(matches!(
+            probe.status(&shortcuts),
+            ShortcutProbeStatus::Match(_)
+        ));
+    }
+
+    #[test]
+    fn capture_escape_clears_the_current_shortcut() {
+        let shortcuts = probe_catalog();
+        let mut probe = ShortcutProbe::default();
+
+        probe.capture(stroke("KeyG", true), &shortcuts, 1_000);
+        probe.capture(stroke("Escape", false), &shortcuts, 1_100);
+
+        assert!(probe.sequence.is_empty());
+        assert!(!probe.pending);
+        assert!(!probe.missed);
+    }
+
+    #[test]
+    fn pending_probe_expires_in_host_state() {
+        let shortcuts = probe_catalog();
+        let mut probe = ShortcutProbe::default();
+
+        probe.press(stroke("KeyG", true), &shortcuts, 1_000);
+        assert!(!probe.expire(1_999, shortcuts.chord_timeout_ms));
+        assert!(probe.expire(2_000, shortcuts.chord_timeout_ms));
+        assert!(probe.sequence.is_empty());
+    }
+
+    #[test]
+    fn projected_groups_include_only_matching_shortcuts() {
+        let shortcuts = probe_catalog();
+        let mut view = Shortcuts {
+            catalog: shortcuts,
+            probe: ShortcutProbe::default(),
+        };
+
+        view.probe.press(stroke("KeyG", true), &view.catalog, 1_000);
+        let state = view.project();
+
+        assert_eq!(state.groups.len(), 1);
+        assert_eq!(state.groups[0].entries.len(), 1);
+        assert!(state.groups[0].entries[0].shortcuts[0].emphasized);
+        assert_eq!(state.probe.status, ShortcutProbeStatus::Pending);
+    }
+
+    #[test]
+    fn event_lists_hidden_and_visible_shortcuts() {
+        let definitions = LayoutCommandFixture::definitions(true, true);
+        let event = ShortcutCatalog::build(
+            &Keymap::defaults_with(&definitions),
+            KeyContext::NONE,
+            &Locale::from("en-US"),
+            &definitions,
+        );
+        let names = event
+            .groups
+            .iter()
+            .flat_map(|group| group.entries.iter())
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(
+            names
+                .iter()
+                .any(|name| name.contains("Rotate Panes Forward"))
+        );
+        assert!(names.iter().any(|name| name.contains("Open in New Tab")));
+    }
+
+    #[test]
+    fn event_exposes_chords_as_individual_strokes() {
+        let definitions = LayoutCommandFixture::definitions(true, false);
+        let event = ShortcutCatalog::build(
+            &Keymap::defaults_with(&definitions),
+            KeyContext::NONE,
+            &Locale::from("en-US"),
+            &definitions,
+        );
+        let shortcut = event
+            .bindings()
+            .find(|(entry, shortcut)| entry.id == "close_pane" && shortcut.strokes.len() == 2)
+            .map(|(_, shortcut)| shortcut)
+            .expect("close pane chord");
+
+        assert_eq!(shortcut.strokes[0].code, "KeyB");
+        assert!(shortcut.strokes[0].ctrl);
+        assert_eq!(shortcut.strokes[1].code, "KeyX");
+        assert_eq!(shortcut.strokes[1].keycaps(), ["X"]);
+    }
+
+    #[test]
+    fn event_marks_the_binding_selected_by_runtime_context() {
+        let mut keymap = Keymap::default();
+        let combo = KeyCombo {
+            key: KeyCode::Escape,
+            modifiers: Modifiers::default(),
+        };
+        keymap.extend(
+            Source::Settings,
+            [
+                Binding {
+                    shortcut: Shortcut::Direct(combo.clone()),
+                    command: "close_pane".into(),
+                    when: When::parse("!chat.selector"),
+                },
+                Binding {
+                    shortcut: Shortcut::Direct(combo),
+                    command: "stack_close".into(),
+                    when: None,
+                },
+            ],
+        );
+        let definitions = vec![
+            CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane"),
+            CommandDefinition::new("stack_close", "Close Stack", "Layout > Stack"),
+        ];
+        keymap.register(definitions.iter().map(|definition| definition.id.as_str()));
+
+        let event = ShortcutCatalog::build(
+            &keymap,
+            KeyContext::NONE,
+            &Locale::from("en-US"),
+            &definitions,
+        );
+        let resolving = event
+            .resolutions()
+            .map(|(entry, _)| entry.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(resolving, ["close_pane"]);
+    }
+
+    #[test]
+    fn page_open_spawns_shortcuts_view() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(NativeOpenPlugin)
+            .add_plugins(ShortcutPlugin);
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PageOpenTask {
+            id: PageOpenId::new(),
+            stack,
+            url: ShortcutPlugin::URL.to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let title = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Shortcuts>>()
+            .single(app.world())
+            .expect("shortcuts webview spawned")
+            .title
+            .clone();
+        assert_eq!(title, "Keyboard Shortcuts");
+    }
+
+    #[test]
+    fn old_cheatsheet_urls_open_the_shortcuts_page() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(NativeOpenPlugin)
+            .add_plugins(ShortcutPlugin);
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PageOpenTask {
+            id: PageOpenId::new(),
+            stack,
+            url: "vmux://cheatsheet/".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let metadata = app.world().get::<PageMetadata>(stack).unwrap();
+        assert_eq!(metadata.url, ShortcutPlugin::URL);
+    }
+
+    #[test]
+    fn focused_live_shortcuts_view_automatically_owns_capture() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(ShortcutPlugin);
+        let window = app
+            .world_mut()
+            .spawn(Window {
+                focused: true,
+                visible: true,
+                ..default()
+            })
+            .id();
+        let root = app.world_mut().spawn(HostWindow(window)).id();
+        let stack = app.world_mut().spawn(ChildOf(root)).id();
+        let page = app
+            .world_mut()
+            .spawn((Shortcuts::default(), ChildOf(stack)))
+            .id();
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                stack: Some(stack),
+                ..default()
+            }
+            .local_bundle(),
+        );
+
+        app.update();
+        assert!(app.world().entity(page).contains::<NativeKeyCapture>());
+        app.world_mut()
+            .resource_mut::<Messages<NativeKeyInput>>()
+            .write(NativeKeyInput {
+                key: Some(KeyCode::KeyH),
+                native_code: 0x04,
+                text: "h".to_string(),
+                modifiers: KeyModifiers::default(),
+                repeat: false,
+                captured: true,
+                claim: None,
+                pressed_at_ms: 1,
+            });
+        app.update();
+        assert_eq!(
+            app.world().get::<Shortcuts>(page).unwrap().probe.sequence,
+            vec![ShortcutStroke {
+                code: "KeyH".to_string(),
+                label: "H".to_string(),
+                ..default()
+            }]
+        );
+        app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
+        app.update();
+        assert!(!app.world().entity(page).contains::<NativeKeyCapture>());
+        app.world_mut().get_mut::<Window>(window).unwrap().focused = true;
+        app.update();
+        assert!(app.world().entity(page).contains::<NativeKeyCapture>());
+        app.world_mut().despawn(page);
+        app.update();
+        assert!(
+            app.world_mut()
+                .query_filtered::<Entity, With<NativeKeyCapture>>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
+    }
+}

@@ -1,0 +1,278 @@
+#![allow(dead_code)]
+
+use std::collections::{HashMap, HashSet};
+
+use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, NodeKind, Stack as StackDto};
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ValidationError {
+    DuplicateId(String),
+    InvalidIdFormat(String),
+    WrongKindForPosition {
+        id: String,
+        expected: NodeKind,
+        got: NodeKind,
+    },
+    NewStackMissingUrl,
+    NewStackMissingKind,
+    NewPaneMissingStacks,
+    NewTabMissingName,
+    FlexWeightsLengthMismatch {
+        children: usize,
+        weights: usize,
+    },
+    FocusReferencesUnknownId(String),
+    MissingReferencedEntity(Vec<String>),
+}
+
+impl DiffPlan {
+    pub fn validate(snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut all_ids: HashSet<String> = HashSet::new();
+
+        for tab in &snapshot.tabs {
+            if let Some(id) = &tab.id {
+                let (kind, _) = NodeKind::parse_id(id)
+                    .map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+                if kind != NodeKind::Tab {
+                    return Err(ValidationError::WrongKindForPosition {
+                        id: id.clone(),
+                        expected: NodeKind::Tab,
+                        got: kind,
+                    });
+                }
+                if !seen.insert(id.clone()) {
+                    return Err(ValidationError::DuplicateId(id.clone()));
+                }
+                all_ids.insert(id.clone());
+            } else if tab.name.is_empty() {
+                return Err(ValidationError::NewTabMissingName);
+            }
+            Self::validate_node(&tab.root, &mut seen, &mut all_ids)?;
+        }
+
+        Self::validate_focus(&snapshot.focused, &all_ids)?;
+        Ok(())
+    }
+
+    fn validate_node(
+        node: &LayoutNode,
+        seen: &mut HashSet<String>,
+        all_ids: &mut HashSet<String>,
+    ) -> Result<(), ValidationError> {
+        match node {
+            LayoutNode::Split {
+                id,
+                flex_weights,
+                children,
+                ..
+            } => {
+                if let Some(id) = id {
+                    let (kind, _) = NodeKind::parse_id(id)
+                        .map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+                    if kind != NodeKind::Split {
+                        return Err(ValidationError::WrongKindForPosition {
+                            id: id.clone(),
+                            expected: NodeKind::Split,
+                            got: kind,
+                        });
+                    }
+                    if !seen.insert(id.clone()) {
+                        return Err(ValidationError::DuplicateId(id.clone()));
+                    }
+                    all_ids.insert(id.clone());
+                }
+                if !flex_weights.is_empty() && flex_weights.len() != children.len() {
+                    return Err(ValidationError::FlexWeightsLengthMismatch {
+                        children: children.len(),
+                        weights: flex_weights.len(),
+                    });
+                }
+                for child in children {
+                    Self::validate_node(child, seen, all_ids)?;
+                }
+                Ok(())
+            }
+            LayoutNode::Pane { id, stacks, .. } => {
+                if let Some(id) = id {
+                    let (kind, _) = NodeKind::parse_id(id)
+                        .map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+                    if kind != NodeKind::Pane {
+                        return Err(ValidationError::WrongKindForPosition {
+                            id: id.clone(),
+                            expected: NodeKind::Pane,
+                            got: kind,
+                        });
+                    }
+                    if !seen.insert(id.clone()) {
+                        return Err(ValidationError::DuplicateId(id.clone()));
+                    }
+                    all_ids.insert(id.clone());
+                } else if stacks.is_empty() {
+                    return Err(ValidationError::NewPaneMissingStacks);
+                }
+                for stack in stacks {
+                    Self::validate_stack(stack, seen, all_ids)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn plan_node(
+        node: &LayoutNode,
+        actions_by_id: &mut HashMap<String, NodePlan>,
+        referenced: &mut HashSet<String>,
+    ) {
+        match node {
+            LayoutNode::Split { id, children, .. } => {
+                if let Some(id) = id {
+                    referenced.insert(id.clone());
+                    let (_, value) = NodeKind::parse_id(id).expect("validated");
+                    actions_by_id.insert(
+                        id.clone(),
+                        NodePlan::Match {
+                            existing: value,
+                            desired_kind: NodeKind::Split,
+                        },
+                    );
+                }
+                for child in children {
+                    Self::plan_node(child, actions_by_id, referenced);
+                }
+            }
+            LayoutNode::Pane { id, stacks, .. } => {
+                if let Some(id) = id {
+                    referenced.insert(id.clone());
+                    let (_, value) = NodeKind::parse_id(id).expect("validated");
+                    actions_by_id.insert(
+                        id.clone(),
+                        NodePlan::Match {
+                            existing: value,
+                            desired_kind: NodeKind::Pane,
+                        },
+                    );
+                }
+                for stack in stacks {
+                    Self::plan_stack(stack, actions_by_id, referenced);
+                }
+            }
+        }
+    }
+
+    fn validate_stack(
+        stack: &StackDto,
+        seen: &mut HashSet<String>,
+        all_ids: &mut HashSet<String>,
+    ) -> Result<(), ValidationError> {
+        if let Some(id) = &stack.id {
+            let (kind, _) =
+                NodeKind::parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+            if kind != NodeKind::Stack {
+                return Err(ValidationError::WrongKindForPosition {
+                    id: id.clone(),
+                    expected: NodeKind::Stack,
+                    got: kind,
+                });
+            }
+            if !seen.insert(id.clone()) {
+                return Err(ValidationError::DuplicateId(id.clone()));
+            }
+            all_ids.insert(id.clone());
+        } else {
+            if stack.url.is_empty() {
+                return Err(ValidationError::NewStackMissingUrl);
+            }
+            if stack.kind.is_empty() {
+                return Err(ValidationError::NewStackMissingKind);
+            }
+        }
+        Ok(())
+    }
+
+    fn plan_stack(
+        stack: &StackDto,
+        actions_by_id: &mut HashMap<String, NodePlan>,
+        referenced: &mut HashSet<String>,
+    ) {
+        if let Some(id) = &stack.id {
+            referenced.insert(id.clone());
+            let (_, value) = NodeKind::parse_id(id).expect("validated");
+            actions_by_id.insert(
+                id.clone(),
+                NodePlan::Match {
+                    existing: value,
+                    desired_kind: NodeKind::Stack,
+                },
+            );
+        }
+    }
+
+    fn validate_focus(focus: &Focus, all_ids: &HashSet<String>) -> Result<(), ValidationError> {
+        for id in [&focus.tab, &focus.pane, &focus.stack]
+            .into_iter()
+            .flatten()
+        {
+            if !all_ids.contains(id) {
+                return Err(ValidationError::FocusReferencesUnknownId(id.clone()));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum NodePlan {
+    Match {
+        existing: u64,
+        desired_kind: NodeKind,
+    },
+    Create,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct DiffPlan {
+    pub actions_by_id: HashMap<String, NodePlan>,
+    pub closes: Vec<String>,
+    pub focus: Focus,
+}
+
+impl DiffPlan {
+    pub fn build(
+        snapshot: &LayoutSnapshot,
+        existing_ids: &HashSet<String>,
+    ) -> Result<Self, ValidationError> {
+        Self::validate(snapshot)?;
+        let mut actions_by_id: HashMap<String, NodePlan> = HashMap::new();
+        let mut referenced: HashSet<String> = HashSet::new();
+
+        for tab in &snapshot.tabs {
+            if let Some(id) = &tab.id {
+                referenced.insert(id.clone());
+                let (_, value) = NodeKind::parse_id(id).expect("validated above");
+                actions_by_id.insert(
+                    id.clone(),
+                    NodePlan::Match {
+                        existing: value,
+                        desired_kind: NodeKind::Tab,
+                    },
+                );
+            }
+            Self::plan_node(&tab.root, &mut actions_by_id, &mut referenced);
+        }
+
+        let mut missing: Vec<String> = referenced.difference(existing_ids).cloned().collect();
+        if !missing.is_empty() {
+            missing.sort();
+            return Err(ValidationError::MissingReferencedEntity(missing));
+        }
+
+        let closes: Vec<String> = existing_ids.difference(&referenced).cloned().collect();
+
+        Ok(Self {
+            actions_by_id,
+            closes,
+            focus: snapshot.focused.clone(),
+        })
+    }
+}

@@ -1,0 +1,1515 @@
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use agent_client_protocol::schema::v1::{
+    ContentBlock, Plan, PlanEntryStatus, RequestPermissionRequest, SessionUpdate, ToolCall,
+    ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
+};
+use bevy::prelude::{Component, Query};
+use vmux_api::protocol::{
+    AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId, FileTouchKind, ServiceMessage,
+    SharedEvent,
+};
+use vmux_api::room::{AssistantBlock, Message, PlanStep};
+use vmux_ecs::host::workspace::WorkspaceLocation;
+
+use super::{
+    AcpHistoryReplay, AcpSessionConfigs, AcpSessionShared, AcpTranscriptInbox, AcpTranscriptInput,
+};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Intent {
+    Delta(String),
+    Snapshot,
+    ProposedDiff {
+        call_id: String,
+        path: String,
+        old_text: Option<String>,
+        new_text: String,
+    },
+    FileTouched {
+        path: String,
+        line: Option<u32>,
+        kind: FileTouchKind,
+    },
+    WorkspaceChanged(WorkspaceLocation),
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcpWorktreeMetadata {
+    name: String,
+    branch: String,
+    cwd: String,
+    workspace_cwd: String,
+}
+
+impl AcpWorktreeMetadata {
+    fn intents(update: agent_client_protocol::schema::v1::SessionInfoUpdate) -> Vec<Intent> {
+        let Some(value) = update
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("worktree"))
+            .cloned()
+        else {
+            return Vec::new();
+        };
+        let Ok(worktree) = serde_json::from_value::<Self>(value) else {
+            return Vec::new();
+        };
+        let Ok(workspace) = WorkspaceLocation::new(
+            worktree.name,
+            worktree.branch,
+            worktree.cwd,
+            worktree.workspace_cwd,
+        ) else {
+            return Vec::new();
+        };
+        vec![Intent::WorkspaceChanged(workspace)]
+    }
+}
+
+const ACTIVE_FILE_TOUCH_LIMIT: usize = 1024;
+const FINALIZED_FILE_TOUCH_LIMIT: usize = 1024;
+
+#[derive(Default)]
+struct FileTouchState {
+    kind: ToolKind,
+    locations: Vec<ToolCallLocation>,
+    pending_edits: Vec<Intent>,
+}
+
+impl FileTouchState {
+    fn project(
+        &mut self,
+        kind: Option<ToolKind>,
+        locations: Option<&[ToolCallLocation]>,
+        status: Option<ToolCallStatus>,
+        full_update: bool,
+    ) -> (Vec<Intent>, bool) {
+        let identity_changed = full_update
+            || kind.is_some_and(|kind| kind != self.kind)
+            || locations.is_some_and(|locations| locations != self.locations);
+        if let Some(kind) = kind {
+            self.kind = kind;
+        }
+        if let Some(locations) = locations {
+            self.locations = locations.to_vec();
+        }
+        let current = self.intents();
+        match status {
+            Some(ToolCallStatus::Failed) => {
+                self.pending_edits.clear();
+                (Vec::new(), true)
+            }
+            Some(ToolCallStatus::Completed) => {
+                let intents = if identity_changed {
+                    current
+                } else {
+                    std::mem::take(&mut self.pending_edits)
+                };
+                (intents, true)
+            }
+            _ if identity_changed => {
+                if Self::is_edit(self.kind) {
+                    self.pending_edits.clone_from(&current);
+                } else {
+                    self.pending_edits.clear();
+                }
+                (current, false)
+            }
+            _ => (Vec::new(), false),
+        }
+    }
+
+    fn kind(kind: ToolKind) -> Option<FileTouchKind> {
+        match kind {
+            ToolKind::Read => Some(FileTouchKind::Read),
+            ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Some(FileTouchKind::Edit),
+            _ => None,
+        }
+    }
+
+    fn intents(&self) -> Vec<Intent> {
+        let Some(kind) = Self::kind(self.kind) else {
+            return Vec::new();
+        };
+        self.locations
+            .iter()
+            .map(|location| Intent::FileTouched {
+                path: location.path.to_string_lossy().into_owned(),
+                line: location.line,
+                kind,
+            })
+            .collect()
+    }
+
+    fn is_edit(kind: ToolKind) -> bool {
+        matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
+    }
+}
+
+struct ToolContent;
+
+impl ToolContent {
+    fn locations(content: &[ToolCallContent]) -> Vec<ToolCallLocation> {
+        let mut paths = HashSet::new();
+        let mut locations = Vec::new();
+        for item in content {
+            if let ToolCallContent::Diff(diff) = item
+                && paths.insert(diff.path.clone())
+            {
+                locations.push(ToolCallLocation::new(diff.path.clone()));
+            }
+        }
+        locations
+    }
+
+    fn text(content: &[ToolCallContent]) -> String {
+        let mut output = String::new();
+        for item in content {
+            if let ToolCallContent::Content(inner) = item
+                && let ContentBlock::Text(text) = &inner.content
+            {
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(&text.text);
+            }
+        }
+        output
+    }
+}
+
+pub(crate) struct AcpToolTitle;
+
+impl AcpToolTitle {
+    pub(crate) fn is_conversation_title(title: &str) -> bool {
+        title
+            .trim()
+            .to_ascii_lowercase()
+            .split(|character: char| {
+                character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+            })
+            .filter(|part| !part.is_empty())
+            .eq(["mcp", "vmux", "set", "conversation", "title"])
+    }
+}
+
+struct AcpJson;
+
+impl AcpJson {
+    fn pretty(value: &serde_json::Value) -> String {
+        serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+    }
+
+    fn input(raw: Option<&serde_json::Value>) -> String {
+        raw.map(serde_json::Value::to_string)
+            .unwrap_or_else(|| "{}".to_string())
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct ApprovalDetailsQuery {
+    call_id: String,
+    name: Option<String>,
+    args: Option<String>,
+    kind: Option<ToolKind>,
+}
+
+impl ApprovalDetailsQuery {
+    pub(super) fn from_request(request: &RequestPermissionRequest) -> Self {
+        Self {
+            call_id: request.tool_call.tool_call_id.to_string(),
+            name: request
+                .tool_call
+                .fields
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string),
+            args: request
+                .tool_call
+                .fields
+                .raw_input
+                .as_ref()
+                .map(serde_json::Value::to_string),
+            kind: request.tool_call.fields.kind,
+        }
+    }
+
+    pub(super) fn fallback(&self) -> (String, String) {
+        (
+            match self.kind {
+                Some(ToolKind::Read) => "Read data",
+                Some(ToolKind::Edit) => "Edit files",
+                Some(ToolKind::Delete) => "Delete files",
+                Some(ToolKind::Move) => "Move files",
+                Some(ToolKind::Search) => "Search",
+                Some(ToolKind::Execute) => "Execute command",
+                Some(ToolKind::Think) => "Think",
+                Some(ToolKind::Fetch) => "Fetch data",
+                Some(ToolKind::SwitchMode) => "Switch mode",
+                _ => "Use tool",
+            }
+            .to_string(),
+            self.args.clone().unwrap_or_else(|| "{}".to_string()),
+        )
+    }
+}
+
+#[derive(Component, Default)]
+pub struct AcpProjector {
+    messages: Vec<Message>,
+    hidden_tool_calls: HashSet<String>,
+    hidden_tool_details: HashMap<String, (String, String)>,
+    file_touches: HashMap<String, FileTouchState>,
+    file_touch_order: VecDeque<String>,
+    finalized_file_touches: HashSet<String>,
+    finalized_file_touch_order: VecDeque<String>,
+}
+
+impl AcpProjector {
+    pub fn messages(&self) -> &[Message] {
+        &self.messages
+    }
+
+    pub fn tool_call_details(&self, call_id: &str) -> Option<(String, String)> {
+        if let Some(details) = self.hidden_tool_details.get(call_id) {
+            return Some(details.clone());
+        }
+        self.messages.iter().find_map(|message| {
+            let Message::Assistant { blocks } = message else {
+                return None;
+            };
+            blocks.iter().find_map(|block| {
+                let AssistantBlock::ToolUse {
+                    call_id: existing,
+                    name,
+                    args,
+                    ..
+                } = block
+                else {
+                    if let AssistantBlock::Subagent(subagent) = block {
+                        return (subagent.call_id == call_id)
+                            .then(|| (subagent.title.clone(), subagent.raw_input.clone()));
+                    }
+                    return None;
+                };
+                (existing == call_id).then(|| (name.clone(), args.clone()))
+            })
+        })
+    }
+
+    pub(super) fn approval_details(
+        &self,
+        query: &ApprovalDetailsQuery,
+    ) -> Option<(String, String)> {
+        let (projected_name, projected_args) =
+            self.tool_call_details(&query.call_id).unwrap_or_default();
+        let name = query
+            .name
+            .clone()
+            .or_else(|| (!projected_name.is_empty()).then_some(projected_name))?;
+        let args = query
+            .args
+            .clone()
+            .or_else(|| (!projected_args.is_empty()).then_some(projected_args))
+            .unwrap_or_else(|| "{}".to_string());
+        Some((name, args))
+    }
+
+    pub fn push_user(&mut self, text: String, attachments: Vec<AgentAttachment>) {
+        self.messages
+            .push(Message::user_with_attachments(text, attachments));
+    }
+
+    pub fn apply(&mut self, update: SessionUpdate) -> Vec<Intent> {
+        match update {
+            SessionUpdate::AgentMessageChunk(chunk) => self.append_assistant_text(chunk.content),
+            SessionUpdate::UserMessageChunk(chunk) => self.append_user_chunk(chunk.content),
+            SessionUpdate::AgentThoughtChunk(chunk) => self.append_thinking(chunk.content),
+            SessionUpdate::ToolCall(tc) => self.apply_tool_call(tc),
+            SessionUpdate::ToolCallUpdate(update) => self.apply_tool_call_update(update),
+            SessionUpdate::Plan(plan) => self.upsert_plan(plan),
+            SessionUpdate::SessionInfoUpdate(update) => AcpWorktreeMetadata::intents(update),
+            _ => Vec::new(),
+        }
+    }
+
+    fn append_thinking(&mut self, content: ContentBlock) -> Vec<Intent> {
+        let ContentBlock::Text(text) = content else {
+            return Vec::new();
+        };
+        let text = text.text;
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => match blocks.last_mut() {
+                Some(AssistantBlock::Thinking(existing)) => existing.push_str(&text),
+                _ => blocks.push(AssistantBlock::Thinking(text)),
+            },
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Thinking(text)],
+            }),
+        }
+        vec![Intent::Snapshot]
+    }
+
+    fn append_user_chunk(&mut self, content: ContentBlock) -> Vec<Intent> {
+        let ContentBlock::Text(text) = content else {
+            return Vec::new();
+        };
+        let text = text.text;
+        match self.messages.last_mut() {
+            Some(Message::User { text: existing, .. }) => existing.push_str(&text),
+            _ => self.messages.push(Message::user(text)),
+        }
+        vec![Intent::Snapshot]
+    }
+
+    fn upsert_plan(&mut self, plan: Plan) -> Vec<Intent> {
+        let steps: Vec<PlanStep> = plan
+            .entries
+            .iter()
+            .map(|entry| PlanStep {
+                content: entry.content.clone(),
+                status: match entry.status {
+                    PlanEntryStatus::InProgress => "in_progress",
+                    PlanEntryStatus::Completed => "completed",
+                    _ => "pending",
+                }
+                .to_string(),
+            })
+            .collect();
+        for message in self.messages.iter_mut() {
+            if let Message::Assistant { blocks } = message {
+                for block in blocks.iter_mut() {
+                    if let AssistantBlock::Plan { steps: existing } = block {
+                        *existing = steps;
+                        return vec![Intent::Snapshot];
+                    }
+                }
+            }
+        }
+        let block = AssistantBlock::Plan { steps };
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => blocks.push(block),
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![block],
+            }),
+        }
+        vec![Intent::Snapshot]
+    }
+
+    fn append_assistant_text(&mut self, content: ContentBlock) -> Vec<Intent> {
+        let ContentBlock::Text(text) = content else {
+            return Vec::new();
+        };
+        let text = text.text;
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => match blocks.last_mut() {
+                Some(AssistantBlock::Text(existing)) => existing.push_str(&text),
+                _ => blocks.push(AssistantBlock::Text(text.clone())),
+            },
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Text(text.clone())],
+            }),
+        }
+        vec![Intent::Delta(text), Intent::Snapshot]
+    }
+
+    fn project_tool_file_touches(
+        &mut self,
+        call_id: &str,
+        kind: Option<ToolKind>,
+        locations: Option<&[ToolCallLocation]>,
+        status: Option<ToolCallStatus>,
+        full_update: bool,
+    ) -> Vec<Intent> {
+        if self.finalized_file_touches.contains(call_id) {
+            return Vec::new();
+        }
+        let should_track = self.file_touches.contains_key(call_id)
+            || kind.is_some_and(|kind| FileTouchState::kind(kind).is_some())
+            || locations.is_some_and(|locations| !locations.is_empty());
+        if !should_track {
+            return Vec::new();
+        }
+        self.track_file_touch(call_id);
+        let (intents, finalized) = self
+            .file_touches
+            .get_mut(call_id)
+            .expect("tracked file touch state")
+            .project(kind, locations, status, full_update);
+        if finalized {
+            self.remove_file_touch(call_id);
+            self.mark_file_touch_finalized(call_id);
+        }
+        intents
+    }
+
+    fn track_file_touch(&mut self, call_id: &str) {
+        if self.file_touches.contains_key(call_id) {
+            return;
+        }
+        self.file_touches
+            .insert(call_id.to_string(), FileTouchState::default());
+        self.file_touch_order.push_back(call_id.to_string());
+        while self.file_touch_order.len() > ACTIVE_FILE_TOUCH_LIMIT {
+            if let Some(expired) = self.file_touch_order.pop_front() {
+                self.file_touches.remove(&expired);
+            }
+        }
+    }
+
+    fn remove_file_touch(&mut self, call_id: &str) {
+        self.file_touches.remove(call_id);
+        if let Some(index) = self
+            .file_touch_order
+            .iter()
+            .position(|tracked| tracked == call_id)
+        {
+            self.file_touch_order.remove(index);
+        }
+    }
+
+    fn mark_file_touch_finalized(&mut self, call_id: &str) {
+        if !self.finalized_file_touches.insert(call_id.to_string()) {
+            return;
+        }
+        self.finalized_file_touch_order
+            .push_back(call_id.to_string());
+        while self.finalized_file_touch_order.len() > FINALIZED_FILE_TOUCH_LIMIT {
+            if let Some(expired) = self.finalized_file_touch_order.pop_front() {
+                self.finalized_file_touches.remove(&expired);
+            }
+        }
+    }
+
+    fn apply_tool_call(&mut self, tc: ToolCall) -> Vec<Intent> {
+        let call_id = tc.tool_call_id.to_string();
+        if AcpToolTitle::is_conversation_title(&tc.title) {
+            if !matches!(
+                tc.status,
+                ToolCallStatus::Completed | ToolCallStatus::Failed
+            ) {
+                self.hidden_tool_calls.insert(call_id.clone());
+                self.hidden_tool_details
+                    .insert(call_id, (tc.title, AcpJson::input(tc.raw_input.as_ref())));
+            }
+            return Vec::new();
+        }
+        self.upsert_tool_use(
+            &call_id,
+            &tc.title,
+            &AcpJson::input(tc.raw_input.as_ref()),
+            None,
+        );
+        let diff_locations = tc
+            .locations
+            .is_empty()
+            .then(|| ToolContent::locations(&tc.content));
+        let locations = diff_locations.as_deref().unwrap_or(&tc.locations);
+        let mut intents = vec![Intent::Snapshot];
+        intents.extend(self.project_tool_file_touches(
+            &call_id,
+            Some(tc.kind),
+            Some(locations),
+            Some(tc.status),
+            true,
+        ));
+        let failed = matches!(tc.status, ToolCallStatus::Failed);
+        intents.extend(self.record_tool_content(&call_id, &tc.content, failed));
+        if ToolContent::text(&tc.content).is_empty() {
+            self.record_raw_output(&call_id, tc.raw_output.as_ref(), failed);
+        }
+        intents
+    }
+
+    fn apply_tool_call_update(&mut self, update: ToolCallUpdate) -> Vec<Intent> {
+        let call_id = update.tool_call_id.to_string();
+        let title = update.fields.title.clone().unwrap_or_default();
+        if self.hidden_tool_calls.contains(&call_id) || AcpToolTitle::is_conversation_title(&title)
+        {
+            if matches!(
+                update.fields.status,
+                Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
+            ) {
+                self.hidden_tool_calls.remove(&call_id);
+                self.hidden_tool_details.remove(&call_id);
+            } else {
+                self.hidden_tool_calls.insert(call_id.clone());
+                let details = self
+                    .hidden_tool_details
+                    .entry(call_id)
+                    .or_insert_with(|| (String::new(), "{}".to_string()));
+                if !title.is_empty() {
+                    details.0 = title;
+                }
+                if let Some(raw_input) = update.fields.raw_input.as_ref() {
+                    details.1 = raw_input.to_string();
+                }
+            }
+            return Vec::new();
+        }
+        self.upsert_tool_use(
+            &call_id,
+            &title,
+            &AcpJson::input(update.fields.raw_input.as_ref()),
+            None,
+        );
+        let diff_locations = update
+            .fields
+            .content
+            .as_deref()
+            .map(ToolContent::locations)
+            .unwrap_or_default();
+        let locations = update.fields.locations.as_deref();
+        let locations = if locations.is_none_or(|locations| locations.is_empty())
+            && !diff_locations.is_empty()
+        {
+            Some(diff_locations.as_slice())
+        } else {
+            locations
+        };
+        let mut intents = vec![Intent::Snapshot];
+        intents.extend(self.project_tool_file_touches(
+            &call_id,
+            update.fields.kind,
+            locations,
+            update.fields.status,
+            false,
+        ));
+        if let Some(content) = &update.fields.content {
+            let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
+            intents.extend(self.record_tool_content(&call_id, content, failed));
+            if ToolContent::text(content).is_empty() {
+                self.record_raw_output(&call_id, update.fields.raw_output.as_ref(), failed);
+            }
+        } else if matches!(
+            update.fields.status,
+            Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
+        ) {
+            self.record_raw_output(
+                &call_id,
+                update.fields.raw_output.as_ref(),
+                matches!(update.fields.status, Some(ToolCallStatus::Failed)),
+            );
+        }
+        intents
+    }
+
+    fn record_tool_content(
+        &mut self,
+        call_id: &str,
+        content: &[ToolCallContent],
+        failed: bool,
+    ) -> Vec<Intent> {
+        let mut intents = Vec::new();
+        let mut has_terminal = false;
+        for item in content {
+            match item {
+                ToolCallContent::Diff(diff) => {
+                    let path = diff.path.to_string_lossy().into_owned();
+                    self.upsert_diff(call_id, &path, diff.old_text.clone(), diff.new_text.clone());
+                    intents.push(Intent::ProposedDiff {
+                        call_id: call_id.to_string(),
+                        path,
+                        old_text: diff.old_text.clone(),
+                        new_text: diff.new_text.clone(),
+                    });
+                }
+                ToolCallContent::Terminal(_) => has_terminal = true,
+                _ => {}
+            }
+        }
+        let output = ToolContent::text(content);
+        if !output.is_empty() {
+            self.upsert_tool_result(call_id, output, failed);
+        } else if has_terminal {
+            self.upsert_tool_result(
+                call_id,
+                "[terminal output shown in the attached pane]".to_string(),
+                failed,
+            );
+        }
+        intents
+    }
+
+    fn upsert_tool_result(&mut self, call_id: &str, content: String, is_error: bool) {
+        for message in self.messages.iter_mut() {
+            if let Message::ToolResult {
+                call_id: existing,
+                content: existing_content,
+                is_error: existing_error,
+            } = message
+                && existing == call_id
+            {
+                *existing_content = content;
+                *existing_error = is_error;
+                return;
+            }
+        }
+        self.messages.push(Message::ToolResult {
+            call_id: call_id.to_string(),
+            content,
+            is_error,
+        });
+    }
+
+    fn record_raw_output(
+        &mut self,
+        call_id: &str,
+        raw_output: Option<&serde_json::Value>,
+        is_error: bool,
+    ) {
+        let Some(raw_output) = raw_output.filter(|value| !value.is_null()) else {
+            return;
+        };
+        self.upsert_tool_result(call_id, AcpJson::pretty(raw_output), is_error);
+    }
+
+    fn upsert_tool_use(
+        &mut self,
+        call_id: &str,
+        name: &str,
+        args: &str,
+        parent_call_id: Option<String>,
+    ) {
+        for message in self.messages.iter_mut() {
+            if let Message::Assistant { blocks } = message {
+                for block in blocks.iter_mut() {
+                    if let AssistantBlock::ToolUse {
+                        call_id: existing,
+                        name: existing_name,
+                        args: existing_args,
+                        parent_call_id: existing_parent_call_id,
+                    } = block
+                        && existing == call_id
+                    {
+                        if !name.is_empty() {
+                            *existing_name = name.to_string();
+                        }
+                        if args != "{}" {
+                            *existing_args = args.to_string();
+                        }
+                        if parent_call_id.is_some() {
+                            *existing_parent_call_id = parent_call_id;
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+        let block = AssistantBlock::ToolUse {
+            call_id: call_id.to_string(),
+            name: name.to_string(),
+            args: args.to_string(),
+            parent_call_id,
+        };
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => blocks.push(block),
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![block],
+            }),
+        }
+    }
+
+    fn upsert_diff(
+        &mut self,
+        call_id: &str,
+        path: &str,
+        old_text: Option<String>,
+        new_text: String,
+    ) {
+        for message in self.messages.iter_mut() {
+            if let Message::Assistant { blocks } = message {
+                for block in blocks.iter_mut() {
+                    if let AssistantBlock::Diff {
+                        call_id: existing,
+                        old_text: eo,
+                        new_text: en,
+                        ..
+                    } = block
+                        && existing == call_id
+                    {
+                        *eo = old_text;
+                        *en = new_text;
+                        return;
+                    }
+                }
+            }
+        }
+        let block = AssistantBlock::Diff {
+            call_id: call_id.to_string(),
+            path: path.to_string(),
+            old_text,
+            new_text,
+        };
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => blocks.push(block),
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![block],
+            }),
+        }
+    }
+}
+
+pub(super) fn project(
+    mut sessions: Query<(
+        &super::SessionId,
+        &AcpSessionShared,
+        &mut AcpTranscriptInbox,
+        &mut AcpProjector,
+        &mut AcpHistoryReplay,
+        &mut AcpSessionConfigs,
+    )>,
+) {
+    for (sid, shared, mut inbox, mut projector, mut replay, mut configs) in &mut sessions {
+        while let Ok(input) = inbox.0.try_recv() {
+            match input {
+                AcpTranscriptInput::BeginHistoryReplay => {
+                    *projector = AcpProjector::default();
+                    replay.active = true;
+                    replay.updates = 0;
+                }
+                AcpTranscriptInput::Update(update) => {
+                    match update.as_ref() {
+                        SessionUpdate::ConfigOptionUpdate(config) => {
+                            let legacy = configs
+                                .0
+                                .iter()
+                                .find(|config| config.config_id.is_none())
+                                .cloned();
+                            let mut next =
+                                AcpSessionConfigs::from_acp(&config.config_options, None);
+                            if !next
+                                .0
+                                .iter()
+                                .any(|config| config.category.as_deref() == Some("mode"))
+                                && let Some(legacy) = legacy
+                            {
+                                next.0.push(legacy);
+                            }
+                            if *configs != next {
+                                *configs = next;
+                                shared.0.emit(ServiceMessage::AcpSessionConfigState {
+                                    sid: sid.0.clone(),
+                                    configs: configs.0.clone(),
+                                });
+                            }
+                        }
+                        SessionUpdate::CurrentModeUpdate(current) => {
+                            let value = current.current_mode_id.to_string();
+                            if let Some(config) = configs
+                                .0
+                                .iter_mut()
+                                .find(|config| config.config_id.is_none())
+                                && config.current_value != value
+                                && config.values.iter().any(|option| option.value == value)
+                            {
+                                config.current_value = value;
+                                shared.0.emit(ServiceMessage::AcpSessionConfigState {
+                                    sid: sid.0.clone(),
+                                    configs: configs.0.clone(),
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                    let intents = projector.apply(*update);
+                    shared
+                        .0
+                        .projector_updates
+                        .send_modify(|revision| *revision += 1);
+                    if replay.active {
+                        for intent in &intents {
+                            if let Intent::WorkspaceChanged(workspace) = intent {
+                                shared.0.publish_workspace_change(workspace);
+                            }
+                        }
+                        replay.updates += 1;
+                        if replay.updates == 1
+                            || replay
+                                .updates
+                                .is_multiple_of(super::driver::HISTORY_REPLAY_SNAPSHOT_INTERVAL)
+                        {
+                            shared
+                                .0
+                                .emit(shared.0.snapshot_message(projector.messages()));
+                        }
+                        continue;
+                    }
+                    for intent in intents {
+                        match intent {
+                            Intent::Delta(text) => {
+                                shared
+                                    .0
+                                    .emit(ServiceMessage::Shared(SharedEvent::AgentDelta {
+                                        sid: sid.0.clone(),
+                                        text,
+                                    }))
+                            }
+                            Intent::Snapshot => shared
+                                .0
+                                .emit(shared.0.snapshot_message(projector.messages())),
+                            Intent::ProposedDiff {
+                                call_id,
+                                path,
+                                old_text,
+                                new_text,
+                            } => shared.0.emit(ServiceMessage::AcpProposedDiff {
+                                sid: sid.0.clone(),
+                                call_id,
+                                path,
+                                old_text,
+                                new_text,
+                            }),
+                            Intent::FileTouched { path, line, kind } => {
+                                let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+                                    anchor: shared.0.anchor,
+                                    path,
+                                    line,
+                                    col: None,
+                                    end_col: None,
+                                    kind,
+                                }) else {
+                                    continue;
+                                };
+                                shared.0.emit(ServiceMessage::AgentRequest {
+                                    request_id: AgentRequestId::new(),
+                                    anchor: Some(shared.0.anchor),
+                                    request,
+                                });
+                            }
+                            Intent::WorkspaceChanged(workspace) => {
+                                shared.0.publish_workspace_change(&workspace)
+                            }
+                        }
+                    }
+                }
+                AcpTranscriptInput::FinishHistoryReplay(loaded) => {
+                    if !loaded {
+                        *projector = AcpProjector::default();
+                    }
+                    replay.active = false;
+                    replay.updates = 0;
+                    shared
+                        .0
+                        .emit(shared.0.snapshot_message(projector.messages()));
+                }
+                AcpTranscriptInput::PushUser { text, attachments } => {
+                    projector.push_user(text, attachments);
+                    shared
+                        .0
+                        .emit(shared.0.snapshot_message(projector.messages()));
+                }
+                AcpTranscriptInput::Snapshot => {
+                    shared
+                        .0
+                        .emit(shared.0.snapshot_message(projector.messages()));
+                }
+                AcpTranscriptInput::ApprovalDetails { query, response } => {
+                    let _ = response.send(projector.approval_details(&query));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v1::{
+        Content, ContentChunk, Diff, Plan, PlanEntry, PlanEntryPriority, SessionInfoUpdate,
+        SessionUpdate, Terminal, TextContent, ToolCall, ToolCallContent, ToolCallUpdate,
+        ToolCallUpdateFields,
+    };
+
+    fn chunk(text: &str) -> SessionUpdate {
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            text,
+        ))))
+    }
+
+    #[test]
+    fn session_info_worktree_metadata_emits_workspace_change() {
+        let project = tempfile::tempdir().unwrap();
+        let working = project.path().join("quiet-amber-wolf");
+        std::fs::create_dir(&working).unwrap();
+        let working_path = working.to_string_lossy().into_owned();
+        let project_path = project.path().to_string_lossy().into_owned();
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            "worktree".to_string(),
+            serde_json::json!({
+                "name": "quiet-amber-wolf",
+                "branch": "vibe/quiet-amber-wolf",
+                "cwd": working_path,
+                "workspaceCwd": project_path
+            }),
+        );
+        let mut projector = AcpProjector::default();
+
+        let intents = projector.apply(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().meta(meta),
+        ));
+
+        assert_eq!(
+            intents,
+            vec![Intent::WorkspaceChanged(WorkspaceLocation {
+                name: "quiet-amber-wolf".to_string(),
+                revision: "vibe/quiet-amber-wolf".to_string(),
+                working_directory: working.canonicalize().unwrap(),
+                project_directory: project.path().canonicalize().unwrap(),
+            })]
+        );
+    }
+
+    #[test]
+    fn session_info_rejects_relative_worktree_paths() {
+        let project = tempfile::tempdir().unwrap();
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            "worktree".to_string(),
+            serde_json::json!({
+                "name": "quiet-amber-wolf",
+                "branch": "vibe/quiet-amber-wolf",
+                "cwd": ".",
+                "workspaceCwd": project.path().to_string_lossy()
+            }),
+        );
+        let mut projector = AcpProjector::default();
+
+        let intents = projector.apply(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().meta(meta),
+        ));
+
+        assert!(intents.is_empty());
+    }
+
+    #[test]
+    fn message_chunks_accumulate_into_one_assistant_message() {
+        let mut p = AcpProjector::default();
+        let first = p.apply(chunk("Hel"));
+        let second = p.apply(chunk("lo"));
+        assert_eq!(
+            first,
+            vec![Intent::Delta("Hel".to_string()), Intent::Snapshot]
+        );
+        assert_eq!(
+            second,
+            vec![Intent::Delta("lo".to_string()), Intent::Snapshot]
+        );
+        assert_eq!(p.messages().len(), 1);
+        assert_eq!(
+            p.messages()[0],
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Text("Hello".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn push_user_records_a_turn_before_following_assistant_text() {
+        let mut p = AcpProjector::default();
+        let attachment = AgentAttachment {
+            path: "/tmp/image.png".into(),
+            name: "image.png".into(),
+            mime_type: "image/png".into(),
+            size: 3,
+        };
+        p.push_user("hi".to_string(), vec![attachment.clone()]);
+        p.apply(chunk("hello"));
+        assert_eq!(p.messages().len(), 2);
+        assert_eq!(
+            p.messages()[0],
+            Message::User {
+                text: "hi".to_string(),
+                attachments: vec![attachment],
+            }
+        );
+        assert_eq!(
+            p.messages()[1],
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Text("hello".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn tool_call_with_diff_emits_proposed_diff_and_records_block() {
+        let mut p = AcpProjector::default();
+        let tc = ToolCall::new("c1", "Edit file").content(vec![ToolCallContent::Diff(
+            Diff::new("/tmp/a.rs", "b").old_text("a"),
+        )]);
+        let intents = p.apply(SessionUpdate::ToolCall(tc));
+        assert!(intents.contains(&Intent::Snapshot));
+        assert!(intents.iter().any(|i| matches!(
+            i,
+            Intent::ProposedDiff { call_id, path, old_text, new_text }
+                if call_id == "c1"
+                    && path == "/tmp/a.rs"
+                    && old_text.as_deref() == Some("a")
+                    && new_text == "b"
+        )));
+        assert_eq!(p.messages().len(), 1);
+        match &p.messages()[0] {
+            Message::Assistant { blocks } => assert!(matches!(
+                blocks.first(),
+                Some(AssistantBlock::ToolUse { call_id, .. }) if call_id == "c1"
+            )),
+            other => panic!("expected assistant message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_diff_without_locations_emits_and_retries_file_touch() {
+        let mut p = AcpProjector::default();
+        let started = p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Editing files")
+                .kind(ToolKind::Edit)
+                .content(vec![ToolCallContent::Diff(Diff::new(
+                    "/repo/src/main.rs",
+                    "new",
+                ))]),
+        ));
+        let completed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+
+        for intents in [started, completed] {
+            assert!(intents.iter().any(|intent| matches!(
+                intent,
+                Intent::FileTouched { path, line: None, kind }
+                    if path == "/repo/src/main.rs"
+                        && *kind == FileTouchKind::Edit
+            )));
+        }
+    }
+
+    #[test]
+    fn tool_call_details_returns_projected_title_and_input() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "vmux.run")
+                .raw_input(serde_json::json!({"command": "echo hi", "focus": true})),
+        ));
+
+        assert_eq!(
+            p.tool_call_details("c1"),
+            Some((
+                "vmux.run".to_string(),
+                r#"{"command":"echo hi","focus":true}"#.to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn conversation_title_tool_stays_out_of_transcript() {
+        let mut p = AcpProjector::default();
+        let started = p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
+                .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
+        ));
+        assert_eq!(
+            p.tool_call_details("title-1"),
+            Some((
+                "mcp__vmux__set_conversation_title".to_string(),
+                r#"{"title":"Paris Izakaya Website"}"#.to_string(),
+            ))
+        );
+        let completed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "title-1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+
+        assert!(started.is_empty());
+        assert!(completed.is_empty());
+        assert!(p.messages().is_empty());
+        assert!(p.tool_call_details("title-1").is_none());
+    }
+
+    #[test]
+    fn conversation_title_tool_recognizes_agent_identifier_variants() {
+        for title in [
+            "mcp__vmux__set_conversation_title",
+            "mcp.vmux.set_conversation_title",
+            "mcp vmux set conversation title",
+            "mcp-vmux-set-conversation-title",
+            "mcp:vmux:set:conversation:title",
+            "mcp__vmux.set-conversation title",
+        ] {
+            assert!(AcpToolTitle::is_conversation_title(title));
+        }
+        assert!(!AcpToolTitle::is_conversation_title(
+            "mcp__other__set_conversation_title"
+        ));
+        assert!(!AcpToolTitle::is_conversation_title(
+            "set_conversation_title"
+        ));
+    }
+
+    #[test]
+    fn read_tool_call_locations_emit_file_touched() {
+        let mut p = AcpProjector::default();
+        let tc = ToolCall::new("c1", "Read file")
+            .kind(ToolKind::Read)
+            .locations(vec![ToolCallLocation::new("/repo/src/main.rs")]);
+        let intents = p.apply(SessionUpdate::ToolCall(tc));
+        assert!(intents.iter().any(|i| matches!(
+            i,
+            Intent::FileTouched { path, line: None, kind }
+                if path == "/repo/src/main.rs" && *kind == FileTouchKind::Read
+        )));
+    }
+
+    #[test]
+    fn completed_edit_retries_file_touch_from_initial_tool_call() {
+        let mut p = AcpProjector::default();
+        let tc = ToolCall::new("c1", "Write file")
+            .kind(ToolKind::Edit)
+            .locations(vec![ToolCallLocation::new("/repo/new.rs")]);
+        p.apply(SessionUpdate::ToolCall(tc));
+
+        let intents = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+
+        assert!(intents.iter().any(|intent| matches!(
+            intent,
+            Intent::FileTouched { path, line: None, kind }
+                if path == "/repo/new.rs" && *kind == FileTouchKind::Edit
+        )));
+    }
+
+    #[test]
+    fn failed_edit_clears_pending_and_suppresses_future_touches() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Write file")
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        ));
+
+        let failed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Failed),
+        )));
+        let completed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        )));
+
+        assert!(
+            failed
+                .iter()
+                .chain(&completed)
+                .all(|intent| !matches!(intent, Intent::FileTouched { .. }))
+        );
+        assert!(!p.file_touches.contains_key("c1"));
+        assert!(!p.file_touch_order.iter().any(|call_id| call_id == "c1"));
+    }
+
+    #[test]
+    fn locations_only_update_uses_initial_edit_kind() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Write file").kind(ToolKind::Edit),
+        ));
+
+        let intents = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::InProgress)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        )));
+
+        assert!(intents.iter().any(|intent| matches!(
+            intent,
+            Intent::FileTouched { path, line: None, kind }
+                if path == "/repo/new.rs" && *kind == FileTouchKind::Edit
+        )));
+    }
+
+    #[test]
+    fn kind_only_update_uses_initial_locations() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Write file")
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        ));
+
+        let intents = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::InProgress)
+                .kind(ToolKind::Edit),
+        )));
+
+        assert!(intents.iter().any(|intent| matches!(
+            intent,
+            Intent::FileTouched { path, line: None, kind }
+                if path == "/repo/new.rs" && *kind == FileTouchKind::Edit
+        )));
+    }
+
+    #[test]
+    fn completion_with_explicit_locations_uses_replacement() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Write files")
+                .kind(ToolKind::Edit)
+                .locations(vec![
+                    ToolCallLocation::new("/repo/a.rs"),
+                    ToolCallLocation::new("/repo/b.rs"),
+                ]),
+        ));
+
+        let intents = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/b.rs")]),
+        )));
+        let touches: Vec<_> = intents
+            .iter()
+            .filter_map(|intent| match intent {
+                Intent::FileTouched { path, .. } => Some(path.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(touches, vec!["/repo/b.rs"]);
+    }
+
+    #[test]
+    fn completion_reclassification_does_not_replay_initial_edit() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Write file")
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/old.rs")]),
+        ));
+
+        let intents = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .kind(ToolKind::Read)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        )));
+
+        assert_eq!(
+            intents
+                .iter()
+                .filter(|intent| matches!(intent, Intent::FileTouched { .. }))
+                .collect::<Vec<_>>(),
+            vec![&Intent::FileTouched {
+                path: "/repo/new.rs".to_string(),
+                line: None,
+                kind: FileTouchKind::Read,
+            }]
+        );
+    }
+
+    #[test]
+    fn repeated_completion_emits_no_duplicate_file_touch() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Write file")
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        ));
+        p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+
+        let intents = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        )));
+
+        assert!(
+            !intents
+                .iter()
+                .any(|intent| matches!(intent, Intent::FileTouched { .. }))
+        );
+        assert!(!p.file_touches.contains_key("c1"));
+    }
+
+    #[test]
+    fn read_completion_with_unchanged_identity_emits_no_duplicate_touch() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Read file")
+                .kind(ToolKind::Read)
+                .locations(vec![ToolCallLocation::new("/repo/file.rs")]),
+        ));
+
+        let intents = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .kind(ToolKind::Read)
+                .locations(vec![ToolCallLocation::new("/repo/file.rs")]),
+        )));
+
+        assert!(
+            !intents
+                .iter()
+                .any(|intent| matches!(intent, Intent::FileTouched { .. }))
+        );
+    }
+
+    #[test]
+    fn finalized_file_touch_tombstones_are_bounded() {
+        let mut p = AcpProjector::default();
+        for index in 0..1025 {
+            p.apply(SessionUpdate::ToolCall(
+                ToolCall::new(format!("c{index}"), "Read file")
+                    .kind(ToolKind::Read)
+                    .status(ToolCallStatus::Completed)
+                    .locations(vec![ToolCallLocation::new(format!("/repo/{index}.rs"))]),
+            ));
+        }
+
+        assert!(p.finalized_file_touches.len() <= 1024);
+    }
+
+    #[test]
+    fn in_progress_file_touches_are_bounded() {
+        let mut p = AcpProjector::default();
+        for index in 0..1025 {
+            p.apply(SessionUpdate::ToolCall(
+                ToolCall::new(format!("c{index}"), "Read file")
+                    .kind(ToolKind::Read)
+                    .locations(vec![ToolCallLocation::new(format!("/repo/{index}.rs"))]),
+            ));
+        }
+
+        assert!(p.file_touches.len() <= 1024);
+        assert!(!p.file_touches.contains_key("c0"));
+        assert!(p.file_touches.contains_key("c1024"));
+    }
+
+    #[test]
+    fn non_file_tool_call_emits_no_file_touched() {
+        let mut p = AcpProjector::default();
+        let tc = ToolCall::new("c1", "run a command")
+            .kind(ToolKind::Execute)
+            .locations(vec![ToolCallLocation::new("/repo/x")]);
+        let intents = p.apply(SessionUpdate::ToolCall(tc));
+        assert!(
+            !intents
+                .iter()
+                .any(|i| matches!(i, Intent::FileTouched { .. }))
+        );
+    }
+
+    fn thought(text: &str) -> SessionUpdate {
+        SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            text,
+        ))))
+    }
+
+    #[test]
+    fn thought_chunks_accumulate_into_a_thinking_block() {
+        let mut p = AcpProjector::default();
+        p.apply(thought("plan"));
+        p.apply(thought("ning"));
+        assert_eq!(p.messages().len(), 1);
+        assert_eq!(
+            p.messages()[0],
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Thinking("planning".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn plan_update_replaces_the_single_plan_block() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::Plan(Plan::new(vec![PlanEntry::new(
+            "step one",
+            PlanEntryPriority::High,
+            PlanEntryStatus::Pending,
+        )])));
+        p.apply(SessionUpdate::Plan(Plan::new(vec![PlanEntry::new(
+            "step one",
+            PlanEntryPriority::High,
+            PlanEntryStatus::Completed,
+        )])));
+        let blocks = match &p.messages()[0] {
+            Message::Assistant { blocks } => blocks,
+            other => panic!("expected assistant, got {other:?}"),
+        };
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            AssistantBlock::Plan { steps } => {
+                assert_eq!(steps.len(), 1);
+                assert_eq!(steps[0].content, "step one");
+                assert_eq!(steps[0].status, "completed");
+            }
+            other => panic!("expected plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_update_content_becomes_a_tool_result() {
+        let mut p = AcpProjector::default();
+        p.apply(SessionUpdate::ToolCall(ToolCall::new("c1", "run")));
+        let fields = ToolCallUpdateFields::new()
+            .status(ToolCallStatus::Completed)
+            .content(vec![ToolCallContent::Content(Content::new(
+                ContentBlock::Text(TextContent::new("hello output")),
+            ))]);
+        p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1", fields,
+        )));
+        assert!(p.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult { call_id, content, is_error: false }
+                if call_id == "c1" && content == "hello output"
+        )));
+    }
+
+    #[test]
+    fn tool_call_with_terminal_folds_to_pane_pointer_result() {
+        let mut p = AcpProjector::default();
+        let tc = ToolCall::new("c1", "Run")
+            .content(vec![ToolCallContent::Terminal(Terminal::new("t1"))]);
+        p.apply(SessionUpdate::ToolCall(tc));
+        assert!(p.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult { call_id, content, .. }
+                if call_id == "c1" && content.contains("pane")
+        )));
+    }
+
+    #[test]
+    fn tool_call_with_terminal_and_text_prefers_text_output() {
+        let mut p = AcpProjector::default();
+        let tc = ToolCall::new("c1", "Run").content(vec![
+            ToolCallContent::Terminal(Terminal::new("t1")),
+            ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new(
+                "real output",
+            )))),
+        ]);
+        p.apply(SessionUpdate::ToolCall(tc));
+        assert!(p.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult { call_id, content, .. }
+                if call_id == "c1" && content == "real output"
+        )));
+    }
+}

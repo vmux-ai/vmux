@@ -1,0 +1,316 @@
+use std::path::{Path, PathBuf};
+
+use bevy::prelude::*;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use unicode_width::UnicodeWidthChar;
+use vmux_ecs::event::{LinkRange, TermLine};
+use vmux_layout::stack::OpenRequest;
+use vmux_path::NavigationText;
+
+use crate::event::TermLinkOpenRequest;
+
+pub(super) struct LinkPlugin;
+
+impl Plugin for LinkPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(UiEventPlugin::<(TermLinkOpenRequest,)>::default())
+            .add_observer(term_open);
+    }
+}
+
+fn term_open(
+    trigger: On<UiInput<TermLinkOpenRequest>>,
+    mut stack_requests: MessageWriter<OpenRequest>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    let url = trigger.payload.url.clone();
+    if url.is_empty() {
+        return;
+    }
+    stack_requests.write(OpenRequest { url: Some(url) });
+    if let Some(proxy) = proxy.as_ref() {
+        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+    }
+}
+
+const TRAILING_TRIM: &[char] = &['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '>'];
+
+const LEADING_TRIM: &[char] = &['(', '[', '{', '<', '"', '\''];
+
+const MAX_LINKS_PER_LINE: usize = 16;
+
+pub(super) struct LinkDetector {
+    cwd: Option<PathBuf>,
+}
+
+impl LinkDetector {
+    pub(super) fn new(cwd: Option<&Path>) -> Self {
+        Self {
+            cwd: cwd.map(Path::to_path_buf),
+        }
+    }
+
+    pub(super) fn annotate(&self, line: &mut TermLine) {
+        line.links.clear();
+
+        let mut text = String::with_capacity(line.spans.iter().map(|span| span.text.len()).sum());
+        for span in &line.spans {
+            text.push_str(&span.text);
+        }
+        if text.is_empty() {
+            return;
+        }
+
+        let detected = self.detect(&text);
+        if detected.is_empty() {
+            return;
+        }
+
+        let mut cols: Vec<(u16, u16)> = Vec::with_capacity(text.chars().count());
+        for span in &line.spans {
+            let mut col = span.col;
+            for ch in span.text.chars() {
+                let width = UnicodeWidthChar::width(ch).unwrap_or(0).max(1) as u16;
+                cols.push((col, width));
+                col = col.saturating_add(width);
+            }
+        }
+
+        for (char_start, char_end, url) in detected.into_iter().take(MAX_LINKS_PER_LINE) {
+            let Some(&(start_col, _)) = cols.get(char_start) else {
+                continue;
+            };
+            let Some(&(last_col, last_w)) = cols.get(char_end - 1) else {
+                continue;
+            };
+            line.links.push(LinkRange {
+                start_col,
+                end_col: last_col + last_w - 1,
+                url,
+            });
+        }
+    }
+
+    fn detect(&self, text: &str) -> Vec<(usize, usize, String)> {
+        let mut out = Vec::new();
+        if !Self::may_hold(text) {
+            return out;
+        }
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i].is_whitespace() {
+                i += 1;
+                continue;
+            }
+            let mut start = i;
+            while i < chars.len() && !chars[i].is_whitespace() {
+                i += 1;
+            }
+            let mut end = i;
+            while start < end && LEADING_TRIM.contains(&chars[start]) {
+                start += 1;
+            }
+            while end > start && TRAILING_TRIM.contains(&chars[end - 1]) {
+                end -= 1;
+            }
+            if end <= start {
+                continue;
+            }
+            let token: String = chars[start..end].iter().collect();
+            if let Some(url) = self.resolve(&token) {
+                out.push((start, end, url));
+            }
+        }
+        out
+    }
+
+    fn may_hold(text: &str) -> bool {
+        text.contains('/')
+            || text
+                .as_bytes()
+                .windows(5)
+                .any(|window| window.eq_ignore_ascii_case(b"data:"))
+    }
+
+    fn resolve(&self, token: &str) -> Option<String> {
+        let query = NavigationText::new(token);
+        if query.is_data_uri() || token.contains("://") {
+            return Some(token.to_string());
+        }
+        if query.looks_like_path() && Self::path_has_name(token) {
+            return self.resolve_path(token);
+        }
+        None
+    }
+
+    fn path_has_name(token: &str) -> bool {
+        !token.contains('\\')
+            && token
+                .chars()
+                .any(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-'))
+    }
+
+    fn resolve_path(&self, token: &str) -> Option<String> {
+        let expanded = if let Some(rest) = token.strip_prefix("~/") {
+            let home = std::env::var_os("HOME")?;
+            Path::new(&home).join(rest)
+        } else {
+            let path = Path::new(token);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                self.cwd.as_ref()?.join(path)
+            }
+        };
+        Some(format!("file://{}", expanded.to_string_lossy()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_ecs::event::TermSpan;
+
+    #[test]
+    fn link_open_emits_stack_open_request() {
+        #[derive(Resource, Default)]
+        struct Captured(Vec<OpenRequest>);
+
+        fn capture(mut requests: MessageReader<OpenRequest>, mut captured: ResMut<Captured>) {
+            for request in requests.read() {
+                captured.0.push(request.clone());
+            }
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenRequest>()
+            .init_resource::<Captured>()
+            .add_observer(term_open)
+            .add_systems(Update, capture);
+        let webview = app.world_mut().spawn(vmux_ecs::team::User).id();
+
+        app.world_mut().trigger(UiInput::<TermLinkOpenRequest> {
+            webview,
+            payload: TermLinkOpenRequest {
+                url: "https://vmux.ai".into(),
+            },
+        });
+        app.update();
+
+        let captured = app.world().resource::<Captured>();
+        assert!(captured.0.iter().any(|request| matches!(
+            request,
+            OpenRequest { url: Some(url) } if url == "https://vmux.ai"
+        )));
+    }
+
+    fn line_of(text: &str) -> TermLine {
+        TermLine {
+            spans: vec![TermSpan {
+                text: text.to_string(),
+                col: 0,
+                grid_cols: text.chars().count() as u16,
+                ..Default::default()
+            }],
+            links: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn detects_https_url() {
+        let mut l = line_of("see https://vmux.ai/docs now");
+        LinkDetector::new(None).annotate(&mut l);
+        assert_eq!(l.links.len(), 1);
+        assert_eq!(l.links[0].url, "https://vmux.ai/docs");
+        assert_eq!(l.links[0].start_col, 4);
+        assert_eq!(l.links[0].end_col, 23);
+    }
+
+    #[test]
+    fn detects_a_slashless_data_uri_whatever_its_case() {
+        let mut l = line_of("payload Data:,hello here");
+        LinkDetector::new(None).annotate(&mut l);
+        assert_eq!(l.links.len(), 1);
+        assert_eq!(l.links[0].url, "Data:,hello");
+    }
+
+    #[test]
+    fn trims_trailing_punctuation() {
+        let mut l = line_of("docs at https://vmux.ai/docs.");
+        LinkDetector::new(None).annotate(&mut l);
+        assert_eq!(l.links[0].url, "https://vmux.ai/docs");
+    }
+
+    #[test]
+    fn trims_wrapping_parens() {
+        let mut l = line_of("(https://vmux.ai/x)");
+        LinkDetector::new(None).annotate(&mut l);
+        assert_eq!(l.links.len(), 1);
+        assert_eq!(l.links[0].url, "https://vmux.ai/x");
+    }
+
+    #[test]
+    fn detects_absolute_path() {
+        let mut l = line_of("edit /Users/me/main.rs please");
+        LinkDetector::new(None).annotate(&mut l);
+        assert_eq!(l.links.len(), 1);
+        assert_eq!(l.links[0].url, "file:///Users/me/main.rs");
+    }
+
+    #[test]
+    fn ignores_ascii_art_path_punctuation() {
+        let mut line = line_of(r"/ \/ /\\ \\// |/\\| ////");
+
+        LinkDetector::new(None).annotate(&mut line);
+
+        assert!(line.links.is_empty());
+    }
+
+    #[test]
+    fn resolves_relative_path_against_cwd() {
+        let mut l = line_of("see crates/foo.rs");
+        LinkDetector::new(Some(Path::new("/work"))).annotate(&mut l);
+        assert_eq!(l.links[0].url, "file:///work/crates/foo.rs");
+    }
+
+    #[test]
+    fn skips_relative_path_without_cwd() {
+        let mut l = line_of("see crates/foo.rs");
+        LinkDetector::new(None).annotate(&mut l);
+        assert!(l.links.is_empty());
+    }
+
+    #[test]
+    fn does_not_treat_bare_filename_as_url() {
+        let mut l = line_of("opened foo.txt and Cargo.toml");
+        LinkDetector::new(None).annotate(&mut l);
+        assert!(l.links.is_empty());
+    }
+
+    #[test]
+    fn ignores_bare_words() {
+        let mut l = line_of("hello world this is prose");
+        LinkDetector::new(None).annotate(&mut l);
+        assert!(l.links.is_empty());
+    }
+
+    #[test]
+    fn multiple_links_one_line() {
+        let mut l = line_of("https://a.com and https://b.com");
+        LinkDetector::new(None).annotate(&mut l);
+        assert_eq!(l.links.len(), 2);
+        assert_eq!(l.links[0].url, "https://a.com");
+        assert_eq!(l.links[1].url, "https://b.com");
+    }
+
+    #[test]
+    fn wide_chars_shift_columns() {
+        let mut l = line_of("あ https://x.io");
+        LinkDetector::new(None).annotate(&mut l);
+        assert_eq!(l.links.len(), 1);
+        assert_eq!(l.links[0].start_col, 3);
+    }
+}

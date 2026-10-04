@@ -1,0 +1,402 @@
+use bevy::prelude::*;
+
+use crate::event::{
+    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryLoadMoreRequest,
+    HistoryOpenRequest, HistoryQueryRequest, HistorySuggestionsRequest, HistorySuggestionsResponse,
+};
+use crate::ranking::HistoryRank;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
+
+use super::state::HistoryPageState;
+
+pub struct HistoryQueryPlugin;
+
+impl Plugin for HistoryQueryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            UiEventPlugin::<(
+                HistoryQueryRequest,
+                HistoryLoadMoreRequest,
+                HistoryDeleteRequest,
+                HistoryClearAllRequest,
+                HistoryOpenRequest,
+            )>::default(),
+            UiEventPlugin::<(HistorySuggestionsRequest,)>::default(),
+        ))
+        .add_message::<HistoryOpenIntent>()
+        .add_observer(request)
+        .add_observer(load_more)
+        .add_observer(delete_request)
+        .add_observer(clear_all_request)
+        .add_observer(open_request)
+        .add_observer(suggestions_request)
+        .add_systems(
+            Update,
+            broadcast_changed.after(super::spawn::HistoryWriteSet),
+        )
+        .add_systems(PostUpdate, publish_pages);
+    }
+}
+
+fn request(trigger: On<UiInput<HistoryQueryRequest>>, mut pages: Query<&mut HistoryPageState>) {
+    let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    state.search(&trigger.event().payload.query);
+}
+
+fn load_more(
+    trigger: On<UiInput<HistoryLoadMoreRequest>>,
+    mut pages: Query<&mut HistoryPageState>,
+) {
+    let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    state.load_more();
+}
+
+struct HistoryEntries(Vec<HistoryEntry>);
+
+impl HistoryEntries {
+    fn build(
+        query: &Option<String>,
+        urls: &[(Entity, PageMetadata, VisitCount, LastVisitedAt)],
+        visits: &[(CreatedAt, VisitedUrl)],
+        now: i64,
+    ) -> Self {
+        let entries = match query {
+            None => {
+                let mut entries = Vec::new();
+                for (created, visited_url) in visits {
+                    let Some((entity, metadata, count, last)) = urls
+                        .iter()
+                        .find(|(entity, _, _, _)| *entity == visited_url.0)
+                    else {
+                        continue;
+                    };
+                    entries.push(HistoryEntry {
+                        url_entity_bits: entity.to_bits(),
+                        url: metadata.url.clone(),
+                        title: metadata.title.clone(),
+                        favicon_url: metadata.icon.favicon_url().to_string(),
+                        visit_created_at: created.0,
+                        visit_count: count.0,
+                        last_visited_at: last.0,
+                    });
+                }
+                entries.sort_by_key(|entry| std::cmp::Reverse(entry.visit_created_at));
+                entries
+            }
+            Some(query) => {
+                let mut scored = Vec::new();
+                for (entity, metadata, count, last) in urls {
+                    let score = HistoryRank::new(count.0, last.0, now).score(
+                        query,
+                        &metadata.url,
+                        &metadata.title,
+                    );
+                    if score <= 0.0 {
+                        continue;
+                    }
+                    scored.push((
+                        score,
+                        HistoryEntry {
+                            url_entity_bits: entity.to_bits(),
+                            url: metadata.url.clone(),
+                            title: metadata.title.clone(),
+                            favicon_url: metadata.icon.favicon_url().to_string(),
+                            visit_created_at: last.0,
+                            visit_count: count.0,
+                            last_visited_at: last.0,
+                        },
+                    ));
+                }
+                scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                scored.into_iter().map(|(_, entry)| entry).collect()
+            }
+        };
+        Self(entries)
+    }
+
+    fn state(self, limit: usize) -> crate::state::HistoryUiState {
+        crate::state::HistoryUiState {
+            has_more: self.0.len() > limit,
+            entries: self.0.into_iter().take(limit).collect(),
+        }
+    }
+}
+
+fn delete_request(
+    trigger: On<UiInput<HistoryDeleteRequest>>,
+    mut commands: Commands,
+    visits: Query<(Entity, &VisitedUrl), With<Visit>>,
+    mut pages: Query<&mut HistoryPageState>,
+) {
+    let target = Entity::from_bits(trigger.event().payload.url_entity_bits);
+    for (visit_e, visited_url) in visits.iter() {
+        if visited_url.0 == target {
+            commands.entity(visit_e).despawn();
+        }
+    }
+    if commands.get_entity(target).is_ok() {
+        commands.entity(target).despawn();
+    }
+    for mut page in &mut pages {
+        page.set_changed();
+    }
+}
+
+fn clear_all_request(
+    _trigger: On<UiInput<HistoryClearAllRequest>>,
+    mut commands: Commands,
+    urls: Query<Entity, With<Url>>,
+    visits: Query<Entity, With<Visit>>,
+    mut pages: Query<&mut HistoryPageState>,
+) {
+    for e in urls.iter() {
+        commands.entity(e).despawn();
+    }
+    for e in visits.iter() {
+        commands.entity(e).despawn();
+    }
+    for mut page in &mut pages {
+        page.set_changed();
+    }
+}
+
+#[derive(Clone, Debug, Message)]
+pub struct HistoryOpenIntent {
+    pub url: String,
+    pub in_new_stack: bool,
+}
+
+fn open_request(
+    trigger: On<UiInput<HistoryOpenRequest>>,
+    mut messages: MessageWriter<HistoryOpenIntent>,
+) {
+    let req = &trigger.event().payload;
+    messages.write(HistoryOpenIntent {
+        url: req.url.clone(),
+        in_new_stack: req.in_new_stack,
+    });
+}
+
+fn broadcast_changed(
+    changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
+    mut pages: Query<&mut HistoryPageState>,
+) {
+    if changed.iter().next().is_none() {
+        return;
+    }
+    for mut page in &mut pages {
+        page.set_changed();
+    }
+}
+
+fn publish_pages(
+    mut pages: Query<(Entity, &mut HistoryPageState), Changed<HistoryPageState>>,
+    urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
+    visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
+    mut commands: Commands,
+) {
+    for (entity, mut state) in &mut pages {
+        let url_rows = urls
+            .iter()
+            .map(|(entity, metadata, count, last)| (entity, metadata.clone(), *count, *last))
+            .collect::<Vec<_>>();
+        let visit_rows = visits
+            .iter()
+            .map(|(created, visited)| (*created, *visited))
+            .collect::<Vec<_>>();
+        let snapshot = HistoryEntries::build(
+            &state.query,
+            &url_rows,
+            &visit_rows,
+            vmux_ecs::UnixMillis::now().0,
+        )
+        .state(state.limit as usize);
+        state.bypass_change_detection().has_more = snapshot.has_more;
+        commands.trigger(
+            vmux_ecs::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
+                entity, &snapshot,
+            ),
+        );
+    }
+}
+
+fn suggestions_request(
+    trigger: On<UiInput<HistorySuggestionsRequest>>,
+    urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
+    mut commands: Commands,
+) {
+    let req = &trigger.event().payload;
+    let now = vmux_ecs::UnixMillis::now().0;
+    let url_rows = urls
+        .iter()
+        .map(|(entity, metadata, count, last)| (entity, metadata.clone(), *count, *last))
+        .collect::<Vec<_>>();
+    let entries = HistoryEntries::build(&Some(req.query.clone()), &url_rows, &[], now)
+        .state(req.limit as usize)
+        .entries;
+
+    commands.trigger(vmux_ecs::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(
+        trigger.event().webview,
+        &HistorySuggestionsResponse {
+            request_id: req.request_id,
+            entries,
+        },
+    ));
+}
+
+#[cfg(test)]
+mod handler_tests {
+    use super::*;
+    use vmux_ecs::{
+        CreatedAt, EcsPlugin, LastVisitedAt, PageMetadata, Url, VisitCount, VisitedUrl,
+    };
+
+    #[test]
+    fn build_entries_no_query_orders_by_visit_created_at_desc() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
+
+        let url_e = app
+            .world_mut()
+            .spawn((
+                Url,
+                PageMetadata {
+                    url: "https://example.com".into(),
+                    ..default()
+                },
+                VisitCount(2),
+                LastVisitedAt(200),
+                CreatedAt(0),
+            ))
+            .id();
+
+        let url_rows = vec![(
+            url_e,
+            PageMetadata {
+                url: "https://example.com".into(),
+                ..default()
+            },
+            VisitCount(2),
+            LastVisitedAt(200),
+        )];
+        let visit_rows = vec![
+            (CreatedAt(100), VisitedUrl(url_e)),
+            (CreatedAt(200), VisitedUrl(url_e)),
+        ];
+
+        let entries = HistoryEntries::build(&None, &url_rows, &visit_rows, 1000).0;
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].visit_created_at, 200);
+        assert_eq!(entries[1].visit_created_at, 100);
+    }
+
+    #[test]
+    fn build_entries_with_query_filters_and_ranks() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
+
+        let e1 = app
+            .world_mut()
+            .spawn((
+                Url,
+                PageMetadata {
+                    url: "https://github.com".into(),
+                    title: "GitHub".into(),
+                    ..default()
+                },
+                VisitCount(10),
+                LastVisitedAt(1000),
+                CreatedAt(0),
+            ))
+            .id();
+
+        let e2 = app
+            .world_mut()
+            .spawn((
+                Url,
+                PageMetadata {
+                    url: "https://example.com".into(),
+                    title: "Example".into(),
+                    ..default()
+                },
+                VisitCount(10),
+                LastVisitedAt(1000),
+                CreatedAt(0),
+            ))
+            .id();
+
+        let url_rows = vec![
+            (
+                e1,
+                PageMetadata {
+                    url: "https://github.com".into(),
+                    title: "GitHub".into(),
+                    ..default()
+                },
+                VisitCount(10),
+                LastVisitedAt(1000),
+            ),
+            (
+                e2,
+                PageMetadata {
+                    url: "https://example.com".into(),
+                    title: "Example".into(),
+                    ..default()
+                },
+                VisitCount(10),
+                LastVisitedAt(1000),
+            ),
+        ];
+        let visit_rows = vec![];
+
+        let entries = HistoryEntries::build(&Some("git".into()), &url_rows, &visit_rows, 1000).0;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url, "https://github.com");
+    }
+
+    #[test]
+    fn build_entries_pagination() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
+
+        let url_e = app
+            .world_mut()
+            .spawn((
+                Url,
+                PageMetadata {
+                    url: "u".into(),
+                    ..default()
+                },
+                VisitCount(1),
+                LastVisitedAt(0),
+                CreatedAt(0),
+            ))
+            .id();
+
+        let url_rows = vec![(
+            url_e,
+            PageMetadata {
+                url: "u".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(0),
+        )];
+        let visit_rows: Vec<_> = (0..5)
+            .map(|i| (CreatedAt(i * 100), VisitedUrl(url_e)))
+            .collect();
+
+        let all = HistoryEntries::build(&None, &url_rows, &visit_rows, 1000).0;
+        assert_eq!(all.len(), 5);
+
+        let page: Vec<_> = all.into_iter().skip(2).take(2).collect();
+        assert_eq!(page.len(), 2);
+    }
+}

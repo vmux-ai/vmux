@@ -10,12 +10,12 @@ name = "vmux"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-serde_json = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+clap = { version = "4", features = ["string"] }
 tokio = { workspace = true }
-vmux_mcp = { path = "../../host/vmux_mcp" }
-vmux_profile = { path = "../../vmux_profile" }
-vmux_client = { path = "../../host/vmux_client" }
+vmux_app = { path = "../../util/vmux_app", features = ["cli"] }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 
 [dev-dependencies]
 assert_cmd = "2"

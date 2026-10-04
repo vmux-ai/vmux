@@ -3,6 +3,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::early_exit_if_subprocess;
 use vmux_desktop::VmuxPlugin;
 
+use bevy::ecs::schedule::ScheduleLabel;
+
 fn main() {
     #[cfg(target_os = "macos")]
     vmux_simulator::SimulatorPlugin::exit_helper_if_requested();
@@ -33,7 +35,7 @@ fn main() {
         }
     );
 
-    vmux_core::profile::migrate_legacy_personal_layout();
+    vmux_ecs::profile::ProfilePaths::current().migrate_legacy_personal_layout();
 
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);
@@ -50,7 +52,6 @@ fn main() {
 }
 
 fn run_update_on_one_thread(app: &mut App) {
-    use bevy::ecs::schedule::ScheduleLabel;
     for label in [
         First.intern(),
         PreUpdate.intern(),

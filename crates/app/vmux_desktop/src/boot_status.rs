@@ -1,7 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_core::page::PageReady;
-use vmux_layout::SpaceFilePresent;
+use vmux_ecs::host::persistence::WorkspaceRestore;
+use vmux_ecs::page::PageReady;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
@@ -10,28 +10,56 @@ pub(crate) struct BootStatusPlugin;
 
 impl Plugin for BootStatusPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SplashStatus>()
-            .init_resource::<RestoreComplete>()
-            .add_systems(
-                Update,
-                compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
-            );
+        app.add_systems(Startup, spawn)
+            .add_systems(Update, update.after(vmux_layout::stack::ComputeFocusSet));
     }
 }
 
-fn stack_in_active_space(
-    stack: Entity,
-    child_of_q: &Query<&ChildOf>,
-    space_active_q: &Query<Has<vmux_core::Active>, With<Space>>,
-) -> bool {
-    let mut entity = stack;
-    loop {
-        if let Ok(active) = space_active_q.get(entity) {
-            return active;
+fn spawn(mut commands: Commands) {
+    commands.spawn((Name::new("Boot status"), SplashStatus::default()));
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct BootLayout<'w, 's> {
+    layout: Query<'w, 's, (), (With<LayoutCef>, With<PageReady>)>,
+    stacks: Query<'w, 's, (Entity, Option<&'static Children>), With<Stack>>,
+    ready: Query<'w, 's, (), With<PageReady>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    spaces: Query<'w, 's, Has<vmux_ecs::Active>, With<Space>>,
+}
+
+impl BootLayout<'_, '_> {
+    fn ready(&self) -> bool {
+        !self.layout.is_empty()
+    }
+
+    fn page_counts(&self) -> (usize, usize) {
+        let mut total = 0;
+        let mut ready = 0;
+        for (stack, children) in &self.stacks {
+            if !self.stack_is_active(stack) {
+                continue;
+            }
+            if let Some(children) = children.filter(|children| !children.is_empty()) {
+                total += 1;
+                if children.iter().any(|entity| self.ready.contains(entity)) {
+                    ready += 1;
+                }
+            }
         }
-        match child_of_q.get(entity) {
-            Ok(child_of) => entity = child_of.get(),
-            Err(_) => return true,
+        (total, ready)
+    }
+
+    fn stack_is_active(&self, stack: Entity) -> bool {
+        let mut entity = stack;
+        loop {
+            if let Ok(active) = self.spaces.get(entity) {
+                return active;
+            }
+            match self.child_of.get(entity) {
+                Ok(child_of) => entity = child_of.get(),
+                Err(_) => return true,
+            }
         }
     }
 }
@@ -57,9 +85,13 @@ impl BootPhase {
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct SplashStatus {
     pub phase: BootPhase,
+    #[cfg_attr(
+        not(all(target_os = "macos", feature = "native-glass")),
+        allow(dead_code)
+    )]
     pub reveal_ready: bool,
 }
 
@@ -72,9 +104,6 @@ impl Default for SplashStatus {
     }
 }
 
-#[derive(Resource, Default)]
-pub struct RestoreComplete(pub bool);
-
 pub struct BootInputs {
     pub space_present: bool,
     pub restore_complete: bool,
@@ -83,64 +112,49 @@ pub struct BootInputs {
     pub ready_pages: usize,
 }
 
-pub fn compute(i: BootInputs) -> (BootPhase, bool) {
-    let reveal_ready = i.layout_ready;
-
-    let phase = if i.layout_ready && i.total_pages > 0 {
-        BootPhase::LoadingPages {
-            ready: i.ready_pages,
-            total: i.total_pages,
-        }
-    } else if i.layout_ready || i.restore_complete {
-        BootPhase::LoadingInterface
-    } else if i.space_present {
-        BootPhase::RestoringSpace
-    } else {
-        BootPhase::Starting
-    };
-
-    (phase, reveal_ready)
-}
-
-fn compute_boot_status(
-    mut status: ResMut<SplashStatus>,
-    space_present: Res<SpaceFilePresent>,
-    restore: Res<RestoreComplete>,
-    layout_q: Query<(), (With<LayoutCef>, With<PageReady>)>,
-    stacks_q: Query<(Entity, Option<&Children>), With<Stack>>,
-    ready_q: Query<(), With<PageReady>>,
-    child_of_q: Query<&ChildOf>,
-    space_active_q: Query<Has<vmux_core::Active>, With<Space>>,
-) {
-    let layout_ready = !layout_q.is_empty();
-
-    let mut total_pages = 0usize;
-    let mut ready_pages = 0usize;
-    for (stack, children) in &stacks_q {
-        if !stack_in_active_space(stack, &child_of_q, &space_active_q) {
-            continue;
-        }
-        if let Some(c) = children.filter(|c| !c.is_empty()) {
-            total_pages += 1;
-            if c.iter().any(|e| ready_q.contains(e)) {
-                ready_pages += 1;
+impl BootInputs {
+    pub fn status(self) -> SplashStatus {
+        let phase = if self.layout_ready && self.total_pages > 0 {
+            BootPhase::LoadingPages {
+                ready: self.ready_pages,
+                total: self.total_pages,
             }
+        } else if self.layout_ready || self.restore_complete {
+            BootPhase::LoadingInterface
+        } else if self.space_present {
+            BootPhase::RestoringSpace
+        } else {
+            BootPhase::Starting
+        };
+
+        SplashStatus {
+            phase,
+            reveal_ready: self.layout_ready,
         }
     }
+}
 
-    let (phase, reveal_ready) = compute(BootInputs {
-        space_present: space_present.0,
-        restore_complete: restore.0,
+fn update(
+    mut status: Single<&mut SplashStatus>,
+    restore: Single<&WorkspaceRestore>,
+    layout: BootLayout,
+) {
+    let layout_ready = layout.ready();
+    let (total_pages, ready_pages) = layout.page_counts();
+
+    let next = BootInputs {
+        space_present: restore.store_present,
+        restore_complete: restore.complete,
         layout_ready,
         total_pages,
         ready_pages,
-    });
-
-    if status.phase != phase {
-        info!("boot: {}", phase.display());
     }
-    status.phase = phase;
-    status.reveal_ready = reveal_ready;
+    .status();
+
+    if status.phase != next.phase {
+        info!("boot: {}", next.phase.display());
+    }
+    **status = next;
 }
 
 #[cfg(test)]
@@ -159,77 +173,84 @@ mod tests {
 
     #[test]
     fn starting_when_nothing_ready() {
-        let (phase, reveal) = compute(inputs());
-        assert_eq!(phase, BootPhase::Starting);
-        assert!(!reveal);
+        let status = inputs().status();
+        assert_eq!(status.phase, BootPhase::Starting);
+        assert!(!status.reveal_ready);
     }
 
     #[test]
     fn restoring_space_when_present_and_not_complete() {
-        let (phase, _) = compute(BootInputs {
+        let status = BootInputs {
             space_present: true,
             ..inputs()
-        });
-        assert_eq!(phase, BootPhase::RestoringSpace);
+        }
+        .status();
+        assert_eq!(status.phase, BootPhase::RestoringSpace);
     }
 
     #[test]
     fn loading_interface_after_restore_complete() {
-        let (phase, _) = compute(BootInputs {
+        let status = BootInputs {
             space_present: true,
             restore_complete: true,
             ..inputs()
-        });
-        assert_eq!(phase, BootPhase::LoadingInterface);
+        }
+        .status();
+        assert_eq!(status.phase, BootPhase::LoadingInterface);
     }
 
     #[test]
     fn loading_interface_on_fresh_boot_once_complete() {
-        let (phase, _) = compute(BootInputs {
+        let status = BootInputs {
             restore_complete: true,
             ..inputs()
-        });
-        assert_eq!(phase, BootPhase::LoadingInterface);
+        }
+        .status();
+        assert_eq!(status.phase, BootPhase::LoadingInterface);
     }
 
     #[test]
     fn loading_pages_counts_when_layout_ready() {
-        let (phase, _) = compute(BootInputs {
+        let status = BootInputs {
             layout_ready: true,
             total_pages: 5,
             ready_pages: 2,
             ..inputs()
-        });
-        assert_eq!(phase, BootPhase::LoadingPages { ready: 2, total: 5 });
+        }
+        .status();
+        assert_eq!(status.phase, BootPhase::LoadingPages { ready: 2, total: 5 });
     }
 
     #[test]
     fn not_revealed_until_layout_ready() {
-        let (_, reveal) = compute(BootInputs {
+        let status = BootInputs {
             layout_ready: false,
             ..inputs()
-        });
-        assert!(!reveal);
+        }
+        .status();
+        assert!(!status.reveal_ready);
     }
 
     #[test]
     fn revealed_when_layout_ready() {
-        let (_, reveal) = compute(BootInputs {
+        let status = BootInputs {
             layout_ready: true,
             ..inputs()
-        });
-        assert!(reveal);
+        }
+        .status();
+        assert!(status.reveal_ready);
     }
 
     #[test]
     fn revealed_when_layout_ready_even_while_pages_pending() {
-        let (_, reveal) = compute(BootInputs {
+        let status = BootInputs {
             layout_ready: true,
             total_pages: 3,
             ready_pages: 0,
             ..inputs()
-        });
-        assert!(reveal);
+        }
+        .status();
+        assert!(status.reveal_ready);
     }
 
     #[test]
@@ -249,11 +270,12 @@ mod tests {
     #[test]
     fn system_reports_loading_pages_and_reveals_on_layout_ready() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<SplashStatus>()
-            .init_resource::<RestoreComplete>()
-            .insert_resource(SpaceFilePresent(true))
-            .add_systems(Update, compute_boot_status);
+        let status = app.world_mut().spawn(SplashStatus::default()).id();
+        app.world_mut().spawn(WorkspaceRestore {
+            store_present: true,
+            complete: false,
+        });
+        app.add_plugins(MinimalPlugins).add_systems(Update, update);
 
         app.world_mut().spawn((LayoutCef, PageReady {}));
         let stack = app.world_mut().spawn(Stack::default()).id();
@@ -261,7 +283,7 @@ mod tests {
 
         app.update();
 
-        let status = app.world().resource::<SplashStatus>();
+        let status = app.world().get::<SplashStatus>(status).unwrap();
         assert_eq!(status.phase, BootPhase::LoadingPages { ready: 1, total: 1 });
         assert!(status.reveal_ready);
     }
@@ -269,15 +291,16 @@ mod tests {
     #[test]
     fn system_reports_restoring_space_before_layout_ready() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<SplashStatus>()
-            .init_resource::<RestoreComplete>()
-            .insert_resource(SpaceFilePresent(true))
-            .add_systems(Update, compute_boot_status);
+        let status = app.world_mut().spawn(SplashStatus::default()).id();
+        app.world_mut().spawn(WorkspaceRestore {
+            store_present: true,
+            complete: false,
+        });
+        app.add_plugins(MinimalPlugins).add_systems(Update, update);
 
         app.update();
 
-        let status = app.world().resource::<SplashStatus>();
+        let status = app.world().get::<SplashStatus>(status).unwrap();
         assert_eq!(status.phase, BootPhase::RestoringSpace);
         assert!(!status.reveal_ready);
     }

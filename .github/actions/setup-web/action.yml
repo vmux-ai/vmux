@@ -1,0 +1,53 @@
+name: Setup web
+description: Prepare a runner for building the vmux website
+inputs:
+  cache-key:
+    description: Rust cache partition
+    required: true
+  tailwind:
+    description: Install Tailwind CSS
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-rust
+      with:
+        targets: wasm32-unknown-unknown
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: website
+        shared-key: ${{ inputs.cache-key }}
+
+    - name: Cache binaryen
+      uses: actions/cache@v5
+      with:
+        path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
+        key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
+
+    - name: Cache tailwindcss
+      if: inputs.tailwind == 'true'
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/bin/tailwindcss
+        key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+    - name: Add local binaries to PATH
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Install dioxus-cli
+      shell: bash
+      run: ./scripts/install-dioxus-cli.sh
+
+    - name: Install binaryen
+      shell: bash
+      run: ./scripts/install-dioxus-binaryen.sh
+
+    - name: Install tailwindcss
+      if: inputs.tailwind == 'true'
+      shell: bash
+      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh

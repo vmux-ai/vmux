@@ -15,9 +15,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  TAILWINDCSS_VERSION: "4.2.4"
-  DIOXUS_CLI_VERSION: "0.7.9"
-  BINARYEN_VERSION: "127"
   DX_HOME: ${{ github.workspace }}/.dx
 
 jobs:
@@ -46,57 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [cef-version, changes]
     if: needs.changes.outputs.code == 'true'
-    env:
-      CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            /usr/local/share/chromium /usr/local/share/edge
-          sudo docker image prune --all --force || true
-          df -h /
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libssl-dev \
-            libasound2-dev \
-            libudev-dev \
-            libx11-dev \
-            libxi-dev \
-            libxcursor-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libgtk-3-dev \
-            libxdo-dev \
-            libvulkan-dev
-
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-linux
         with:
           components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: lint
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
-
-      - name: Cache CEF framework
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ env.CEF_VERSION }}-${{ hashFiles('cef/manifest.toml') }}
+          cache-key: lint
+          cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Compute workspace packages (excluding patches)
         id: pkgs
@@ -109,9 +63,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt ${{ steps.pkgs.outputs.args }} -- --check
 
-      - name: Install CEF framework
-        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
-
       - name: Clippy
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
 
@@ -123,58 +74,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [cef-version, changes]
     if: needs.changes.outputs.code == 'true'
-    env:
-      CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            /usr/local/share/chromium /usr/local/share/edge
-          sudo docker image prune --all --force || true
-          df -h /
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libssl-dev \
-            libasound2-dev \
-            libudev-dev \
-            libx11-dev \
-            libxi-dev \
-            libxcursor-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libgtk-3-dev \
-            libxdo-dev \
-            libvulkan-dev
-
-      - uses: dtolnay/rust-toolchain@1.95.0
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-linux
         with:
-          shared-key: test
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
-
-      - name: Cache CEF framework
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ env.CEF_VERSION }}-${{ hashFiles('cef/manifest.toml') }}
-
-      - name: Install CEF framework
-        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
+          cache-key: test
+          cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Run tests
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
@@ -206,6 +112,7 @@ jobs:
               - 'Makefile'
               - 'rust-toolchain.toml'
               - 'scripts/**'
+              - '.github/actions/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/nightly.yml'
               - '.github/workflows/build-cef.yml'
@@ -217,6 +124,7 @@ jobs:
               - 'patches/**'
               - 'packaging/**'
               - 'scripts/**'
+              - '.github/actions/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'Makefile'
@@ -236,9 +144,10 @@ jobs:
               - 'Makefile'
               - 'rust-toolchain.toml'
               - 'scripts/*ios*'
+              - '.github/actions/**'
               - '.github/workflows/ci.yml'
               - '!crates/app/vmux_desktop/**'
-              - '!crates/vmux_native/**'
+              - '!crates/util/vmux_native/**'
               - '!patches/**'
 
   deps-rust:
@@ -249,7 +158,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-rust
 
       - name: No crate on the headless path links bevy_cef
         run: |
@@ -323,27 +232,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-ios
         with:
-          targets: aarch64-apple-ios
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ios
-
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Add ~/.local/bin to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install tailwindcss
-        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+          cache-key: ios
+          tailwind: "true"
 
       - name: Generate the tailwind bundle dx would
         run: |
@@ -355,7 +247,7 @@ jobs:
         run: cargo build --locked -p vmux_mobile --target aarch64-apple-ios --features mobile --bin vmux_mobile
 
       - name: Test the phone app
-        run: cargo test --locked -p vmux_mobile --features mobile --bin vmux_mobile
+        run: cargo test --locked -p vmux_mobile --target aarch64-apple-darwin --features mobile --bin vmux_mobile
 
       - name: Check the pages that ship on the phone
         run: |
@@ -491,26 +383,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-web
         with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: website
-          shared-key: website
-
-      - name: Cache binaryen
-        uses: actions/cache@v5
-        with:
-          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
-
-      - name: Install dioxus-cli
-        run: ./scripts/install-dioxus-cli.sh
-
-      - name: Install binaryen
-        run: ./scripts/install-dioxus-binaryen.sh
+          cache-key: website
 
       - name: Build website
         working-directory: website
@@ -539,9 +414,17 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          TAG="v$VERSION"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          . ./scripts/release-artifacts.sh
+          vmux_release_artifacts "$VERSION"
+          {
+            echo "VERSION=$VERSION"
+            echo "TAG=$VMUX_RELEASE_TAG"
+            echo "DMG_NAME=$VMUX_DMG_NAME"
+            echo "BINARY_ARCHIVE_NAME=$VMUX_BINARY_ARCHIVE_NAME"
+            echo "APP_ARCHIVE_NAME=$VMUX_APP_ARCHIVE_NAME"
+            echo "APP_SIGNATURE_NAME=$VMUX_APP_SIGNATURE_NAME"
+            echo "DMG_URL=$VMUX_DMG_URL"
+          } >> "$GITHUB_ENV"
 
           if [ -z "${BASE_SHA:-}" ]; then
             echo "Not a pull_request event; skipping release prep."
@@ -559,73 +442,19 @@ jobs:
           echo "Release PR detected: $BASE_VERSION -> $VERSION"
           echo "IS_RELEASE_PR=1" >> "$GITHUB_ENV"
 
-          if gh release view "$TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
+          if gh release view "$VMUX_RELEASE_TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
             asset_count=$(jq '.assets | length' /tmp/r.json)
             CASK_URL=$(grep -m1 '^  url' Casks/vmux.rb | sed 's/.*"\(.*\)".*/\1/')
-            EXPECTED_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Vmux_${VERSION}_aarch64.dmg"
-            if [ "$asset_count" -ge 4 ] && [ "$CASK_URL" = "$EXPECTED_URL" ]; then
+            if [ "$asset_count" -ge 4 ] && [ "$CASK_URL" = "$VMUX_DMG_URL" ]; then
               echo "Draft release ready and cask matches; release prep already complete."
               echo "PREP_DONE=1" >> "$GITHUB_ENV"
             fi
           fi
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-macos
         with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build-mac
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.9-cef${{ env.CEF_VERSION }}-v3
-
-      - name: Cache binaryen
-        uses: actions/cache@v5
-        with:
-          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
-
-      - name: Cache CEF framework
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cef/manifest.toml') }}
-
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Add ~/.local/bin to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install CEF framework
-        run: ./scripts/install-cef.sh
-
-      - name: Install dioxus-cli
-        run: ./scripts/install-dioxus-cli.sh
-
-      - name: Install binaryen
-        run: ./scripts/install-dioxus-binaryen.sh
-
-      - name: Install bevy_cef bundle tool
-        run: command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
-
-      - name: Install cargo-packager (patched for macOS Tahoe)
-        run: |
-          if ! cargo-packager --version 2>/dev/null | grep -q '0.11.9'; then
-            cargo install --path patches/cargo-packager-0.11.8 --locked --force
-          fi
-
-      - name: Install tailwindcss
-        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+          cache-key: build-mac
+          cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Check lean macOS desktop features
         run: env VMUX_SKIP_DX_BUILD=1 ./scripts/cargo-with-cef-cache.sh check -p vmux_desktop --no-default-features --features dev
@@ -640,7 +469,11 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
-        run: ./scripts/build-mac-release.sh
+        run: |
+          if [ "$IS_RELEASE_PR" != "1" ]; then
+            export SKIP_NOTARIZE=1
+          fi
+          ./scripts/build-mac-release.sh
 
       - name: Smoke test bundled app
         if: env.PREP_DONE != '1'
@@ -691,20 +524,20 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: Vmux-${{ github.sha }}.dmg
-          path: target/release/Vmux_*.dmg
+          path: target/release/${{ env.DMG_NAME }}
           retention-days: 7
 
       - name: Create binary tarball
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
         run: |
           cd target/release/Vmux.app/Contents/MacOS
-          tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" vmux_desktop
+          tar czf "$GITHUB_WORKSPACE/target/release/${BINARY_ARCHIVE_NAME}" vmux_desktop
 
       - name: Create app bundle tarball
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
         run: |
           cd target/release
-          tar czf "Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz" Vmux.app
+          tar czf "$APP_ARCHIVE_NAME" Vmux.app
 
       - name: Sign update artifact (minisign)
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
@@ -712,7 +545,7 @@ jobs:
           VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
           VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
         run: |
-          TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          TARBALL="target/release/${APP_ARCHIVE_NAME}"
           cargo packager signer sign "${TARBALL}" \
             --private-key "${VMUX_UPDATE_PRIVATE_KEY}" \
             --password "${VMUX_UPDATE_PRIVATE_KEY_PASSWORD}"
@@ -725,10 +558,10 @@ jobs:
         run: |
           set -euo pipefail
           ASSETS=(
-            "target/release/Vmux_${VERSION}_aarch64.dmg"
-            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
-            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
-            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig"
+            "target/release/${DMG_NAME}"
+            "target/release/${BINARY_ARCHIVE_NAME}"
+            "target/release/${APP_ARCHIVE_NAME}"
+            "target/release/${APP_SIGNATURE_NAME}"
           )
           if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
             is_draft=$(jq -r .isDraft /tmp/r.json)

@@ -1,0 +1,580 @@
+use bevy::prelude::*;
+#[cfg(test)]
+use bevy_cef::prelude::HostWindow;
+use std::time::Instant;
+use vmux_flex::prelude::*;
+use vmux_history::LastActivatedAt;
+
+use super::{FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit};
+#[cfg(test)]
+use crate::stack::Stack;
+use crate::{
+    host::command::LayoutRequestSet,
+    stack::{ActiveTabParam, LayoutFocus},
+};
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const HOVER_COOLDOWN_MS: u64 = 300;
+
+pub(super) struct FocusPlugin;
+
+impl Plugin for FocusPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<FocusRequest>()
+            .add_systems(Update, select.in_set(LayoutRequestSet::Handle))
+            .add_systems(PostUpdate, warp_cursor_to_active);
+        #[cfg(target_os = "macos")]
+        app.add_systems(
+            Update,
+            apply_pending_hover.before(crate::stack::ComputeFocusSet),
+        );
+        #[cfg(not(target_os = "macos"))]
+        app.add_systems(Update, poll_cursor.before(crate::stack::ComputeFocusSet));
+    }
+}
+
+#[derive(Component)]
+pub struct PaneHoverCooldown(Instant);
+
+impl PaneHoverCooldown {
+    pub fn start() -> Self {
+        Self(Instant::now())
+    }
+
+    fn active(&self) -> bool {
+        self.0.elapsed().as_millis() < HOVER_COOLDOWN_MS as u128
+    }
+}
+
+#[derive(Component)]
+pub struct PendingCursorWarp;
+
+fn select(
+    mut reader: MessageReader<FocusRequest>,
+    active_tab_param: ActiveTabParam,
+    focus_query: LayoutFocus,
+    pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_layout: Query<&ComputedNode, With<Pane>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let focus = &request.0;
+
+        let Some(tab) = active_tab_param.get() else {
+            continue;
+        };
+        let panes = focus_query.leaves(tab);
+        if panes.len() < 2 {
+            continue;
+        }
+        let Some(current) = focus_query.pane(tab) else {
+            continue;
+        };
+        let target = match focus {
+            PaneFocus::Next => {
+                let Some(index) = panes.iter().position(|pane| *pane == current) else {
+                    continue;
+                };
+                panes[(index + 1) % panes.len()]
+            }
+            PaneFocus::Direction(direction) => {
+                let direction = match direction {
+                    vmux_api::open_target::PaneDirection::Left => Vec2::new(-1.0, 0.0),
+                    vmux_api::open_target::PaneDirection::Right => Vec2::new(1.0, 0.0),
+                    vmux_api::open_target::PaneDirection::Top => Vec2::new(0.0, -1.0),
+                    vmux_api::open_target::PaneDirection::Bottom => Vec2::new(0.0, 1.0),
+                };
+                let Ok(&current_layout) = pane_layout.get(current) else {
+                    continue;
+                };
+                let mut candidates = Vec::new();
+                for pane in &panes {
+                    if *pane == current {
+                        continue;
+                    }
+                    let Ok(&candidate_layout) = pane_layout.get(*pane) else {
+                        continue;
+                    };
+                    if (candidate_layout.center - current_layout.center).dot(direction) <= 0.0 {
+                        continue;
+                    }
+                    let overlaps = if direction.x.abs() > 0.5 {
+                        current_layout.overlaps_rows(candidate_layout)
+                    } else {
+                        current_layout.overlaps_columns(candidate_layout)
+                    };
+                    if overlaps {
+                        candidates.push(*pane);
+                    }
+                }
+                let Some(target) = LastActivatedAt::latest(
+                    candidates
+                        .iter()
+                        .filter_map(|&entity| pane_activity.get(entity).ok())
+                        .map(|(entity, activated_at)| (entity, *activated_at)),
+                ) else {
+                    continue;
+                };
+                target
+            }
+        };
+        commands.entity(target).insert((
+            LastActivatedAt::now(),
+            PaneHoverCooldown::start(),
+            PendingCursorWarp,
+        ));
+    }
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn poll_cursor(
+    windows: Query<(Entity, &Window)>,
+    focused_window: crate::window::FocusedWindow,
+    hierarchy: crate::window::WindowHierarchy,
+    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
+    pane_cooldowns: Query<&PaneHoverCooldown>,
+    pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    focus: LayoutFocus,
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    active_drags: Query<(), With<PaneDrag>>,
+) {
+    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
+        return;
+    }
+    if !active_drags.is_empty() {
+        return;
+    }
+    let Some(window_entity) = focused_window.entity() else {
+        return;
+    };
+    let Ok((_, window)) = windows.get(window_entity) else {
+        return;
+    };
+    let Some(cursor) = vmux_input::NativePointer::position(window_entity, window) else {
+        return;
+    };
+
+    let mut window_panes = Vec::new();
+    let mut hovered_pane = None;
+    for (entity, layout) in &leaf_panes {
+        if hierarchy.get(entity) == Some(window_entity) {
+            window_panes.push(entity);
+            if layout.contains(cursor) {
+                hovered_pane = Some(entity);
+            }
+        }
+    }
+
+    let Some(target) = hovered_pane else {
+        return;
+    };
+    let current = LastActivatedAt::latest(
+        window_panes
+            .iter()
+            .filter_map(|&entity| pane_activity.get(entity).ok())
+            .map(|(entity, activated_at)| (entity, *activated_at)),
+    );
+    if let Some(current) = current
+        && let Ok(cooldown) = pane_cooldowns.get(current)
+    {
+        if cooldown.active() {
+            return;
+        }
+        commands.entity(current).remove::<PaneHoverCooldown>();
+    }
+    if current == Some(target) {
+        return;
+    }
+
+    commands.entity(target).insert(LastActivatedAt::now());
+    if let Some(stack) = focus.stack(target) {
+        commands.entity(stack).insert(LastActivatedAt::now());
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_pending_hover(
+    focused_window: crate::window::FocusedWindow,
+    hierarchy: crate::window::WindowHierarchy,
+    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
+    pane_cooldowns: Query<&PaneHoverCooldown>,
+    pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    focus: LayoutFocus,
+    mut commands: Commands,
+    mut last_motion_sequence: Local<u64>,
+) {
+    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
+        return;
+    };
+    if pointer.motion_sequence == 0 || pointer.motion_sequence == *last_motion_sequence {
+        return;
+    }
+    *last_motion_sequence = pointer.motion_sequence;
+    let Some(window_entity) = focused_window.entity() else {
+        return;
+    };
+    let mut target = None;
+    let mut window_panes = Vec::new();
+    for (entity, layout) in leaf_panes.iter() {
+        if hierarchy.get(entity) == Some(window_entity) {
+            window_panes.push(entity);
+            if layout.contains(pointer.position_px) {
+                target = Some(entity);
+            }
+        }
+    }
+    let Some(target) = target else {
+        return;
+    };
+    let current = LastActivatedAt::latest(
+        window_panes
+            .iter()
+            .filter_map(|&entity| pane_activity.get(entity).ok())
+            .map(|(entity, activated_at)| (entity, *activated_at)),
+    );
+    if let Some(current) = current
+        && let Ok(cooldown) = pane_cooldowns.get(current)
+    {
+        if cooldown.active() {
+            return;
+        }
+        commands.entity(current).remove::<PaneHoverCooldown>();
+    }
+    if current == Some(target) {
+        return;
+    }
+    commands.entity(target).insert(LastActivatedAt::now());
+    if let Some(stack) = focus.stack(target) {
+        commands.entity(stack).insert(LastActivatedAt::now());
+    }
+}
+
+fn warp_cursor_to_active(
+    pane_layout: Query<
+        (Entity, &ComputedNode),
+        (With<Pane>, Without<PaneSplit>, With<PendingCursorWarp>),
+    >,
+    hierarchy: crate::window::WindowHierarchy,
+    mut windows: Query<&mut Window>,
+    mut commands: Commands,
+) {
+    for (target, layout) in &pane_layout {
+        if layout.is_empty() {
+            continue;
+        }
+        let Some(window_entity) = hierarchy.get(target) else {
+            commands.entity(target).remove::<PendingCursorWarp>();
+            continue;
+        };
+        if let Ok(mut window) = windows.get_mut(window_entity) {
+            window.set_physical_cursor_position(Some(layout.center.as_dvec2()));
+        }
+        commands.entity(target).remove::<PendingCursorWarp>();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{pane::PaneSplitDirection, tab::Tab};
+    use bevy::{ecs::message::Messages, window::PrimaryWindow};
+    use vmux_api::open_target::PaneDirection;
+
+    struct FocusFixture {
+        app: App,
+    }
+
+    impl FocusFixture {
+        fn selection() -> Self {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<FocusRequest>()
+                .add_systems(Update, select);
+            app.world_mut().spawn(PrimaryWindow);
+            Self { app }
+        }
+
+        fn hover() -> Self {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(ButtonInput::<KeyCode>::default())
+                .add_systems(Update, poll_cursor);
+            Self { app }
+        }
+
+        fn pane(&mut self, parent: Entity, center: Vec2, size: Vec2) -> Entity {
+            let pane = self
+                .app
+                .world_mut()
+                .spawn((
+                    Pane,
+                    Node::default(),
+                    LastActivatedAt::now(),
+                    ChildOf(parent),
+                    ComputedNode {
+                        size,
+                        center,
+                        ..default()
+                    },
+                ))
+                .id();
+            self.app
+                .world_mut()
+                .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
+            pane
+        }
+
+        fn select(&mut self, direction: PaneDirection) {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<FocusRequest>>()
+                .write(FocusRequest(PaneFocus::Direction(direction)));
+            self.app.update();
+        }
+    }
+
+    #[test]
+    fn select_right_picks_most_recently_active_among_overlapping_neighbors() {
+        let mut fixture = FocusFixture::selection();
+        let tab = fixture
+            .app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let row = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = fixture.pane(row, Vec2::new(399.5, 450.0), Vec2::new(791.0, 892.0));
+        let column = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                ChildOf(row),
+            ))
+            .id();
+        let top = fixture.pane(column, Vec2::new(1199.5, 225.0), Vec2::new(793.0, 442.0));
+        let bottom = fixture.pane(column, Vec2::new(1199.5, 675.0), Vec2::new(793.0, 442.0));
+
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(bottom)
+            .insert(LastActivatedAt::now());
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(top)
+            .insert(LastActivatedAt::now());
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(left)
+            .insert(LastActivatedAt::now());
+
+        let previous_top = fixture.app.world().get::<LastActivatedAt>(top).unwrap().0;
+        let previous_bottom = fixture
+            .app
+            .world()
+            .get::<LastActivatedAt>(bottom)
+            .unwrap()
+            .0;
+        assert!(previous_top > previous_bottom);
+
+        fixture.select(PaneDirection::Right);
+
+        assert!(fixture.app.world().get::<LastActivatedAt>(top).unwrap().0 > previous_top);
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(bottom)
+                .unwrap()
+                .0,
+            previous_bottom
+        );
+    }
+
+    #[test]
+    fn select_left_picks_full_height_neighbor_from_sub_split_pane() {
+        let mut fixture = FocusFixture::selection();
+        let tab = fixture
+            .app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let row = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = fixture.pane(row, Vec2::new(399.5, 450.0), Vec2::new(791.0, 892.0));
+        let column = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                ChildOf(row),
+            ))
+            .id();
+        let top = fixture.pane(column, Vec2::new(1199.5, 225.0), Vec2::new(793.0, 442.0));
+        let bottom = fixture.pane(column, Vec2::new(1199.5, 675.0), Vec2::new(793.0, 442.0));
+
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(left)
+            .insert(LastActivatedAt(1));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(top)
+            .insert(LastActivatedAt(10));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(bottom)
+            .insert(LastActivatedAt(0));
+        let previous_left = fixture.app.world().get::<LastActivatedAt>(left).unwrap().0;
+
+        fixture.select(PaneDirection::Left);
+
+        assert!(fixture.app.world().get::<LastActivatedAt>(left).unwrap().0 > previous_left);
+    }
+
+    #[test]
+    fn select_left_picks_left_neighbor_in_horizontal_split() {
+        let mut fixture = FocusFixture::selection();
+        let tab = fixture
+            .app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let row = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = fixture.pane(row, Vec2::new(400.0, 450.0), Vec2::new(800.0, 900.0));
+        let right = fixture.pane(row, Vec2::new(1200.0, 450.0), Vec2::new(800.0, 900.0));
+
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(right)
+            .insert(LastActivatedAt::now());
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        fixture.select(PaneDirection::Left);
+
+        let left_activity = fixture.app.world().get::<LastActivatedAt>(left).unwrap().0;
+        let right_activity = fixture.app.world().get::<LastActivatedAt>(right).unwrap().0;
+        assert!(left_activity > right_activity);
+    }
+
+    #[test]
+    fn pane_hover_activates_hovered_pane_in_single_update() {
+        let mut fixture = FocusFixture::hover();
+        let window = fixture
+            .app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(window)
+            .insert(vmux_ecs::Active);
+        let root = fixture.app.world_mut().spawn(HostWindow(window)).id();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(window)
+            .get_mut::<Window>()
+            .unwrap()
+            .set_physical_cursor_position(Some(bevy::math::DVec2::new(400.0, 450.0)));
+        let tab = fixture
+            .app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+            .id();
+        let row = fixture
+            .app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = fixture.pane(row, Vec2::new(400.0, 450.0), Vec2::new(800.0, 900.0));
+        let right = fixture.pane(row, Vec2::new(1200.0, 450.0), Vec2::new(800.0, 900.0));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(left)
+            .insert(LastActivatedAt(1));
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(right)
+            .insert(LastActivatedAt(10));
+        let left_stack = fixture
+            .app
+            .world()
+            .get::<Children>(left)
+            .unwrap()
+            .iter()
+            .find(|&entity| fixture.app.world().get::<Stack>(entity).is_some())
+            .unwrap();
+        fixture
+            .app
+            .world_mut()
+            .entity_mut(left_stack)
+            .insert(LastActivatedAt(1));
+
+        fixture.app.update();
+
+        assert!(fixture.app.world().get::<LastActivatedAt>(left).unwrap().0 > 10);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(left_stack)
+                .unwrap()
+                .0
+                > 1
+        );
+    }
+}

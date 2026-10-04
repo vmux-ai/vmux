@@ -1,0 +1,553 @@
+use super::CommandBarPicker;
+
+pub use vmux_api::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
+
+#[vmux_api::contract]
+pub struct StyledSpan {
+    pub text: String,
+    pub fg: [u8; 3],
+    pub bold: bool,
+    pub italic: bool,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub enum FoldGutter {
+    #[default]
+    None,
+    Open,
+    Collapsed,
+}
+
+#[vmux_api::contract(Default)]
+pub struct FileLine {
+    pub line_no: u32,
+    pub fold: FoldGutter,
+    pub spans: Vec<StyledSpan>,
+    #[serde(default)]
+    pub indent_levels: u16,
+}
+
+#[vmux_api::contract]
+pub struct FileMetaEvent {
+    pub revision: u64,
+    pub path: String,
+    pub abs_path: String,
+    pub kind: FileDocumentKind,
+    pub language: String,
+    pub total_lines: u32,
+    #[serde(default)]
+    pub indent: FileIndent,
+    #[serde(default)]
+    pub line_ending: FileLineEnding,
+    #[serde(default)]
+    pub encoding: FileEncoding,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub enum FileDocumentKind {
+    #[default]
+    Text,
+    Markdown,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub struct FileIndent {
+    pub spaces: bool,
+    pub width: u16,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub enum FileLineEnding {
+    #[default]
+    Lf,
+    Crlf,
+}
+
+#[vmux_api::contract(Copy, Eq, Hash, Default)]
+pub enum FileEncoding {
+    #[default]
+    Utf8,
+    Utf8Bom,
+    Utf16Le,
+    Utf16Be,
+    ShiftJis,
+    EucJp,
+    Iso2022Jp,
+    Gbk,
+    Big5,
+    EucKr,
+    Windows1252,
+    Iso8859_1,
+}
+
+impl FileEncoding {
+    pub const ALL: [Self; 12] = [
+        Self::Utf8,
+        Self::Utf8Bom,
+        Self::Utf16Le,
+        Self::Utf16Be,
+        Self::ShiftJis,
+        Self::EucJp,
+        Self::Iso2022Jp,
+        Self::Gbk,
+        Self::Big5,
+        Self::EucKr,
+        Self::Windows1252,
+        Self::Iso8859_1,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Utf8Bom => "UTF-8 with BOM",
+            Self::Utf16Le => "UTF-16 LE",
+            Self::Utf16Be => "UTF-16 BE",
+            Self::ShiftJis => "Shift_JIS",
+            Self::EucJp => "EUC-JP",
+            Self::Iso2022Jp => "ISO-2022-JP",
+            Self::Gbk => "GBK",
+            Self::Big5 => "Big5",
+            Self::EucKr => "EUC-KR",
+            Self::Windows1252 => "Windows-1252",
+            Self::Iso8859_1 => "ISO-8859-1",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedEncodingLabel;
+
+impl std::fmt::Display for UnsupportedEncodingLabel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("unsupported file encoding label")
+    }
+}
+
+impl std::error::Error for UnsupportedEncodingLabel {}
+
+impl TryFrom<&str> for FileEncoding {
+    type Error = UnsupportedEncodingLabel;
+
+    fn try_from(label: &str) -> Result<Self, Self::Error> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.label() == label)
+            .ok_or(UnsupportedEncodingLabel)
+    }
+}
+
+#[vmux_api::contract]
+pub struct FileViewportPatch {
+    pub first_row: u32,
+    pub total_rows: u32,
+    pub total_lines: u32,
+    pub wrap_columns: u16,
+    pub layouts: Vec<FileLineLayout>,
+    pub lines: Vec<FileLine>,
+    #[serde(default)]
+    pub sticky: Vec<FileLine>,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileLineLayout {
+    pub line_no: u32,
+    pub row: u32,
+    pub rows: u16,
+}
+
+#[vmux_api::contract(Copy)]
+pub enum MdTableAlign {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+#[vmux_api::contract(recursive)]
+pub enum MdInline {
+    Text(String),
+    Code(String),
+    Strong(Vec<MdInline>),
+    Emph(Vec<MdInline>),
+    Strike(Vec<MdInline>),
+    Link {
+        href: String,
+        inlines: Vec<MdInline>,
+    },
+    Image {
+        src: String,
+        alt: String,
+    },
+    SoftBreak,
+    HardBreak,
+    WikiLink {
+        target: String,
+        label: String,
+        path: String,
+        line: Option<u32>,
+        exists: bool,
+        embed: bool,
+    },
+}
+
+#[vmux_api::contract(recursive)]
+pub struct MdListItem {
+    pub source_line: u32,
+    pub task: Option<bool>,
+    pub blocks: Vec<MdBlock>,
+}
+
+#[vmux_api::contract(recursive)]
+pub enum MdBlock {
+    Heading {
+        level: u8,
+        inlines: Vec<MdInline>,
+    },
+    Paragraph {
+        inlines: Vec<MdInline>,
+    },
+    List {
+        ordered: bool,
+        start: u64,
+        items: Vec<MdListItem>,
+    },
+    CodeBlock {
+        lang: String,
+        lines: Vec<FileLine>,
+    },
+    BlockQuote {
+        blocks: Vec<MdBlock>,
+    },
+    Table {
+        aligns: Vec<MdTableAlign>,
+        header: Vec<Vec<MdInline>>,
+        rows: Vec<Vec<Vec<MdInline>>>,
+    },
+    ThematicBreak,
+    Html {
+        raw: String,
+    },
+}
+
+#[vmux_api::contract]
+pub struct NoteBlock {
+    pub start_line: u32,
+    pub end_line: u32,
+    pub source: String,
+    pub block: MdBlock,
+}
+
+#[vmux_api::contract]
+pub struct FileNoteEvent {
+    pub title: String,
+    pub properties: Vec<vmux_api::knowledge::KnowledgeProperty>,
+    pub blocks: Vec<NoteBlock>,
+    pub active: Option<u32>,
+    pub references: Vec<vmux_api::knowledge::KnowledgeReference>,
+    pub reveal_line: Option<u32>,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FilePropertyEdit {
+    pub original_key: String,
+    pub key: String,
+    pub kind: vmux_api::knowledge::KnowledgePropertyKind,
+    pub values: Vec<String>,
+    pub remove: bool,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct KnowledgeLinkOpen {
+    pub path: String,
+    pub title: String,
+    pub line: Option<u32>,
+    pub create: bool,
+}
+
+#[vmux_api::contract]
+pub struct FileErrorEvent {
+    pub message: String,
+    #[serde(default)]
+    pub undecodable: bool,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct FileResizeEvent {
+    pub char_height: f32,
+    pub viewport_height: f32,
+    pub wrap_columns: u16,
+}
+
+#[vmux_api::ui_event]
+pub struct FileVideoRect {
+    pub path: String,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+#[vmux_api::ui_event(Eq, Default)]
+pub struct FileScrollEvent {
+    pub top_row: u32,
+    pub needs_rows: bool,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub struct FileScrollByEvent {
+    pub revision: u64,
+    pub lines: i32,
+}
+
+#[vmux_api::ui_event(Copy, Eq, Default)]
+pub struct FileFoldToggle {
+    pub line: u32,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct FileDirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct FileDirectoryState {
+    pub path: String,
+    pub abs_path: String,
+    pub entries: Vec<FileDirEntry>,
+    pub parent_entries: Vec<FileDirEntry>,
+    pub selected: u32,
+    pub show_hidden: bool,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectorySelectRequest {
+    pub index: u32,
+}
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryNextRequest;
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryPreviousRequest;
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectoryAscendRequest {
+    pub target: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectoryDescendRequest {
+    pub target: String,
+}
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryActivateRequest;
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryParentRequest;
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectoryOpenRequest {
+    pub path: String,
+}
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryBackRequest;
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryToggleHiddenRequest;
+
+#[vmux_api::contract(Default)]
+pub struct FileThemeEvent {
+    pub font_family: String,
+    pub font_size: f32,
+    pub line_height: f32,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FilePreviewRequest {
+    pub path: String,
+    pub thumb: bool,
+}
+
+#[vmux_api::contract]
+pub enum PreviewKind {
+    Dir(Vec<FileDirEntry>),
+    Text(Vec<FileLine>),
+    Image {
+        mime: String,
+        bytes: Vec<u8>,
+    },
+    Video {
+        url: String,
+        path: String,
+        native: bool,
+    },
+    Info {
+        size: u64,
+        modified: String,
+        kind: String,
+    },
+    Error(String),
+}
+
+#[vmux_api::contract]
+pub struct FilePreviewEvent {
+    pub path: String,
+    pub thumb: bool,
+    pub kind: PreviewKind,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileOpenEvent {
+    pub path: String,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct FileMediaEvent {
+    pub kind: vmux_api::media::MediaKind,
+    pub mime: String,
+    pub url: String,
+    pub abs_path: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileOpenExternalRequest {
+    pub path: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileTextInput {
+    pub text: String,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FilePointerEvent {
+    pub line: u32,
+    pub col: u32,
+    pub extend: bool,
+    pub add: bool,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct FileCursorEvent {
+    pub mode: vmux_api::editor::EditMode,
+    pub mode_label: String,
+    pub primary: vmux_api::editor::CursorPos,
+    pub carets: Vec<vmux_api::editor::CursorPos>,
+    pub selections: Vec<vmux_api::editor::SelSpan>,
+    pub source_primary: vmux_api::editor::CursorPos,
+    pub source_selections: Vec<vmux_api::editor::SelSpan>,
+    pub search: Vec<vmux_api::editor::SelSpan>,
+    pub word_highlights: Vec<vmux_api::editor::SelSpan>,
+    pub search_total: u32,
+    pub search_index: u32,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileDirtyEvent {
+    pub dirty: bool,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub enum FileViewMode {
+    #[default]
+    Editor,
+    Note,
+    Diff,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileViewModeEvent {
+    pub mode: FileViewMode,
+    pub revision: u64,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileViewModeSet {
+    pub mode: FileViewMode,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileKeymapEvent {
+    pub keymap: vmux_api::editor::KeymapKind,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileKeymapSet {
+    pub keymap: vmux_api::editor::KeymapKind,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileShapeEvent {
+    pub indent: FileIndent,
+    pub line_ending: FileLineEnding,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileShapeSet {
+    pub indent: FileIndent,
+    pub line_ending: FileLineEnding,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileEncodingEvent {
+    pub encoding: FileEncoding,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileEncodingReopenRequest {
+    pub encoding: FileEncoding,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileEncodingSaveRequest {
+    pub encoding: FileEncoding,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileStatusPickerOpen {
+    pub picker: CommandBarPicker,
+}
+
+impl From<CommandBarPicker> for FileStatusPickerOpen {
+    fn from(picker: CommandBarPicker) -> Self {
+        Self { picker }
+    }
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileFindEvent {
+    pub open: bool,
+    pub forward: bool,
+    pub revision: u64,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct FileTidyPromptEvent {
+    pub count: u32,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum TidyChoice {
+    Tidy,
+    Always,
+    Dismiss,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileTidyRequest {
+    pub choice: TidyChoice,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct FileFindRequest {
+    pub query: String,
+    pub step: bool,
+    pub reverse: bool,
+    pub done: bool,
+    pub regex: bool,
+    pub forward: bool,
+}

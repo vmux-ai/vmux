@@ -1,0 +1,71 @@
+[package]
+name = "vmux_service"
+version.workspace = true
+edition.workspace = true
+description = "Background service hosting persistent processes"
+publish = false
+build = "../../build_cfg_git.rs"
+
+[features]
+default = []
+
+[lib]
+name = "vmux_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vmux_service"
+path = "src/main.rs"
+
+[dependencies]
+rkyv = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+vmux_transport = { path = "../../util/vmux_transport" }
+vmux_api = { path = "../../util/vmux_api" }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+base64 = "0.22"
+bevy = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+libc = "0.2"
+tokio = { workspace = true, features = ["process", "io-util"] }
+quinn = { workspace = true }
+rustls-pemfile = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+chrono = { workspace = true }
+crossbeam-channel = "0.5"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+ring = { workspace = true }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_agent = { path = "../vmux_agent", default-features = false, features = ["service"] }
+vmux_path = { path = "../../util/vmux_path" }
+vmux_profile = { path = "../../util/vmux_profile" }
+vmux_process = { path = "../../util/vmux_process" }
+vmux_session = { path = "../vmux_session" }
+tempfile = "3.27.0"
+uuid = { workspace = true }
+url = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+] }
+objc2-service-management = { version = "0.3", default-features = false, features = [
+    "std",
+    "SMAppService",
+    "objc2",
+    "objc2-foundation",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros", "rt"] }
+mockito = "1"
+serial_test = "3"
+
+[lints]
+workspace = true

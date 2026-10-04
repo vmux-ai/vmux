@@ -1,0 +1,51 @@
+[package]
+name = "vmux_chat"
+build = "../../build_cfg.rs"
+description = "The shared chat transcript UI rendered by every vmux client"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+chrono = { workspace = true }
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = false }
+pulldown-cmark = { version = "0.12", default-features = false, features = [
+    "html",
+] }
+rkyv = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+similar = "2"
+unicode-segmentation = "1"
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_command = { path = "../vmux_command" }
+vmux_native = { path = "../../util/vmux_native" }
+vmux_ui = { path = "../../util/vmux_ui" }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+base64 = "0.22"
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+futures-lite = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff"] }
+rfd = { workspace = true }
+uuid = { workspace = true }
+vmux_clipboard = { path = "../../util/vmux_clipboard" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_session = { path = "../vmux_session" }
+vmux_tool = { path = "../vmux_tool" }
+
+[lints]
+workspace = true

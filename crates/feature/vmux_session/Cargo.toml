@@ -1,0 +1,21 @@
+[package]
+name = "vmux_session"
+description = "Render-free ECS model of an agent session and its room projection"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+unicode-segmentation = "1"
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+
+[lints]
+workspace = true
