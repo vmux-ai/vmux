@@ -19,7 +19,7 @@ use vmux_tool::{
 };
 
 use self::environment::AcpEnvironment;
-use self::install::AgentInstaller;
+use self::installer::AgentInstaller;
 use self::registry::Registry;
 pub(super) use config::AcpSessionConfigPlugin;
 use vmux_session::AgentRunState;
@@ -27,18 +27,17 @@ use vmux_session::AgentRunState;
 mod config;
 mod environment;
 mod install;
+mod installer;
 pub mod registry;
 
 pub(crate) struct AcpToolPlugin;
 
 impl Plugin for AcpToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
-            .add_message::<AcpPackageChanged>()
+        app.add_plugins(install::InstallPlugin)
+            .add_message::<ServiceRequest>()
             .add_message::<vmux_ecs::agent::SwapStackSession>()
-            .add_observer(cancel_install_on_remove)
-            .add_systems(Startup, spawn_tool_provider)
-            .add_systems(Update, (start_installs, poll_installs).chain());
+            .add_systems(Startup, spawn_tool_provider);
     }
 }
 

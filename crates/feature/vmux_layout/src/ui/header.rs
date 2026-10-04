@@ -5,13 +5,13 @@ use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
 use vmux_ecs::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
-use vmux_ui::class::ClassList;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
+use vmux_ui::util::cn;
 
 use super::bookmark::LayoutContextMenu;
 use super::extension::ExtensionBar;
@@ -255,7 +255,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
     } else {
         "cursor-pointer"
     };
-    let tab_box_classes = ClassList::join([
+    let tab_box_classes = cn([
         "group relative flex h-10 w-[var(--tab-width)] min-w-[var(--tab-width)] max-w-[var(--tab-width)] basis-[var(--tab-width)] shrink-0 grow-0 select-none items-start",
         cursor_classes,
     ]);
@@ -270,11 +270,11 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         (
             "--tab-bg:var(--glass);background-color:var(--glass);border-bottom-width:0;"
                 .to_string(),
-            ClassList::join([
+            cn([
                 skirt_classes,
                 "glass mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
             ]),
-            ClassList::join([
+            cn([
                 "min-w-0 flex-1",
                 trunc,
                 "text-ui font-medium text-foreground transition-colors duration-150 ease-out",
@@ -284,11 +284,11 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
     } else {
         (
             "background-color:color-mix(in oklab,var(--glass) 58%,transparent);".to_string(),
-            ClassList::join([
+            cn([
                 "my-1 flex h-8 w-full items-center gap-2 rounded-lg border border-glass-border/65 px-3.5 text-muted-foreground shadow-sm transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
                 inactive_hover_classes,
             ]),
-            ClassList::join([
+            cn([
                 "min-w-0 flex-1",
                 trunc,
                 "text-ui transition-colors duration-150 ease-out",

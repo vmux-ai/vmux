@@ -1,6 +1,5 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use crossbeam_channel::Receiver;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
 use vmux_ecs::ProcessId;
@@ -16,7 +15,7 @@ use vmux_layout::worktree::TabWorktreeReady;
 use vmux_terminal::ReattachedTerminalBundle;
 
 use super::handoff::PendingHandoff;
-use crate::host::acp::registry::{Registry, RegistryAgent};
+use crate::host::acp::registry::RegistryPlugin;
 use crate::host::acp::{AcpLaunchStarted, AcpToolPlugin};
 use crate::host::event::{
     AgentApprovalRequest, UiAgentAcpTerminalCreated, UiAgentInfo,
@@ -38,6 +37,7 @@ impl Plugin for AgentRuntimePlugin {
         app.add_plugins((
             FeaturePlugin::<crate::Feature>::default(),
             AgentPolicyPlugin,
+            RegistryPlugin,
         ))
         .add_message::<ServiceRequest>()
         .add_plugins(AcpToolPlugin)
@@ -47,12 +47,10 @@ impl Plugin for AgentRuntimePlugin {
         .add_message::<UiAgentSessionConfigSelectionResult>()
         .add_message::<UiAgentSessionCreated>()
         .add_message::<UiAgentAcpTerminalCreated>()
-        .add_systems(Startup, fetch_catalog)
         .add_systems(
             Update,
             (
                 input.after(ServiceMessageSet),
-                receive_catalog,
                 (
                     info,
                     workspace,
@@ -182,49 +180,6 @@ impl AcpSessionConfigState {
             .find(|initial| initial.config_id == config.config_id)
             .map(|initial| initial.value.as_str())
             .unwrap_or(&config.current_value)
-    }
-}
-
-#[derive(Component)]
-struct AcpCatalogFetch {
-    rx: Receiver<Vec<RegistryAgent>>,
-}
-
-fn fetch_catalog(mut commands: Commands) {
-    let (tx, rx) = crossbeam_channel::unbounded();
-    std::thread::spawn(move || {
-        let agents = Registry::fetch_blocking()
-            .ok()
-            .or_else(Registry::cached)
-            .map(|r| r.agents)
-            .unwrap_or_default();
-        let _ = tx.send(agents);
-    });
-    commands.spawn(AcpCatalogFetch { rx });
-}
-
-fn receive_catalog(
-    fetches: Query<(Entity, &AcpCatalogFetch)>,
-    current: Query<Entity, With<RegistryAgent>>,
-    mut commands: Commands,
-) {
-    let mut received = None;
-    for (entity, fetch) in &fetches {
-        let Ok(agents) = fetch.rx.try_recv() else {
-            continue;
-        };
-        received = Some(agents);
-        commands.entity(entity).despawn();
-    }
-    let Some(agents) = received else {
-        return;
-    };
-    for entity in &current {
-        commands.entity(entity).despawn();
-    }
-    for agent in agents {
-        let name = Name::new(format!("ACP agent {}", agent.id));
-        commands.spawn((name, agent));
     }
 }
 
@@ -653,29 +608,6 @@ mod tests {
             &queue,
             true
         ));
-    }
-
-    #[test]
-    fn catalog_fetch_entity_is_consumed_after_delivery() {
-        let mut app = App::new();
-        app.add_systems(Update, receive_catalog);
-        let (tx, rx) = crossbeam_channel::unbounded();
-        let fetch = app.world_mut().spawn(AcpCatalogFetch { rx }).id();
-        tx.send(vec![RegistryAgent {
-            id: "agent".into(),
-            name: "Agent".into(),
-            version: None,
-            description: None,
-            icon: None,
-            distribution: crate::host::acp::registry::Distribution::default(),
-        }])
-        .unwrap();
-
-        app.update();
-
-        assert!(app.world().get_entity(fetch).is_err());
-        let mut agents = app.world_mut().query::<&RegistryAgent>();
-        assert_eq!(agents.single(app.world()).unwrap().id, "agent");
     }
 
     #[test]

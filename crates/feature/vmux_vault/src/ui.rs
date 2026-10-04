@@ -2,7 +2,7 @@
 
 use crate::state::{
     VaultConnectionProvider, VaultDestination, VaultDestinationSelectRequest,
-    VaultGenerateRecoveryKeyRequest, VaultOperationKind, VaultOwnerKind, VaultOwnerSelectRequest,
+    VaultGenerateRecoveryKeyRequest, VaultOperationKind, VaultOwnerSelectRequest,
     VaultPrivacyRequest, VaultProviderSelectRequest, VaultRecoveryConfirmationRequest,
     VaultRecoveryInputRequest, VaultRefreshRequest, VaultRepositoryNameRequest,
     VaultRepositorySelectRequest, VaultSnapshot, VaultSyncRequest, VaultSyncStatus, VaultUiState,
@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
-    ManagerSelectItem, ManagerSelectItemKind, ManagerSpinner,
+    ManagerSelectItem, ManagerSpinner,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -109,11 +109,6 @@ fn VaultPanel(
         .map(|owner| ManagerSelectItem {
             value: owner.value.clone(),
             label: owner.value.clone(),
-            kind: if owner.kind == VaultOwnerKind::User {
-                ManagerSelectItemKind::User
-            } else {
-                ManagerSelectItemKind::Organization
-            },
         })
         .collect::<Vec<_>>();
     let repository_items = workflow
@@ -126,7 +121,6 @@ fn VaultPanel(
             } else {
                 repository.name.clone()
             },
-            kind: ManagerSelectItemKind::Default,
         })
         .collect::<Vec<_>>();
     let status = match workflow.sync_status {

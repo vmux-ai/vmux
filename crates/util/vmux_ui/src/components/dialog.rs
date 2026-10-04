@@ -1,4 +1,4 @@
-use crate::class::ClassList;
+use crate::util::cn;
 use dioxus::prelude::*;
 use dioxus_primitives::dialog::{
     self, DialogContentProps, DialogDescriptionProps, DialogRootProps, DialogTitleProps,
@@ -30,7 +30,7 @@ pub fn DialogRoot(props: DialogRootProps) -> Element {
 
 #[component]
 pub fn DialogContent(props: DialogContentProps) -> Element {
-    let class = ClassList::join([DIALOG_PANEL, props.class.as_deref().unwrap_or_default()]);
+    let class = cn([DIALOG_PANEL, props.class.as_deref().unwrap_or_default()]);
     rsx! {
         dialog::DialogContent { class: Some(class), id: props.id, attributes: props.attributes, {props.children} }
     }

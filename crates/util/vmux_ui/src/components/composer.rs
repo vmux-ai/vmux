@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 pub use vmux_api::prompt_media::PromptComposerAttachment;
 
-use crate::class::ClassList;
 use crate::components::prompt_box::PromptBox;
 use crate::i18n::translate;
 use crate::ime::use_ime_guard;
+use crate::util::cn;
 
 pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
 
@@ -54,7 +54,7 @@ pub fn PromptComposer(
     let typed_text_class = if overlaid { "text-transparent" } else { "" };
     let mode_class = if action_enabled {
         match mode {
-            PromptComposerMode::Send => ClassList::join([
+            PromptComposerMode::Send => cn([
                 "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg",
                 accent_gradient.as_str(),
             ]),
@@ -68,14 +68,13 @@ pub fn PromptComposer(
     } else {
         ""
     };
-    let prompt_box_class =
-        ClassList::join(["vmux-prompt-composer flex-wrap", shared_transition_class]);
+    let prompt_box_class = cn(["vmux-prompt-composer flex-wrap", shared_transition_class]);
     let caret_class = if caret_visible {
         "caret-[var(--vmux-prompt-accent)]"
     } else {
         "caret-transparent"
     };
-    let textarea_class = ClassList::join([
+    let textarea_class = cn([
         "relative z-10 max-h-40 min-h-11 w-full [field-sizing:content] resize-none overflow-y-auto bg-transparent px-1.5 py-2.5 text-base leading-6 outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap placeholder:text-muted-foreground/50 sm:min-h-10 sm:py-2 sm:text-[15px]",
         typed_text_class,
         caret_class,

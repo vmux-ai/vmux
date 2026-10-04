@@ -23,7 +23,6 @@ use vmux_command::{
 use vmux_ecs::host::UiState;
 #[cfg(test)]
 use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ui::hooks::MenuDirection;
 use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 use crate::selector::SelectorMode;
@@ -457,10 +456,6 @@ fn move_list(
     } else {
         return;
     };
-    let direction = match next {
-        true => MenuDirection::Next,
-        false => MenuDirection::Previous,
-    };
     let caller = trigger.event().invocation().caller;
     let Ok(composer) = composers.get(caller) else {
         return;
@@ -474,7 +469,13 @@ fn move_list(
     let kind = list.kind;
     let len = list.len;
     let selected = selection.current(&list);
-    *selected = direction.move_selection(*selected, len);
+    if len == 0 {
+        *selected = 0;
+    } else if next {
+        *selected = (*selected + 1) % len;
+    } else {
+        *selected = (*selected + len - 1) % len;
+    }
     commands.trigger(
         vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
             caller,

@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use vmux_ui::class::ClassList;
 use vmux_ui::components::composer_bar::{ComposerChipIcon, ComposerMenuKind};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::skeleton::Skeleton;
@@ -7,6 +6,7 @@ use vmux_ui::favicon::Favicon;
 use vmux_ui::file_icon::FilePath;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
+use vmux_ui::util::cn;
 
 use vmux_api::command_bar::{CommandBarResultItem as ResultItem, ResumeSection};
 
@@ -147,8 +147,8 @@ pub fn ResultRow(
                                 div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     span { class: "shrink-0 text-sm text-muted-foreground/40", "\u{21ba}" }
                                     div { class: "flex min-w-0 flex-1 flex-col gap-1.5",
-                                        Skeleton { class: ClassList::join(["h-3 bg-muted-foreground/20", SkeletonWidth::title(*row)]) }
-                                        Skeleton { class: ClassList::join(["h-2.5 bg-muted-foreground/10", SkeletonWidth::latest(*row)]) }
+                                        Skeleton { class: cn(["h-3 bg-muted-foreground/20", SkeletonWidth::title(*row)]) }
+                                        Skeleton { class: cn(["h-2.5 bg-muted-foreground/10", SkeletonWidth::latest(*row)]) }
                                     }
                                 }
                                 span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }

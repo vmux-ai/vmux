@@ -1,7 +1,7 @@
 use super::readline::TextEditCommand;
 use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
-use vmux_ui::caret::{EventSelection, TextCaret};
+use vmux_ui::dom::{DomCaret, DomSelection};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::KeyClaim;
 
@@ -55,7 +55,7 @@ impl PaletteInput {
         }
         self.last_input_revision.set(revision);
         self.query.set(query.to_string());
-        TextCaret::in_field(input_id).to_end();
+        DomCaret::in_field(input_id).to_end();
     }
 }
 
@@ -86,7 +86,7 @@ impl CommandBarField {
             return;
         }
         FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
-        TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
+        DomCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
     }
 }
 
@@ -116,7 +116,7 @@ impl Readline {
             &mut query,
             edit,
             ghost,
-            EventSelection::caret_in(input_id),
+            DomSelection::caret_in(input_id),
             input_id,
         );
         true
@@ -139,7 +139,7 @@ impl Readline {
         if edited.value != value {
             query.set(edited.value);
         }
-        TextCaret::in_field(input_id).place(edited.caret);
+        DomCaret::in_field(input_id).place(edited.caret);
     }
 
     fn select_all(event: &KeyboardEvent, input_id: &'static str) -> bool {
@@ -154,7 +154,7 @@ impl Readline {
 
         event.prevent_default();
         event.stop_propagation();
-        TextCaret::in_field(input_id).select_all();
+        DomCaret::in_field(input_id).select_all();
         true
     }
 }

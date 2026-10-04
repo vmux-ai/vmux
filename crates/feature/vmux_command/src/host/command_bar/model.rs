@@ -4,11 +4,8 @@ use vmux_api::command_bar::{
 };
 use vmux_api::open_target::OpenTarget;
 
-use vmux_ui::i18n::translate;
-#[cfg(test)]
-use vmux_ui::list_nav::MenuDirection;
-
 use crate::CommandPaletteSurface;
+use vmux_ui::i18n::translate;
 
 pub(super) use self::decision::{AgentSegment, PaletteDecision, PaletteState};
 #[cfg(test)]
@@ -342,10 +339,11 @@ impl PaletteRows {
     }
 
     #[cfg(test)]
-    pub fn step(&self, from: usize, direction: MenuDirection) -> usize {
-        match direction {
-            MenuDirection::Next => (from + 1).min(self.items.len().saturating_sub(1)),
-            MenuDirection::Previous => from.saturating_sub(1),
+    pub fn step(&self, from: usize, next: bool) -> usize {
+        if next {
+            (from + 1).min(self.items.len().saturating_sub(1))
+        } else {
+            from.saturating_sub(1)
         }
     }
 }
@@ -1375,9 +1373,9 @@ mod tests {
         );
         let last = rows.items.len() - 1;
 
-        assert_eq!(rows.step(0, MenuDirection::Previous), 0);
-        assert_eq!(rows.step(last, MenuDirection::Next), last);
-        assert_eq!(rows.step(0, MenuDirection::Next), 1);
+        assert_eq!(rows.step(0, false), 0);
+        assert_eq!(rows.step(last, true), last);
+        assert_eq!(rows.step(0, true), 1);
     }
 
     #[test]

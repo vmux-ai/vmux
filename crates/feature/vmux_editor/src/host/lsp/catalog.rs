@@ -5,7 +5,7 @@ use std::path::Path;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use serde_json::Value;
-use vmux_ecs::event::{LspCatalog, LspCatalogRequest, LspPackage, LspPkgStatus};
+use vmux_ecs::event::{LspPackage, LspPkgStatus};
 use vmux_path::Executable;
 
 use crate::lsp::archive::ArchiveKind;
@@ -19,8 +19,7 @@ pub(crate) struct CatalogPlugin;
 
 impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn)
-            .add_systems(Update, (refresh, poll, search).chain());
+        app.add_systems(Startup, spawn).add_systems(Update, poll);
     }
 }
 
@@ -36,38 +35,21 @@ pub struct Package {
 }
 
 #[derive(Component)]
-pub(crate) struct CatalogSearch {
-    pub target: Entity,
-    pub request: LspCatalogRequest,
-}
-
-#[derive(Component)]
-pub(crate) struct CatalogOutput {
-    pub target: Entity,
-    pub catalog: LspCatalog,
-}
-
-#[derive(Component)]
 pub(crate) struct CatalogReady;
 
 #[derive(Component)]
 struct CatalogRoot;
 
 #[derive(Component)]
-struct CatalogRefreshQueued;
-
-#[derive(Component)]
 struct CatalogTask {
-    refresh: bool,
     task: Task<Result<Vec<Package>, String>>,
 }
 
 impl CatalogTask {
-    fn new(refresh: bool) -> Self {
+    fn new() -> Self {
         Self {
-            refresh,
             task: IoTaskPool::get()
-                .spawn(async move { CatalogSource::load(&store::PackageStore::lsp(), refresh) }),
+                .spawn(async move { CatalogSource::load(&store::PackageStore::lsp(), false) }),
         }
     }
 }
@@ -185,31 +167,6 @@ impl Package {
             _ => {}
         }
         Ok(bin)
-    }
-
-    fn matches(&self, request: &LspCatalogRequest) -> bool {
-        let query = request.query.to_ascii_lowercase();
-        if !query.is_empty()
-            && !self.name.as_str().to_ascii_lowercase().contains(&query)
-            && !self.description.to_ascii_lowercase().contains(&query)
-        {
-            return false;
-        }
-        let language = request.language.to_ascii_lowercase();
-        if !language.is_empty()
-            && !self
-                .languages
-                .iter()
-                .any(|item| item.to_ascii_lowercase() == language)
-        {
-            return false;
-        }
-        let category = request.category.to_ascii_lowercase();
-        category.is_empty()
-            || self
-                .categories
-                .iter()
-                .any(|item| item.to_ascii_lowercase() == category)
     }
 
     pub(crate) fn snapshot(&self, store: &store::PackageStore) -> LspPackage {
@@ -347,48 +304,20 @@ impl CatalogSource {
 }
 
 fn spawn(mut commands: Commands) {
-    commands.spawn((
-        Name::new("LSP catalog"),
-        CatalogRoot,
-        CatalogTask::new(false),
-    ));
-}
-
-fn refresh(
-    requests: Query<&CatalogSearch, Added<CatalogSearch>>,
-    catalogs: Query<(Entity, Option<&CatalogTask>), With<CatalogRoot>>,
-    mut commands: Commands,
-) {
-    if !requests.iter().any(|search| search.request.refresh) {
-        return;
-    }
-    let Ok((entity, task)) = catalogs.single() else {
-        return;
-    };
-    commands.entity(entity).remove::<CatalogReady>();
-    match task {
-        Some(task) if !task.refresh => {
-            commands.entity(entity).insert(CatalogRefreshQueued);
-        }
-        Some(_) => {}
-        None => {
-            commands.entity(entity).insert(CatalogTask::new(true));
-        }
-    }
+    commands.spawn((Name::new("LSP catalog"), CatalogRoot, CatalogTask::new()));
 }
 
 fn poll(
-    mut catalogs: Query<(Entity, &mut CatalogTask, Has<CatalogRefreshQueued>), With<CatalogRoot>>,
+    mut catalogs: Query<(Entity, &mut CatalogTask), With<CatalogRoot>>,
     packages: Query<(Entity, &ChildOf), With<Package>>,
     mut commands: Commands,
 ) {
-    let Ok((entity, mut task, refresh_queued)) = catalogs.single_mut() else {
+    let Ok((entity, mut task)) = catalogs.single_mut() else {
         return;
     };
     let Some(result) = block_on(future::poll_once(&mut task.task)) else {
         return;
     };
-    let refreshed = task.refresh;
     match result {
         Ok(loaded) => {
             for (package, parent) in &packages {
@@ -408,54 +337,10 @@ fn poll(
             bevy::log::warn!("LSP catalog load failed: {error}");
         }
     }
-    let mut catalog = commands.entity(entity);
-    catalog.remove::<CatalogTask>();
-    if refresh_queued && !refreshed {
-        catalog
-            .remove::<CatalogRefreshQueued>()
-            .insert(CatalogTask::new(true));
-    } else {
-        catalog
-            .remove::<CatalogRefreshQueued>()
-            .insert(CatalogReady);
-    }
-}
-
-fn search(
-    catalogs: Query<Entity, With<CatalogReady>>,
-    packages: Query<(&Package, &ChildOf)>,
-    requests: Query<(Entity, &CatalogSearch)>,
-    mut commands: Commands,
-) {
-    let Ok(catalog) = catalogs.single() else {
-        return;
-    };
-    let store = store::PackageStore::lsp();
-    for (entity, search) in &requests {
-        let mut snapshots = Vec::new();
-        for (package, parent) in &packages {
-            if parent.parent() != catalog || !package.matches(&search.request) {
-                continue;
-            }
-            let snapshot = package.snapshot(&store);
-            if search.request.installed_only
-                && !matches!(
-                    snapshot.status,
-                    LspPkgStatus::Installed | LspPkgStatus::Outdated
-                )
-            {
-                continue;
-            }
-            snapshots.push(snapshot);
-        }
-        commands.spawn(CatalogOutput {
-            target: search.target,
-            catalog: LspCatalog {
-                packages: snapshots,
-            },
-        });
-        commands.entity(entity).despawn();
-    }
+    commands
+        .entity(entity)
+        .remove::<CatalogTask>()
+        .insert(CatalogReady);
 }
 
 #[cfg(test)]
@@ -530,31 +415,6 @@ mod tests {
             .unwrap();
         assert!(ts.assets.is_empty());
         assert!(ts.source_id.starts_with("pkg:npm/"));
-    }
-
-    #[test]
-    fn search_filters() {
-        let packages = CatalogSource::parse(SAMPLE).unwrap();
-        let count = |query: &str, language: &str, category: &str| {
-            let request = LspCatalogRequest {
-                query: query.to_string(),
-                language: language.to_string(),
-                category: category.to_string(),
-                installed_only: false,
-                refresh: false,
-            };
-            packages
-                .iter()
-                .filter(|package| package.matches(&request))
-                .count()
-        };
-        assert_eq!(count("rust", "", ""), 1);
-        assert_eq!(count("", "python", ""), 1);
-        assert_eq!(count("", "", "lsp"), 2);
-        assert_eq!(count("", "", "formatter"), 1);
-        assert_eq!(count("lsp", "", ""), 2);
-        assert_eq!(count("linter", "", ""), 1);
-        assert_eq!(count("zzz", "", ""), 0);
     }
 
     #[test]

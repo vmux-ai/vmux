@@ -1,12 +1,7 @@
-use crate::class::ClassList;
 use crate::components::badge::Badge;
 use crate::components::skeleton::Skeleton;
-use crate::hooks::use_selector;
-use crate::list_nav::MenuDirection;
+use crate::util::cn;
 use dioxus::prelude::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static NEXT_MANAGER_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum ManagerTone {
@@ -208,7 +203,7 @@ pub fn ManagerThumbnail(src: Option<String>, fallback: String) -> Element {
 #[component]
 pub fn ManagerBadge(#[props(default)] tone: ManagerTone, children: Element) -> Element {
     rsx! {
-        Badge { class: ClassList::join(["rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset", tone.classes()]),
+        Badge { class: cn(["rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset", tone.classes()]),
             {children}
         }
     }
@@ -235,15 +230,6 @@ pub fn ManagerButton(
 pub struct ManagerSelectItem {
     pub value: String,
     pub label: String,
-    pub kind: ManagerSelectItemKind,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ManagerSelectItemKind {
-    #[default]
-    Default,
-    User,
-    Organization,
 }
 
 #[component]
@@ -254,159 +240,27 @@ pub fn ManagerSelect(
     #[props(default)] disabled: bool,
     onselect: EventHandler<String>,
 ) -> Element {
-    let mut open = use_signal(|| false);
-    let mut highlighted = use_signal(|| 0usize);
-    let id = use_hook(|| {
-        format!(
-            "manager-select-{}",
-            NEXT_MANAGER_SELECT_ID.fetch_add(1, Ordering::Relaxed)
-        )
-    });
-    let selected_index = value
-        .as_ref()
-        .and_then(|value| items.iter().position(|item| item.value == *value));
-    let selected_item = selected_index.and_then(|index| items.get(index));
-    let selected_label = selected_item
-        .map(|item| item.label.as_str())
-        .unwrap_or(&placeholder);
-
-    let scroll_id = id.clone();
-    use_selector(highlighted, move |index| {
-        if open() {
-            format!("{scroll_id}-option-{index}")
-        } else {
-            String::new()
-        }
-    });
-
-    let key_items = items.clone();
-    let key_select = onselect;
-    let onkeydown = move |event: KeyboardEvent| {
-        if let Some(direction) = MenuDirection::from_key(&event)
-            && !key_items.is_empty()
-        {
-            event.prevent_default();
-            event.stop_propagation();
-            if open() {
-                let current = highlighted().min(key_items.len() - 1);
-                highlighted.set(direction.move_selection(current, key_items.len()));
-            } else {
-                open.set(true);
-                highlighted.set(match direction {
-                    MenuDirection::Next => selected_index.unwrap_or(0),
-                    MenuDirection::Previous => selected_index.unwrap_or(key_items.len() - 1),
-                });
-            }
-            return;
-        }
-        let activate = event.key() == Key::Enter
-            || matches!(event.key(), Key::Character(ref character) if character == " ");
-        if activate {
-            event.prevent_default();
-            event.stop_propagation();
-            if open() {
-                if let Some(item) = key_items.get(highlighted()) {
-                    key_select.call(item.value.clone());
-                }
-                open.set(false);
-            } else if !key_items.is_empty() {
-                highlighted.set(selected_index.unwrap_or(0));
-                open.set(true);
-            }
-            return;
-        }
-        if event.key() == Key::Escape && open() {
-            event.prevent_default();
-            event.stop_propagation();
-            open.set(false);
-        }
-    };
+    let selected = value.unwrap_or_default();
+    let empty = items.is_empty();
 
     rsx! {
         div { class: "relative min-w-0",
-            button {
-                r#type: "button",
-                class: "flex w-full min-w-0 items-center gap-2 rounded-xl bg-background/55 py-2 pl-3 pr-4 text-left text-xs text-foreground ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-background/70 focus-visible:outline-none focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-50",
-                disabled: disabled || items.is_empty(),
-                aria_haspopup: "listbox",
-                aria_expanded: open(),
-                onkeydown,
-                onblur: move |_| open.set(false),
-                onclick: move |_| {
-                    if !items.is_empty() {
-                        highlighted.set(selected_index.unwrap_or(0));
-                        open.toggle();
-                    }
-                },
-                if let Some(item) = selected_item {
-                    ManagerSelectItemIcon { kind: item.kind }
+            select {
+                class: "w-full min-w-0 appearance-none rounded-xl bg-background/55 py-2 pl-3 pr-9 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-background/70 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-50",
+                disabled: disabled || empty,
+                value: selected.clone(),
+                onchange: move |event| onselect.call(event.value()),
+                if selected.is_empty() {
+                    option { value: "", disabled: true, "{placeholder}" }
                 }
-                span { class: if selected_index.is_some() { "min-w-0 flex-1 truncate" } else { "min-w-0 flex-1 truncate text-muted-foreground" },
-                    "{selected_label}"
-                }
-                svg { class: "h-4 w-4 shrink-0 transition-transform data-[open=true]:rotate-180", "data-open": open(), view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                    path { d: "m6 9 6 6 6-6" }
+                for item in items {
+                    option { value: item.value, "{item.label}" }
                 }
             }
-            if open() {
-                div {
-                    class: "absolute left-0 top-full z-[1000] mt-1 max-h-64 w-full min-w-48 overflow-y-auto rounded-xl bg-background/95 p-1 text-xs shadow-xl ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
-                    role: "listbox",
-                    for (index, item) in items.iter().enumerate() {
-                        div {
-                            id: "{id}-option-{index}",
-                            role: "option",
-                            aria_selected: value.as_ref() == Some(&item.value),
-                            class: if highlighted() == index {
-                                "flex cursor-pointer items-center gap-2 rounded-lg bg-foreground/[0.09] px-3 py-2 text-foreground"
-                            } else {
-                                "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
-                            },
-                            onpointerenter: move |_| highlighted.set(index),
-                            onpointerdown: {
-                                let item_value = item.value.clone();
-                                move |event| {
-                                    event.prevent_default();
-                                    onselect.call(item_value.clone());
-                                    open.set(false);
-                                }
-                            },
-                            ManagerSelectItemIcon { kind: item.kind }
-                            span { class: "min-w-0 flex-1 truncate", "{item.label}" }
-                            if value.as_ref() == Some(&item.value) {
-                                svg { class: "h-3.5 w-3.5 shrink-0", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
-                                    path { d: "m5 12 4 4L19 6" }
-                                }
-                            }
-                        }
-                    }
-                }
+            svg { class: "pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                path { d: "m6 9 6 6 6-6" }
             }
         }
-    }
-}
-
-#[component]
-fn ManagerSelectItemIcon(kind: ManagerSelectItemKind) -> Element {
-    match kind {
-        ManagerSelectItemKind::Default => rsx! {},
-        ManagerSelectItemKind::User => rsx! {
-            svg { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground/70", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                circle { cx: "12", cy: "8", r: "4" }
-                path { d: "M4 21a8 8 0 0 1 16 0" }
-            }
-        },
-        ManagerSelectItemKind::Organization => rsx! {
-            svg { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground/70", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                path { d: "M3 21h18" }
-                path { d: "M6 21V5l6-3 6 3v16" }
-                path { d: "M9 9h1" }
-                path { d: "M14 9h1" }
-                path { d: "M9 13h1" }
-                path { d: "M14 13h1" }
-                path { d: "M9 17h6" }
-            }
-        },
     }
 }
 

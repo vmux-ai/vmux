@@ -7,8 +7,8 @@ use vmux_ecs::event::{
 };
 use vmux_git::event::GitLineStatus;
 use vmux_knowledge::{KnowledgeProperty, KnowledgePropertyKind};
-use vmux_ui::caret::EventSelection;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::dom::DomSelection;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
@@ -728,7 +728,7 @@ pub(super) fn NoteBlockView(
                     return;
                 }
                 event.stop_propagation();
-                if EventSelection::in_document() {
+                if DomSelection::in_document() {
                     return;
                 }
                 let at = event.client_coordinates();

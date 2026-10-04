@@ -11,7 +11,7 @@ use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
-use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSelectItemKind};
+use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -62,7 +62,6 @@ pub fn Page() -> Element {
         .map(|profile| ManagerSelectItem {
             value: profile.id.clone(),
             label: profile.name.clone(),
-            kind: ManagerSelectItemKind::User,
         })
         .collect::<Vec<_>>();
 

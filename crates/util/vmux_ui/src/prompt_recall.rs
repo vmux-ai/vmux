@@ -1,6 +1,3 @@
-use crate::caret::TextCaret;
-use crate::list_nav::MenuDirection;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptHistoryDirection {
     Older,
@@ -8,11 +5,8 @@ pub enum PromptHistoryDirection {
 }
 
 impl PromptHistoryDirection {
-    pub fn from_menu(direction: Option<MenuDirection>) -> Option<Self> {
-        match direction? {
-            MenuDirection::Previous => Some(Self::Older),
-            MenuDirection::Next => Some(Self::Newer),
-        }
+    pub fn from_menu(next: Option<bool>) -> Option<Self> {
+        Some(if next? { Self::Newer } else { Self::Older })
     }
 }
 
@@ -21,8 +15,8 @@ impl PromptHistoryDirection {
         key: &str,
         ctrl: bool,
         value: &str,
-        selection_start: u32,
-        selection_end: u32,
+        selection_start: usize,
+        selection_end: usize,
     ) -> Option<Self> {
         if selection_start != selection_end {
             return None;
@@ -34,7 +28,7 @@ impl PromptHistoryDirection {
                 _ => None,
             };
         }
-        let caret = TextCaret::byte_from_utf16(value, selection_start);
+        let caret = selection_start.min(value.len());
         match key {
             "ArrowUp" if !value[..caret].contains('\n') => Some(Self::Older),
             "ArrowDown" if !value[caret..].contains('\n') => Some(Self::Newer),

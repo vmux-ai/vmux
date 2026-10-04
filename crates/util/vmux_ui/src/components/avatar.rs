@@ -1,4 +1,4 @@
-use crate::class::ClassList;
+use crate::util::cn;
 use dioxus::prelude::*;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
@@ -14,7 +14,7 @@ pub fn Avatar(
     #[props(default)] alt: String,
     #[props(default)] class: String,
 ) -> Element {
-    let class = ClassList::join([AVATAR, class.as_str()]);
+    let class = cn([AVATAR, class.as_str()]);
     let avatar_seed = if seed.trim().is_empty() { &alt } else { &seed };
     let generated = GeneratedAvatar::generate(avatar_seed, &background);
     rsx! {

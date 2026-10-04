@@ -4,11 +4,11 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::prelude::*;
 use vmux_ecs::event::FileDirEntry;
 
-use crate::class::ClassList;
 use crate::file_icon::TypeIcon;
 use crate::focus::FocusClaim;
 use crate::platform::Platform;
 use crate::scroll::ScrollIntoView;
+use crate::util::cn;
 
 #[component]
 pub fn DirectoryNavigator(
@@ -178,7 +178,7 @@ impl DirectoryRowStyle {
         } else {
             "text-foreground/75 hover:bg-foreground/[0.05]"
         };
-        ClassList::join([base, state])
+        cn([base, state])
     }
 }
 

@@ -16,15 +16,15 @@ use vmux_api::command_bar::{
 use vmux_api::input::UiKeyContext;
 use vmux_api::prompt_media::{ChatPasteMedia, ChatPickFiles};
 use vmux_ui::agent_accent::AgentAccent;
-use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, PromptFocus};
 use vmux_ui::components::composer_bar::ComposerBar;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
+use vmux_ui::dom::DomSelection;
 use vmux_ui::hooks::Unclaimed;
-use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
+use vmux_ui::hooks::{send, use_key_claim, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::prompt_recall::PromptHistoryDirection;
@@ -267,9 +267,18 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 });
                 return;
             }
-            let direction = MenuDirection::from_key(&e);
-            let go_down = direction == Some(MenuDirection::Next);
-            let go_up = direction == Some(MenuDirection::Previous);
+            let direction = if e.modifiers().meta() || e.modifiers().alt() || e.modifiers().shift()
+            {
+                None
+            } else {
+                match (e.code(), ctrl) {
+                    (Code::ArrowDown, false) | (Code::KeyN | Code::KeyJ, true) => Some(true),
+                    (Code::ArrowUp, false) | (Code::KeyP | Code::KeyK, true) => Some(false),
+                    _ => None,
+                }
+            };
+            let go_down = direction == Some(true);
+            let go_up = direction == Some(false);
 
             if mcp_open {
                 if e.key() == Key::Enter && !e.modifiers().shift() {
@@ -308,10 +317,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     });
                     return;
                 }
-                if let Some(direction) = direction {
+                if let Some(next) = direction {
                     let _ = send(&CommandPaletteMenuMoveRequest {
                         open_id: state().open_id,
-                        next: direction == MenuDirection::Next,
+                        next,
                     });
                     return;
                 }
@@ -362,7 +371,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             let wanted = match projection.history_recalling {
                 true => PromptHistoryDirection::from_menu(direction),
                 false => {
-                    let (start, end) = EventSelection::in_field(PROMPT_INPUT_ID);
+                    let (start, end) = DomSelection::in_field(PROMPT_INPUT_ID);
                     let entering = go_up && projection.selected == 0;
                     entering
                         .then(|| {
@@ -370,8 +379,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 &e.key().to_string(),
                                 ctrl,
                                 &query,
-                                TextCaret::utf16_from_byte(&query, start),
-                                TextCaret::utf16_from_byte(&query, end),
+                                start,
+                                end,
                             )
                         })
                         .flatten()

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
-use crate::class::ClassList;
 use crate::i18n::translate;
+use crate::util::cn;
 
 pub const START_BACKDROP_CLASS: &str =
     "bg-[radial-gradient(140%_100%_at_50%_-12%,rgba(129,140,248,0.05),transparent_55%)]";
@@ -29,7 +29,7 @@ pub fn StartHero(
     } else {
         "opacity-0 blur-sm translate-y-4"
     };
-    let class = ClassList::join([
+    let class = cn([
         "relative z-10 mx-auto flex w-full max-w-md flex-col items-center gap-6 transition-all duration-700 ease-out motion-reduce:transition-none md:max-w-3xl md:gap-8",
         reveal,
     ]);

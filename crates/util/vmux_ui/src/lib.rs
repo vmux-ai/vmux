@@ -2,9 +2,9 @@ pub use language_icon::LanguageIconPath;
 
 pub mod agent_accent;
 
-pub mod caret;
+pub mod dom;
 
-pub mod class;
+pub mod util;
 
 pub mod clipboard;
 
@@ -42,7 +42,6 @@ pub mod transport;
 pub mod key_stroke;
 
 pub mod language_icon;
-pub mod list_nav;
 
 pub mod hooks;
 

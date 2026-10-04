@@ -1,12 +1,63 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use bevy::prelude::Component;
+use bevy::prelude::*;
+use crossbeam_channel::Receiver;
 use serde::Deserialize;
 use vmux_editor::lsp::package_path::Sha256Digest;
 
 pub const REGISTRY_URL: &str =
     "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
+
+pub(crate) struct RegistryPlugin;
+
+impl Plugin for RegistryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, fetch).add_systems(Update, receive);
+    }
+}
+
+#[derive(Component)]
+struct RegistryFetch {
+    rx: Receiver<Vec<RegistryAgent>>,
+}
+
+fn fetch(mut commands: Commands) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    std::thread::spawn(move || {
+        let agents = Registry::fetch_blocking()
+            .ok()
+            .or_else(Registry::cached)
+            .map(|registry| registry.agents)
+            .unwrap_or_default();
+        let _ = tx.send(agents);
+    });
+    commands.spawn(RegistryFetch { rx });
+}
+
+fn receive(
+    fetches: Query<(Entity, &RegistryFetch)>,
+    current: Query<Entity, With<RegistryAgent>>,
+    mut commands: Commands,
+) {
+    let mut received = None;
+    for (entity, fetch) in &fetches {
+        let Ok(agents) = fetch.rx.try_recv() else {
+            continue;
+        };
+        received = Some(agents);
+        commands.entity(entity).despawn();
+    }
+    let Some(agents) = received else {
+        return;
+    };
+    for entity in &current {
+        commands.entity(entity).despawn();
+    }
+    for agent in agents {
+        commands.spawn((Name::new(format!("ACP agent {}", agent.id)), agent));
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Registry {
@@ -178,6 +229,29 @@ mod tests {
         }
       ]
     }"#;
+
+    #[test]
+    fn fetch_entity_is_consumed_after_delivery() {
+        let mut app = App::new();
+        app.add_systems(Update, receive);
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let fetch = app.world_mut().spawn(RegistryFetch { rx }).id();
+        tx.send(vec![RegistryAgent {
+            id: "agent".into(),
+            name: "Agent".into(),
+            version: None,
+            description: None,
+            icon: None,
+            distribution: Distribution::default(),
+        }])
+        .unwrap();
+
+        app.update();
+
+        assert!(app.world().get_entity(fetch).is_err());
+        let mut agents = app.world_mut().query::<&RegistryAgent>();
+        assert_eq!(agents.single(app.world()).unwrap().id, "agent");
+    }
 
     #[test]
     fn parses_all_distribution_types() {

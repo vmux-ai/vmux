@@ -1,5 +1,3 @@
-use vmux_ui::caret::TextCaret;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextEditCommand {
     Home,
@@ -34,7 +32,7 @@ impl TextEditCommand {
     }
 
     pub fn apply(self, value: &str, caret: usize, ghost: &str) -> Edited {
-        let caret = TextCaret::floor_boundary(value, caret);
+        let caret = Self::floor_boundary(value, caret);
         let kept = |caret| Edited {
             value: value.to_string(),
             caret,
@@ -79,13 +77,23 @@ impl TextEditCommand {
                 while start > 0 && bytes[start - 1] != b' ' {
                     start -= 1;
                 }
-                cut(TextCaret::floor_boundary(value, start), caret)
+                cut(Self::floor_boundary(value, start), caret)
             }
             Self::DeleteToBeginning => Edited {
                 value: value[caret..].to_string(),
                 caret: 0,
             },
         }
+    }
+
+    fn floor_boundary(value: &str, mut byte: usize) -> usize {
+        if byte >= value.len() {
+            return value.len();
+        }
+        while byte > 0 && !value.is_char_boundary(byte) {
+            byte -= 1;
+        }
+        byte
     }
 }
 

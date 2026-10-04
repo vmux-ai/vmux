@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 
-use crate::class::ClassList;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
+use crate::util::cn;
 
 #[component]
 pub fn EffortMenu(
@@ -68,7 +68,7 @@ fn EffortOption(
     let row_class = PromptMenuRow::class(at_cursor);
     rsx! {
         button {
-            class: ClassList::join([row_class.as_str(), text]),
+            class: cn([row_class.as_str(), text]),
             onmousedown: move |event| event.prevent_default(),
             onmouseenter: move |_| on_hover.call(()),
             onclick: move |_| on_pick.call(level.clone()),

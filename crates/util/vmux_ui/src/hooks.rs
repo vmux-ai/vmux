@@ -1,6 +1,5 @@
 #[cfg(ui)]
 pub use crate::key_stroke::PressedKey;
-pub use crate::list_nav::MenuDirection;
 pub use crate::transport;
 #[allow(unused_imports)]
 pub use crate::transport::event_listener::{EventListenerError, send};
