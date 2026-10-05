@@ -22,9 +22,11 @@ vmux_page = { path = "../../util/vmux_page" }
 vmux_git = { path = "../vmux_git" }
 vmux_knowledge = { path = "../vmux_knowledge" }
 vmux_api = { path = "../../util/vmux_api" }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 arboard = "3"
+base64 = "0.22"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
@@ -66,9 +68,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 url = { workspace = true }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-base64 = "0.22"
 dioxus = { workspace = true }
-vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [[bin]]
 name = "vmux_mock_lsp"
