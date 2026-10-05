@@ -25,7 +25,10 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 
 pub mod event;
 pub mod state;
+#[cfg(host)]
 pub mod themes;
+
+pub use state::{EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH};
 
 #[cfg(host)]
 mod schema;

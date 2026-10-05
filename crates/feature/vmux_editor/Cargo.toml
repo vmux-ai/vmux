@@ -23,6 +23,7 @@ vmux_git = { path = "../vmux_git" }
 vmux_knowledge = { path = "../vmux_knowledge" }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+vmux_setting = { path = "../vmux_setting" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 arboard = "3"
@@ -60,7 +61,6 @@ vmux_mcp = { path = "../../util/vmux_mcp" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_transport = { path = "../../util/vmux_transport" }
 vmux_path = { path = "../../util/vmux_path" }
-vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 

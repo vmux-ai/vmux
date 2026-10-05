@@ -1,5 +1,6 @@
 use crate::SearchEngineSetting;
 use crate::schema::{FieldSpec, SectionSpec};
+use crate::state::{EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH};
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -359,10 +360,6 @@ impl Default for EditorSettings {
 fn default_word_wrap_column() -> u16 {
     80
 }
-
-pub const EXPLORER_DEFAULT_WIDTH: u32 = 240;
-pub const EXPLORER_MIN_WIDTH: u32 = 160;
-pub const EXPLORER_MAX_WIDTH: u32 = 600;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ExplorerSettings {

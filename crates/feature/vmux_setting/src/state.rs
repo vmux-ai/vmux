@@ -1,3 +1,7 @@
+pub const EXPLORER_DEFAULT_WIDTH: u32 = 240;
+pub const EXPLORER_MIN_WIDTH: u32 = 160;
+pub const EXPLORER_MAX_WIDTH: u32 = 600;
+
 #[vmux_api::ui_state(Default, version = 2)]
 pub struct SettingsUiState {
     pub query: String,

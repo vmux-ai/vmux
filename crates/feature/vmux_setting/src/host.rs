@@ -2,10 +2,9 @@ pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, Sy
 use bevy::{ecs::message::MessageReader, prelude::*};
 pub use runtime::{
     AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkFolderSettings,
-    BrowserSettings, ColorScheme, DirSource, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH,
-    EXPLORER_MIN_WIDTH, KeyComboDef, SettingsLoadSet, SettingsRuntimePlugin, SettingsSaveRequest,
-    ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir,
-    TerminalSettings, TerminalTheme, UpdateChannel,
+    BrowserSettings, ColorScheme, DirSource, KeyComboDef, SettingsLoadSet, SettingsRuntimePlugin,
+    SettingsSaveRequest, ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides,
+    SpaceProject, StartupDir, TerminalSettings, TerminalTheme, UpdateChannel,
 };
 pub use state::Settings;
 pub use tool::SettingToolPlugin;
