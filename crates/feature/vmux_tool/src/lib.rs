@@ -363,9 +363,7 @@ brew "ripgrep"
         ));
         app.update();
         let provider = {
-            let mut providers = app
-                .world_mut()
-                .query::<(Entity, &ToolProviderBinding)>();
+            let mut providers = app.world_mut().query::<(Entity, &ToolProviderBinding)>();
             providers
                 .iter(app.world())
                 .find_map(|(entity, binding)| (binding.index() == 2).then_some(entity))
@@ -432,9 +430,7 @@ brew "ripgrep"
         ));
         app.update();
         let provider = {
-            let mut providers = app
-                .world_mut()
-                .query::<(Entity, &ToolProviderBinding)>();
+            let mut providers = app.world_mut().query::<(Entity, &ToolProviderBinding)>();
             providers
                 .iter(app.world())
                 .find_map(|(entity, binding)| (binding.index() == 3).then_some(entity))
