@@ -24,6 +24,14 @@ impl ToolProviderBinding {
             index,
         }
     }
+
+    pub fn feature(self) -> FeatureId {
+        self.feature
+    }
+
+    pub fn index(self) -> usize {
+        self.index
+    }
 }
 
 #[derive(Component, Clone, Copy)]

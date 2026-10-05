@@ -91,11 +91,11 @@ fn bind(
     for (entity, binding) in &providers {
         let Some(manifest) = manifests
             .iter()
-            .find_map(|(feature, manifest)| (*feature == binding.feature).then_some(manifest))
+            .find_map(|(feature, manifest)| (*feature == binding.feature()).then_some(manifest))
         else {
             continue;
         };
-        let Some(provider) = manifest.tool_providers.get(binding.index) else {
+        let Some(provider) = manifest.tool_providers.get(binding.index()) else {
             continue;
         };
         commands.entity(entity).insert((
