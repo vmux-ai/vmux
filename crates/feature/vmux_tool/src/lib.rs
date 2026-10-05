@@ -361,6 +361,16 @@ brew "ripgrep"
             ToolRuntimePlugin,
             npm::NpmToolPlugin,
         ));
+        app.update();
+        let provider = {
+            let mut providers = app
+                .world_mut()
+                .query::<(Entity, &ToolProviderBinding)>();
+            providers
+                .iter(app.world())
+                .find_map(|(entity, binding)| (binding.index() == 2).then_some(entity))
+                .unwrap()
+        };
         let store_entity = app.world_mut().spawn(store.clone()).id();
         let operation = app
             .world_mut()
@@ -370,6 +380,7 @@ brew "ripgrep"
                     value: package_json.to_string_lossy().into_owned(),
                 }),
                 ToolStoreTarget::new(store_entity),
+                ToolProviderTarget::new(provider),
             ))
             .id();
 
@@ -419,6 +430,16 @@ brew "ripgrep"
             ToolRuntimePlugin,
             mcp::McpToolPlugin,
         ));
+        app.update();
+        let provider = {
+            let mut providers = app
+                .world_mut()
+                .query::<(Entity, &ToolProviderBinding)>();
+            providers
+                .iter(app.world())
+                .find_map(|(entity, binding)| (binding.index() == 3).then_some(entity))
+                .unwrap()
+        };
         let store_entity = app.world_mut().spawn(store.clone()).id();
         let operation = app
             .world_mut()
@@ -428,6 +449,7 @@ brew "ripgrep"
                     value: String::new(),
                 }),
                 ToolStoreTarget::new(store_entity),
+                ToolProviderTarget::new(provider),
             ))
             .id();
 

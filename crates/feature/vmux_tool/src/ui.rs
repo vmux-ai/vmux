@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn tool_routes_are_data_driven() {
-        assert_eq!(ToolRoute::from("vmux://tools/").id(), "");
+        assert_eq!(ToolRoute::from("vmux://tools/").id(), "acp");
         assert_eq!(ToolRoute::from("vmux://tools/acp").id(), "acp");
         assert_eq!(ToolRoute::from("vmux://tools/lsp/").id(), "lsp");
     }

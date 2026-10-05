@@ -42,7 +42,7 @@ mod tests {
     fn routes_are_derived_from_the_tool_page() {
         assert_eq!(
             ToolRoute::parse(crate::ToolPlugin::URL),
-            Some(ToolRoute::default())
+            Some(ToolRoute::named("acp"))
         );
         assert_eq!(
             ToolRoute::parse("vmux://tools/lsp").map(|route| route.url()),
