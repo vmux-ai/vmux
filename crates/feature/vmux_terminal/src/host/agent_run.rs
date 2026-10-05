@@ -1488,6 +1488,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalBucketPaneOutput>()
             .add_systems(Update, collect_run_bucket_panes);
+        app.world_mut().spawn(crate::TerminalPlugin::MANIFEST);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let agent_pane = app
