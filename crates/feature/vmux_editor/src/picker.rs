@@ -10,6 +10,7 @@ impl EditorPicker {
     pub(crate) const INDENT: &str = "browser_open_indentation";
     pub(crate) const LINE_ENDING: &str = "browser_open_line_ending";
 
+    #[cfg(ui)]
     pub(crate) fn encoding() -> CommandBarPicker {
         CommandBarPicker::new(Self::ENCODING)
     }
@@ -22,6 +23,7 @@ impl EditorPicker {
         CommandBarPicker::new(Self::ENCODING_SAVE)
     }
 
+    #[cfg(ui)]
     pub(crate) fn goto_line() -> CommandBarPicker {
         CommandBarPicker::new(Self::GOTO_LINE)
     }
@@ -30,6 +32,7 @@ impl EditorPicker {
         CommandBarPicker::new(Self::INDENT)
     }
 
+    #[cfg(ui)]
     pub(crate) fn line_ending() -> CommandBarPicker {
         CommandBarPicker::new(Self::LINE_ENDING)
     }

@@ -633,9 +633,16 @@ mod tests {
         let path = dir.path().join("test_history.ron");
 
         let mut app_save = App::new();
-        app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
-        app_save.add_observer(save_on_default_event);
+        app_save
+            .add_plugins(MinimalPlugins)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .register_persisted::<vmux_ecs::Visit>()
+            .register_persisted::<vmux_ecs::Url>()
+            .register_persisted::<vmux_ecs::VisitCount>()
+            .register_persisted::<vmux_ecs::LastVisitedAt>()
+            .register_persisted::<vmux_ecs::VisitedUrl>()
+            .register_persisted::<vmux_ecs::TransitionType>()
+            .add_observer(save_on_default_event);
 
         let url_e = app_save
             .world_mut()
@@ -671,6 +678,12 @@ mod tests {
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
             .add_plugins(vmux_ecs::PrimitivesPlugin)
+            .register_persisted::<vmux_ecs::Visit>()
+            .register_persisted::<vmux_ecs::Url>()
+            .register_persisted::<vmux_ecs::VisitCount>()
+            .register_persisted::<vmux_ecs::LastVisitedAt>()
+            .register_persisted::<vmux_ecs::VisitedUrl>()
+            .register_persisted::<vmux_ecs::TransitionType>()
             .add_observer(load_on_default_event);
         app_load.update();
 
@@ -941,7 +954,14 @@ mod tests {
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
         app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
-        app_save.register_persisted::<PaneId>();
+        app_save
+            .register_persisted::<PaneId>()
+            .register_persisted::<ArchivedPage>()
+            .register_persisted::<ArchivedPagePosition>()
+            .register_persisted::<ArchivedTabPage>()
+            .register_type::<vmux_ecs::PaneStep>()
+            .register_type::<vmux_ecs::SplitAxis>()
+            .register_type::<Vec<vmux_ecs::PaneStep>>();
         app_save.add_observer(save_on_default_event);
         app_save
             .world_mut()
@@ -978,6 +998,12 @@ mod tests {
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
             .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_type::<PaneId>()
+            .register_type::<ArchivedPage>()
+            .register_type::<ArchivedPagePosition>()
+            .register_type::<ArchivedTabPage>()
+            .register_type::<vmux_ecs::PaneStep>()
+            .register_type::<vmux_ecs::SplitAxis>()
+            .register_type::<Vec<vmux_ecs::PaneStep>>()
             .add_observer(load_on_default_event);
         app_load.update();
         app_load
@@ -1173,12 +1199,15 @@ mod tests {
     fn auto_save_system_skips_save_without_space() {
         let _home = HomeEnvGuard::use_temp_home("auto-save-system-skips-without-space");
         let mut app = App::new();
-        app.world_mut().spawn(AutoSave {
-            debounce: Timer::from_seconds(0.0, TimerMode::Once),
-            periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
-            dirty: true,
-            components: WorldFilter::allow_all(),
-        });
+        app.world_mut().spawn((
+            AutoSave {
+                debounce: Timer::from_seconds(0.0, TimerMode::Once),
+                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+                dirty: true,
+                components: WorldFilter::allow_all(),
+            },
+            WorkspaceStorePath::default(),
+        ));
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_persisted::<WindowGeometry>()
@@ -1206,12 +1235,15 @@ mod tests {
     fn auto_save_system_saves_with_space() {
         let _home = HomeEnvGuard::use_temp_home("auto-save-system-saves-with-space");
         let mut app = App::new();
-        app.world_mut().spawn(AutoSave {
-            debounce: Timer::from_seconds(0.0, TimerMode::Once),
-            periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
-            dirty: true,
-            components: WorldFilter::allow_all(),
-        });
+        app.world_mut().spawn((
+            AutoSave {
+                debounce: Timer::from_seconds(0.0, TimerMode::Once),
+                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+                dirty: true,
+                components: WorldFilter::allow_all(),
+            },
+            WorkspaceStorePath::default(),
+        ));
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_persisted::<WindowGeometry>()
