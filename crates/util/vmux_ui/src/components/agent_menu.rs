@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandPaletteAgent;
 
+use crate::cn::cn;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::favicon::Favicon;
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[component]
 pub fn AgentMenu(

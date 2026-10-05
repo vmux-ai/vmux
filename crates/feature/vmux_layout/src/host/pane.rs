@@ -30,9 +30,9 @@ pub(crate) use tree::PaneHierarchy;
 use tree::TreePlugin;
 pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
+use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(test)]
 use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
 #[cfg(test)]
@@ -89,6 +89,7 @@ pub enum PaneResize {
     Direction(PaneDirection),
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub direction: PaneDirection,
@@ -147,6 +148,7 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseRequest;
 
@@ -158,6 +160,7 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusRequest(pub PaneFocus);
 
@@ -176,6 +179,7 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArrangeRequest(pub PaneArrangement);
 
@@ -200,6 +204,7 @@ impl TryFrom<&CommandInvocation> for ArrangeRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResizeRequest(pub PaneResize);
 
@@ -218,6 +223,7 @@ impl TryFrom<&CommandInvocation> for ResizeRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToggleZoomRequest;
 
@@ -227,15 +233,6 @@ impl TryFrom<&CommandInvocation> for ToggleZoomRequest {
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "zoom_pane").then_some(Self).ok_or(())
     }
-}
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenRequest>(&mut commands);
-    registry.message::<CloseRequest>(&mut commands);
-    registry.message::<FocusRequest>(&mut commands);
-    registry.message::<ArrangeRequest>(&mut commands);
-    registry.message::<ResizeRequest>(&mut commands);
-    registry.message::<ToggleZoomRequest>(&mut commands);
 }
 
 pub struct PaneCommandPlugin;
@@ -252,8 +249,7 @@ impl Plugin for PaneCommandPlugin {
             .add_message::<FocusRequest>()
             .add_message::<ArrangeRequest>()
             .add_message::<ResizeRequest>()
-            .add_message::<ToggleZoomRequest>()
-            .add_systems(Startup, bind_commands.in_set(BindCommands));
+            .add_message::<ToggleZoomRequest>();
     }
 }
 
@@ -287,6 +283,78 @@ mod tests {
         },
     };
     use vmux_command::CommandPlugin;
+    use vmux_ecs::page::{PageManifest, PagePlacement, PageSplitAxis, PageSplitPreference};
+
+    fn register_placement_pages(app: &mut App) {
+        for manifest in [
+            PageManifest {
+                route: "vmux://sessions/",
+                url: "vmux://sessions/",
+                asset_host: "sessions",
+                owns_subtree: true,
+                title: "Sessions",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: false,
+                startup: false,
+                reports_title: true,
+                placement: PagePlacement {
+                    group: "assistant",
+                    auxiliary: true,
+                    reuse: vmux_ecs::page::PageReuse::Route,
+                    ..PagePlacement::DEFAULT
+                },
+            },
+            PageManifest {
+                route: "vmux://terminal/",
+                url: "vmux://terminal/",
+                asset_host: "terminal",
+                owns_subtree: true,
+                title: "Terminal",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: false,
+                startup: false,
+                reports_title: false,
+                placement: PagePlacement {
+                    group: "terminal",
+                    refresh: true,
+                    split: Some(PageSplitPreference {
+                        anchor_group: "browser",
+                        allowed_groups: &["assistant", "browser"],
+                        axis: PageSplitAxis::Column,
+                    }),
+                    ..PagePlacement::DEFAULT
+                },
+            },
+            PageManifest {
+                route: "file://",
+                url: "vmux://files/",
+                asset_host: "files",
+                owns_subtree: false,
+                title: "Files",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: None,
+                command_bar: false,
+                startup: false,
+                reports_title: false,
+                placement: PagePlacement {
+                    group: "files",
+                    refresh: true,
+                    reuse: vmux_ecs::page::PageReuse::Fragmentless,
+                    ..PagePlacement::DEFAULT
+                },
+            },
+        ] {
+            app.world_mut().spawn(manifest);
+        }
+    }
 
     fn test_settings() -> LayoutSettings {
         LayoutSettings {
@@ -460,6 +528,7 @@ mod tests {
             .add_message::<LauncherDismissRequest>()
             .add_plugins(BesideOpenPlugin);
         app.world_mut().spawn(SpawnCounter::default());
+        register_placement_pages(&mut app);
         app
     }
 
@@ -1913,6 +1982,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<SpiralOut>()
             .add_systems(Update, spiral_test_sys);
+        register_placement_pages(&mut app);
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()

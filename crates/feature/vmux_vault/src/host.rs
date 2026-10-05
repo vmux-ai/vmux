@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 
+use crate::storage::{GeneratedRecoveryKey, VaultRecovery};
 use bevy::prelude::*;
 use bevy::tasks::Task;
 use parking_lot::Mutex;
-use vmux_ecs::host::{UiState, UiStatePlugin};
-use vmux_ecs::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
+use vmux_ecs::{UiState, UiStatePlugin};
 
 use crate::state::{
     VaultAuthorization, VaultCompletion, VaultOperation, VaultOperationKind, VaultOperationState,
@@ -27,7 +27,7 @@ struct OperationSet;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct RuntimeSet;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct VaultPlugin;
 
 impl Plugin for VaultPlugin {
@@ -36,9 +36,9 @@ impl Plugin for VaultPlugin {
         app.add_plugins(crate::ui::VaultPage::plugin()).add_plugins(
             Self::MANIFEST
                 .plugin()
-                .hosted(vmux_ecs::host::page::NativelyHosted::page(
+                .hosted(vmux_ecs::page::HostedPage::page(
                     Self::URL,
-                    crate::ui::VaultPage::NATIVE.title,
+                    crate::ui::VaultPage::PAGE.title,
                 )),
         );
 

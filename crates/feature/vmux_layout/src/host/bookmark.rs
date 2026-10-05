@@ -3,26 +3,29 @@ use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_api::PageIcon;
 use vmux_api::bookmark::{
     BookmarkAddRequest as BookmarkAddUiRequest, BookmarkContextMenuRequest, BookmarkDropRequest,
-    BookmarkDropSource, BookmarkDropTarget,
-    BookmarkFolderCreateRequest as BookmarkFolderCreateUiRequest,
-    BookmarkFolderMoveRequest as BookmarkFolderMoveUiRequest,
+    BookmarkDropSource, BookmarkDropTarget, BookmarkEditCloseRequest, BookmarkEditInputRequest,
+    BookmarkEditState, BookmarkEditSubmitRequest,
+    BookmarkFolderCreateRequest as BookmarkFolderCreateUiRequest, BookmarkFolderEditOpenRequest,
+    BookmarkFolderEditState, BookmarkFolderMoveRequest as BookmarkFolderMoveUiRequest,
     BookmarkFolderRemoveRequest as BookmarkFolderRemoveUiRequest,
     BookmarkFolderRenameRequest as BookmarkFolderRenameUiRequest,
     BookmarkFolderToggleRequest as BookmarkFolderToggleUiRequest, BookmarkMenuEntryRequest,
     BookmarkMenuFolderRequest, BookmarkMenuPinRequest, BookmarkMenuRootRequest,
     BookmarkMoveRequest as BookmarkMoveUiRequest, BookmarkOpenRequest,
     BookmarkPinRequest as BookmarkPinUiRequest, BookmarkPinUrlRequest as BookmarkPinUrlUiRequest,
-    BookmarkRemoveRequest as BookmarkRemoveUiRequest,
-    BookmarkRenameRequest as BookmarkRenameUiRequest, BookmarkTextInputRequest,
-    BookmarkToggleRequest, BookmarkUnpinRequest as BookmarkUnpinUiRequest,
+    BookmarkRemoveRequest as BookmarkRemoveUiRequest, BookmarkRenameEditOpenRequest,
+    BookmarkRenameEditState, BookmarkRenameRequest as BookmarkRenameUiRequest,
+    BookmarkTextInputRequest, BookmarkToggleRequest,
+    BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
-use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
+use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::page::PageManifest;
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::page::PageManifest;
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
 
 use super::{command::LayoutRequestSet, stack::OpenRequest};
 
@@ -41,7 +44,6 @@ impl Plugin for BookmarkPlugin {
         app.add_message::<BookmarkToggleActiveRequest>()
             .add_message::<BookmarkPinActiveRequest>()
             .add_message::<CreateFolderRequest>()
-            .add_systems(Startup, bind_commands.in_set(BindCommands))
             .add_message::<ShowBookmarkMenuRequest>()
             .add_plugins(UiEventPlugin::<(
                 BookmarkToggleRequest,
@@ -56,18 +58,27 @@ impl Plugin for BookmarkPlugin {
                 BookmarkRenameUiRequest,
                 BookmarkMoveUiRequest,
             )>::default())
-            .add_plugins(UiEventPlugin::<(
-                BookmarkPinUiRequest,
-                BookmarkUnpinUiRequest,
-                BookmarkFolderToggleUiRequest,
-                BookmarkFolderCreateUiRequest,
-                BookmarkFolderMoveUiRequest,
-                BookmarkFolderRenameUiRequest,
-                BookmarkFolderRemoveUiRequest,
-                BookmarkTextInputRequest,
-                BookmarkContextMenuRequest,
-                BookmarkDropRequest,
-            )>::default())
+            .add_plugins((
+                UiEventPlugin::<(
+                    BookmarkPinUiRequest,
+                    BookmarkUnpinUiRequest,
+                    BookmarkFolderToggleUiRequest,
+                    BookmarkFolderCreateUiRequest,
+                    BookmarkFolderMoveUiRequest,
+                    BookmarkFolderRenameUiRequest,
+                    BookmarkFolderRemoveUiRequest,
+                    BookmarkTextInputRequest,
+                )>::default(),
+                UiEventPlugin::<(
+                    BookmarkContextMenuRequest,
+                    BookmarkDropRequest,
+                    BookmarkFolderEditOpenRequest,
+                    BookmarkRenameEditOpenRequest,
+                    BookmarkEditInputRequest,
+                    BookmarkEditSubmitRequest,
+                    BookmarkEditCloseRequest,
+                )>::default(),
+            ))
             .add_observer(request_toggle)
             .add_observer(request_menu::<BookmarkMenuRootRequest>)
             .add_observer(request_menu::<BookmarkMenuPinRequest>)
@@ -89,6 +100,12 @@ impl Plugin for BookmarkPlugin {
             .add_observer(text_input)
             .add_observer(open_context_menu)
             .add_observer(request_drop)
+            .add_observer(open_folder_edit)
+            .add_observer(open_rename_edit)
+            .add_observer(edit_draft)
+            .add_observer(submit_edit)
+            .add_observer(close_edit)
+            .add_observer(menu_edit)
             .add_systems(
                 Update,
                 (
@@ -119,6 +136,213 @@ impl Plugin for BookmarkPlugin {
     }
 }
 
+#[derive(Component)]
+struct BookmarkFolderEditor {
+    parent: Option<String>,
+    draft: String,
+}
+
+#[derive(Component)]
+struct BookmarkRenameEditor {
+    uuid: String,
+    folder: bool,
+    draft: String,
+}
+
+#[derive(Component, Default)]
+struct BookmarkMenuRevisions {
+    create: u64,
+    rename: u64,
+}
+
+fn open_folder_edit(trigger: On<UiInput<BookmarkFolderEditOpenRequest>>, mut commands: Commands) {
+    let event = trigger.event();
+    let state = BookmarkFolderEditState {
+        open: true,
+        parent: event.payload.parent.clone(),
+        draft: event.payload.draft.clone(),
+    };
+    commands
+        .entity(event.webview)
+        .remove::<BookmarkRenameEditor>()
+        .insert(BookmarkFolderEditor {
+            parent: state.parent.clone(),
+            draft: state.draft.clone(),
+        });
+    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+        event.webview,
+        &BookmarkEditState {
+            create: state,
+            ..Default::default()
+        },
+    ));
+}
+
+fn open_rename_edit(trigger: On<UiInput<BookmarkRenameEditOpenRequest>>, mut commands: Commands) {
+    let event = trigger.event();
+    let state = BookmarkRenameEditState {
+        open: true,
+        uuid: event.payload.uuid.clone(),
+        folder: event.payload.folder,
+        draft: event.payload.draft.clone(),
+    };
+    commands
+        .entity(event.webview)
+        .remove::<BookmarkFolderEditor>()
+        .insert(BookmarkRenameEditor {
+            uuid: state.uuid.clone(),
+            folder: state.folder,
+            draft: state.draft.clone(),
+        });
+    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+        event.webview,
+        &BookmarkEditState {
+            rename: state,
+            ..Default::default()
+        },
+    ));
+}
+
+fn edit_draft(
+    trigger: On<UiInput<BookmarkEditInputRequest>>,
+    mut editors: Query<(
+        Option<&mut BookmarkFolderEditor>,
+        Option<&mut BookmarkRenameEditor>,
+    )>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let Ok((folder, rename)) = editors.get_mut(event.webview) else {
+        return;
+    };
+    let mut state = BookmarkEditState::default();
+    if let Some(mut folder) = folder {
+        folder.draft.clone_from(&event.payload.draft);
+        state.create = BookmarkFolderEditState {
+            open: true,
+            parent: folder.parent.clone(),
+            draft: folder.draft.clone(),
+        };
+    }
+    if let Some(mut rename) = rename {
+        rename.draft.clone_from(&event.payload.draft);
+        state.rename = BookmarkRenameEditState {
+            open: true,
+            uuid: rename.uuid.clone(),
+            folder: rename.folder,
+            draft: rename.draft.clone(),
+        };
+    }
+    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+        event.webview,
+        &state,
+    ));
+}
+
+fn submit_edit(
+    trigger: On<UiInput<BookmarkEditSubmitRequest>>,
+    editors: Query<(Option<&BookmarkFolderEditor>, Option<&BookmarkRenameEditor>)>,
+    mut create: MessageWriter<CreateFolderRequest>,
+    mut rename_folder: MessageWriter<RenameFolderRequest>,
+    mut rename_bookmark: MessageWriter<RenameRequest>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok((folder, rename)) = editors.get(webview) else {
+        return;
+    };
+    if let Some(folder) = folder {
+        let name = folder.draft.trim();
+        if !name.is_empty() {
+            create.write(CreateFolderRequest {
+                name: name.to_string(),
+                parent: folder.parent.clone(),
+            });
+        }
+    }
+    if let Some(rename) = rename {
+        let name = rename.draft.trim();
+        if !name.is_empty() {
+            if rename.folder {
+                rename_folder.write(RenameFolderRequest {
+                    uuid: rename.uuid.clone(),
+                    name: name.to_string(),
+                });
+            } else {
+                rename_bookmark.write(RenameRequest {
+                    uuid: rename.uuid.clone(),
+                    name: name.to_string(),
+                });
+            }
+        }
+    }
+    commands
+        .entity(webview)
+        .remove::<BookmarkFolderEditor>()
+        .remove::<BookmarkRenameEditor>();
+    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+        webview,
+        &BookmarkEditState::default(),
+    ));
+}
+
+fn close_edit(trigger: On<UiInput<BookmarkEditCloseRequest>>, mut commands: Commands) {
+    let webview = trigger.event().webview;
+    commands
+        .entity(webview)
+        .remove::<BookmarkFolderEditor>()
+        .remove::<BookmarkRenameEditor>();
+    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+        webview,
+        &BookmarkEditState::default(),
+    ));
+}
+
+fn menu_edit(
+    trigger: On<UiStateWrite<crate::state::LayoutUiState>>,
+    handled: Query<&BookmarkMenuRevisions>,
+    entries: Query<(&Uuid, &Name, Has<Folder>)>,
+    mut commands: Commands,
+) {
+    let Some(effect) = trigger.event().update().bookmark_menu.as_ref() else {
+        return;
+    };
+    let webview = trigger.event().webview();
+    let current = handled.get(webview).ok();
+    let mut revisions = BookmarkMenuRevisions {
+        create: current.map_or(0, |value| value.create),
+        rename: current.map_or(0, |value| value.rename),
+    };
+    if effect.create_folder.revision > revisions.create {
+        revisions.create = effect.create_folder.revision;
+        commands.trigger(UiInput {
+            webview,
+            payload: BookmarkFolderEditOpenRequest {
+                parent: effect.create_folder.parent.clone(),
+                draft: vmux_ui::i18n::translate("layout-new-folder"),
+            },
+        });
+    }
+    if effect.rename.revision > revisions.rename {
+        revisions.rename = effect.rename.revision;
+        if let Some((_, name, folder)) = entries
+            .iter()
+            .find(|(uuid, _, _)| uuid.0 == effect.rename.uuid)
+        {
+            commands.trigger(UiInput {
+                webview,
+                payload: BookmarkRenameEditOpenRequest {
+                    uuid: effect.rename.uuid.clone(),
+                    folder,
+                    draft: name.to_string(),
+                },
+            });
+        }
+    }
+    commands.entity(webview).insert(revisions);
+}
+
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct BookmarkToggleActiveRequest;
 
@@ -132,6 +356,7 @@ impl TryFrom<&CommandInvocation> for BookmarkToggleActiveRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct BookmarkPinActiveRequest;
 
@@ -145,6 +370,7 @@ impl TryFrom<&CommandInvocation> for BookmarkPinActiveRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[vmux_api::agent(Eq, Message)]
 pub struct CreateFolderRequest {
     pub name: String,
@@ -175,12 +401,6 @@ impl TryFrom<&CommandInvocation> for CreateFolderRequest {
             .then(|| Self::root("New Folder"))
             .ok_or(())
     }
-}
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<BookmarkToggleActiveRequest>(&mut commands);
-    registry.message::<BookmarkPinActiveRequest>(&mut commands);
-    registry.message::<CreateFolderRequest>(&mut commands);
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -1133,7 +1353,7 @@ fn commands(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_ecs::PageIcon;
+    use vmux_api::PageIcon;
 
     #[test]
     fn command_id_dispatches_the_typed_bookmark_request() {
@@ -1143,8 +1363,7 @@ mod tests {
             FeaturePlugin::<crate::Feature>::default(),
             vmux_command::CommandRuntimePlugin,
         ))
-        .add_message::<BookmarkToggleActiveRequest>()
-        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands));
+        .add_message::<BookmarkToggleActiveRequest>();
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<vmux_command::CommandInvocation>>()
@@ -1498,7 +1717,7 @@ mod tests {
         let expected = PageMetadata {
             title: "Start".into(),
             url: "vmux://start/".into(),
-            icon: PageIcon::Builtin(vmux_ecs::BuiltinIcon::Sparkles),
+            icon: PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
             bg_color: Some("#111111".into()),
         };
         TestRequest::send(
@@ -1602,6 +1821,7 @@ mod tests {
             ))
             .id();
         app.world_mut().spawn(PageManifest {
+            route: "vmux://simulator/",
             url: "vmux://simulator/",
             asset_host: "simulator",
             owns_subtree: true,
@@ -1609,9 +1829,11 @@ mod tests {
             title_message_id: None,
             replaces_command: None,
             keywords: &[],
-            icon: Some(vmux_ecs::BuiltinIcon::Smartphone),
+            icon: Some(vmux_api::BuiltinIcon::Smartphone),
             command_bar: true,
             startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement::DEFAULT,
         });
 
         app.update();
@@ -1620,7 +1842,7 @@ mod tests {
         assert_eq!(metadata.title, "Simulator");
         assert_eq!(
             metadata.icon,
-            PageIcon::Builtin(vmux_ecs::BuiltinIcon::Smartphone)
+            PageIcon::Builtin(vmux_api::BuiltinIcon::Smartphone)
         );
     }
 

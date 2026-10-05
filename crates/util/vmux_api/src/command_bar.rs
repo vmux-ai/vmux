@@ -21,13 +21,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_bar_open_event_carries_space_name() {
+    fn command_bar_open_event_carries_context_label() {
         let event = CommandBarOpenEvent {
-            space_name: "Work".to_string(),
+            context_label: "Work".to_string(),
             ..Default::default()
         };
 
-        assert_eq!(event.space_name, "Work");
+        assert_eq!(event.context_label, "Work");
     }
 
     #[test]
@@ -108,23 +108,6 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_open_event_carries_spaces() {
-        let event = CommandBarOpenEvent {
-            spaces: vec![CommandBarSpace {
-                id: "work".to_string(),
-                name: "Work".to_string(),
-                profile: "Personal".to_string(),
-                is_active: true,
-                tab_count: 2,
-            }],
-            ..Default::default()
-        };
-
-        assert_eq!(event.spaces[0].id, "work");
-        assert!(event.spaces[0].is_active);
-    }
-
-    #[test]
     fn command_bar_open_event_carries_pages() {
         let event = CommandBarOpenEvent {
             pages: vec![CommandBarPage {
@@ -148,14 +131,17 @@ mod tests {
     #[test]
     fn an_asserted_picker_survives_the_wire() {
         let event = CommandBarOpenEvent {
-            picker: Some(CommandBarPicker::EncodingReopen),
+            picker: Some(CommandBarPicker::new("editor.encoding-reopen")),
             ..Default::default()
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).expect("ser");
         let recovered =
             rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
 
-        assert_eq!(recovered.picker, Some(CommandBarPicker::EncodingReopen));
+        assert_eq!(
+            recovered.picker,
+            Some(CommandBarPicker::new("editor.encoding-reopen"))
+        );
         assert_eq!(CommandBarOpenEvent::default().picker, None);
     }
 

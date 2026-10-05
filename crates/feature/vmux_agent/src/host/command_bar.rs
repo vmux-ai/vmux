@@ -14,24 +14,20 @@ use super::acp::AcpPackageChanged;
 use super::acp::registry::RegistryAgent;
 use crate::route::AcpRoute;
 
-pub(crate) struct CommandBarPlugin;
-
-impl Plugin for CommandBarPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<AcpPackageChanged>()
-            .add_systems(Startup, claim)
-            .add_systems(
-                Update,
-                (
-                    sync_work_directories,
-                    sync_installed,
-                    ApplyDeferred,
-                    publish,
-                )
-                    .chain()
-                    .in_set(WriteCommandBarSnapshots),
-            );
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_message::<AcpPackageChanged>()
+        .add_systems(Startup, claim)
+        .add_systems(
+            Update,
+            (
+                sync_work_directories,
+                sync_installed,
+                ApplyDeferred,
+                publish,
+            )
+                .chain()
+                .in_set(WriteCommandBarSnapshots),
+        );
 }
 
 #[derive(Component)]
@@ -40,7 +36,7 @@ struct InstalledAgent;
 fn claim(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent command-bar contribution"),
-        ClaimedUrl(vmux_chat::ChatPlugin::URL.to_string()),
+        ClaimedUrl(vmux_api::VmuxRoute::SESSIONS_ROOT.to_string()),
     ));
 }
 
@@ -132,7 +128,7 @@ fn publish(
                     icon: agent
                         .icon
                         .as_ref()
-                        .map(|icon| vmux_ecs::PageIcon::Favicon(icon.clone()))
+                        .map(|icon| vmux_api::PageIcon::Favicon(icon.clone()))
                         .unwrap_or_default(),
                     shortcut: String::new(),
                     prompt_target: true,
@@ -175,21 +171,6 @@ mod tests {
     use vmux_ecs::ProcessId;
 
     use super::*;
-    use crate::host::acp::registry::Distribution;
-
-    impl RegistryAgent {
-        fn test(id: &str, name: &str, icon: Option<&str>) -> Self {
-            Self {
-                id: id.to_string(),
-                name: name.to_string(),
-                version: None,
-                description: None,
-                icon: icon.map(str::to_string),
-                distribution: Distribution::default(),
-            }
-        }
-    }
-
     #[test]
     fn installed_agents_contribute_pages_in_recent_order() {
         let mut app = App::new();
@@ -225,7 +206,7 @@ mod tests {
         assert_eq!(pages[1].id, "claude-acp");
         assert!(matches!(
             pages[1].page.icon,
-            vmux_ecs::PageIcon::Favicon(ref icon)
+            vmux_api::PageIcon::Favicon(ref icon)
                 if icon == "https://cdn.example/claude-acp.svg"
         ));
     }
@@ -233,7 +214,7 @@ mod tests {
     #[test]
     fn only_bare_agent_urls_are_claimed() {
         let mut world = World::new();
-        world.spawn(ClaimedUrl(vmux_chat::ChatPlugin::URL.to_string()));
+        world.spawn(ClaimedUrl(vmux_api::VmuxRoute::SESSIONS_ROOT.to_string()));
 
         let claimed = world
             .run_system_once(|claimed: ClaimedUrls| {

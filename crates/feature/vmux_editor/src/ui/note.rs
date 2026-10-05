@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::prelude::*;
 use vmux_ecs::event::{
-    CompletionItem, FilePanelPick, FilePointerEvent, FilePropertyEdit, MdBlock, NoteBlock,
+    CompletionItem, FileNoteEditDismissRequest, FileNoteEditRequest,
+    FileNotePropertiesToggleRequest, FilePanelPick, FilePointerEvent, FilePropertyDraftRequest,
+    FilePropertyDraftState, FilePropertyEdit, MdBlock, NoteBlock,
 };
 use vmux_git::event::GitLineStatus;
 use vmux_knowledge::{KnowledgeProperty, KnowledgePropertyKind};
@@ -27,17 +29,21 @@ const NOTE_CARET_ID: &str = "note-caret";
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct NoteCursor {
-    active: Signal<Option<u32>>,
-    editing: Signal<bool>,
-    edit_line: Signal<Option<u32>>,
+    active: Memo<Option<u32>>,
+    editing: Memo<bool>,
+    edit_line: Memo<Option<u32>>,
 }
 
 impl NoteCursor {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(
+        active: Memo<Option<u32>>,
+        editing: Memo<bool>,
+        edit_line: Memo<Option<u32>>,
+    ) -> Self {
         Self {
-            active: use_signal(|| None),
-            editing: use_signal(|| false),
-            edit_line: use_signal(|| None),
+            active,
+            editing,
+            edit_line,
         }
     }
 
@@ -53,22 +59,16 @@ impl NoteCursor {
         (self.edit_line)()
     }
 
-    pub(super) fn reset(mut self) {
-        self.active.set(None);
-        self.editing.set(false);
-        self.edit_line.set(None);
+    pub(super) fn reset(self) {
+        let _ = send(&FileNoteEditDismissRequest);
     }
 
-    pub(super) fn set_active(mut self, active: Option<u32>) {
-        self.active.set(active);
-    }
-
-    pub(super) fn set_editing(mut self, editing: bool) {
-        self.editing.set(editing);
-    }
-
-    pub(super) fn set_edit_line(mut self, line: Option<u32>) {
-        self.edit_line.set(line);
+    pub(super) fn set_editing(self, editing: bool) {
+        if editing {
+            let _ = send(&FileNoteEditRequest);
+        } else {
+            let _ = send(&FileNoteEditDismissRequest);
+        }
     }
 
     pub(super) fn activate(self, block_index: usize, line: u32) {
@@ -83,20 +83,12 @@ impl NoteCursor {
         NoteCaretAnchor::new(block_index, line).reveal();
     }
 
-    fn activate_inline(mut self, block_index: usize) {
-        self.active.set(Some(block_index as u32));
-        self.editing.set(true);
-        self.edit_line.set(None);
-    }
-
-    fn activate_line(mut self, block_index: usize, line: u32) {
-        self.active.set(Some(block_index as u32));
-        self.editing.set(true);
-        self.edit_line.set(Some(line));
+    fn edit(self) {
+        let _ = send(&FileNoteEditRequest);
     }
 
     fn activate_with_scroll(self, block_index: usize, line: u32, center: bool) {
-        self.activate_line(block_index, line);
+        self.edit();
         spawn(async move {
             Platform::sleep(0).await;
             EditorFocus::file();
@@ -481,8 +473,11 @@ fn next_property_kind(kind: KnowledgePropertyKind) -> KnowledgePropertyKind {
 }
 
 #[component]
-pub(super) fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
-    let mut open = use_signal(|| !properties.is_empty());
+pub(super) fn NoteProperties(
+    properties: Vec<KnowledgeProperty>,
+    open: bool,
+    drafts: Vec<FilePropertyDraftState>,
+) -> Element {
     let has_tags = properties
         .iter()
         .any(|property| property.kind == KnowledgePropertyKind::Tags);
@@ -509,8 +504,10 @@ pub(super) fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
                 button {
                     r#type: "button",
                     class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
-                    onclick: move |_| open.toggle(),
-                    Icon { class: if open() { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
+                    onclick: move |_| {
+                        let _ = send(&FileNotePropertiesToggleRequest);
+                    },
+                    Icon { class: if open { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
                     span { {translate("editor-properties")} }
                     if !properties.is_empty() {
                         span { class: "text-[10px] text-muted-foreground", "{properties.len()}" }
@@ -522,7 +519,9 @@ pub(super) fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
                     disabled: has_tags,
                     class: if has_tags { "rounded-md px-1 text-xs text-muted-foreground/30" } else { "rounded-md px-1 text-xs text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" },
                     onclick: move |_| {
-                        open.set(true);
+                        if !open {
+                            let _ = send(&FileNotePropertiesToggleRequest);
+                        }
                         emit_property_edit(
                             String::new(),
                             "tags".to_string(),
@@ -538,7 +537,9 @@ pub(super) fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
                     title: translate("editor-add-property"),
                     class: "rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
                     onclick: move |_| {
-                        open.set(true);
+                        if !open {
+                            let _ = send(&FileNotePropertiesToggleRequest);
+                        }
                         emit_property_edit(
                             String::new(),
                             add_key.clone(),
@@ -550,15 +551,24 @@ pub(super) fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
                     Icon { class: "h-3.5 w-3.5", path { d: "M12 5v14" } path { d: "M5 12h14" } }
                 }
             }
-            if open() {
+            if open {
                 div { class: "border-t border-foreground/[0.06] px-1 py-1",
                     if properties.is_empty() {
                         div { class: "px-3 py-2 text-xs text-muted-foreground", {translate("editor-no-properties")} }
                     }
                     for property in properties {
-                        NotePropertyRow {
-                            key: "{property.key}:{property.kind:?}:{property.values:?}",
-                            property,
+                        {
+                            let draft = drafts
+                                .iter()
+                                .find(|draft| draft.original_key == property.key)
+                                .cloned();
+                            rsx! {
+                                NotePropertyRow {
+                                    key: "{property.key}:{property.kind:?}:{property.values:?}",
+                                    property,
+                                    draft,
+                                }
+                            }
                         }
                     }
                 }
@@ -569,12 +579,12 @@ pub(super) fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
 
 #[component]
 pub(super) fn NoteBlockView(
-    note_blocks: Signal<Vec<NoteBlock>>,
+    note_blocks: Memo<Vec<NoteBlock>>,
     diff_markers: ReadSignal<HashMap<u32, GitLineStatus>>,
     index: usize,
     editing: bool,
-    source_cursor: Signal<vmux_api::editor::CursorPos>,
-    source_selections: Signal<Vec<vmux_api::editor::SelSpan>>,
+    source_cursor: ReadSignal<vmux_api::editor::CursorPos>,
+    source_selections: ReadSignal<Vec<vmux_api::editor::SelSpan>>,
     note_diff_marker: Option<GitLineStatus>,
     keymap: vmux_api::editor::KeymapKind,
     note_cursor: NoteCursor,
@@ -733,7 +743,7 @@ pub(super) fn NoteBlockView(
                 }
                 let at = event.client_coordinates();
                 if is_live_inline {
-                    note_cursor.activate_inline(index);
+                    note_cursor.edit();
                     place_note_block_caret(index, start, live_pointer_source.clone(), at);
                     return;
                 }
@@ -745,7 +755,7 @@ pub(super) fn NoteBlockView(
                     &pointer_block,
                     list_hit(),
                 );
-                note_cursor.activate_line(index, line);
+                note_cursor.edit();
                 place_note_caret(
                     format!("note-line-{line}"),
                     line,
@@ -922,12 +932,18 @@ fn note_block_diff_marker(
 }
 
 #[component]
-fn NotePropertyRow(property: KnowledgeProperty) -> Element {
+fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftState>) -> Element {
     let original_key = property.key.clone();
     let kind = property.kind;
-    let mut key = use_signal(|| property.key.clone());
-    let mut scalar = use_signal(|| property.values.first().cloned().unwrap_or_default());
-    let mut item = use_signal(String::new);
+    let draft = draft.unwrap_or_else(|| FilePropertyDraftState {
+        original_key: original_key.clone(),
+        key: property.key.clone(),
+        scalar: property.values.first().cloned().unwrap_or_default(),
+        item: String::new(),
+    });
+    let key = draft.key.clone();
+    let scalar = draft.scalar.clone();
+    let item = draft.item.clone();
     let ime = use_ime_guard();
     let values = property.values.clone();
     let key_for_kind = original_key.clone();
@@ -937,11 +953,21 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
             input {
                 value: "{key}",
                 class: "w-28 shrink-0 bg-transparent text-xs font-medium text-foreground/65 outline-none focus:text-foreground",
-                oninput: move |event| key.set(event.value()),
+                oninput: {
+                    let draft = draft.clone();
+                    move |event: FormEvent| {
+                        let mut draft = draft.clone();
+                        draft.key = event.value();
+                        let _ = send(&FilePropertyDraftRequest {
+                            draft,
+                        });
+                    }
+                },
                 onblur: {
                     let original_key = original_key.clone();
+                    let property_key = key.clone();
                     let values = values.clone();
-                    move |_| emit_property_edit(original_key.clone(), key(), kind, values.clone(), false)
+                    move |_| emit_property_edit(original_key.clone(), property_key.clone(), kind, values.clone(), false)
                 },
             }
             button {
@@ -950,9 +976,10 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                 class: "shrink-0 rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                 onclick: {
                     let values = values.clone();
+                    let property_key = key.clone();
                     move |_| {
                         let next = next_property_kind(kind);
-                        emit_property_edit(key_for_kind.clone(), key(), next, values.clone(), false);
+                        emit_property_edit(key_for_kind.clone(), property_key.clone(), next, values.clone(), false);
                     }
                 },
                 {property_kind_label(kind)}
@@ -961,13 +988,14 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                 if kind == KnowledgePropertyKind::Checkbox {
                     button {
                         r#type: "button",
-                        class: if scalar().eq_ignore_ascii_case("true") { "flex h-5 w-9 items-center justify-end rounded-full bg-primary px-0.5" } else { "flex h-5 w-9 items-center justify-start rounded-full bg-foreground/15 px-0.5" },
+                        class: if scalar.eq_ignore_ascii_case("true") { "flex h-5 w-9 items-center justify-end rounded-full bg-primary px-0.5" } else { "flex h-5 w-9 items-center justify-start rounded-full bg-foreground/15 px-0.5" },
                         onclick: {
                             let original_key = original_key.clone();
+                            let property_key = key.clone();
+                            let checkbox_scalar = scalar.clone();
                             move |_| {
-                                let next = (!scalar().eq_ignore_ascii_case("true")).to_string();
-                                scalar.set(next.clone());
-                                emit_property_edit(original_key.clone(), key(), kind, vec![next], false);
+                                let next = (!checkbox_scalar.eq_ignore_ascii_case("true")).to_string();
+                                emit_property_edit(original_key.clone(), property_key.clone(), kind, vec![next], false);
                             }
                         },
                         span { class: "h-4 w-4 rounded-full bg-background shadow-sm" }
@@ -977,6 +1005,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                         for (index, value) in values.iter().enumerate() {
                             {
                                 let remove_key = original_key.clone();
+                                let property_key = key.clone();
                                 let remove_values = values.clone();
                                 rsx! {
                                     button {
@@ -987,7 +1016,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                                         onclick: move |_| {
                                             let mut next = remove_values.clone();
                                             next.remove(index);
-                                            emit_property_edit(remove_key.clone(), key(), kind, next, false);
+                                            emit_property_edit(remove_key.clone(), property_key.clone(), kind, next, false);
                                         },
                                         if kind == KnowledgePropertyKind::Tags { "#" }
                                         "{value}"
@@ -999,11 +1028,22 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                             value: "{item}",
                             placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
                             class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
-                            oninput: move |event| item.set(event.value()),
+                            oninput: {
+                                let draft = draft.clone();
+                                move |event: FormEvent| {
+                                    let mut draft = draft.clone();
+                                    draft.item = event.value();
+                                    let _ = send(&FilePropertyDraftRequest {
+                                        draft,
+                                    });
+                                }
+                            },
                             oncompositionstart: move |_| ime.start(),
                             oncompositionend: move |_| ime.commit(),
                             onkeydown: {
                                 let add_key = original_key.clone();
+                                let property_key = key.clone();
+                                let draft_item = item.clone();
                                 let add_values = values.clone();
                                 move |event: Event<KeyboardData>| {
                                     if ime.swallows(&event) {
@@ -1013,7 +1053,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                                         return;
                                     }
                                     event.prevent_default();
-                                    let value = item().trim().trim_start_matches('#').to_string();
+                                    let value = draft_item.trim().trim_start_matches('#').to_string();
                                     if value.is_empty() {
                                         return;
                                     }
@@ -1021,8 +1061,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                                     if !next.iter().any(|existing| existing.eq_ignore_ascii_case(&value)) {
                                         next.push(value);
                                     }
-                                    item.set(String::new());
-                                    emit_property_edit(add_key.clone(), key(), kind, next, false);
+                                    emit_property_edit(add_key.clone(), property_key.clone(), kind, next, false);
                                 }
                             },
                         }
@@ -1037,10 +1076,21 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                         value: "{scalar}",
                         placeholder: if kind == KnowledgePropertyKind::Link { translate("editor-linked-note") } else { translate("editor-property-value") },
                         class: "w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
-                        oninput: move |event| scalar.set(event.value()),
+                        oninput: {
+                            let draft = draft.clone();
+                            move |event: FormEvent| {
+                                let mut draft = draft.clone();
+                                draft.scalar = event.value();
+                                let _ = send(&FilePropertyDraftRequest {
+                                    draft,
+                                });
+                            }
+                        },
                         onblur: {
                             let original_key = original_key.clone();
-                            move |_| emit_property_edit(original_key.clone(), key(), kind, vec![scalar()], false)
+                            let property_key = key.clone();
+                            let property_scalar = scalar.clone();
+                            move |_| emit_property_edit(original_key.clone(), property_key.clone(), kind, vec![property_scalar.clone()], false)
                         },
                     }
                 }

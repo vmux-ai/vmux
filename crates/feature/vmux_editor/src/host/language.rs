@@ -16,10 +16,15 @@ impl Plugin for LanguagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             FileHoverRequest,
+            FileHoverDismissRequest,
             FileDefinitionRequest,
             FileReferencesRequest,
             FileRenameRequest,
+            FileRenameDraftRequest,
+            FileRenameDismissRequest,
+            FileCodeActionMoveRequest,
             FileCodeActionPick,
+            FileCodeActionDismissRequest,
             FileCompletionRequest,
         )>::default())
             .add_plugins(UiEventPlugin::<FileEditorOperationRequests>::default())
@@ -35,9 +40,12 @@ impl Plugin for LanguagePlugin {
             .add_observer(format_selection)
             .add_observer(code_action)
             .add_observer(request_hover)
+            .add_observer(dismiss_hover)
             .add_observer(request_definition)
             .add_observer(request_references)
             .add_observer(request_rename)
+            .add_observer(edit_rename)
+            .add_observer(dismiss_rename)
             .add_observer(open_command_palette)
             .add_observer(request_code_action)
             .add_observer(request_declaration)
@@ -370,14 +378,17 @@ fn rename(
     if current.is_empty() || !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
-        &FileRenamePrompt {
+        &FileRenameState {
+            open: true,
             line: position.line,
             col: position.char_col as u32,
-            current,
+            current: current.clone(),
+            draft: current,
         },
     ));
+    commands.trigger(super::feedback::ClearEditFailure(entity));
 }
 
 fn completion(
@@ -561,6 +572,13 @@ fn request_hover(
     }
 }
 
+fn dismiss_hover(trigger: On<UiInput<FileHoverDismissRequest>>, mut commands: Commands) {
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        trigger.event().webview,
+        &FileHoverState::default(),
+    ));
+}
+
 fn request_definition(
     trigger: On<UiInput<FileDefinitionRequest>>,
     views: Query<&Editor>,
@@ -683,6 +701,10 @@ fn request_rename(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        entity,
+        &FileRenameState::default(),
+    ));
     let request = &trigger.event().payload;
     if request.new_name.trim().is_empty() {
         return;
@@ -701,6 +723,33 @@ fn request_rename(
     if let Some(request) = request {
         commands.spawn(request);
     }
+}
+
+fn edit_rename(
+    trigger: On<UiInput<FileRenameDraftRequest>>,
+    states: Query<&vmux_ecs::FileUiStateUpdates>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(state) = states.get(entity) else {
+        return;
+    };
+    let Some(current) = state.current() else {
+        return;
+    };
+    let mut rename = current.language.rename.clone();
+    if !rename.open {
+        return;
+    }
+    rename.draft.clone_from(&trigger.event().payload.draft);
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &rename));
+}
+
+fn dismiss_rename(trigger: On<UiInput<FileRenameDismissRequest>>, mut commands: Commands) {
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        trigger.event().webview,
+        &FileRenameState::default(),
+    ));
 }
 
 fn request_references(

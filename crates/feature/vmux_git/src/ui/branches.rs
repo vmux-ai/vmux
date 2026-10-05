@@ -18,9 +18,9 @@ use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
 #[component]
 pub(super) fn BranchPromptDialog() -> Element {
     let state = use_context::<super::state::GitPageState>();
-    let mut branch_prompt = state.branch_prompt;
-    let mut draft = state.branch_draft;
-    let Some(prompt) = branch_prompt() else {
+    let controller = (state.controller)();
+    let draft = controller.branch_draft;
+    let Some(prompt) = controller.branch_prompt else {
         return rsx! {};
     };
     let title = match &prompt {
@@ -28,12 +28,13 @@ pub(super) fn BranchPromptDialog() -> Element {
         GitBranchPrompt::Delete { .. } => translate("git-delete-branch"),
     };
     let is_create = matches!(prompt, GitBranchPrompt::Create { .. });
+    let submit_ready = !draft.trim().is_empty();
     rsx! {
         DialogRoot {
             open: true,
             on_open_change: move |open: bool| {
                 if !open {
-                    branch_prompt.set(None);
+                    let _ = send(&GitBranchPromptCloseRequest);
                 }
             },
             attributes: vec![],
@@ -45,17 +46,14 @@ pub(super) fn BranchPromptDialog() -> Element {
                         autofocus: true,
                         value: "{draft}",
                         placeholder: translate("git-new-branch"),
-                        oninput: move |event: Event<FormData>| draft.set(event.value()),
-                        onkeydown: {
-                            let prompt = prompt.clone();
-                            move |event: KeyboardEvent| {
-                                event.stop_propagation();
-                                if event.key() == Key::Enter
-                                    && state.submit_branch_prompt(&prompt)
-                                {
-                                    event.prevent_default();
-                                    branch_prompt.set(None);
-                                }
+                        oninput: move |event: Event<FormData>| {
+                            let _ = send(&GitBranchDraftRequest { draft: event.value() });
+                        },
+                        onkeydown: move |event: KeyboardEvent| {
+                            event.stop_propagation();
+                            if event.key() == Key::Enter && submit_ready {
+                                event.prevent_default();
+                                let _ = send(&GitBranchSubmitRequest);
                             }
                         },
                     }
@@ -66,20 +64,17 @@ pub(super) fn BranchPromptDialog() -> Element {
                     Button {
                         size: ButtonSize::Xs,
                         variant: ButtonVariant::Ghost,
-                        onclick: move |_| branch_prompt.set(None),
+                        onclick: move |_| {
+                            let _ = send(&GitBranchPromptCloseRequest);
+                        },
                         {translate("common-cancel")}
                     }
                     Button {
                         size: ButtonSize::Xs,
                         variant: if is_create { ButtonVariant::Primary } else { ButtonVariant::Destructive },
-                        disabled: is_create && draft().trim().is_empty(),
-                        onclick: {
-                            let prompt = prompt.clone();
-                            move |_| {
-                                if state.submit_branch_prompt(&prompt) {
-                                    branch_prompt.set(None);
-                                }
-                            }
+                        disabled: is_create && !submit_ready,
+                        onclick: move |_| {
+                            let _ = send(&GitBranchSubmitRequest);
                         },
                         {if is_create { translate("common-save") } else { translate("common-delete") }}
                     }
@@ -158,8 +153,6 @@ pub(super) fn BranchesCard(
     repository: GitRepositorySnapshot,
     selected_branch: String,
     branch_collection: GitBranchCollection,
-    branch_prompt: Signal<Option<GitBranchPrompt>>,
-    branch_draft: Signal<String>,
     focused_panel: GitPanel,
     operations: GitOperationEligibility,
 ) -> Element {
@@ -205,8 +198,9 @@ pub(super) fn BranchesCard(
                     onpress: {
                         let base = branch.name.clone();
                         move |_| {
-                            branch_draft.set(String::new());
-                            branch_prompt.set(Some(GitBranchPrompt::Create { base: base.clone() }));
+                            let _ = send(&GitBranchPromptOpenRequest {
+                                prompt: GitBranchPrompt::Create { base: base.clone() },
+                            });
                         }
                     },
                 }
@@ -218,7 +212,11 @@ pub(super) fn BranchesCard(
                     danger: true,
                     onpress: {
                         let branch = branch.name.clone();
-                        move |_| branch_prompt.set(Some(GitBranchPrompt::Delete { branch: branch.clone() }))
+                        move |_| {
+                            let _ = send(&GitBranchPromptOpenRequest {
+                                prompt: GitBranchPrompt::Delete { branch: branch.clone() },
+                            });
+                        }
                     },
                 }
                 HeaderOperationButton {

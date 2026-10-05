@@ -109,12 +109,18 @@ impl WindowFrameQueries<'_, '_> {
     fn active_tab(&self, tab: Entity) -> Option<Entity> {
         let space = self.child_of.get(tab).ok()?.get();
         let children = self.all_children.get(space).ok()?;
-        LastActivatedAt::latest(
-            children
-                .iter()
-                .filter_map(|entity| self.tabs.get(entity).ok())
-                .map(|(entity, activated_at)| (entity, *activated_at)),
-        )
+        let mut latest = None;
+        for entity in children.iter() {
+            let Ok((entity, activated_at)) = self.tabs.get(entity) else {
+                continue;
+            };
+            if latest
+                .is_none_or(|(_, current): (Entity, LastActivatedAt)| activated_at.0 > current.0)
+            {
+                latest = Some((entity, *activated_at));
+            }
+        }
+        latest.map(|(entity, _)| entity)
     }
 
     fn tab_is_visible(&self, tab: Option<Entity>) -> bool {
@@ -1871,7 +1877,7 @@ mod tests {
     }
 
     #[test]
-    fn windowed_reconcile_wakes_until_native_pages_are_sized() {
+    fn windowed_reconcile_wakes_until_hosted_pages_are_sized() {
         assert!(windowed_reconcile_should_wake(true, false, false));
         assert!(windowed_reconcile_should_wake(false, true, true));
         assert!(!windowed_reconcile_should_wake(false, true, false));

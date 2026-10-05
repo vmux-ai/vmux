@@ -5,7 +5,7 @@ use tray_icon::{TrayIcon, TrayIconBuilder};
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
 use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
-use vmux_native::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet};
+use vmux_page::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 

@@ -4,7 +4,7 @@ pub use vmux_api::git::{
 };
 use vmux_api::input::KeyModifiers;
 
-use crate::state::{GitBranchCollection, GitPanel};
+use crate::state::{GitBranchCollection, GitBranchPrompt, GitPanel};
 
 #[vmux_api::ui_event(Eq)]
 pub struct GitKeyRequest {
@@ -108,6 +108,30 @@ pub struct GitStashSelectRequest {
 pub struct GitDiscardFileRequest {
     pub path_bytes: Vec<u8>,
 }
+
+#[vmux_api::ui_event(Eq)]
+pub struct GitBranchPromptOpenRequest {
+    pub prompt: GitBranchPrompt,
+}
+
+#[vmux_api::ui_event]
+pub struct GitBranchPromptCloseRequest;
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct GitBranchDraftRequest {
+    pub draft: String,
+}
+
+#[vmux_api::ui_event]
+pub struct GitBranchSubmitRequest;
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct GitCommitDraftRequest {
+    pub message: String,
+}
+
+#[vmux_api::ui_event]
+pub struct GitCommitSubmitRequest;
 
 #[vmux_api::ui_event(Eq)]
 pub struct GitRepositoryRequest {

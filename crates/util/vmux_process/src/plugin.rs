@@ -1,793 +1,556 @@
-use std::sync::Mutex;
+use bevy::ecs::system::SystemParam;
+use bevy::platform::cell::SyncCell;
+use bevy::prelude::*;
+use tokio::sync::broadcast;
+use vmux_api::ProcessId;
+use vmux_api::protocol::{AgentCommandExit, AgentRunCompletion, ProcessInfo};
 
-use bevy::prelude::{App, Bundle, Component, IntoScheduleConfigs, Plugin, Query, Update};
-use tokio::sync::{broadcast, mpsc, oneshot};
-use vmux_api::protocol::{
-    AgentCommandExit, AgentQueryResult, AgentRequest, AgentRequestId, AgentRunCompletion,
-    CopyModeKey, ProcessInfo, ServiceMessage,
-};
-use vmux_api::{ProcessId, TermSelectionRange};
-
-use crate::{Process, ProcessManager, ProcessSnapshot, ProcessUpdate};
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentReadProcessOutput {
-    pub process_id: ProcessId,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentReadProcessTranscript {
-    pub process_id: ProcessId,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentProcessCommandExit {
-    pub process_id: ProcessId,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentProcessRunCompletion {
-    pub process_id: ProcessId,
-}
+use crate::runtime_driver::{self as runtime, ProcessCreated, ProcessWake, RuntimeInbox};
+use crate::{Process, ProcessUpdate, PtyInputWriter};
 
 pub struct ProcessPlugin;
 
 impl Plugin for ProcessPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (apply_operations, poll_processes).chain());
-    }
-}
-
-pub struct ProcessLaunch {
-    pub id: ProcessId,
-    pub command: String,
-    pub args: Vec<String>,
-    pub cwd: String,
-    pub env: Vec<(String, String)>,
-    pub cols: u16,
-    pub rows: u16,
-    pub keep_after_exit: bool,
-}
-
-pub struct ProcessCreated {
-    pub id: ProcessId,
-    pub pid: u32,
-    pub updates: broadcast::Receiver<ProcessUpdate>,
-}
-
-#[derive(Clone)]
-pub struct ProcessRuntime {
-    operations: mpsc::UnboundedSender<ProcessOperation>,
-    wake: mpsc::UnboundedSender<()>,
-}
-
-impl ProcessRuntime {
-    pub fn new(wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
-        let (operations, inbox) = mpsc::unbounded_channel();
-        (
-            Self {
-                operations,
-                wake: wake.clone(),
-            },
+        app.add_systems(
+            Update,
             (
-                ProcessRegistry(Mutex::new(ProcessManager::new(wake))),
-                ProcessOperationInbox(inbox),
-            ),
-        )
+                create,
+                ApplyDeferred,
+                (
+                    subscribe,
+                    input,
+                    mouse_wheel,
+                    scroll_window,
+                    resize,
+                    list,
+                    kill,
+                    snapshot,
+                    set_selection,
+                    extend_selection,
+                    select_word,
+                    select_line,
+                    selection_text,
+                )
+                    .chain(),
+                (
+                    enter_copy_mode,
+                    exit_copy_mode,
+                    copy_mode_key,
+                    count,
+                    output,
+                    transcript,
+                    command_exit,
+                    run_completion,
+                    exit_code,
+                )
+                    .chain(),
+                remove,
+                shutdown,
+                ApplyDeferred,
+                poll,
+            )
+                .chain(),
+        );
+    }
+}
+
+#[derive(Component)]
+struct ProcessDriver(SyncCell<Process>);
+
+#[derive(Component, Clone)]
+struct ProcessShell(String);
+
+#[derive(Component, Clone)]
+struct ProcessDirectory(String);
+
+#[derive(Component, Clone, Copy)]
+struct ProcessSize {
+    cols: u16,
+    rows: u16,
+}
+
+#[derive(Component, Clone, Copy)]
+struct ProcessPid(u32);
+
+#[derive(Component, Clone, Copy)]
+struct ProcessStartedAt(std::time::Instant);
+
+#[derive(Component, Clone)]
+struct ProcessUpdates(broadcast::Sender<ProcessUpdate>);
+
+#[derive(Component, Clone)]
+struct ProcessInput(PtyInputWriter);
+
+#[derive(Component, Clone, Copy)]
+struct ProcessExit(Option<i32>);
+
+#[derive(Component)]
+struct KeepAfterExit;
+
+#[derive(Component)]
+struct Running;
+
+#[derive(Component)]
+struct Exited;
+
+#[derive(SystemParam)]
+struct Processes<'w, 's> {
+    values: Query<'w, 's, (Entity, &'static ProcessId, &'static mut ProcessDriver)>,
+}
+
+impl Processes<'_, '_> {
+    fn contains(&mut self, process_id: ProcessId) -> bool {
+        self.values
+            .iter_mut()
+            .any(|(_, process, _)| *process == process_id)
     }
 
-    pub async fn create(&self, launch: ProcessLaunch) -> Result<ProcessCreated, String> {
-        self.request(|response| ProcessOperation::Create { launch, response })
-            .await?
+    fn entity(&mut self, process_id: ProcessId) -> Option<Entity> {
+        self.values
+            .iter_mut()
+            .find(|(_, process, _)| **process == process_id)
+            .map(|(entity, _, _)| entity)
     }
 
-    pub async fn subscribe(
-        &self,
+    fn read<T>(
+        &mut self,
         process_id: ProcessId,
-    ) -> Result<broadcast::Receiver<ProcessUpdate>, String> {
-        self.request(|response| ProcessOperation::Subscribe {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn input(&self, process_id: ProcessId, data: Vec<u8>) -> Result<(), String> {
-        self.request(|response| ProcessOperation::Input {
-            process_id,
-            data,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn mouse_wheel(
-        &self,
-        process_id: ProcessId,
-        up: bool,
-        col: u16,
-        row: u16,
-        modifiers: u8,
-    ) -> Result<(), String> {
-        self.request(|response| ProcessOperation::MouseWheel {
-            process_id,
-            up,
-            col,
-            row,
-            modifiers,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn scroll_window(
-        &self,
-        process_id: ProcessId,
-        top_row: u32,
-        follow: bool,
-    ) -> Result<(), String> {
-        self.request(|response| ProcessOperation::ScrollWindow {
-            process_id,
-            top_row,
-            follow,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn resize(&self, process_id: ProcessId, cols: u16, rows: u16) -> Result<(), String> {
-        self.request(|response| ProcessOperation::Resize {
-            process_id,
-            cols,
-            rows,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn list(&self) -> Result<Vec<ProcessInfo>, String> {
-        self.request(|response| ProcessOperation::List { response })
-            .await
-    }
-
-    pub async fn remove(&self, process_id: ProcessId) -> Result<(), String> {
-        self.request(|response| ProcessOperation::Remove {
-            process_id,
-            response,
-        })
-        .await
-    }
-
-    pub async fn kill(&self, process_id: ProcessId) -> Result<(), String> {
-        self.request(|response| ProcessOperation::Kill {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn snapshot(&self, process_id: ProcessId) -> Result<ProcessSnapshot, String> {
-        self.request(|response| ProcessOperation::Snapshot {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn set_selection(
-        &self,
-        process_id: ProcessId,
-        range: Option<TermSelectionRange>,
-    ) -> Result<(), String> {
-        self.request(|response| ProcessOperation::SetSelection {
-            process_id,
-            range,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn extend_selection(
-        &self,
-        process_id: ProcessId,
-        col: u16,
-        row: u16,
-    ) -> Result<(), String> {
-        self.request(|response| ProcessOperation::ExtendSelection {
-            process_id,
-            col,
-            row,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn select_word(
-        &self,
-        process_id: ProcessId,
-        col: u16,
-        row: u16,
-    ) -> Result<(), String> {
-        self.request(|response| ProcessOperation::SelectWord {
-            process_id,
-            col,
-            row,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn select_line(&self, process_id: ProcessId, row: u16) -> Result<(), String> {
-        self.request(|response| ProcessOperation::SelectLine {
-            process_id,
-            row,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn selection_text(&self, process_id: ProcessId) -> Result<String, String> {
-        self.request(|response| ProcessOperation::SelectionText {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn enter_copy_mode(&self, process_id: ProcessId) -> Result<(), String> {
-        self.request(|response| ProcessOperation::EnterCopyMode {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn exit_copy_mode(&self, process_id: ProcessId) -> Result<(), String> {
-        self.request(|response| ProcessOperation::ExitCopyMode {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn copy_mode_key(
-        &self,
-        process_id: ProcessId,
-        key: CopyModeKey,
-    ) -> Result<Option<String>, String> {
-        self.request(|response| ProcessOperation::CopyModeKey {
-            process_id,
-            key,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn shutdown(&self) -> Result<(), String> {
-        self.request(|response| ProcessOperation::Shutdown { response })
-            .await
-    }
-
-    pub async fn count(&self) -> Result<u32, String> {
-        self.request(|response| ProcessOperation::Count { response })
-            .await
-    }
-
-    pub async fn output(&self, process_id: ProcessId) -> Result<String, String> {
-        self.request(|response| ProcessOperation::Output {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn transcript(&self, process_id: ProcessId) -> Result<String, String> {
-        self.request(|response| ProcessOperation::Transcript {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn command_exit(&self, process_id: ProcessId) -> Result<AgentCommandExit, String> {
-        self.request(|response| ProcessOperation::CommandExit {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn run_completion(
-        &self,
-        process_id: ProcessId,
-    ) -> Result<AgentRunCompletion, String> {
-        self.request(|response| ProcessOperation::RunCompletion {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn exit_code(&self, process_id: ProcessId) -> Result<Option<i32>, String> {
-        self.request(|response| ProcessOperation::ExitCode {
-            process_id,
-            response,
-        })
-        .await?
-    }
-
-    pub async fn response(
-        &self,
-        request_id: AgentRequestId,
-        request: &AgentRequest,
-    ) -> Result<Option<ServiceMessage>, String> {
-        if let Some(request) = request.decode::<AgentReadProcessOutput>()? {
-            return Ok(Some(ServiceMessage::AgentQueryResult(
-                AgentQueryResult::text(request_id, self.output(request.process_id).await),
-            )));
-        }
-        if let Some(request) = request.decode::<AgentReadProcessTranscript>()? {
-            return Ok(Some(ServiceMessage::AgentQueryResult(
-                AgentQueryResult::text(request_id, self.transcript(request.process_id).await),
-            )));
-        }
-        if let Some(request) = request.decode::<AgentProcessCommandExit>()? {
-            let result = self.command_exit(request.process_id).await.map(|result| {
-                let exit = result
-                    .exit
-                    .map_or_else(|| "null".to_string(), |code| code.to_string());
-                format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence)
-            });
-            return Ok(Some(ServiceMessage::AgentQueryResult(
-                AgentQueryResult::text(request_id, result),
-            )));
-        }
-        if let Some(request) = request.decode::<AgentProcessRunCompletion>()? {
-            let result = self.run_completion(request.process_id).await.map(|result| {
-                let token = result
-                    .token
-                    .map_or_else(|| "null".to_string(), |token| format!("\"{token}\""));
-                let exit = result
-                    .exit
-                    .map_or_else(|| "null".to_string(), |code| code.to_string());
-                format!("{{\"token\":{token},\"exit\":{exit}}}")
-            });
-            return Ok(Some(ServiceMessage::AgentQueryResult(
-                AgentQueryResult::text(request_id, result),
-            )));
-        }
-        Ok(None)
-    }
-
-    async fn request<T>(
-        &self,
-        operation: impl FnOnce(oneshot::Sender<T>) -> ProcessOperation,
+        read: impl FnOnce(&Process) -> T,
     ) -> Result<T, String> {
-        let (response, receiver) = oneshot::channel();
-        self.operations
-            .send(operation(response))
-            .map_err(|_| "process runtime unavailable".to_string())?;
-        self.wake
-            .send(())
-            .map_err(|_| "process runtime unavailable".to_string())?;
-        receiver
-            .await
-            .map_err(|_| "process operation was cancelled".to_string())
+        let (_, _, mut driver) = self
+            .values
+            .iter_mut()
+            .find(|(_, process, _)| **process == process_id)
+            .ok_or_else(|| format!("process not found: {process_id}"))?;
+        Ok(read(driver.0.get()))
+    }
+
+    fn mutate<T>(
+        &mut self,
+        process_id: ProcessId,
+        mutate: impl FnOnce(&mut Process) -> T,
+    ) -> Result<T, String> {
+        let (_, _, mut driver) = self
+            .values
+            .iter_mut()
+            .find(|(_, process, _)| **process == process_id)
+            .ok_or_else(|| format!("process not found: {process_id}"))?;
+        Ok(mutate(driver.0.get()))
     }
 }
 
-#[derive(Component)]
-struct ProcessRegistry(Mutex<ProcessManager>);
-
-#[derive(Component)]
-struct ProcessOperationInbox(mpsc::UnboundedReceiver<ProcessOperation>);
-
-enum ProcessOperation {
-    Create {
-        launch: ProcessLaunch,
-        response: oneshot::Sender<Result<ProcessCreated, String>>,
-    },
-    Subscribe {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<broadcast::Receiver<ProcessUpdate>, String>>,
-    },
-    Input {
-        process_id: ProcessId,
-        data: Vec<u8>,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    MouseWheel {
-        process_id: ProcessId,
-        up: bool,
-        col: u16,
-        row: u16,
-        modifiers: u8,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    ScrollWindow {
-        process_id: ProcessId,
-        top_row: u32,
-        follow: bool,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    Resize {
-        process_id: ProcessId,
-        cols: u16,
-        rows: u16,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    List {
-        response: oneshot::Sender<Vec<ProcessInfo>>,
-    },
-    Remove {
-        process_id: ProcessId,
-        response: oneshot::Sender<()>,
-    },
-    Kill {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    Snapshot {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<ProcessSnapshot, String>>,
-    },
-    SetSelection {
-        process_id: ProcessId,
-        range: Option<TermSelectionRange>,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    ExtendSelection {
-        process_id: ProcessId,
-        col: u16,
-        row: u16,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    SelectWord {
-        process_id: ProcessId,
-        col: u16,
-        row: u16,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    SelectLine {
-        process_id: ProcessId,
-        row: u16,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    SelectionText {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<String, String>>,
-    },
-    EnterCopyMode {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    ExitCopyMode {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    CopyModeKey {
-        process_id: ProcessId,
-        key: CopyModeKey,
-        response: oneshot::Sender<Result<Option<String>, String>>,
-    },
-    Shutdown {
-        response: oneshot::Sender<()>,
-    },
-    Count {
-        response: oneshot::Sender<u32>,
-    },
-    Output {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<String, String>>,
-    },
-    Transcript {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<String, String>>,
-    },
-    CommandExit {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<AgentCommandExit, String>>,
-    },
-    RunCompletion {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<AgentRunCompletion, String>>,
-    },
-    ExitCode {
-        process_id: ProcessId,
-        response: oneshot::Sender<Result<Option<i32>, String>>,
-    },
-}
-
-fn apply_operations(mut runtime: Query<(&mut ProcessRegistry, &mut ProcessOperationInbox)>) {
-    let Ok((registry, mut inbox)) = runtime.single_mut() else {
-        return;
-    };
-    let Ok(mut processes) = registry.0.lock() else {
-        return;
-    };
-    while let Ok(operation) = inbox.0.try_recv() {
-        match operation {
-            ProcessOperation::Create { launch, response } => {
-                let result = processes
-                    .create_process(
-                        launch.id,
-                        launch.command,
-                        launch.args,
-                        launch.cwd,
-                        launch.env,
-                        launch.cols,
-                        launch.rows,
-                    )
-                    .and_then(|(id, pid)| {
-                        let process = processes
-                            .processes
-                            .get_mut(&id)
-                            .ok_or_else(|| format!("process not found after creation: {id}"))?;
-                        if launch.keep_after_exit {
-                            process.set_keep_after_exit();
-                        }
-                        Ok(ProcessCreated {
-                            id,
-                            pid,
-                            updates: process.subscribe(),
-                        })
-                    });
-                let _ = response.send(result);
-            }
-            ProcessOperation::Subscribe {
-                process_id,
-                response,
-            } => {
-                let result = processes
-                    .processes
-                    .get(&process_id)
-                    .map(Process::subscribe)
-                    .ok_or_else(|| format!("process not found: {process_id}"));
-                let _ = response.send(result);
-            }
-            ProcessOperation::Input {
-                process_id,
-                data,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    if !process.is_copy_mode() {
-                        process.write_input(&data);
-                    }
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::MouseWheel {
-                process_id,
-                up,
-                col,
-                row,
-                modifiers,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.handle_mouse_wheel(up, col, row, modifiers)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::ScrollWindow {
-                process_id,
-                top_row,
-                follow,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.handle_scroll_window(top_row, follow)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::Resize {
-                process_id,
-                cols,
-                rows,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.resize(cols, rows)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::List { response } => {
-                let mut list = Vec::new();
-                for process in processes.processes.values() {
-                    list.push(process.info());
+fn create(
+    mut requests: Single<&mut RuntimeInbox<runtime::CreateRequest>>,
+    wake: Single<&ProcessWake>,
+    mut processes: Processes,
+    mut commands: Commands,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let runtime::CreateRequest { launch, reply } = request;
+        let result = if processes.contains(launch.id) {
+            Err(format!("process already exists: {}", launch.id))
+        } else {
+            Process::new_with_wake(
+                launch.id,
+                launch.command,
+                launch.args,
+                launch.cwd,
+                launch.env,
+                launch.cols,
+                launch.rows,
+                wake.0.clone(),
+            )
+            .map(|mut process| {
+                if launch.keep_after_exit {
+                    process.set_keep_after_exit();
                 }
-                let _ = response.send(list);
-            }
-            ProcessOperation::Remove {
-                process_id,
-                response,
-            } => {
-                processes.remove_process(&process_id);
-                let _ = response.send(());
-            }
-            ProcessOperation::Kill {
-                process_id,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, Process::kill);
-                let _ = response.send(result);
-            }
-            ProcessOperation::Snapshot {
-                process_id,
-                response,
-            } => {
-                let result = process_ref(&processes, process_id, Process::snapshot);
-                let _ = response.send(result);
-            }
-            ProcessOperation::SetSelection {
-                process_id,
-                range,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.set_selection(range)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::ExtendSelection {
-                process_id,
-                col,
-                row,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.extend_selection_to(col, row)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::SelectWord {
-                process_id,
-                col,
-                row,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.select_word_at(col, row)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::SelectLine {
-                process_id,
-                row,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.select_line_at(row)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::SelectionText {
-                process_id,
-                response,
-            } => {
-                let result = process_ref(&processes, process_id, |process| {
-                    process.selection_text().unwrap_or_default()
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::EnterCopyMode {
-                process_id,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, Process::enter_copy_mode);
-                let _ = response.send(result);
-            }
-            ProcessOperation::ExitCopyMode {
-                process_id,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, Process::exit_copy_mode);
-                let _ = response.send(result);
-            }
-            ProcessOperation::CopyModeKey {
-                process_id,
-                key,
-                response,
-            } => {
-                let result = process_mut(&mut processes, process_id, |process| {
-                    process.copy_mode_key(key)
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::Shutdown { response } => {
-                processes.shutdown();
-                let _ = response.send(());
-            }
-            ProcessOperation::Count { response } => {
-                let _ = response.send(processes.processes.len() as u32);
-            }
-            ProcessOperation::Output {
-                process_id,
-                response,
-            } => {
-                let result = process_ref(&processes, process_id, Process::visible_text);
-                let _ = response.send(result);
-            }
-            ProcessOperation::Transcript {
-                process_id,
-                response,
-            } => {
-                let result = process_ref(&processes, process_id, Process::full_text);
-                let _ = response.send(result);
-            }
-            ProcessOperation::CommandExit {
-                process_id,
-                response,
-            } => {
-                let result = process_ref(&processes, process_id, |process| {
-                    let (sequence, exit) = process.command_status();
-                    AgentCommandExit { sequence, exit }
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::RunCompletion {
-                process_id,
-                response,
-            } => {
-                let result = process_ref(&processes, process_id, |process| {
-                    let (token, exit) = match process.run_completion() {
-                        Some((token, exit)) => (Some(token), Some(exit)),
-                        None => (None, None),
-                    };
-                    AgentRunCompletion { token, exit }
-                });
-                let _ = response.send(result);
-            }
-            ProcessOperation::ExitCode {
-                process_id,
-                response,
-            } => {
-                let result = process_ref(&processes, process_id, Process::process_exit);
-                let _ = response.send(result);
-            }
-        }
+                let updates = process.updates();
+                let input = process.input_writer();
+                let created = ProcessCreated {
+                    id: process.id,
+                    pid: process.pid,
+                    updates: updates.subscribe(),
+                };
+                let mut entity = commands.spawn((
+                    Name::new(format!("Process {}", process.id)),
+                    process.id,
+                    ProcessShell(process.shell.clone()),
+                    ProcessDirectory(process.cwd.clone()),
+                    ProcessSize {
+                        cols: process.cols,
+                        rows: process.rows,
+                    },
+                    ProcessPid(process.pid),
+                    ProcessStartedAt(process.created_at),
+                    ProcessUpdates(updates),
+                    ProcessInput(input),
+                    ProcessExit(process.process_exit()),
+                    Running,
+                    ProcessDriver(SyncCell::new(process)),
+                ));
+                if launch.keep_after_exit {
+                    entity.insert(KeepAfterExit);
+                }
+                created
+            })
+        };
+        let _ = reply.send(result);
     }
 }
 
-fn poll_processes(runtime: Query<&ProcessRegistry>) {
-    let Ok(registry) = runtime.single() else {
-        return;
-    };
-    let Ok(mut processes) = registry.0.lock() else {
-        return;
-    };
-    processes.reap_exited();
+fn subscribe(
+    mut requests: Single<&mut RuntimeInbox<runtime::SubscribeRequest>>,
+    processes: Query<(&ProcessId, &ProcessUpdates)>,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes
+            .iter()
+            .find(|(process, _)| **process == request.process_id)
+            .map(|(_, updates)| updates.0.subscribe())
+            .ok_or_else(|| format!("process not found: {}", request.process_id));
+        let _ = request.reply.send(result);
+    }
 }
 
-fn process_ref<T>(
-    processes: &ProcessManager,
-    process_id: ProcessId,
-    read: impl FnOnce(&Process) -> T,
-) -> Result<T, String> {
-    processes
-        .processes
-        .get(&process_id)
-        .map(read)
-        .ok_or_else(|| format!("process not found: {process_id}"))
+fn input(
+    mut requests: Single<&mut RuntimeInbox<runtime::InputRequest>>,
+    mut processes: Processes,
+    inputs: Query<(&ProcessId, &ProcessInput)>,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes
+            .read(request.process_id, Process::is_copy_mode)
+            .and_then(|copy_mode| {
+                if copy_mode {
+                    return Ok(());
+                }
+                let input = inputs
+                    .iter()
+                    .find(|(process, _)| **process == request.process_id)
+                    .map(|(_, input)| input)
+                    .ok_or_else(|| format!("process not found: {}", request.process_id))?;
+                Process::write_input_to_writer(&input.0, &request.data);
+                Ok(())
+            });
+        let _ = request.reply.send(result);
+    }
 }
 
-fn process_mut<T>(
-    processes: &mut ProcessManager,
-    process_id: ProcessId,
-    mutate: impl FnOnce(&mut Process) -> T,
-) -> Result<T, String> {
-    processes
-        .processes
-        .get_mut(&process_id)
-        .map(mutate)
-        .ok_or_else(|| format!("process not found: {process_id}"))
+fn mouse_wheel(
+    mut requests: Single<&mut RuntimeInbox<runtime::MouseWheelRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, |process| {
+            process.handle_mouse_wheel(request.up, request.col, request.row, request.modifiers)
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn scroll_window(
+    mut requests: Single<&mut RuntimeInbox<runtime::ScrollWindowRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, |process| {
+            process.handle_scroll_window(request.top_row, request.follow)
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn resize(
+    mut requests: Single<&mut RuntimeInbox<runtime::ResizeRequest>>,
+    mut processes: Processes,
+    mut sizes: Query<&mut ProcessSize>,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let entity = processes.entity(request.process_id);
+        let result = processes.mutate(request.process_id, |process| {
+            process.resize(request.cols, request.rows)
+        });
+        if result.is_ok()
+            && let Some(entity) = entity
+            && let Ok(mut size) = sizes.get_mut(entity)
+        {
+            size.cols = request.cols;
+            size.rows = request.rows;
+        }
+        let _ = request.reply.send(result);
+    }
+}
+
+fn list(
+    mut requests: Single<&mut RuntimeInbox<runtime::ListRequest>>,
+    processes: Query<(
+        &ProcessId,
+        &ProcessShell,
+        &ProcessDirectory,
+        &ProcessSize,
+        &ProcessPid,
+        &ProcessStartedAt,
+    )>,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let mut values = Vec::new();
+        for (id, shell, directory, size, pid, started_at) in &processes {
+            values.push(ProcessInfo {
+                id: *id,
+                shell: shell.0.clone(),
+                cwd: directory.0.clone(),
+                cols: size.cols,
+                rows: size.rows,
+                pid: pid.0,
+                created_at_secs: started_at.0.elapsed().as_secs(),
+            });
+        }
+        let _ = request.reply.send(values);
+    }
+}
+
+fn remove(
+    mut requests: Single<&mut RuntimeInbox<runtime::RemoveRequest>>,
+    mut processes: Processes,
+    mut commands: Commands,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        if let Some(entity) = processes.entity(request.process_id) {
+            let _ = processes.mutate(request.process_id, Process::kill);
+            commands.entity(entity).despawn();
+        }
+        let _ = request.reply.send(());
+    }
+}
+
+fn kill(mut requests: Single<&mut RuntimeInbox<runtime::KillRequest>>, mut processes: Processes) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, Process::kill);
+        let _ = request.reply.send(result);
+    }
+}
+
+fn snapshot(
+    mut requests: Single<&mut RuntimeInbox<runtime::SnapshotRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.read(request.process_id, Process::snapshot);
+        let _ = request.reply.send(result);
+    }
+}
+
+fn set_selection(
+    mut requests: Single<&mut RuntimeInbox<runtime::SetSelectionRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, |process| {
+            process.set_selection(request.range)
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn extend_selection(
+    mut requests: Single<&mut RuntimeInbox<runtime::ExtendSelectionRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, |process| {
+            process.extend_selection_to(request.col, request.row)
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn select_word(
+    mut requests: Single<&mut RuntimeInbox<runtime::SelectWordRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, |process| {
+            process.select_word_at(request.col, request.row)
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn select_line(
+    mut requests: Single<&mut RuntimeInbox<runtime::SelectLineRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, |process| {
+            process.select_line_at(request.row)
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn selection_text(
+    mut requests: Single<&mut RuntimeInbox<runtime::SelectionTextRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.read(request.process_id, |process| {
+            process.selection_text().unwrap_or_default()
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn enter_copy_mode(
+    mut requests: Single<&mut RuntimeInbox<runtime::EnterCopyModeRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, Process::enter_copy_mode);
+        let _ = request.reply.send(result);
+    }
+}
+
+fn exit_copy_mode(
+    mut requests: Single<&mut RuntimeInbox<runtime::ExitCopyModeRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, Process::exit_copy_mode);
+        let _ = request.reply.send(result);
+    }
+}
+
+fn copy_mode_key(
+    mut requests: Single<&mut RuntimeInbox<runtime::CopyModeRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.mutate(request.process_id, |process| {
+            process.copy_mode_key(request.key)
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn shutdown(
+    mut requests: Single<&mut RuntimeInbox<runtime::ShutdownRequest>>,
+    mut processes: Processes,
+    mut commands: Commands,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        for (entity, _, mut driver) in &mut processes.values {
+            driver.0.get().kill();
+            commands.entity(entity).despawn();
+        }
+        let _ = request.reply.send(());
+    }
+}
+
+fn count(
+    mut requests: Single<&mut RuntimeInbox<runtime::CountRequest>>,
+    processes: Query<&ProcessId, With<ProcessDriver>>,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let _ = request.reply.send(processes.iter().count() as u32);
+    }
+}
+
+fn output(
+    mut requests: Single<&mut RuntimeInbox<runtime::OutputRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.read(request.process_id, Process::visible_text);
+        let _ = request.reply.send(result);
+    }
+}
+
+fn transcript(
+    mut requests: Single<&mut RuntimeInbox<runtime::TranscriptRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.read(request.process_id, Process::full_text);
+        let _ = request.reply.send(result);
+    }
+}
+
+fn command_exit(
+    mut requests: Single<&mut RuntimeInbox<runtime::CommandExitRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.read(request.process_id, |process| {
+            let (sequence, exit) = process.command_status();
+            AgentCommandExit { sequence, exit }
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn run_completion(
+    mut requests: Single<&mut RuntimeInbox<runtime::RunCompletionRequest>>,
+    mut processes: Processes,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes.read(request.process_id, |process| {
+            let (token, exit) = match process.run_completion() {
+                Some((token, exit)) => (Some(token), Some(exit)),
+                None => (None, None),
+            };
+            AgentRunCompletion { token, exit }
+        });
+        let _ = request.reply.send(result);
+    }
+}
+
+fn exit_code(
+    mut requests: Single<&mut RuntimeInbox<runtime::ExitCodeRequest>>,
+    processes: Query<(&ProcessId, &ProcessExit)>,
+) {
+    while let Ok(request) = requests.0.try_recv() {
+        let result = processes
+            .iter()
+            .find(|(process, _)| **process == request.process_id)
+            .map(|(_, exit)| exit.0)
+            .ok_or_else(|| format!("process not found: {}", request.process_id));
+        let _ = request.reply.send(result);
+    }
+}
+
+fn poll(
+    mut processes: Query<(
+        Entity,
+        &mut ProcessDriver,
+        &mut ProcessExit,
+        Option<&KeepAfterExit>,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, mut driver, mut exit, keep_after_exit) in &mut processes {
+        let process = driver.0.get();
+        let exited = process.poll();
+        exit.0 = process.process_exit();
+        if !exited {
+            continue;
+        }
+        if keep_after_exit.is_some() {
+            commands.entity(entity).remove::<Running>().insert(Exited);
+            continue;
+        }
+        process.kill();
+        commands.entity(entity).despawn();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::prelude::{App, MinimalPlugins, Name};
+    use tokio::sync::mpsc;
+
+    use crate::ProcessRuntime;
 
     #[tokio::test]
     async fn missing_process_query_is_answered_by_ecs() {

@@ -12,12 +12,12 @@ use bevy::{
 use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
+use vmux_command::CommandInvocation;
 #[cfg(test)]
 use vmux_command::CommandManifest;
-use vmux_command::{CommandInvocation, CommandRegistry};
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -41,7 +41,6 @@ impl Plugin for StackPlugin {
             .add_message::<FocusRequest>()
             .add_message::<MoveRequest>()
             .add_message::<PageOpenRequest>()
-            .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
             .add_systems(
                 Startup,
                 open_startup_url_if_no_stacks
@@ -87,6 +86,7 @@ pub struct CloseStackSet;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct OpenStartupPageSet;
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub url: Option<String>,
@@ -105,6 +105,7 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseRequest;
 
@@ -116,6 +117,7 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusRequest(pub SiblingDirection);
 
@@ -131,6 +133,7 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MoveRequest(pub SiblingDirection);
 
@@ -144,13 +147,6 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
             _ => Err(()),
         }
     }
-}
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenRequest>(&mut commands);
-    registry.message::<CloseRequest>(&mut commands);
-    registry.message::<FocusRequest>(&mut commands);
-    registry.message::<MoveRequest>(&mut commands);
 }
 
 #[derive(Component)]

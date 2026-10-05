@@ -9,7 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
-use vmux_extension::{crx, manifest, store};
+use vmux_extension::{crx, driver, store};
 
 const CHROMIUM_MAJOR: u32 = 148;
 const CONFORMANCE_PROFILE: &str = "extension-conformance";
@@ -540,7 +540,7 @@ fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Re
     let store = store::ExtensionStore::at(&root);
     let manifest_text = std::fs::read_to_string(extension.join("manifest.json"))
         .map_err(|error| error.to_string())?;
-    let parsed = manifest::ExtensionManifest::parse(&manifest_text)?;
+    let parsed = driver::ExtensionManifest::parse(&manifest_text)?;
     let source = store.source_dir(extension_id, &parsed.version);
     copy_tree(extension, &source)?;
     let source_hash = store.source_hash(&source)?;

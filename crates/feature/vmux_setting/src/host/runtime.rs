@@ -1,12 +1,12 @@
+use crate::SearchEngineSetting;
 use crate::schema::{FieldSpec, SectionSpec};
-use crate::{SearchEngine, SearchEngineSetting};
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
-use vmux_ecs::host::manifest::FeatureManifest;
+use vmux_ecs::manifest::FeatureManifest;
 pub use vmux_layout::settings::LayoutSettings;
 use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]
@@ -25,6 +25,7 @@ impl Plugin for SettingsRuntimePlugin {
         app.add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
             .init_resource::<SettingsDefaults>()
+            .init_resource::<crate::themes::TerminalColorSchemes>()
             .configure_sets(
                 Startup,
                 SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
@@ -50,7 +51,7 @@ impl Plugin for SettingsRuntimePlugin {
 fn spawn_settings_runtime(mut commands: Commands) {
     commands.spawn((
         Name::new("Settings runtime"),
-        SearchEngineSetting::default(),
+        SearchEngineSetting("google".to_string()),
         LastSelfWriteHash::default(),
         SettingsSaveDebounce::default(),
     ));
@@ -863,8 +864,8 @@ impl KeyComboDef {
 pub struct BrowserSettings {
     #[serde(default)]
     pub startup_url: String,
-    #[serde(default)]
-    pub search_engine: SearchEngine,
+    #[serde(default = "default_search_engine")]
+    pub search_engine: String,
     #[serde(default)]
     pub bookmarks: Vec<String>,
     #[serde(default)]
@@ -881,10 +882,14 @@ pub struct BookmarkFolderSettings {
 fn default_browser_settings() -> BrowserSettings {
     BrowserSettings {
         startup_url: String::new(),
-        search_engine: SearchEngine::default(),
+        search_engine: default_search_engine(),
         bookmarks: Vec::new(),
         bookmark_folders: Vec::new(),
     }
+}
+
+fn default_search_engine() -> String {
+    "google".to_string()
 }
 
 impl Default for BrowserSettings {
@@ -1046,6 +1051,8 @@ pub(super) struct SettingsManifest {
     pub fields: Vec<FieldSpec>,
     #[serde(default)]
     defaults: PartialAppSettings,
+    #[serde(default)]
+    terminal_color_schemes: Vec<crate::themes::TerminalColorSchemeRon>,
 }
 
 #[derive(Component)]
@@ -1147,6 +1154,7 @@ fn register_manifests(
 fn compose_defaults(
     manifests: Query<(Option<&Name>, &FeatureManifest, Option<&SettingsManifest>)>,
     mut defaults: ResMut<SettingsDefaults>,
+    mut color_schemes: ResMut<crate::themes::TerminalColorSchemes>,
 ) {
     let mut manifests = manifests.iter().collect::<Vec<_>>();
     manifests.sort_by(|left, right| {
@@ -1160,6 +1168,7 @@ fn compose_defaults(
     for (_, feature, manifest) in manifests {
         if let Some(manifest) = manifest {
             manifest.defaults.apply_to(&mut settings);
+            color_schemes.extend(manifest.terminal_color_schemes.clone());
         }
         for page in &feature.pages {
             if let Some(order) = page.bookmark {
@@ -1186,8 +1195,10 @@ fn parse_with_defaults(
         })
 }
 
-fn read_settings_and_path(defaults: &AppSettings) -> (AppSettings, Option<std::path::PathBuf>) {
-    let path = vmux_ecs::profile::ProfilePaths::current().settings();
+fn read_settings_and_path(
+    defaults: &AppSettings,
+    path: std::path::PathBuf,
+) -> (AppSettings, Option<std::path::PathBuf>) {
     let parent_ready = path
         .parent()
         .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
@@ -1213,10 +1224,15 @@ fn read_settings_and_path(defaults: &AppSettings) -> (AppSettings, Option<std::p
 
 fn load_settings(
     defaults: Res<SettingsDefaults>,
+    profile: vmux_ecs::profile::CurrentProfile,
     mut commands: Commands,
     runtime: Single<Entity, With<LastSelfWriteHash>>,
 ) {
-    let (settings, config_path) = read_settings_and_path(&defaults.0);
+    let config_path = profile.paths().map(|paths| paths.settings());
+    let (settings, config_path) = match config_path {
+        Some(path) => read_settings_and_path(&defaults.0, path),
+        None => (defaults.0.clone(), None),
+    };
     vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
 
     commands.insert_resource(settings.layout.clone());
@@ -1323,7 +1339,7 @@ fn sync_search_engine(
         return;
     };
     if search_engine.0 != settings.browser.search_engine {
-        search_engine.0 = settings.browser.search_engine;
+        search_engine.0.clone_from(&settings.browser.search_engine);
     }
 }
 
@@ -1865,7 +1881,7 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: String::new(),
-                search_engine: SearchEngine::default(),
+                search_engine: default_search_engine(),
                 bookmarks: Default::default(),
                 bookmark_folders: Default::default(),
             },
@@ -2586,13 +2602,13 @@ mod tests {
         let s = parse_settings("()").unwrap();
         assert_eq!(s.shortcuts.leader.key, "b");
         assert!(s.browser.startup_url.is_empty());
-        assert_eq!(s.browser.search_engine, SearchEngine::Google);
+        assert_eq!(s.browser.search_engine, "google");
     }
 
     #[test]
     fn parse_settings_selects_search_engine() {
-        let s = parse_settings(r#"(browser: (search_engine: duckduckgo))"#).unwrap();
-        assert_eq!(s.browser.search_engine, SearchEngine::DuckDuckGo);
+        let s = parse_settings(r#"(browser: (search_engine: "duckduckgo"))"#).unwrap();
+        assert_eq!(s.browser.search_engine, "duckduckgo");
     }
 
     #[test]

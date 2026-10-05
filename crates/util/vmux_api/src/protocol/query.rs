@@ -1,8 +1,29 @@
 use super::AgentRequestId;
+use crate::ProcessId;
 use crate::json::JsonValue;
 
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentListCommands;
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentReadProcessOutput {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentReadProcessTranscript {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentProcessCommandExit {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentProcessRunCompletion {
+    pub process_id: ProcessId,
+}
 
 #[vmux_api::contract(Eq)]
 pub struct AgentSpace {

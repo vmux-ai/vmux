@@ -42,6 +42,9 @@ pub struct FileHoverRequest {
 }
 
 #[vmux_api::ui_event(Copy, Eq)]
+pub struct FileHoverDismissRequest;
+
+#[vmux_api::ui_event(Copy, Eq)]
 pub struct FileDefinitionRequest {
     pub line: u32,
     pub col: u32,
@@ -54,10 +57,26 @@ pub struct FileRenameRequest {
     pub new_name: String,
 }
 
+#[vmux_api::ui_event(Eq)]
+pub struct FileRenameDraftRequest {
+    pub draft: String,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileRenameDismissRequest;
+
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct FileCodeActionPick {
     pub index: u32,
 }
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileCodeActionMoveRequest {
+    pub next: bool,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileCodeActionDismissRequest;
 
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct FileReferencesRequest {

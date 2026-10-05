@@ -5,6 +5,8 @@ use std::str::FromStr;
 pub struct VmuxRoute(url::Url);
 
 impl VmuxRoute {
+    pub const SESSIONS_ROOT: &str = "vmux://sessions/";
+
     pub fn parse(value: &str) -> Option<Self> {
         Self::try_from(value).ok()
     }
@@ -43,6 +45,13 @@ impl VmuxRoute {
 
     pub fn is_terminal(&self) -> bool {
         self.is_host("terminal")
+    }
+
+    pub fn agent_id(&self) -> Option<&str> {
+        if !self.is_agent() {
+            return None;
+        }
+        self.path_segments().next()
     }
 
     pub fn supports_inline_transition(&self) -> bool {
@@ -215,6 +224,18 @@ mod tests {
         assert_eq!(
             VmuxRoute::canonical("vmux://lsp/?source=menu#catalog").as_deref(),
             Some("vmux://tools/lsp?source=menu#catalog")
+        );
+    }
+
+    #[test]
+    fn agent_id_reads_canonical_and_legacy_routes() {
+        for url in ["vmux://sessions/codex/cli", "vmux://agent/codex/cli"] {
+            let route = VmuxRoute::parse(url).unwrap();
+            assert_eq!(route.agent_id(), Some("codex"));
+        }
+        assert_eq!(
+            VmuxRoute::parse("vmux://terminal/").unwrap().agent_id(),
+            None
         );
     }
 

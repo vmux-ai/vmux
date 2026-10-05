@@ -26,9 +26,9 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                 }
                 if chat.mcp_menu_open() {
                     McpMenu {
-                        connections: chat.mcp,
+                        state: chat.mcp.value.read().clone(),
                         entries: chat.filtered_mcp_servers(),
-                        selected: (chat.slash.menu_sel)(),
+                        selected: chat.list_selection(),
                         on_select: move |index| chat.choose_list(index),
                         on_hover: move |index| chat.point_at_list(index),
                         on_dismiss: move |()| chat.dismiss_selector(),
@@ -85,7 +85,7 @@ fn ChatComposer(chat: Chat) -> Element {
                 if chat.streaming() {
                     chat.stop_or_flush();
                 } else if chat.mcp_menu_open() {
-                    chat.choose_list((chat.slash.menu_sel)());
+                    chat.choose_list(chat.list_selection());
                 } else {
                     chat.submit();
                 }

@@ -82,7 +82,6 @@
                 "LayoutOverlayEvent",
                 "RemoteCopyEvent",
                 "RemoteRevokeRequest",
-                "CommandBarPanelRequest",
                 "BookmarkToggleRequest",
                 "BookmarkMenuRootRequest",
                 "BookmarkMenuPinRequest",
@@ -104,6 +103,15 @@
                 "BookmarkFolderRemoveRequest",
                 "BookmarkTextInputRequest",
                 "BookmarkContextMenuRequest",
+                "BookmarkFolderEditOpenRequest",
+                "BookmarkRenameEditOpenRequest",
+                "BookmarkEditInputRequest",
+                "BookmarkEditSubmitRequest",
+                "BookmarkEditCloseRequest",
+                "SpaceFormOpenRequest",
+                "SpaceFormInputRequest",
+                "SpaceFormCloseRequest",
+                "SpaceRenameRequest",
                 "TeamEvent",
                 "TeamOpenRequest",
                 "TeamMemberFocusRequest",
@@ -183,7 +191,7 @@
     tools: [
             (
                 name: "open_page",
-                description: r#"Open a page using vmux auto placement. Omit `direction` so vmux reuses the existing matching bucket first (terminal pages with terminals, browser pages with browsers) and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate (vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false."#,
+                description: r#"Open a page using the placement policy declared by its feature. Omit `direction` to allow feature-defined reuse, grouping, and split preferences. direction overrides that policy with a forced adjacent open: right|left|top|bottom. focus defaults false."#,
                 input_schema: (
                     type: Object,
                     required: ["url"],
@@ -219,7 +227,7 @@
         
         Atomicity: all changes apply as one transaction. If validation fails (duplicate ids, malformed payload), nothing is applied.
         
-        Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to create a new node; a new stack needs url (use vmux://terminal/ for a terminal, anything else loads as a browser), a new pane needs at least one stack, a new tab needs name."#,
+        Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to create a new node; a new stack needs a URL handled by a registered feature, a new pane needs at least one stack, and a new tab needs a name."#,
                 input_schema: (
                     type: Object,
                     required: ["tabs", "focused"],
@@ -342,6 +350,7 @@
                 label: "Toggle Active",
                 group: "Bookmark",
                 shortcuts: [(shortcut: Direct("Super+d"), when: None)],
+                toolbar: Some((icon: Bookmark, rank: 0)),
             ),
             (id: "bookmark_pin_active", label: "Pin Active", group: "Bookmark"),
             (

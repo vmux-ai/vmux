@@ -208,7 +208,7 @@ impl ToolStore {
 
     pub fn set_managed_package(
         &self,
-        provider: ToolProvider,
+        provider: &ToolProvider,
         name: &str,
         managed: bool,
     ) -> Result<(), String> {

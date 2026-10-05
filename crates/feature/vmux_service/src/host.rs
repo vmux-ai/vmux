@@ -20,6 +20,7 @@ pub mod plugin;
 pub mod registry;
 pub mod runner;
 pub mod server;
+mod server_driver;
 #[cfg(target_os = "macos")]
 pub mod sm_app_service;
 pub mod supervisor;

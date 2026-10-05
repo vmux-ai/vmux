@@ -4,8 +4,8 @@ use vmux_api::protocol::AgentRequest;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet};
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet};
 
 mod bridge;
 mod bridge_page;
@@ -22,7 +22,7 @@ mod tabs;
 mod template;
 mod windows;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct ExtensionPlugin;
 
 impl Plugin for ExtensionPlugin {
@@ -62,10 +62,9 @@ impl Plugin for ExtensionPlugin {
             .collect();
         app.world_mut().spawn((Name::new("Extensions"), prepared));
         app.add_agent_request::<AgentBrowserInstallExtension>()
-            .bind_tool::<BrowserInstallExtensionArgs>()
             .add_plugins((
                 crate::catalog::ExtensionCatalogPlugin,
-                vmux_ecs::host::UiStatePlugin::<vmux_api::extension::ExtensionsEvent>::default(),
+                vmux_ecs::UiStatePlugin::<vmux_api::extension::ExtensionsUiState>::default(),
                 bridge::ExtensionBridgePlugin::new(profile, registrations),
                 bridge_page::ExtensionBridgePagePlugin,
                 broker::ExtensionBrokerPlugin,
@@ -92,7 +91,7 @@ struct AgentBrowserInstallExtension {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserInstallExtensionArgs {
+struct BrowserInstallExtension {
     source: String,
 }
 
@@ -112,7 +111,7 @@ fn request_install(
 
 fn encode_install(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserInstallExtensionArgs), AddedTool<BrowserInstallExtensionArgs>>,
+    requests: Query<(Entity, &BrowserInstallExtension), AddedTool<BrowserInstallExtension>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.source.trim().is_empty() {

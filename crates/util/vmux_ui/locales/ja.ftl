@@ -154,6 +154,9 @@ lsp-status-running = 実行中
 lsp-status-failed = 失敗
 
 spaces-title = スペース
+space-initialize-git-question = Git リポジトリを初期化しますか？
+space-initialize-git = Git を初期化
+space-not-now = 今はしない
 spaces-new-placeholder = 新しいスペース名
 spaces-empty = スペースがありません
 spaces-default-name = スペース { $number }

@@ -11,16 +11,16 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::{CommandDefinition, ResolvedLocale};
 use vmux_command::{KeyCombo, KeyContext, Keymap, Shortcut};
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
 use vmux_input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
-use vmux_layout::native_open::HostedUiPlugin;
+use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::stack::FocusedStack;
 use vmux_layout::window::WindowHierarchy;
 use vmux_ui::i18n::Locale;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct ShortcutPlugin;
 
 impl Plugin for ShortcutPlugin {
@@ -33,7 +33,7 @@ impl Plugin for ShortcutPlugin {
             crate::input::InputPlugin,
             HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
             UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
-            vmux_ecs::host::UiStatePlugin::<ShortcutUiState>::default(),
+            vmux_ecs::UiStatePlugin::<ShortcutUiState>::default(),
         ))
         .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
@@ -432,7 +432,7 @@ fn expire_probe(mut views: Query<&mut Shortcuts>) {
 
 fn publish_state(views: Query<(Entity, &Shortcuts), Changed<Shortcuts>>, mut commands: Commands) {
     for (entity, view) in &views {
-        commands.trigger(vmux_ecs::host::UiStateWrite::<ShortcutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<ShortcutUiState>::from_event(
             entity,
             &view.project(),
         ));
@@ -594,7 +594,7 @@ mod tests {
     use vmux_command::CommandManifest;
     use vmux_command::{Binding, Modifiers, Source, When};
     use vmux_ecs::{PageMetadata, PageOpenId, PageOpenTask};
-    use vmux_layout::native_open::NativeOpenPlugin;
+    use vmux_layout::hosted_page::HostedPagePlugin;
 
     struct LayoutCommandFixture;
 
@@ -841,7 +841,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .add_plugins(NativeOpenPlugin)
+            .add_plugins(HostedPagePlugin)
             .add_plugins(ShortcutPlugin);
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(PageOpenTask {
@@ -868,7 +868,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .add_plugins(NativeOpenPlugin)
+            .add_plugins(HostedPagePlugin)
             .add_plugins(ShortcutPlugin);
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(PageOpenTask {

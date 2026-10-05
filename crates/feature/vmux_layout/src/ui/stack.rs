@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
+use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkAddRequest, BookmarkPinUrlRequest};
-use vmux_ecs::{PageIcon, PageMetadata};
+use vmux_ecs::PageMetadata;
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;

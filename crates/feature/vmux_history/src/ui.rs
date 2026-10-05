@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryLoadMoreRequest,
-    HistoryOpenRequest, HistoryQueryRequest,
+    HistoryClearAllRequest, HistoryClearConfirmRequest, HistoryDeleteRequest, HistoryEntry,
+    HistoryLoadMoreRequest, HistoryOpenRequest, HistoryQueryRequest,
 };
 use crate::state::HistoryUiState;
 use dioxus::prelude::*;
@@ -15,16 +15,17 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::Platform;
 
-#[vmux_native::page(component = Page)]
+#[vmux_page::page(component = Page)]
 pub(crate) struct HistoryPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut query: Signal<String> = use_signal(String::new);
     let state = use_ui_state::<HistoryUiState>().state;
+    let confirm_open = use_memo(move || Some(state().clear_confirm_open));
     let snapshot = state();
     let has_more = snapshot.has_more;
+    let query = snapshot.query.clone();
 
     let load_more = move |e: Event<VisibleData>| {
         if !e.is_intersecting().unwrap_or(false) {
@@ -36,11 +37,8 @@ pub fn Page() -> Element {
         let _ = send(&HistoryLoadMoreRequest);
     };
 
-    let mut confirm_open = use_signal(|| Some(false));
-
     let on_input = move |e: Event<FormData>| {
         let query_value = e.value();
-        query.set(query_value.clone());
         let _ = send(&HistoryQueryRequest { query: query_value });
     };
 
@@ -67,13 +65,15 @@ pub fn Page() -> Element {
                         input {
                             class: "min-w-0 flex-1 bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
                             placeholder: translate("history-search"),
-                            value: "{query.read()}",
+                            value: "{query}",
                             oninput: on_input,
                         }
                         button {
                             class: "rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40",
                             disabled: entry_count == 0,
-                            onclick: move |_| confirm_open.set(Some(true)),
+                            onclick: move |_| {
+                                let _ = send(&HistoryClearConfirmRequest { open: true });
+                            },
                             {translate("history-clear-all")}
                         }
                     }
@@ -139,7 +139,9 @@ pub fn Page() -> Element {
         }
         AlertDialogRoot {
             open: Into::<ReadSignal<Option<bool>>>::into(confirm_open),
-            on_open_change: Callback::new(move |open| confirm_open.set(Some(open))),
+            on_open_change: Callback::new(move |open| {
+                let _ = send(&HistoryClearConfirmRequest { open });
+            }),
             default_open: false,
             attributes: vec![],
             AlertDialogContent { attributes: vec![],
@@ -148,14 +150,15 @@ pub fn Page() -> Element {
                 AlertDialogActions { attributes: vec![],
                     AlertDialogCancel {
                         attributes: vec![],
-                        on_click: Some(EventHandler::new(move |_| confirm_open.set(Some(false)))),
+                        on_click: Some(EventHandler::new(move |_| {
+                            let _ = send(&HistoryClearConfirmRequest { open: false });
+                        })),
                         {translate("history-cancel")}
                     }
                     AlertDialogAction {
                         attributes: vec![],
                         on_click: Some(EventHandler::new(move |_| {
                             let _ = send(&HistoryClearAllRequest);
-                            confirm_open.set(Some(false));
                         })),
                         {translate("history-clear-all")}
                     }

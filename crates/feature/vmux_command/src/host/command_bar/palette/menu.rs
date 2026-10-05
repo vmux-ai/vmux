@@ -9,7 +9,7 @@ use vmux_api::command_bar::{
     StartSelectWorkspace,
 };
 
-use crate::{BindCommands, CommandDispatch, CommandRegistry};
+use crate::CommandDispatch;
 
 use super::{PaletteDraftInput, PaletteOpen, PaletteSnapshot};
 
@@ -39,8 +39,7 @@ impl Plugin for MenuPlugin {
             .add_observer(dismiss_input)
             .add_observer(move_cursor)
             .add_observer(choose)
-            .add_observer(dismiss)
-            .add_systems(Startup, bind.in_set(BindCommands));
+            .add_observer(dismiss);
     }
 }
 
@@ -61,26 +60,6 @@ pub(super) struct BranchMenuOpen;
 
 #[derive(Component, Default)]
 pub(super) struct PaletteMenuCursor(pub(super) usize);
-
-impl PaletteMenuCursor {
-    fn step(&mut self, next: bool, rows: usize) {
-        if rows == 0 {
-            return;
-        }
-        let at = self.0.min(rows - 1);
-        self.0 = if next {
-            (at + 1).min(rows - 1)
-        } else {
-            at.saturating_sub(1)
-        };
-    }
-
-    fn highlight(&mut self, index: usize, rows: usize) {
-        if index < rows {
-            self.0 = index;
-        }
-    }
-}
 
 pub(super) type OpenMenu = (
     AgentMenuOpen,
@@ -124,13 +103,6 @@ struct CommandBarMenuChooseBinding;
 
 #[vmux_command::command]
 struct CommandBarMenuDismissBinding;
-
-fn bind(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<CommandBarMenuNextBinding>(&mut commands);
-    registry.bind::<CommandBarMenuPreviousBinding>(&mut commands);
-    registry.bind::<CommandBarMenuChooseBinding>(&mut commands);
-    registry.bind::<CommandBarMenuDismissBinding>(&mut commands);
-}
 
 fn toggle_agent(
     trigger: On<UiInput<CommandPaletteAgentMenuToggleRequest>>,
@@ -293,7 +265,15 @@ fn navigate(
     } else {
         return;
     };
-    cursor.step(request.next, rows);
+    if rows == 0 {
+        return;
+    }
+    let current = cursor.0.min(rows - 1);
+    cursor.0 = if request.next {
+        (current + 1).min(rows - 1)
+    } else {
+        current.saturating_sub(1)
+    };
 }
 
 fn highlight(
@@ -328,7 +308,10 @@ fn highlight(
     } else {
         return;
     };
-    cursor.highlight(request.index as usize, rows);
+    let index = request.index as usize;
+    if index < rows {
+        cursor.0 = index;
+    }
 }
 
 fn activate(
@@ -355,7 +338,7 @@ fn activate(
         input.target_url.clone_from(&agent.url);
         input.selected = 0;
         input.navigating = false;
-        input.changed();
+        input.set_changed();
         true
     } else if model {
         let Some(model) = composer.model_options.get(index) else {

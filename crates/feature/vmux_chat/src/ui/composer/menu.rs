@@ -9,13 +9,12 @@ use vmux_ui::i18n::translate;
 
 #[component]
 pub(super) fn MediaMenu(chat: Chat) -> Element {
-    let menu_sel = chat.slash.menu_sel;
     let media = chat.media.current();
     rsx! {
         PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             PromptMediaOptions {
                 items: chat.media_options(),
-                selected: menu_sel(),
+                selected: chat.list_selection(),
                 loading: media.loading,
                 loading_label: translate("agent-loading-media"),
                 empty_label: translate("agent-no-matching-media"),
@@ -28,25 +27,23 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
 
 #[component]
 pub(super) fn CommandMenu(chat: Chat) -> Element {
-    let menu_sel = chat.slash.menu_sel;
     rsx! {
         PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             for (index , command) in chat.filtered_commands().into_iter().enumerate() {
                 {
-                    let hint = if command.command == vmux_api::chat::SlashCommand::Mcp {
-                        translate("mcp-command-description")
-                    } else {
-                        command.description.clone()
-                    };
                     rsx! {
                         ResultRow {
                             key: "sc{index}",
                             index,
-                            item: CommandBarResultItem::Slash {
-                                name: command.command.name().to_string(),
-                                hint,
+                            item: CommandBarResultItem {
+                                key: command.command.name().to_string(),
+                                leading: "/".to_string(),
+                                title: command.command.name().to_string(),
+                                subtitle: command.description.clone(),
+                                trailing: "\u{21b5}".to_string(),
+                                ..Default::default()
                             },
-                            selected: index == menu_sel(),
+                            selected: index == chat.list_selection(),
                             on_activate: move |()| chat.choose_list(index),
                             on_hover: move |()| chat.point_at_list(index),
                         }
@@ -59,7 +56,6 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
 
 #[component]
 pub(super) fn ResumeMenu(chat: Chat) -> Element {
-    let menu_sel = chat.slash.menu_sel;
     let state = chat.resume_state();
     let resume = chat.resume.current();
     let note = match state {
@@ -74,15 +70,13 @@ pub(super) fn ResumeMenu(chat: Chat) -> Element {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "{note}" }
             } else {
                 for (index , item) in resume.rows.iter().cloned().enumerate() {
-                    if let CommandBarResultItem::Resume { .. } = &item {
-                        ResultRow {
-                            key: "rs{index}",
-                            index,
-                            item: item.clone(),
-                            selected: index == menu_sel(),
-                            on_activate: move |()| chat.choose_list(index),
-                            on_hover: move |()| chat.point_at_list(index),
-                        }
+                    ResultRow {
+                        key: "rs{index}",
+                        index,
+                        item,
+                        selected: index == chat.list_selection(),
+                        on_activate: move |()| chat.choose_list(index),
+                        on_hover: move |()| chat.point_at_list(index),
                     }
                 }
             }

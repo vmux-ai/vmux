@@ -180,7 +180,7 @@ fn git_page_ready(
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
     commands.trigger(
-        vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
             webview,
             &GitPageContext {
                 working_directory: path,
@@ -238,9 +238,7 @@ fn project_activate(
     };
     let Some(tab_entity) = tab_entity else {
         writer.commands.trigger(
-            vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
-                webview, &event,
-            ),
+            vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
         );
         return;
     };
@@ -249,9 +247,7 @@ fn project_activate(
         loop {
             if current == tab_entity {
                 writer.commands.trigger(
-                    vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
-                        page, &event,
-                    ),
+                    vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(page, &event),
                 );
                 break;
             }
@@ -271,7 +267,7 @@ mod tests {
     struct ContextWrites(Vec<GitPageContext>);
 
     fn capture_context(
-        trigger: On<vmux_ecs::host::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
         mut writes: ResMut<ContextWrites>,
     ) {
         if let Some(context) = &trigger.event().update().context {

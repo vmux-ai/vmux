@@ -1,5 +1,5 @@
-#[vmux_api::ui_state(Default, Eq)]
-pub struct TeamEvent {
+#[vmux_api::ui_state(Default, Eq, version = 2)]
+pub struct TeamUiState {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
     pub profiles: Vec<ProfileRow>,
@@ -7,6 +7,14 @@ pub struct TeamEvent {
     pub active_profile: Option<ProfileRow>,
     #[serde(default)]
     pub agents: Vec<TeamAgentPresentation>,
+    #[serde(default)]
+    pub profile_form: Option<TeamProfileForm>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct TeamProfileForm {
+    pub profile_id: Option<String>,
+    pub draft: String,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -76,6 +84,20 @@ pub struct TeamProfileUpdateRequest {
     pub name: String,
 }
 
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamProfileFormOpenRequest {
+    pub profile_id: Option<String>,
+    pub draft: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct TeamProfileFormInputRequest {
+    pub draft: String,
+}
+
+#[vmux_api::ui_event]
+pub struct TeamProfileFormCloseRequest;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,7 +122,7 @@ mod tests {
 
     #[test]
     fn team_event_rkyv_roundtrip() {
-        let original = TeamEvent {
+        let original = TeamUiState {
             members: vec![TeamMemberRow {
                 id: "9".to_string(),
                 name: "You".to_string(),
@@ -127,10 +149,11 @@ mod tests {
                 is_active: true,
             }),
             agents: Vec::new(),
+            profile_form: None,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =
-            rkyv::from_bytes::<TeamEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
+            rkyv::from_bytes::<TeamUiState, rkyv::rancor::Error>(&bytes).expect("deserialize");
         assert_eq!(original, recovered);
     }
 

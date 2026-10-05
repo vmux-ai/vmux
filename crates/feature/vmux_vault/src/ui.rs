@@ -17,7 +17,7 @@ use vmux_ui::components::manager::{
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
     subtree,
     takes = vmux_ecs::PageMetadata

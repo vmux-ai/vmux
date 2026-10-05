@@ -20,19 +20,29 @@ struct Command {
 struct Args {
     id: Option<LitStr>,
     file: LitStr,
+    message: bool,
+    binding: bool,
 }
 
 impl Parse for Args {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut id = None;
         let mut file = None;
+        let mut message = false;
+        let mut binding = false;
         while !input.is_empty() {
             let key: Ident = input.parse()?;
-            input.parse::<Token![=]>()?;
-            match key.to_string().as_str() {
-                "id" => id = Some(input.parse()?),
-                "file" => file = Some(input.parse()?),
-                _ => return Err(syn::Error::new_spanned(key, "unknown command option")),
+            if key == "message" && !input.peek(Token![=]) {
+                message = true;
+            } else if key == "binding" && !input.peek(Token![=]) {
+                binding = true;
+            } else {
+                input.parse::<Token![=]>()?;
+                match key.to_string().as_str() {
+                    "id" => id = Some(input.parse()?),
+                    "file" => file = Some(input.parse()?),
+                    _ => return Err(syn::Error::new_spanned(key, "unknown command option")),
+                }
             }
             if !input.is_empty() {
                 input.parse::<Token![,]>()?;
@@ -41,6 +51,8 @@ impl Parse for Args {
         Ok(Self {
             id,
             file: file.unwrap_or_else(|| LitStr::new("src/feature.ron", input.span())),
+            message,
+            binding,
         })
     }
 }
@@ -48,6 +60,47 @@ impl Parse for Args {
 pub(crate) fn expand(args: TokenStream, mut input: DeriveInput) -> syn::Result<TokenStream> {
     let args = syn::parse2::<Args>(args)?;
     let ident = &input.ident;
+    let file = args.file;
+    if args.message && args.binding {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "command cannot be both message and binding",
+        ));
+    }
+    if args.message {
+        if !input.generics.params.is_empty() {
+            return Err(syn::Error::new_spanned(
+                &input.generics,
+                "command messages cannot be generic",
+            ));
+        }
+        return Ok(quote! {
+            const _: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", #file));
+
+            #input
+
+            ::vmux_command::__private::inventory::submit! {
+                ::vmux_command::__private::CommandMessageRegistration::of::<#ident>()
+            }
+        });
+    }
+    if args.binding {
+        if !input.generics.params.is_empty() {
+            return Err(syn::Error::new_spanned(
+                &input.generics,
+                "command bindings cannot be generic",
+            ));
+        }
+        return Ok(quote! {
+            const _: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", #file));
+
+            #input
+
+            ::vmux_command::__private::inventory::submit! {
+                ::vmux_command::CommandBindingRegistration::of::<#ident>()
+            }
+        });
+    }
     if !matches!(&input.data, Data::Struct(data) if matches!(data.fields, Fields::Unit)) {
         return Err(syn::Error::new_spanned(
             &input,
@@ -67,7 +120,7 @@ pub(crate) fn expand(args: TokenStream, mut input: DeriveInput) -> syn::Result<T
     let crate_root = std::env::var_os("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
         .ok_or_else(|| syn::Error::new(id.span(), "CARGO_MANIFEST_DIR is not set"))?;
-    let path = crate_root.join(args.file.value());
+    let path = crate_root.join(file.value());
     let source = std::fs::read_to_string(&path).map_err(|error| {
         syn::Error::new(
             id.span(),
@@ -101,7 +154,6 @@ pub(crate) fn expand(args: TokenStream, mut input: DeriveInput) -> syn::Result<T
             ),
         ));
     }
-    let file = args.file;
     input
         .attrs
         .push(parse_quote!(#[derive(::bevy::prelude::Component)]));
@@ -115,6 +167,10 @@ pub(crate) fn expand(args: TokenStream, mut input: DeriveInput) -> syn::Result<T
             fn for_command(id: &str) -> ::core::option::Option<Self> {
                 (id == #id).then_some(Self)
             }
+        }
+
+        ::vmux_command::__private::inventory::submit! {
+            ::vmux_command::CommandBindingRegistration::of::<#ident #type_generics>()
         }
     })
 }

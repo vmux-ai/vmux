@@ -162,7 +162,7 @@ fn file_set(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &FileShapeEvent {
             indent: shape.indent,

@@ -4,7 +4,7 @@ use bevy_cef::prelude::HostWindow;
 use vmux_ecs::WindowFullscreen;
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 use vmux_ecs::WindowFullscreenSet;
-use vmux_ecs::host::persistence::WorkspaceRestore;
+use vmux_ecs::persistence::WorkspaceRestore;
 use vmux_layout::window::{
     CloseFocusedWindowRequest, FocusedWindow, NewWindowRequest, NewWindowWorkspace, VmuxWindow,
     WindowGeometry,

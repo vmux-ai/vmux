@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use base64::Engine;
 use vmux_ecs::event::{FileLine, PreviewKind};
 
 use super::file_lifecycle::FileDir;
@@ -45,8 +46,7 @@ impl PreviewBuilder {
             }
             return match std::fs::read(path) {
                 Ok(bytes) => PreviewKind::Image {
-                    mime: mime.to_string(),
-                    bytes,
+                    url: Self::image_url(mime, &bytes),
                 },
                 Err(error) => PreviewKind::Error(error.to_string()),
             };
@@ -75,6 +75,13 @@ impl PreviewBuilder {
 
     fn image_mime(path: &Path) -> Option<&'static str> {
         vmux_api::media::MediaKind::image_mime(&path.to_string_lossy())
+    }
+
+    pub(crate) fn image_url(mime: &str, bytes: &[u8]) -> String {
+        format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
     }
 
     fn raw_url(path: &Path) -> String {

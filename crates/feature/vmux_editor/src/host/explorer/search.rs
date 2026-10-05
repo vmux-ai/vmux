@@ -2,7 +2,11 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_ecs::event::{ExplorerGoto, ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchOpen};
+use vmux_ecs::event::{
+    ExplorerGoto, ExplorerSearchClear, ExplorerSearchCollapseAll, ExplorerSearchDraftRequest,
+    ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchGroupToggle, ExplorerSearchOpen,
+    ExplorerSearchRequest,
+};
 
 use super::panel::StackExplorerVisibility;
 use super::{ExplorerPanelDefaults, ExplorerPanelSent};
@@ -13,10 +17,24 @@ pub(super) struct SearchPlugin;
 
 impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(ExplorerGoto, ExplorerSearchOpen)>::default())
+        app.add_plugins(UiEventPlugin::<(
+            ExplorerGoto,
+            ExplorerSearchOpen,
+            ExplorerSearchGroupToggle,
+            ExplorerSearchCollapseAll,
+            ExplorerSearchClear,
+            ExplorerSearchDraftRequest,
+        )>::default())
             .add_systems(Update, (queue, apply, emit).chain())
             .add_observer(goto)
-            .add_observer(open);
+            .add_observer(open)
+            .add_observer(toggle_group)
+            .add_observer(collapse_all)
+            .add_observer(clear)
+            .add_observer(draft)
+            .add_observer(begin)
+            .add_observer(update_form)
+            .add_observer(navigate);
     }
 }
 
@@ -25,6 +43,9 @@ pub struct GlobalSearchRequest {
     pub target_path: PathBuf,
     pub root: String,
     pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
     pub files: Vec<ExplorerSearchFile>,
     pub capped: bool,
 }
@@ -34,6 +55,16 @@ struct GlobalSearchState(ExplorerSearchEvent);
 
 #[derive(Component)]
 struct GlobalSearchDirty;
+
+#[derive(EntityEvent)]
+struct SearchFormChanged {
+    #[event_target]
+    entity: Entity,
+    query: String,
+    regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
+}
 
 #[derive(Component)]
 struct PendingGlobalSearch {
@@ -88,6 +119,7 @@ fn queue(mut reader: MessageReader<GlobalSearchRequest>, mut commands: Commands)
 fn apply(
     mut pending: Query<(Entity, &mut PendingGlobalSearch)>,
     views: Query<(Entity, &FileView, Option<&ChildOf>)>,
+    searches: Query<&GlobalSearchState>,
     visibility: Query<&StackExplorerVisibility>,
     panel: Single<&ExplorerPanelDefaults>,
     mut commands: Commands,
@@ -104,6 +136,15 @@ fn apply(
             continue;
         };
         let scope = parent.map(ChildOf::parent).unwrap_or(entity);
+        if let Ok(search) = searches.get(entity)
+            && (search.0.query != request.query
+                || search.0.regex != request.regex
+                || search.0.case_sensitive != request.case_sensitive
+                || search.0.whole_word != request.whole_word)
+        {
+            commands.entity(pending_entity).despawn();
+            continue;
+        }
         let explorer_visible = visibility
             .get(scope)
             .map(|state| state.visible)
@@ -124,8 +165,13 @@ fn apply(
             GlobalSearchState(ExplorerSearchEvent {
                 root: request.root,
                 query: request.query,
+                regex: request.regex,
+                case_sensitive: request.case_sensitive,
+                whole_word: request.whole_word,
                 files: request.files,
                 capped: request.capped,
+                collapsed: Vec::new(),
+                opened: String::new(),
             }),
             GlobalSearchDirty,
         ));
@@ -142,16 +188,82 @@ fn emit(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-            entity, &search.0,
-        ));
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &search.0));
         commands.entity(entity).remove::<GlobalSearchDirty>();
     }
 }
 
-fn open(trigger: On<UiInput<ExplorerSearchOpen>>, mut commands: Commands) {
+fn draft(trigger: On<UiInput<ExplorerSearchDraftRequest>>, mut commands: Commands) {
+    let request = &trigger.event().payload;
+    commands.trigger(SearchFormChanged {
+        entity: trigger.event().webview,
+        query: request.query.clone(),
+        regex: request.regex,
+        case_sensitive: request.case_sensitive,
+        whole_word: request.whole_word,
+    });
+}
+
+fn begin(trigger: On<UiInput<ExplorerSearchRequest>>, mut commands: Commands) {
+    let request = &trigger.event().payload;
+    commands.trigger(SearchFormChanged {
+        entity: trigger.event().webview,
+        query: request.query.clone(),
+        regex: request.regex,
+        case_sensitive: request.case_sensitive,
+        whole_word: request.whole_word,
+    });
+}
+
+fn update_form(
+    trigger: On<SearchFormChanged>,
+    mut searches: Query<&mut GlobalSearchState>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if let Ok(mut search) = searches.get_mut(event.entity) {
+        if search.0.query == event.query
+            && search.0.regex == event.regex
+            && search.0.case_sensitive == event.case_sensitive
+            && search.0.whole_word == event.whole_word
+        {
+            return;
+        }
+        search.0.root.clear();
+        search.0.query.clone_from(&event.query);
+        search.0.regex = event.regex;
+        search.0.case_sensitive = event.case_sensitive;
+        search.0.whole_word = event.whole_word;
+        search.0.files.clear();
+        search.0.capped = false;
+        search.0.collapsed.clear();
+        search.0.opened.clear();
+    } else {
+        commands
+            .entity(event.entity)
+            .insert(GlobalSearchState(ExplorerSearchEvent {
+                query: event.query.clone(),
+                regex: event.regex,
+                case_sensitive: event.case_sensitive,
+                whole_word: event.whole_word,
+                ..Default::default()
+            }));
+    }
+    commands.entity(event.entity).insert(GlobalSearchDirty);
+}
+
+fn open(
+    trigger: On<UiInput<ExplorerSearchOpen>>,
+    mut searches: Query<&mut GlobalSearchState>,
+    mut commands: Commands,
+) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
+    if let Ok(mut search) = searches.get_mut(entity) {
+        search.0.opened =
+            vmux_ecs::event::ExplorerSearchMatch::key_at(&request.path, request.line, request.col);
+        commands.entity(entity).insert(GlobalSearchDirty);
+    }
     commands.trigger(FileNavigateRequest::new(
         entity,
         PathBuf::from(&request.path),
@@ -162,6 +274,75 @@ fn open(trigger: On<UiInput<ExplorerSearchOpen>>, mut commands: Commands) {
         request.col,
         request.end_col,
     ));
+}
+
+fn toggle_group(
+    trigger: On<UiInput<ExplorerSearchGroupToggle>>,
+    mut searches: Query<&mut GlobalSearchState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(mut search) = searches.get_mut(entity) else {
+        return;
+    };
+    let path = &trigger.event().payload.path;
+    if let Some(index) = search.0.collapsed.iter().position(|entry| entry == path) {
+        search.0.collapsed.remove(index);
+    } else {
+        search.0.collapsed.push(path.clone());
+    }
+    commands.entity(entity).insert(GlobalSearchDirty);
+}
+
+fn collapse_all(
+    trigger: On<UiInput<ExplorerSearchCollapseAll>>,
+    mut searches: Query<&mut GlobalSearchState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(mut search) = searches.get_mut(entity) else {
+        return;
+    };
+    let mut collapsed = Vec::with_capacity(search.0.files.len());
+    for file in &search.0.files {
+        collapsed.push(file.path.clone());
+    }
+    search.0.collapsed = collapsed;
+    commands.entity(entity).insert(GlobalSearchDirty);
+}
+
+fn clear(
+    trigger: On<UiInput<ExplorerSearchClear>>,
+    mut searches: Query<&mut GlobalSearchState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if let Ok(mut search) = searches.get_mut(entity) {
+        search.0 = ExplorerSearchEvent::default();
+    } else {
+        commands
+            .entity(entity)
+            .insert(GlobalSearchState(ExplorerSearchEvent::default()));
+    }
+    commands.entity(entity).insert(GlobalSearchDirty);
+}
+
+fn navigate(
+    trigger: On<FileNavigateRequest>,
+    mut searches: Query<&mut GlobalSearchState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(mut search) = searches.get_mut(entity) else {
+        return;
+    };
+    let path = trigger.event().path.to_string_lossy();
+    let prefix = format!("{path}:");
+    if search.0.opened.starts_with(&prefix) {
+        return;
+    }
+    search.0.opened.clear();
+    commands.entity(entity).insert(GlobalSearchDirty);
 }
 
 #[cfg(test)]
@@ -216,6 +397,9 @@ mod tests {
                 target_path: target,
                 root: "/project".to_string(),
                 query: "needle".to_string(),
+                regex: false,
+                case_sensitive: false,
+                whole_word: false,
                 files: Vec::new(),
                 capped: false,
             });
@@ -262,6 +446,9 @@ mod tests {
                 target_path: target.clone(),
                 root: "/project".to_string(),
                 query: "needle".to_string(),
+                regex: false,
+                case_sensitive: false,
+                whole_word: false,
                 files: Vec::new(),
                 capped: false,
             });

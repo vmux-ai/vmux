@@ -31,10 +31,12 @@ pub struct ExtRow {
     pub status: ExtStatus,
 }
 
-#[vmux_api::ui_state(Eq, Default, version = 2)]
-pub struct ExtensionsEvent {
+#[vmux_api::ui_state(Eq, Default, version = 3)]
+pub struct ExtensionsUiState {
     pub loaded: bool,
     pub extensions: Vec<ExtRow>,
+    pub visible: Vec<ExtRow>,
+    pub query: String,
     pub installing: Vec<ExtInstallProgress>,
     pub pending: bool,
 }
@@ -108,5 +110,10 @@ pub struct ExtOpenManagerRequest;
 
 #[vmux_api::ui_event(Eq)]
 pub struct ExtBrowseStoreRequest {
+    pub query: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ExtFilterRequest {
     pub query: String,
 }

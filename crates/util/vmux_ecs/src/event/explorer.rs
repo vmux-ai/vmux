@@ -11,6 +11,7 @@ pub struct TreeRow {
 #[vmux_api::contract(Eq)]
 pub struct OpenEditorItem {
     pub name: String,
+    pub context: String,
     pub path: String,
     pub active: bool,
     pub dirty: bool,
@@ -56,12 +57,14 @@ pub enum ExplorerReveal {
     Followed,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct ExplorerFsResult {
+#[vmux_api::contract(Default, Eq)]
+pub struct ExplorerNotice {
     pub ok: bool,
-    pub message: String,
-    pub open_path: String,
+    pub message: Option<String>,
 }
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerNoticeDismissRequest;
 
 #[vmux_api::contract(Eq)]
 pub struct OpenEditorsEvent {
@@ -78,15 +81,34 @@ pub struct ExplorerPanelEvent {
     pub visible: bool,
     pub width: u32,
     pub search: bool,
+    pub open_editors: bool,
+    pub files: bool,
+    pub outline: bool,
     pub search_focus_revision: u64,
-    pub client_id: u64,
-    pub request_id: u64,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ExplorerPromptState {
+    pub open: bool,
+    pub title_message_id: String,
+    pub name: String,
+    pub draft: String,
+    pub destructive: bool,
 }
 
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct ExplorerPanelViewSet {
     pub search: bool,
 }
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerOpenEditorsToggle;
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerFilesToggle;
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerOutlineToggle;
 
 #[vmux_api::ui_event(Eq)]
 pub struct ExplorerTreeToggle {
@@ -110,22 +132,37 @@ pub struct ExplorerRevealCurrent;
 pub struct ExplorerCollapseAll;
 
 #[vmux_api::ui_event(Eq)]
-pub struct ExplorerCreate {
-    pub parent: String,
-    pub name: String,
-    pub is_dir: bool,
+pub struct ExplorerCreateFilePromptRequest {
+    pub path: String,
 }
 
 #[vmux_api::ui_event(Eq)]
-pub struct ExplorerRename {
+pub struct ExplorerCreateDirectoryPromptRequest {
+    pub path: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ExplorerRenamePromptRequest {
     pub path: String,
     pub name: String,
 }
 
 #[vmux_api::ui_event(Eq)]
-pub struct ExplorerDelete {
+pub struct ExplorerDeletePromptRequest {
     pub path: String,
+    pub name: String,
 }
+
+#[vmux_api::ui_event(Eq)]
+pub struct ExplorerPromptDraftRequest {
+    pub draft: String,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerPromptSubmitRequest;
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerPromptDismissRequest;
 
 #[vmux_api::ui_event(Eq)]
 pub struct ExplorerCloseEditor {
@@ -135,12 +172,15 @@ pub struct ExplorerCloseEditor {
 #[vmux_api::ui_event(Copy, Default, Eq)]
 pub struct ExplorerPanelSetVisible {
     pub visible: bool,
-    pub client_id: u64,
-    pub request_id: u64,
 }
 
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct ExplorerPanelWidth {
+    pub px: u32,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerPanelViewportWidth {
     pub px: u32,
 }
 
@@ -158,6 +198,16 @@ pub struct ExplorerSearchMatch {
     pub preview: String,
 }
 
+impl ExplorerSearchMatch {
+    pub fn key(&self, path: &str) -> String {
+        Self::key_at(path, self.line, self.col)
+    }
+
+    pub fn key_at(path: &str, line: u32, col: u32) -> String {
+        format!("{path}:{line}:{col}")
+    }
+}
+
 #[vmux_api::contract(Eq)]
 pub struct ExplorerSearchFile {
     pub path: String,
@@ -169,8 +219,13 @@ pub struct ExplorerSearchFile {
 pub struct ExplorerSearchEvent {
     pub root: String,
     pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
     pub files: Vec<ExplorerSearchFile>,
     pub capped: bool,
+    pub collapsed: Vec<String>,
+    pub opened: String,
 }
 
 #[vmux_api::ui_event(Eq)]
@@ -179,6 +234,25 @@ pub struct ExplorerSearchOpen {
     pub line: u32,
     pub col: u32,
     pub end_col: u32,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ExplorerSearchGroupToggle {
+    pub path: String,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerSearchCollapseAll;
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerSearchClear;
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ExplorerSearchDraftRequest {
+    pub query: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
 }
 
 #[vmux_api::ui_event(Default, Eq)]

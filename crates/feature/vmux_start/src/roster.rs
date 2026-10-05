@@ -84,8 +84,8 @@ fn emit(
     }
     launcher.sequence = launcher.sequence.wrapping_add(1).max(1);
     let state = CommandBarUiState {
-        sequence: launcher.sequence,
-        patches: vec![launcher.snapshot.clone().into()],
+        snapshot: launcher.snapshot.clone(),
+        ..Default::default()
     };
     let Some(emit) = UiStateEmit::from_state(&state) else {
         return;

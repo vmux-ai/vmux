@@ -13,8 +13,8 @@ use crate::process::ToolProcess;
 use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
     ToolOperationRequest, ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded,
-    ToolOperationTask, ToolOperator, ToolProviderId, ToolProviderSnapshot, ToolScanner,
-    ToolStoreOperation, ToolStoreTarget,
+    ToolOperationTask, ToolOperator, ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget,
+    ToolScanner, ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct HomebrewToolPlugin;
@@ -28,7 +28,7 @@ impl Plugin for HomebrewToolPlugin {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Component, Clone, Copy)]
 enum HomebrewPackage {
     Formula,
     Cask,
@@ -36,19 +36,21 @@ enum HomebrewPackage {
 
 impl HomebrewPackage {
     fn scan_formulae(
+        provider: &ToolProvider,
         store: &ToolStore,
         manifest: &mut ToolsManifest,
         refresh: bool,
     ) -> Result<ToolProviderSnapshot, String> {
-        Self::Formula.scan(store, manifest, refresh)
+        Self::Formula.scan(provider, store, manifest, refresh)
     }
 
     fn scan_casks(
+        provider: &ToolProvider,
         store: &ToolStore,
         manifest: &mut ToolsManifest,
         refresh: bool,
     ) -> Result<ToolProviderSnapshot, String> {
-        Self::Cask.scan(store, manifest, refresh)
+        Self::Cask.scan(provider, store, manifest, refresh)
     }
 
     fn operate_formula(
@@ -67,13 +69,6 @@ impl HomebrewPackage {
         Self::Cask.operate(store, operation, value)
     }
 
-    fn provider(self) -> ToolProvider {
-        match self {
-            Self::Formula => ToolProvider::HomebrewFormula,
-            Self::Cask => ToolProvider::HomebrewCask,
-        }
-    }
-
     fn is_cask(self) -> bool {
         matches!(self, Self::Cask)
     }
@@ -87,12 +82,13 @@ impl HomebrewPackage {
 
     fn scan(
         self,
+        provider: &ToolProvider,
         _store: &ToolStore,
         manifest: &mut ToolsManifest,
         refresh: bool,
     ) -> Result<ToolProviderSnapshot, String> {
         Ok(
-            ToolInventory::new(self.provider(), self.inventory(refresh)?)
+            ToolInventory::new(provider.clone(), self.inventory(refresh)?)
                 .reconcile(manifest)
                 .into(),
         )
@@ -178,31 +174,33 @@ impl HomebrewPackage {
         match operation.kind {
             ToolOperationKind::Install => {
                 self.command("install", id)?;
-                store.set_managed_package(operation.provider, id, true)?;
+                store.set_managed_package(&operation.provider, id, true)?;
                 Ok(format!("{id} installed"))
             }
             ToolOperationKind::Update => {
                 self.command("upgrade", id)?;
-                store.set_managed_package(operation.provider, id, true)?;
+                store.set_managed_package(&operation.provider, id, true)?;
                 Ok(format!("{id} updated"))
             }
             ToolOperationKind::Uninstall => {
                 self.command("uninstall", id)?;
-                store.set_managed_package(operation.provider, id, false)?;
+                store.set_managed_package(&operation.provider, id, false)?;
                 Ok(format!("{id} removed"))
             }
             ToolOperationKind::Forget => {
-                store.set_managed_package(operation.provider, id, false)?;
+                store.set_managed_package(&operation.provider, id, false)?;
                 Ok(format!("{id} removed from tools.toml"))
             }
             ToolOperationKind::Adopt => {
-                store.set_managed_package(operation.provider, id, true)?;
+                store.set_managed_package(&operation.provider, id, true)?;
                 Ok(format!("{id} is now managed"))
             }
-            ToolOperationKind::Import if value.trim().is_empty() => Self::import_installed(store),
+            ToolOperationKind::Import if value.trim().is_empty() => {
+                self.import_installed(store, &operation.provider)
+            }
             _ => Err(format!(
                 "{} does not support {:?}",
-                operation.provider.title(),
+                operation.provider.id(),
                 operation.kind
             )),
         }
@@ -222,56 +220,56 @@ impl HomebrewPackage {
         Ok(())
     }
 
-    fn import_installed(store: &ToolStore) -> Result<String, String> {
+    fn import_installed(
+        self,
+        store: &ToolStore,
+        provider: &ToolProvider,
+    ) -> Result<String, String> {
         let mut manifest = store.load()?;
-        let before_formulae = manifest
-            .managed_packages(ToolProvider::HomebrewFormula.id())
-            .len();
-        let before_casks = manifest
-            .managed_packages(ToolProvider::HomebrewCask.id())
-            .len();
-        let _ = Self::Formula.scan(store, &mut manifest, false)?;
-        let _ = Self::Cask.scan(store, &mut manifest, false)?;
-        let formulae = manifest
-            .managed_packages(ToolProvider::HomebrewFormula.id())
+        let before = manifest.managed_packages(provider.id()).len();
+        let _ = self.scan(provider, store, &mut manifest, false)?;
+        let imported = manifest
+            .managed_packages(provider.id())
             .len()
-            .saturating_sub(before_formulae);
-        let casks = manifest
-            .managed_packages(ToolProvider::HomebrewCask.id())
-            .len()
-            .saturating_sub(before_casks);
+            .saturating_sub(before);
         store.save(&manifest)?;
-        Ok(format!("imported {formulae} formulae and {casks} casks"))
+        let kind = if self.is_cask() { "cask" } else { "formula" };
+        Ok(format!("imported {imported} {kind} item(s)"))
     }
 }
 
 fn spawn(mut commands: Commands) {
     commands.spawn((
-        Name::new("Homebrew formula tool provider"),
-        ToolProviderId(ToolProvider::HomebrewFormula),
+        ToolProviderBinding::new::<crate::Feature>(0),
+        HomebrewPackage::Formula,
         ToolScanner::new(HomebrewPackage::scan_formulae),
         ToolOperator::new(HomebrewPackage::operate_formula),
     ));
     commands.spawn((
-        Name::new("Homebrew cask tool provider"),
-        ToolProviderId(ToolProvider::HomebrewCask),
+        ToolProviderBinding::new::<crate::Feature>(1),
+        HomebrewPackage::Cask,
         ToolScanner::new(HomebrewPackage::scan_casks),
         ToolOperator::new(HomebrewPackage::operate_cask),
     ));
 }
 
 fn route(
-    requests: Query<(Entity, &ToolOperationRequest<ToolImportRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolImportRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<HomebrewPackage>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
-        let request = &operation.0;
-        if !matches!(
-            request.provider,
-            ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask
-        ) {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
             continue;
         }
+        let request = &operation.0;
         let path = request.value.trim();
         if path.is_empty() {
             continue;

@@ -2,15 +2,15 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker, PickRequest};
 use vmux_command::{
-    BindCommands, CommandDispatch, CommandInvocation, CommandRegistry, CommandRuntimePlugin,
+    CommandBarDismiss, CommandBarOpenRequest, ResolvedLocale, WriteCommandBarRequests,
 };
-use vmux_command::{CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests};
+use vmux_command::{CommandDispatch, CommandInvocation, CommandRuntimePlugin};
 use vmux_ecs::event::{
     ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 
 use crate::host::editing::FileFindOpenRequest;
 use crate::host::editor::{Editor, FileView};
@@ -20,7 +20,10 @@ use crate::host::explorer::{
 use crate::host::panel::{
     FilePanelChooseRequest, FilePanelDismissRequest, FilePanelNextRequest, FilePanelPreviousRequest,
 };
+use crate::host::picker_driver::EditorPicks;
 use crate::host::shape::BufferShape;
+use crate::picker::EditorPicker;
+use vmux_ui::i18n::Locale;
 
 pub(crate) struct KeyPlugin;
 
@@ -35,7 +38,6 @@ impl Plugin for KeyPlugin {
             .add_message::<CommandBarOpenRequest>()
             .add_message::<FileStatusPicked>()
             .add_message::<OpenStatusPickerRequest>()
-            .add_systems(Startup, bind_commands.in_set(BindCommands))
             .add_systems(
                 Update,
                 open_bound_status_picker.in_set(WriteCommandBarRequests),
@@ -78,22 +80,17 @@ struct FilePanelChooseBinding;
 #[vmux_command::command]
 struct FilePanelDismissBinding;
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+#[vmux_command::command(message)]
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
 struct OpenStatusPickerRequest(CommandBarPicker);
 
 impl TryFrom<&CommandInvocation> for OpenStatusPickerRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        match invocation.id.as_str() {
-            "browser_open_goto_line" => Ok(Self(CommandBarPicker::GotoLine)),
-            "browser_open_indentation" => Ok(Self(CommandBarPicker::Indent)),
-            "browser_open_line_ending" => Ok(Self(CommandBarPicker::LineEnding)),
-            "browser_open_encoding" => Ok(Self(CommandBarPicker::Encoding)),
-            "browser_open_reopen_with_encoding" => Ok(Self(CommandBarPicker::EncodingReopen)),
-            "browser_open_save_with_encoding" => Ok(Self(CommandBarPicker::EncodingSave)),
-            _ => Err(()),
-        }
+        EditorPicker::from_command(&invocation.id)
+            .map(Self)
+            .ok_or(())
     }
 }
 
@@ -103,24 +100,17 @@ struct FileStatusPicked {
     pick: CommandBarPick,
 }
 
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<FileToggleExplorerBinding>(&mut commands);
-    registry.bind::<FileRevealInExplorerBinding>(&mut commands);
-    registry.bind::<FileFindBinding>(&mut commands);
-    registry.bind::<FileFindInFilesBinding>(&mut commands);
-    registry.bind::<FilePanelNextBinding>(&mut commands);
-    registry.bind::<FilePanelPreviousBinding>(&mut commands);
-    registry.bind::<FilePanelChooseBinding>(&mut commands);
-    registry.bind::<FilePanelDismissBinding>(&mut commands);
-    registry.message::<OpenStatusPickerRequest>(&mut commands);
-}
-
 fn open_bound_status_picker(
     mut requests: MessageReader<OpenStatusPickerRequest>,
+    locale: Option<Res<ResolvedLocale>>,
     mut open: MessageWriter<CommandBarOpenRequest>,
 ) {
     if let Some(request) = requests.read().last() {
-        open.write(CommandBarOpenRequest::picker(request.0));
+        let locale = locale
+            .as_deref()
+            .map(|locale| locale.0.clone())
+            .unwrap_or_else(Locale::preferred);
+        open.write(EditorPicks::request(request.0.clone(), &locale));
     }
 }
 
@@ -233,29 +223,27 @@ fn dispatch_panel_dismiss_command(
 fn open_status_picker(
     trigger: On<UiInput<FileStatusPickerOpen>>,
     views: Query<(), With<FileView>>,
+    locale: Option<Res<ResolvedLocale>>,
     mut open: MessageWriter<CommandBarOpenRequest>,
 ) {
     if !views.contains(trigger.event().webview) {
         return;
     }
-    match trigger.event().payload.picker {
-        CommandBarPicker::GotoLine
-        | CommandBarPicker::Indent
-        | CommandBarPicker::LineEnding
-        | CommandBarPicker::Encoding
-        | CommandBarPicker::EncodingReopen
-        | CommandBarPicker::EncodingSave => {
-            open.write(CommandBarOpenRequest::picker(
-                trigger.event().payload.picker,
-            ));
-        }
-        CommandBarPicker::Space => {}
+    let picker = &trigger.event().payload.picker;
+    if !EditorPicker::owns(&picker.0) {
+        return;
     }
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    open.write(EditorPicks::request(picker.clone(), &locale));
 }
 
 fn pick_status(
     trigger: On<UiInput<PickRequest>>,
     focus: vmux_layout::stack::FocusedStack,
+    locale: Option<Res<ResolvedLocale>>,
     mut picked: MessageWriter<FileStatusPicked>,
     mut open: MessageWriter<CommandBarOpenRequest>,
     mut commands: Commands,
@@ -263,7 +251,11 @@ fn pick_status(
     let webview = trigger.event().webview;
     match &trigger.event().payload.pick {
         CommandBarPick::Picker(next) => {
-            open.write(CommandBarOpenRequest::picker(*next));
+            let locale = locale
+                .as_deref()
+                .map(|locale| locale.0.clone())
+                .unwrap_or_else(Locale::preferred);
+            open.write(EditorPicks::request(next.clone(), &locale));
         }
         pick => {
             picked.write(FileStatusPicked {
@@ -294,16 +286,33 @@ fn apply_status_picks(
         };
         match &message.pick {
             CommandBarPick::Picker(_) => {}
-            CommandBarPick::GotoLine { line } => {
+            CommandBarPick::Typed { picker, value } if picker.is(EditorPicker::GOTO_LINE) => {
+                let digits = value
+                    .split_once(':')
+                    .map_or(value.trim(), |(line, _)| line.trim());
+                let Ok(line) = digits.parse::<u32>() else {
+                    continue;
+                };
                 commands.trigger(UiInput {
                     webview: entity,
                     payload: ExplorerGoto {
                         path: String::new(),
-                        line: *line,
+                        line: line.saturating_sub(1),
                     },
                 });
             }
-            CommandBarPick::Indent { spaces, width } => {
+            CommandBarPick::Typed { picker, value } if picker.is(EditorPicker::INDENT) => {
+                let Some((kind, width)) = value.split_once(':') else {
+                    continue;
+                };
+                let Ok(width) = width.parse::<u16>() else {
+                    continue;
+                };
+                let spaces = match kind {
+                    "spaces" => true,
+                    "tabs" => false,
+                    _ => continue,
+                };
                 let Ok(edit) = shapes.get(entity) else {
                     continue;
                 };
@@ -311,22 +320,20 @@ fn apply_status_picks(
                 commands.trigger(UiInput {
                     webview: entity,
                     payload: FileShapeSet {
-                        indent: FileIndent {
-                            spaces: *spaces,
-                            width: *width,
-                        },
+                        indent: FileIndent { spaces, width },
                         line_ending: shape.line_ending,
                     },
                 });
             }
-            CommandBarPick::LineEnding { crlf } => {
+            CommandBarPick::Typed { picker, value } if picker.is(EditorPicker::LINE_ENDING) => {
                 let Ok(edit) = shapes.get(entity) else {
                     continue;
                 };
                 let shape = BufferShape::detect(&edit.core.buffer.rope);
-                let line_ending = match crlf {
-                    true => FileLineEnding::Crlf,
-                    false => FileLineEnding::Lf,
+                let line_ending = match value.as_str() {
+                    "crlf" => FileLineEnding::Crlf,
+                    "lf" => FileLineEnding::Lf,
+                    _ => continue,
                 };
                 commands.trigger(UiInput {
                     webview: entity,
@@ -336,11 +343,14 @@ fn apply_status_picks(
                     },
                 });
             }
-            CommandBarPick::Encoding { label, save } => {
-                let Ok(encoding) = FileEncoding::try_from(label.as_str()) else {
+            CommandBarPick::Typed { picker, value }
+                if picker.is(EditorPicker::ENCODING_REOPEN)
+                    || picker.is(EditorPicker::ENCODING_SAVE) =>
+            {
+                let Ok(encoding) = FileEncoding::try_from(value.as_str()) else {
                     continue;
                 };
-                if *save {
+                if picker.is(EditorPicker::ENCODING_SAVE) {
                     commands.trigger(UiInput {
                         webview: entity,
                         payload: FileEncodingSaveRequest { encoding },
@@ -352,6 +362,7 @@ fn apply_status_picks(
                     });
                 }
             }
+            CommandBarPick::Typed { .. } => {}
         }
     }
 }
@@ -476,9 +487,9 @@ mod tests {
         Picks::submit(
             &mut app,
             Some(stack),
-            CommandBarPick::Encoding {
-                label: "Shift_JIS".to_string(),
-                save: false,
+            CommandBarPick::Typed {
+                picker: EditorPicker::encoding_reopen(),
+                value: "Shift_JIS".to_string(),
             },
         );
 
@@ -498,9 +509,9 @@ mod tests {
             Picks::submit(
                 &mut app,
                 stack,
-                CommandBarPick::Encoding {
-                    label: "Shift_JIS".to_string(),
-                    save: false,
+                CommandBarPick::Typed {
+                    picker: EditorPicker::encoding_reopen(),
+                    value: "Shift_JIS".to_string(),
                 },
             );
         }
@@ -516,9 +527,9 @@ mod tests {
         Picks::submit(
             &mut app,
             Some(stack),
-            CommandBarPick::Encoding {
-                label: "Klingon".to_string(),
-                save: false,
+            CommandBarPick::Typed {
+                picker: EditorPicker::encoding_reopen(),
+                value: "Klingon".to_string(),
             },
         );
 

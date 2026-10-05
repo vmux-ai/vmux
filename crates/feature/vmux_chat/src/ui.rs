@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 mod activity;
 mod format;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
     subtree,
     preserve_title,

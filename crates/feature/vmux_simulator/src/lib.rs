@@ -11,14 +11,14 @@ pub use host::{
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
 pub mod event;
 pub mod url;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct SimulatorPlugin;
 
 #[cfg(ui)]

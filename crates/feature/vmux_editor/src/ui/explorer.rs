@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 
-use super::state::use_file_ui;
+use super::state::FileUi;
 use dioxus::prelude::*;
 use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
@@ -21,7 +21,6 @@ use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
 
 const TREE_MOTION_MS: u32 = 170;
-const NOTICE_MS: u32 = 2400;
 const TREE_ROW_HEIGHT: f64 = 22.0;
 const STICKY_DEPTH_MAX: usize = 5;
 
@@ -39,27 +38,6 @@ struct TreeMenu {
     is_root: bool,
     x: f64,
     y: f64,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PromptKind {
-    CreateFile,
-    CreateDir,
-    Rename,
-    Delete,
-}
-
-#[derive(Clone, PartialEq)]
-struct TreePrompt {
-    kind: PromptKind,
-    path: String,
-    name: String,
-}
-
-#[derive(Clone, PartialEq)]
-struct ExplorerNotice {
-    ok: bool,
-    message: String,
 }
 
 fn open_file(path: String) {
@@ -129,14 +107,6 @@ impl SidebarView {
             Self::Explorer => translate("editor-show-search"),
             Self::Search => translate("editor-show-explorer"),
         }
-    }
-}
-
-struct SearchRowKey;
-
-impl SearchRowKey {
-    fn for_hit(path: &str, hit: &ExplorerSearchMatch) -> String {
-        format!("{path}:{}:{}", hit.line, hit.col)
     }
 }
 
@@ -257,73 +227,58 @@ impl PreviewSpan {
 
 #[derive(Clone, Copy, PartialEq)]
 struct SearchState {
-    query: Signal<String>,
-    regex: Signal<bool>,
-    case_sensitive: Signal<bool>,
-    whole_word: Signal<bool>,
-    results: Signal<Option<ExplorerSearchEvent>>,
-    collapsed: Signal<HashSet<String>>,
-    opened: Signal<String>,
+    results: ReadSignal<Option<ExplorerSearchEvent>>,
 }
 
 impl SearchState {
     fn run(self) {
-        let text = self.query.peek().clone();
-        if text.trim().is_empty() {
+        let results = self.results.read();
+        let Some(results) = results.as_ref() else {
+            return;
+        };
+        if results.query.trim().is_empty() {
             self.clear();
             return;
         }
         let _ = send(&ExplorerSearchRequest {
-            query: text,
-            regex: (self.regex)(),
-            case_sensitive: (self.case_sensitive)(),
-            whole_word: (self.whole_word)(),
+            query: results.query.clone(),
+            regex: results.regex,
+            case_sensitive: results.case_sensitive,
+            whole_word: results.whole_word,
+        });
+    }
+
+    fn draft(self, query: String, regex: bool, case_sensitive: bool, whole_word: bool) {
+        let _ = send(&ExplorerSearchDraftRequest {
+            query,
+            regex,
+            case_sensitive,
+            whole_word,
         });
     }
 
     fn clear(self) {
-        let mut results = self.results;
-        let mut collapsed = self.collapsed;
-        let mut opened = self.opened;
-        results.set(None);
-        collapsed.set(HashSet::new());
-        opened.set(String::new());
-    }
-
-    fn arrived(self, event: ExplorerSearchEvent) {
-        let mut results = self.results;
-        let mut collapsed = self.collapsed;
-        collapsed.set(HashSet::new());
-        results.set(Some(event));
+        let _ = send(&ExplorerSearchClear);
     }
 
     fn is_collapsed(self, path: &str) -> bool {
-        self.collapsed.read().contains(path)
+        self.results
+            .read()
+            .as_ref()
+            .is_some_and(|results| results.collapsed.iter().any(|entry| entry == path))
     }
 
     fn toggle_group(self, path: &str) {
-        let mut collapsed = self.collapsed;
-        let mut next = collapsed.peek().clone();
-        if !next.remove(path) {
-            next.insert(path.to_string());
-        }
-        collapsed.set(next);
+        let _ = send(&ExplorerSearchGroupToggle {
+            path: path.to_string(),
+        });
     }
 
     fn collapse_all(self) {
-        let mut collapsed = self.collapsed;
-        let mut next = HashSet::new();
-        if let Some(results) = self.results.peek().as_ref() {
-            for file in &results.files {
-                next.insert(file.path.clone());
-            }
-        }
-        collapsed.set(next);
+        let _ = send(&ExplorerSearchCollapseAll);
     }
 
     fn open(self, path: &str, hit: &ExplorerSearchMatch) {
-        let mut opened = self.opened;
-        opened.set(SearchRowKey::for_hit(path, hit));
         let _ = send(&ExplorerSearchOpen {
             path: path.to_string(),
             line: hit.line,
@@ -332,47 +287,22 @@ impl SearchState {
         });
     }
 
-    fn showing(self, path: &str) {
-        let mut opened = self.opened;
-        if opened.peek().starts_with(&format!("{path}:")) {
-            return;
-        }
-        opened.set(String::new());
-    }
-
     fn keys(self) -> Vec<String> {
         let mut keys = Vec::new();
         let results = self.results.read();
         let Some(results) = results.as_ref() else {
             return keys;
         };
-        let collapsed = self.collapsed.read();
         for file in &results.files {
-            if collapsed.contains(&file.path) {
+            if results.collapsed.iter().any(|path| path == &file.path) {
                 continue;
             }
             for hit in &file.matches {
-                keys.push(SearchRowKey::for_hit(&file.path, hit));
+                keys.push(hit.key(&file.path));
             }
         }
         keys
     }
-}
-
-fn create_entry(parent: String, name: String, is_dir: bool) {
-    let _ = send(&ExplorerCreate {
-        parent,
-        name,
-        is_dir,
-    });
-}
-
-fn rename_entry(path: String, name: String) {
-    let _ = send(&ExplorerRename { path, name });
-}
-
-fn delete_entry(path: String) {
-    let _ = send(&ExplorerDelete { path });
 }
 
 fn tree_row_id(path: &str) -> String {
@@ -505,10 +435,6 @@ impl TreeRows {
         }
     }
 
-    fn create_parent(self, focus: &str, root: &str) -> String {
-        CreateTarget::resolve(self.rows.peek().as_slice(), focus, root)
-    }
-
     fn expand(self, path: &str) {
         self.claim();
         let mut opened = self.rows.read().clone();
@@ -588,29 +514,6 @@ impl AncestorChain {
         chain.reverse();
         chain.truncate(STICKY_DEPTH_MAX);
         chain
-    }
-}
-
-struct CreateTarget;
-
-impl CreateTarget {
-    fn resolve(rows: &[MotionRow], focus: &str, root: &str) -> String {
-        if focus.is_empty() {
-            return root.to_string();
-        }
-        for motion in rows {
-            if motion.row.path != focus {
-                continue;
-            }
-            if motion.row.is_dir {
-                return focus.to_string();
-            }
-            let Some(parent) = Path::new(focus).parent() else {
-                return root.to_string();
-            };
-            return parent.to_string_lossy().into_owned();
-        }
-        root.to_string()
     }
 }
 
@@ -719,37 +622,6 @@ impl TreeFocus {
     }
 }
 
-fn show_notice(
-    mut notice: Signal<Option<ExplorerNotice>>,
-    mut generation: Signal<u32>,
-    value: ExplorerNotice,
-) {
-    let id = generation().wrapping_add(1);
-    generation.set(id);
-    notice.set(Some(value));
-    spawn(async move {
-        Platform::sleep(NOTICE_MS).await;
-        if generation() == id {
-            notice.set(None);
-        }
-    });
-}
-
-fn submit_prompt(mut prompt: Signal<Option<TreePrompt>>, draft: Signal<String>) {
-    let Some(current) = prompt() else {
-        return;
-    };
-    let name = draft().trim().to_string();
-    match current.kind {
-        PromptKind::CreateFile if !name.is_empty() => create_entry(current.path, name, false),
-        PromptKind::CreateDir if !name.is_empty() => create_entry(current.path, name, true),
-        PromptKind::Rename if !name.is_empty() => rename_entry(current.path, name),
-        PromptKind::Delete => delete_entry(current.path),
-        _ => return,
-    }
-    prompt.set(None);
-}
-
 #[component]
 fn TreeIndentGuides(depth: u16, base: u32) -> Element {
     rsx! {
@@ -781,12 +653,12 @@ fn Chevron(expanded: bool, loading: bool) -> Element {
 }
 
 #[component]
-fn SectionHeader(title: String, open: Signal<bool>, on_toggle: EventHandler<()>) -> Element {
+fn SectionHeader(title: String, open: bool, on_toggle: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "flex items-center gap-1 px-2 py-1 cursor-default text-[11px] font-bold uppercase tracking-wide text-foreground/70 transition-colors hover:text-foreground",
             onclick: move |_| on_toggle.call(()),
-            Chevron { expanded: open(), loading: false }
+            Chevron { expanded: open, loading: false }
             span { class: "truncate", "{title}" }
         }
     }
@@ -939,50 +811,35 @@ fn StickyOutlineRow(row: OutlineRow, on_pick: EventHandler<u32>) -> Element {
 }
 
 #[component]
-fn SearchView(view: Signal<SidebarView>) -> Element {
+fn SearchView(view: ReadSignal<SidebarView>) -> Element {
+    let results = FileUi::current().use_value(|state| Some(&state.explorer.explorer_search));
     let search = SearchState {
-        query: use_signal(String::new),
-        regex: use_signal(|| false),
-        case_sensitive: use_signal(|| false),
-        whole_word: use_signal(|| false),
-        results: use_signal(|| None::<ExplorerSearchEvent>),
-        collapsed: use_signal(HashSet::new),
-        opened: use_signal(String::new),
+        results: results.into(),
     };
     let hit_focus = TreeFocus {
         key: use_signal(String::new),
     };
-    let mut focus_revision = use_signal(|| 0u64);
-    let mut query = search.query;
     let ime = use_ime_guard();
 
-    let search_event = use_file_ui::<ExplorerSearchEvent>();
-    use_effect(move || {
-        search_event.for_each(|event| {
-            search.arrived(event);
-        })
-    });
-    let focus_event = use_file_ui::<ExplorerFocusEvent>();
-    use_effect(move || {
-        focus_event.for_each(|event| {
-            if event.revision <= *focus_revision.peek() {
-                return;
-            }
-            focus_revision.set(event.revision);
-            search.showing(&event.path);
-        })
-    });
-
     let active = view().is_search();
-    let opened = search.opened.cloned();
     let focused = hit_focus.key.cloned();
+    let current = search.results.read().as_ref().cloned().unwrap_or_default();
+    let query = current.query.clone();
+    let regex = current.regex;
+    let case_sensitive = current.case_sensitive;
+    let whole_word = current.whole_word;
+    let case_query = query.clone();
+    let whole_query = query.clone();
+    let regex_query = query.clone();
     let mut summary = None;
     let mut root = String::new();
     let mut files = Vec::new();
-    if let Some(found) = search.results.read().as_ref() {
-        summary = Some(SearchSummary::from(found).text());
-        root = found.root.clone();
-        files = found.files.clone();
+    let mut opened = String::new();
+    if !current.query.is_empty() && !current.files.is_empty() {
+        summary = Some(SearchSummary::from(&current).text());
+        root = current.root.clone();
+        files = current.files.clone();
+        opened.clone_from(&current.opened);
     }
 
     rsx! {
@@ -1000,10 +857,7 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                     TitleButton {
                         glyph: TitleGlyph::Clear,
                         label: translate("editor-search-clear"),
-                        on_press: move |_| {
-                            query.set(String::new());
-                            search.clear();
-                        },
+                        on_press: move |_| search.clear(),
                     }
                     TitleButton {
                         glyph: TitleGlyph::CollapseAll,
@@ -1020,7 +874,9 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                         class: "min-w-0 flex-1 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
                         placeholder: translate("editor-find-in-files-placeholder"),
                         value: "{query}",
-                        oninput: move |event| query.set(event.value()),
+                        oninput: move |event| {
+                            search.draft(event.value(), regex, case_sensitive, whole_word);
+                        },
                         oncompositionstart: move |_| ime.start(),
                         oncompositionend: move |_| ime.commit(),
                         onkeydown: move |event: Event<KeyboardData>| {
@@ -1035,7 +891,6 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                                 }
                                 Key::Escape => {
                                     event.prevent_default();
-                                    query.set(String::new());
                                     search.clear();
                                 }
                                 _ => {}
@@ -1045,29 +900,35 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                     SearchToggle {
                         label: "Aa".to_string(),
                         hint: translate("editor-find-case"),
-                        on: (search.case_sensitive)(),
-                        on_press: move |_| {
-                            let mut flag = search.case_sensitive;
-                            flag.toggle();
-                        },
+                        on: case_sensitive,
+                        on_press: move |_| search.draft(
+                            case_query.clone(),
+                            regex,
+                            !case_sensitive,
+                            whole_word,
+                        ),
                     }
                     SearchToggle {
                         label: "ab".to_string(),
                         hint: translate("editor-find-whole-word"),
-                        on: (search.whole_word)(),
-                        on_press: move |_| {
-                            let mut flag = search.whole_word;
-                            flag.toggle();
-                        },
+                        on: whole_word,
+                        on_press: move |_| search.draft(
+                            whole_query.clone(),
+                            regex,
+                            case_sensitive,
+                            !whole_word,
+                        ),
                     }
                     SearchToggle {
                         label: ".*".to_string(),
                         hint: translate("editor-find-regex"),
-                        on: (search.regex)(),
-                        on_press: move |_| {
-                            let mut flag = search.regex;
-                            flag.toggle();
-                        },
+                        on: regex,
+                        on_press: move |_| search.draft(
+                            regex_query.clone(),
+                            !regex,
+                            case_sensitive,
+                            whole_word,
+                        ),
                     }
                 }
             }
@@ -1087,7 +948,7 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                             }
                         }
                     }
-                } else if !query().is_empty() {
+                } else if !query.is_empty() {
                     div { class: "flex h-6 items-center px-3 text-foreground/45",
                         {translate("editor-search-idle")}
                     }
@@ -1135,7 +996,7 @@ fn SearchFileGroup(
                 div { class: "min-h-0 overflow-hidden",
                     for hit in file.matches.clone() {
                         SearchHitRow {
-                            key: "{SearchRowKey::for_hit(&file.path, &hit)}",
+                            key: "{hit.key(&file.path)}",
                             path: file.path.clone(),
                             hit,
                             search,
@@ -1159,7 +1020,7 @@ fn SearchHitRow(
     opened: String,
     focused: String,
 ) -> Element {
-    let key = SearchRowKey::for_hit(&path, &hit);
+    let key = hit.key(&path);
     let accent = TreeRowAccent::resolve(key == opened, key == focused);
     let span = PreviewSpan::split(&hit.preview, hit.col, hit.end_col);
     let key_click = key.clone();
@@ -1223,7 +1084,7 @@ fn SearchToggle(label: String, hint: String, on: bool, on_press: EventHandler<()
 }
 
 #[component]
-fn SidebarViewSwitch(view: Signal<SidebarView>) -> Element {
+fn SidebarViewSwitch(view: ReadSignal<SidebarView>) -> Element {
     let current = view();
     rsx! {
         button {
@@ -1238,15 +1099,6 @@ fn SidebarViewSwitch(view: Signal<SidebarView>) -> Element {
             },
             TitleButtonIcon { glyph: current.switch_glyph() }
         }
-    }
-}
-
-fn prompt_title(kind: PromptKind) -> String {
-    match kind {
-        PromptKind::CreateFile => translate("editor-new-file"),
-        PromptKind::CreateDir => translate("editor-new-folder"),
-        PromptKind::Rename => translate("common-rename"),
-        PromptKind::Delete => translate("common-delete"),
     }
 }
 
@@ -1265,11 +1117,62 @@ fn localize_notice(message: &str) -> String {
 }
 
 #[component]
-pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<SidebarView>) -> Element {
-    let mut root_name = use_signal(|| translate("editor-explorer"));
-    let mut root_path = use_signal(String::new);
-    let mut current_path = use_signal(String::new);
-    let mut root_loading = use_signal(|| false);
+pub fn ExplorerPanel(
+    visible: Memo<bool>,
+    caret_line: u32,
+    view: ReadSignal<SidebarView>,
+) -> Element {
+    let tree_state = FileUi::current().use_value(|state| state.explorer.explorer_tree.as_ref());
+    let focus_state = FileUi::current().use_value(|state| state.explorer.explorer_focus.as_ref());
+    let editors_state = FileUi::current().use_value(|state| state.explorer.open_editors.as_ref());
+    let outline_state = FileUi::current().use_value(|state| state.explorer.outline.as_ref());
+    let notice = FileUi::current().use_value(|state| Some(&state.explorer.explorer_notice));
+    let panel = FileUi::current().use_value(|state| state.explorer.explorer_panel.as_ref());
+    let prompt = FileUi::current().use_value(|state| Some(&state.explorer.explorer_prompt));
+    let root_name = use_memo(move || {
+        tree_state
+            .read()
+            .as_ref()
+            .map(|tree| tree.root_name.clone())
+            .unwrap_or_else(|| translate("editor-explorer"))
+    });
+    let root_path = use_memo(move || {
+        tree_state
+            .read()
+            .as_ref()
+            .map(|tree| tree.root_path.clone())
+            .unwrap_or_default()
+    });
+    let current_path = use_memo(move || {
+        focus_state
+            .read()
+            .as_ref()
+            .map(|focus| focus.path.clone())
+            .filter(|path| !path.is_empty())
+            .or_else(|| {
+                tree_state
+                    .read()
+                    .as_ref()
+                    .map(|tree| tree.current_path.clone())
+            })
+            .unwrap_or_default()
+    });
+    let root_loading =
+        use_memo(move || tree_state.read().as_ref().is_some_and(|tree| tree.loading));
+    let open_editors = use_memo(move || {
+        editors_state
+            .read()
+            .as_ref()
+            .map(|editors| editors.items.clone())
+            .unwrap_or_default()
+    });
+    let outline = use_memo(move || {
+        outline_state
+            .read()
+            .as_ref()
+            .map(|outline| outline.items.clone())
+            .unwrap_or_default()
+    });
     let rows = use_signal(Vec::<MotionRow>::new);
     let row_generation = use_signal(|| 0u32);
     let tree = TreeRows {
@@ -1307,16 +1210,10 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
     let outline_focus = TreeFocus {
         key: use_signal(String::new),
     };
-    let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
-    let mut outline = use_signal(Vec::<OutlineRow>::new);
-    let mut show_open = use_signal(|| true);
-    let mut show_files = use_signal(|| true);
-    let mut show_outline = use_signal(|| true);
+    let show_open = panel.read().as_ref().is_none_or(|panel| panel.open_editors);
+    let show_files = panel.read().as_ref().is_none_or(|panel| panel.files);
+    let show_outline = panel.read().as_ref().is_none_or(|panel| panel.outline);
     let mut menu = use_signal(|| None::<TreeMenu>);
-    let mut prompt = use_signal(|| None::<TreePrompt>);
-    let mut draft = use_signal(String::new);
-    let mut notice = use_signal(|| None::<ExplorerNotice>);
-    let notice_generation = use_signal(|| 0u32);
     let ime = use_ime_guard();
 
     use_effect(move || {
@@ -1325,76 +1222,36 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
         }
     });
 
-    let tree_event = use_file_ui::<ExplorerTreeEvent>();
+    let tree_event = FileUi::current().use_field(|state| state.explorer.explorer_tree.as_ref());
     use_effect(move || {
         tree_event.for_each(|e| {
-            root_name.set(e.root_name);
-            root_path.set(e.root_path);
-            current_path.set(e.current_path);
-            root_loading.set(e.loading);
             tree.reconcile(e.rows);
         })
     });
-    let focus_event = use_file_ui::<ExplorerFocusEvent>();
+    let focus_event = FileUi::current().use_field(|state| state.explorer.explorer_focus.as_ref());
     use_effect(move || {
         focus_event.for_each(|e| {
             if e.revision <= *focus_revision.peek() {
                 return;
             }
             focus_revision.set(e.revision);
-            if current_path() != e.path {
-                current_path.set(e.path.clone());
-            }
             if visible() {
                 tree_focus.at(e.path.clone());
                 schedule_tree_focus(e.path, focus_generation, e.reveal);
             }
         })
     });
-    let editors_event = use_file_ui::<OpenEditorsEvent>();
-    use_effect(move || {
-        editors_event.for_each(|e| {
-            open_editors.set(e.items);
-        })
-    });
-    let outline_event = use_file_ui::<OutlineEvent>();
-    use_effect(move || {
-        outline_event.for_each(|e| {
-            outline.set(e.items);
-        })
-    });
-    let fs_result = use_file_ui::<ExplorerFsResult>();
-    use_effect(move || {
-        fs_result.for_each(|e| {
-            if e.ok && !e.open_path.is_empty() {
-                open_file(e.open_path);
-            }
-            show_notice(
-                notice,
-                notice_generation,
-                ExplorerNotice {
-                    ok: e.ok,
-                    message: if e.ok {
-                        localize_notice(&e.message)
-                    } else {
-                        e.message
-                    },
-                },
-            );
-        })
-    });
-
-    let open_body = if show_open() {
+    let open_body = if show_open {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
     } else {
         "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
     };
-    let files_body = if show_files() {
+    let files_body = if show_files {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
     } else {
         "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
     };
-    let outline_body = if show_outline() {
+    let outline_body = if show_outline {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
     } else {
         "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
@@ -1404,9 +1261,9 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
         let _layout = (
             visible(),
             view().is_search(),
-            show_open(),
-            show_files(),
-            show_outline(),
+            show_open,
+            show_files,
+            show_outline,
             open_editors.read().len(),
             rows.read().len(),
             outline.read().len(),
@@ -1446,6 +1303,15 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
     let focused_symbol = outline_focus.key.cloned();
     let caret_symbol = CaretSymbol::from_rows(&outline.read(), caret_line);
     let tree_empty = rows.read().is_empty();
+    let notice = notice().and_then(|notice| {
+        let message = notice.message?;
+        let message = if notice.ok {
+            localize_notice(&message)
+        } else {
+            message
+        };
+        Some((notice.ok, message))
+    });
 
     rsx! {
         div { class: "group/panel relative flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
@@ -1465,15 +1331,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                         label: translate("editor-new-file"),
                         on_press: move |_| {
                             let focus = tree_focus.key.peek().clone();
-                            draft.set(String::new());
-                            prompt
-                                .set(
-                                    Some(TreePrompt {
-                                        kind: PromptKind::CreateFile,
-                                        path: tree.create_parent(&focus, &root_path()),
-                                        name: String::new(),
-                                    }),
-                                );
+                            let _ = send(&ExplorerCreateFilePromptRequest { path: focus });
                         },
                     }
                     TitleButton {
@@ -1481,15 +1339,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                         label: translate("editor-new-folder"),
                         on_press: move |_| {
                             let focus = tree_focus.key.peek().clone();
-                            draft.set(String::new());
-                            prompt
-                                .set(
-                                    Some(TreePrompt {
-                                        kind: PromptKind::CreateDir,
-                                        path: tree.create_parent(&focus, &root_path()),
-                                        name: String::new(),
-                                    }),
-                                );
+                            let _ = send(&ExplorerCreateDirectoryPromptRequest { path: focus });
                         },
                     }
                     TitleButton {
@@ -1520,7 +1370,13 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                     files_sticky.measure();
                     outline_sticky.measure();
                 },
-                SectionHeader { title: translate("editor-open-editors"), open: show_open, on_toggle: EventHandler::new(move |_| show_open.set(!show_open())) }
+                SectionHeader {
+                    title: translate("editor-open-editors"),
+                    open: show_open,
+                    on_toggle: EventHandler::new(move |_| {
+                        let _ = send(&ExplorerOpenEditorsToggle);
+                    }),
+                }
                 div { class: "{open_body}",
                     div { class: "min-h-0 overflow-hidden",
                         for it in open_editors() {
@@ -1584,7 +1440,9 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                     SectionHeader {
                         title: root_name(),
                         open: show_files,
-                        on_toggle: EventHandler::new(move |_| show_files.set(!show_files())),
+                        on_toggle: EventHandler::new(move |_| {
+                            let _ = send(&ExplorerFilesToggle);
+                        }),
                     }
                 }
                 StickyFolders {
@@ -1722,7 +1580,9 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                 SectionHeader {
                     title: translate("editor-outline"),
                     open: show_outline,
-                    on_toggle: EventHandler::new(move |_| show_outline.set(!show_outline())),
+                    on_toggle: EventHandler::new(move |_| {
+                        let _ = send(&ExplorerOutlineToggle);
+                    }),
                 }
                 StickyOutline { rows: sticky_outline, on_pick: move |line: u32| goto_line(line) }
                 div { class: "{outline_body}",
@@ -1800,8 +1660,9 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                             onclick: {
                                 let path = current.path.clone();
                                 move |_| {
-                                    draft.set(String::new());
-                                    prompt.set(Some(TreePrompt { kind: PromptKind::CreateFile, path: path.clone(), name: String::new() }));
+                                    let _ = send(&ExplorerCreateFilePromptRequest {
+                                        path: path.clone(),
+                                    });
                                     menu.set(None);
                                 }
                             },
@@ -1812,8 +1673,9 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                             onclick: {
                                 let path = current.path.clone();
                                 move |_| {
-                                    draft.set(String::new());
-                                    prompt.set(Some(TreePrompt { kind: PromptKind::CreateDir, path: path.clone(), name: String::new() }));
+                                    let _ = send(&ExplorerCreateDirectoryPromptRequest {
+                                        path: path.clone(),
+                                    });
                                     menu.set(None);
                                 }
                             },
@@ -1842,8 +1704,10 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                 let path = current.path.clone();
                                 let name = current.name.clone();
                                 move |_| {
-                                    draft.set(name.clone());
-                                    prompt.set(Some(TreePrompt { kind: PromptKind::Rename, path: path.clone(), name: name.clone() }));
+                                    let _ = send(&ExplorerRenamePromptRequest {
+                                        path: path.clone(),
+                                        name: name.clone(),
+                                    });
                                     menu.set(None);
                                 }
                             },
@@ -1855,7 +1719,10 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                 let path = current.path.clone();
                                 let name = current.name.clone();
                                 move |_| {
-                                    prompt.set(Some(TreePrompt { kind: PromptKind::Delete, path: path.clone(), name: name.clone() }));
+                                    let _ = send(&ExplorerDeletePromptRequest {
+                                        path: path.clone(),
+                                        name: name.clone(),
+                                    });
                                     menu.set(None);
                                 }
                             },
@@ -1865,18 +1732,18 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                 }
             }
 
-            if let Some(current) = prompt() {
+            if let Some(current) = prompt().filter(|prompt| prompt.open) {
                 DialogRoot {
                     open: true,
                     on_open_change: Callback::new(move |open: bool| {
                         if !open {
-                            prompt.set(None);
+                            let _ = send(&ExplorerPromptDismissRequest);
                         }
                     }),
                     attributes: vec![],
                     DialogContent { class: "max-w-[360px] p-4", attributes: vec![],
-                        DialogTitle { attributes: vec![], "{prompt_title(current.kind)}" }
-                        if current.kind == PromptKind::Delete {
+                        DialogTitle { attributes: vec![], "{translate(&current.title_message_id)}" }
+                        if current.destructive {
                             DialogDescription { class: "text-xs leading-relaxed", attributes: vec![],
                                 {translate_with("editor-delete-confirm", &[("name", TranslationValue::String(&current.name))])}
                             }
@@ -1884,8 +1751,10 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                             input {
                                 class: "w-full rounded-md border border-border bg-foreground/[0.04] px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary/50",
                                 autofocus: true,
-                                value: "{draft}",
-                                oninput: move |e| draft.set(e.value()),
+                                value: "{current.draft}",
+                                oninput: move |e| {
+                                    let _ = send(&ExplorerPromptDraftRequest { draft: e.value() });
+                                },
                                 oncompositionstart: move |_| ime.start(),
                                 oncompositionend: move |_| ime.commit(),
                                 onkeydown: move |e: Event<KeyboardData>| {
@@ -1893,34 +1762,40 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                     if ime.swallows(&e) { return; }
                                     if e.key() == Key::Enter {
                                         e.prevent_default();
-                                        submit_prompt(prompt, draft);
+                                        let _ = send(&ExplorerPromptSubmitRequest);
                                     } else if e.key() == Key::Escape {
-                                        prompt.set(None);
+                                        let _ = send(&ExplorerPromptDismissRequest);
                                     }
                                 },
                             }
                         }
                         div { class: "flex justify-end gap-2",
-                            Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost, onclick: move |_| prompt.set(None),
+                            Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost, onclick: move |_| {
+                                let _ = send(&ExplorerPromptDismissRequest);
+                            },
                                 {translate("common-cancel")}
                             }
-                            Button { size: ButtonSize::Xs, variant: if current.kind == PromptKind::Delete { ButtonVariant::Destructive } else { ButtonVariant::Primary }, onclick: move |_| submit_prompt(prompt, draft),
-                                {if current.kind == PromptKind::Delete { translate("common-delete") } else { translate("common-save") }}
+                            Button { size: ButtonSize::Xs, variant: if current.destructive { ButtonVariant::Destructive } else { ButtonVariant::Primary }, onclick: move |_| {
+                                let _ = send(&ExplorerPromptSubmitRequest);
+                            },
+                                {if current.destructive { translate("common-delete") } else { translate("common-save") }}
                             }
                         }
                     }
                 }
             }
 
-            if let Some(current) = notice() {
+            if let Some((ok, message)) = notice {
                 button {
-                    class: if current.ok {
+                    class: if ok {
                         "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-success/90 px-3 py-2 text-left text-xs text-white shadow-lg"
                     } else {
                         "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-red-500/90 px-3 py-2 text-left text-xs text-white shadow-lg"
                     },
-                    onclick: move |_| notice.set(None),
-                    "{current.message}"
+                    onclick: move |_| {
+                        let _ = send(&ExplorerNoticeDismissRequest);
+                    },
+                    "{message}"
                 }
             }
         }
@@ -1944,28 +1819,6 @@ pub fn OutlineGlyph(kind: u8) -> Element {
 mod tests {
     use super::*;
 
-    impl MotionRow {
-        fn dir(path: &str) -> Self {
-            Self {
-                row: TreeRow {
-                    name: String::new(),
-                    path: path.to_string(),
-                    depth: 0,
-                    is_dir: true,
-                    expanded: false,
-                    loading: false,
-                },
-                visible: true,
-            }
-        }
-
-        fn file(path: &str) -> Self {
-            let mut motion = Self::dir(path);
-            motion.row.is_dir = false;
-            motion
-        }
-    }
-
     fn span(name: &str, line: u32, end_line: u32, depth: u16) -> OutlineRow {
         OutlineRow {
             name: name.to_string(),
@@ -1974,23 +1827,6 @@ mod tests {
             end_line,
             depth,
         }
-    }
-
-    #[test]
-    fn a_new_entry_lands_in_the_selected_folder_or_the_selected_file_s_folder() {
-        let rows = vec![MotionRow::dir("/r/src"), MotionRow::file("/r/src/lib.rs")];
-        assert_eq!(CreateTarget::resolve(&rows, "/r/src", "/r"), "/r/src");
-        assert_eq!(
-            CreateTarget::resolve(&rows, "/r/src/lib.rs", "/r"),
-            "/r/src"
-        );
-    }
-
-    #[test]
-    fn a_new_entry_lands_in_the_root_without_a_live_selection() {
-        let rows = vec![MotionRow::dir("/r/src")];
-        assert_eq!(CreateTarget::resolve(&rows, "", "/r"), "/r");
-        assert_eq!(CreateTarget::resolve(&rows, "/r/dropped", "/r"), "/r");
     }
 
     #[test]
@@ -2062,11 +1898,16 @@ mod tests {
         let whole = ExplorerSearchEvent {
             root: "/r".to_string(),
             query: "needle".to_string(),
+            regex: false,
+            case_sensitive: false,
+            whole_word: false,
             files: vec![
                 HitFile::build("/r/a.rs", &[1, 2], false),
                 HitFile::build("/r/b.rs", &[7], false),
             ],
             capped: false,
+            collapsed: Vec::new(),
+            opened: String::new(),
         };
         assert_eq!(
             SearchSummary::from(&whole),

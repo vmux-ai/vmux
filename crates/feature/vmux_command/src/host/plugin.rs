@@ -12,7 +12,7 @@ use crate::host::definition::{
     CommandDefinition, CommandInvocation, CommandRuntimePlugin, DispatchCommandInvocations,
     WriteCommandRequests,
 };
-use crate::host::shortcut::{KeyCombo, KeyContext, Keymap};
+use crate::host::shortcut_driver::{KeyCombo, KeyContext, Keymap};
 use crate::host::snapshot::UiStatePlugin;
 use vmux_ecs::team::{Agent, Profile, User};
 
@@ -159,7 +159,7 @@ mod tests {
     use vmux_api::input::KeyModifiers;
 
     use super::*;
-    use crate::host::shortcut::{Binding, Modifiers, Shortcut, Source, When};
+    use crate::host::shortcut_driver::{Binding, Modifiers, Shortcut, Source, When};
 
     const CTRL: Modifiers = Modifiers {
         ctrl: true,

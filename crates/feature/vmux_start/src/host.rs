@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -7,14 +9,14 @@ use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId
 use vmux_api::open_target::OpenTarget;
 use vmux_api::space::ProjectBranch;
 use vmux_command::{
-    ClaimedUrl, CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
-    CommandBarTerminalPage, CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes,
-    ContributedCommand, ContributedPage,
+    ClaimedUrl, CommandBarContextSnapshot, CommandBarPagesSnapshot, CommandBarProjectRoots,
+    CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes, ContributedCommand,
+    ContributedPage,
 };
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::PageMetadata;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ui::i18n::Locale;
 
 use crate::event::StartSelectWorkspace;
@@ -23,7 +25,7 @@ use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 use vmux_layout::workspace_snapshot::TabGather;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
@@ -31,9 +33,11 @@ impl Plugin for StartPlugin {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
-        app.add_plugins(Self::MANIFEST.plugin().hosted(
-            vmux_ecs::host::page::NativelyHosted::page(Self::URL, "Start"),
-        ))
+        app.add_plugins(
+            Self::MANIFEST
+                .plugin()
+                .hosted(vmux_ecs::page::HostedPage::page(Self::URL, "Start")),
+        )
         .add_message::<InlineTransitionRequested>()
         .add_systems(Update, (mark_launcher, begin_inline));
         app.add_plugins(UiEventPlugin::<(
@@ -80,7 +84,7 @@ struct CommandBarFocusRequested {
 #[derive(Component)]
 struct PendingStartWorkspacePicker {
     tab: Entity,
-    task: Task<Option<(std::path::PathBuf, bool)>>,
+    task: Task<Option<(PathBuf, bool)>>,
 }
 
 #[derive(SystemParam)]
@@ -94,11 +98,10 @@ struct StartPromptContext<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
-    spaces: Single<'w, 's, Ref<'static, CommandBarSpacesSnapshot>>,
+    context: Single<'w, 's, Ref<'static, CommandBarContextSnapshot>>,
     pages: Single<'w, 's, Ref<'static, CommandBarPagesSnapshot>>,
     projects: Single<'w, 's, Ref<'static, CommandBarProjectRoots>>,
     work: Single<'w, 's, Ref<'static, CommandBarWorkSnapshot>>,
-    terminal_page: Query<'w, 's, Ref<'static, CommandBarTerminalPage>>,
     warmed_branches_for: Local<'s, String>,
 }
 
@@ -109,14 +112,17 @@ impl StartPromptContext<'_, '_> {
                 SlashCommandEntry {
                     command: SlashCommand::Upload,
                     description: "Attach files".to_string(),
+                    delegated: false,
                 },
                 SlashCommandEntry {
                     command: SlashCommand::Resume,
                     description: "Resume a past session".to_string(),
+                    delegated: true,
                 },
                 SlashCommandEntry {
                     command: SlashCommand::Mcp,
-                    description: String::new(),
+                    description: vmux_ui::i18n::translate("mcp-command-description"),
+                    delegated: true,
                 },
             ],
             ..Default::default()
@@ -124,11 +130,10 @@ impl StartPromptContext<'_, '_> {
     }
 
     fn changed(&self, tab: Option<Entity>) -> bool {
-        if self.spaces.is_changed()
+        if self.context.is_changed()
             || self.pages.is_changed()
             || self.projects.is_changed()
             || self.work.is_changed()
-            || self.terminal_page.iter().any(|page| page.is_changed())
         {
             return true;
         }
@@ -174,7 +179,7 @@ impl StartPromptContext<'_, '_> {
         if cwd.is_empty() {
             return Self::unrooted();
         }
-        let path = std::path::Path::new(&cwd);
+        let path = Path::new(&cwd);
         let named = match info {
             Some(info) => info.project_name(),
             None => path
@@ -209,26 +214,17 @@ impl StartPromptContext<'_, '_> {
         projects: Vec<vmux_api::space::ProjectRow>,
         locale: &Locale,
     ) -> CommandBarOpenEvent {
-        let active_stack_count = tabs.stack_q.iter().count();
-        let space_name = self.spaces.active_space_name.clone();
-        let tab_rows = tabs.tabs(active_tab, &space_name, locale);
+        let context_label = self.context.label.clone();
+        let tab_rows = tabs.tabs(active_tab, &context_label, locale);
         let mut payload = projector.project(CommandBarOpenProjection {
             open_id: OpenId::NONE,
             native_windowed: false,
-            space_name,
+            context: (**self.context).clone(),
             url: String::new(),
-            spaces: (**self.spaces).clone(),
-            terminal_page_url: self
-                .terminal_page
-                .iter()
-                .next()
-                .map(|page| page.0.clone())
-                .unwrap_or_default(),
             pages: (**self.pages).clone(),
             projects: (**self.projects).clone(),
             work: (**self.work).clone(),
             locale: locale.clone(),
-            active_stack_count,
             tabs: tab_rows,
             target: Some(OpenTarget::InPlace),
         });
@@ -243,6 +239,7 @@ fn select_workspace(
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<Tab>>,
     pending: Query<&PendingStartWorkspacePicker>,
+    projects: vmux_ecs::profile::Projects,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -263,21 +260,20 @@ fn select_workspace(
         return;
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let projects_dir = vmux_ecs::profile::ProfilePaths::current().projects();
-    let initial_dir = std::fs::create_dir_all(&projects_dir)
+    let initial_dir = projects
+        .path()
         .ok()
-        .map(|_| projects_dir)
-        .filter(|path| path.is_dir())
+        .map(Path::to_path_buf)
         .or_else(|| {
-            std::path::PathBuf::from(&trigger.event().payload.current_dir)
+            PathBuf::from(&trigger.event().payload.current_dir)
                 .canonicalize()
                 .ok()
                 .filter(|path| path.is_dir())
         })
         .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
-        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
         .filter(|path| path.is_dir())
-        .unwrap_or_else(|| std::path::PathBuf::from("/"));
+        .unwrap_or_else(|| PathBuf::from("/"));
     let task = IoTaskPool::get().spawn(async move {
         let selected = rfd::AsyncFileDialog::new()
             .set_title("Choose existing project")
@@ -362,8 +358,8 @@ fn read_branches(
             commands.entity(entity).despawn();
             continue;
         }
-        let root = std::path::PathBuf::from(&project);
-        let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+        let root = PathBuf::from(&project);
+        let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             let mut branches = Vec::new();
@@ -417,7 +413,7 @@ fn finish_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(vmux_ecs::host::UiStateWrite::<
+        commands.trigger(vmux_ecs::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(
             read.webview,
@@ -451,7 +447,7 @@ fn go_to_branch(
     let evt = &trigger.event().payload;
     let checkout = evt.checkout.trim();
     if !checkout.is_empty() {
-        let Ok(path) = std::path::PathBuf::from(checkout).canonicalize() else {
+        let Ok(path) = PathBuf::from(checkout).canonicalize() else {
             return;
         };
         commands.trigger(ChosenProject {
@@ -461,7 +457,7 @@ fn go_to_branch(
         });
         return;
     }
-    let Ok(root) = std::path::PathBuf::from(&evt.project).canonicalize() else {
+    let Ok(root) = PathBuf::from(&evt.project).canonicalize() else {
         return;
     };
     let worktree = (!evt.branch.trim().is_empty()).then(|| TabWorktree {
@@ -481,7 +477,7 @@ fn go_to_branch(
 struct ChosenProject {
     #[event_target]
     tab: Entity,
-    path: std::path::PathBuf,
+    path: PathBuf,
     worktree: Option<TabWorktree>,
 }
 
@@ -568,11 +564,9 @@ fn sync_pages(
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
     let git_info = (!cwd.is_empty())
         .then(|| {
-            repo_info.as_mut().and_then(|cache| {
-                cache
-                    .bypass_change_detection()
-                    .lookup(std::path::Path::new(&cwd))
-            })
+            repo_info
+                .as_mut()
+                .and_then(|cache| cache.bypass_change_detection().lookup(Path::new(&cwd)))
         })
         .flatten();
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
@@ -638,7 +632,7 @@ fn sync_pages(
                 project: project.clone(),
             });
         }
-        commands.trigger(vmux_ecs::host::UiStateWrite::<
+        commands.trigger(vmux_ecs::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(e, &payload));
         if focus_requested {
@@ -663,7 +657,7 @@ fn focus_command_bar(
             effect
         }
     };
-    commands.trigger(vmux_ecs::host::UiStateWrite::<
+    commands.trigger(vmux_ecs::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(webview, &effect));
 }
@@ -707,7 +701,7 @@ fn begin_inline(
 mod tests {
     use super::*;
     use vmux_api::command_bar::CommandBarUiState;
-    use vmux_ecs::host::UiStateWrite;
+    use vmux_ecs::UiStateWrite;
     use vmux_ecs::page::PageManifest;
 
     #[derive(Resource, Default)]
@@ -717,7 +711,7 @@ mod tests {
         trigger: On<UiStateWrite<CommandBarUiState>>,
         mut emitted: ResMut<EmittedIds>,
     ) {
-        let patch = trigger.event().patch();
+        let patch = trigger.event().update();
         let entry = if patch.snapshot.is_some() {
             ("snapshot", 0)
         } else if let Some(effect) = &patch.focus {

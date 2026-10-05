@@ -3,22 +3,31 @@
 #[cfg(host)]
 pub use host::{
     AgentInvokeCommand, BindCommands, Binding, ClaimedUrl, ClaimedUrls, CommandBar,
-    CommandBarDismiss, CommandBarNativeSize, CommandBarOpenProjection, CommandBarOpenRequest,
-    CommandBarPagesSnapshot, CommandBarPanelActive, CommandBarPlugin, CommandBarProjectRoots,
-    CommandBarProjector, CommandBarSpacesSnapshot, CommandBarState, CommandBarTerminalPage,
-    CommandBarWorkDirectory, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandBinding,
-    CommandDefinition, CommandDispatch, CommandInvocation, CommandManifest, CommandMcp,
-    CommandPlugin, CommandRegistry, CommandRuntimePlugin, CommandShortcut, CommandToolPlugin,
-    ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPage,
-    ContributedPages, DispatchCommandInvocations, KeyCombo, KeyContext, Keymap, Modifiers,
-    PendingCommandBarReveal, ReadCommandRequests, RegisteredPage, ResolvedKey, ResolvedLocale,
-    ResumeRows, Shortcut, ShortcutDefinition, Source, SpaceSummary, When, WriteCommandBarRequests,
-    WriteCommandBarSnapshots, WriteCommandRequests,
+    CommandBarContextSnapshot, CommandBarDismiss, CommandBarNativeSize, CommandBarOpenProjection,
+    CommandBarOpenRequest, CommandBarPagesSnapshot, CommandBarPanelActive, CommandBarPlugin,
+    CommandBarProjectRoots, CommandBarProjector, CommandBarState, CommandBarWorkDirectory,
+    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandBinding,
+    CommandBindingRegistration, CommandDefinition, CommandDispatch, CommandInvocation,
+    CommandManifest, CommandMcp, CommandPlugin, CommandRegistry, CommandRuntimePlugin,
+    CommandShortcut, CommandToolPlugin, ContributedAgentModels, ContributedAgentModes,
+    ContributedCommand, ContributedPage, ContributedPages, DispatchCommandInvocations, KeyCombo,
+    KeyContext, Keymap, Modifiers, PendingCommandBarReveal, ReadCommandRequests, RegisteredPage,
+    ResolvedKey, ResolvedLocale, Shortcut, ShortcutDefinition, Source, When,
+    WriteCommandBarRequests, WriteCommandBarSnapshots, WriteCommandRequests,
 };
 pub use palette_surface::CommandPaletteSurface;
 #[cfg(ui)]
 pub use ui::{CommandBarPanel, CommandPalette, PaletteProps, ResultRow, use_command_bar_ui};
 pub use vmux_macro::command;
+
+mod palette_surface_driver;
+
+#[doc(hidden)]
+pub mod __private {
+    #[cfg(host)]
+    pub use crate::host::CommandMessageRegistration;
+    pub use inventory;
+}
 
 extern crate self as vmux_command;
 
@@ -26,7 +35,7 @@ extern crate self as vmux_command;
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

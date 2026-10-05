@@ -6,29 +6,51 @@ use crate::state::{
 use bevy_ecs::prelude::Component;
 
 use crate::{ToolStore, ToolsManifest};
+use vmux_ecs::manifest::{FeatureId, FeatureManifestSource};
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolProviderId(pub ToolProvider);
 
 #[derive(Component, Clone, Copy)]
+pub struct ToolProviderBinding {
+    pub(crate) feature: FeatureId,
+    pub(crate) index: usize,
+}
+
+impl ToolProviderBinding {
+    pub fn new<M: FeatureManifestSource>(index: usize) -> Self {
+        Self {
+            feature: FeatureId::of::<M>(),
+            index,
+        }
+    }
+}
+
+#[derive(Component, Clone, Copy)]
 pub struct ToolScanner(
-    fn(&ToolStore, &mut ToolsManifest, bool) -> Result<ToolProviderSnapshot, String>,
+    fn(&ToolProvider, &ToolStore, &mut ToolsManifest, bool) -> Result<ToolProviderSnapshot, String>,
 );
 
 impl ToolScanner {
     pub fn new(
-        scan: fn(&ToolStore, &mut ToolsManifest, bool) -> Result<ToolProviderSnapshot, String>,
+        scan: fn(
+            &ToolProvider,
+            &ToolStore,
+            &mut ToolsManifest,
+            bool,
+        ) -> Result<ToolProviderSnapshot, String>,
     ) -> Self {
         Self(scan)
     }
 
     pub fn scan(
         self,
+        provider: &ToolProvider,
         store: &ToolStore,
         manifest: &mut ToolsManifest,
         refresh: bool,
     ) -> Result<ToolProviderSnapshot, String> {
-        (self.0)(store, manifest, refresh)
+        (self.0)(provider, store, manifest, refresh)
     }
 }
 
@@ -131,7 +153,7 @@ impl ToolInventory {
             .map(|item| {
                 let managed = manifest.contains(self.provider.id(), &item.id);
                 ToolItem {
-                    provider: self.provider,
+                    provider: self.provider.clone(),
                     operations: item.operations(managed),
                     id: item.id,
                     name: item.name,
@@ -152,7 +174,7 @@ impl ToolInventory {
                 continue;
             }
             items.push(ToolItem {
-                provider: self.provider,
+                provider: self.provider.clone(),
                 id: name.clone(),
                 name,
                 icon: None,
@@ -183,9 +205,10 @@ mod tests {
     #[test]
     fn inventory_reconciliation_imports_installed_items_and_preserves_missing_declarations() {
         let mut manifest = ToolsManifest::default();
-        manifest.set_package(ToolProvider::Npm.id(), "missing", true);
+        let provider = ToolProvider::new("npm");
+        manifest.set_package(provider.id(), "missing", true);
         let category = ToolInventory::new(
-            ToolProvider::Npm,
+            provider.clone(),
             vec![ToolInventoryItem {
                 id: "installed".to_string(),
                 name: "Installed".to_string(),
@@ -198,7 +221,7 @@ mod tests {
         )
         .reconcile(&mut manifest);
 
-        assert!(manifest.contains(ToolProvider::Npm.id(), "installed"));
+        assert!(manifest.contains(provider.id(), "installed"));
         assert_eq!(category.items.len(), 2);
         assert_eq!(category.items[0].id, "installed");
         assert_eq!(category.items[1].id, "missing");
@@ -208,7 +231,7 @@ mod tests {
     fn reconciled_installed_items_keep_metadata_and_removal() {
         let mut manifest = ToolsManifest::default();
         let category = ToolInventory::new(
-            ToolProvider::Npm,
+            ToolProvider::new("npm"),
             vec![ToolInventoryItem {
                 id: "typescript".to_string(),
                 name: "TypeScript".to_string(),

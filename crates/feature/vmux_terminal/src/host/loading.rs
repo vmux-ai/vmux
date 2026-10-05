@@ -46,8 +46,8 @@ fn set_shell_icon(
         if !metadata.icon.is_none() {
             continue;
         }
-        if let Some(icon) = vmux_ecs::BuiltinIcon::for_shell(&launch.command) {
-            metadata.icon = vmux_ecs::PageIcon::Builtin(icon);
+        if let Some(icon) = vmux_api::BuiltinIcon::for_shell(&launch.command) {
+            metadata.icon = vmux_api::PageIcon::Builtin(icon);
         }
     }
 }
@@ -76,16 +76,16 @@ fn announce_slow_shell_boot(
             continue;
         }
         loading.announced = true;
-        commands.trigger(vmux_ecs::host::UiStateWrite::<
-            vmux_ecs::event::TerminalUiState,
-        >::from_event(
-            entity,
-            &TermLoadingEvent {
-                loading: true,
-                label: "Terminal".to_string(),
-                segment: "terminal".to_string(),
-            },
-        ));
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_ecs::event::TerminalUiState>::from_event(
+                entity,
+                &TermLoadingEvent {
+                    loading: true,
+                    label: "Terminal".to_string(),
+                    segment: "terminal".to_string(),
+                },
+            ),
+        );
     }
 }
 
@@ -121,15 +121,15 @@ fn clear_shell(
         if !state.announced {
             continue;
         }
-        commands.trigger(vmux_ecs::host::UiStateWrite::<
-            vmux_ecs::event::TerminalUiState,
-        >::from_event(
-            entity,
-            &TermLoadingEvent {
-                loading: false,
-                label: "Terminal".to_string(),
-                segment: "terminal".to_string(),
-            },
-        ));
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_ecs::event::TerminalUiState>::from_event(
+                entity,
+                &TermLoadingEvent {
+                    loading: false,
+                    label: "Terminal".to_string(),
+                    segment: "terminal".to_string(),
+                },
+            ),
+        );
     }
 }

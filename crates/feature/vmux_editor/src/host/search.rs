@@ -57,6 +57,9 @@ fn finish_project(
             target_path: view.path.clone(),
             root: outcome.root.to_string_lossy().into_owned(),
             query: outcome.query,
+            regex: outcome.regex,
+            case_sensitive: outcome.case_sensitive,
+            whole_word: outcome.whole_word,
             files: outcome.files,
             capped: outcome.capped,
         });
@@ -69,6 +72,9 @@ struct RunningSearch(Task<SearchOutcome>);
 struct SearchOutcome {
     root: PathBuf,
     query: String,
+    regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
     files: Vec<ExplorerSearchFile>,
     capped: bool,
 }
@@ -76,6 +82,9 @@ struct SearchOutcome {
 struct ProjectSearch {
     root: PathBuf,
     query: String,
+    regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
     pattern: SearchPattern,
 }
 
@@ -85,6 +94,9 @@ impl ProjectSearch {
         Some(Self {
             root: FileDir::project_root(start),
             query: request.query.clone(),
+            regex: request.regex,
+            case_sensitive: request.case_sensitive,
+            whole_word: request.whole_word,
             pattern,
         })
     }
@@ -127,6 +139,9 @@ impl ProjectSearch {
         SearchOutcome {
             root: self.root,
             query: self.query,
+            regex: self.regex,
+            case_sensitive: self.case_sensitive,
+            whole_word: self.whole_word,
             files,
             capped,
         }

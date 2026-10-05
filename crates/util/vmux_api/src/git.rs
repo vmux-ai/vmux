@@ -100,6 +100,8 @@ pub struct FileGitState {
     pub ahead: u32,
     pub behind: u32,
     pub staged_count: u32,
+    pub commit_message: String,
+    pub commit_pending: String,
     pub message: String,
     pub result: Option<GitOperationResult>,
     pub result_sequence: u64,

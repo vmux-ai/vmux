@@ -1,5 +1,6 @@
-#[vmux_api::ui_state(Default)]
+#[vmux_api::ui_state(Default, version = 2)]
 pub struct SettingsUiState {
+    pub query: String,
     pub sections: Vec<SettingsSection>,
     pub fields: Vec<SettingsRenderField>,
     pub items: Vec<SettingsRenderItem>,
@@ -36,10 +37,10 @@ pub enum SettingsRenderFieldKind {
         value: bool,
     },
     Integer {
-        value: u64,
+        value: String,
     },
     Number {
-        value: f64,
+        value: String,
         step: f64,
     },
     Text {
@@ -101,6 +102,7 @@ mod tests {
     #[test]
     fn typed_snapshot_round_trips() {
         let state = SettingsUiState {
+            query: String::new(),
             sections: vec![SettingsSection {
                 id: "general".into(),
                 title: "General".into(),

@@ -1,8 +1,11 @@
 use crate::event::{SideSheetPane, StackRevealTarget};
 use dioxus::prelude::*;
+use vmux_ecs::event::space::{
+    SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest, SpaceFormState,
+    SpaceRenameRequest,
+};
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -91,6 +94,8 @@ fn SideSheetContent() -> Element {
     let active_space = side_sheet.active_space;
     let panes = side_sheet.panes;
     let bookmarks = ui.bookmarks;
+    let bookmark_edit = ui.bookmark_edit;
+    let space_form = ui.space_form;
     let active_session = ui.active_session;
     let side_sheet_error = layout.error();
     let update_phase = ui.update;
@@ -149,7 +154,11 @@ fn SideSheetContent() -> Element {
                     ..BookmarkDragState::listeners(drag_state),
                     if let Some(space) = active_space {
                         div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
-                            SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
+                            SideSheetSpaceRow {
+                                key: "{space.id}",
+                                space: space.clone(),
+                                form: space_form.clone(),
+                            }
                             if let Some(session) = active_session {
                                 ActiveSessionPanel { session }
                             }
@@ -158,6 +167,7 @@ fn SideSheetContent() -> Element {
                     if let Some(pane) = active_pane {
                         BookmarksSection {
                             bookmarks: bookmarks.clone(),
+                            edit: bookmark_edit.clone(),
                             pane_id: pane.id,
                             expanded: pane.bookmarks_expanded,
                         }
@@ -200,11 +210,13 @@ fn SideSheetContent() -> Element {
 }
 
 #[component]
-fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow) -> Element {
-    let editing = use_signal(|| false);
-    let draft = use_signal(|| space.name.clone());
+fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow, form: SpaceFormState) -> Element {
+    let editing = form.open && form.space_id.as_deref() == Some(space.id.as_str());
     let menu_value = use_signal(|| space.id.clone());
     let rename_id = space.id.clone();
+    let rename_name = space.name.clone();
+    let menu_id = space.id.clone();
+    let menu_name = space.name.clone();
 
     rsx! {
         LayoutContextMenu {
@@ -213,14 +225,14 @@ fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow) -> Element {
                     class: "group relative flex w-full cursor-pointer items-center px-2 py-1.5 text-foreground hover:bg-foreground/5",
                     button {
                         r#type: "button",
-                        class: if editing() {
+                        class: if editing {
                             "pointer-events-none absolute inset-0 z-0 rounded outline-none"
                         } else {
                             "absolute inset-0 z-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
                         },
                         title: space.name.clone(),
                         aria_label: space.name.clone(),
-                        disabled: editing(),
+                        disabled: editing,
                         onclick: move |_| {
                             let _ = send(&vmux_ecs::event::space::SpaceOpenPageRequest);
                         },
@@ -232,20 +244,22 @@ fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow) -> Element {
                             path { d: "M3 14h7v7H3z" }
                             path { d: "M14 14h7v7h-7z" }
                         }
-                        EditableText {
-                            value: space.name.clone(),
-                            editing,
-                            draft,
-                            display_class: "pointer-events-auto min-w-0 flex-1 cursor-text truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground hover:bg-foreground/[0.06]".to_string(),
-                            input_class: "pointer-events-auto min-w-0 flex-1 rounded bg-background/70 px-1 py-0.5 text-ui font-medium text-foreground outline-none ring-1 ring-inset ring-primary/40".to_string(),
-                            title: translate("common-rename"),
-                            on_active_change: BookmarkInput::set_active,
-                            on_commit: move |name| {
-                                let _ = send(&vmux_ecs::event::space::SpaceRenameRequest {
-                                    space_id: rename_id.clone(),
-                                    name,
-                                });
-                            },
+                        if editing {
+                            SpaceRenameInput { form: form.clone() }
+                        } else {
+                            button {
+                                r#type: "button",
+                                class: "pointer-events-auto min-w-0 flex-1 cursor-text truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground hover:bg-foreground/[0.06]",
+                                title: translate("common-rename"),
+                                onclick: move |event| {
+                                    event.stop_propagation();
+                                    let _ = send(&SpaceFormOpenRequest {
+                                        space_id: Some(rename_id.clone()),
+                                        draft: rename_name.clone(),
+                                    });
+                                },
+                                "{space.name}"
+                            }
                         }
                     }
                 }
@@ -255,13 +269,78 @@ fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow) -> Element {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_value),
                     on_select: move |_: String| {
-                        BookmarkInput::begin_rename(editing, draft, space.name.clone())
+                        let _ = send(&SpaceFormOpenRequest {
+                            space_id: Some(menu_id.clone()),
+                            draft: menu_name.clone(),
+                        });
                     },
                     attributes: vec![],
                     {translate("common-rename")}
                 }
             }
         }
+    }
+}
+
+#[component]
+fn SpaceRenameInput(form: SpaceFormState) -> Element {
+    let mut finished = use_signal(|| false);
+    let submission = SpaceRenameSubmission(form.clone());
+    let enter = submission.clone();
+    let blur = submission.clone();
+    rsx! {
+        input {
+            r#type: "text",
+            class: "pointer-events-auto min-w-0 flex-1 rounded bg-background/70 px-1 py-0.5 text-ui font-medium text-foreground outline-none ring-1 ring-inset ring-primary/40",
+            value: form.draft,
+            autofocus: true,
+            autocomplete: "off",
+            onfocus: move |_| BookmarkInput::set_active(true),
+            onclick: move |event| event.stop_propagation(),
+            oninput: move |event: FormEvent| {
+                let _ = send(&SpaceFormInputRequest { draft: event.value() });
+            },
+            onkeydown: move |event: KeyboardEvent| match event.key() {
+                Key::Enter if !finished() => {
+                    event.prevent_default();
+                    finished.set(true);
+                    BookmarkInput::set_active(false);
+                    enter.submit();
+                }
+                Key::Escape if !finished() => {
+                    event.prevent_default();
+                    finished.set(true);
+                    BookmarkInput::set_active(false);
+                    let _ = send(&SpaceFormCloseRequest);
+                }
+                _ => {}
+            },
+            onblur: move |_| {
+                BookmarkInput::set_active(false);
+                if !finished() {
+                    finished.set(true);
+                    blur.submit();
+                }
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SpaceRenameSubmission(SpaceFormState);
+
+impl SpaceRenameSubmission {
+    fn submit(&self) {
+        let name = self.0.draft.trim().to_string();
+        if let Some(space_id) = self.0.space_id.as_ref()
+            && !name.is_empty()
+        {
+            let _ = send(&SpaceRenameRequest {
+                space_id: space_id.clone(),
+                name,
+            });
+        }
+        let _ = send(&SpaceFormCloseRequest);
     }
 }
 

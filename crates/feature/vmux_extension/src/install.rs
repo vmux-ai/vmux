@@ -5,13 +5,13 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::Receiver;
-use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress, ExtensionsEvent};
+use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress, ExtensionsUiState};
 
 #[cfg(test)]
 use crate::crx::ChromeExtensionId;
 use crate::crx::CrxArchive;
 use crate::webstore::ChromeWebStore;
-use crate::{catalog::ExtensionCatalog, download, manifest, store};
+use crate::{catalog::ExtensionCatalog, download, driver, store};
 
 const DEFAULT_PRODVERSION: &str = "120.0.0.0";
 
@@ -64,6 +64,7 @@ struct InstallFailed(String);
 
 struct ResolvedInstall {
     id: String,
+    profile: String,
     store: store::ExtensionStore,
     staging: PathBuf,
     crx_path: PathBuf,
@@ -72,6 +73,7 @@ struct ResolvedInstall {
 
 struct DownloadedInstall {
     id: String,
+    profile: String,
     store: store::ExtensionStore,
     staging: PathBuf,
     crx_path: PathBuf,
@@ -79,27 +81,30 @@ struct DownloadedInstall {
 
 struct PackageInstaller {
     id: String,
+    profile: String,
     store: store::ExtensionStore,
     staging: PathBuf,
 }
 
 struct InstallOutput {
     entry: store::ExtEntry,
-    snapshot: ExtensionsEvent,
+    snapshot: ExtensionsUiState,
 }
 
-impl TryFrom<&str> for ResolvedInstall {
-    type Error = String;
-
-    fn try_from(source: &str) -> Result<Self, Self::Error> {
+impl ResolvedInstall {
+    fn resolve(
+        source: &str,
+        profile: String,
+        store: store::ExtensionStore,
+    ) -> Result<Self, String> {
         let id = ChromeWebStore::extension_id(source)
             .ok_or("not a Chrome Web Store URL or extension id")?;
-        let store = store::ExtensionStore::current();
         let staging = store.path().join("staging").join(&id);
         let crx_path = staging.join("download.crx");
         let download_url = ChromeWebStore::crx_url(&id, DEFAULT_PRODVERSION);
         Ok(ResolvedInstall {
             id,
+            profile,
             store,
             staging,
             crx_path,
@@ -120,6 +125,7 @@ impl ResolvedInstall {
         })?;
         Ok(DownloadedInstall {
             id: self.id,
+            profile: self.profile,
             store: self.store,
             staging: self.staging,
             crx_path: self.crx_path,
@@ -132,6 +138,7 @@ impl DownloadedInstall {
         let bytes = std::fs::read(&self.crx_path).map_err(|error| error.to_string())?;
         PackageInstaller {
             id: self.id,
+            profile: self.profile,
             store: self.store,
             staging: self.staging,
         }
@@ -156,7 +163,7 @@ impl PackageInstaller {
 
         let manifest_json = std::fs::read_to_string(unpack_dir.join("manifest.json"))
             .map_err(|error| error.to_string())?;
-        let manifest = manifest::ExtensionManifest::parse(&manifest_json)?;
+        let manifest = driver::ExtensionManifest::parse(&manifest_json)?;
         let name = manifest.resolve_name(&unpack_dir);
         let icon = manifest
             .icon
@@ -171,7 +178,7 @@ impl PackageInstaller {
         let source_hash = self.store.source_hash(&final_dir)?;
         let _ = std::fs::remove_dir_all(&self.staging);
 
-        let profile = vmux_ecs::profile::Profile::current().into_id();
+        let profile = self.profile;
         let mut profile_enabled = std::collections::BTreeMap::new();
         profile_enabled.insert(profile.clone(), false);
 
@@ -250,9 +257,15 @@ impl PackageInstaller {
 fn start(
     mut requests: MessageReader<ExtensionInstallRequest>,
     mut catalog: Single<&mut ExtensionCatalog>,
+    profile: vmux_ecs::profile::CurrentProfile,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+        return;
+    };
+    let profile = profile.clone().into_id();
+    let store = store::ExtensionStore::at(paths.extensions());
     for request in requests.read() {
         catalog.update_progress(ExtInstallProgress {
             key: request.source.clone(),
@@ -265,16 +278,18 @@ fn start(
             ExtensionInstallOperation,
             request.clone(),
         ));
-        let resolved = match ResolvedInstall::try_from(request.source.as_str()) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                operation.insert(InstallFailed(error));
-                continue;
-            }
-        };
+        let resolved =
+            match ResolvedInstall::resolve(request.source.as_str(), profile.clone(), store.clone())
+            {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    operation.insert(InstallFailed(error));
+                    continue;
+                }
+            };
         let (progress_sender, progress) = crossbeam_channel::bounded(16);
         let progress_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let completion_wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+        let completion_wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let result = resolved.download(|received, total| {
                 let update = DownloadProgress { received, total };
@@ -334,7 +349,7 @@ fn download(
                 continue;
             }
         };
-        let completion_wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+        let completion_wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let result = downloaded.unpack();
             drop(completion_wake);
@@ -466,6 +481,7 @@ mod tests {
             let staging = self.store.path().join("staging").join(&fixture.id);
             PackageInstaller {
                 id: fixture.id.clone(),
+                profile: "test".into(),
                 store: self.store.clone(),
                 staging,
             }
@@ -504,12 +520,9 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(source.join("manifest.json")).unwrap())
                 .unwrap();
         assert_eq!(manifest["background"]["service_worker"], "background.js");
-        assert!(entry.installed_for("personal"));
-        assert!(!entry.enabled_for("personal"));
-        assert_eq!(
-            entry.grants_for("personal"),
-            store::ExtensionGrants::default()
-        );
+        assert!(entry.installed_for("test"));
+        assert!(!entry.enabled_for("test"));
+        assert_eq!(entry.grants_for("test"), store::ExtensionGrants::default());
     }
 
     #[test]

@@ -4,6 +4,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use super::Mode;
+use crate::picker::EditorPicker;
 
 #[component]
 pub(super) fn FileStatusInfo(
@@ -32,7 +33,7 @@ pub(super) fn FileStatusInfo(
                 label: position,
                 title: translate("editor-status-goto-title"),
                 extra: "tabular-nums",
-                picker: CommandBarPicker::GotoLine,
+                picker: EditorPicker::goto_line(),
             }
         }
         if scope.shows_indent() {
@@ -40,20 +41,20 @@ pub(super) fn FileStatusInfo(
                 label: IndentChoice::from(indent).label(),
                 title: translate("editor-status-indent-title"),
                 extra: "",
-                picker: CommandBarPicker::Indent,
+                picker: EditorPicker::indent(),
             }
         }
         StatusItemButton {
             label: encoding.label().to_string(),
             title: translate("editor-status-encoding-title"),
             extra: "",
-            picker: CommandBarPicker::Encoding,
+            picker: EditorPicker::encoding(),
         }
         StatusItemButton {
             label: eol.to_string(),
             title: translate("editor-status-eol-title"),
             extra: "",
-            picker: CommandBarPicker::LineEnding,
+            picker: EditorPicker::line_ending(),
         }
         if !language.is_empty() {
             span { class: "shrink-0", "{language}" }
@@ -73,7 +74,7 @@ fn StatusItemButton(
             class: "shrink-0 rounded px-1 py-0.5 transition-colors hover:bg-foreground/[0.10] hover:text-foreground {extra}",
             title,
             onclick: move |_| {
-                let _ = send(&FileStatusPickerOpen::from(picker));
+                let _ = send(&FileStatusPickerOpen::from(picker.clone()));
             },
             "{label}"
         }
@@ -86,7 +87,7 @@ pub(super) fn EncodingRecovery() -> Element {
         button {
             class: "shrink-0 rounded-md bg-foreground/10 px-3 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-foreground/20",
             onclick: move |_| {
-                let _ = send(&FileStatusPickerOpen::from(CommandBarPicker::EncodingReopen));
+                let _ = send(&FileStatusPickerOpen::from(EditorPicker::encoding_reopen()));
             },
             {translate("editor-status-encoding-reopen")}
         }

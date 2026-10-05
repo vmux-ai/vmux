@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
 use super::agent::LayoutAgentPlugin;
@@ -12,7 +12,7 @@ use crate::bookmark::BookmarkPlugin;
 use crate::contract::LayoutContractPlugin;
 use crate::event::CEF_RESERVED_HEIGHT_PX;
 use crate::host::webview_reveal::WebviewRevealPlugin;
-use crate::native_open::NativeOpenPlugin;
+use crate::hosted_page::HostedPagePlugin;
 use crate::overlay::LayoutOverlayPlugin;
 use crate::page_context::PageContextPlugin;
 use crate::pane::PanePlugin;
@@ -26,7 +26,7 @@ use crate::window::WindowLayoutPlugin;
 use crate::worktree::WorktreePlugin;
 use crate::{Header, LayoutStartupSet, Open, TerminalLayoutSpawnRequest, apply, settings};
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
@@ -83,9 +83,9 @@ impl Plugin for LayoutPlugin {
                 WebviewRevealPlugin,
                 ArchivePlugin,
                 PrewarmPagesPlugin,
-                NativeOpenPlugin,
+                HostedPagePlugin,
                 BookmarkPlugin,
-                vmux_ecs::host::UiStatePlugin::<crate::state::LayoutUiState>::default(),
+                vmux_ecs::UiStatePlugin::<crate::state::LayoutUiState>::default(),
                 crate::workspace_snapshot_publish::SnapshotPlugin,
                 crate::pending_stack::PendingStackPlugin,
             ));
@@ -118,5 +118,5 @@ fn sync_header_visibility(
     }
 }
 
-#[vmux_native::page(page = "error")]
+#[vmux_page::page(page = "error")]
 pub struct ErrorPage;

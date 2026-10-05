@@ -1,11 +1,11 @@
 use crate::{
-    placement::{LeafInfo, PageKind, Placement, ReuseHit},
+    placement::{LeafInfo, Placement, ReuseHit},
     stack::{ActiveTabParam, LayoutFocus, Stack},
     tab::Tab,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use vmux_api::VmuxRoute;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
+use vmux_ecs::page::{PagePlacement, PagePlacementCatalog};
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -64,6 +64,7 @@ struct PaneOpenResolver<'w, 's> {
     open_task_q: Query<'w, 's, &'static PageOpenTask>,
     space_hierarchy: crate::space::SpaceHierarchy<'w, 's>,
     tab_q: Query<'w, 's, Entity, With<Tab>>,
+    placements: PagePlacementCatalog<'w, 's>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -123,6 +124,7 @@ fn handle_beside_requests(
     let mut retired_leaf_panes: std::collections::HashSet<Entity> =
         std::collections::HashSet::new();
     for req in reader.read() {
+        let placement = resolver.placements.resolve(&req.url);
         let reuse = resolver.space_hierarchy.get(req.pane).and_then(|space| {
             find_reuse_in_space(
                 &req.url,
@@ -132,6 +134,7 @@ fn handle_beside_requests(
                 &resolver.page_q,
                 &resolver.open_task_q,
                 &child_of_q,
+                &resolver.placements,
             )
         });
         if let Some(hit) = reuse {
@@ -146,7 +149,8 @@ fn handle_beside_requests(
             continue;
         }
         if req.direction.is_none()
-            && let Some(index) = pending_open_match_index(&req.url, &pending_open_stacks)
+            && let Some(index) =
+                pending_open_match_index(&req.url, &pending_open_stacks, &resolver.placements)
         {
             let (pending_url, stack) = &mut pending_open_stacks[index];
             if *pending_url != req.url {
@@ -177,6 +181,7 @@ fn handle_beside_requests(
                             &resolver.node_q,
                             &resolver.page_q,
                             &spawn_seq_overrides,
+                            &resolver.placements,
                         );
                         let split_dir = PaneSplitDirection::from(direction);
                         let already_split =
@@ -211,6 +216,8 @@ fn handle_beside_requests(
                 &mut tree.commands,
                 target_pane,
                 req,
+                placement,
+                &resolver.placements,
                 &mut writer,
                 &mut spawn_seq_overrides,
                 &mut pending_leaf_infos,
@@ -227,6 +234,8 @@ fn handle_beside_requests(
                 &mut tree.commands,
                 req.pane,
                 req,
+                placement,
+                &resolver.placements,
                 &mut writer,
                 &mut spawn_seq_overrides,
                 &mut pending_leaf_infos,
@@ -246,29 +255,28 @@ fn handle_beside_requests(
             &resolver.node_q,
             &resolver.page_q,
             &spawn_seq_overrides,
+            &resolver.placements,
         );
         leaves.retain(|leaf| !retired_leaf_panes.contains(&leaf.pane));
         merge_pending_leaf_infos(&mut leaves, &pending_leaf_infos);
 
-        match Placement::resolve(&req.url, reuse, &leaves, req.pane) {
+        match Placement::resolve(placement, reuse, &leaves, req.pane) {
             Placement::Focus { tab, stack } => {
                 focus_reuse_hit(&mut tree.commands, &child_of_q, ReuseHit { tab, stack });
             }
             Placement::AddTab { pane } => {
-                let refresh_spawn_seq = matches!(
-                    PageKind::for_url(&req.url),
-                    PageKind::File | PageKind::Terminal
-                );
                 let stack = spawn_beside_stack(
                     &mut tree.commands,
                     pane,
                     req,
+                    placement,
+                    &resolver.placements,
                     &mut writer,
                     &mut spawn_seq_overrides,
                     &mut pending_leaf_infos,
                     &mut pending_leaf_stacks,
                     pane_size(pane, &resolver.node_q),
-                    refresh_spawn_seq,
+                    placement.refresh,
                 );
                 pending_open_stacks.push((req.url.clone(), stack));
             }
@@ -309,6 +317,8 @@ fn handle_beside_requests(
                     &mut tree.commands,
                     split.target,
                     req,
+                    placement,
+                    &resolver.placements,
                     &mut writer,
                     &mut spawn_seq_overrides,
                     &mut pending_leaf_infos,
@@ -437,6 +447,8 @@ fn spawn_beside_stack(
     commands: &mut Commands,
     target_pane: Entity,
     req: &OpenBesideRequest,
+    placement: PagePlacement,
+    placements: &PagePlacementCatalog,
     writer: &mut PaneOpenWriter,
     spawn_seq_overrides: &mut std::collections::HashMap<Entity, u64>,
     pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
@@ -459,7 +471,7 @@ fn spawn_beside_stack(
     record_pending_leaf_info(
         pending_leaf_infos,
         target_pane,
-        PageKind::for_url(&req.url),
+        placement,
         spawn_seq,
         pending_size,
     );
@@ -482,16 +494,19 @@ fn spawn_beside_stack(
     writer.open(
         new_stack,
         req.url.clone(),
-        (!req.url.starts_with("file:") && VmuxRoute::parse(&req.url).is_none())
-            .then_some(req.request_id),
+        (!placements.registered(&req.url)).then_some(req.request_id),
     );
     new_stack
 }
 
-fn pending_open_match_index(url: &str, pending_open_stacks: &[(String, Entity)]) -> Option<usize> {
+fn pending_open_match_index(
+    url: &str,
+    pending_open_stacks: &[(String, Entity)],
+    placements: &PagePlacementCatalog,
+) -> Option<usize> {
     pending_open_stacks
         .iter()
-        .position(|(pending_url, _)| PageKind::reuses(url, pending_url))
+        .position(|(pending_url, _)| placements.reuses(url, pending_url))
 }
 
 fn pane_size(pane: Entity, node_q: &Query<&ComputedNode>) -> Vec2 {
@@ -508,18 +523,22 @@ fn split_child_size(size: Vec2, split_dir: PaneSplitDirection) -> Vec2 {
 fn record_pending_leaf_info(
     pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
     pane: Entity,
-    kind: PageKind,
+    placement: PagePlacement,
     spawn_seq: u64,
     size: Vec2,
 ) {
     let info = pending_leaf_infos.entry(pane).or_insert_with(|| LeafInfo {
         pane,
-        kinds: Vec::new(),
+        placements: Vec::new(),
         spawn_seq,
         size,
     });
-    if !info.kinds.contains(&kind) {
-        info.kinds.push(kind);
+    if !info
+        .placements
+        .iter()
+        .any(|existing| existing.group == placement.group)
+    {
+        info.placements.push(placement);
     }
     info.spawn_seq = spawn_seq;
     if info.size == Vec2::ZERO {
@@ -533,9 +552,13 @@ fn merge_pending_leaf_infos(
 ) {
     for pending in pending_leaf_infos.values() {
         if let Some(existing) = leaves.iter_mut().find(|leaf| leaf.pane == pending.pane) {
-            for kind in &pending.kinds {
-                if !existing.kinds.contains(kind) {
-                    existing.kinds.push(*kind);
+            for placement in &pending.placements {
+                if !existing
+                    .placements
+                    .iter()
+                    .any(|existing| existing.group == placement.group)
+                {
+                    existing.placements.push(*placement);
                 }
             }
             existing.spawn_seq = pending.spawn_seq;
@@ -575,18 +598,20 @@ fn leaf_info_for_pane(
     node_q: &Query<&ComputedNode>,
     page_q: &Query<&PageMetadata, With<Stack>>,
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
+    placements: &PagePlacementCatalog,
 ) -> Option<LeafInfo> {
-    let kinds = unique_page_kinds(
+    let placements = unique_page_placements(
         pane_children
             .get(pane)
             .ok()?
             .iter()
             .filter_map(|child| page_q.get(child).ok())
             .map(|p| p.url.as_str()),
+        placements,
     );
     Some(LeafInfo {
         pane,
-        kinds,
+        placements,
         spawn_seq: spawn_seq_overrides
             .get(&pane)
             .copied()
@@ -596,15 +621,21 @@ fn leaf_info_for_pane(
     })
 }
 
-fn unique_page_kinds<'a>(urls: impl Iterator<Item = &'a str>) -> Vec<PageKind> {
-    let mut kinds = Vec::new();
+fn unique_page_placements<'a>(
+    urls: impl Iterator<Item = &'a str>,
+    catalog: &PagePlacementCatalog,
+) -> Vec<PagePlacement> {
+    let mut placements = Vec::new();
     for url in urls {
-        let kind = PageKind::for_url(url);
-        if !kinds.contains(&kind) {
-            kinds.push(kind);
+        let placement = catalog.resolve(url);
+        if !placements
+            .iter()
+            .any(|existing: &PagePlacement| existing.group == placement.group)
+        {
+            placements.push(placement);
         }
     }
-    kinds
+    placements
 }
 
 fn find_reuse_in_space(
@@ -615,6 +646,7 @@ fn find_reuse_in_space(
     page_q: &Query<&PageMetadata, With<Stack>>,
     open_task_q: &Query<&PageOpenTask>,
     child_of_q: &Query<&ChildOf>,
+    placements: &PagePlacementCatalog,
 ) -> Option<ReuseHit> {
     let tabs: Vec<Entity> = all_children
         .get(space)
@@ -624,7 +656,7 @@ fn find_reuse_in_space(
         let mut frontier = vec![tab];
         while let Some(node) = frontier.pop() {
             if let Ok(meta) = page_q.get(node)
-                && PageKind::reuses(url, &meta.url)
+                && placements.reuses(url, &meta.url)
             {
                 return Some(ReuseHit { tab, stack: node });
             }
@@ -634,7 +666,7 @@ fn find_reuse_in_space(
         }
     }
     for task in open_task_q.iter() {
-        if !PageKind::reuses(url, &task.url) {
+        if !placements.reuses(url, &task.url) {
             continue;
         }
         if let Some(tab) = tab_for_stack_in_space(task.stack, space, child_of_q, tab_q) {
@@ -679,6 +711,7 @@ pub struct PanePlacement<'w, 's> {
     pub seq_q: Query<'w, 's, &'static SpawnSeq>,
     pub node_q: Query<'w, 's, &'static ComputedNode>,
     pub page_q: Query<'w, 's, &'static PageMetadata, With<Stack>>,
+    pub placements: PagePlacementCatalog<'w, 's>,
     pub tree: PaneTree<'w, 's>,
 }
 
@@ -692,6 +725,7 @@ impl PanePlacement<'_, '_> {
         node_q: &Query<&ComputedNode>,
         page_q: &Query<&PageMetadata, With<Stack>>,
         spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
+        placements: &PagePlacementCatalog,
     ) -> Vec<LeafInfo> {
         let mut panes = Vec::new();
         let mut pending = vec![tab];
@@ -706,20 +740,21 @@ impl PanePlacement<'_, '_> {
         panes
             .into_iter()
             .map(|pane| {
-                let kinds = pane_children
+                let placements = pane_children
                     .get(pane)
                     .map(|children| {
-                        unique_page_kinds(
+                        unique_page_placements(
                             children
                                 .iter()
                                 .filter_map(|child| page_q.get(child).ok())
                                 .map(|page| page.url.as_str()),
+                            placements,
                         )
                     })
                     .unwrap_or_default();
                 LeafInfo {
                     pane,
-                    kinds,
+                    placements,
                     spawn_seq: spawn_seq_overrides
                         .get(&pane)
                         .copied()
@@ -761,8 +796,9 @@ impl PanePlacement<'_, '_> {
             &self.node_q,
             &self.page_q,
             &std::collections::HashMap::new(),
+            &self.placements,
         );
-        match Placement::resolve(url, None, &leaves, anchor_pane) {
+        match Placement::resolve(self.placements.resolve(url), None, &leaves, anchor_pane) {
             Placement::AddTab { pane } => pane,
             Placement::Spiral { anchor, axis } => {
                 let existing_tabs: Vec<Entity> = self
@@ -797,6 +833,7 @@ impl PanePlacement<'_, '_> {
             &self.node_q,
             &self.page_q,
             &std::collections::HashMap::new(),
+            &self.placements,
         );
         Placement::split_anchor(&leaves, anchor_pane)
     }

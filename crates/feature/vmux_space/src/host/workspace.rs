@@ -6,7 +6,7 @@ use bevy_cef::prelude::UiInput;
 use vmux_api::protocol::ClientMessage;
 use vmux_chat::event::ChatChoiceSelected;
 use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
-use vmux_command::WriteCommandRequests;
+use vmux_command::{ResolvedLocale, WriteCommandRequests};
 use vmux_ecs::AgentWorkingDir;
 use vmux_ecs::agent::{AgentContinuationRequest, AgentSessionRoot};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
@@ -16,9 +16,10 @@ use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
 };
 use vmux_session::AcpSession;
+use vmux_ui::i18n::Locale;
 
 use super::agent_workspace::AgentWorkspaceRequestSet;
-use vmux_ecs::profile::ProjectsDirectory;
+use vmux_ecs::profile::Projects;
 
 pub(super) struct WorkspaceAgentPlugin;
 
@@ -41,9 +42,9 @@ pub(crate) const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection reques
 
 pub(crate) const WORKSPACE_SELECTION_PENDING: &str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 
-const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
+const INITIALIZE_GIT_QUESTION_ID: &str = "space-initialize-git-question";
 
-const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
+const INITIALIZE_GIT_OPTION_IDS: [&str; 2] = ["space-initialize-git", "space-not-now"];
 
 #[derive(Component, Clone, Debug)]
 pub struct PendingProject(pub PathBuf);
@@ -86,6 +87,7 @@ pub(super) struct AgentWorkspacePicker<'w, 's> {
     pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     session_roots: Query<'w, 's, (), With<AgentSessionRoot>>,
+    projects: Projects<'w, 's>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
@@ -115,11 +117,7 @@ impl AgentWorkspacePicker<'_, '_> {
         let wake = self.proxy.as_deref().map(|proxy| (**proxy).clone());
         let initial_dir = requested
             .filter(|path| path.is_dir())
-            .or_else(|| {
-                ProjectsDirectory::ensure()
-                    .ok()
-                    .map(ProjectsDirectory::into_path)
-            })
+            .or_else(|| self.projects.path().ok().map(Path::to_path_buf))
             .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .filter(|path| path.is_dir())
@@ -146,6 +144,10 @@ impl AgentWorkspacePicker<'_, '_> {
             }
             Some(path)
         })
+    }
+
+    pub(super) fn trusted(&self, path: &Path) -> bool {
+        self.projects.contains(path)
     }
 }
 
@@ -476,7 +478,12 @@ fn drain_picker_tasks(
     mut commands: Commands,
     mut continuations: MessageWriter<AgentContinuationRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
+    locale: Option<Res<ResolvedLocale>>,
 ) {
+    let locale = locale
+        .as_deref()
+        .map(|resolved| resolved.0.clone())
+        .unwrap_or_else(Locale::preferred);
     for (picker_entity, mut picker) in &mut pickers {
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
@@ -514,10 +521,11 @@ fn drain_picker_tasks(
                                             .insert((
                                                 PendingAgentChoice {
                                                     session_entity: picker.session_entity,
-                                                    question: INITIALIZE_GIT_QUESTION.to_string(),
-                                                    options: INITIALIZE_GIT_OPTIONS
+                                                    question: locale
+                                                        .translate(INITIALIZE_GIT_QUESTION_ID),
+                                                    options: INITIALIZE_GIT_OPTION_IDS
                                                         .into_iter()
-                                                        .map(str::to_string)
+                                                        .map(|id| locale.translate(id))
                                                         .collect(),
                                                 },
                                                 InitializeGitAgentChoice {
@@ -632,10 +640,10 @@ mod tests {
             .spawn((
                 PendingAgentChoice {
                     session_entity: session,
-                    question: INITIALIZE_GIT_QUESTION.into(),
-                    options: INITIALIZE_GIT_OPTIONS
+                    question: Locale::from("en-US").translate(INITIALIZE_GIT_QUESTION_ID),
+                    options: INITIALIZE_GIT_OPTION_IDS
                         .into_iter()
-                        .map(str::to_string)
+                        .map(|id| Locale::from("en-US").translate(id))
                         .collect(),
                 },
                 InitializeGitAgentChoice {
@@ -680,7 +688,8 @@ mod tests {
         .unwrap();
         let execution_dir = activation.execution_dir.clone();
         let anchor = ProcessId::new();
-        let projects = ProjectsDirectory::ensure().unwrap().into_path();
+        let projects_dir = tempfile::tempdir().unwrap();
+        let projects = projects_dir.path().to_path_buf();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         let tab = app

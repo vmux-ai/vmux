@@ -100,6 +100,38 @@ fn explorer_tree_rows_follow_expanded_directories() {
     assert!(rows[0].loading);
 }
 
+#[test]
+fn a_new_entry_uses_the_selected_directory_or_file_parent() {
+    let root = PathBuf::from("/r");
+    let source = root.join("src");
+    let mut tree = ExplorerTree::new(root.clone());
+    tree.children.insert(
+        root,
+        vec![
+            FileDirEntry {
+                name: "src".into(),
+                path: source.to_string_lossy().into_owned(),
+                is_dir: true,
+            },
+            FileDirEntry {
+                name: "lib.rs".into(),
+                path: source.join("lib.rs").to_string_lossy().into_owned(),
+                is_dir: false,
+            },
+        ],
+    );
+    assert_eq!(tree.create_parent(&source), source);
+    assert_eq!(tree.create_parent(&source.join("lib.rs")), source);
+}
+
+#[test]
+fn a_new_entry_uses_the_root_without_a_live_selection() {
+    let root = PathBuf::from("/r");
+    let tree = ExplorerTree::new(root.clone());
+    assert_eq!(tree.create_parent(Path::new("")), root);
+    assert_eq!(tree.create_parent(Path::new("/r/dropped")), root);
+}
+
 fn git_repo() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir(tmp.path().join(".git")).unwrap();
@@ -522,13 +554,16 @@ fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
 }
 
 #[derive(Resource, Default)]
-struct SentReveals(Vec<ExplorerReveal>);
+struct SentReveals {
+    revision: u64,
+    reveals: Vec<ExplorerReveal>,
+}
 
 impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.add_plugins(vmux_ecs::host::UiStatePlugin::<vmux_ecs::event::FileUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);
@@ -542,15 +577,18 @@ impl SentReveals {
         let Ok(event) = decoded else {
             return;
         };
-        for patch in event.patches {
-            if let Some(event) = patch.explorer_focus {
-                sent.0.push(event.reveal);
-            }
+        let Some(focus) = event.explorer.explorer_focus else {
+            return;
+        };
+        if focus.revision <= sent.revision {
+            return;
         }
+        sent.revision = focus.revision;
+        sent.reveals.push(focus.reveal);
     }
 
     fn drain(app: &mut App) -> Vec<ExplorerReveal> {
-        std::mem::take(&mut app.world_mut().resource_mut::<Self>().0)
+        std::mem::take(&mut app.world_mut().resource_mut::<Self>().reveals)
     }
 }
 
@@ -642,11 +680,7 @@ fn showing_the_panel_reveals_without_taking_the_caret() {
 
     app.world_mut().trigger(UiInput {
         webview: view,
-        payload: ExplorerPanelSetVisible {
-            visible: true,
-            client_id: 1,
-            request_id: 1,
-        },
+        payload: ExplorerPanelSetVisible { visible: true },
     });
     app.update();
 
@@ -702,13 +736,13 @@ fn panel_visibility_is_shared_only_within_stack() {
             ChildOf(second_stack),
         ))
         .id();
+    app.update();
+    for entity in [first, peer, other] {
+        app.world_mut().entity_mut(entity).insert(ExplorerPanelSent);
+    }
     app.world_mut().trigger(UiInput {
         webview: first,
-        payload: ExplorerPanelSetVisible {
-            visible: false,
-            client_id: 7,
-            request_id: 1,
-        },
+        payload: ExplorerPanelSetVisible { visible: false },
     });
     app.update();
     assert!(
@@ -723,25 +757,9 @@ fn panel_visibility_is_shared_only_within_stack() {
             .unwrap()
             .visible
     );
-    assert!(app.world().get::<ExplorerPanelSent>(first).is_some());
+    assert!(app.world().get::<ExplorerPanelSent>(first).is_none());
     assert!(app.world().get::<ExplorerPanelSent>(peer).is_none());
     assert!(app.world().get::<ExplorerPanelSent>(other).is_some());
-
-    app.world_mut().trigger(UiInput {
-        webview: first,
-        payload: ExplorerPanelSetVisible {
-            visible: false,
-            client_id: 7,
-            request_id: 2,
-        },
-    });
-    app.update();
-    let revision = app
-        .world()
-        .get::<StackExplorerRevision>(first_stack)
-        .unwrap();
-    assert_eq!(revision.client_id, 7);
-    assert_eq!(revision.request_id, 2);
 }
 
 #[test]
@@ -765,11 +783,7 @@ fn panel_open_reveals_current_file() {
     wait_for_children(&mut app, tmp.path(), tmp.path());
     app.world_mut().trigger(UiInput {
         webview: e,
-        payload: ExplorerPanelSetVisible {
-            visible: true,
-            client_id: 9,
-            request_id: 1,
-        },
+        payload: ExplorerPanelSetVisible { visible: true },
     });
     wait_for_children(&mut app, tmp.path(), &tmp.path().join("src"));
     assert!(

@@ -7,7 +7,7 @@ pub use host::StartPlugin;
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

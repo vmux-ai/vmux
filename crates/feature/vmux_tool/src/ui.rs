@@ -5,8 +5,9 @@ use std::collections::BTreeSet;
 use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
-    ToolOperationNotice, ToolProvider, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest,
-    ToolUpdateRequest, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
+    ToolOperationNotice, ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest,
+    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest,
+    ToolsRefreshRequest, ToolsUiState,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
@@ -18,60 +19,58 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::route::ToolRoute;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
-    subtree,
-    takes = vmux_ecs::PageMetadata
+    subtree
 )]
 pub struct ToolsPage;
 
 #[component]
 pub fn Page() -> Element {
-    let initial_route = try_consume_context::<vmux_ecs::PageMetadata>()
-        .map(|metadata| ToolRoute::from(metadata.url.as_str()))
-        .unwrap_or_default();
-    let active_route = use_signal(|| initial_route);
-    let route = active_route();
-    rsx! { ToolManager { route, active_route } }
+    use_theme();
+    let state = use_ui_state::<ToolsUiState>().state;
+    rsx! { ToolManager { state: state() } }
 }
 
-impl ToolRoute {
-    fn title(self) -> String {
-        match self {
-            Self::Acp => translate("tools-provider-acp-agents"),
-            Self::Lsp => translate("tools-provider-lsp-servers"),
-            Self::Homebrew => translate("tools-homebrew"),
-            Self::Npm => translate("tools-provider-npm"),
-            Self::Mcp => translate("tools-provider-mcp-servers"),
-            Self::Dotfiles => translate("tools-provider-dotfiles"),
+impl ToolProviderMetadata {
+    fn localized_title(&self) -> String {
+        if self.title_message_id.is_empty() {
+            self.title.clone()
+        } else {
+            translate(&self.title_message_id)
+        }
+    }
+
+    fn localized_route_title(&self) -> String {
+        if self.route_title_message_id.is_empty() {
+            self.route_title.clone()
+        } else {
+            translate(&self.route_title_message_id)
         }
     }
 }
 
 #[component]
-fn ToolsManagerTabs(mut active_route: Signal<ToolRoute>) -> Element {
-    let routes = [
-        (ToolRoute::Acp, "tools-provider-acp-agents"),
-        (ToolRoute::Lsp, "tools-provider-lsp-servers"),
-        (ToolRoute::Homebrew, "tools-homebrew"),
-        (ToolRoute::Npm, "tools-provider-npm"),
-        (ToolRoute::Mcp, "tools-provider-mcp-servers"),
-        (ToolRoute::Dotfiles, "tools-provider-dotfiles"),
-    ];
-    let tabs = routes
-        .into_iter()
-        .map(|(route, label)| ManagerTab {
-            id: route.id().to_string(),
-            label: translate(label),
+fn ToolsManagerTabs(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
+    let mut seen = BTreeSet::new();
+    let mut tabs = Vec::new();
+    for provider in providers {
+        if provider.route.is_empty() || !seen.insert(provider.route.clone()) {
+            continue;
+        }
+        let route = ToolRoute::named(provider.route.clone());
+        let label = provider.localized_route_title();
+        tabs.push(ManagerTab {
+            id: provider.route,
+            label,
             href: route.url(),
-        })
-        .collect();
+        });
+    }
     rsx! {
         ManagerTabs {
-            active: active_route().id().to_string(),
+            active,
             tabs,
             onselect: move |url: String| {
-                active_route.set(ToolRoute::from(url.as_str()));
                 let _ = send(&ToolsNavigateRequest { url });
             },
         }
@@ -79,50 +78,49 @@ fn ToolsManagerTabs(mut active_route: Signal<ToolRoute>) -> Element {
 }
 
 #[component]
-fn ToolManager(route: ToolRoute, active_route: Signal<ToolRoute>) -> Element {
-    use_theme();
-    let state = use_ui_state::<ToolsUiState>().state;
-    let mut query = use_signal(String::new);
-
-    let current = state();
+fn ToolManager(state: ToolsUiState) -> Element {
+    let current = state;
     let pending = current.pending.into_iter().collect::<BTreeSet<_>>();
     let notice = current.notice;
     let snapshot = &current.snapshot;
-    let search = query().trim().to_ascii_lowercase();
-    let visible_count = snapshot
-        .categories
-        .iter()
-        .filter(|category| route.matches(category.provider))
-        .flat_map(|category| &category.items)
-        .filter(|item| item_matches(item, &search))
-        .count();
+    let view = &current.view;
+    let apply_provider = view.apply_provider.clone();
+    let route_title = if view.route_title_message_id.is_empty() {
+        view.route_title.clone()
+    } else {
+        translate(&view.route_title_message_id)
+    };
     rsx! {
         ManagerPage {
-            ToolsManagerTabs { active_route }
+            ToolsManagerTabs { active: view.route.clone(), providers: snapshot.providers.clone() }
             ManagerHeader {
-                title: route.title(),
-                count: visible_count,
-                search_value: query(),
+                title: route_title,
+                count: view.visible_count as usize,
+                search_value: view.query.clone(),
                 search_placeholder: translate("tools-search"),
-                onsearch: move |event: FormEvent| query.set(event.value()),
+                onsearch: move |event: FormEvent| {
+                    let _ = send(&ToolsFilterRequest { query: event.value() });
+                },
                 onkeydown: None,
                 actions: rsx! {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Secondary,
-                        disabled: pending.contains(&ToolOperationKey::new(
-                            ToolProvider::Dotfiles,
-                            ToolOperationKind::Apply,
-                            "",
-                        )),
-                        onclick: move |_| {
-                            send_operation(
-                                ToolProvider::Dotfiles,
+                    if let Some(provider) = apply_provider {
+                        ManagerButton {
+                            variant: ManagerButtonVariant::Secondary,
+                            disabled: pending.contains(&ToolOperationKey::new(
+                                provider.clone(),
                                 ToolOperationKind::Apply,
-                                String::new(),
-                                String::new(),
-                            );
-                        },
-                        {translate("tools-apply")}
+                                "",
+                            )),
+                            onclick: move |_| {
+                                send_operation(
+                                    provider.clone(),
+                                    ToolOperationKind::Apply,
+                                    String::new(),
+                                    String::new(),
+                                );
+                            },
+                            {translate("tools-apply")}
+                        }
                     }
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
@@ -134,7 +132,7 @@ fn ToolManager(route: ToolRoute, active_route: Signal<ToolRoute>) -> Element {
                 },
             }
             ManagerList {
-                if route == ToolRoute::Homebrew {
+                if view.show_brewfile {
                     HomebrewSourceCard {
                         root: snapshot.root.clone(),
                     }
@@ -164,22 +162,22 @@ fn ToolManager(route: ToolRoute, active_route: Signal<ToolRoute>) -> Element {
                 }
                 if !snapshot.loaded {
                     ManagerSpinner { detail: translate("tools-scanning") }
-                } else if visible_count == 0 {
+                } else if view.visible_count == 0 {
                     ManagerEmpty {
                         title: translate("tools-empty"),
                         detail: translate("tools-empty-detail"),
                     }
                 } else {
-                    for category in snapshot.categories.iter() {
-                        if route.matches(category.provider) && category.items.iter().any(|item| item_matches(item, &search)) {
+                    for category in view.categories.iter() {
+                        if let Some(provider) = snapshot.provider(&category.provider) {
                             div { class: "mt-3 flex items-center gap-2 px-1 first:mt-0",
-                                h2 { class: "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", {provider_title(category.provider)} }
+                                h2 { class: "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", {provider.localized_title()} }
                                 span { class: "text-[10px] text-muted-foreground/60",
-                                    "{category.items.iter().filter(|item| item_matches(item, &search)).count()}"
+                                    "{category.items.len()}"
                                 }
                             }
-                            for item in category.items.iter().filter(|item| item_matches(item, &search)) {
-                                ToolRow { key: "{category.provider.id()}:{item.id}", item: item.clone(), pending: pending.clone() }
+                            for item in category.items.iter() {
+                                ToolRow { key: "{category.provider.id()}:{item.id}", item: item.clone(), provider: provider.clone(), pending: pending.clone() }
                             }
                         }
                     }
@@ -222,11 +220,15 @@ fn HomebrewSourceCard(root: String) -> Element {
 }
 
 #[component]
-fn ToolRow(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
+fn ToolRow(
+    item: ToolItem,
+    provider: ToolProviderMetadata,
+    pending: BTreeSet<ToolOperationKey>,
+) -> Element {
     let version = item.version.clone().unwrap_or_default();
-    let provider = item.provider;
+    let provider_id = item.provider.clone();
     let id = item.id.clone();
-    let show_icon = provider == ToolProvider::Acp;
+    let show_icon = provider.thumbnails;
     rsx! {
         ManagerRow {
             show_icon,
@@ -236,7 +238,7 @@ fn ToolRow(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
             title: item.name.clone(),
             subtitle: version,
             meta: rsx! {
-                span { class: "shrink-0 text-[10px] text-muted-foreground/60", {provider_short_label(provider)} }
+                span { class: "shrink-0 text-[10px] text-muted-foreground/60", "{provider.short_label}" }
                 if item.managed {
                     span { class: "shrink-0 text-[10px] text-muted-foreground/60", {format!("· {}", translate("tools-managed"))} }
                 }
@@ -249,8 +251,9 @@ fn ToolRow(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
                 for kind in item.operations.iter().copied() {
                     {
                         let operation_id = id.clone();
-                        let operation = ToolOperationKey::new(provider, kind, operation_id.clone());
-                        let key = format!("{}:{kind:?}:{operation_id}", provider.id());
+                        let operation_provider = provider_id.clone();
+                        let operation = ToolOperationKey::new(operation_provider.clone(), kind, operation_id.clone());
+                        let key = format!("{}:{kind:?}:{operation_id}", provider_id.id());
                         rsx! {
                             ManagerButton {
                                 key: "{key}",
@@ -258,7 +261,7 @@ fn ToolRow(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
                                 disabled: pending.contains(&operation),
                                 onclick: move |_| {
                                     send_operation(
-                                        provider,
+                                        operation_provider.clone(),
                                         kind,
                                         operation_id.clone(),
                                         String::new(),
@@ -291,42 +294,9 @@ fn send_operation(provider: ToolProvider, kind: ToolOperationKind, id: String, v
         }),
         ToolOperationKind::Link => send(&ToolLinkRequest { provider, id }),
         ToolOperationKind::Unlink => send(&ToolUnlinkRequest { provider, id }),
-        ToolOperationKind::Apply => send(&ToolApplyRequest),
+        ToolOperationKind::Apply => send(&ToolApplyRequest { provider }),
         ToolOperationKind::Import => send(&ToolImportRequest { provider, value }),
     };
-}
-
-fn item_matches(item: &ToolItem, query: &str) -> bool {
-    query.is_empty()
-        || item.name.to_ascii_lowercase().contains(query)
-        || item.id.to_ascii_lowercase().contains(query)
-        || item.detail.to_ascii_lowercase().contains(query)
-        || provider_title(item.provider)
-            .to_ascii_lowercase()
-            .contains(query)
-}
-
-fn provider_title(provider: ToolProvider) -> String {
-    translate(match provider {
-        ToolProvider::HomebrewFormula => "tools-provider-homebrew-formulae",
-        ToolProvider::HomebrewCask => "tools-provider-homebrew-casks",
-        ToolProvider::Npm => "tools-provider-npm",
-        ToolProvider::Acp => "tools-provider-acp-agents",
-        ToolProvider::Lsp => "tools-provider-lsp-servers",
-        ToolProvider::Mcp => "tools-provider-mcp-servers",
-        ToolProvider::Dotfiles => "tools-provider-dotfiles",
-    })
-}
-
-fn provider_short_label(provider: ToolProvider) -> String {
-    match provider {
-        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => "brew".to_string(),
-        ToolProvider::Npm => "NPM".to_string(),
-        ToolProvider::Acp => "acp".to_string(),
-        ToolProvider::Lsp => "lsp".to_string(),
-        ToolProvider::Mcp => "mcp".to_string(),
-        ToolProvider::Dotfiles => translate("tools-provider-dotfiles").to_lowercase(),
-    }
 }
 
 fn status_label(status: ToolStatus) -> String {
@@ -404,12 +374,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_routes_select_their_provider() {
-        assert_eq!(ToolRoute::from("vmux://tools/"), ToolRoute::Acp);
-        assert_eq!(ToolRoute::from("vmux://tools/acp"), ToolRoute::Acp);
-        assert_eq!(ToolRoute::from("vmux://tools/lsp/"), ToolRoute::Lsp);
-        assert!(ToolRoute::Homebrew.matches(ToolProvider::HomebrewFormula));
-        assert!(ToolRoute::Homebrew.matches(ToolProvider::HomebrewCask));
-        assert!(!ToolRoute::Homebrew.matches(ToolProvider::Npm));
+    fn tool_routes_are_data_driven() {
+        assert_eq!(ToolRoute::from("vmux://tools/").id(), "");
+        assert_eq!(ToolRoute::from("vmux://tools/acp").id(), "acp");
+        assert_eq!(ToolRoute::from("vmux://tools/lsp/").id(), "lsp");
     }
 }

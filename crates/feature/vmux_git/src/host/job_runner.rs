@@ -4,11 +4,6 @@ use std::thread::JoinHandle;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy::{ecs::system::SystemParam, prelude::*};
 
-use crate::event::{
-    GitBranchLog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
-    GitRepositorySnapshot,
-};
-
 use super::GitUpdateSet;
 use super::job::{
     AmendJob, BranchLogJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob,
@@ -17,6 +12,10 @@ use super::job::{
     StashPushJob, UnstageJob,
 };
 use super::repository::GitRepository;
+use crate::event::{
+    GitBranchLog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
+    GitRepositorySnapshot,
+};
 
 pub(super) struct JobPlugin;
 
@@ -221,10 +220,7 @@ fn poll_jobs<T: Component>(mut jobs: Query<(Entity, &mut GitJobTask<T>)>, mut co
 fn deliver_repository_outputs(
     outputs: Query<(Entity, &GitJob, &RepositoryOutput)>,
     mut pages: Query<&mut vmux_ecs::PageMetadata>,
-    mut views: Query<(
-        &mut super::state::GitState,
-        &mut super::controller::GitController,
-    )>,
+    mut states: super::state::GitStates,
     mut commands: Commands,
 ) {
     for (entity, job, output) in &outputs {
@@ -240,18 +236,10 @@ fn deliver_repository_outputs(
                         false => format!("{} · {}", event.repo_name, event.branch),
                     };
                 }
-                if let Ok((mut view, mut controller)) = views.get_mut(webview) {
-                    controller.reconcile_repository(event);
-                    view.set_repository(event.clone());
-                    if let Some(payload) = controller.branch_log_request(&view) {
-                        commands.trigger(bevy_cef::prelude::UiInput { webview, payload });
-                    }
-                }
+                states.set_repository(webview, event.clone());
             }
             Err(error) => {
-                if let Ok((mut view, _)) = views.get_mut(webview) {
-                    view.apply_error(error);
-                }
+                states.apply_error(webview, error);
             }
         }
         commands.entity(entity).despawn();
@@ -260,18 +248,13 @@ fn deliver_repository_outputs(
 
 fn deliver_branch_log_outputs(
     outputs: Query<(Entity, &GitJob, &BranchLogOutput)>,
-    mut views: Query<(
-        &mut super::state::GitState,
-        &mut super::controller::GitController,
-    )>,
+    mut states: super::state::GitStates,
     mut commands: Commands,
 ) {
     for (entity, job, output) in &outputs {
-        if let Ok((mut view, _)) = views.get_mut(job.webview) {
-            match &output.0 {
-                Ok(event) => view.set_branch_log(event.clone()),
-                Err(error) => view.apply_error(error),
-            }
+        match &output.0 {
+            Ok(event) => states.set_branch_log(job.webview, event.clone()),
+            Err(error) => states.apply_error(job.webview, error),
         }
         commands.entity(entity).despawn();
     }
@@ -279,8 +262,11 @@ fn deliver_branch_log_outputs(
 
 fn deliver_diff_outputs(
     outputs: Query<(Entity, &GitJob, &DiffOutput)>,
-    mut views: Query<&mut super::state::GitState>,
-    mut files: Query<&mut super::status::FileGit>,
+    mut views: Query<(
+        &mut super::state::GitState,
+        &mut super::state::GitDiffRevealRanges,
+    )>,
+    mut files: super::status::FileGitStates,
     diffs: Query<&super::diff::GitDiffQuery>,
     mut commands: Commands,
 ) {
@@ -291,17 +277,17 @@ fn deliver_diff_outputs(
             commands.entity(entity).despawn();
             continue;
         };
-        if let Ok(mut view) = views.get_mut(webview) {
+        if let Ok((mut view, mut revealed)) = views.get_mut(webview) {
             if query.accepts(event.generation) {
-                view.set_diff_viewport(event.clone());
+                view.snapshot.diff_loading = false;
+                view.snapshot.diff_viewport = Some(event.clone());
+                revealed.0.clear();
             }
             commands.entity(entity).despawn();
             continue;
         }
-        if let Ok(mut file) = files.get_mut(webview)
-            && query.accepts_file(event.generation, &file)
-        {
-            file.apply_diff(event.clone());
+        if files.accepts_diff(webview, event.generation, query) {
+            files.apply_diff(webview, event.clone());
         }
         commands.entity(entity).despawn();
     }
@@ -309,25 +295,33 @@ fn deliver_diff_outputs(
 
 fn deliver_operation_outputs(
     outputs: Query<(Entity, &GitJob, &OperationOutput)>,
-    mut views: Query<(
-        &mut super::state::GitState,
-        &mut super::controller::GitController,
-    )>,
-    mut files: Query<&mut super::status::FileGit>,
+    mut pending_branches: Query<&mut super::controller::PendingBranchCheckout>,
+    mut states: super::state::GitStates,
+    mut files: super::status::FileGitStates,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let wake = wake.as_deref().map(|wake| (**wake).clone());
     for (entity, job, output) in &outputs {
         let webview = job.webview;
-        if let Ok((mut view, mut controller)) = views.get_mut(webview) {
-            let branch = controller.apply_result(&output.result);
-            view.apply_result(&output.result);
+        if states.contains(webview) {
+            let branch = if output.result.operation == "new branch" && output.result.ok {
+                pending_branches
+                    .get_mut(webview)
+                    .ok()
+                    .map(|mut pending| std::mem::take(&mut pending.0))
+                    .filter(|branch| !branch.is_empty())
+            } else {
+                None
+            };
+            let workspace = states
+                .apply_result(webview, &output.result)
+                .unwrap_or_default();
             if let Some(branch) = branch {
                 commands.trigger(bevy_cef::prelude::UiInput {
                     webview,
                     payload: vmux_ecs::event::space::ProjectActivateRequest {
-                        path: view.workspace().to_string(),
+                        path: workspace.clone(),
                         branch,
                         checkout: String::new(),
                         pane_id: None,
@@ -335,24 +329,26 @@ fn deliver_operation_outputs(
                 });
             }
             if let Some(Err(error)) = &output.status {
-                view.apply_error(error);
+                states.apply_error(webview, error);
             }
-            if !view.workspace().is_empty() {
+            if !workspace.is_empty() {
                 commands.spawn((
                     GitJob::new(webview),
                     RepositoryJob {
-                        path: view.workspace().into(),
+                        path: workspace.into(),
                     },
                 ));
             }
-        } else if let Ok(mut file) = files.get_mut(webview) {
-            let refresh = file.apply_result(output.result.clone(), wake.clone());
+        } else if files.contains(webview) {
+            let refresh = files.apply_result(webview, output.result.clone(), wake.clone());
             match &output.status {
-                Some(Ok(status)) => file.apply_status(status.clone()),
-                Some(Err(error)) => file.apply_error(error.message.clone()),
+                Some(Ok(status)) => files.apply_status(webview, status.clone()),
+                Some(Err(error)) => files.apply_error(webview, error.message.clone()),
                 None => {}
             }
-            commands.entity(webview).insert(refresh);
+            if let Some(refresh) = refresh {
+                commands.entity(webview).insert(refresh);
+            }
         }
         commands.entity(entity).despawn();
     }
@@ -360,15 +356,15 @@ fn deliver_operation_outputs(
 
 fn deliver_failure_outputs(
     outputs: Query<(Entity, &GitJob, &FailureOutput)>,
-    mut views: Query<&mut super::state::GitState>,
-    mut files: Query<&mut super::status::FileGit>,
+    mut states: super::state::GitStates,
+    mut files: super::status::FileGitStates,
     mut commands: Commands,
 ) {
     for (entity, job, output) in &outputs {
-        if let Ok(mut view) = views.get_mut(job.webview) {
-            view.apply_error(&output.0);
-        } else if let Ok(mut file) = files.get_mut(job.webview) {
-            file.apply_error(output.0.message.clone());
+        if states.contains(job.webview) {
+            states.apply_error(job.webview, &output.0);
+        } else if files.contains(job.webview) {
+            files.apply_error(job.webview, output.0.message.clone());
         }
         commands.entity(entity).despawn();
     }

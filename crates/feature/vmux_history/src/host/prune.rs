@@ -46,12 +46,12 @@ fn prune(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_ecs::{EcsPlugin, PageMetadata, VisitCount};
+    use vmux_ecs::{PageMetadata, PrimitivesPlugin, VisitCount};
 
     fn app() -> App {
         let mut a = App::new();
         a.add_plugins(MinimalPlugins);
-        a.add_plugins(EcsPlugin);
+        a.add_plugins(PrimitivesPlugin);
         a.add_systems(Update, prune);
         a
     }

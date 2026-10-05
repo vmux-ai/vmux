@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 

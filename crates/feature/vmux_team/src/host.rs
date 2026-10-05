@@ -1,24 +1,30 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_api::avatar::AvatarSpec;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
+use vmux_api::space::SpacesUiState;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_ecs::event::team::{
-    ProfileRow, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
-    TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
+    ProfileRow, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest, TeamProfileCreateRequest,
+    TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
+    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
 };
-use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
 use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::PageReady;
-use vmux_ecs::profile::{Profile as StoredProfile, ProfileId, ProfileLabel, SessionEnvironment};
+use vmux_ecs::profile::{
+    ActiveProfile, Profile as StoredProfile, ProfileCatalog, ProfileId, ProfileLabel,
+    ProfileRecord, SessionEnvironment,
+};
 use vmux_ecs::team::{Agent, Profile, Tester, User};
 use vmux_ecs::{ActivateRequest, Active, PageMetadata};
+use vmux_ecs::{UiStatePlugin, UiStateWrite};
 use vmux_layout::cef::LayoutCef;
-use vmux_layout::native_open::HostedUiPlugin;
+use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::profile::Profile as SpaceProfile;
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, SpaceHierarchy};
@@ -29,7 +35,7 @@ use vmux_space::Spaces;
 
 use crate::projection::TeamStateProjection;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct TeamPlugin;
 
 impl Plugin for TeamPlugin {
@@ -42,7 +48,18 @@ impl Plugin for TeamPlugin {
             IntentPlugin,
             crate::TeamToolPlugin,
         ))
-        .add_systems(Startup, (spawn_user_profile, spawn_profile_labels));
+        .add_agent_request::<AgentRenameProfile>()
+        .add_systems(Startup, spawn_user_profile)
+        .add_systems(
+            Update,
+            (
+                rename_from_agent.after(AgentRequestRouteSet),
+                create_profile,
+                rename_profile,
+                finish_profile_create,
+                finish_profile_rename,
+            ),
+        );
     }
 }
 
@@ -51,7 +68,7 @@ struct ProjectionPlugin;
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_agent_request::<AgentListTeam>()
-            .add_plugins(UiStatePlugin::<TeamEvent>::default())
+            .add_plugins(UiStatePlugin::<TeamUiState>::default())
             .add_observer(replay)
             .add_systems(Update, (sync_user_profile_name, project, publish).chain())
             .add_systems(Update, list.after(AgentRequestRouteSet));
@@ -63,18 +80,26 @@ struct IntentPlugin;
 impl Plugin for IntentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ProfileSwitchRequested>()
+            .add_message::<ProfileCreateRequest>()
+            .add_message::<ProfileRenameRequest>()
             .add_plugins(UiEventPlugin::<(
                 TeamOpenRequest,
                 TeamMemberFocusRequest,
                 TeamProfileCreateRequest,
                 TeamProfileSwitchRequest,
                 TeamProfileUpdateRequest,
+                TeamProfileFormOpenRequest,
+                TeamProfileFormInputRequest,
+                TeamProfileFormCloseRequest,
             )>::default())
             .add_observer(open_request)
             .add_observer(member_focus_request)
             .add_observer(profile_create_request)
             .add_observer(profile_switch_request)
-            .add_observer(profile_update_request);
+            .add_observer(profile_update_request)
+            .add_observer(open_form)
+            .add_observer(edit_form)
+            .add_observer(close_form);
     }
 }
 
@@ -83,28 +108,41 @@ pub struct ProfileSwitchRequested {
     pub profile_id: String,
 }
 
+#[vmux_api::agent]
+pub struct AgentRenameProfile {
+    pub name: String,
+}
+
+#[derive(Message, Clone)]
+struct ProfileCreateRequest {
+    name: String,
+}
+
+#[derive(Message, Clone)]
+struct ProfileRenameRequest {
+    profile_id: String,
+    name: String,
+}
+
+#[derive(Component)]
+struct ProfileCreateTask(Task<Result<ProfileRecord, String>>);
+
+#[derive(Component)]
+struct ProfileRenameTask(Task<Result<ProfileRecord, String>>);
+
 #[derive(Component, Default)]
 struct Team;
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-struct TeamPresentation(TeamEvent);
+struct TeamPresentation(TeamUiState);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct ProfileFormState(TeamProfileForm);
 
 fn spawn_user_profile(mut commands: Commands) {
     let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
     if SessionEnvironment::is_test() {
         identity.insert(Tester);
-    }
-}
-
-fn spawn_profile_labels(mut commands: Commands) {
-    let active = StoredProfile::current();
-    for profile in StoredProfile::all() {
-        let id = profile.id().to_string();
-        let name = profile.display_name();
-        let mut entity = commands.spawn((ProfileLabel, ProfileId(id.clone()), Name::new(name)));
-        if profile == active {
-            entity.insert(Active);
-        }
     }
 }
 
@@ -268,15 +306,18 @@ fn list(
 fn project(
     views: Query<Entity, Or<(With<LayoutCef>, With<Team>, With<Spaces>)>>,
     presentations: Query<&TeamPresentation>,
+    forms: Query<&ProfileFormState>,
     projector: TeamProjector,
     mut commands: Commands,
 ) {
     for entity in &views {
         let target_space = projector.target(entity);
-        let presentation = TeamPresentation(TeamStateProjection::build(
+        let mut state = TeamStateProjection::build(
             projector.members(target_space.or_else(|| projector.current())),
             projector.profiles(),
-        ));
+        );
+        state.profile_form = forms.get(entity).ok().map(|form| form.0.clone());
+        let presentation = TeamPresentation(state);
         if presentations
             .get(entity)
             .is_ok_and(|current| current == &presentation)
@@ -289,13 +330,20 @@ fn project(
 
 fn publish(
     presentations: Query<(Entity, &TeamPresentation), Changed<TeamPresentation>>,
-    direct_views: Query<(), Or<(With<Team>, With<Spaces>)>>,
+    team_views: Query<(), With<Team>>,
+    spaces_views: Query<(), With<Spaces>>,
     layout_cefs: Query<(), With<LayoutCef>>,
     mut commands: Commands,
 ) {
     for (entity, presentation) in &presentations {
-        if direct_views.contains(entity) {
-            commands.trigger(UiStateWrite::<TeamEvent>::from_event(
+        if team_views.contains(entity) {
+            commands.trigger(UiStateWrite::<TeamUiState>::from_event(
+                entity,
+                &presentation.0,
+            ));
+        }
+        if spaces_views.contains(entity) {
+            commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
                 entity,
                 &presentation.0,
             ));
@@ -311,7 +359,8 @@ fn publish(
 fn replay(
     trigger: On<UiInput<PageReady>>,
     presentations: Query<&TeamPresentation>,
-    direct_views: Query<(), Or<(With<Team>, With<Spaces>)>>,
+    team_views: Query<(), With<Team>>,
+    spaces_views: Query<(), With<Spaces>>,
     layout_cefs: Query<(), With<LayoutCef>>,
     mut commands: Commands,
 ) {
@@ -319,8 +368,14 @@ fn replay(
     let Ok(presentation) = presentations.get(entity) else {
         return;
     };
-    if direct_views.contains(entity) {
-        commands.trigger(UiStateWrite::<TeamEvent>::from_event(
+    if team_views.contains(entity) {
+        commands.trigger(UiStateWrite::<TeamUiState>::from_event(
+            entity,
+            &presentation.0,
+        ));
+    }
+    if spaces_views.contains(entity) {
+        commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
             entity,
             &presentation.0,
         ));
@@ -382,30 +437,27 @@ fn member_focus_request(
 
 fn profile_create_request(
     trigger: On<UiInput<TeamProfileCreateRequest>>,
-    mut profile_switches: MessageWriter<ProfileSwitchRequested>,
-    mut commands: Commands,
+    mut requests: MessageWriter<ProfileCreateRequest>,
 ) {
     let name = trigger.event().payload.name.trim().to_string();
-    match StoredProfile::create(&name) {
-        Ok(profile) => {
-            let profile_id = profile.into_id();
-            commands.spawn((ProfileLabel, ProfileId(profile_id.clone()), Name::new(name)));
-            profile_switches.write(ProfileSwitchRequested { profile_id });
-        }
-        Err(error) => bevy::log::warn!("profile create failed: {error}"),
+    if !name.is_empty() {
+        requests.write(ProfileCreateRequest { name });
     }
 }
 
 fn profile_switch_request(
     trigger: On<UiInput<TeamProfileSwitchRequest>>,
+    active: Query<&ActiveProfile>,
     profile_labels: Query<&ProfileId, With<ProfileLabel>>,
     mut profile_switches: MessageWriter<ProfileSwitchRequested>,
 ) {
-    let profile = StoredProfile::named(&trigger.event().payload.profile_id);
-    if profile == StoredProfile::current() || !profile.exists() {
+    let profile_id = StoredProfile::named(&trigger.event().payload.profile_id).into_id();
+    let Ok(active) = active.single() else {
+        return;
+    };
+    if profile_id == active.0.id() {
         return;
     }
-    let profile_id = profile.into_id();
     if profile_labels.iter().any(|id| id.0 == profile_id) {
         profile_switches.write(ProfileSwitchRequested { profile_id });
     }
@@ -413,32 +465,164 @@ fn profile_switch_request(
 
 fn profile_update_request(
     trigger: On<UiInput<TeamProfileUpdateRequest>>,
+    mut requests: MessageWriter<ProfileRenameRequest>,
+) {
+    requests.write(ProfileRenameRequest {
+        profile_id: trigger.event().payload.profile_id.clone(),
+        name: trigger.event().payload.name.clone(),
+    });
+}
+
+fn open_form(trigger: On<UiInput<TeamProfileFormOpenRequest>>, mut commands: Commands) {
+    commands
+        .entity(trigger.event().webview)
+        .insert(ProfileFormState(TeamProfileForm {
+            profile_id: trigger.event().payload.profile_id.clone(),
+            draft: trigger.event().payload.draft.clone(),
+        }));
+}
+
+fn edit_form(
+    trigger: On<UiInput<TeamProfileFormInputRequest>>,
+    mut forms: Query<&mut ProfileFormState>,
+) {
+    let Ok(mut form) = forms.get_mut(trigger.event().webview) else {
+        return;
+    };
+    form.0.draft.clone_from(&trigger.event().payload.draft);
+}
+
+fn close_form(trigger: On<UiInput<TeamProfileFormCloseRequest>>, mut commands: Commands) {
+    commands
+        .entity(trigger.event().webview)
+        .remove::<ProfileFormState>();
+}
+
+fn rename_from_agent(
+    mut requests: MessageReader<AgentRequestMessage<AgentRenameProfile>>,
+    active: Query<&ActiveProfile>,
+    mut renames: MessageWriter<ProfileRenameRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) {
+    let Ok(active) = active.single() else {
+        return;
+    };
+    let profile_id = active.0.clone().into_id();
+    for request in requests.read() {
+        renames.write(ProfileRenameRequest {
+            profile_id: profile_id.clone(),
+            name: request.payload.name.clone(),
+        });
+        responses.write(request.reply.ok());
+    }
+}
+
+fn create_profile(
+    mut requests: MessageReader<ProfileCreateRequest>,
+    profiles: Query<&ProfileCatalog>,
+    mut commands: Commands,
+) {
+    let Ok(profiles) = profiles.single() else {
+        return;
+    };
+    for request in requests.read() {
+        let profiles = profiles.0.clone();
+        let name = request.name.clone();
+        commands.spawn((
+            Name::new("Create profile"),
+            ProfileCreateTask(
+                IoTaskPool::get().spawn(async move {
+                    profiles.create(&name).map_err(|error| error.to_string())
+                }),
+            ),
+        ));
+    }
+}
+
+fn rename_profile(
+    mut requests: MessageReader<ProfileRenameRequest>,
+    profiles: Query<&ProfileCatalog>,
+    mut commands: Commands,
+) {
+    let Ok(profiles) = profiles.single() else {
+        return;
+    };
+    for request in requests.read() {
+        let profiles = profiles.0.clone();
+        let profile = StoredProfile::named(&request.profile_id);
+        let name = request.name.clone();
+        commands.spawn((
+            Name::new("Rename profile"),
+            ProfileRenameTask(IoTaskPool::get().spawn(async move {
+                profiles
+                    .rename(&profile, &name)
+                    .map_err(|error| error.to_string())
+            })),
+        ));
+    }
+}
+
+fn finish_profile_create(
+    mut tasks: Query<(Entity, &mut ProfileCreateTask)>,
+    mut profile_switches: MessageWriter<ProfileSwitchRequested>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        match result {
+            Ok(record) => {
+                let profile_id = record.profile.into_id();
+                commands.spawn((
+                    ProfileLabel,
+                    ProfileId(profile_id.clone()),
+                    Name::new(record.name),
+                ));
+                profile_switches.write(ProfileSwitchRequested { profile_id });
+            }
+            Err(error) => bevy::log::warn!("profile create failed: {error}"),
+        }
+    }
+}
+
+fn finish_profile_rename(
+    mut tasks: Query<(Entity, &mut ProfileRenameTask)>,
     user: Query<Entity, With<User>>,
     mut space_profiles: Query<&mut SpaceProfile, With<Space>>,
     mut profile_labels: Query<(&ProfileId, &mut Name), With<ProfileLabel>>,
     mut commands: Commands,
 ) {
-    let request = &trigger.event().payload;
-    let profile = StoredProfile::named(&request.profile_id);
-    if let Err(error) = profile.set_display_name(&request.name) {
-        bevy::log::warn!("profile update failed: {error}");
-        return;
-    }
-    let profile_id = profile.id().to_string();
-    let name = request.name.trim().to_string();
-    for (id, mut label) in &mut profile_labels {
-        if id.0 == profile_id {
-            *label = Name::new(name.clone());
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        let record = match result {
+            Ok(record) => record,
+            Err(error) => {
+                bevy::log::warn!("profile update failed: {error}");
+                continue;
+            }
+        };
+        let profile_id = record.profile.id().to_string();
+        for (id, mut label) in &mut profile_labels {
+            if id.0 == profile_id {
+                *label = Name::new(record.name.clone());
+            }
         }
-    }
-    if profile != StoredProfile::current() {
-        return;
-    }
-    for mut profile in &mut space_profiles {
-        profile.name.clone_from(&name);
-    }
-    if let Ok(entity) = user.single() {
-        commands.entity(entity).insert(Profile::user_named(name));
+        if !record.active {
+            continue;
+        }
+        for mut profile in &mut space_profiles {
+            profile.name.clone_from(&record.name);
+        }
+        if let Ok(entity) = user.single() {
+            commands
+                .entity(entity)
+                .insert(Profile::user_named(record.name));
+        }
     }
 }
 
@@ -578,7 +762,7 @@ mod tests {
     fn team_page_open_titles_webview_profiles() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_layout::native_open::NativeOpenPlugin)
+            .add_plugins(vmux_layout::hosted_page::HostedPagePlugin)
             .add_plugins(HostedUiPlugin::<Team>::new(TeamPlugin::MANIFEST));
 
         let stack = app.world_mut().spawn(Stack::default()).id();
@@ -661,7 +845,7 @@ mod tests {
             },
             PageMetadata {
                 url: "vmux://sessions/mistral-vibe".to_string(),
-                icon: vmux_ecs::PageIcon::favicon("https://cdn.example/vibe.svg"),
+                icon: vmux_api::PageIcon::favicon("https://cdn.example/vibe.svg"),
                 ..default()
             },
             ChildOf(space),

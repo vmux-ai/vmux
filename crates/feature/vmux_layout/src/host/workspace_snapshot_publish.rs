@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_command::{
-    CommandBarSpacesSnapshot, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
+    CommandBarContextSnapshot, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_ui::i18n::Locale;
 
@@ -29,7 +29,7 @@ fn publish_workspace_snapshot(
     tab_gather: TabGather,
     locale: Option<Res<ResolvedLocale>>,
     projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
-    spaces: Single<&CommandBarSpacesSnapshot>,
+    context: Single<&CommandBarContextSnapshot>,
     mut state: Single<&mut CommandBarWorkspaceSnapshot>,
 ) {
     let active_tab = tab_gather.active_tab.get();
@@ -60,7 +60,7 @@ fn publish_workspace_snapshot(
         .as_deref()
         .map(|resolved| resolved.0.clone())
         .unwrap_or_else(Locale::preferred);
-    let tabs = tab_gather.tabs(active_tab, &spaces.active_space_name, &locale);
+    let tabs = tab_gather.tabs(active_tab, &context.label, &locale);
     let next = CommandBarWorkspaceSnapshot {
         stack,
         pane,

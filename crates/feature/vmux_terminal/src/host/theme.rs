@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::page::PageReady;
-use vmux_setting::{AppSettings, SettingsSaveRequest, themes::TerminalColorScheme};
+use vmux_setting::{
+    AppSettings, SettingsSaveRequest,
+    themes::{TerminalColorScheme, TerminalColorSchemes},
+};
 
 use crate::{Terminal, event::TermThemeEvent};
 
@@ -73,24 +76,13 @@ fn theme_signature(theme: &vmux_setting::TerminalTheme, colors: &TerminalColorSc
     hasher.finish()
 }
 
-fn scheme_for_appearance(name: &str, dark: bool) -> &str {
-    match (name, dark) {
-        ("catppuccin-mocha" | "catppuccin-frappe" | "catppuccin-macchiato", false) => {
-            "catppuccin-latte"
-        }
-        ("catppuccin-latte", true) => "catppuccin-mocha",
-        ("solarized-dark", false) => "solarized-light",
-        ("solarized-light", true) => "solarized-dark",
-        (other, _) => other,
-    }
-}
-
 fn sync(
     terminals: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
     newly_ready: Query<Entity, (With<Terminal>, Changed<PageReady>)>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
+    color_schemes: Res<TerminalColorSchemes>,
     scheme: Option<Single<&vmux_setting::ResolvedColorScheme>>,
     mut commands: Commands,
     mut last_theme_hash: Local<u64>,
@@ -103,8 +95,8 @@ fn sync(
     let dark = scheme
         .map(|scheme| matches!(scheme.0, vmux_setting::ResolvedScheme::Dark))
         .unwrap_or(true);
-    let scheme_name = scheme_for_appearance(&theme.color_scheme, dark);
-    let colors = TerminalColorScheme::resolve(scheme_name, &terminal_settings.custom_themes);
+    let colors = color_schemes.resolve(&theme.color_scheme, &terminal_settings.custom_themes);
+    let colors = color_schemes.for_appearance(colors, dark, &terminal_settings.custom_themes);
     let hash = theme_signature(&theme, &colors);
 
     let theme_changed = hash != *last_theme_hash;
@@ -133,9 +125,11 @@ fn sync(
 
     for entity in targets {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(vmux_ecs::host::UiStateWrite::<
-                vmux_ecs::event::TerminalUiState,
-            >::from_event(entity, &event));
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<vmux_ecs::event::TerminalUiState>::from_event(
+                    entity, &event,
+                ),
+            );
         }
     }
 }
@@ -274,7 +268,15 @@ mod tests {
 
     #[test]
     fn theme_signature_changes_with_font_size() {
-        let colors = TerminalColorScheme::resolve("catppuccin-mocha", &[]);
+        let colors = TerminalColorScheme {
+            name: "test".to_string(),
+            light: None,
+            dark: None,
+            foreground: [255, 255, 255].into(),
+            background: [0, 0, 0].into(),
+            cursor: [255, 255, 255].into(),
+            ansi: [[0, 0, 0]; 16].into(),
+        };
         let small = terminal_theme(14.0);
         let large = terminal_theme(15.0);
         assert_ne!(

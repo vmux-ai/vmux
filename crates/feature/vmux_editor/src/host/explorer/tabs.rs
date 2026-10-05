@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -57,6 +58,11 @@ fn emit_open_editors(
             continue;
         }
         let active_dirty = edit.map(|edit| edit.core.dirty).unwrap_or(false);
+        let mut name_counts = HashMap::new();
+        for path in &state.open_editors {
+            let name = OpenEditorPath::name(path);
+            *name_counts.entry(name).or_insert(0usize) += 1;
+        }
         let mut items = Vec::with_capacity(state.open_editors.len());
         for path in &state.open_editors {
             let active = *path == file_view.path;
@@ -64,15 +70,21 @@ fn emit_open_editors(
                 true => active_dirty,
                 false => parked.is_some_and(|parked| parked.is_dirty(path)),
             };
+            let name = OpenEditorPath::name(path);
+            let context = match name_counts.get(&name).copied().unwrap_or_default() > 1 {
+                true => OpenEditorPath::parent(path),
+                false => String::new(),
+            };
             items.push(OpenEditorItem {
-                name: OpenEditorPath::name(path),
+                name,
+                context,
                 path: path.to_string_lossy().into_owned(),
                 active,
                 dirty,
                 is_dir: path.is_dir(),
             });
         }
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
             entity,
             &OpenEditorsEvent { items },
         ));
@@ -87,6 +99,17 @@ impl OpenEditorPath {
         path.file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| path.to_string_lossy().to_string())
+    }
+
+    fn parent(path: &Path) -> String {
+        let Some(parent) = path.parent() else {
+            return String::new();
+        };
+        match parent.file_name() {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None if parent.has_root() => "/".to_string(),
+            None => String::new(),
+        }
     }
 }
 

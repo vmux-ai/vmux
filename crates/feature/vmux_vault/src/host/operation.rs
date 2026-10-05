@@ -5,12 +5,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
+use crate::storage::{GeneratedRecoveryKey, VaultRecovery, VaultStorage};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use parking_lot::Mutex;
-use vmux_ecs::profile::vault::{GeneratedRecoveryKey, VaultRecovery, VaultStorage};
 
 use crate::state::{
     VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion, VaultConnectCloudRequest,
@@ -96,9 +96,9 @@ fn create_vault(
 ) -> VaultOperationFuture {
     Box::pin(async move {
         let visibility = if request.private {
-            vmux_ecs::profile::vault::RepositoryVisibility::Private
+            crate::storage::RepositoryVisibility::Private
         } else {
-            vmux_ecs::profile::vault::RepositoryVisibility::Public
+            crate::storage::RepositoryVisibility::Public
         };
         let message = VaultStorage::current().create_remote(&request.repository, visibility)?;
         Ok(VaultOperationOutput::message(message))

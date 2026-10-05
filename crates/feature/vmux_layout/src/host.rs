@@ -23,7 +23,7 @@ pub mod bookmark;
 pub mod cef;
 mod command;
 pub mod contract;
-pub mod native_open;
+pub mod hosted_page;
 pub mod overlay;
 pub mod page_context;
 pub mod pane;
@@ -53,7 +53,7 @@ mod swap;
 mod webview_reveal;
 mod zoom;
 
-pub type LayoutUiStateUpdates = vmux_ecs::host::UiState<crate::state::LayoutUiState>;
+pub type LayoutUiStateUpdates = vmux_ecs::UiState<crate::state::LayoutUiState>;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {

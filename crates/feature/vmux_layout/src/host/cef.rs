@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_api::PageIcon;
 use vmux_api::VmuxRoute;
-use vmux_ecs::host::page::HostsPage;
 use vmux_ecs::launcher::RendersLauncherPanel;
-use vmux_ecs::{PageIcon, PageMetadata, Url};
+use vmux_ecs::page::{HostsPage, PagePlacementCatalog};
+use vmux_ecs::{PageMetadata, Url};
 use vmux_flex::prelude::*;
 
 #[derive(Component)]
@@ -107,28 +108,30 @@ fn mirror_metadata_to_url(
 fn apply_state_from_webview(
     cef_rx: Res<WebviewCefStateReceiver>,
     mut browser_meta: Query<&mut PageMetadata>,
+    pages: PagePlacementCatalog,
 ) {
     while let Ok(ev) = cef_rx.0.try_recv() {
         let Ok(mut meta) = browser_meta.get_mut(ev.webview) else {
             continue;
         };
-        apply_cef_state_to_meta(&mut meta, ev);
+        let reports_title = pages.reports_title(&meta.url);
+        apply_cef_state_to_meta(&mut meta, ev, reports_title);
     }
 }
 
 fn apply_cef_state_to_meta(
     meta: &mut PageMetadata,
     ev: bevy_cef_core::prelude::WebviewCefStateEvent,
+    reports_title: bool,
 ) {
     let route = VmuxRoute::parse(&meta.url);
     let on_native_view = route.is_some();
-    let accepts_dynamic_title = route.is_some_and(|route| route.is_agent());
     let navigating_away = ev
         .url
         .as_deref()
         .is_some_and(|url| VmuxRoute::parse(url).is_none());
     if on_native_view && !navigating_away {
-        if accepts_dynamic_title && let Some(title) = ev.title {
+        if reports_title && let Some(title) = ev.title {
             meta.title = title;
         }
         return;
@@ -202,11 +205,11 @@ impl Browser {
         )
     }
 
-    pub fn native_page(url: &str, title: &str) -> impl Bundle {
-        Self::native_page_with_icon(url, title, PageIcon::None)
+    pub fn hosted_page(url: &str, title: &str) -> impl Bundle {
+        Self::hosted_page_with_icon(url, title, PageIcon::None)
     }
 
-    pub fn native_page_with_icon(url: &str, title: &str, icon: PageIcon) -> impl Bundle {
+    pub fn hosted_page_with_icon(url: &str, title: &str, icon: PageIcon) -> impl Bundle {
         (
             Self,
             WebviewWindowed,
@@ -242,7 +245,7 @@ mod apply_cef_state_tests {
         PageMetadata {
             url: "vmux://history/".into(),
             title: "History".into(),
-            icon: vmux_ecs::PageIcon::None,
+            icon: vmux_api::PageIcon::None,
             bg_color: None,
         }
     }
@@ -251,7 +254,7 @@ mod apply_cef_state_tests {
         PageMetadata {
             url: "https://example.com".into(),
             title: "old".into(),
-            icon: vmux_ecs::PageIcon::None,
+            icon: vmux_api::PageIcon::None,
             bg_color: None,
         }
     }
@@ -268,7 +271,7 @@ mod apply_cef_state_tests {
     #[test]
     fn vmux_url_preserves_title_against_cef_update() {
         let mut meta = vmux_meta();
-        apply_cef_state_to_meta(&mut meta, ev(Some("vmux history POC"), None, None));
+        apply_cef_state_to_meta(&mut meta, ev(Some("vmux history POC"), None, None), false);
         assert_eq!(meta.title, "History");
     }
 
@@ -278,7 +281,7 @@ mod apply_cef_state_tests {
             let mut meta = PageMetadata {
                 url: url.into(),
                 title: "Codex".into(),
-                icon: vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Sparkles),
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
                 bg_color: None,
             };
             apply_cef_state_to_meta(
@@ -288,12 +291,13 @@ mod apply_cef_state_tests {
                     Some("https://example.com/favicon.ico"),
                     None,
                 ),
+                true,
             );
             assert_eq!(meta.title, "● Codex", "{url}");
             assert_eq!(meta.url, url);
             assert_eq!(
                 meta.icon,
-                vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Sparkles),
+                vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
                 "{url}"
             );
         }
@@ -302,14 +306,14 @@ mod apply_cef_state_tests {
     #[test]
     fn vmux_url_preserves_favicon_against_cef_update() {
         let mut meta = vmux_meta();
-        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
-        assert_eq!(meta.icon, vmux_ecs::PageIcon::None);
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None), false);
+        assert_eq!(meta.icon, vmux_api::PageIcon::None);
     }
 
     #[test]
     fn vmux_url_preserves_url_when_cef_reports_same_vmux_url() {
         let mut meta = vmux_meta();
-        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("vmux://history/")));
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("vmux://history/")), false);
         assert_eq!(meta.url, "vmux://history/");
         assert_eq!(meta.title, "History");
     }
@@ -317,32 +321,40 @@ mod apply_cef_state_tests {
     #[test]
     fn vmux_url_updates_when_cef_navigates_to_external_url() {
         let mut meta = vmux_meta();
-        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
+        apply_cef_state_to_meta(
+            &mut meta,
+            ev(None, None, Some("https://anthropic.com")),
+            false,
+        );
         assert_eq!(meta.url, "https://anthropic.com");
     }
 
     #[test]
     fn after_navigation_away_subsequent_title_updates_apply() {
         let mut meta = vmux_meta();
-        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
-        apply_cef_state_to_meta(&mut meta, ev(Some("Frontier AI"), None, None));
+        apply_cef_state_to_meta(
+            &mut meta,
+            ev(None, None, Some("https://anthropic.com")),
+            false,
+        );
+        apply_cef_state_to_meta(&mut meta, ev(Some("Frontier AI"), None, None), false);
         assert_eq!(meta.title, "Frontier AI");
     }
 
     #[test]
     fn external_url_accepts_title_update() {
         let mut meta = external_meta();
-        apply_cef_state_to_meta(&mut meta, ev(Some("New Title"), None, None));
+        apply_cef_state_to_meta(&mut meta, ev(Some("New Title"), None, None), false);
         assert_eq!(meta.title, "New Title");
     }
 
     #[test]
     fn external_url_accepts_favicon_update() {
         let mut meta = external_meta();
-        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None), false);
         assert_eq!(
             meta.icon,
-            vmux_ecs::PageIcon::Favicon("https://x/fav.ico".into())
+            vmux_api::PageIcon::Favicon("https://x/fav.ico".into())
         );
     }
 
@@ -351,12 +363,12 @@ mod apply_cef_state_tests {
         let mut meta = PageMetadata {
             url: "https://example.com".into(),
             title: "Old".into(),
-            icon: vmux_ecs::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            icon: vmux_api::PageIcon::Favicon("https://example.com/fav.ico".into()),
             bg_color: None,
         };
-        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")));
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")), false);
         assert_eq!(meta.url, "https://other.com");
-        assert_eq!(meta.icon, vmux_ecs::PageIcon::None);
+        assert_eq!(meta.icon, vmux_api::PageIcon::None);
     }
 }
 
@@ -413,13 +425,13 @@ mod tests {
 #[cfg(test)]
 mod url_mirror_tests {
     use super::*;
-    use vmux_ecs::{CreatedAt, EcsPlugin, LastVisitedAt, PageMetadata, Url, VisitCount};
+    use vmux_ecs::{CreatedAt, LastVisitedAt, PageMetadata, PrimitivesPlugin, Url, VisitCount};
 
     #[test]
     fn updates_matching_url_meta() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(EcsPlugin)
+            .add_plugins(PrimitivesPlugin)
             .add_systems(Update, mirror_metadata_to_url);
 
         app.world_mut().spawn((
@@ -436,7 +448,7 @@ mod url_mirror_tests {
         app.world_mut().spawn(PageMetadata {
             url: "https://example.com".into(),
             title: "Example".into(),
-            icon: vmux_ecs::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            icon: vmux_api::PageIcon::Favicon("https://example.com/fav.ico".into()),
             bg_color: None,
         });
 
@@ -451,7 +463,7 @@ mod url_mirror_tests {
         assert_eq!(url_meta.title, "Example");
         assert_eq!(
             url_meta.icon,
-            vmux_ecs::PageIcon::Favicon("https://example.com/fav.ico".into())
+            vmux_api::PageIcon::Favicon("https://example.com/fav.ico".into())
         );
     }
 
@@ -459,7 +471,7 @@ mod url_mirror_tests {
     fn skips_empty_tab_url() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(EcsPlugin)
+            .add_plugins(PrimitivesPlugin)
             .add_systems(Update, mirror_metadata_to_url);
 
         app.world_mut().spawn((

@@ -1,11 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use vmux_api::protocol::AgentAttachment;
 use vmux_chat::host::{ChatView, ImportedConversation};
 use vmux_ecs::agent::SwapStackSession;
-use vmux_ecs::host::persistence::PageRestore;
+use vmux_ecs::persistence::PageRestore;
+use vmux_ecs::profile::Projects;
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
@@ -14,94 +13,26 @@ use vmux_ecs::{
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
-use vmux_session::{AcpSession, AgentConversationTitle, PromptQueue};
+use vmux_session::AcpSession;
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 
 use super::attach::AcpAgentAttachment;
+use super::navigation_driver::{AcpCatalog, AgentPageOpenWorkspace, PageOpener};
+#[cfg(test)]
 use crate::host::acp::registry::RegistryAgent;
 use crate::route::AcpRoute;
 use vmux_terminal::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-#[derive(SystemParam)]
-struct AcpCatalog<'w, 's> {
-    agents: Query<'w, 's, &'static RegistryAgent>,
-}
-
-impl AcpCatalog<'_, '_> {
-    fn agent(&self, id: &str) -> Option<&RegistryAgent> {
-        self.agents.iter().find(|agent| agent.id == id)
-    }
-
-    fn installed_id(&self) -> Option<String> {
-        self.agents
-            .iter()
-            .find(|agent| agent.is_installed())
-            .map(|agent| agent.id.clone())
-    }
-
-    fn icon(&self, id: &str) -> Option<String> {
-        self.agent(id).and_then(|agent| agent.icon.clone())
-    }
-
-    fn profile_name(&self, id: &str, config: Option<&vmux_setting::AcpAgentConfig>) -> String {
-        self.agent(id)
-            .map(|agent| agent.name.trim())
-            .filter(|name| !name.is_empty())
-            .or_else(|| {
-                let name = config?.name.trim();
-                (!name.is_empty()).then_some(name)
-            })
-            .unwrap_or(id)
-            .to_string()
-    }
-}
-
-pub struct NavigationPlugin;
-
-impl Plugin for NavigationPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, swap).add_systems(
-            Update,
-            (release_transition, prepare, open)
-                .chain()
-                .in_set(PageOpenSet::HandleKnownPages),
-        );
-    }
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct AgentPageOpenWorkspace<'w, 's> {
-    active_space: FocusedSpace<'w, 's>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    tabs: Query<'w, 's, &'static Tab>,
-    hierarchy: vmux_layout::space::SpaceHierarchy<'w, 's>,
-}
-
-impl AgentPageOpenWorkspace<'_, '_> {
-    fn startup_dir(
-        &self,
-        entity: Entity,
-        settings: &AppSettings,
-    ) -> Option<vmux_setting::StartupDir> {
-        let space_id = self
-            .hierarchy
-            .id(entity)
-            .or_else(|| self.active_space.id().map(str::to_string))?;
-        vmux_setting::StartupDir::resolve(settings, &space_id, None)
-    }
-
-    fn tab(&self, entity: Entity) -> Option<(Entity, Option<String>)> {
-        let mut current = entity;
-        loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                return Some((current, tab.startup_dir.clone()));
-            }
-            current = self.child_of.get(current).ok()?.parent();
-        }
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_systems(Update, swap).add_systems(
+        Update,
+        (release_transition, prepare, open)
+            .chain()
+            .in_set(PageOpenSet::HandleKnownPages),
+    );
 }
 
 #[derive(Component)]
@@ -109,32 +40,6 @@ struct PreparingAgentChatView;
 
 #[derive(Component)]
 struct AwaitingAgentTransitionPaint;
-
-struct AgentChatTarget {
-    url: String,
-    title: String,
-}
-
-impl AgentChatTarget {
-    fn parse(url: &str) -> Option<Self> {
-        match AcpRoute::parse(url)? {
-            AcpRoute::AcpDefault => Some(Self {
-                url: vmux_chat::ChatPlugin::URL.to_string(),
-                title: "Agent".to_string(),
-            }),
-            AcpRoute::Acp { id, sid } => {
-                let url = match sid {
-                    Some(sid) => format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL),
-                    None => format!("{}{id}", vmux_chat::ChatPlugin::URL),
-                };
-                Some(Self {
-                    url,
-                    title: id.to_string(),
-                })
-            }
-        }
-    }
-}
 
 fn ancestor_tab_entity(
     entity: Entity,
@@ -192,15 +97,30 @@ fn prepare(
         };
         if !preparing_by_stack.contains_key(&task.stack)
             && let Ok(transition) = transitions.get(task.stack)
-            && let Some(target) = AgentChatTarget::parse(&task.url)
+            && let Some(target) = AcpRoute::parse(&task.url)
         {
+            let (url, title) = match target {
+                AcpRoute::AcpDefault => (
+                    vmux_api::VmuxRoute::SESSIONS_ROOT.to_string(),
+                    "Agent".to_string(),
+                ),
+                AcpRoute::Acp { id, sid } => {
+                    let url = match sid {
+                        Some(sid) => {
+                            format!("{}{id}/{sid}", vmux_api::VmuxRoute::SESSIONS_ROOT)
+                        }
+                        None => format!("{}{id}", vmux_api::VmuxRoute::SESSIONS_ROOT),
+                    };
+                    (url, id.to_string())
+                }
+            };
             let view = transition.webview;
             commands
                 .entity(view)
                 .insert((
                     PageMetadata {
-                        url: target.url,
-                        title: target.title,
+                        url,
+                        title,
                         bg_color: None,
                         ..default()
                     },
@@ -341,6 +261,7 @@ fn open(
     mut opener: PageOpener,
     transitions: Query<&StartInlineTransition>,
     launches: Query<&TerminalLaunch>,
+    projects: Projects,
 ) {
     let tasks: Vec<(Entity, PageOpenTask, bool)> = open_q
         .p0()
@@ -367,8 +288,8 @@ fn open(
                 Ok(Some(path)) => path,
                 Ok(None) => match space_startup_dir {
                     Some(dir) => dir.path,
-                    None => match AgentCwd::projects() {
-                        Ok(path) => path,
+                    None => match projects.path() {
+                        Ok(path) => path.to_path_buf(),
                         Err(message) => {
                             opener
                                 .commands
@@ -504,110 +425,6 @@ fn swap(
             _ => unreachable!(),
         }
     }
-}
-
-#[derive(SystemParam)]
-struct PageOpener<'w, 's> {
-    sessions: Query<'w, 's, &'static AcpSession>,
-    commands: Commands<'w, 's>,
-    settings: Res<'w, AppSettings>,
-    catalog: AcpCatalog<'w, 's>,
-}
-
-impl PageOpener<'_, '_> {
-    fn apply(
-        &mut self,
-        task: &PageOpenTask,
-        initial_prompt: Option<String>,
-        initial_attachments: Vec<AgentAttachment>,
-        transition_webview: Option<Entity>,
-        default_cwd: &Path,
-    ) -> Result<(), String> {
-        let target = match AcpRoute::parse(&task.url) {
-            Some(AcpRoute::AcpDefault) => {
-                let id = self
-                    .settings
-                    .agent
-                    .acp
-                    .first()
-                    .map(|config| config.id.clone())
-                    .or_else(|| self.catalog.installed_id())
-                    .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
-                AcpRoute::Acp { id, sid: None }
-            }
-            Some(target) => target,
-            None => return Err(format!("malformed agent URL '{}'", task.url)),
-        };
-        match target {
-            AcpRoute::Acp { id, sid } => {
-                let config = self
-                    .settings
-                    .agent
-                    .acp
-                    .iter()
-                    .find(|config| config.id == id);
-                if config.is_none() && self.catalog.agent(&id).is_none() {
-                    return Err(format!("ACP agent unavailable for '{id}'"));
-                }
-                if self
-                    .sessions
-                    .get(task.stack)
-                    .is_ok_and(|session| session.agent_id == id)
-                {
-                    return Ok(());
-                }
-                if transition_webview.is_none() {
-                    self.commands.entity(task.stack).despawn_children();
-                }
-                let routing_sid = uuid::Uuid::new_v4().to_string();
-                let icon = self.catalog.icon(&id);
-                let name = self.catalog.profile_name(&id, config);
-                let request = AcpAgentAttachment::new(
-                    id,
-                    name,
-                    routing_sid,
-                    default_cwd.to_path_buf(),
-                    icon,
-                    sid,
-                );
-                self.commands.entity(task.stack).insert(request);
-                if let Some(webview) = transition_webview {
-                    self.commands
-                        .entity(task.stack)
-                        .insert(vmux_ecs::EntityTarget::<ChatView>::new(webview));
-                }
-                insert_initial_prompt_queue(
-                    task.stack,
-                    initial_prompt,
-                    initial_attachments,
-                    &mut self.commands,
-                );
-                Ok(())
-            }
-            AcpRoute::AcpDefault => unreachable!(),
-        }
-    }
-}
-
-fn insert_initial_prompt_queue(
-    stack: Entity,
-    initial_prompt: Option<String>,
-    initial_attachments: Vec<AgentAttachment>,
-    commands: &mut Commands,
-) {
-    let prompt = initial_prompt.unwrap_or_default();
-    if prompt.trim().is_empty() && initial_attachments.is_empty() {
-        return;
-    }
-    if let Some(title) = AgentConversationTitle::from_prompt(&prompt) {
-        commands.entity(stack).insert(title);
-    }
-    let mut queue = PromptQueue::default();
-    queue.enqueue_with_attachments(prompt, initial_attachments);
-    commands
-        .entity(stack)
-        .insert(queue)
-        .remove::<(PendingPrompt, PendingPromptAttachments)>();
 }
 
 #[cfg(test)]

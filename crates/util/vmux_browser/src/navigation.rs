@@ -3,11 +3,9 @@ use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{
-    BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
-};
+use vmux_command::{CommandDispatch, CommandRuntimePlugin, ReadCommandRequests};
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -42,7 +40,6 @@ impl Plugin for NavigationPlugin {
                     .after(vmux_ecs::service::ServiceMessageSet)
                     .before(vmux_ecs::PageOpenSet::ResolveTarget),
             )
-            .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_open_history)
             .add_systems(
                 Update,
@@ -69,10 +66,6 @@ pub struct OpenHistoryRequest;
 
 #[vmux_command::command]
 struct BrowserOpenHistoryBinding;
-
-fn bind_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<BrowserOpenHistoryBinding>(&mut commands);
-}
 
 fn issue_open_history(
     trigger: On<CommandDispatch>,
@@ -483,7 +476,6 @@ mod command_definition_tests {
             .add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_plugins(CommandRuntimePlugin)
             .add_message::<OpenHistoryRequest>()
-            .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_open_history);
         app.update();
 

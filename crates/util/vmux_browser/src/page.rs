@@ -8,6 +8,7 @@ use vmux_api::{
 };
 
 use vmux_command::ReadCommandRequests;
+use vmux_ecs::persistence::PageRestore;
 use vmux_ecs::{
     CefPageAttachRequest, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
     PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
@@ -373,7 +374,7 @@ fn attach_error_pages(
             ..default()
         });
         commands.spawn((
-            Browser::native_page(vmux_layout::ErrorPage::URL, &title),
+            Browser::hosted_page(vmux_layout::ErrorPage::URL, &title),
             attachment.failure.clone(),
             ChildOf(attachment.stack),
         ));
@@ -407,6 +408,7 @@ fn respond_open_tasks(
     mut service_requests: MessageWriter<vmux_ecs::service::ServiceRequest>,
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
+        commands.entity(task.stack).remove::<PageRestore>();
         if let Some(error) = error {
             if let Some(response) =
                 PageOpenResponse::from_result(task.request_id, Err(error.message.clone()))

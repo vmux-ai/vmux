@@ -7,11 +7,11 @@ use vmux_api::protocol::{
 };
 use vmux_command::AgentInvokeCommand;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
+    ToolQueryRouteSet,
 };
 
 use super::agent::{AgentOpenBeside, AgentPaneDirection, AgentReadLayout, AgentUpdateLayout};
@@ -22,10 +22,6 @@ pub struct LayoutToolPlugin;
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<OpenPageArgs>()
-            .bind_tool::<ReadLayoutArgs>()
-            .bind_tool::<UpdateLayoutArgs>()
-            .bind_tool::<SelectTabArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
@@ -69,7 +65,7 @@ impl From<PaneDirection> for AgentPaneDirection {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OpenPageArgs {
+struct OpenPageTool {
     url: String,
     direction: Option<PaneDirection>,
     #[serde(default)]
@@ -78,7 +74,7 @@ struct OpenPageArgs {
 
 fn open_page(
     mut commands: Commands,
-    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenPageArgs), Added<OpenPageArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenPageTool), Added<OpenPageTool>>,
 ) {
     for (entity, name, anchor, args) in &requests {
         let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
@@ -157,23 +153,23 @@ fn forward_snapshots(
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ReadLayoutArgs {}
+struct ReadLayoutTool {}
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SelectTabArgs {
+struct SelectTabTool {
     index: u8,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(transparent)]
-struct UpdateLayoutArgs(layout::LayoutSnapshot);
+struct UpdateLayoutTool(layout::LayoutSnapshot);
 
 fn read(
     mut commands: Commands,
-    calls: Query<(Entity, Option<&ProcessAnchor>), AddedTool<ReadLayoutArgs>>,
+    calls: Query<(Entity, Option<&ProcessAnchor>), AddedTool<ReadLayoutTool>>,
 ) {
     for (request, anchor) in &calls {
         commands
@@ -186,7 +182,7 @@ fn read(
 
 fn update(
     mut commands: Commands,
-    requests: Query<(Entity, &UpdateLayoutArgs), AddedTool<UpdateLayoutArgs>>,
+    requests: Query<(Entity, &UpdateLayoutTool), AddedTool<UpdateLayoutTool>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -199,7 +195,7 @@ fn update(
 
 fn select_tab(
     mut commands: Commands,
-    requests: Query<(Entity, &SelectTabArgs), AddedTool<SelectTabArgs>>,
+    requests: Query<(Entity, &SelectTabTool), AddedTool<SelectTabTool>>,
 ) {
     for (entity, args) in &requests {
         let index = args.index;

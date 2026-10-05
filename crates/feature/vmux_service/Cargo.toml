@@ -13,10 +13,6 @@ default = []
 name = "vmux_service"
 path = "src/lib.rs"
 
-[[bin]]
-name = "vmux_service"
-path = "src/main.rs"
-
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
@@ -41,7 +37,6 @@ crossbeam-channel = "0.5"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 ring = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
-vmux_agent = { path = "../vmux_agent", default-features = false, features = ["service"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_process = { path = "../../util/vmux_process" }

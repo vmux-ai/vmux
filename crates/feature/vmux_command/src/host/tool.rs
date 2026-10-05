@@ -5,11 +5,11 @@ use vmux_api::protocol::{
     AgentListCommands, AgentNotify, AgentQueryResult, AgentRequest, ClientMessage, JsonValue,
 };
 use vmux_ecs::JsonArguments;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQueryHandled, ToolQueryRequest,
-    ToolQueryRouteSet, UnclaimedToolInvocation,
+    AddedTool, ToolCommand, ToolDispatchSet, ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
+    UnclaimedToolInvocation,
 };
 
 #[vmux_api::agent]
@@ -24,8 +24,6 @@ pub struct CommandToolPlugin;
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<OpenCommandBarArgs>()
-            .bind_tool::<NotifyArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
@@ -83,21 +81,21 @@ fn answer(
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OpenCommandBarArgs {
+struct OpenCommandBarTool {
     mode: Option<String>,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NotifyArgs {
+struct NotifyTool {
     title: Option<String>,
     body: Option<String>,
 }
 
 fn open(
     mut commands: Commands,
-    requests: Query<(Entity, &OpenCommandBarArgs), AddedTool<OpenCommandBarArgs>>,
+    requests: Query<(Entity, &OpenCommandBarTool), AddedTool<OpenCommandBarTool>>,
 ) {
     for (entity, args) in &requests {
         let result = match args.mode.as_deref().unwrap_or("default") {
@@ -116,7 +114,7 @@ fn open(
     }
 }
 
-fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyArgs), AddedTool<NotifyArgs>>) {
+fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyTool), AddedTool<NotifyTool>>) {
     for (entity, args) in &requests {
         commands
             .entity(entity)
@@ -131,14 +129,16 @@ fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyArgs), AddedTo
 mod tests {
     use super::*;
     use vmux_ecs::JsonArguments;
-    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{
+        ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation, ToolRegistryPlugin,
+    };
 
     struct CommandToolFixture;
 
     impl CommandToolFixture {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins(CommandToolPlugin);
+            app.add_plugins((ToolRegistryPlugin, CommandToolPlugin));
             app.update();
             app
         }

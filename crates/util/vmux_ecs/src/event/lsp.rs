@@ -1,13 +1,14 @@
 use super::FileLine;
 pub use host::{
-    FileCodeActions, FileDiagnostics, FileEditFailure, FileHover, FileLspStatus, FilePanelContent,
-    FilePanelFocus, FilePanelFocusTarget, FilePanelState, FileRenamePrompt, LspCatalog,
-    LspInstallProgress, LspManagerUiState, LspPackageStatus,
+    FileCodeActions, FileDiagnostics, FileEditNotice, FileHover, FileHoverState, FileLspStatus,
+    FilePanelContent, FilePanelFocus, FilePanelFocusTarget, FilePanelState, FileRenameState,
+    LspCatalog, LspInstallNotice, LspInstallProgress, LspManagerUiState, LspPackageStatus,
 };
 pub use ui::{
-    FileCodeActionPick, FileCompletionRequest, FileDefinitionRequest, FileHoverRequest,
-    FilePanelPick, FileReferencesRequest, FileRenameRequest, LspCatalogRequest, LspInstallRequest,
-    LspUninstallRequest, LspUpdateRequest,
+    FileCodeActionDismissRequest, FileCodeActionMoveRequest, FileCodeActionPick,
+    FileCompletionRequest, FileDefinitionRequest, FileHoverDismissRequest, FileHoverRequest,
+    FilePanelPick, FileReferencesRequest, FileRenameDismissRequest, FileRenameDraftRequest,
+    FileRenameRequest, LspCatalogRequest, LspInstallRequest, LspUninstallRequest, LspUpdateRequest,
 };
 
 mod host;

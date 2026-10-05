@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use vmux_api::protocol::ProcessId;
 
-use crate::runtime::{Process, PtyInputWriter};
+use crate::driver::{Process, PtyInputWriter};
 
 pub struct ProcessManager {
     pub processes: HashMap<ProcessId, Process>,

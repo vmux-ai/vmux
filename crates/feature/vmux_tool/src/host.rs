@@ -4,20 +4,22 @@ use std::path::Path;
 use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
-    ToolProvider, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
-    ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot, ToolsUiState,
+    ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest,
+    ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, ToolsRefreshRequest,
+    ToolsSnapshot, ToolsUiState, ToolsView,
 };
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::manifest::{FeatureId, FeatureManifest};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 
 use crate::{
     ExternalToolOperation, ToolApplier, ToolOperationFailed, ToolOperationFinished,
-    ToolOperationRequest, ToolOperationSucceeded, ToolOperator, ToolProviderId, ToolScanner,
-    ToolStore, ToolStoreTarget, ToolsManifest,
+    ToolOperationRequest, ToolOperationSucceeded, ToolOperator, ToolProviderBinding,
+    ToolProviderId, ToolProviderTarget, ToolScanner, ToolStore, ToolStoreTarget, ToolsManifest,
 };
 
 pub(crate) struct ToolHostPlugin;
@@ -28,20 +30,25 @@ impl Plugin for ToolHostPlugin {
             crate::McpConnectionPlugin,
             UiStatePlugin::<ToolsUiState>::default(),
         ))
-        .add_plugins(UiEventPlugin::<(
-            ToolsRefreshRequest,
-            ToolInstallRequest,
-            ToolUpdateRequest,
-            ToolUninstallRequest,
-            ToolForgetRequest,
-            ToolAdoptRequest,
-            ToolLinkRequest,
-            ToolUnlinkRequest,
-            ToolApplyRequest,
-            ToolImportRequest,
-            ToolOpenRequest,
-            ToolsNavigateRequest,
-        )>::default())
+        .add_plugins((
+            UiEventPlugin::<(
+                ToolsRefreshRequest,
+                ToolInstallRequest,
+                ToolUpdateRequest,
+                ToolUninstallRequest,
+                ToolForgetRequest,
+                ToolAdoptRequest,
+                ToolLinkRequest,
+            )>::default(),
+            UiEventPlugin::<(
+                ToolUnlinkRequest,
+                ToolApplyRequest,
+                ToolImportRequest,
+                ToolOpenRequest,
+                ToolsFilterRequest,
+                ToolsNavigateRequest,
+            )>::default(),
+        ))
         .add_observer(page_ready)
         .add_observer(refresh_request)
         .add_observer(operation_request::<ToolInstallRequest>)
@@ -54,11 +61,14 @@ impl Plugin for ToolHostPlugin {
         .add_observer(operation_request::<ToolApplyRequest>)
         .add_observer(operation_request::<ToolImportRequest>)
         .add_observer(open_request)
+        .add_observer(filter_request)
         .add_observer(navigate_request)
         .add_systems(Startup, spawn_registry)
         .add_systems(
             Update,
             (
+                bind,
+                ApplyDeferred,
                 request_scan,
                 finish_scans,
                 start_operation,
@@ -73,10 +83,32 @@ impl Plugin for ToolHostPlugin {
     }
 }
 
+fn bind(
+    providers: Query<(Entity, &ToolProviderBinding), Without<ToolProviderId>>,
+    manifests: Query<(&FeatureId, &FeatureManifest)>,
+    mut commands: Commands,
+) {
+    for (entity, binding) in &providers {
+        let Some(manifest) = manifests
+            .iter()
+            .find_map(|(feature, manifest)| (*feature == binding.feature).then_some(manifest))
+        else {
+            continue;
+        };
+        let Some(provider) = manifest.tool_providers.get(binding.index) else {
+            continue;
+        };
+        commands.entity(entity).insert((
+            Name::new(format!("{} tool provider", provider.title)),
+            ToolProviderId(ToolProvider::new(provider.id.clone())),
+        ));
+    }
+}
+
 fn page_ready(
     trigger: On<UiInput<PageReady>>,
     pages: Query<&PageMetadata>,
-    subscribers: Query<(), With<ToolSubscriber>>,
+    mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -86,9 +118,23 @@ fn page_ready(
     if !page.url.starts_with(crate::ToolPlugin::URL) {
         return;
     }
-    if !subscribers.contains(webview) {
-        commands.entity(webview).insert(ToolSubscriber::default());
+    if let Ok(mut subscriber) = subscribers.get_mut(webview) {
+        subscriber.navigate(&page.url);
+    } else {
+        let mut subscriber = ToolSubscriber::default();
+        subscriber.navigate(&page.url);
+        commands.entity(webview).insert(subscriber);
     }
+}
+
+fn filter_request(
+    trigger: On<UiInput<ToolsFilterRequest>>,
+    mut subscribers: Query<&mut ToolSubscriber>,
+) {
+    let Ok(mut subscriber) = subscribers.get_mut(trigger.event().webview) else {
+        return;
+    };
+    subscriber.filter(&trigger.event().payload.query);
 }
 
 fn open_request(
@@ -118,11 +164,15 @@ fn open_request(
 
 fn navigate_request(
     trigger: On<UiInput<ToolsNavigateRequest>>,
+    mut subscribers: Query<&mut ToolSubscriber>,
     mut requests: MessageWriter<PageOpenRequest>,
 ) {
     let Some(route) = crate::route::ToolRoute::parse(&trigger.event().payload.url) else {
         return;
     };
+    if let Ok(mut subscriber) = subscribers.get_mut(trigger.event().webview) {
+        subscriber.navigate(&route.url());
+    }
     requests.write(PageOpenRequest {
         target: PageOpenTarget::ContainingStack(trigger.event().webview),
         url: route.url(),
@@ -208,7 +258,97 @@ impl ToolSubscriber {
         }
         self.snapshot_revision = revision;
         self.state.snapshot = snapshot.clone();
+        self.project();
         self.touch();
+    }
+
+    fn navigate(&mut self, url: &str) {
+        let Some(route) = crate::route::ToolRoute::parse(url) else {
+            return;
+        };
+        if self.state.view.route == route.id() {
+            return;
+        }
+        self.state.view.route = route.id().to_string();
+        self.project();
+        self.touch();
+    }
+
+    fn filter(&mut self, query: &str) {
+        let query = query.to_string();
+        if self.state.view.query == query {
+            return;
+        }
+        self.state.view.query = query;
+        self.project();
+        self.touch();
+    }
+
+    fn project(&mut self) {
+        let snapshot = &self.state.snapshot;
+        let route = if self.state.view.route.is_empty() {
+            snapshot
+                .providers
+                .first()
+                .map(|provider| provider.route.clone())
+                .unwrap_or_default()
+        } else {
+            self.state.view.route.clone()
+        };
+        let query = self.state.view.query.trim().to_ascii_lowercase();
+        let provider = snapshot
+            .providers
+            .iter()
+            .find(|provider| provider.route == route);
+        let mut categories = Vec::new();
+        for category in &snapshot.categories {
+            let Some(metadata) = snapshot.provider(&category.provider) else {
+                continue;
+            };
+            if metadata.route != route {
+                continue;
+            }
+            let mut items = Vec::new();
+            for item in &category.items {
+                if query.is_empty()
+                    || item.name.to_ascii_lowercase().contains(&query)
+                    || item.id.to_ascii_lowercase().contains(&query)
+                    || item.detail.to_ascii_lowercase().contains(&query)
+                    || metadata.title.to_ascii_lowercase().contains(&query)
+                {
+                    items.push(item.clone());
+                }
+            }
+            if !items.is_empty() {
+                categories.push(crate::state::ToolCategory {
+                    provider: category.provider.clone(),
+                    items,
+                });
+            }
+        }
+        let visible_count = categories
+            .iter()
+            .map(|category| category.items.len() as u32)
+            .sum();
+        self.state.view = ToolsView {
+            route: route.clone(),
+            query: self.state.view.query.clone(),
+            route_title: provider
+                .map(|provider| provider.route_title.clone())
+                .unwrap_or_default(),
+            route_title_message_id: provider
+                .map(|provider| provider.route_title_message_id.clone())
+                .unwrap_or_default(),
+            categories,
+            visible_count,
+            apply_provider: provider
+                .filter(|provider| provider.apply)
+                .map(|provider| provider.provider.clone()),
+            show_brewfile: snapshot
+                .providers
+                .iter()
+                .any(|provider| provider.route == route && provider.brewfile),
+        };
     }
 
     fn touch(&mut self) {
@@ -333,6 +473,7 @@ fn start_operation(
     active: Query<(), With<ToolStoreTarget>>,
     scans: Query<(), With<ToolScanTask>>,
     stores: Query<Entity, (With<ToolStore>, With<ToolRegistry>)>,
+    providers: Query<(Entity, &ToolProviderId)>,
     mut commands: Commands,
 ) {
     if !active.is_empty() || !scans.is_empty() {
@@ -341,25 +482,38 @@ fn start_operation(
     let mut next = None;
     for (entity, operation) in &pending {
         match next {
-            Some((_, operation_id)) if operation_id <= operation.operation_id => {}
-            _ => next = Some((entity, operation.operation_id)),
+            Some((_, operation_id, _)) if operation_id <= operation.operation_id => {}
+            _ => {
+                next = Some((
+                    entity,
+                    operation.operation_id,
+                    operation.operation.provider.clone(),
+                ))
+            }
         }
     }
-    let Some((entity, _)) = next else {
+    let Some((entity, _, provider_id)) = next else {
         return;
     };
     let Ok(store) = stores.single() else {
         return;
     };
-    commands
-        .entity(entity)
+    let mut operation_entity = commands.entity(entity);
+    operation_entity
         .remove::<PendingToolOperation>()
         .insert(ToolStoreTarget::new(store));
+    if let Some((provider, _)) = providers
+        .iter()
+        .find(|(_, provider)| provider.0 == provider_id)
+    {
+        operation_entity.insert(ToolProviderTarget::new(provider));
+    }
 }
 
 fn request_scan(
     mut registry: Query<(&mut ToolRegistry, &ToolStore)>,
     providers: Query<(&ToolProviderId, &ToolScanner)>,
+    features: Query<&FeatureManifest>,
     scans: Query<(), With<ToolScanTask>>,
     tool_operations: Query<(), With<ToolStoreTarget>>,
     pending_tool_operations: Query<(), With<PendingToolOperation>>,
@@ -380,11 +534,31 @@ fn request_scan(
     let store = store.clone();
     let mut providers = providers
         .iter()
-        .map(|(provider, scanner)| (*provider, *scanner))
+        .map(|(provider, scanner)| (provider.clone(), *scanner))
         .collect::<Vec<_>>();
-    providers.sort_by_key(|(provider, _)| provider.0);
-    let task =
-        IoTaskPool::get().spawn(async move { scan_tools(&store, &providers, refresh_catalogs) });
+    providers.sort_by(|(left, _), (right, _)| left.0.cmp(&right.0));
+    let mut metadata = Vec::new();
+    for feature in &features {
+        for entry in &feature.tool_providers {
+            metadata.push(ToolProviderMetadata {
+                provider: ToolProvider::new(entry.id.clone()),
+                title: entry.title.clone(),
+                title_message_id: entry.title_message_id.clone(),
+                route_title: entry.route_title.clone(),
+                route_title_message_id: entry.route_title_message_id.clone(),
+                short_label: entry.short_label.clone(),
+                route: entry.route.clone(),
+                rank: entry.rank,
+                thumbnails: entry.thumbnails,
+                apply: entry.apply,
+                brewfile: entry.brewfile,
+            });
+        }
+    }
+    metadata.sort_by_key(|entry| entry.rank);
+    metadata.dedup_by(|left, right| left.provider == right.provider);
+    let task = IoTaskPool::get()
+        .spawn(async move { scan_tools(&store, &providers, metadata, refresh_catalogs) });
     commands.spawn((
         Name::new("Tool inventory scan"),
         ToolScanTask { generation, task },
@@ -457,24 +631,28 @@ fn start_external_operations(
             let Ok(registry) = registry.single() else {
                 continue;
             };
+            let operators = providers
+                .iter()
+                .map(|(provider, operator)| (provider.clone(), *operator))
+                .collect::<Vec<_>>();
             let installs = registry
                 .snapshot
                 .categories
                 .iter()
                 .flat_map(|category| &category.items)
                 .filter(|item| item.managed && item.status == ToolStatus::Missing)
-                .filter(|item| !matches!(item.provider, ToolProvider::Dotfiles | ToolProvider::Mcp))
+                .filter(|item| {
+                    operators
+                        .iter()
+                        .any(|(provider, _)| provider.0 == item.provider)
+                })
                 .map(|item| {
                     ToolOperationKey::new(
-                        item.provider,
+                        item.provider.clone(),
                         ToolOperationKind::Install,
                         item.id.clone(),
                     )
                 })
-                .collect::<Vec<_>>();
-            let operators = providers
-                .iter()
-                .map(|(provider, operator)| (*provider, *operator))
                 .collect::<Vec<_>>();
             let appliers = appliers.iter().copied().collect::<Vec<_>>();
             let task = IoTaskPool::get()
@@ -493,7 +671,7 @@ fn start_external_operations(
                 ToolOperationFinished,
                 ToolOperationFailed(format!(
                     "{} does not support this operation",
-                    context.operation.provider.title()
+                    context.operation.provider.id()
                 )),
             ));
             continue;
@@ -523,7 +701,7 @@ fn apply_tools(
         else {
             return Err(format!(
                 "{} does not support install",
-                operation.provider.title()
+                operation.provider.id()
             ));
         };
         operator.run(store, operation, "")?;
@@ -562,6 +740,7 @@ fn finish_external_operations(
 fn scan_tools(
     store: &ToolStore,
     providers: &[(ToolProviderId, ToolScanner)],
+    metadata: Vec<ToolProviderMetadata>,
     refresh_catalogs: bool,
 ) -> ToolScanResult {
     let (mut manifest, manifest_error) = match store.load() {
@@ -573,12 +752,12 @@ fn scan_tools(
     let mut categories = Vec::new();
     let mut errors = manifest_error.into_iter().collect::<Vec<_>>();
     for (provider, scanner) in providers {
-        match scanner.scan(store, &mut manifest, refresh_catalogs) {
+        match scanner.scan(&provider.0, store, &mut manifest, refresh_catalogs) {
             Ok(snapshot) => {
                 categories.push(snapshot.category);
                 errors.extend(snapshot.errors);
             }
-            Err(error) => errors.push(format!("{}: {error}", provider.0.title())),
+            Err(error) => errors.push(format!("{}: {error}", provider.0.id())),
         }
     }
     if can_persist
@@ -607,6 +786,7 @@ fn scan_tools(
             loaded: true,
             root: store.root().to_string_lossy().into_owned(),
             categories,
+            providers: metadata,
             installed,
             updates,
             conflicts,
@@ -738,14 +918,17 @@ mod tests {
 
     #[test]
     fn tool_operation_state_tracks_pending_and_completion() {
-        let operation =
-            ToolOperationKey::new(ToolProvider::Npm, ToolOperationKind::Install, "typescript");
+        let operation = ToolOperationKey::new(
+            ToolProvider::new("npm"),
+            ToolOperationKind::Install,
+            "typescript",
+        );
         let mut subscriber = ToolSubscriber::pending(7, operation.clone());
 
         assert_eq!(
             subscriber.state.pending,
             vec![ToolOperationKey::new(
-                ToolProvider::Npm,
+                ToolProvider::new("npm"),
                 ToolOperationKind::Install,
                 "typescript",
             )]

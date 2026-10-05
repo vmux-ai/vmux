@@ -14,12 +14,12 @@ debug = []
 path = "src/lib.rs"
 
 [dependencies]
+inventory = "0.3"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
-vmux_history = { path = "../vmux_history", default-features = false }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_macro = { path = "../../util/vmux_macro" }
 vmux_path = { path = "../../util/vmux_path" }

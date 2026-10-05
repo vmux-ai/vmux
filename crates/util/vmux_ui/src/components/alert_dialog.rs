@@ -7,7 +7,7 @@ use dioxus_primitives::alert_dialog::{
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
-use crate::util::cn;
+use crate::cn::cn;
 
 #[component]
 pub fn AlertDialogRoot(props: AlertDialogRootProps) -> Element {

@@ -17,10 +17,6 @@ pub(super) fn GitDashboard() -> Element {
     let GitPageState {
         snapshot,
         controller,
-        branch_prompt,
-        branch_draft,
-        commit_message,
-        pending_commit_message,
         ..
     } = use_context::<GitPageState>();
     let ui = snapshot();
@@ -48,8 +44,8 @@ pub(super) fn GitDashboard() -> Element {
                     repository: repository.clone(),
                     selected_path_bytes: controller_state.selected_path_bytes.clone(),
                     confirm_discard: controller_state.confirm_discard.clone(),
-                    commit_message,
-                    pending_commit_message,
+                    commit_message: controller_state.commit_message.clone(),
+                    commit_pending: controller_state.commit_pending.clone(),
                     focused_panel: controller_state.focused_panel,
                     operations: controller_state.operations.clone(),
                 }
@@ -57,8 +53,6 @@ pub(super) fn GitDashboard() -> Element {
                     repository: repository.clone(),
                     selected_branch: controller_state.selected_branch.clone(),
                     branch_collection: controller_state.branch_collection,
-                    branch_prompt,
-                    branch_draft,
                     focused_panel: controller_state.focused_panel,
                     operations: controller_state.operations.clone(),
                 }

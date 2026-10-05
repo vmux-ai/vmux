@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_ecs::profile::Projects;
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
@@ -50,12 +51,12 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
             PageMetadata {
                 title,
                 url: url.to_string(),
-                icon: vmux_ecs::PageIcon::None,
+                icon: vmux_api::PageIcon::None,
                 bg_color: None,
             },
-            vmux_ecs::host::page::HostsPage,
-            vmux_ecs::host::page::BindsEditingChords,
-            vmux_ecs::host::page::HostHistory::default(),
+            vmux_ecs::page::HostsPage,
+            vmux_ecs::page::BindsEditingChords,
+            vmux_ecs::page::HostHistory::default(),
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -78,13 +79,16 @@ fn handle_file(
     children: Query<&Children>,
     mut views: Query<(&FileView, &mut PageMetadata)>,
     focused_space: vmux_layout::space::FocusedSpace,
+    projects: Projects,
     mut commands: Commands,
     mut record_writer: MessageWriter<vmux_ecs::event::RecordVisitRequest>,
 ) {
     for (entity, task) in &tasks {
         let project_dir = focused_space.startup_dir();
         let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
-        let Some(target) = FilePageTarget::resolve(&task.url, project_dir, &knowledge_root) else {
+        let Some(target) =
+            FilePageTarget::resolve(&task.url, project_dir, projects.path(), &knowledge_root)
+        else {
             continue;
         };
         let Some(path) = target.path else {
@@ -130,7 +134,7 @@ fn handle_file(
                     } else if page_url.starts_with("vmux://") {
                         metadata.title.clone_from(&page_url);
                         metadata.url = page_url.clone();
-                        metadata.icon = vmux_ecs::PageIcon::None;
+                        metadata.icon = vmux_api::PageIcon::None;
                     }
                 }
                 view
@@ -155,15 +159,25 @@ struct FilePageTarget {
 }
 
 impl FilePageTarget {
-    fn resolve(url: &str, project_dir: Option<&Path>, knowledge_root: &Path) -> Option<Self> {
+    fn resolve(
+        url: &str,
+        project_dir: Option<&Path>,
+        projects: Result<&Path, String>,
+        knowledge_root: &Path,
+    ) -> Option<Self> {
         if url.trim_end_matches('/') == super::ProjectsPage::MANIFEST.url.trim_end_matches('/') {
-            return Some(Self {
-                path: Some(
-                    project_dir
-                        .map(Path::to_path_buf)
-                        .unwrap_or_else(|| vmux_ecs::profile::ProfilePaths::current().projects()),
-                ),
-                error: String::new(),
+            if let Some(project_dir) = project_dir {
+                return Some(Self {
+                    path: Some(project_dir.to_path_buf()),
+                    error: String::new(),
+                });
+            }
+            return Some(match projects {
+                Ok(projects) => Self {
+                    path: Some(projects.to_path_buf()),
+                    error: String::new(),
+                },
+                Err(error) => Self { path: None, error },
             });
         }
         if url.trim_end_matches('/') == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/') {

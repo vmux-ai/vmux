@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiInput};
 use std::sync::{LazyLock, Mutex};
-use vmux_ecs::host::page::HostsPage;
-use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
+use vmux_ecs::overlay::Overlay;
+use vmux_ecs::page::HostsPage;
 use vmux_flex::prelude::{ComputedNode, LayoutSystems};
 use vmux_layout::event::WindowDragRegionEvent;
 use vmux_layout::{
@@ -139,11 +139,11 @@ fn publish_region(
     window_q: Query<(Entity, &ComputedNode), With<VmuxWindow>>,
     hierarchy: WindowHierarchy,
     focused_window: vmux_layout::window::FocusedWindow,
-    overlay_q: OverlayStateQuery,
+    overlay: Overlay,
     pointer_capture_q: Query<(Entity, &HostWindow), (With<LayoutCef>, LayoutPointerCapture)>,
     mut last: Local<(Vec<WindowDragRegion>, Vec<WindowDragRegion>)>,
 ) {
-    let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input()
+    let overlay_owns_input = overlay.owns_input()
         || pointer_capture_q
             .iter()
             .any(|(_, host)| Some(host.0) == focused_window.entity());

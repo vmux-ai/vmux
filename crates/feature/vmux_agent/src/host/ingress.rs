@@ -1,8 +1,8 @@
 use crate::host::event::{
-    AgentApprovalRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin,
-    UiAgentAcpTerminalCreated, UiAgentApprovalResolved, UiAgentDelta, UiAgentInfo,
-    UiAgentRunStatus, UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState,
-    UiAgentSessionCreated, UiAgentSnapshot, UiAgentWorkspaceChanged,
+    AcpAgentInfo, AcpSessionConfigSelectionResult, AcpSessionConfigSnapshot, AcpSessionCreated,
+    AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest, AgentApprovalResolved,
+    AgentDelta, AgentMessagesSnapshot, AgentRequestInput, AgentRunStatusChanged,
+    AgentToolCallRequest, CommandOrigin,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentRunStatus, ClientMessage, JsonValue};
@@ -28,44 +28,40 @@ struct InboundAgentAwaitingApproval {
     args: JsonValue,
 }
 
-pub(crate) struct AgentIngressPlugin;
-
-impl Plugin for AgentIngressPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_service_message::<InboundAgentRequest>()
-            .add_service_message::<AgentToolCallRequest>()
-            .add_service_message::<UiAgentDelta>()
-            .add_service_message::<UiAgentRunStatus>()
-            .add_service_message::<InboundAgentAwaitingApproval>()
-            .add_service_message::<UiAgentApprovalResolved>()
-            .add_service_message::<UiAgentSnapshot>()
-            .add_service_message::<UiAgentInfo>()
-            .add_service_message::<UiAgentWorkspaceChanged>()
-            .add_service_message::<UiAgentSessionConfigState>()
-            .add_service_message::<UiAgentSessionConfigSelectionResult>()
-            .add_service_message::<UiAgentSessionCreated>()
-            .add_service_message::<UiAgentAcpTerminalCreated>()
-            .add_message::<ServiceRequest>()
-            .add_message::<AgentCommandResponse>()
-            .add_message::<AgentRequestInput>()
-            .add_systems(
-                Update,
+pub(super) fn add(app: &mut App) {
+    app.add_service_message::<InboundAgentRequest>()
+        .add_service_message::<AgentToolCallRequest>()
+        .add_service_message::<AgentDelta>()
+        .add_service_message::<AgentRunStatusChanged>()
+        .add_service_message::<InboundAgentAwaitingApproval>()
+        .add_service_message::<AgentApprovalResolved>()
+        .add_service_message::<AgentMessagesSnapshot>()
+        .add_service_message::<AcpAgentInfo>()
+        .add_service_message::<AcpWorkspaceChanged>()
+        .add_service_message::<AcpSessionConfigSnapshot>()
+        .add_service_message::<AcpSessionConfigSelectionResult>()
+        .add_service_message::<AcpSessionCreated>()
+        .add_service_message::<AcpTerminalCreated>()
+        .add_message::<ServiceRequest>()
+        .add_message::<AgentCommandResponse>()
+        .add_message::<AgentRequestInput>()
+        .add_systems(
+            Update,
+            (
+                subscribe_commands,
                 (
-                    subscribe_commands,
-                    (
-                        route_requests,
-                        route_approval_requests,
-                        project_deltas,
-                        project_snapshots,
-                        project_statuses,
-                        project_approval_resolutions,
-                    )
-                        .chain()
-                        .in_set(ServiceMessageSet),
-                ),
-            )
-            .add_systems(Last, forward_command_responses);
-    }
+                    route_requests,
+                    route_approval_requests,
+                    project_deltas,
+                    project_snapshots,
+                    project_statuses,
+                    project_approval_resolutions,
+                )
+                    .chain()
+                    .in_set(ServiceMessageSet),
+            ),
+        )
+        .add_systems(Last, forward_command_responses);
 }
 
 fn subscribe_commands(
@@ -133,7 +129,7 @@ fn route_approval_requests(
 }
 
 fn project_deltas(
-    mut inbound: MessageReader<UiAgentDelta>,
+    mut inbound: MessageReader<AgentDelta>,
     mut sessions: Query<(&AcpSession, &mut AgentMessages, &mut AgentMessageTimes)>,
 ) {
     for inbound in inbound.read() {
@@ -157,7 +153,7 @@ fn project_deltas(
 }
 
 fn project_snapshots(
-    mut inbound: MessageReader<UiAgentSnapshot>,
+    mut inbound: MessageReader<AgentMessagesSnapshot>,
     mut sessions: Query<(&AcpSession, &mut AgentMessages, &mut AgentMessageTimes)>,
 ) {
     for inbound in inbound.read() {
@@ -172,7 +168,7 @@ fn project_snapshots(
 }
 
 fn project_statuses(
-    mut inbound: MessageReader<UiAgentRunStatus>,
+    mut inbound: MessageReader<AgentRunStatusChanged>,
     mut sessions: Query<(&AcpSession, &mut AgentRunState, &mut PromptQueue)>,
 ) {
     for inbound in inbound.read() {
@@ -202,7 +198,7 @@ fn project_statuses(
 }
 
 fn project_approval_resolutions(
-    mut inbound: MessageReader<UiAgentApprovalResolved>,
+    mut inbound: MessageReader<AgentApprovalResolved>,
     mut sessions: Query<(&AcpSession, &mut AgentRunState)>,
 ) {
     for inbound in inbound.read() {
@@ -224,12 +220,13 @@ mod tests {
     use super::*;
     use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage};
     use vmux_ecs::service::ServiceInbound;
-    use vmux_space::AgentRenameProfile;
+    use vmux_team::AgentRenameProfile;
 
     #[test]
     fn routes_agent_requests_without_terminal_ownership() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AgentIngressPlugin));
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
         let request_id = AgentRequestId([7; 16]);
         app.world_mut()
             .write_message(ServiceInbound(ServiceMessage::AgentRequest {

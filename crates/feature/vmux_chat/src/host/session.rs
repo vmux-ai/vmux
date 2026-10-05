@@ -16,21 +16,20 @@ use crate::event::{
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
 use crate::state::ChatUiState;
-use vmux_api::ProcessId;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
+use vmux_api::{PageIcon, ProcessId};
 use vmux_command::CommandBarDismiss;
 use vmux_command::{CommandBarWorkspaceSnapshot, ContributedPages};
+use vmux_ecs::UiState;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, AgentSessionRoot,
 };
-use vmux_ecs::host::UiState;
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::team::Profile;
 use vmux_ecs::{
-    PageIcon, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
-    PendingPromptAttachments,
+    PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_layout::stack::OpenRequest;
 use vmux_session::{AcpSession, AgentConversationTitle, AgentMessages, AgentRunState};
@@ -558,7 +557,7 @@ impl ChatResumeProjection {
             return false;
         }
         self.0.sessions.clone_from(&sessions.sessions);
-        self.0.rows = vmux_command::ResumeRows::all(&sessions.sessions);
+        self.0.rows = super::command_bar::ResumeRows::project(&sessions.sessions);
         self.0.total = sessions.total;
         self.0.loading = false;
         true

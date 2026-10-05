@@ -1,6 +1,6 @@
 use bevy_app::{App, Plugin};
 #[cfg(host)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 
 #[cfg(host)]
 pub use handoff::ImportedConversation;
@@ -20,6 +20,8 @@ pub use state::{ChatRuntime, PublishComposerEffect, RepublishChatUiState};
 #[cfg(host)]
 pub use tool::ChatToolPlugin;
 
+#[cfg(host)]
+mod command_bar;
 #[cfg(host)]
 mod composer;
 mod group;
@@ -42,7 +44,7 @@ mod tool;
 #[cfg(host)]
 mod transcript;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
@@ -58,6 +60,7 @@ impl Plugin for ChatPlugin {
             FeaturePlugin::<crate::Feature>::default(),
             Self::MANIFEST.plugin(),
             session::ChatHostPlugin,
+            command_bar::Plugin,
             transcript::Plugin,
         ));
     }

@@ -13,6 +13,7 @@ use vmux_ecs::PageMetadata;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentReply, AgentRequestApplySet, AgentRequestBlocked, AgentRequestInput,
 };
+#[cfg(test)]
 use vmux_ecs::profile::ProjectsDirectory;
 use vmux_layout::AgentPaneDirection;
 #[cfg(test)]
@@ -20,7 +21,6 @@ use vmux_layout::LayoutContractPlugin;
 #[cfg(test)]
 use vmux_layout::pane::Pane;
 use vmux_layout::pane::{PaneSplitDirection, SpawnCounter, SpawnSeq};
-use vmux_layout::placement::PageKind;
 #[cfg(test)]
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
@@ -318,7 +318,11 @@ impl AgentPanes<'_, '_> {
                     valid = false;
                     break;
                 };
-                if PageKind::for_url(&meta.url) != PageKind::Terminal {
+                if !self
+                    .placement
+                    .placements
+                    .same_group(&meta.url, crate::TerminalPlugin::URL)
+                {
                     valid = false;
                     break;
                 }
@@ -598,10 +602,6 @@ impl<'a> AgentCwd<'a> {
                 .ok_or_else(|| "agent project directory is missing".to_string());
         }
         Err("tab and agent project directories are missing".to_string())
-    }
-
-    pub fn projects() -> Result<PathBuf, String> {
-        ProjectsDirectory::ensure().map(ProjectsDirectory::into_path)
     }
 }
 

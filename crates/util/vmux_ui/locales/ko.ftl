@@ -157,6 +157,9 @@ lsp-status-running = 실행 중
 lsp-status-failed = 실패
 
 spaces-title = 스페이스
+space-initialize-git-question = Git 저장소를 초기화할까요?
+space-initialize-git = Git 초기화
+space-not-now = 나중에
 spaces-new-placeholder = 새 스페이스 이름
 spaces-empty = 스페이스 없음
 spaces-default-name = 스페이스 { $number }

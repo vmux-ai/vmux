@@ -19,7 +19,7 @@ url = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_api = { path = "../../util/vmux_api" }
-vmux_native = { path = "../../util/vmux_native" }
+vmux_page = { path = "../../util/vmux_page" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }

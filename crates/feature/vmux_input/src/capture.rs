@@ -4,11 +4,10 @@ use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentImage, AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage,
 };
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
-    ToolQueryRouteSet,
+    AddedTool, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
 };
 
 #[vmux_api::agent(Eq)]
@@ -37,9 +36,6 @@ impl Plugin for CapturePlugin {
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
-            .bind_tool::<ScreenshotArgs>()
-            .bind_tool::<RecordStartArgs>()
-            .bind_tool::<RecordStopArgs>()
             .add_message::<ScreenshotRequest>()
             .add_message::<ScreenshotResponse>()
             .add_message::<RecordStartRequest>()
@@ -121,14 +117,14 @@ pub struct RecordStopResponse {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ScreenshotArgs {
+struct ScreenshotTool {
     pane: Option<String>,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RecordStartArgs {
+struct RecordStartTool {
     #[serde(default)]
     gif: bool,
     max_secs: Option<u32>,
@@ -138,7 +134,7 @@ struct RecordStartArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RecordStopArgs {
+struct RecordStopTool {
     dir: Option<String>,
     name: Option<String>,
 }
@@ -152,7 +148,7 @@ struct CaptureQueryWriters<'w> {
 
 fn screenshot(
     mut commands: Commands,
-    requests: Query<(Entity, &ScreenshotArgs), AddedTool<ScreenshotArgs>>,
+    requests: Query<(Entity, &ScreenshotTool), AddedTool<ScreenshotTool>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -165,7 +161,7 @@ fn screenshot(
 
 fn record_start(
     mut commands: Commands,
-    requests: Query<(Entity, &RecordStartArgs), AddedTool<RecordStartArgs>>,
+    requests: Query<(Entity, &RecordStartTool), AddedTool<RecordStartTool>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -180,7 +176,7 @@ fn record_start(
 
 fn record_stop(
     mut commands: Commands,
-    requests: Query<(Entity, &RecordStopArgs), AddedTool<RecordStopArgs>>,
+    requests: Query<(Entity, &RecordStopTool), AddedTool<RecordStopTool>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -334,14 +330,16 @@ impl OptionalText {
 mod tests {
     use super::*;
     use vmux_ecs::JsonArguments;
-    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{
+        ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation, ToolRegistryPlugin,
+    };
 
     struct CaptureFixture;
 
     impl CaptureFixture {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins(CapturePlugin);
+            app.add_plugins((ToolRegistryPlugin, CapturePlugin));
             app.update();
             app
         }

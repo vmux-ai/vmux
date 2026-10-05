@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet};
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_tool::{ToolCommand, ToolDispatchSet};
 
 use crate::host::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
 
@@ -12,9 +12,6 @@ pub struct KnowledgeToolPlugin;
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<SearchKnowledgeArgs>()
-            .bind_tool::<ReadKnowledgeArgs>()
-            .bind_tool::<WriteKnowledgeArgs>()
             .add_systems(Update, (search, read, write).in_set(ToolDispatchSet));
     }
 }
@@ -22,7 +19,7 @@ impl Plugin for KnowledgeToolPlugin {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SearchKnowledgeArgs {
+struct SearchKnowledge {
     query: String,
     limit: Option<u64>,
 }
@@ -30,7 +27,7 @@ struct SearchKnowledgeArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ReadKnowledgeArgs {
+struct ReadKnowledge {
     path: String,
     line: Option<u64>,
     limit: Option<u64>,
@@ -39,7 +36,7 @@ struct ReadKnowledgeArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WriteKnowledgeArgs {
+struct WriteKnowledge {
     path: Option<String>,
     title: String,
     content: String,
@@ -48,8 +45,8 @@ struct WriteKnowledgeArgs {
 fn search(
     mut commands: Commands,
     requests: Query<
-        (Entity, &Name, Option<&ProcessAnchor>, &SearchKnowledgeArgs),
-        Added<SearchKnowledgeArgs>,
+        (Entity, &Name, Option<&ProcessAnchor>, &SearchKnowledge),
+        Added<SearchKnowledge>,
     >,
 ) {
     for (entity, name, anchor, args) in &requests {
@@ -62,14 +59,17 @@ fn search(
                 )
             })
             .and_then(|anchor| {
-                let query = Text::required(args.query.clone(), "search_knowledge.query is empty")?;
+                let query = args.query.trim();
+                if query.is_empty() {
+                    return Err("search_knowledge.query is empty".to_string());
+                }
                 let limit = args.limit.unwrap_or(20);
                 if !(1..=100).contains(&limit) {
                     return Err("search_knowledge.limit must be between 1 and 100".to_string());
                 }
                 AgentRequest::encode(&AgentSearchKnowledge {
                     anchor,
-                    query,
+                    query: query.to_string(),
                     limit: limit as u16,
                 })
             });
@@ -79,10 +79,7 @@ fn search(
 
 fn read(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &Name, Option<&ProcessAnchor>, &ReadKnowledgeArgs),
-        Added<ReadKnowledgeArgs>,
-    >,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &ReadKnowledge), Added<ReadKnowledge>>,
 ) {
     for (entity, name, anchor, args) in &requests {
         let command = anchor
@@ -94,7 +91,10 @@ fn read(
                 )
             })
             .and_then(|anchor| {
-                let path = Text::required(args.path.clone(), "read_knowledge.path is empty")?;
+                let path = args.path.trim();
+                if path.is_empty() {
+                    return Err("read_knowledge.path is empty".to_string());
+                }
                 let line = args.line.unwrap_or(1);
                 let limit = args.limit.unwrap_or(200);
                 if line == 0 || line > u32::MAX as u64 {
@@ -105,7 +105,7 @@ fn read(
                 }
                 AgentRequest::encode(&AgentReadKnowledge {
                     anchor,
-                    path,
+                    path: path.to_string(),
                     line: line as u32,
                     limit: limit as u32,
                 })
@@ -117,8 +117,8 @@ fn read(
 fn write(
     mut commands: Commands,
     requests: Query<
-        (Entity, &Name, Option<&ProcessAnchor>, &WriteKnowledgeArgs),
-        Added<WriteKnowledgeArgs>,
+        (Entity, &Name, Option<&ProcessAnchor>, &WriteKnowledge),
+        Added<WriteKnowledge>,
     >,
 ) {
     for (entity, name, anchor, args) in &requests {
@@ -131,30 +131,26 @@ fn write(
                 )
             })
             .and_then(|anchor| {
-                let path = args.path.clone().and_then(Text::trimmed);
-                let title = Text::required(args.title.clone(), "write_knowledge.title is empty")?;
-                let content =
-                    Text::required(args.content.clone(), "write_knowledge.content is empty")?;
+                let path = args
+                    .path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty());
+                let title = args.title.trim();
+                if title.is_empty() {
+                    return Err("write_knowledge.title is empty".to_string());
+                }
+                let content = args.content.trim();
+                if content.is_empty() {
+                    return Err("write_knowledge.content is empty".to_string());
+                }
                 AgentRequest::encode(&AgentWriteKnowledge {
                     anchor,
-                    path,
-                    title,
-                    content,
+                    path: path.map(str::to_string),
+                    title: title.to_string(),
+                    content: content.to_string(),
                 })
             });
         commands.entity(entity).insert(ToolCommand(command));
-    }
-}
-
-struct Text;
-
-impl Text {
-    fn trimmed(value: String) -> Option<String> {
-        let value = value.trim();
-        (!value.is_empty()).then(|| value.to_string())
-    }
-
-    fn required(value: String, error: &str) -> Result<String, String> {
-        Self::trimmed(value).ok_or_else(|| error.to_string())
     }
 }

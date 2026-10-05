@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_ecs::FileUiStateWrite;
 use vmux_ecs::event::*;
-use vmux_ecs::host::FileUiStateWrite;
 use vmux_ecs::page::PageReady;
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
@@ -9,7 +9,7 @@ use crate::host::editor::{Editor, FileDocumentRevision, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer};
 use crate::host::keymap::KeymapConfig;
 use crate::host::markdown::ParsedNote;
-use crate::host::note::{NoteRevealLine, NoteSent};
+use crate::host::note::{NoteEditing, NoteRevealLine, NoteSent};
 use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
 
 pub(crate) struct StatusPlugin;
@@ -257,11 +257,18 @@ fn send_file_keymap(
 fn apply_file_view_mode_requests(
     mut requests: MessageReader<FileViewModeRequest>,
     state: Single<(&mut SharedFileViewMode, &mut FileViewModeRevision)>,
+    editing: Query<Entity, With<NoteEditing>>,
+    mut commands: Commands,
 ) {
     if let Some(request) = requests.read().last() {
         let (mut mode, mut revision) = state.into_inner();
         mode.0 = request.0;
         revision.0 = revision.0.wrapping_add(1).max(1);
+        if mode.0 != FileViewMode::Note {
+            for entity in &editing {
+                commands.entity(entity).remove::<NoteEditing>();
+            }
+        }
     }
 }
 
@@ -279,6 +286,7 @@ fn file_view_mode_set(
     mode.0 = trigger.event().payload.mode;
     revision.0 = revision.0.wrapping_add(1).max(1);
     if mode.0 != FileViewMode::Note || !ParsedNote::supports(&file.path) {
+        commands.entity(entity).remove::<NoteEditing>();
         return;
     }
     let reveal_line = edit.map(Editor::cursor_line);

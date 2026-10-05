@@ -20,57 +20,29 @@ impl OpenId {
     }
 }
 
-#[vmux_api::contract(Copy, Default, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum SearchEngine {
-    #[default]
-    Google,
-    Bing,
-    DuckDuckGo,
-    Brave,
-    Kagi,
+#[vmux_api::contract(Default, Eq)]
+pub struct SearchEngine {
+    pub id: String,
+    pub name: String,
+    pub hosts: Vec<String>,
+    pub query_url: String,
 }
 
 impl SearchEngine {
-    pub const ALL: [Self; 5] = [
-        Self::Google,
-        Self::Bing,
-        Self::DuckDuckGo,
-        Self::Brave,
-        Self::Kagi,
-    ];
-
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Google => "Google",
-            Self::Bing => "Bing",
-            Self::DuckDuckGo => "DuckDuckGo",
-            Self::Brave => "Brave Search",
-            Self::Kagi => "Kagi",
-        }
+    pub fn matches_url(&self, url: &str) -> bool {
+        let Ok(parsed) = url::Url::parse(url) else {
+            return false;
+        };
+        let Some(host) = parsed.host_str() else {
+            return false;
+        };
+        let host = host.trim_start_matches("www.");
+        self.hosts.iter().any(|candidate| candidate == host)
     }
 
-    pub fn from_url(url: &str) -> Option<Self> {
-        let parsed = url::Url::parse(url).ok()?;
-        match parsed.host_str()?.trim_start_matches("www.") {
-            "google.com" => Some(Self::Google),
-            "bing.com" => Some(Self::Bing),
-            "duckduckgo.com" => Some(Self::DuckDuckGo),
-            "search.brave.com" => Some(Self::Brave),
-            "kagi.com" => Some(Self::Kagi),
-            _ => None,
-        }
-    }
-
-    pub fn query_url(self, query: &str) -> String {
+    pub fn query_url(&self, query: &str) -> String {
         let query: String = url::form_urlencoded::byte_serialize(query.trim().as_bytes()).collect();
-        match self {
-            Self::Google => format!("https://www.google.com/search?q={query}"),
-            Self::Bing => format!("https://www.bing.com/search?q={query}"),
-            Self::DuckDuckGo => format!("https://duckduckgo.com/?q={query}"),
-            Self::Brave => format!("https://search.brave.com/search?q={query}"),
-            Self::Kagi => format!("https://kagi.com/search?q={query}"),
-        }
+        self.query_url.replace("{query}", &query)
     }
 }
 
@@ -84,17 +56,13 @@ pub struct CommandBarOpenEvent {
     pub caret_at_end: bool,
     pub url: String,
     #[serde(default)]
-    pub space_name: String,
-    #[serde(default)]
-    pub spaces: Vec<CommandBarSpace>,
-    #[serde(default)]
-    pub spaces_page_url: String,
+    pub context_label: String,
     pub tabs: Vec<CommandBarTab>,
     pub commands: Vec<CommandBarCommandEntry>,
     #[serde(default)]
-    pub pages: Vec<CommandBarPage>,
+    pub controls: Vec<CommandBarControl>,
     #[serde(default)]
-    pub terminal_page_url: String,
+    pub pages: Vec<CommandBarPage>,
     #[serde(default)]
     pub work_dirs: Vec<CommandBarWorkDir>,
     #[serde(default)]
@@ -114,6 +82,22 @@ pub struct CommandBarOpenEvent {
     pub picker: Option<CommandBarPicker>,
     #[serde(default)]
     pub picks: Vec<CommandBarPickRow>,
+    #[serde(default)]
+    pub picker_label: String,
+    #[serde(default)]
+    pub picker_placeholder: String,
+    #[serde(default)]
+    pub picker_typed: bool,
+    #[serde(default)]
+    pub picker_numbered: bool,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct CommandBarControl {
+    pub id: String,
+    pub label: String,
+    pub title: String,
+    pub icon: crate::icon::BuiltinIcon,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -141,15 +125,6 @@ pub struct CommandBarPage {
     pub prompt_target: bool,
     #[serde(default)]
     pub startup: bool,
-}
-
-#[vmux_api::contract(Eq)]
-pub struct CommandBarSpace {
-    pub id: String,
-    pub name: String,
-    pub profile: String,
-    pub is_active: bool,
-    pub tab_count: u32,
 }
 
 #[vmux_api::contract]

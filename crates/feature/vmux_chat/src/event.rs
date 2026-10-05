@@ -203,6 +203,11 @@ pub struct ChatDraftChanged {
     pub text: String,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatComposerDraft {
+    pub text: String,
+}
+
 #[vmux_api::ui_event(Default)]
 pub struct ChatRemoveAttachment {
     pub path: String,
@@ -342,6 +347,12 @@ pub struct ChatMediaState {
     pub query: String,
     pub entries: Vec<ChatMediaEntry>,
     pub loading: bool,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatComposerMedia {
+    pub options: Vec<vmux_api::prompt_media::PromptMediaOption>,
+    pub attachments: Vec<vmux_api::prompt_media::PromptComposerAttachment>,
 }
 
 #[vmux_api::ui_event(Default)]

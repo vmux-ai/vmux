@@ -13,12 +13,13 @@ use serde::{Deserialize, Serialize};
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolProviderId,
-    ToolProviderSnapshot, ToolScanner, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolProviderBinding,
+    ToolProviderSnapshot, ToolProviderTarget, ToolScanner, ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct McpToolPlugin;
 
+#[derive(Component)]
 struct McpProvider;
 
 impl Plugin for McpToolPlugin {
@@ -46,14 +47,15 @@ impl Plugin for McpToolPlugin {
 
 fn spawn(mut commands: Commands) {
     commands.spawn((
-        Name::new("MCP tool provider"),
-        ToolProviderId(ToolProvider::Mcp),
+        ToolProviderBinding::new::<crate::Feature>(3),
+        McpProvider,
         ToolScanner::new(McpProvider::scan),
     ));
 }
 
 impl McpProvider {
     fn scan(
+        provider: &ToolProvider,
         store: &ToolStore,
         manifest: &mut ToolsManifest,
         _refresh: bool,
@@ -121,7 +123,7 @@ impl McpProvider {
                     Vec::new()
                 };
                 ToolItem {
-                    provider: ToolProvider::Mcp,
+                    provider: provider.clone(),
                     id: name.clone(),
                     name,
                     icon: None,
@@ -135,7 +137,7 @@ impl McpProvider {
             .collect();
         Ok(ToolProviderSnapshot {
             category: ToolCategory {
-                provider: ToolProvider::Mcp,
+                provider: provider.clone(),
                 items,
             },
             errors,
@@ -144,14 +146,22 @@ impl McpProvider {
 }
 
 fn request_import(
-    requests: Query<(Entity, &ToolOperationRequest<ToolImportRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolImportRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<McpProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
-        let request = &operation.0;
-        if request.provider != ToolProvider::Mcp {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
             continue;
         }
+        let request = &operation.0;
         let value = request.value.trim();
         let operation = if value.is_empty() {
             commands.entity(entity).insert((
@@ -172,12 +182,23 @@ fn request_import(
 }
 
 fn request_adopt(
-    requests: Query<(Entity, &ToolOperationRequest<ToolAdoptRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolAdoptRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<McpProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider != ToolProvider::Mcp || request.id.trim().is_empty() {
+        if request.id.trim().is_empty() {
             continue;
         }
         commands.entity(entity).insert((
@@ -191,12 +212,23 @@ fn request_adopt(
 }
 
 fn request_forget(
-    requests: Query<(Entity, &ToolOperationRequest<ToolForgetRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolForgetRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<McpProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider != ToolProvider::Mcp || request.id.trim().is_empty() {
+        if request.id.trim().is_empty() {
             continue;
         }
         commands.entity(entity).insert((

@@ -30,7 +30,7 @@ similar = "2"
 unicode-segmentation = "1"
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_command = { path = "../vmux_command" }
-vmux_native = { path = "../../util/vmux_native" }
+vmux_page = { path = "../../util/vmux_page" }
 vmux_ui = { path = "../../util/vmux_ui" }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 

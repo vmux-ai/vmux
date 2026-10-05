@@ -3,6 +3,7 @@ use vmux_api::protocol::AcpModeOption;
 use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
+use crate::cn::cn;
 use crate::components::agent_menu::AgentMenu;
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
@@ -11,7 +12,6 @@ use crate::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker
 use crate::components::prompt_box::PromptPopupPlacement;
 use crate::components::skeleton::Skeleton;
 use crate::i18n::{TranslationValue, translate, translate_with};
-use crate::util::cn;
 
 const COMPOSER_CHIP: &str = "flex h-7 max-w-44 shrink-0 items-center gap-1 rounded-lg px-1.5 text-[11px] text-muted-foreground";
 const COMPOSER_CHIP_LABEL_TIGHT: &str = "@max-[34rem]:hidden";
@@ -609,88 +609,6 @@ pub struct BranchMenuData {
     pub branches: Vec<ProjectBranch>,
     pub loaded: bool,
     pub on_pick: EventHandler<ProjectPick>,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub struct ComposerMenu {
-    open: Signal<Option<ComposerMenuKind>>,
-    cursor: Signal<usize>,
-}
-
-pub fn use_composer_menu() -> ComposerMenu {
-    ComposerMenu {
-        open: use_signal(|| None),
-        cursor: use_signal(|| 0),
-    }
-}
-
-impl ComposerMenu {
-    pub fn opened(&self) -> Option<ComposerMenuKind> {
-        (self.open)()
-    }
-
-    pub fn is(&self, kind: ComposerMenuKind) -> bool {
-        self.opened() == Some(kind)
-    }
-
-    pub fn cursor(&self) -> usize {
-        (self.cursor)()
-    }
-
-    pub fn point_at(&self, index: usize) {
-        let mut cursor = self.cursor;
-        if *cursor.peek() != index {
-            cursor.set(index);
-        }
-    }
-
-    pub fn step(&self, next: bool, rows: usize) {
-        if rows == 0 {
-            return;
-        }
-        let mut cursor = self.cursor;
-        let at = (*cursor.peek()).min(rows - 1);
-        let next = if next {
-            (at + 1).min(rows - 1)
-        } else {
-            at.saturating_sub(1)
-        };
-        cursor.set(next);
-    }
-
-    pub fn toggle(&self, kind: ComposerMenuKind) -> bool {
-        self.toggle_at(kind, 0)
-    }
-
-    pub fn toggle_at(&self, kind: ComposerMenuKind, index: usize) -> bool {
-        let mut open = self.open;
-        let mut cursor = self.cursor;
-        cursor.set(index);
-        if *open.peek() == Some(kind) {
-            open.set(None);
-            return false;
-        }
-        open.set(Some(kind));
-        true
-    }
-
-    pub fn show_at(&self, kind: ComposerMenuKind, index: usize) {
-        let mut open = self.open;
-        let mut cursor = self.cursor;
-        cursor.set(index);
-        if *open.peek() != Some(kind) {
-            open.set(Some(kind));
-        }
-    }
-
-    pub fn close(&self) {
-        let mut open = self.open;
-        let mut cursor = self.cursor;
-        cursor.set(0);
-        if open.peek().is_some() {
-            open.set(None);
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

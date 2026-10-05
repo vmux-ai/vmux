@@ -5,11 +5,6 @@ use vmux_ecs::agent::{
 };
 
 #[vmux_api::agent]
-pub struct AgentRenameProfile {
-    pub name: String,
-}
-
-#[vmux_api::agent]
 pub struct AgentSpaceCreate {
     pub name: Option<String>,
 }
@@ -70,22 +65,8 @@ impl Plugin for SpaceAgentPlugin {
         .add_agent_request::<AgentSpaceCreate>()
         .add_agent_request::<AgentSpaceRename>()
         .add_agent_request::<AgentSpaceDelete>()
-        .add_agent_request::<AgentRenameProfile>()
-        .add_message::<RenameProfileRequest>()
-        .add_systems(
-            Update,
-            (
-                (create, rename, delete, request_profile_rename).after(AgentRequestRouteSet),
-                rename_profile,
-            )
-                .chain(),
-        );
+        .add_systems(Update, (create, rename, delete).after(AgentRequestRouteSet));
     }
-}
-
-#[derive(Message, Clone)]
-struct RenameProfileRequest {
-    name: String,
 }
 
 fn create(
@@ -125,44 +106,5 @@ fn delete(
             space_id: request.payload.space_id.clone(),
         });
         responses.write(request.reply.ok());
-    }
-}
-
-fn request_profile_rename(
-    mut requests: MessageReader<AgentRequestMessage<AgentRenameProfile>>,
-    mut rename: MessageWriter<RenameProfileRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        rename.write(RenameProfileRequest {
-            name: request.payload.name.clone(),
-        });
-        responses.write(request.reply.ok());
-    }
-}
-
-fn rename_profile(
-    mut requests: MessageReader<RenameProfileRequest>,
-    mut profiles: Query<
-        &mut vmux_layout::profile::Profile,
-        (
-            With<vmux_layout::space::Space>,
-            With<vmux_layout::space::CurrentSpace>,
-        ),
-    >,
-) {
-    for request in requests.read() {
-        let name = request.name.trim();
-        if name.is_empty() {
-            continue;
-        }
-        match vmux_ecs::profile::Profile::current().set_display_name(name) {
-            Ok(()) => {
-                if let Ok(mut profile) = profiles.single_mut() {
-                    profile.name = name.to_string();
-                }
-            }
-            Err(error) => warn!("rename_profile: failed to persist display name: {error}"),
-        }
     }
 }

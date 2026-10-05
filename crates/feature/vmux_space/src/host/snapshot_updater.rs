@@ -1,12 +1,10 @@
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
-use vmux_command::{CommandBarSpacesSnapshot, SpaceSummary};
-use vmux_ecs::Order;
-use vmux_layout::space::{Space, SpaceId};
-
-use crate::host::SpacePlugin;
-use crate::model::SpaceRecord;
+use vmux_command::CommandBarContextSnapshot;
+use vmux_layout::space::Space;
+#[cfg(test)]
+use vmux_layout::space::SpaceId;
 
 pub struct SnapshotPlugin;
 
@@ -14,65 +12,33 @@ impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn).add_systems(
             Update,
-            update_spaces_snapshot.in_set(vmux_command::WriteCommandBarSnapshots),
+            update.in_set(vmux_command::WriteCommandBarSnapshots),
         );
     }
 }
 
 fn spawn(mut commands: Commands) {
     commands.spawn((
-        Name::new("Command bar spaces"),
-        CommandBarSpacesSnapshot::default(),
+        Name::new("Command bar context"),
+        CommandBarContextSnapshot::default(),
     ));
 }
 
-fn update_spaces_snapshot(
-    spaces: Query<
-        (
-            Entity,
-            &SpaceId,
-            &Name,
-            Has<vmux_ecs::Active>,
-            Option<&Order>,
-        ),
-        With<Space>,
-    >,
+fn update(
+    spaces: Query<(Entity, &Name, Has<vmux_ecs::Active>), With<Space>>,
     focused_window: vmux_layout::window::FocusedWindow,
     hierarchy: vmux_layout::window::WindowHierarchy,
-    mut state: Single<&mut CommandBarSpacesSnapshot>,
+    mut state: Single<&mut CommandBarContextSnapshot>,
 ) {
-    let profile = SpaceRecord::current_profile_name();
-    let mut rows: Vec<(u32, SpaceSummary)> = Vec::new();
-    let mut active_space_id = String::new();
-    let mut active_space_name = String::new();
-    for (entity, id, name, is_active, order) in &spaces {
+    let mut label = String::new();
+    for (entity, name, is_active) in &spaces {
         let local = hierarchy.get(entity) == focused_window.entity();
         if local && is_active {
-            active_space_id.clone_from(&id.0);
-            active_space_name = name.to_string();
+            label = name.to_string();
+            break;
         }
-        let order = order.map(|order| order.0).unwrap_or(u32::MAX);
-        if let Some((existing_order, _)) = rows.iter_mut().find(|(_, summary)| summary.id == id.0) {
-            *existing_order = (*existing_order).min(order);
-            continue;
-        }
-        rows.push((
-            order,
-            SpaceSummary {
-                id: id.0.clone(),
-                name: name.to_string(),
-                profile: profile.clone(),
-            },
-        ));
     }
-    rows.sort_by_key(|(order, _)| *order);
-
-    let next = CommandBarSpacesSnapshot {
-        spaces: rows.into_iter().map(|(_, summary)| summary).collect(),
-        active_space_id,
-        active_space_name,
-        spaces_page_url: SpacePlugin::MANIFEST.url.to_string(),
-    };
+    let next = CommandBarContextSnapshot { label };
     if **state != next {
         **state = next;
     }
@@ -84,14 +50,14 @@ mod tests {
 
     struct Spaces {
         app: App,
-        published: CommandBarSpacesSnapshot,
+        published: CommandBarContextSnapshot,
     }
 
     impl Spaces {
         fn one() -> Self {
             let mut app = App::new();
-            app.add_systems(Update, update_spaces_snapshot);
-            app.world_mut().spawn(CommandBarSpacesSnapshot::default());
+            app.add_systems(Update, update);
+            app.world_mut().spawn(CommandBarContextSnapshot::default());
             let window = app
                 .world_mut()
                 .spawn((Window::default(), vmux_ecs::Active))
@@ -107,7 +73,7 @@ mod tests {
             ));
             Self {
                 app,
-                published: CommandBarSpacesSnapshot::default(),
+                published: CommandBarContextSnapshot::default(),
             }
         }
 
@@ -119,11 +85,11 @@ mod tests {
             changed
         }
 
-        fn snapshot(&self) -> &CommandBarSpacesSnapshot {
+        fn snapshot(&self) -> &CommandBarContextSnapshot {
             self.app
                 .world()
                 .iter_entities()
-                .find_map(|entity| entity.get::<CommandBarSpacesSnapshot>())
+                .find_map(|entity| entity.get::<CommandBarContextSnapshot>())
                 .unwrap()
         }
 
@@ -144,10 +110,7 @@ mod tests {
         spaces.republished();
         let snap = spaces.snapshot();
 
-        assert_eq!(snap.spaces_page_url, SpacePlugin::MANIFEST.url);
-        assert_eq!(snap.active_space_id, "space-1");
-        assert_eq!(snap.active_space_name, "Space 1");
-        assert_eq!(snap.spaces.len(), 1);
+        assert_eq!(snap.label, "Space 1");
     }
 
     #[test]
@@ -168,14 +131,14 @@ mod tests {
         spaces.rename("Renamed");
 
         assert!(spaces.republished(), "a rename has to reach the bar");
-        assert_eq!(spaces.snapshot().active_space_name, "Renamed");
+        assert_eq!(spaces.snapshot().label, "Renamed");
     }
 
     #[test]
     fn publishes_global_spaces_with_the_focused_windows_active_space() {
         let mut app = App::new();
-        app.add_systems(Update, update_spaces_snapshot);
-        app.world_mut().spawn(CommandBarSpacesSnapshot::default());
+        app.add_systems(Update, update);
+        app.world_mut().spawn(CommandBarContextSnapshot::default());
         let first_window = app
             .world_mut()
             .spawn((Window::default(), vmux_ecs::Active))
@@ -198,12 +161,9 @@ mod tests {
         let snapshot = app
             .world()
             .iter_entities()
-            .find_map(|entity| entity.get::<CommandBarSpacesSnapshot>())
+            .find_map(|entity| entity.get::<CommandBarContextSnapshot>())
             .unwrap();
-        assert_eq!(snapshot.active_space_id, "first");
-        assert_eq!(snapshot.spaces.len(), 2);
-        assert_eq!(snapshot.spaces[0].id, "first");
-        assert_eq!(snapshot.spaces[1].id, "second");
+        assert_eq!(snapshot.label, "first");
 
         app.world_mut()
             .entity_mut(first_window)
@@ -216,9 +176,8 @@ mod tests {
         let snapshot = app
             .world()
             .iter_entities()
-            .find_map(|entity| entity.get::<CommandBarSpacesSnapshot>())
+            .find_map(|entity| entity.get::<CommandBarContextSnapshot>())
             .unwrap();
-        assert_eq!(snapshot.active_space_id, "second");
-        assert_eq!(snapshot.spaces.len(), 2);
+        assert_eq!(snapshot.label, "second");
     }
 }

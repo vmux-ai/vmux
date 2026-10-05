@@ -2,35 +2,34 @@
 
 use super::breadcrumb::EditorBreadcrumbs;
 use super::diagnostic::DiagnosticPresentation;
-use super::directory::{Preview, PreviewPane};
+use super::directory::{PreviewDom, PreviewPane};
 use super::dom::{EditorDom, ScrolledLineHeight};
 use super::editor::{EditorLines, StickyScope};
 use super::explorer::SidebarView;
 use super::input::{EditorFocus, EditorInput, PreeditField};
 use super::key::use_file_keys;
-use super::menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameBox, RenameInput};
+use super::menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameInput};
 use super::note::{NoteBlankLine, NoteBlockView, NoteBlocks, NoteCursor, NoteProperties};
 use super::sidebar::{ExplorerPane, ExplorerSidebar, ExplorerToggleButton, PaneWidth};
-use super::state::use_file_ui;
+use super::state::FileUi;
 use super::status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
 use super::text_geometry::{CellMetrics, ColumnRuler, GutterWidth, RowRuler};
 use super::text_style::StyledSpanStyle;
-use super::toolbar::{EditorTabItem, EditorTabStrip, FindBar, VimStatus};
+use super::toolbar::{EditorTabStrip, FindBar, VimStatus};
 use std::collections::HashMap;
 
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_api::editor::KeymapKind;
-use vmux_api::editor::{CursorPos, EditMode, SelSpan};
+use vmux_api::editor::{CursorPos, EditMode};
 use vmux_api::media::MediaKind;
 use vmux_ecs::event::*;
 use vmux_ecs::scroll::{EDGE_TRIGGER_K, ScrollWindow};
-use vmux_git::event::FileGitState;
 use vmux_git::ui::{DiffView, GitFooter};
-use vmux_knowledge::{KnowledgeProperty, KnowledgeReference};
+use vmux_setting::EXPLORER_DEFAULT_WIDTH;
 use vmux_ui::directory::DirectoryNavigator;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state};
+use vmux_ui::hooks::{PressedKey, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::Platform;
@@ -39,50 +38,254 @@ use vmux_ui::scroll::ScrollIntoView;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    use_ui_state::<FileUiState>();
-    let mut path = use_signal(String::new);
-    let mut document_revision = use_signal(|| 0u64);
-    let mut document_kind = use_signal(FileDocumentKind::default);
-    let mut total_lines = use_signal(|| 0u32);
-    let mut total_rows = use_signal(|| 0u32);
-    let mut first_row = use_signal(|| 0u32);
+    let ui = FileUi::use_root();
+    let mut handled_document_revision = use_signal(|| 0u64);
+    let meta_state = ui.use_value(|state| state.document.meta.as_ref());
+    let directory_state = ui.use_value(|state| state.document.directory.as_ref());
+    let media_state = ui.use_value(|state| state.document.media.as_ref());
+    let note_state = ui.use_value(|state| state.document.note.as_ref());
+    let error_state = ui.use_value(|state| state.document.error.as_ref());
+    let path = use_memo(move || {
+        directory_state
+            .read()
+            .as_ref()
+            .map(|directory| directory.path.clone())
+            .or_else(|| meta_state.read().as_ref().map(|meta| meta.path.clone()))
+            .unwrap_or_default()
+    });
+    let git_path = use_memo(move || {
+        directory_state
+            .read()
+            .as_ref()
+            .map(|directory| directory.abs_path.clone())
+            .or_else(|| meta_state.read().as_ref().map(|meta| meta.abs_path.clone()))
+            .unwrap_or_default()
+    });
+    let mode = use_memo(move || {
+        if let Some(media) = media_state.read().as_ref() {
+            Mode::Media(media.kind)
+        } else if directory_state.read().is_some() {
+            Mode::Dir
+        } else {
+            Mode::Text
+        }
+    });
+    let media = use_memo(move || media_state.read().as_ref().cloned());
+    let dir_entries = use_memo(move || {
+        directory_state
+            .read()
+            .as_ref()
+            .map(|directory| directory.entries.clone())
+            .unwrap_or_default()
+    });
+    let parent_entries = use_memo(move || {
+        directory_state
+            .read()
+            .as_ref()
+            .map(|directory| directory.parent_entries.clone())
+            .unwrap_or_default()
+    });
+    let selected = use_memo(move || {
+        directory_state
+            .read()
+            .as_ref()
+            .map(|directory| usize::try_from(directory.selected).unwrap_or_default())
+            .unwrap_or_default()
+    });
+    let error = use_memo(move || {
+        error_state
+            .read()
+            .as_ref()
+            .map(|error| error.message.clone())
+            .unwrap_or_default()
+    });
+    let error_undecodable = use_memo(move || {
+        error_state
+            .read()
+            .as_ref()
+            .is_some_and(|error| error.undecodable)
+    });
+    let doc_title = use_memo(move || {
+        if let Some(directory) = directory_state.read().as_ref() {
+            return directory
+                .path
+                .rsplit('/')
+                .find(|part| !part.is_empty())
+                .unwrap_or(&directory.path)
+                .to_string();
+        }
+        if let Some(note) = note_state.read().as_ref()
+            && !note.title.is_empty()
+        {
+            return note.title.clone();
+        }
+        let path = path();
+        path.rsplit('/').next().unwrap_or(&path).to_string()
+    });
+    let shape_state = ui.use_value(|state| state.document.shape.as_ref());
+    let encoding_state = ui.use_value(|state| state.document.encoding.as_ref());
+    let document_kind = use_memo(move || {
+        meta_state
+            .read()
+            .as_ref()
+            .map(|meta| meta.kind)
+            .unwrap_or_default()
+    });
+    let language = use_memo(move || {
+        meta_state
+            .read()
+            .as_ref()
+            .map(|meta| meta.language.clone())
+            .unwrap_or_default()
+    });
+    let indent = use_memo(move || {
+        shape_state
+            .read()
+            .as_ref()
+            .map(|shape| shape.indent)
+            .or_else(|| meta_state.read().as_ref().map(|meta| meta.indent))
+            .unwrap_or_default()
+    });
+    let line_ending = use_memo(move || {
+        shape_state
+            .read()
+            .as_ref()
+            .map(|shape| shape.line_ending)
+            .or_else(|| meta_state.read().as_ref().map(|meta| meta.line_ending))
+            .unwrap_or_default()
+    });
+    let encoding = use_memo(move || {
+        encoding_state
+            .read()
+            .as_ref()
+            .map(|state| state.encoding)
+            .or_else(|| meta_state.read().as_ref().map(|meta| meta.encoding))
+            .unwrap_or_default()
+    });
+    let viewport_state = ui.use_value(|state| state.viewport.content.as_ref());
+    let total_lines = use_memo(move || {
+        viewport_state
+            .read()
+            .as_ref()
+            .map(|viewport| viewport.total_lines)
+            .or_else(|| meta_state.read().as_ref().map(|meta| meta.total_lines))
+            .unwrap_or_default()
+    });
+    let total_rows = use_memo(move || {
+        viewport_state
+            .read()
+            .as_ref()
+            .map(|viewport| viewport.total_rows)
+            .unwrap_or_default()
+    });
+    let first_row = use_memo(move || {
+        viewport_state
+            .read()
+            .as_ref()
+            .map(|viewport| viewport.first_row)
+            .unwrap_or_default()
+    });
     let mut gutter_hover = use_signal(|| false);
-    let mut language = use_signal(String::new);
-    let mut indent = use_signal(FileIndent::default);
-    let mut line_ending = use_signal(FileLineEnding::default);
-    let mut encoding = use_signal(FileEncoding::default);
-    let mut lines = use_signal(Vec::<FileLine>::new);
-    let mut sticky_lines = use_signal(Vec::<FileLine>::new);
-    let mut outline = use_signal(Vec::<OutlineRow>::new);
-    let mut line_layouts = use_signal(Vec::<FileLineLayout>::new);
-    let mut wrap_columns = use_signal(|| 0u16);
-    let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
+    let lines = use_memo(move || {
+        viewport_state
+            .read()
+            .as_ref()
+            .map(|viewport| viewport.lines.clone())
+            .unwrap_or_default()
+    });
+    let sticky_lines = use_memo(move || {
+        viewport_state
+            .read()
+            .as_ref()
+            .map(|viewport| viewport.sticky.clone())
+            .unwrap_or_default()
+    });
+    let outline = ui.use_value(|state| state.explorer.outline.as_ref());
+    let line_layouts = use_memo(move || {
+        viewport_state
+            .read()
+            .as_ref()
+            .map(|viewport| viewport.layouts.clone())
+            .unwrap_or_default()
+    });
+    let wrap_columns = use_memo(move || {
+        viewport_state
+            .read()
+            .as_ref()
+            .map(|viewport| viewport.wrap_columns)
+            .unwrap_or_default()
+    });
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
-    let mut lsp_status = use_signal(|| Option::<FileLspStatus>::None);
-    let mut lsp_capabilities = use_signal(Vec::<EditorCapability>::new);
-    let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
-    let mut lsp_notice_generation = use_signal(|| 0u32);
-    let mut code_actions = use_signal(Vec::<String>::new);
-    let mut code_action_sel = use_signal(|| 0usize);
-    let mut rename_box = use_signal(|| Option::<RenameBox>::None);
-    let mut rename_failed = use_signal(String::new);
-    let mut rename_failed_generation = use_signal(|| 0u32);
-    let mut error = use_signal(String::new);
-    let mut error_undecodable = use_signal(|| false);
-    let mut dir_entries = use_signal(Vec::<FileDirEntry>::new);
-    let mut parent_entries = use_signal(Vec::<FileDirEntry>::new);
-    let mut selected = use_signal(|| 0usize);
-    let mut mode = use_signal(|| Mode::Text);
-    let mut media = use_signal(|| Option::<FileMediaEvent>::None);
-    let mut preview = use_signal(|| Preview::None);
-    let mut thumbs = use_signal(HashMap::<String, String>::new);
-    let mut theme_style = use_signal(String::new);
+    let lsp_install_notice = ui.use_value(|state| Some(&state.language.lsp_install_notice));
+    let code_actions = ui.use_value(|state| state.language.code_actions.as_ref());
+    let rename = ui.use_value(|state| Some(&state.language.rename));
+    let edit_notice = ui.use_value(|state| Some(&state.document.edit_notice));
+    let preview_state = ui.use_value(|state| state.document.preview.as_ref());
+    let preview = use_memo(move || {
+        preview_state
+            .read()
+            .as_ref()
+            .and_then(|state| state.selected.clone())
+    });
+    let thumbs = use_memo(move || {
+        preview_state
+            .read()
+            .as_ref()
+            .map(|state| {
+                state
+                    .thumbnails
+                    .iter()
+                    .map(|thumbnail| (thumbnail.path.clone(), thumbnail.url.clone()))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default()
+    });
+    let theme = ui.use_value(|state| state.document.theme.as_ref());
+    let theme_style = use_memo(move || {
+        let Some(theme) = theme.read().as_ref().cloned() else {
+            return String::new();
+        };
+        let mut style = String::new();
+        if !theme.font_family.is_empty() {
+            style.push_str(&format!(
+                "font-family:\"{}\",var(--font-mono);",
+                theme.font_family
+            ));
+        }
+        if theme.font_size > 0.0 {
+            style.push_str(&format!("font-size:{}px;", theme.font_size));
+        }
+        if theme.line_height > 0.0 {
+            style.push_str(&format!("line-height:{};", theme.line_height));
+        }
+        style
+    });
     let mut cell_dims = use_signal(CellMetrics::default);
     let dom = EditorDom::new();
-    let page_width = use_signal(|| 0u32);
     let last_resize = use_signal(FileResizeEvent::default);
-    let mut git_path = use_signal(String::new);
-    let mut git_state = use_signal(FileGitState::default);
+    let diagnostics_state = ui.use_value(|state| state.language.diagnostics.as_ref());
+    let diagnostics = use_memo(move || {
+        let Some(state) = diagnostics_state.read().as_ref().cloned() else {
+            return Vec::new();
+        };
+        if state.path == git_path() {
+            state.diagnostics
+        } else {
+            Vec::new()
+        }
+    });
+    let lsp_status_state = ui.use_value(|state| state.language.lsp_status.as_ref());
+    let lsp_status = use_memo(move || {
+        let state = lsp_status_state.read().as_ref().cloned()?;
+        (state.path == git_path()).then_some(state)
+    });
+    let lsp_capabilities = use_memo(move || {
+        lsp_status()
+            .map(|state| state.capabilities)
+            .unwrap_or_default()
+    });
+    let git_state_event = ui.use_value(|state| state.git.git_state.as_ref());
+    let git_state = use_memo(move || git_state_event.read().clone().unwrap_or_default());
     let git_repo_root = use_memo(move || {
         let state = git_state();
         if state.path == git_path() {
@@ -120,58 +323,204 @@ pub fn Page() -> Element {
             })
             .unwrap_or_default()
     });
-    let mut file_view_mode = use_signal(|| FileViewMode::Note);
+    let view_mode = ui.use_value(|state| state.document.view_mode.as_ref());
+    let file_view_mode = use_memo(move || {
+        view_mode
+            .read()
+            .as_ref()
+            .map(|event| event.mode)
+            .unwrap_or(FileViewMode::Note)
+    });
     let mut view_mode_revision = use_signal(|| 0u64);
-    let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
-    let mut note_properties = use_signal(Vec::<KnowledgeProperty>::new);
-    let mut note_references = use_signal(Vec::<KnowledgeReference>::new);
-    let note_cursor = NoteCursor::new();
+    let note_blocks = use_memo(move || {
+        note_state
+            .read()
+            .as_ref()
+            .map(|note| note.blocks.clone())
+            .unwrap_or_default()
+    });
+    let note_properties = use_memo(move || {
+        note_state
+            .read()
+            .as_ref()
+            .map(|note| note.properties.clone())
+            .unwrap_or_default()
+    });
+    let note_properties_open = use_memo(move || {
+        note_state
+            .read()
+            .as_ref()
+            .is_some_and(|note| note.properties_open)
+    });
+    let note_property_drafts = use_memo(move || {
+        note_state
+            .read()
+            .as_ref()
+            .map(|note| note.property_drafts.clone())
+            .unwrap_or_default()
+    });
+    let note_references = use_memo(move || {
+        note_state
+            .read()
+            .as_ref()
+            .map(|note| note.references.clone())
+            .unwrap_or_default()
+    });
+    let note_active = use_memo(move || note_state.read().as_ref().and_then(|note| note.active));
+    let note_editing =
+        use_memo(move || note_state.read().as_ref().is_some_and(|note| note.editing));
+    let note_edit_line =
+        use_memo(move || note_state.read().as_ref().and_then(|note| note.edit_line));
+    let note_cursor = NoteCursor::new(note_active, note_editing, note_edit_line);
     let mut note_dragging = use_signal(|| false);
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
-    let mut ed_mode = use_signal(|| EditMode::Insert);
-    let mut ed_label = use_signal(String::new);
-    let mut search_spans = use_signal(Vec::<SelSpan>::new);
-    let mut word_spans = use_signal(Vec::<SelSpan>::new);
-    let find_open = use_signal(|| false);
-    let find_forward = use_signal(|| true);
+    let find_state = ui.use_value(|state| state.viewport.find.as_ref());
+    let find_open = use_memo(move || find_state.read().as_ref().is_some_and(|event| event.open));
+    let find_forward =
+        use_memo(move || find_state.read().as_ref().is_none_or(|event| event.forward));
+    let find_query = use_memo(move || {
+        find_state
+            .read()
+            .as_ref()
+            .map(|event| event.query.clone())
+            .unwrap_or_default()
+    });
+    let find_regex = use_memo(move || find_state.read().as_ref().is_some_and(|event| event.regex));
     let mut find_revision = use_signal(|| 0u64);
-    let sidebar_view = use_signal(SidebarView::default);
+    let explorer_panel = ui.use_value(|state| state.explorer.explorer_panel.as_ref());
+    let explorer_panel_effect = ui.use_field(|state| state.explorer.explorer_panel.as_ref());
+    let explorer_visible = use_memo(move || {
+        explorer_panel
+            .read()
+            .as_ref()
+            .is_some_and(|panel| panel.visible)
+    });
+    let explorer_width = use_memo(move || {
+        explorer_panel
+            .read()
+            .as_ref()
+            .map(|panel| panel.width)
+            .unwrap_or(EXPLORER_DEFAULT_WIDTH)
+    });
+    let sidebar_view = use_memo(move || {
+        if explorer_panel
+            .read()
+            .as_ref()
+            .is_some_and(|panel| panel.search)
+        {
+            SidebarView::Search
+        } else {
+            SidebarView::Explorer
+        }
+    });
     let mut explorer_search_focus_revision = use_signal(|| 0u64);
-    let find_query = use_signal(String::new);
-    let mut find_total = use_signal(|| 0u32);
-    let mut find_index = use_signal(|| 0u32);
-    let mut keymap = use_signal(KeymapKind::default);
-    let mut cursor = use_signal(CursorPos::default);
-    let mut carets = use_signal(Vec::<CursorPos>::new);
-    let mut sel = use_signal(Vec::<SelSpan>::new);
-    let mut source_cursor = use_signal(CursorPos::default);
-    let mut source_sel = use_signal(Vec::<SelSpan>::new);
-    let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
+    let keymap_state = ui.use_value(|state| state.viewport.keymap.as_ref());
+    let keymap = use_memo(move || {
+        keymap_state
+            .read()
+            .as_ref()
+            .map(|event| event.keymap)
+            .unwrap_or_default()
+    });
+    let cursor_state = ui.use_value(|state| state.viewport.cursor.as_ref());
+    let cursor = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.primary)
+            .unwrap_or_default()
+    });
+    let carets = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.carets.clone())
+            .unwrap_or_default()
+    });
+    let sel = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.selections.clone())
+            .unwrap_or_default()
+    });
+    let source_cursor = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.source_primary)
+            .unwrap_or_default()
+    });
+    let source_sel = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.source_selections.clone())
+            .unwrap_or_default()
+    });
+    let ed_mode = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.mode)
+            .unwrap_or(EditMode::Insert)
+    });
+    let ed_label = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.mode_label.clone())
+            .unwrap_or_default()
+    });
+    let search_spans = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.search.clone())
+            .unwrap_or_default()
+    });
+    let word_spans = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.word_highlights.clone())
+            .unwrap_or_default()
+    });
+    let find_total = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.search_total)
+            .unwrap_or_default()
+    });
+    let find_index = use_memo(move || {
+        cursor_state
+            .read()
+            .as_ref()
+            .map(|state| state.search_index)
+            .unwrap_or_default()
+    });
+    let mut effect_cursor = use_signal(CursorPos::default);
+    let open_editors = ui.use_value(|state| state.explorer.open_editors.as_ref());
     let ime = use_ime_guard();
     let typed = use_signal(String::new);
-    let mut lsp_hover = use_signal(|| Option::<FileHover>::None);
+    let lsp_hover = ui.use_value(|state| Some(&state.language.hover));
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
     let ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
-    let mut panel = use_signal(FilePanelState::default);
+    let panel_state = ui.use_value(|state| state.panel.panel.as_ref());
+    let panel = use_memo(move || panel_state.read().as_ref().cloned().unwrap_or_default());
     let mut panel_focus_revision = use_signal(|| 0u64);
     let mut last_scroll_req = use_signal(|| 0u32);
-    let explorer = ExplorerPane::new(page_width);
-    let mut tidy_prompt = use_signal(|| Option::<u32>::None);
-    let mut doc_title = use_signal(String::new);
+    let explorer = ExplorerPane::new(explorer_visible, explorer_width);
+    let tidy = ui.use_value(|state| Some(&state.explorer.tidy));
     let is_markdown = use_memo(move || document_kind() == FileDocumentKind::Markdown);
 
-    let keys = use_file_keys(panel);
+    let keys = use_file_keys(panel.into());
     use_context_provider(|| keys);
 
-    let explorer_panel = use_file_ui::<ExplorerPanelEvent>();
     use_effect(move || {
-        explorer_panel.for_each(|event| {
-            let mut view = sidebar_view;
-            view.set(match event.search {
-                true => SidebarView::Search,
-                false => SidebarView::Explorer,
-            });
+        explorer_panel_effect.for_each(|event| {
             if event.search && event.search_focus_revision > explorer_search_focus_revision() {
                 explorer_search_focus_revision.set(event.search_focus_revision);
                 spawn(async move {
@@ -179,21 +528,16 @@ pub fn Page() -> Element {
                     FocusClaim::new(super::explorer::SEARCH_INPUT_ID).request();
                 });
             }
-            explorer.apply_panel(event);
         })
     });
 
-    let find_event = use_file_ui::<FileFindEvent>();
+    let find_event = FileUi::current().use_field(|state| state.viewport.find.as_ref());
     use_effect(move || {
         find_event.for_each(|event| {
             if event.revision <= find_revision() {
                 return;
             }
             find_revision.set(event.revision);
-            let mut open = find_open;
-            let mut forward = find_forward;
-            open.set(event.open);
-            forward.set(event.forward);
             if event.open {
                 spawn(async move {
                     Platform::sleep(0).await;
@@ -203,49 +547,21 @@ pub fn Page() -> Element {
         })
     });
 
-    let tidy_prompt_event = use_file_ui::<FileTidyPromptEvent>();
-    use_effect(move || {
-        tidy_prompt_event.for_each(|e| {
-            tidy_prompt.set(Some(e.count));
-        })
-    });
-
-    let file_meta = use_file_ui::<FileMetaEvent>();
+    let file_meta = FileUi::current().use_field(|state| state.document.meta.as_ref());
     use_effect(move || {
         file_meta.for_each(|m| {
-            let reset_view = *document_revision.peek() != m.revision;
-            document_revision.set(m.revision);
-            document_kind.set(m.kind);
-            doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
-            path.set(m.path);
-            git_path.set(m.abs_path);
-            total_lines.set(m.total_lines);
-            language.set(m.language);
-            indent.set(m.indent);
-            line_ending.set(m.line_ending);
-            encoding.set(m.encoding);
-            mode.set(Mode::Text);
+            let reset_view = *handled_document_revision.peek() != m.revision;
+            handled_document_revision.set(m.revision);
             if !reset_view {
                 return;
             }
-            error.set(String::new());
-            Preview::clear(preview, thumbs);
-            media.set(None);
             dom.reset();
             last_scroll_req.set(0);
             let _ = send(&FileScrollEvent {
                 top_row: 0,
                 needs_rows: true,
             });
-            diagnostics.set(Vec::new());
             hover_diag.set(None);
-            lsp_status.set(None);
-            lsp_install_notice.set(None);
-            lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
-            explorer.show_if_room(mode);
-            note_blocks.set(Vec::new());
-            note_properties.set(Vec::new());
-            note_references.set(Vec::new());
             note_cursor.reset();
             note_dragging.set(false);
             editor_dragging.set(false);
@@ -253,84 +569,19 @@ pub fn Page() -> Element {
         })
     });
 
-    let file_shape = use_file_ui::<FileShapeEvent>();
+    let file_viewport = FileUi::current().use_field(|state| state.viewport.content.as_ref());
     use_effect(move || {
-        file_shape.for_each(|s| {
-            indent.set(s.indent);
-            line_ending.set(s.line_ending);
+        file_viewport.for_each(|_| {
+            let _ = send(&FileHoverDismissRequest);
         })
     });
 
-    let file_encoding = use_file_ui::<FileEncodingEvent>();
-    use_effect(move || {
-        file_encoding.for_each(|e| {
-            encoding.set(e.encoding);
-        })
-    });
-
-    let file_viewport = use_file_ui::<FileViewportPatch>();
-    use_effect(move || {
-        file_viewport.for_each(|p| {
-            first_row.set(p.first_row);
-            total_rows.set(p.total_rows);
-            total_lines.set(p.total_lines);
-            wrap_columns.set(p.wrap_columns);
-            if line_layouts.peek().as_slice() != p.layouts.as_slice() {
-                line_layouts.set(p.layouts);
-            }
-            if lines.peek().as_slice() != p.lines.as_slice() {
-                lines.set(p.lines);
-            }
-            if sticky_lines.peek().as_slice() != p.sticky.as_slice() {
-                sticky_lines.set(p.sticky);
-            }
-            lsp_hover.set(None);
-        })
-    });
-
-    let outline_event = use_file_ui::<OutlineEvent>();
-    use_effect(move || {
-        outline_event.for_each(|e| {
-            outline.set(e.items);
-        })
-    });
-
-    let file_cursor = use_file_ui::<FileCursorEvent>();
+    let file_cursor = FileUi::current().use_field(|state| state.viewport.cursor.as_ref());
     use_effect(move || {
         file_cursor.for_each(|c| {
-            let moved = cursor.peek().ne(&c.primary);
-            if *ed_mode.peek() != c.mode {
-                ed_mode.set(c.mode);
-            }
-            if ed_label.peek().ne(&c.mode_label) {
-                ed_label.set(c.mode_label.clone());
-            }
+            let moved = effect_cursor().ne(&c.primary);
             if moved {
-                cursor.set(c.primary);
-            }
-            if carets.peek().as_slice() != c.carets.as_slice() {
-                carets.set(c.carets.clone());
-            }
-            if sel.peek().as_slice() != c.selections.as_slice() {
-                sel.set(c.selections.clone());
-            }
-            if source_cursor.peek().ne(&c.source_primary) {
-                source_cursor.set(c.source_primary);
-            }
-            if source_sel.peek().as_slice() != c.source_selections.as_slice() {
-                source_sel.set(c.source_selections.clone());
-            }
-            if search_spans.peek().as_slice() != c.search.as_slice() {
-                search_spans.set(c.search.clone());
-            }
-            if word_spans.peek().as_slice() != c.word_highlights.as_slice() {
-                word_spans.set(c.word_highlights.clone());
-            }
-            if *find_total.peek() != c.search_total {
-                find_total.set(c.search_total);
-            }
-            if *find_index.peek() != c.search_index {
-                find_index.set(c.search_index);
+                effect_cursor.set(c.primary);
             }
             let note_mode = *file_view_mode.peek() == FileViewMode::Note && *is_markdown.peek();
             if note_mode {
@@ -344,21 +595,8 @@ pub fn Page() -> Element {
                 {
                     note_cursor.activate(index, c.source_primary.line);
                 }
-                if note_cursor.editing() {
-                    let is_list = active.is_some_and(|index| {
-                        matches!(note_blocks.peek()[index].block, MdBlock::List { .. })
-                    });
-                    let edit_line = is_list.then_some(c.source_primary.line);
-                    if note_cursor.edit_line() != edit_line {
-                        note_cursor.set_edit_line(edit_line);
-                    }
-                }
-                let active = active.map(|index| index as u32);
-                if note_cursor.active() != active {
-                    note_cursor.set_active(active);
-                }
                 if moved && let Some(index) = active {
-                    note_cursor.reveal(index as usize, c.source_primary.line);
+                    note_cursor.reveal(index, c.source_primary.line);
                 }
             }
             if moved && !note_mode {
@@ -367,7 +605,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let scroll_by = use_file_ui::<FileScrollByEvent>();
+    let scroll_by = FileUi::current().use_field(|state| state.viewport.scroll_by.as_ref());
     let mut scroll_effect_revision = use_signal(|| 0u64);
     use_effect(move || {
         scroll_by.for_each(|event| {
@@ -384,31 +622,16 @@ pub fn Page() -> Element {
         })
     });
 
-    let open_editors_event = use_file_ui::<OpenEditorsEvent>();
-    use_effect(move || {
-        open_editors_event.for_each(|event| {
-            open_editors.set(event.items);
-        })
-    });
-
-    let file_git_state = use_file_ui::<FileGitState>();
-    use_effect(move || {
-        file_git_state.for_each(|state| {
-            git_state.set(state);
-        })
-    });
-
-    let view_mode_event = use_file_ui::<FileViewModeEvent>();
+    let view_mode_event = FileUi::current().use_field(|state| state.document.view_mode.as_ref());
     use_effect(move || {
         view_mode_event.for_each(|event| {
             if event.revision <= *view_mode_revision.peek() {
                 return;
             }
             view_mode_revision.set(event.revision);
-            if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
+            if event.mode != FileViewMode::Note {
                 note_cursor.set_editing(false);
             }
-            file_view_mode.set(event.mode);
             match event.mode {
                 FileViewMode::Note if is_markdown() => {
                     let line = source_cursor().line;
@@ -430,10 +653,9 @@ pub fn Page() -> Element {
         })
     });
 
-    let keymap_event = use_file_ui::<FileKeymapEvent>();
+    let keymap_event = FileUi::current().use_field(|state| state.viewport.keymap.as_ref());
     use_effect(move || {
         keymap_event.for_each(|event| {
-            keymap.set(event.keymap);
             if event.keymap == KeymapKind::Vim
                 && file_view_mode() == FileViewMode::Note
                 && is_markdown()
@@ -443,26 +665,29 @@ pub fn Page() -> Element {
                     note_cursor.activate_centered(index, line);
                 }
             }
+            if file_view_mode() == FileViewMode::Note && is_markdown() && !note_cursor.editing() {
+                EditorFocus::container();
+            } else {
+                EditorFocus::file();
+            }
         })
     });
 
-    let note_event = use_file_ui::<FileNoteEvent>();
+    let note_event = FileUi::current().use_field(|state| state.document.note.as_ref());
     use_effect(move || {
         note_event.for_each(|event| {
             let FileNoteEvent {
-                title,
-                properties,
+                title: _,
+                properties: _,
+                properties_open: _,
+                property_drafts: _,
                 blocks,
-                active,
-                references,
+                active: _,
+                editing: _,
+                edit_line: _,
+                references: _,
                 reveal_line,
             } = event;
-            let title = if title.is_empty() {
-                path().rsplit('/').next().unwrap_or_default().to_string()
-            } else {
-                title
-            };
-            doc_title.set(title.clone());
             let activation = NoteCursorActivation::resolve(
                 reveal_line,
                 keymap() == KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
@@ -478,10 +703,6 @@ pub fn Page() -> Element {
                     .block_index_for_line(line)
                     .map(|index| (activation, index, line))
             });
-            note_blocks.set(blocks);
-            note_properties.set(properties);
-            note_references.set(references);
-            note_cursor.set_active(active);
             if let Some((activation, index, line)) = activation {
                 match activation {
                     NoteCursorActivation::Center(_) => note_cursor.activate_centered(index, line),
@@ -491,18 +712,10 @@ pub fn Page() -> Element {
         })
     });
 
-    let hover_event = use_file_ui::<FileHover>();
-    use_effect(move || {
-        hover_event.for_each(|h| {
-            lsp_hover.set(Some(h));
-        })
-    });
-
-    let panel_event = use_file_ui::<FilePanelState>();
+    let panel_event = FileUi::current().use_field(|state| state.panel.panel.as_ref());
     use_effect(move || {
         panel_event.for_each(|state| {
             let focus = state.focus;
-            panel.set(state);
             if focus.revision <= panel_focus_revision() {
                 return;
             }
@@ -520,208 +733,42 @@ pub fn Page() -> Element {
         })
     });
 
-    let diagnostics_event = use_file_ui::<FileDiagnostics>();
-    use_effect(move || {
-        diagnostics_event.for_each(|d| {
-            if d.path != git_path() {
-                return;
-            }
-            diagnostics.set(d.diagnostics);
-        })
-    });
-
-    let lsp_status_event = use_file_ui::<FileLspStatus>();
-    use_effect(move || {
-        lsp_status_event.for_each(|s| {
-            if s.path != git_path() {
-                return;
-            }
-            lsp_capabilities.set(s.capabilities.clone());
-            lsp_status.set(Some(s));
-        })
-    });
-
-    let install_progress = use_file_ui::<LspInstallProgress>();
-    use_effect(move || {
-        install_progress.for_each(|progress| {
-            let delay = match progress.phase {
-                InstallPhase::Done => Some(LSP_NOTICE_DONE_MS),
-                InstallPhase::Failed => Some(LSP_NOTICE_FAILED_MS),
-                _ => None,
-            };
-            lsp_install_notice.set(Some(progress));
-            if let Some(delay) = delay {
-                schedule_lsp_notice_clear(lsp_install_notice, lsp_notice_generation, delay);
-            }
-        })
-    });
-
-    let package_status = use_file_ui::<LspPackageStatus>();
-    use_effect(move || {
-        package_status.for_each(|status| {
-            if status.status != LspPkgStatus::Installed {
-                return;
-            }
-            lsp_install_notice.set(Some(LspInstallProgress {
-                name: status.name,
-                phase: InstallPhase::Done,
-                pct: Some(100),
-                message: translate("lsp-status-installed"),
-            }));
-            schedule_lsp_notice_clear(
-                lsp_install_notice,
-                lsp_notice_generation,
-                LSP_NOTICE_DONE_MS,
-            );
-        })
-    });
-
-    let file_error = use_file_ui::<FileErrorEvent>();
-    use_effect(move || {
-        file_error.for_each(|e| {
-            error_undecodable.set(e.undecodable);
-            error.set(e.message);
-        })
-    });
-
-    let code_actions_event = use_file_ui::<FileCodeActions>();
-    use_effect(move || {
-        code_actions_event.for_each(|e| {
-            code_action_sel.set(0);
-            code_actions.set(e.titles);
-        })
-    });
-
-    let rename_event = use_file_ui::<FileRenamePrompt>();
-    use_effect(move || {
-        rename_event.for_each(|e| {
-            rename_failed.set(String::new());
-            rename_box.set(Some(RenameBox::new(e.line, e.col, e.current)));
-        })
-    });
-
-    let edit_failed = use_file_ui::<FileEditFailure>();
-    use_effect(move || {
-        edit_failed.for_each(|e| {
-            rename_failed.set(e.reason);
-            let id = rename_failed_generation().wrapping_add(1);
-            rename_failed_generation.set(id);
-            spawn(async move {
-                Platform::sleep(RENAME_NOTICE_MS).await;
-                if rename_failed_generation() == id {
-                    rename_failed.set(String::new());
-                }
-            });
-        })
-    });
-
-    let directory_event = use_file_ui::<FileDirectoryState>();
+    let directory_event = FileUi::current().use_field(|state| state.document.directory.as_ref());
     use_effect(move || {
         directory_event.for_each(|d| {
-            error.set(String::new());
-            if path() != d.path {
-                thumbs.set(HashMap::new());
-            }
-            preview.set(Preview::None);
-            media.set(None);
-            doc_title.set(
-                d.path
-                    .rsplit('/')
-                    .find(|s| !s.is_empty())
-                    .unwrap_or(&d.path)
-                    .to_string(),
-            );
-            git_path.set(d.abs_path);
-            mode.set(Mode::Dir);
-            diagnostics.set(Vec::new());
             hover_diag.set(None);
-            lsp_status.set(None);
-            dir_entries.set(d.entries);
-            parent_entries.set(d.parent_entries);
-            path.set(d.path);
             let index = usize::try_from(d.selected).unwrap_or_default();
-            selected.set(index);
             ScrollIntoView::nearest(&format!("dir-row-{index}"));
         })
     });
 
-    let media_event = use_file_ui::<FileMediaEvent>();
+    let media_event = FileUi::current().use_field(|state| state.document.media.as_ref());
     use_effect(move || {
-        media_event.for_each(|e| {
-            error.set(String::new());
-            Preview::clear(preview, thumbs);
-            let kind = e.kind;
-            media.set(Some(e));
-            mode.set(Mode::Media(kind));
-            diagnostics.set(Vec::new());
+        media_event.for_each(|_| {
             hover_diag.set(None);
-            lsp_status.set(None);
-        })
-    });
-
-    let preview_event = use_file_ui::<FilePreviewEvent>();
-    use_effect(move || {
-        preview_event.for_each(|ev| {
-            if ev.thumb {
-                if let PreviewKind::Image { bytes, .. } = ev.kind {
-                    let url = Preview::image_url(&bytes, &ev.path);
-                    thumbs.write().insert(ev.path.clone(), url);
-                }
-                return;
-            }
-            let next = match ev.kind {
-                PreviewKind::Image { bytes, .. } => Preview::image(bytes, &ev.path),
-                PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
-                PreviewKind::Text(l) => Preview::Text(l),
-                PreviewKind::Dir(e) => Preview::Dir(e),
-                PreviewKind::Info {
-                    size,
-                    modified,
-                    kind,
-                } => Preview::Info {
-                    size,
-                    modified,
-                    kind,
-                },
-                PreviewKind::Error(m) => Preview::Error(m),
-            };
-            preview.set(next);
-        })
-    });
-
-    let theme_event = use_file_ui::<FileThemeEvent>();
-    use_effect(move || {
-        theme_event.for_each(|t| {
-            let mut s = String::new();
-            if !t.font_family.is_empty() {
-                s.push_str(&format!(
-                    "font-family:\"{}\",var(--font-mono);",
-                    t.font_family
-                ));
-            }
-            if t.font_size > 0.0 {
-                s.push_str(&format!("font-size:{}px;", t.font_size));
-            }
-            if t.line_height > 0.0 {
-                s.push_str(&format!("line-height:{};", t.line_height));
-            }
-            theme_style.set(s);
         })
     });
 
     use_effect(move || {
-        explorer.sync();
         dom.announce(cell_dims(), total_lines(), last_resize);
     });
 
     let gw = GutterWidth::for_lines(total_lines());
-    let editor_tabs = EditorTabItem::all(&open_editors.read());
+    let editor_tabs = open_editors
+        .read()
+        .as_ref()
+        .map(|event| event.items.clone())
+        .unwrap_or_default();
     let breadcrumb_path = match error().is_empty() {
         true => git_path(),
         false => String::new(),
     };
     let breadcrumb_outline = match mode() {
-        Mode::Text => outline(),
+        Mode::Text => outline
+            .read()
+            .as_ref()
+            .map(|event| event.items.clone())
+            .unwrap_or_default(),
         Mode::Dir | Mode::Media(_) => Vec::new(),
     };
     let breadcrumb_caret_line = match file_view_mode() == FileViewMode::Note && is_markdown() {
@@ -767,7 +814,7 @@ pub fn Page() -> Element {
                 explorer.finish_resize();
             },
 
-            PaneWidth { width: page_width }
+            PaneWidth {}
 
         div {
             class: "flex min-h-0 flex-1 flex-row overflow-hidden",
@@ -830,7 +877,7 @@ pub fn Page() -> Element {
                         }
                         " " => {
                             e.prevent_default();
-                            Preview::toggle_video();
+                            PreviewDom::toggle_video();
                         }
                         _ => {
                             keys.offer(&e);
@@ -888,8 +935,9 @@ pub fn Page() -> Element {
                 EditorTabStrip { tabs: editor_tabs }
                 if find_open() {
                     FindBar {
-                        query: find_query,
-                        forward: find_forward,
+                        query: find_query(),
+                        forward: find_forward(),
+                        regex: find_regex(),
                         vim: keymap() == KeymapKind::Vim,
                         total: find_total(),
                         index: find_index(),
@@ -903,12 +951,7 @@ pub fn Page() -> Element {
                                     class: file_mode_class(file_view_mode() == FileViewMode::Note),
                                     title: translate("editor-rendered-markdown"),
                                     onclick: move |_| {
-                                        file_view_mode.set(FileViewMode::Note);
                                         let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
-                                        let line = source_cursor().line;
-                                        if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
-                                            note_cursor.activate_centered(index, line);
-                                        }
                                     },
                                     {translate("editor-note")}
                                 }
@@ -921,11 +964,7 @@ pub fn Page() -> Element {
                                 ),
                                 title: translate("editor-source-editor"),
                                 onclick: move |_| {
-                                    note_cursor.set_editing(false);
-                                    file_view_mode.set(FileViewMode::Editor);
-                                    dom.center_row(cursor().row, cell_dims().height);
                                     let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
-                                    EditorFocus::file();
                                 },
                                 {translate("editor-editor")}
                             }
@@ -934,7 +973,6 @@ pub fn Page() -> Element {
                                     class: file_mode_class(file_view_mode() == FileViewMode::Diff),
                                     title: translate("editor-git-diff"),
                                     onclick: move |_| {
-                                        file_view_mode.set(FileViewMode::Diff);
                                         let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
                                     },
                                     {translate("editor-diff")}
@@ -949,18 +987,7 @@ pub fn Page() -> Element {
                             class: file_mode_class(keymap() == KeymapKind::Vscode),
                             onclick: move |_| {
                                 let next = KeymapKind::Vscode;
-                                keymap.set(next);
-                                ed_mode.set(EditMode::Insert);
-                                ed_label.set(String::new());
                                 let _ = send(&FileKeymapSet { keymap: next });
-                                if file_view_mode() == FileViewMode::Note
-                                    && is_markdown()
-                                    && !note_cursor.editing()
-                                {
-                                    EditorFocus::container();
-                                } else {
-                                    EditorFocus::file();
-                                }
                             },
                             {translate("editor-keymap-standard")}
                         }
@@ -968,26 +995,14 @@ pub fn Page() -> Element {
                             class: file_mode_class(keymap() == KeymapKind::Vim),
                             onclick: move |_| {
                                 let next = KeymapKind::Vim;
-                                keymap.set(next);
-                                let next_mode = EditMode::Normal;
-                                ed_mode.set(next_mode);
-                                ed_label.set(next_mode.label().to_string());
                                 let _ = send(&FileKeymapSet { keymap: next });
-                                if file_view_mode() == FileViewMode::Note
-                                    && is_markdown()
-                                    && !note_cursor.editing()
-                                {
-                                    EditorFocus::container();
-                                } else {
-                                    EditorFocus::file();
-                                }
                             },
                             {translate("editor-keymap-vim")}
                         }
                     }
                 }
                 {
-                    tidy_prompt().map(|count| {
+                    tidy().and_then(|state| state.count).map(|count| {
                         rsx! {
                             div {
                                 class: "flex shrink-0 items-center gap-1.5 text-[11px]",
@@ -1002,7 +1017,6 @@ pub fn Page() -> Element {
                                     class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
                                     onclick: move |_| {
                                         let _ = send(&FileTidyRequest { choice: TidyChoice::Tidy });
-                                        tidy_prompt.set(None);
                                     },
                                     {translate("editor-tidy")}
                                 }
@@ -1010,7 +1024,6 @@ pub fn Page() -> Element {
                                     class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
                                     onclick: move |_| {
                                         let _ = send(&FileTidyRequest { choice: TidyChoice::Always });
-                                        tidy_prompt.set(None);
                                     },
                                     {translate("editor-always")}
                                 }
@@ -1018,7 +1031,6 @@ pub fn Page() -> Element {
                                     class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
                                     onclick: move |_| {
                                         let _ = send(&FileTidyRequest { choice: TidyChoice::Dismiss });
-                                        tidy_prompt.set(None);
                                     },
                                     "\u{2715}"
                                 }
@@ -1105,8 +1117,8 @@ pub fn Page() -> Element {
                         path: path(),
                         parent_entries: parent_entries(),
                         entries: dir_entries(),
-                        children: match preview() {
-                            Preview::Dir(entries) => Some(entries),
+                        children: match preview().map(|preview| preview.kind) {
+                            Some(PreviewKind::Dir(entries)) => Some(entries),
                             _ => None,
                         },
                         selected: selected(),
@@ -1198,7 +1210,11 @@ pub fn Page() -> Element {
                                     onpointercancel: move |_| note_dragging.set(false),
                                     div {
                                         class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
-                                        NoteProperties { properties: note_properties() }
+                                        NoteProperties {
+                                            properties: note_properties(),
+                                            open: note_properties_open(),
+                                            drafts: note_property_drafts(),
+                                        }
                                         if blank_line_slot == Some(0) {
                                             NoteBlankLine {
                                                 key: "blank-{source_position.line}",
@@ -1376,7 +1392,7 @@ pub fn Page() -> Element {
                                     id: SCROLL_ID,
                                     class: "file-mode-editor-enter relative min-h-0 flex-1 overflow-auto",
                                     onmouseleave: move |_| {
-                                        lsp_hover.set(None);
+                                        let _ = send(&FileHoverDismissRequest);
                                         hover_pos.set(None);
                                         gutter_hover.set(false);
                                     },
@@ -1464,7 +1480,6 @@ pub fn Page() -> Element {
                                             editor_drag_origin,
                                             gutter_hover,
                                             hover_pos,
-                                            lsp_hover,
                                             hover_diag,
                                         }
                                         if sel().is_empty() {
@@ -1607,7 +1622,7 @@ pub fn Page() -> Element {
                                         }
 
                                         {
-                                            lsp_hover().map(|h| {
+                                            lsp_hover().and_then(|state| state.value).map(|h| {
                                                 let Some(i) = lines().iter().position(|l| l.line_no == h.line) else {
                                                     return rsx! {};
                                                 };
@@ -1650,17 +1665,21 @@ pub fn Page() -> Element {
                                         }
 
                                         CodeActionMenu {
-                                            titles: code_actions,
-                                            selected: code_action_sel,
+                                            titles: code_actions()
+                                                .map(|actions| actions.titles)
+                                                .unwrap_or_default(),
+                                            selected: code_actions()
+                                                .map(|actions| actions.selected)
+                                                .unwrap_or_default(),
                                             top: cursor().row as f64 * ch + ch,
                                             left: gutter + ruler.x_of(cursor().row, cursor().col),
                                         }
 
-                                        if let Some(rename) = rename_box() {
+                                        if let Some(rename) = rename().filter(|rename| rename.open) {
                                             RenameInput {
-                                                state: rename_box,
-                                                top: rename.line() as f64 * ch + ch,
-                                                left: gutter + ruler.x_of_char(rename.line(), rename.col()),
+                                                top: rename.line as f64 * ch + ch,
+                                                left: gutter + ruler.x_of_char(rename.line, rename.col),
+                                                rename,
                                             }
                                         }
 
@@ -1700,16 +1719,22 @@ pub fn Page() -> Element {
             }
 
             {
-                lsp_install_notice().map(|progress| {
+                lsp_install_notice()
+                    .and_then(|notice| notice.progress.map(|progress| (progress, notice.installed)))
+                    .map(|(progress, installed)| {
                     let (icon_class, icon, spinning) = match progress.phase {
                         InstallPhase::Done => ("text-ansi-2", "✓", false),
                         InstallPhase::Failed => ("text-ansi-1", "×", false),
                         _ => ("text-primary", "", true),
                     };
-                    let detail = progress.pct.map_or_else(
-                        || progress.message.clone(),
-                        |percent| format!("{} {percent}%", progress.message),
-                    );
+                    let message = if installed {
+                        translate("lsp-status-installed")
+                    } else {
+                        progress.message.clone()
+                    };
+                    let detail = progress
+                        .pct
+                        .map_or_else(|| message.clone(), |percent| format!("{message} {percent}%"));
                     rsx! {
                         div {
                             class: "pointer-events-none fixed right-4 bottom-14 z-[60] flex min-w-64 max-w-sm items-center gap-3 rounded-xl bg-background/95 px-3 py-2.5 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28)] ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
@@ -1728,14 +1753,15 @@ pub fn Page() -> Element {
             }
 
             {
-                (!rename_failed().is_empty()).then(|| {
-                    let reason = rename_failed();
+                edit_notice()
+                    .and_then(|notice| notice.reason)
+                    .map(|reason| {
                     rsx! {
                         div {
                             class: "pointer-events-none fixed right-4 bottom-14 z-[60] flex min-w-64 max-w-sm items-center gap-3 rounded-xl bg-background/95 px-3 py-2.5 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28)] ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
                             span { class: "grid h-4 w-4 shrink-0 place-items-center text-base font-semibold text-ansi-1", "×" }
                             div { class: "min-w-0",
-                                div { class: "truncate font-medium", {translate("editor-rename-failed")} }
+                                div { class: "truncate font-medium", {translate("editor-edit-failed")} }
                                 div { class: "truncate text-[10px] text-muted-foreground", "{reason}" }
                             }
                         }
@@ -1831,11 +1857,8 @@ const MEASURE_WIDE_ID: &str = "file-measure-wide";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
-const RENAME_NOTICE_MS: u32 = 2400;
 pub(crate) const HOVER_DELAY_MS: u32 = 300;
 pub(crate) const SCROLL_ID: &str = "file-scroll";
-const LSP_NOTICE_DONE_MS: u32 = 2_500;
-const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
 fn file_mode_class(active: bool) -> &'static str {
     if active {
@@ -1878,21 +1901,6 @@ impl NoteCursorActivation {
             .map(Self::Center)
             .or_else(|| restore_vim_cursor.then_some(Self::PreserveViewport(cursor_line)))
     }
-}
-
-fn schedule_lsp_notice_clear(
-    mut notice: Signal<Option<LspInstallProgress>>,
-    mut generation: Signal<u32>,
-    delay: u32,
-) {
-    let id = generation().wrapping_add(1);
-    generation.set(id);
-    spawn(async move {
-        Platform::sleep(delay).await;
-        if generation() == id {
-            notice.set(None);
-        }
-    });
 }
 
 #[cfg(test)]

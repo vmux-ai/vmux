@@ -7,21 +7,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
+#[cfg(test)]
+use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
 use agent_client_protocol::schema::v1::{
     AudioContent, CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
-    ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
-    LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
-    PromptCapabilities, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
-    SessionId, SessionNotification, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
-};
-#[cfg(test)]
-use agent_client_protocol::schema::v1::{
-    SessionConfigOption, SessionConfigOptionCategory, SessionModeState, SessionUpdate,
+    EnvVariable, HttpHeader, ImageContent, Implementation, InitializeRequest, KillTerminalRequest,
+    KillTerminalResponse, LoadSessionRequest, McpServer, McpServerHttp, McpServerSse,
+    McpServerStdio, NewSessionRequest, PermissionOption, PermissionOptionId, PromptCapabilities,
+    PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+    ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome, SessionConfigOption,
+    SessionId, SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
+    TerminalOutputResponse, TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;
@@ -29,17 +28,19 @@ use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_ecs::ProcessId;
-use vmux_ecs::host::workspace::WorkspaceLocation;
 
 #[cfg(test)]
-use super::projector::AcpProjector;
-use super::projector::{AcpToolTitle, ApprovalDetailsQuery};
+use super::projection_driver::AcpProjector;
+use super::projection_driver::{AcpToolTitle, ApprovalDetailsQuery};
+use super::workspace_driver::WorkspaceLocation;
 use super::{
-    AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpTranscriptInput,
+    AcpAgentInfoInbox, AcpApprovalRequestedInbox, AcpApprovalResolvedInbox, AcpConfigStateInbox,
+    AcpProjectionInboxes, AcpSelectedConfigInbox, AcpSelectionSnapshot, AcpSelectionSnapshotInbox,
+    AcpStatusInbox, AcpTranscriptInbox,
 };
 use vmux_api::protocol::{
-    AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ServiceMessage,
-    SharedEvent,
+    AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ManagedMcpServer,
+    ManagedMcpTransport, ServiceMessage, SharedEvent,
 };
 #[cfg(test)]
 use vmux_api::room::AssistantBlock;
@@ -58,6 +59,185 @@ const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_mil
 const ACP_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const STDERR_TAIL_CAPACITY: usize = 50;
 const STDERR_TAIL_SHOWN: usize = 8;
+
+pub(super) struct AcpMcpServers(pub(super) Vec<McpServer>);
+
+impl AcpMcpServers {
+    pub(super) fn from_sources(
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
+        managed: Vec<ManagedMcpServer>,
+    ) -> Self {
+        let mut servers = Vec::new();
+        if let Some(command) = mcp_command {
+            servers.push(McpServer::Stdio(
+                McpServerStdio::new("vmux", PathBuf::from(command)).args(mcp_args),
+            ));
+        }
+        for server in managed {
+            if let Some(server) = Self::from_managed(server) {
+                servers.push(server);
+            }
+        }
+        Self(servers)
+    }
+
+    pub(super) fn from_managed(server: ManagedMcpServer) -> Option<McpServer> {
+        if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
+            tracing::warn!(
+                "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
+                server.name
+            );
+            return None;
+        }
+        let mut headers = Vec::new();
+        for (name, value) in server.headers {
+            headers.push(HttpHeader::new(name, value));
+        }
+        match server.transport {
+            ManagedMcpTransport::Stdio => {
+                let command = server.command?;
+                let mut env = Vec::new();
+                for (name, value) in server.env {
+                    env.push(EnvVariable::new(name, value));
+                }
+                Some(McpServer::Stdio(
+                    McpServerStdio::new(server.name, command)
+                        .args(server.args)
+                        .env(env),
+                ))
+            }
+            ManagedMcpTransport::Http => server
+                .url
+                .map(|url| McpServer::Http(McpServerHttp::new(server.name, url).headers(headers))),
+            ManagedMcpTransport::Sse => server
+                .url
+                .map(|url| McpServer::Sse(McpServerSse::new(server.name, url).headers(headers))),
+        }
+    }
+}
+
+pub(super) enum AcpTranscriptInput {
+    BeginHistoryReplay,
+    Update(Box<SessionUpdate>),
+    FinishHistoryReplay(bool),
+    PushUser {
+        text: String,
+        attachments: Vec<AgentAttachment>,
+    },
+    Snapshot,
+    ApprovalDetails {
+        query: ApprovalDetailsQuery,
+        response: oneshot::Sender<Option<(String, String)>>,
+    },
+}
+
+pub(super) struct AcpConfigStateInput {
+    pub(super) config_options: Vec<SessionConfigOption>,
+    pub(super) modes: Option<SessionModeState>,
+}
+
+pub(super) struct AcpSelectedConfigInput {
+    pub(super) config_id: Option<String>,
+    pub(super) value: String,
+    pub(super) config_options: Vec<SessionConfigOption>,
+}
+
+pub(super) struct AcpProjectionSenders {
+    transcript: mpsc::UnboundedSender<AcpTranscriptInput>,
+    agent_info: mpsc::UnboundedSender<String>,
+    config_state: mpsc::UnboundedSender<AcpConfigStateInput>,
+    selected_config: mpsc::UnboundedSender<AcpSelectedConfigInput>,
+    status: mpsc::UnboundedSender<AgentRunStatus>,
+    approval_requested: mpsc::UnboundedSender<RemoteApproval>,
+    approval_resolved: mpsc::UnboundedSender<String>,
+    selection_snapshot: mpsc::UnboundedSender<oneshot::Sender<AcpSelectionSnapshot>>,
+    wake: mpsc::UnboundedSender<()>,
+}
+
+impl AcpProjectionSenders {
+    pub(super) fn open(wake: mpsc::UnboundedSender<()>) -> (Self, AcpProjectionInboxes) {
+        let (transcript, transcript_inbox) = mpsc::unbounded_channel();
+        let (agent_info, agent_info_inbox) = mpsc::unbounded_channel();
+        let (config_state, config_state_inbox) = mpsc::unbounded_channel();
+        let (selected_config, selected_config_inbox) = mpsc::unbounded_channel();
+        let (status, status_inbox) = mpsc::unbounded_channel();
+        let (approval_requested, approval_requested_inbox) = mpsc::unbounded_channel();
+        let (approval_resolved, approval_resolved_inbox) = mpsc::unbounded_channel();
+        let (selection_snapshot, selection_snapshot_inbox) = mpsc::unbounded_channel();
+        (
+            Self {
+                transcript,
+                agent_info,
+                config_state,
+                selected_config,
+                status,
+                approval_requested,
+                approval_resolved,
+                selection_snapshot,
+                wake,
+            },
+            AcpProjectionInboxes {
+                transcript: AcpTranscriptInbox(transcript_inbox),
+                agent_info: AcpAgentInfoInbox(agent_info_inbox),
+                config_state: AcpConfigStateInbox(config_state_inbox),
+                selected_config: AcpSelectedConfigInbox(selected_config_inbox),
+                status: AcpStatusInbox(status_inbox),
+                approval_requested: AcpApprovalRequestedInbox(approval_requested_inbox),
+                approval_resolved: AcpApprovalResolvedInbox(approval_resolved_inbox),
+                selection_snapshot: AcpSelectionSnapshotInbox(selection_snapshot_inbox),
+            },
+        )
+    }
+
+    fn sent(&self, accepted: bool) {
+        if accepted {
+            let _ = self.wake.send(());
+        }
+    }
+
+    fn transcript(&self, input: AcpTranscriptInput) {
+        self.sent(self.transcript.send(input).is_ok());
+    }
+
+    fn agent_info(&self, name: String) {
+        self.sent(self.agent_info.send(name).is_ok());
+    }
+
+    fn config_state(&self, input: AcpConfigStateInput) {
+        self.sent(self.config_state.send(input).is_ok());
+    }
+
+    fn selected_config(&self, input: AcpSelectedConfigInput) {
+        self.sent(self.selected_config.send(input).is_ok());
+    }
+
+    fn status(&self, status: AgentRunStatus) {
+        self.sent(self.status.send(status).is_ok());
+    }
+
+    fn approval_requested(&self, approval: RemoteApproval) {
+        self.sent(self.approval_requested.send(approval).is_ok());
+    }
+
+    fn approval_resolved(&self, call_id: String) {
+        self.sent(self.approval_resolved.send(call_id).is_ok());
+    }
+
+    fn approval_details(
+        &self,
+        query: ApprovalDetailsQuery,
+        response: oneshot::Sender<Option<(String, String)>>,
+    ) {
+        self.transcript(AcpTranscriptInput::ApprovalDetails { query, response });
+    }
+
+    async fn selection_snapshot(&self) -> AcpSelectionSnapshot {
+        let (response, receiver) = oneshot::channel();
+        self.sent(self.selection_snapshot.send(response).is_ok());
+        receiver.await.unwrap_or_default()
+    }
+}
 
 pub enum AcpInput {
     User {
@@ -1465,10 +1645,10 @@ mod tests {
                 projection,
             ));
             let mut app = App::new();
+            super::super::projection::add(&mut app);
             app.add_systems(
                 Update,
                 (
-                    super::super::project_transcript,
                     super::super::project_info,
                     super::super::project_config_state,
                     super::super::project_selected_config,

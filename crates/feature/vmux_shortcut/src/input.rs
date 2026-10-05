@@ -199,9 +199,11 @@ mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
     use vmux_command::{CommandInvocation, CommandManifest, CommandPlugin};
+    use vmux_layout::pane::PaneCommandPlugin;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use vmux_layout::tab::TabCommandPlugin;
     use vmux_setting::{
         AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
     };
@@ -211,8 +213,14 @@ mod tests {
     impl ShortcutFixture {
         fn app(settings: Option<AppSettings>) -> App {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, CommandPlugin, InputPlugin))
-                .insert_resource(ButtonInput::<KeyCode>::default());
+            app.add_plugins((
+                MinimalPlugins,
+                CommandPlugin,
+                PaneCommandPlugin,
+                TabCommandPlugin,
+                InputPlugin,
+            ))
+            .insert_resource(ButtonInput::<KeyCode>::default());
             for source in [
                 include_str!("../../vmux_layout/src/feature.ron"),
                 include_str!("../../vmux_space/src/feature.ron"),

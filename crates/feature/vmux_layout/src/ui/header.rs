@@ -5,13 +5,13 @@ use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
 use vmux_ecs::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
+use vmux_ui::cn::cn;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::util::cn;
 
 use super::bookmark::LayoutContextMenu;
 use super::extension::ExtensionBar;

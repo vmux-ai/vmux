@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_ecs::event::{
-    DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHover,
+    DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHoverDismissRequest,
     FileHoverRequest, FileLine, FileLineLayout, FilePointerEvent, FoldGutter,
 };
 use vmux_git::event::GitLineStatus;
@@ -17,22 +17,21 @@ use super::{EditorFocus, HOVER_DELAY_MS};
 
 #[component]
 pub(super) fn EditorLines(
-    lines: Signal<Vec<FileLine>>,
-    line_layouts: Signal<Vec<FileLineLayout>>,
-    first_row: Signal<u32>,
-    diagnostics: Signal<Vec<FileDiagnostic>>,
+    lines: ReadSignal<Vec<FileLine>>,
+    line_layouts: ReadSignal<Vec<FileLineLayout>>,
+    first_row: ReadSignal<u32>,
+    diagnostics: ReadSignal<Vec<FileDiagnostic>>,
     git_line_markers: ReadSignal<HashMap<u32, GitLineStatus>>,
-    wrap_columns: Signal<u16>,
+    wrap_columns: ReadSignal<u16>,
     cell_height: f64,
     gutter_chars: usize,
-    total_lines: Signal<u32>,
+    total_lines: ReadSignal<u32>,
     cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
     gutter_hover: Signal<bool>,
     hover_pos: Signal<Option<(u32, u32)>>,
-    lsp_hover: Signal<Option<FileHover>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
     let chunks = LineChunk::split(&lines(), &line_layouts(), first_row());
@@ -56,7 +55,6 @@ pub(super) fn EditorLines(
                 editor_drag_origin,
                 gutter_hover,
                 hover_pos,
-                lsp_hover,
                 hover_diag,
             }
         }
@@ -106,14 +104,13 @@ fn EditorLineChunk(
     wrap_cols: u16,
     cell_height: f64,
     gutter_chars: usize,
-    total_lines: Signal<u32>,
+    total_lines: ReadSignal<u32>,
     cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
     gutter_hover: Signal<bool>,
     hover_pos: Signal<Option<(u32, u32)>>,
-    lsp_hover: Signal<Option<FileHover>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
     rsx! {
@@ -144,7 +141,6 @@ fn EditorLineChunk(
                         editor_drag_origin,
                         gutter_hover,
                         hover_pos,
-                        lsp_hover,
                         hover_diag,
                     }
                 }
@@ -163,14 +159,13 @@ fn EditorLineRow(
     cell_height: f64,
     gutter_chars: usize,
     wrap_cols: u16,
-    total_lines: Signal<u32>,
+    total_lines: ReadSignal<u32>,
     cell_dims: Signal<CellMetrics>,
     ctx_menu: Signal<Option<(f64, f64, u32, u32)>>,
     editor_dragging: Signal<bool>,
     editor_drag_origin: Signal<Option<(i32, i32)>>,
     gutter_hover: Signal<bool>,
     hover_pos: Signal<Option<(u32, u32)>>,
-    lsp_hover: Signal<Option<FileHover>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
     let mut ctx_menu = ctx_menu;
@@ -178,7 +173,6 @@ fn EditorLineRow(
     let mut editor_drag_origin = editor_drag_origin;
     let mut gutter_hover = gutter_hover;
     let mut hover_pos = hover_pos;
-    let mut lsp_hover = lsp_hover;
     let mut hover_diag = hover_diag;
     let ln = line.line_no;
     let fold = line.fold;
@@ -278,7 +272,7 @@ fn EditorLineRow(
                 }
                 if hover_pos() != Some((ln, col)) {
                     hover_pos.set(Some((ln, col)));
-                    lsp_hover.set(None);
+                    let _ = send(&FileHoverDismissRequest);
                     spawn(async move {
                         Platform::sleep(HOVER_DELAY_MS).await;
                         if hover_pos() != Some((ln, col)) {

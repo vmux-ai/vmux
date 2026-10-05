@@ -10,6 +10,7 @@ publish = false
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true }
+inventory = "0.3"
 ron = "0.8"
 rkyv = { workspace = true }
 serde = { workspace = true }
@@ -20,7 +21,7 @@ vmux_profile = { path = "../../util/vmux_profile" }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_macro = { path = "../../util/vmux_macro" }
-vmux_native = { path = "../../util/vmux_native" }
+vmux_page = { path = "../../util/vmux_page" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]

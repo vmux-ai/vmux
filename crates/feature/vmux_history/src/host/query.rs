@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
 use crate::event::{
-    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryLoadMoreRequest,
-    HistoryOpenRequest, HistoryQueryRequest, HistorySuggestionsRequest, HistorySuggestionsResponse,
+    HistoryClearAllRequest, HistoryClearConfirmRequest, HistoryDeleteRequest, HistoryEntry,
+    HistoryLoadMoreRequest, HistoryOpenRequest, HistoryQueryRequest, HistorySuggestionsRequest,
+    HistorySuggestionsResponse,
 };
 use crate::ranking::HistoryRank;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -20,6 +21,7 @@ impl Plugin for HistoryQueryPlugin {
                 HistoryLoadMoreRequest,
                 HistoryDeleteRequest,
                 HistoryClearAllRequest,
+                HistoryClearConfirmRequest,
                 HistoryOpenRequest,
             )>::default(),
             UiEventPlugin::<(HistorySuggestionsRequest,)>::default(),
@@ -28,6 +30,7 @@ impl Plugin for HistoryQueryPlugin {
         .add_observer(request)
         .add_observer(load_more)
         .add_observer(delete_request)
+        .add_observer(clear_confirm)
         .add_observer(clear_all_request)
         .add_observer(open_request)
         .add_observer(suggestions_request)
@@ -54,6 +57,16 @@ fn load_more(
         return;
     };
     state.load_more();
+}
+
+fn clear_confirm(
+    trigger: On<UiInput<HistoryClearConfirmRequest>>,
+    mut pages: Query<&mut HistoryPageState>,
+) {
+    let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    state.set_clear_confirm_open(trigger.event().payload.open);
 }
 
 struct HistoryEntries(Vec<HistoryEntry>);
@@ -123,6 +136,8 @@ impl HistoryEntries {
         crate::state::HistoryUiState {
             has_more: self.0.len() > limit,
             entries: self.0.into_iter().take(limit).collect(),
+            query: String::new(),
+            clear_confirm_open: false,
         }
     }
 }
@@ -148,11 +163,11 @@ fn delete_request(
 }
 
 fn clear_all_request(
-    _trigger: On<UiInput<HistoryClearAllRequest>>,
+    trigger: On<UiInput<HistoryClearAllRequest>>,
     mut commands: Commands,
     urls: Query<Entity, With<Url>>,
     visits: Query<Entity, With<Visit>>,
-    mut pages: Query<&mut HistoryPageState>,
+    mut pages: Query<(Entity, &mut HistoryPageState)>,
 ) {
     for e in urls.iter() {
         commands.entity(e).despawn();
@@ -160,7 +175,10 @@ fn clear_all_request(
     for e in visits.iter() {
         commands.entity(e).despawn();
     }
-    for mut page in &mut pages {
+    for (entity, mut page) in &mut pages {
+        if entity == trigger.event().webview {
+            page.clear_confirm_open = false;
+        }
         page.set_changed();
     }
 }
@@ -209,18 +227,18 @@ fn publish_pages(
             .iter()
             .map(|(created, visited)| (*created, *visited))
             .collect::<Vec<_>>();
-        let snapshot = HistoryEntries::build(
+        let mut snapshot = HistoryEntries::build(
             &state.query,
             &url_rows,
             &visit_rows,
             vmux_ecs::UnixMillis::now().0,
         )
         .state(state.limit as usize);
+        snapshot.query = state.query.clone().unwrap_or_default();
+        snapshot.clear_confirm_open = state.clear_confirm_open;
         state.bypass_change_detection().has_more = snapshot.has_more;
         commands.trigger(
-            vmux_ecs::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
-                entity, &snapshot,
-            ),
+            vmux_ecs::UiStateWrite::<crate::state::HistoryUiState>::from_event(entity, &snapshot),
         );
     }
 }
@@ -240,7 +258,7 @@ fn suggestions_request(
         .state(req.limit as usize)
         .entries;
 
-    commands.trigger(vmux_ecs::host::UiStateWrite::<
+    commands.trigger(vmux_ecs::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(
         trigger.event().webview,
@@ -255,13 +273,14 @@ fn suggestions_request(
 mod handler_tests {
     use super::*;
     use vmux_ecs::{
-        CreatedAt, EcsPlugin, LastVisitedAt, PageMetadata, Url, VisitCount, VisitedUrl,
+        CreatedAt, LastVisitedAt, PageMetadata, PrimitivesPlugin, Url, VisitCount, VisitedUrl,
     };
 
     #[test]
     fn build_entries_no_query_orders_by_visit_created_at_desc() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(PrimitivesPlugin);
 
         let url_e = app
             .world_mut()
@@ -300,7 +319,8 @@ mod handler_tests {
     #[test]
     fn build_entries_with_query_filters_and_ranks() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(PrimitivesPlugin);
 
         let e1 = app
             .world_mut()
@@ -364,7 +384,8 @@ mod handler_tests {
     #[test]
     fn build_entries_pagination() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(PrimitivesPlugin);
 
         let url_e = app
             .world_mut()

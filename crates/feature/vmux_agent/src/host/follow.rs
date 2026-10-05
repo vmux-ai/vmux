@@ -1,27 +1,29 @@
 use std::path::{Path, PathBuf};
 
-use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
+use vmux_api::protocol::{AgentFileSearch, AgentFileTouched, FileTouchKind, ProcessId};
 #[cfg(test)]
-use vmux_api::protocol::AgentRequest;
-use vmux_api::protocol::{
-    AgentFileSearch, AgentFileTouched, FileSearchMatch, FileTouchKind, ProcessId,
-};
+use vmux_api::protocol::{AgentRequest, FileSearchMatch};
 use vmux_command::WriteCommandRequests;
+#[cfg(test)]
+use vmux_ecs::PageMetadata;
 use vmux_ecs::event::{ExplorerSearchFile, ExplorerSearchMatch, FileViewMode};
 use vmux_ecs::service::ServiceMessageSet;
-use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
 use vmux_editor::ContractPlugin as EditorContractPlugin;
 use vmux_editor::{FileViewModeRequest, GlobalSearchRequest};
+#[cfg(test)]
 use vmux_git::GitDiffSource;
 #[cfg(test)]
 use vmux_layout::LayoutContractPlugin;
 use vmux_layout::OpenBesideRequest;
 use vmux_layout::active_pane::ActivatePane;
+#[cfg(test)]
 use vmux_layout::pane::Pane;
-use vmux_layout::placement::PageKind;
+#[cfg(test)]
 use vmux_layout::stack::Stack;
+#[cfg(test)]
 use vmux_layout::tab::Tab;
 use vmux_layout::worktree::{
     TabDirectoryObservationKind, TabDirectoryObserved, TabDirectoryRebindSet,
@@ -29,21 +31,18 @@ use vmux_layout::worktree::{
 use vmux_path::FileUrl;
 use vmux_setting::AppSettings;
 
+use super::follow_driver::AgentFileLayout;
 use crate::host::event::{AgentRequestInput, CommandOrigin};
 
-pub(super) struct FollowPlugin;
-
-impl Plugin for FollowPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (file_touch.before(TabDirectoryRebindSet), file_search)
-                .chain()
-                .in_set(WriteCommandRequests)
-                .after(ServiceMessageSet)
-                .after(super::command::CommandSet::Commands),
-        );
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_systems(
+        Update,
+        (file_touch.before(TabDirectoryRebindSet), file_search)
+            .chain()
+            .in_set(WriteCommandRequests)
+            .after(ServiceMessageSet)
+            .after(super::command::CommandSet::Commands),
+    );
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -55,32 +54,6 @@ struct AgentFileResolve<'w, 's> {
     layout: AgentFileLayout<'w, 's>,
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct AgentFileLayout<'w, 's> {
-    agent_terms: Query<'w, 's, (Entity, &'static ProcessId, &'static ChildOf)>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    file_pages: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static ChildOf,
-            &'static PageMetadata,
-            Option<&'static GitDiffSource>,
-        ),
-    >,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
-    stack_q: Query<'w, 's, Entity, With<Stack>>,
-    tabs: Query<'w, 's, (), With<Tab>>,
-}
-
-#[derive(Clone, Copy)]
-struct FilePageTarget {
-    stack: Entity,
-    pane: Entity,
-    navigate: bool,
-}
-
 struct PendingFilePreview {
     anchor: ProcessId,
     agent_pane: Entity,
@@ -88,158 +61,6 @@ struct PendingFilePreview {
     request_id: [u8; 16],
     user_origin: bool,
     kind: FileTouchKind,
-}
-
-impl AgentFileLayout<'_, '_> {
-    pub(super) fn agent_pane(&self, anchor: ProcessId) -> Option<Entity> {
-        let (_, _, term_co) = self
-            .agent_terms
-            .iter()
-            .find(|(_, pid, _)| **pid == anchor)?;
-        self.child_of.get(term_co.get()).ok().map(|co| co.get())
-    }
-
-    fn ancestor_tab(&self, entity: Entity) -> Option<Entity> {
-        let mut current = entity;
-        loop {
-            if self.tabs.contains(current) {
-                return Some(current);
-            }
-            current = self.child_of.get(current).ok()?.get();
-        }
-    }
-
-    fn stack_has_file_page(&self, stack: Entity) -> bool {
-        self.file_pages.iter().any(|(_, child_of, metadata, _)| {
-            child_of.get() == stack && metadata.url.starts_with("file:")
-        })
-    }
-
-    fn pane_has_only_file_stacks(&self, pane: Entity) -> bool {
-        let Ok(children) = self.pane_children.get(pane) else {
-            return false;
-        };
-        let mut found = false;
-        for stack in children
-            .iter()
-            .filter(|stack| self.stack_q.contains(*stack))
-        {
-            found = true;
-            if !self.stack_has_file_page(stack) {
-                return false;
-            }
-        }
-        found
-    }
-
-    fn file_panes_for(&self, agent_pane: Entity) -> Vec<Entity> {
-        let Some(agent_tab) = self.ancestor_tab(agent_pane) else {
-            return Vec::new();
-        };
-        let agent_parent = self.child_of.get(agent_pane).ok().map(Relationship::get);
-        let mut panes = Vec::new();
-        for (_, page_child, metadata, _) in self.file_pages.iter() {
-            if !metadata.url.starts_with("file:") {
-                continue;
-            }
-            let stack = page_child.get();
-            let Ok(pane_child) = self.child_of.get(stack) else {
-                continue;
-            };
-            let pane = pane_child.get();
-            if pane == agent_pane
-                || self.ancestor_tab(pane) != Some(agent_tab)
-                || !self.pane_has_only_file_stacks(pane)
-                || panes.contains(&pane)
-            {
-                continue;
-            }
-            panes.push(pane);
-        }
-        panes.sort_by_key(|pane| {
-            let direct = self.child_of.get(*pane).ok().map(Relationship::get) == agent_parent;
-            !direct
-        });
-        panes
-    }
-
-    fn file_page_for(&self, agent_pane: Entity) -> Option<(Entity, Entity)> {
-        let pane = self.file_panes_for(agent_pane).into_iter().next()?;
-        for (page, page_co, meta, _) in self.file_pages.iter() {
-            if !meta.url.starts_with("file:") {
-                continue;
-            }
-            let Ok(pane_co) = self.child_of.get(page_co.get()) else {
-                continue;
-            };
-            if pane_co.get() == pane {
-                return Some((page, pane));
-            }
-        }
-        None
-    }
-
-    fn file_page_target(&self, agent_pane: Entity, url: &str) -> Option<FilePageTarget> {
-        let panes = self.file_panes_for(agent_pane);
-        for pane in &panes {
-            for (_, page_co, meta, diff) in self.file_pages.iter() {
-                let stack = page_co.get();
-                if !meta.url.starts_with("file:")
-                    || self.child_of.get(stack).ok().map(Relationship::get) != Some(*pane)
-                    || !PageKind::reuses(url, &meta.url)
-                {
-                    continue;
-                }
-                let dirty = diff.is_some_and(|source| source.dirty);
-                return Some(FilePageTarget {
-                    stack,
-                    pane: *pane,
-                    navigate: !dirty && meta.url != url,
-                });
-            }
-        }
-        for pane in panes {
-            for (_, page_co, meta, diff) in self.file_pages.iter() {
-                let stack = page_co.get();
-                if !meta.url.starts_with("file:")
-                    || self.child_of.get(stack).ok().map(Relationship::get) != Some(pane)
-                    || diff.is_some_and(|source| source.dirty)
-                {
-                    continue;
-                }
-                return Some(FilePageTarget {
-                    stack,
-                    pane,
-                    navigate: true,
-                });
-            }
-        }
-        None
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn file_stacks_for(
-        &self,
-        agent_pane: Entity,
-    ) -> Option<(Entity, Vec<(Entity, Entity, String)>)> {
-        let follow_pane = self.file_panes_for(agent_pane).into_iter().next()?;
-        let mut stacks = Vec::new();
-        for (page, page_co, meta, _) in self.file_pages.iter() {
-            if !meta.url.starts_with("file:") {
-                continue;
-            }
-            let stack = page_co.get();
-            let Ok(pane_co) = self.child_of.get(stack) else {
-                continue;
-            };
-            let pane = pane_co.get();
-            if pane != follow_pane {
-                continue;
-            }
-            stacks.push((stack, page, meta.url.clone()));
-        }
-        Some((follow_pane, stacks))
-    }
 }
 
 fn file_touch(
@@ -318,7 +139,7 @@ fn file_touch(
             for preview in previews {
                 if let Some(existing) = deduped
                     .iter_mut()
-                    .find(|existing| PageKind::reuses(&preview.url, &existing.url))
+                    .find(|existing| resolve.layout.reuses(&preview.url, &existing.url))
                 {
                     *existing = preview;
                 } else {
@@ -380,26 +201,8 @@ fn file_search(
         let Ok(Some(command)) = request.decode::<AgentFileSearch>() else {
             continue;
         };
-        let files = SearchGrouping::group(&command.matches);
-        let Some(first) = files.first() else {
-            continue;
-        };
-        writer.write(GlobalSearchRequest {
-            target_path: PathBuf::from(&first.path),
-            root: command.root.clone(),
-            query: command.query.clone(),
-            files,
-            capped: false,
-        });
-    }
-}
-
-struct SearchGrouping;
-
-impl SearchGrouping {
-    fn group(matches: &[FileSearchMatch]) -> Vec<ExplorerSearchFile> {
         let mut files: Vec<ExplorerSearchFile> = Vec::new();
-        for result in matches {
+        for result in &command.matches {
             let hit = ExplorerSearchMatch {
                 line: result.line,
                 col: result.col,
@@ -416,13 +219,26 @@ impl SearchGrouping {
                 capped: false,
             });
         }
-        files
+        let Some(first) = files.first() else {
+            continue;
+        };
+        writer.write(GlobalSearchRequest {
+            target_path: PathBuf::from(&first.path),
+            root: command.root.clone(),
+            query: command.query.clone(),
+            regex: false,
+            case_sensitive: false,
+            whole_word: false,
+            files,
+            capped: false,
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::follow_driver::TestRepo;
     use crate::host::test_support::test_settings;
     use vmux_api::protocol::{AgentFileSearch, AgentFileTouched, AgentRequestId, ProcessId};
     use vmux_layout::pane::PaneSplit;
@@ -949,56 +765,8 @@ mod tests {
             }
         }
 
-        struct TestRepo(PathBuf);
-
-        impl TestRepo {
-            fn path(&self) -> &Path {
-                &self.0
-            }
-        }
-
-        impl Drop for TestRepo {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
-            }
-        }
-
-        fn git(dir: &Path, args: &[&str]) {
-            let status = std::process::Command::new("git")
-                .current_dir(dir)
-                .args(args)
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_SYSTEM", "/dev/null")
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .status()
-                .unwrap();
-            assert!(status.success());
-        }
-
-        fn init_repo(name: &str) -> TestRepo {
-            let path = std::env::temp_dir().join(format!(
-                "vmux-agent-{name}-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::create_dir_all(&path).unwrap();
-            let repo = TestRepo(path);
-            git(repo.path(), &["init", "-q", "-b", "main"]);
-            git(repo.path(), &["config", "user.email", "t@example.com"]);
-            git(repo.path(), &["config", "user.name", "Test"]);
-            git(repo.path(), &["config", "commit.gpgsign", "false"]);
-            std::fs::write(repo.path().join("seed.txt"), "seed\n").unwrap();
-            git(repo.path(), &["add", "seed.txt"]);
-            git(repo.path(), &["commit", "-qm", "init"]);
-            repo
-        }
-
-        let current = init_repo("current");
-        let observed = init_repo("observed");
+        let current = TestRepo::new("current");
+        let observed = TestRepo::new("observed");
         let expected = observed
             .path()
             .canonicalize()

@@ -2,7 +2,9 @@
 
 use std::rc::Rc;
 
-use crate::event::{CheckForUpdatesEvent, SettingsRequest};
+use crate::event::{
+    CheckForUpdatesEvent, SettingsEditRequest, SettingsFilterRequest, SettingsRequest,
+};
 use crate::state::{
     SettingsBindingRow, SettingsRenderField, SettingsRenderFieldId, SettingsRenderFieldKind,
     SettingsRenderItem, SettingsRenderItemId, SettingsSection, SettingsSelectOption,
@@ -21,7 +23,7 @@ use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page
 )]
 pub(crate) struct SettingsPage;
@@ -47,11 +49,11 @@ pub fn Page() -> Element {
     use_theme();
     let state = use_ui_state::<SettingsUiState>().state;
     let SettingsUiState {
-        mut sections,
+        query,
+        sections,
         fields,
         items,
     } = state();
-    let mut search = use_signal(String::new);
 
     if sections.is_empty() {
         return rsx! {
@@ -61,10 +63,6 @@ pub fn Page() -> Element {
         };
     }
 
-    let query = search().trim().to_lowercase();
-    if !query.is_empty() {
-        sections.retain(|section| section.search_text.contains(&query));
-    }
     let catalog = SettingsRenderCatalog {
         fields: Rc::new(fields),
         items: Rc::new(items),
@@ -101,8 +99,10 @@ pub fn Page() -> Element {
                         r#type: "search",
                         class: "sticky top-0 z-10 mb-6 w-full rounded-xl bg-background/95 px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-border backdrop-blur-xl transition-colors placeholder:text-muted-foreground/60 focus:bg-muted/40 focus:ring-primary/40",
                         placeholder: "{search_placeholder}",
-                        value: "{search}",
-                        oninput: move |event: FormEvent| search.set(event.value()),
+                        value: "{query}",
+                        oninput: move |event: FormEvent| {
+                            let _ = send(&SettingsFilterRequest { query: event.value() });
+                        },
                     }
                     div { class: "flex flex-col gap-8",
                         for section in sections {
@@ -287,31 +287,20 @@ fn Toggle(path: String, value: bool) -> Element {
 }
 
 #[component]
-fn IntInput(path: String, value: u64) -> Element {
-    let mut draft = use_signal(|| value.to_string());
-    let observed = value.to_string();
-    use_effect(use_reactive!(|observed| {
-        if draft.peek().as_str() != observed.as_str() {
-            draft.set(observed);
-        }
-    }));
+fn IntInput(path: String, value: String) -> Element {
     rsx! {
         Input {
             attributes: attributes!(input {
                 r#type: "number",
                 step: "1",
-                value: "{draft}",
+                value: "{value}",
                 class: "w-24 text-right tabular-nums text-sm",
             }),
             oninput: move |event: FormEvent| {
-                let value = event.value();
-                draft.set(value.clone());
-                if let Ok(value) = value.parse::<u64>() {
-                    let _ = send(&SettingsRequest {
-                        path: path.clone(),
-                        value: serde_json::json!(value).into(),
-                    });
-                }
+                let _ = send(&SettingsEditRequest {
+                    path: path.clone(),
+                    draft: event.value(),
+                });
             },
             placeholder: None::<String>,
             children: rsx! {},
@@ -320,31 +309,20 @@ fn IntInput(path: String, value: u64) -> Element {
 }
 
 #[component]
-fn NumberInput(path: String, value: f64, step: f64) -> Element {
-    let mut draft = use_signal(|| value.to_string());
-    let observed = value.to_string();
-    use_effect(use_reactive!(|observed| {
-        if draft.peek().as_str() != observed.as_str() {
-            draft.set(observed);
-        }
-    }));
+fn NumberInput(path: String, value: String, step: f64) -> Element {
     rsx! {
         Input {
             attributes: attributes!(input {
                 r#type: "number",
                 step: "{step}",
-                value: "{draft}",
+                value: "{value}",
                 class: "w-24 text-right tabular-nums text-sm",
             }),
             oninput: move |event: FormEvent| {
-                let value = event.value();
-                draft.set(value.clone());
-                if let Ok(value) = value.parse::<f64>() {
-                    let _ = send(&SettingsRequest {
-                        path: path.clone(),
-                        value: serde_json::json!(value).into(),
-                    });
-                }
+                let _ = send(&SettingsEditRequest {
+                    path: path.clone(),
+                    draft: event.value(),
+                });
             },
             placeholder: None::<String>,
             children: rsx! {},
@@ -354,28 +332,19 @@ fn NumberInput(path: String, value: f64, step: f64) -> Element {
 
 #[component]
 fn TextInput(path: String, value: String, placeholder: Option<String>) -> Element {
-    let mut draft = use_signal(|| value.clone());
-    let observed = value;
     let placeholder = placeholder.unwrap_or_default();
-    use_effect(use_reactive!(|observed| {
-        if draft.peek().as_str() != observed.as_str() {
-            draft.set(observed);
-        }
-    }));
     rsx! {
         Input {
             attributes: attributes!(input {
                 r#type: "text",
-                value: "{draft}",
+                value: "{value}",
                 placeholder: "{placeholder}",
                 class: "w-full text-sm",
             }),
             oninput: move |event: FormEvent| {
-                let value = event.value();
-                draft.set(value.clone());
-                let _ = send(&SettingsRequest {
+                let _ = send(&SettingsEditRequest {
                     path: path.clone(),
-                    value: serde_json::json!(value).into(),
+                    draft: event.value(),
                 });
             },
             placeholder: None::<String>,

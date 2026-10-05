@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
+use crate::cn::cn;
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
 };
 use crate::components::skeleton::Skeleton;
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ProjectPickerProps {

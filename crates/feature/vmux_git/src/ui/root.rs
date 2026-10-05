@@ -18,7 +18,7 @@ pub fn Page() -> Element {
     use_context_provider(|| state);
     let GitPageState {
         snapshot,
-        branch_prompt,
+        controller,
         ..
     } = state;
 
@@ -58,7 +58,7 @@ pub fn Page() -> Element {
             } else {
                 EmptyRepository {}
             }
-            if branch_prompt().is_some() {
+            if controller().branch_prompt.is_some() {
                 BranchPromptDialog {}
             }
         }

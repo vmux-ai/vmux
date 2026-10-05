@@ -1,4 +1,4 @@
-use crate::{manifest, store};
+use crate::{driver, store};
 
 use bevy::prelude::Component;
 
@@ -100,7 +100,7 @@ impl PreparedExtensions {
             };
             let text = std::fs::read_to_string(source.join("manifest.json"))
                 .map_err(|error| error.to_string())?;
-            let parsed = manifest::ExtensionManifest::parse(&text)?;
+            let parsed = driver::ExtensionManifest::parse(&text)?;
             entry.permissions = parsed.permissions;
             entry.optional_permissions = parsed.optional_permissions;
             entry.host_permissions = parsed.host_permissions;

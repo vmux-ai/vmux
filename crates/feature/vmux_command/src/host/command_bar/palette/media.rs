@@ -6,16 +6,16 @@ use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
-    CommandPaletteRemoveAttachmentRequest, CommandPaletteUiState,
+    CommandPaletteRemoveAttachmentRequest,
 };
 use vmux_api::prompt_media::{
     ChatAttachPaths, ChatAttachments, ChatMediaEntries, ChatMediaListRequest, InlineMediaQuery,
     PromptComposerAttachment, PromptMediaOption,
 };
-use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::UiStateWrite;
 use vmux_ui::file_icon::FilePath;
 
-use crate::{BindCommands, CommandDispatch, CommandRegistry};
+use crate::CommandDispatch;
 
 use super::{
     NewPalette, OpenVersion, PaletteDraftInput, PaletteSnapshot, PendingPaletteRequest,
@@ -23,37 +23,6 @@ use super::{
 };
 
 const MEDIA_DEBOUNCE: Duration = Duration::from_millis(300);
-
-impl PaletteSnapshot {
-    fn project_media(&mut self) {
-        let mut options = Vec::with_capacity(self.0.media_entries.len());
-        for entry in &self.0.media_entries {
-            options.push(PromptMediaOption {
-                key: format!("media-{}", entry.path),
-                name: entry.name.clone(),
-                display_path: entry.display_path(),
-                preview_data_url: entry.preview_data_url.clone(),
-                label: FilePath(&entry.name).extension_label(),
-                is_dir: entry.is_dir,
-            });
-        }
-        self.0.media_options = options;
-    }
-
-    fn project_attachments(&mut self) {
-        let mut attachments = Vec::with_capacity(self.0.attachments.len());
-        for (index, attachment) in self.0.attachments.iter().enumerate() {
-            attachments.push(PromptComposerAttachment {
-                key: format!("attachment-{}", attachment.path),
-                name: attachment.name.clone(),
-                label: FilePath(&attachment.name).extension_label(),
-                preview_data_url: attachment.preview_data_url.clone(),
-                remove_index: Some(index as u32),
-            });
-        }
-        self.0.composer_attachments = attachments;
-    }
-}
 
 pub(super) struct PaletteMediaPlugin;
 
@@ -65,7 +34,6 @@ impl Plugin for PaletteMediaPlugin {
             CommandPaletteMediaActivateRequest,
             CommandPaletteMediaDismissRequest,
         )>::default())
-            .add_systems(Startup, bind.in_set(BindCommands))
             .add_observer(update)
             .add_observer(remove_attachment)
             .add_observer(receive_attachments)
@@ -78,7 +46,8 @@ impl Plugin for PaletteMediaPlugin {
             .add_observer(activate)
             .add_observer(dismiss)
             .add_systems(PreUpdate, attach)
-            .add_systems(Update, request);
+            .add_systems(Update, (queue, request).chain())
+            .add_systems(PostUpdate, project.before(super::project));
     }
 }
 
@@ -90,32 +59,8 @@ pub(super) struct PaletteMedia {
     generation: RequestGeneration,
 }
 
-impl PaletteMedia {
-    fn update_query(
-        &mut self,
-        target: Entity,
-        query: Option<String>,
-        snapshot: &mut CommandPaletteUiState,
-    ) -> Option<MediaRequestDelay> {
-        if self.query == query {
-            return None;
-        }
-        self.query = query.clone();
-        let generation = self.generation.advance();
-        snapshot.media_query = query.clone();
-        snapshot.media_entries.clear();
-        snapshot.media_options.clear();
-        snapshot.media_loading = query.is_some();
-        snapshot.media_selected = 0;
-        let query = query?;
-        Some(MediaRequestDelay(RequestDelay::new(
-            target,
-            generation,
-            query,
-            MEDIA_DEBOUNCE,
-        )))
-    }
-}
+#[derive(Component)]
+struct PendingMediaQuery(Option<String>);
 
 #[vmux_command::command]
 struct CommandBarMediaNextBinding;
@@ -128,13 +73,6 @@ struct CommandBarMediaChooseBinding;
 
 #[vmux_command::command]
 struct CommandBarMediaDismissBinding;
-
-fn bind(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<CommandBarMediaNextBinding>(&mut commands);
-    registry.bind::<CommandBarMediaPreviousBinding>(&mut commands);
-    registry.bind::<CommandBarMediaChooseBinding>(&mut commands);
-    registry.bind::<CommandBarMediaDismissBinding>(&mut commands);
-}
 
 fn attach(pages: Query<Entity, NewPalette<PaletteMedia>>, mut commands: Commands) {
     for page in &pages {
@@ -174,13 +112,7 @@ fn update(
     } else {
         None
     };
-    if let Some(request) = media.update_query(target, query, &mut snapshot.0) {
-        commands.spawn((
-            Name::new("Command Palette Media Request"),
-            request,
-            PendingPaletteRequest,
-        ));
-    }
+    commands.entity(target).insert(PendingMediaQuery(query));
 }
 
 fn move_selection(
@@ -290,16 +222,12 @@ fn highlight(
 
 fn activate(
     trigger: On<UiInput<CommandPaletteMediaActivateRequest>>,
-    mut palettes: Query<(
-        &mut PaletteMedia,
-        &mut PaletteDraftInput,
-        &mut PaletteSnapshot,
-    )>,
+    mut palettes: Query<(&PaletteMedia, &mut PaletteDraftInput, &PaletteSnapshot)>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
     let request = &trigger.event().payload;
-    let Ok((mut media, mut draft, mut snapshot)) = palettes.get_mut(target) else {
+    let Ok((media, mut draft, snapshot)) = palettes.get_mut(target) else {
         return;
     };
     if !media.open.matches(request.open_id) || !media.start {
@@ -329,27 +257,19 @@ fn activate(
     draft.navigating = false;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
     let next_query = InlineMediaQuery::parse(&draft.query).map(|query| query.query.to_string());
-    if let Some(request) = media.update_query(target, next_query, &mut snapshot.0) {
-        commands.spawn((
-            Name::new("Command Palette Media Request"),
-            request,
-            PendingPaletteRequest,
-        ));
-    }
+    commands
+        .entity(target)
+        .insert(PendingMediaQuery(next_query));
 }
 
 fn dismiss(
     trigger: On<UiInput<CommandPaletteMediaDismissRequest>>,
-    mut palettes: Query<(
-        &mut PaletteMedia,
-        &mut PaletteDraftInput,
-        &mut PaletteSnapshot,
-    )>,
+    mut palettes: Query<(&PaletteMedia, &mut PaletteDraftInput, &PaletteSnapshot)>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
     let request = &trigger.event().payload;
-    let Ok((mut media, mut draft, mut snapshot)) = palettes.get_mut(target) else {
+    let Ok((media, mut draft, _snapshot)) = palettes.get_mut(target) else {
         return;
     };
     if !media.open.matches(request.open_id) || !media.start {
@@ -362,13 +282,7 @@ fn dismiss(
     draft.selected = 0;
     draft.navigating = false;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
-    if let Some(request) = media.update_query(target, None, &mut snapshot.0) {
-        commands.spawn((
-            Name::new("Command Palette Media Request"),
-            request,
-            PendingPaletteRequest,
-        ));
-    }
+    commands.entity(target).insert(PendingMediaQuery(None));
 }
 
 fn remove_attachment(
@@ -386,7 +300,6 @@ fn remove_attachment(
         .0
         .attachments
         .retain(|attachment| attachment.path != request.path);
-    snapshot.project_attachments();
 }
 
 fn receive_attachments(
@@ -395,7 +308,7 @@ fn receive_attachments(
 ) {
     let Some(response) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<ChatAttachments>>::payload(
-            trigger.event().patch(),
+            trigger.event().update(),
         )
     else {
         return;
@@ -408,7 +321,6 @@ fn receive_attachments(
     }
     if response.merge_into(&mut snapshot.0.attachments) {
         snapshot.0.attachment_sequence = snapshot.0.attachment_sequence.wrapping_add(1).max(1);
-        snapshot.project_attachments();
     }
 }
 
@@ -420,14 +332,17 @@ fn receive_entries(
 ) {
     let Some(response) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<ChatMediaEntries>>::payload(
-            trigger.event().patch(),
+            trigger.event().update(),
         )
     else {
         return;
     };
     let target = trigger.event().webview();
     for (entity, request) in &pending {
-        if request.matches(target, response) {
+        if request.target == target
+            && request.generation == response.request_id
+            && request.query == response.query
+        {
             commands.entity(entity).despawn();
         }
     }
@@ -441,7 +356,6 @@ fn receive_entries(
         return;
     }
     snapshot.0.media_entries.clone_from(&response.entries);
-    snapshot.project_media();
     snapshot.0.media_loading = false;
     snapshot.0.media_selected = snapshot
         .0
@@ -451,6 +365,37 @@ fn receive_entries(
 
 #[derive(Component)]
 struct MediaRequestDelay(RequestDelay);
+
+fn queue(
+    pending: Query<(Entity, &PendingMediaQuery)>,
+    mut palettes: Query<(&mut PaletteMedia, &mut PaletteSnapshot)>,
+    mut commands: Commands,
+) {
+    for (target, pending) in &pending {
+        commands.entity(target).remove::<PendingMediaQuery>();
+        let Ok((mut media, mut snapshot)) = palettes.get_mut(target) else {
+            continue;
+        };
+        if media.query == pending.0 {
+            continue;
+        }
+        media.query.clone_from(&pending.0);
+        let generation = media.generation.advance();
+        snapshot.0.media_query.clone_from(&pending.0);
+        snapshot.0.media_entries.clear();
+        snapshot.0.media_options.clear();
+        snapshot.0.media_loading = pending.0.is_some();
+        snapshot.0.media_selected = 0;
+        let Some(query) = pending.0.clone() else {
+            continue;
+        };
+        commands.spawn((
+            Name::new("Command Palette Media Request"),
+            MediaRequestDelay(RequestDelay::new(target, generation, query, MEDIA_DEBOUNCE)),
+            PendingPaletteRequest,
+        ));
+    }
+}
 
 fn request(
     delays: Query<(Entity, &MediaRequestDelay)>,
@@ -496,24 +441,51 @@ struct MediaResponsePending {
     query: String,
 }
 
-impl MediaResponsePending {
-    fn matches(&self, target: Entity, response: &ChatMediaEntries) -> bool {
-        self.target == target
-            && self.generation == response.request_id
-            && self.query == response.query
+fn project(mut snapshots: Query<&mut PaletteSnapshot, Changed<PaletteSnapshot>>) {
+    for mut snapshot in &mut snapshots {
+        let mut options = Vec::with_capacity(snapshot.0.media_entries.len());
+        for entry in &snapshot.0.media_entries {
+            options.push(PromptMediaOption {
+                key: format!("media-{}", entry.path),
+                name: entry.name.clone(),
+                display_path: entry.display_path(),
+                preview_data_url: entry.preview_data_url.clone(),
+                label: FilePath(&entry.name).extension_label(),
+                is_dir: entry.is_dir,
+            });
+        }
+        if snapshot.0.media_options != options {
+            snapshot.0.media_options = options;
+        }
+
+        let mut attachments = Vec::with_capacity(snapshot.0.attachments.len());
+        for (index, attachment) in snapshot.0.attachments.iter().enumerate() {
+            attachments.push(PromptComposerAttachment {
+                key: format!("attachment-{}", attachment.path),
+                name: attachment.name.clone(),
+                label: FilePath(&attachment.name).extension_label(),
+                preview_data_url: attachment.preview_data_url.clone(),
+                remove_index: Some(index as u32),
+            });
+        }
+        if snapshot.0.composer_attachments != attachments {
+            snapshot.0.composer_attachments = attachments;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::command_bar::OpenId;
+    use vmux_api::command_bar::{CommandPaletteUiState, OpenId};
     use vmux_api::prompt_media::ChatMediaEntry;
 
     #[test]
     fn navigation_and_dismiss_update_host_state() {
         let mut app = App::new();
-        app.add_observer(move_cursor).add_observer(dismiss);
+        app.add_observer(move_cursor)
+            .add_observer(dismiss)
+            .add_systems(Update, queue);
         let open_id = OpenId(7);
         let mut media = PaletteMedia::default();
         assert_eq!(media.open.accept(open_id), Some(true));
@@ -570,6 +542,7 @@ mod tests {
             webview: page,
             payload: CommandPaletteMediaDismissRequest { open_id },
         });
+        app.update();
 
         let input = app.world().get::<PaletteDraftInput>(page).unwrap();
         assert_eq!(input.query, "show ");

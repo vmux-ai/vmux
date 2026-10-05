@@ -18,7 +18,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 vmux_api = { path = "../../util/vmux_api" }
-vmux_native = { path = "../../util/vmux_native" }
+vmux_page = { path = "../../util/vmux_page" }
 vmux_path = { path = "../../util/vmux_path" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]

@@ -66,6 +66,7 @@ mod file_event_tests {
         let oe = OpenEditorsEvent {
             items: vec![OpenEditorItem {
                 name: "lib.rs".into(),
+                context: "src".into(),
                 path: "/r/src/lib.rs".into(),
                 active: true,
                 dirty: false,
@@ -143,8 +144,7 @@ mod file_event_tests {
     #[test]
     fn preview_kind_rkyv_roundtrip() {
         let k = PreviewKind::Image {
-            mime: "image/png".into(),
-            bytes: vec![1, 2, 3],
+            url: "data:image/png;base64,AQID".into(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&k).unwrap();
         let back = rkyv::from_bytes::<PreviewKind, rkyv::rancor::Error>(&bytes).unwrap();
@@ -335,6 +335,8 @@ mod tests {
                 kind: vmux_api::knowledge::KnowledgePropertyKind::Tags,
                 values: vec!["test".into()],
             }],
+            properties_open: true,
+            property_drafts: Vec::new(),
             blocks: vec![NoteBlock {
                 start_line: 0,
                 end_line: 1,
@@ -345,6 +347,8 @@ mod tests {
                 },
             }],
             active: Some(0),
+            editing: true,
+            edit_line: None,
             references: Vec::new(),
             reveal_line: None,
         };

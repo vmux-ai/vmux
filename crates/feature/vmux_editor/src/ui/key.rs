@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
-use vmux_api::input::UiKeyContext;
+use vmux_api::input::KeyContextRequest;
 use vmux_ecs::event::FilePanelState;
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{KeyClaim, send, use_key_claim};
 
-pub(crate) fn use_file_keys(panel: Signal<FilePanelState>) -> FileKeys {
+pub(crate) fn use_file_keys(panel: ReadSignal<FilePanelState>) -> FileKeys {
     let keys = FileKeys {
         claim: use_key_claim(Unclaimed::Types, move || {
             let mut keys = vec!["files".to_string()];
@@ -15,7 +15,7 @@ pub(crate) fn use_file_keys(panel: Signal<FilePanelState>) -> FileKeys {
         }),
     };
     use_drop(move || {
-        let _ = send(&UiKeyContext { keys: Vec::new() });
+        let _ = send(&KeyContextRequest { keys: Vec::new() });
     });
     keys
 }

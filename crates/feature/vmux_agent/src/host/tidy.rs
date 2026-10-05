@@ -1,114 +1,40 @@
+#[cfg(test)]
 use std::path::PathBuf;
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::LastActivatedAt;
+use vmux_ecs::FileUiStateWrite;
 use vmux_ecs::ProcessId;
-use vmux_ecs::event::{FileTidyPromptEvent, FileTidyRequest, TidyChoice};
-use vmux_ecs::host::FileUiStateWrite;
+use vmux_ecs::event::{FileTidyRequest, FileTidyState, TidyChoice};
 use vmux_ecs::notify::AgentAttention;
 use vmux_ecs::team::Agent;
-use vmux_git::GitRepository;
 use vmux_layout::CloseStackRequest;
 use vmux_layout::stack::ComputeFocusSet;
+#[cfg(test)]
 use vmux_path::FileUrl;
 use vmux_session::{AcpSession, AgentRunState};
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
-use crate::host::follow::AgentFileLayout;
-
-pub struct Plugin;
+use super::tidy_driver::{PendingTidy, TidyFiles};
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TidySet;
 
-impl bevy::app::Plugin for Plugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<AgentAttention>()
-            .add_message::<CloseStackRequest>()
-            .add_message::<SettingsSaveRequest>()
-            .add_plugins(UiEventPlugin::<(FileTidyRequest,)>::default())
-            .add_observer(request)
-            .add_systems(
-                Update,
-                attention
-                    .in_set(TidySet)
-                    .after(ComputeFocusSet)
-                    .after(crate::host::attention::TurnEndedSet),
-            )
-            .add_systems(Update, idle.after(ComputeFocusSet));
-    }
-}
-
-#[derive(Component)]
-struct PendingTidy {
-    closable: Vec<Entity>,
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct TidyFiles<'w, 's> {
-    layout: AgentFileLayout<'w, 's>,
-    last_activated: Query<'w, 's, &'static LastActivatedAt>,
-    pending: Query<'w, 's, (), With<PendingTidy>>,
-    close: MessageWriter<'w, CloseStackRequest>,
-    commands: Commands<'w, 's>,
-}
-
-impl TidyFiles<'_, '_> {
-    fn run(&mut self, agent_pane: Entity, settings: &AppSettings) {
-        let Some((follow_pane, stacks)) = self.layout.file_stacks_for(agent_pane) else {
-            return;
-        };
-        if self.pending.get(follow_pane).is_ok() {
-            return;
-        }
-        let mut repos: Vec<(PathBuf, std::collections::HashSet<String>)> = Vec::new();
-        let rows: Vec<(Entity, i64, bool)> = stacks
-            .iter()
-            .map(|(stack, _page, url)| {
-                let timestamp = self
-                    .last_activated
-                    .get(*stack)
-                    .map(|timestamp| timestamp.0)
-                    .unwrap_or(i64::MIN);
-                let changed = FileUrl::parse(url)
-                    .and_then(|url| url.path())
-                    .map(|path| is_changed(&path, &mut repos))
-                    .unwrap_or(false);
-                (*stack, timestamp, changed)
-            })
-            .collect();
-        let closable = decide_closable(&rows, settings.agent.tidy_files_max);
-        if closable.is_empty() {
-            return;
-        }
-        if settings.agent.tidy_files_auto {
-            for stack in closable {
-                self.close.write(CloseStackRequest::tidying(stack));
-            }
-            return;
-        }
-        let count = closable.len() as u32;
-        let active_page = stacks
-            .iter()
-            .max_by_key(|(stack, _, _)| {
-                self.last_activated
-                    .get(*stack)
-                    .map(|timestamp| timestamp.0)
-                    .unwrap_or(i64::MIN)
-            })
-            .map(|(_, page, _)| *page);
-        if let Some(page) = active_page {
-            self.commands.trigger(FileUiStateWrite::from_event(
-                page,
-                &FileTidyPromptEvent { count },
-            ));
-            self.commands
-                .entity(follow_pane)
-                .insert(PendingTidy { closable });
-        }
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_message::<AgentAttention>()
+        .add_message::<CloseStackRequest>()
+        .add_message::<SettingsSaveRequest>()
+        .add_plugins(UiEventPlugin::<(FileTidyRequest,)>::default())
+        .add_observer(request)
+        .add_systems(
+            Update,
+            attention
+                .in_set(TidySet)
+                .after(ComputeFocusSet)
+                .after(crate::host::attention::TurnEndedSet),
+        )
+        .add_systems(Update, idle.after(ComputeFocusSet));
 }
 
 fn request(
@@ -120,10 +46,14 @@ fn request(
     mut close: MessageWriter<CloseStackRequest>,
     mut commands: Commands,
 ) {
+    let webview = trigger.event().webview;
+    commands.trigger(FileUiStateWrite::from_event(
+        webview,
+        &FileTidyState::default(),
+    ));
     let Some(mut settings) = settings else {
         return;
     };
-    let webview = trigger.event().webview;
     let Ok(stack) = child_of.get(webview).map(Relationship::get) else {
         return;
     };
@@ -152,48 +82,6 @@ fn request(
     }
 }
 
-fn decide_closable(stacks: &[(Entity, i64, bool)], max: usize) -> Vec<Entity> {
-    if stacks.len() <= max {
-        return Vec::new();
-    }
-    let active = stacks
-        .iter()
-        .max_by_key(|(_, ts, _)| *ts)
-        .map(|(s, _, _)| *s);
-    stacks
-        .iter()
-        .filter(|(s, _, changed)| Some(*s) != active && !changed)
-        .map(|(s, _, _)| *s)
-        .collect()
-}
-
-fn is_changed(
-    abs: &std::path::Path,
-    repos: &mut Vec<(PathBuf, std::collections::HashSet<String>)>,
-) -> bool {
-    let abs = abs.canonicalize().unwrap_or_else(|_| abs.to_path_buf());
-    if let Some((root, set)) = repos.iter().find(|(r, _)| abs.starts_with(r)) {
-        return set.contains(&rel_str(root, &abs));
-    }
-    match GitRepository::discover(&abs)
-        .and_then(|repository| repository.dirty_paths().map(|set| (repository, set)))
-    {
-        Ok((repository, set)) => {
-            let root = repository.path().to_path_buf();
-            let changed = set.contains(&rel_str(&root, &abs));
-            repos.push((root, set));
-            changed
-        }
-        Err(_) => false,
-    }
-}
-
-fn rel_str(root: &std::path::Path, abs: &std::path::Path) -> String {
-    abs.strip_prefix(root)
-        .map(|r| r.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
 fn attention(
     mut reader: MessageReader<AgentAttention>,
     settings: Option<Res<AppSettings>>,
@@ -212,7 +100,7 @@ fn attention(
         let Ok(process) = agents.get(attention.entity) else {
             continue;
         };
-        let Some(agent_pane) = tidy.layout.agent_pane(*process) else {
+        let Some(agent_pane) = tidy.agent_pane(*process) else {
             continue;
         };
         tidy.run(agent_pane, &settings);
@@ -234,7 +122,7 @@ fn idle(
         if !matches!(state, AgentRunState::Idle) {
             continue;
         }
-        let Some(agent_pane) = tidy.layout.agent_pane(session.anchor) else {
+        let Some(agent_pane) = tidy.agent_pane(session.anchor) else {
             continue;
         };
         tidy.run(agent_pane, &settings);
@@ -269,7 +157,7 @@ mod tests {
             (ids[1], 20, false),
             (ids[2], 30, false),
         ];
-        assert!(decide_closable(&stacks, 5).is_empty());
+        assert!(crate::host::tidy_driver::TidyPolicy::closable(&stacks, 5).is_empty());
     }
 
     #[test]
@@ -284,7 +172,7 @@ mod tests {
             (ids[4], 50, false),
             (ids[5], 60, false),
         ];
-        let mut got = decide_closable(&stacks, 5);
+        let mut got = crate::host::tidy_driver::TidyPolicy::closable(&stacks, 5);
         got.sort();
         let mut want = vec![ids[0], ids[2], ids[4]];
         want.sort();
@@ -300,6 +188,6 @@ mod tests {
             .enumerate()
             .map(|(i, &e)| (e, i as i64, true))
             .collect();
-        assert!(decide_closable(&stacks, 5).is_empty());
+        assert!(crate::host::tidy_driver::TidyPolicy::closable(&stacks, 5).is_empty());
     }
 }

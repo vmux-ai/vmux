@@ -1,7 +1,7 @@
 use crate::event::{FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH};
 use crate::event::{FLAG_UNDERLINE, TermColor, TermSpan};
 use vmux_api::terminal::CursorStyle;
-use vmux_ui::util::cn;
+use vmux_ui::cn::cn;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SpanBackgroundOverlay {

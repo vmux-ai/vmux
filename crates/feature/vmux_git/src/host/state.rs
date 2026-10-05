@@ -1,24 +1,27 @@
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::page::PageReady;
 
 use crate::event::GitDiffRow;
+#[cfg(test)]
+use crate::event::GitDiffViewport;
 use crate::event::{
-    DiffKind, GitBranchLog, GitBranchLogRequest, GitDiffViewport, GitOperationError,
-    GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
+    DiffKind, GitBranchLog, GitBranchLogRequest, GitOperationError, GitOperationResult,
+    GitRepositoryRequest, GitRepositorySnapshot,
 };
-use crate::state::{GitCommandLogEntry, GitPageSnapshot, GitUiState};
+use crate::state::{GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState};
 
-use super::controller::GitController;
+use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
 use super::directory::GitDirectoryNavigation;
 use super::job::{BranchLogJob, RepositoryJob};
 use super::job_runner::{GitJob, GitJobFailure};
 use super::repository::GitRepository;
 use super::watch::GitWatch;
 
-type GitUiStateUpdates = vmux_ecs::host::UiState<GitUiState>;
+type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
 
 const DIFF_CONTEXT_LINES: usize = 3;
 const DIFF_REVEAL_LINES: usize = 20;
@@ -27,137 +30,38 @@ pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::host::UiStatePlugin::<GitUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
             .add_plugins(UiEventPlugin::<(GitRepositoryRequest, GitBranchLogRequest)>::default())
             .add_observer(page_ready)
             .add_observer(repository_request)
             .add_observer(branch_log_request)
-            .add_systems(Update, publish.after(super::GitUpdateSet::Jobs));
+            .add_systems(
+                Update,
+                (project_diff, publish)
+                    .chain()
+                    .after(super::controller::ControllerSet::BranchLog),
+            );
     }
 }
 
 #[derive(Component, Default)]
-#[require(GitUiStateUpdates, GitController, GitDirectoryNavigation)]
+#[require(
+    GitUiStateUpdates,
+    GitPageControllerState,
+    GitDirectoryNavigation,
+    PendingBranchCheckout,
+    SelectionRevealRevision,
+    GitCommitResultSequence,
+    GitDiffRevealRanges
+)]
 pub(super) struct GitState {
-    snapshot: GitPageSnapshot,
-    revealed_diff: Vec<(usize, usize)>,
+    pub(super) snapshot: GitPageSnapshot,
 }
 
+#[derive(Component, Default)]
+pub(super) struct GitDiffRevealRanges(pub(super) Vec<(usize, usize)>);
+
 impl GitState {
-    pub(super) fn reset(&mut self, workspace: String) {
-        self.snapshot = GitPageSnapshot {
-            workspace,
-            loading: true,
-            ..Default::default()
-        };
-        self.revealed_diff.clear();
-    }
-
-    fn start_repository(&mut self, path: &Path) {
-        self.snapshot.workspace = path.to_string_lossy().into_owned();
-        self.snapshot.loading = true;
-        self.snapshot.message.clear();
-    }
-
-    pub(super) fn set_repository(&mut self, event: GitRepositorySnapshot) {
-        self.snapshot.workspace.clone_from(&event.repo_root);
-        self.snapshot.repository = Some(event);
-        self.snapshot.loading = false;
-        self.snapshot.message.clear();
-    }
-
-    pub(super) fn start_directory(&mut self, path: &Path) {
-        self.snapshot.workspace = path.to_string_lossy().into_owned();
-        self.snapshot.loading = true;
-        self.snapshot.message.clear();
-    }
-
-    pub(super) fn finish_directory(&mut self) {
-        self.snapshot.repository = None;
-        self.snapshot.loading = false;
-        self.snapshot.message.clear();
-    }
-
-    pub(super) fn set_branch_log(&mut self, event: GitBranchLog) {
-        self.snapshot.branch_log = Some(event);
-    }
-
-    pub(super) fn start_diff(&mut self, target_changed: bool) {
-        self.snapshot.diff_loading = target_changed || self.snapshot.diff_viewport.is_none();
-        if target_changed {
-            self.snapshot.diff_viewport = None;
-            self.snapshot.diff_rows.clear();
-            self.revealed_diff.clear();
-        }
-    }
-
-    pub(super) fn set_diff_viewport(&mut self, event: GitDiffViewport) {
-        self.snapshot.diff_loading = false;
-        self.snapshot.diff_viewport = Some(event);
-        self.revealed_diff.clear();
-        self.project_diff();
-    }
-
-    pub(super) fn reveal_diff(&mut self, start: u32, end: u32) -> bool {
-        let range = (start as usize, end as usize);
-        if range.0 >= range.1 || self.revealed_diff.contains(&range) {
-            return false;
-        }
-        self.revealed_diff.push(range);
-        self.project_diff();
-        true
-    }
-
-    pub(super) fn start_fetch(&mut self) {
-        self.snapshot.fetching = true;
-    }
-
-    pub(super) fn apply_result(&mut self, event: &GitOperationResult) {
-        self.push_log(GitCommandLogEntry {
-            operation: event.operation.clone(),
-            message: event.message.clone(),
-            ok: event.ok,
-        });
-        if event.operation == "fetch" {
-            self.snapshot.fetching = false;
-        }
-        if event.ok {
-            self.snapshot.message.clear();
-        } else {
-            self.snapshot.message.clone_from(&event.message);
-        }
-        self.snapshot.nonce = self.snapshot.nonce.wrapping_add(1);
-        self.snapshot.result = Some(event.clone());
-        self.snapshot.result_sequence = self.snapshot.result_sequence.wrapping_add(1).max(1);
-    }
-
-    pub(super) fn apply_error(&mut self, event: &GitOperationError) {
-        self.push_log(GitCommandLogEntry {
-            operation: String::new(),
-            message: event.message.clone(),
-            ok: false,
-        });
-        self.snapshot.loading = false;
-        self.snapshot.fetching = false;
-        self.snapshot.message.clone_from(&event.message);
-    }
-
-    pub(super) fn apply_workspace_error(&mut self, message: String) {
-        self.push_log(GitCommandLogEntry {
-            operation: String::new(),
-            message: message.clone(),
-            ok: false,
-        });
-        self.snapshot.loading = false;
-        self.snapshot.fetching = false;
-        self.snapshot.message = message;
-    }
-
-    pub(super) fn mark_changed(&mut self) -> Option<String> {
-        self.snapshot.nonce = self.snapshot.nonce.wrapping_add(1);
-        (!self.snapshot.workspace.is_empty()).then(|| self.snapshot.workspace.clone())
-    }
-
     pub(super) fn workspace(&self) -> &str {
         &self.snapshot.workspace
     }
@@ -173,18 +77,177 @@ impl GitState {
     pub(super) fn branch_log(&self) -> Option<&GitBranchLog> {
         self.snapshot.branch_log.as_ref()
     }
+}
 
-    fn push_log(&mut self, entry: GitCommandLogEntry) {
-        if self.snapshot.command_log.len() >= 24 {
-            self.snapshot.command_log.remove(0);
-        }
-        self.snapshot.command_log.push(entry);
+#[derive(SystemParam)]
+pub(super) struct GitStates<'w, 's> {
+    states: Query<'w, 's, &'static mut GitState>,
+}
+
+impl GitStates<'_, '_> {
+    pub(super) fn contains(&self, entity: Entity) -> bool {
+        self.states.contains(entity)
     }
 
-    fn project_diff(&mut self) {
-        let Some(viewport) = self.snapshot.diff_viewport.as_ref() else {
-            self.snapshot.diff_rows.clear();
+    pub(super) fn workspace(&self, entity: Entity) -> Option<String> {
+        self.states
+            .get(entity)
+            .ok()
+            .map(|state| state.snapshot.workspace.clone())
+    }
+
+    pub(super) fn reset(&mut self, entity: Entity, workspace: String) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
             return;
+        };
+        state.snapshot = GitPageSnapshot {
+            workspace,
+            loading: true,
+            ..Default::default()
+        };
+    }
+
+    pub(super) fn start_repository(&mut self, entity: Entity, path: &Path) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        state.snapshot.workspace = path.to_string_lossy().into_owned();
+        state.snapshot.loading = true;
+        state.snapshot.message.clear();
+    }
+
+    pub(super) fn set_repository(&mut self, entity: Entity, event: GitRepositorySnapshot) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        state.snapshot.workspace.clone_from(&event.repo_root);
+        state.snapshot.repository = Some(event);
+        state.snapshot.loading = false;
+        state.snapshot.message.clear();
+    }
+
+    pub(super) fn start_directory(&mut self, entity: Entity, path: &Path) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        state.snapshot.workspace = path.to_string_lossy().into_owned();
+        state.snapshot.loading = true;
+        state.snapshot.message.clear();
+    }
+
+    pub(super) fn finish_directory(&mut self, entity: Entity) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        state.snapshot.repository = None;
+        state.snapshot.loading = false;
+        state.snapshot.message.clear();
+    }
+
+    pub(super) fn set_branch_log(&mut self, entity: Entity, event: GitBranchLog) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        state.snapshot.branch_log = Some(event);
+    }
+
+    pub(super) fn start_fetch(&mut self, entity: Entity) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        state.snapshot.fetching = true;
+    }
+
+    pub(super) fn apply_result(
+        &mut self,
+        entity: Entity,
+        event: &GitOperationResult,
+    ) -> Option<String> {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return None;
+        };
+        Self::push_log(
+            &mut state,
+            GitCommandLogEntry {
+                operation: event.operation.clone(),
+                message: event.message.clone(),
+                ok: event.ok,
+            },
+        );
+        if event.operation == "fetch" {
+            state.snapshot.fetching = false;
+        }
+        if event.ok {
+            state.snapshot.message.clear();
+        } else {
+            state.snapshot.message.clone_from(&event.message);
+        }
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1);
+        state.snapshot.result = Some(event.clone());
+        state.snapshot.result_sequence = state.snapshot.result_sequence.wrapping_add(1).max(1);
+        Some(state.snapshot.workspace.clone())
+    }
+
+    pub(super) fn apply_error(&mut self, entity: Entity, event: &GitOperationError) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        Self::push_log(
+            &mut state,
+            GitCommandLogEntry {
+                operation: String::new(),
+                message: event.message.clone(),
+                ok: false,
+            },
+        );
+        state.snapshot.loading = false;
+        state.snapshot.fetching = false;
+        state.snapshot.message.clone_from(&event.message);
+    }
+
+    pub(super) fn apply_workspace_error(&mut self, entity: Entity, message: String) {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return;
+        };
+        Self::push_log(
+            &mut state,
+            GitCommandLogEntry {
+                operation: String::new(),
+                message: message.clone(),
+                ok: false,
+            },
+        );
+        state.snapshot.loading = false;
+        state.snapshot.fetching = false;
+        state.snapshot.message = message;
+    }
+
+    pub(super) fn mark_changed(&mut self, entity: Entity) -> Option<String> {
+        let Ok(mut state) = self.states.get_mut(entity) else {
+            return None;
+        };
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1);
+        (!state.snapshot.workspace.is_empty()).then(|| state.snapshot.workspace.clone())
+    }
+
+    fn push_log(state: &mut GitState, entry: GitCommandLogEntry) {
+        if state.snapshot.command_log.len() >= 24 {
+            state.snapshot.command_log.remove(0);
+        }
+        state.snapshot.command_log.push(entry);
+    }
+}
+
+fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
+    for (mut state, revealed) in &mut pages {
+        if !state.is_changed() && !revealed.is_changed() {
+            continue;
+        }
+        let Some(viewport) = state.snapshot.diff_viewport.as_ref() else {
+            if !state.snapshot.diff_rows.is_empty() {
+                state.snapshot.diff_rows.clear();
+            }
+            continue;
         };
         let lines = &viewport.lines;
         let mut visible = vec![false; lines.len()];
@@ -196,7 +259,7 @@ impl GitState {
             let end = (index + DIFF_CONTEXT_LINES + 1).min(lines.len());
             visible[start..end].fill(true);
         }
-        for (start, end) in &self.revealed_diff {
+        for (start, end) in &revealed.0 {
             let start = (*start).min(lines.len());
             let end = (*end).min(lines.len());
             if start < end {
@@ -231,7 +294,9 @@ impl GitState {
                 reveal_end: reveal_end as u32,
             });
         }
-        self.snapshot.diff_rows = rows;
+        if state.snapshot.diff_rows != rows {
+            state.snapshot.diff_rows = rows;
+        }
     }
 }
 
@@ -254,14 +319,12 @@ fn repository_request(
     trigger: On<UiInput<GitRepositoryRequest>>,
     watch: Option<NonSendMut<GitWatch>>,
     mut pages: Query<&mut vmux_ecs::PageMetadata>,
-    mut views: Query<&mut GitState>,
+    mut states: GitStates,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
-    if let Ok(mut view) = views.get_mut(webview) {
-        view.start_repository(&path);
-    }
+    states.start_repository(webview, &path);
     let repo_root = if let Some(mut watch) = watch {
         match watch.subscribe(webview, &path) {
             Ok(repo_root) => repo_root,
@@ -311,7 +374,7 @@ type GitStateQuery<'w, 's> = Query<
     (
         Entity,
         Ref<'static, GitState>,
-        Ref<'static, GitController>,
+        Ref<'static, GitPageControllerState>,
         Ref<'static, GitDirectoryNavigation>,
     ),
 >;
@@ -319,19 +382,19 @@ type GitStateQuery<'w, 's> = Query<
 fn publish(views: GitStateQuery, mut commands: Commands) {
     for (entity, view, controller, directory) in &views {
         if view.is_changed() {
-            commands.trigger(vmux_ecs::host::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                 entity,
                 &view.snapshot,
             ));
         }
         if controller.is_changed() {
-            commands.trigger(vmux_ecs::host::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                 entity,
-                controller.state(),
+                &*controller,
             ));
         }
         if directory.is_changed() {
-            commands.trigger(vmux_ecs::host::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                 entity,
                 &directory.state(),
             ));
@@ -354,26 +417,40 @@ mod tests {
         }
     }
 
-    fn state_with_change(line_count: u32, changed: usize) -> GitState {
+    fn app_with_change(line_count: u32, changed: usize) -> (App, Entity) {
         let mut lines = (1..=line_count)
             .map(|number| line(DiffKind::Context, number))
             .collect::<Vec<_>>();
         lines[changed].kind = DiffKind::Add;
-        let mut state = GitState::default();
-        state.set_diff_viewport(GitDiffViewport {
-            generation: 1,
-            first_line: 0,
-            total_lines: line_count,
-            lines,
-            markers: Vec::new(),
-            error: String::new(),
-        });
-        state
+        let mut app = App::new();
+        app.add_systems(Update, project_diff);
+        let entity = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: GitPageSnapshot {
+                        diff_viewport: Some(GitDiffViewport {
+                            generation: 1,
+                            first_line: 0,
+                            total_lines: line_count,
+                            lines,
+                            markers: Vec::new(),
+                            error: String::new(),
+                        }),
+                        ..Default::default()
+                    },
+                },
+                GitDiffRevealRanges::default(),
+            ))
+            .id();
+        app.update();
+        (app, entity)
     }
 
     #[test]
     fn diff_projection_collapses_context_outside_changed_hunks() {
-        let state = state_with_change(20, 9);
+        let (app, entity) = app_with_change(20, 9);
+        let state = app.world().get::<GitState>(entity).unwrap();
 
         assert_eq!(
             state.snapshot.diff_rows.first(),
@@ -389,9 +466,14 @@ mod tests {
 
     #[test]
     fn diff_projection_reveals_only_the_requested_chunk() {
-        let mut state = state_with_change(60, 49);
-
-        assert!(state.reveal_diff(0, DIFF_REVEAL_LINES as u32));
+        let (mut app, entity) = app_with_change(60, 49);
+        app.world_mut()
+            .get_mut::<GitDiffRevealRanges>(entity)
+            .unwrap()
+            .0
+            .push((0, DIFF_REVEAL_LINES));
+        app.update();
+        let state = app.world().get::<GitState>(entity).unwrap();
 
         assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Line(0)));
         assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Gap {

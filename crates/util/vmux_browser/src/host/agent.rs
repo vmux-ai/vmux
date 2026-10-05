@@ -8,7 +8,7 @@ use vmux_ecs::browser::{
     BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
     BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
-use vmux_ecs::profile::ProjectsDirectory;
+use vmux_ecs::profile::Projects;
 use vmux_ecs::service::ServiceRequest;
 use vmux_history::HistoryOpenIntent;
 use vmux_layout::active_pane::ActivatePane;
@@ -153,6 +153,7 @@ fn route_scroll_queries(
 fn answer_working_directory(
     mut requests: MessageReader<ToolQueryMessage<AgentWorkingDirectory>>,
     browse: AgentBrowserResolve,
+    projects: Projects,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
@@ -161,8 +162,8 @@ fn answer_working_directory(
         } else if let Some(path) = browse.working_directory(request.payload.anchor) {
             Ok(path.to_string_lossy().into_owned())
         } else {
-            ProjectsDirectory::ensure()
-                .map(ProjectsDirectory::into_path)
+            projects
+                .path()
                 .map(|path| path.to_string_lossy().into_owned())
         };
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(

@@ -9,11 +9,11 @@ proc-macro = true
 
 [dependencies]
 heck = "0.5"
-proc-macro2 = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
 ron = { workspace = true }
 serde = { workspace = true }
-syn = { version = "2", features = ["full"] }
+syn = { version = "2", features = ["full", "visit"] }
 
 [lints]
 workspace = true

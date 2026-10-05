@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
 use cipher::SafeStorageCipher;
 #[cfg(target_os = "macos")]
-pub(crate) use file::ProtectedFile;
+pub use file::ProtectedFile;
 use std::fmt::{Display, Formatter};
 #[cfg(any(target_os = "macos", test))]
 use std::path::{Path, PathBuf};
@@ -137,16 +137,16 @@ impl VaultWrappingKey {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(test, all(target_os = "macos", debug_assertions)))]
 enum RootKeySource {
     Keychain,
-    #[cfg(any(test, debug_assertions))]
     FixedTest,
 }
 
 #[cfg(any(target_os = "macos", test))]
 pub struct SafeStorageContext {
     directory: PathBuf,
+    #[cfg(any(test, all(target_os = "macos", debug_assertions)))]
     root_key_source: RootKeySource,
     desktop_process_required: bool,
 }
@@ -155,37 +155,38 @@ pub struct SafeStorageContext {
 impl SafeStorageContext {
     #[cfg(target_os = "macos")]
     pub fn current() -> Self {
+        Self::at(crate::ProfilePaths::current().application_data())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn at(application_data: PathBuf) -> Self {
         #[cfg(any(test, debug_assertions))]
         let test_session = crate::SessionEnvironment::is_test();
         #[cfg(not(any(test, debug_assertions)))]
         let test_session = false;
 
-        Self::for_environment(
-            crate::ProfilePaths::current().application_data(),
-            test_session,
-        )
+        Self::for_environment(application_data, test_session)
     }
 
     fn for_environment(application_data: PathBuf, test_session: bool) -> Self {
         if test_session {
             return Self {
                 directory: application_data.join("safe-storage-test"),
-                #[cfg(any(test, debug_assertions))]
+                #[cfg(any(test, all(target_os = "macos", debug_assertions)))]
                 root_key_source: RootKeySource::FixedTest,
-                #[cfg(not(any(test, debug_assertions)))]
-                root_key_source: RootKeySource::Keychain,
                 desktop_process_required: false,
             };
         }
         Self {
             directory: application_data.join("safe-storage"),
+            #[cfg(any(test, all(target_os = "macos", debug_assertions)))]
             root_key_source: RootKeySource::Keychain,
             desktop_process_required: true,
         }
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn protected_file(&self, relative: impl AsRef<Path>) -> ProtectedFile {
+    pub fn protected_file(&self, relative: impl AsRef<Path>) -> ProtectedFile {
         ProtectedFile::new(self.directory.clone(), self.directory.join(relative))
     }
 
@@ -243,7 +244,7 @@ impl SafeStorage {
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn wrap_vault_key(
+    pub fn wrap_vault_key(
         context: &SafeStorageContext,
         vault_id: &str,
         key: &[u8],
@@ -252,7 +253,7 @@ impl SafeStorage {
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn unwrap_vault_key(
+    pub fn unwrap_vault_key(
         context: &SafeStorageContext,
         vault_id: &str,
         ciphertext: &[u8],
@@ -261,7 +262,7 @@ impl SafeStorage {
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn unwrap_vault_key_silent(
+    pub fn unwrap_vault_key_silent(
         context: &SafeStorageContext,
         vault_id: &str,
         ciphertext: &[u8],
@@ -291,10 +292,10 @@ impl SafeStorage {
     }
 }
 
-pub(crate) struct SafeStorageName;
+pub struct SafeStorageName;
 
 impl SafeStorageName {
-    pub(crate) fn of(value: &str) -> String {
+    pub fn of(value: &str) -> String {
         let mut encoded = String::with_capacity(value.len() * 2);
         for byte in value.as_bytes() {
             write!(&mut encoded, "{byte:02x}").unwrap();

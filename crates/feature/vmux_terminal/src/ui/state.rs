@@ -1,13 +1,11 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use vmux_ecs::scroll::{OVERSCAN_CAP, OVERSCAN_FLOOR, Overscan, TERMINAL_OVERSCAN_K};
 
 use crate::event::{
-    AgentPromptDraftEvent, ServiceUnavailableEvent, TermCursor, TermLine, TermLoadingEvent,
-    TermThemeEvent, TermTitleEvent, TermViewportPatch, TerminalUiState,
+    TermCursor, TermLine, TermLoadingEvent, TermSelectionRange, TermThemeEvent, TerminalUiState,
 };
-use vmux_ui::hooks::{UiStateBinding, use_ui_state};
+use vmux_ui::hooks::use_ui_state;
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct TerminalRowState {
@@ -17,191 +15,65 @@ pub(crate) struct TerminalRowState {
 
 #[derive(Clone, Copy)]
 pub(crate) struct TerminalState {
-    pub(crate) rows: Signal<BTreeMap<u32, Signal<TerminalRowState>>>,
-    pub(crate) first_row: Signal<u32>,
-    pub(crate) raw_title: Signal<String>,
-    pub(crate) total_rows: Signal<u32>,
-    pub(crate) alt: Signal<bool>,
-    pub(crate) mouse: Signal<bool>,
-    pub(crate) cols: Signal<u16>,
-    pub(crate) cursor: Signal<Option<TermCursor>>,
-    pub(crate) selection: Signal<Option<crate::event::TermSelectionRange>>,
-    pub(crate) copy_mode: Signal<bool>,
-    pub(crate) theme: Signal<Option<TermThemeEvent>>,
-    pub(crate) service_error: Signal<String>,
-    pub(crate) loading: Signal<Option<(String, String)>>,
-    pub(crate) prompt_draft: Signal<(String, bool)>,
+    pub(crate) rows: Memo<BTreeMap<u32, TerminalRowState>>,
+    pub(crate) first_row: Memo<u32>,
+    pub(crate) raw_title: Memo<String>,
+    pub(crate) total_rows: Memo<u32>,
+    pub(crate) alt: Memo<bool>,
+    pub(crate) mouse: Memo<bool>,
+    pub(crate) cols: Memo<u16>,
+    pub(crate) cursor: Memo<Option<TermCursor>>,
+    pub(crate) selection: Memo<Option<TermSelectionRange>>,
+    pub(crate) copy_mode: Memo<bool>,
+    pub(crate) theme: Memo<Option<TermThemeEvent>>,
+    pub(crate) service_error: Memo<String>,
+    pub(crate) loading: Memo<Option<(String, String)>>,
+    pub(crate) prompt_draft: Memo<(String, bool)>,
 }
 
 impl TerminalState {
     pub(crate) fn use_state() -> Self {
-        let ui = use_ui_state::<TerminalUiState>();
-        let state = Self {
-            rows: use_signal(BTreeMap::new),
-            first_row: use_signal(|| 0),
-            raw_title: use_signal(String::new),
-            total_rows: use_signal(|| 0),
-            alt: use_signal(|| false),
-            mouse: use_signal(|| false),
-            cols: use_signal(|| 0),
-            cursor: use_signal(|| None),
-            selection: use_signal(|| None),
-            copy_mode: use_signal(|| false),
-            theme: use_signal(|| None),
-            service_error: use_signal(String::new),
-            loading: use_signal(|| None),
-            prompt_draft: use_signal(|| (String::new(), false)),
-        };
-        state.listen(ui);
-        state
-    }
-
-    fn listen(self, ui: UiStateBinding<TerminalUiState>) {
-        ui.use_updates::<ServiceUnavailableEvent>(move |event| {
-            let mut service_error = self.service_error;
-            service_error.set(event.message);
-        });
-        ui.use_updates::<TermViewportPatch>(move |viewport| self.apply_viewport(&viewport));
-        ui.use_updates::<TermThemeEvent>(move |event| {
-            let mut theme = self.theme;
-            theme.set(Some(event));
-        });
-        ui.use_updates::<TermTitleEvent>(move |event| {
-            let mut raw_title = self.raw_title;
-            raw_title.set(event.title);
-        });
-        ui.use_updates::<TermLoadingEvent>(move |event| {
-            let mut loading = self.loading;
-            let mut prompt_draft = self.prompt_draft;
-            loading.set(if event.loading {
-                Some((event.label, event.segment))
-            } else {
-                prompt_draft.set((String::new(), false));
-                None
-            });
-        });
-        ui.use_updates::<AgentPromptDraftEvent>(move |event| {
-            let mut prompt_draft = self.prompt_draft;
-            prompt_draft.set((event.draft, event.skipped));
-        });
-    }
-
-    fn apply_viewport(self, patch: &TermViewportPatch) {
-        let mut first_row = self.first_row;
-        let mut total_rows = self.total_rows;
-        let mut alt = self.alt;
-        let mut mouse = self.mouse;
-        let mut cols = self.cols;
-        let mut rows = self.rows;
-        let mut selection = self.selection;
-        let mut copy_mode = self.copy_mode;
-        let mut cursor = self.cursor;
-
-        let first = patch.first_row;
-        if *first_row.peek() != first {
-            first_row.set(first);
-        }
-        if *total_rows.peek() != patch.total_rows {
-            total_rows.set(patch.total_rows);
-        }
-        if *alt.peek() != patch.alt {
-            alt.set(patch.alt);
-        }
-        if *mouse.peek() != patch.mouse {
-            mouse.set(patch.mouse);
-        }
-        if *cols.peek() != patch.cols {
-            cols.set(patch.cols);
-        }
-
-        let overscan = Overscan::new(
-            patch.rows,
-            TERMINAL_OVERSCAN_K,
-            OVERSCAN_FLOOR,
-            OVERSCAN_CAP,
-        )
-        .rows();
-        let keep_hi =
-            (first + patch.rows as u32 + overscan * 2 + 2).min(patch.total_rows.saturating_sub(1));
-        let previous_cursor = cursor.peek().clone();
-        let next_cursor = patch.cursor.clone();
-        if patch.full {
-            let next = patch
-                .changed_lines
-                .iter()
-                .filter(|(doc_row, _)| *doc_row >= first && *doc_row <= keep_hi)
-                .map(|(doc_row, line)| {
-                    (
-                        *doc_row,
-                        Signal::new(TerminalRowState {
-                            line: line.clone(),
-                            cursor: (next_cursor.row == *doc_row).then_some(next_cursor.clone()),
-                        }),
-                    )
-                })
-                .collect();
-            rows.set(next);
-        } else {
-            let mut missing = Vec::new();
-            for (doc_row, line) in &patch.changed_lines {
-                let state = TerminalRowState {
-                    line: line.clone(),
-                    cursor: (next_cursor.row == *doc_row).then_some(next_cursor.clone()),
-                };
-                if let Some(mut existing) = rows.peek().get(doc_row).copied() {
-                    if *existing.peek() != state {
-                        existing.set(state);
-                    }
-                } else {
-                    missing.push((*doc_row, state));
-                }
-            }
-
-            if previous_cursor.as_ref().map(|cursor| cursor.row) != Some(next_cursor.row)
-                && let Some(old_row) = previous_cursor.as_ref().map(|cursor| cursor.row)
-                && !patch.changed_row_indices().any(|row| row == old_row)
-                && let Some(mut state) = rows.peek().get(&old_row).copied()
-                && state.peek().cursor.is_some()
-            {
-                let line = state.peek().line.clone();
-                state.set(TerminalRowState { line, cursor: None });
-            }
-            if !patch
-                .changed_row_indices()
-                .any(|row| row == next_cursor.row)
-                && let Some(mut state) = rows.peek().get(&next_cursor.row).copied()
-            {
-                let current = state.peek().clone();
-                if current.cursor.as_ref() != Some(&next_cursor) {
-                    state.set(TerminalRowState {
-                        line: current.line,
-                        cursor: Some(next_cursor.clone()),
-                    });
-                }
-            }
-
-            let prune = rows
-                .peek()
-                .keys()
-                .any(|doc_row| *doc_row < first || *doc_row > keep_hi);
-            if !missing.is_empty() || prune {
-                rows.with_mut(|map| {
-                    for (doc_row, state) in missing {
-                        map.insert(doc_row, Signal::new(state));
-                    }
-                    map.retain(|doc_row, _| *doc_row >= first && *doc_row <= keep_hi);
-                });
-            }
-        }
-
-        if *selection.peek() != patch.selection {
-            selection.set(patch.selection);
-        }
-        if *copy_mode.peek() != patch.copy_mode {
-            copy_mode.set(patch.copy_mode);
-        }
-        if cursor.peek().as_ref() != Some(&patch.cursor) {
-            cursor.set(Some(patch.cursor.clone()));
+        let root = use_ui_state::<TerminalUiState>().state;
+        Self {
+            rows: use_memo(move || {
+                let state = root.read();
+                let cursor = state.viewport.cursor.as_ref();
+                state
+                    .viewport
+                    .rows
+                    .iter()
+                    .map(|(row, line)| {
+                        (
+                            *row,
+                            TerminalRowState {
+                                line: line.clone(),
+                                cursor: cursor.filter(|cursor| cursor.row == *row).cloned(),
+                            },
+                        )
+                    })
+                    .collect()
+            }),
+            first_row: use_memo(move || root.read().viewport.first_row),
+            raw_title: use_memo(move || root.read().title.clone()),
+            total_rows: use_memo(move || root.read().viewport.total_rows),
+            alt: use_memo(move || root.read().viewport.alt),
+            mouse: use_memo(move || root.read().viewport.mouse),
+            cols: use_memo(move || root.read().viewport.cols),
+            cursor: use_memo(move || root.read().viewport.cursor.clone()),
+            selection: use_memo(move || root.read().viewport.selection),
+            copy_mode: use_memo(move || root.read().viewport.copy_mode),
+            theme: use_memo(move || root.read().theme.clone()),
+            service_error: use_memo(move || root.read().service_error.clone()),
+            loading: use_memo(move || {
+                root.read()
+                    .loading
+                    .as_ref()
+                    .map(|TermLoadingEvent { label, segment, .. }| (label.clone(), segment.clone()))
+            }),
+            prompt_draft: use_memo(move || {
+                let state = root.read();
+                (state.prompt_draft.draft.clone(), state.prompt_draft.skipped)
+            }),
         }
     }
 }

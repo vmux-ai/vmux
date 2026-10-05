@@ -2,27 +2,38 @@
 
 #[cfg(all(host, feature = "app"))]
 pub use host::AgentPlugin;
+#[cfg(all(host, feature = "service"))]
+pub use service::AgentServicePlugin;
 
 #[cfg(all(host, feature = "app"))]
 pub(crate) struct Feature;
 
 #[cfg(all(host, feature = "app"))]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
 #[cfg(all(host, feature = "service"))]
-pub mod acp;
+mod acp;
 #[cfg(all(host, feature = "service"))]
-pub mod broker;
-
+mod broker_driver;
 #[cfg(all(host, feature = "app"))]
 mod host;
 #[cfg(all(host, feature = "app"))]
-mod managed_mcp;
+mod managed_mcp_driver;
 #[cfg(all(host, feature = "app"))]
-mod mcp;
+mod mcp_driver;
 #[cfg(all(host, feature = "app"))]
 mod policy;
-#[cfg(host)]
+#[cfg(all(host, feature = "app"))]
+mod policy_driver;
+#[cfg(all(host, feature = "service"))]
+mod remote_driver;
+#[cfg(all(host, feature = "app"))]
 pub(crate) mod route;
+#[cfg(all(host, feature = "app"))]
+mod route_driver;
+#[cfg(all(host, feature = "service"))]
+mod service;
+#[cfg(all(host, feature = "service"))]
+mod service_driver;

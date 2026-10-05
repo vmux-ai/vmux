@@ -7,8 +7,8 @@
 #[cfg(host)]
 pub use host::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
-    AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentRenameProfile,
-    AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, PendingProject,
+    AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentSpaceCreate,
+    AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, PendingProject,
     RepositoryNeedsWorktree, SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest,
     SpaceOpenPageRequest, SpacePlugin, SpaceProjects, SpaceRenameRequest, SpaceToolPlugin, Spaces,
     WorkspaceCwd,
@@ -19,7 +19,7 @@ pub use vmux_api::space as event;
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

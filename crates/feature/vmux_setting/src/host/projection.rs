@@ -14,14 +14,14 @@ use crate::state::{
     SettingsRenderItem, SettingsRenderItemId, SettingsSection, SettingsUiState,
 };
 
-use super::state::Settings;
+use super::state::{Settings, SettingsViewState};
 
 pub(super) struct ProjectionPlugin;
 
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_status)
-            .add_plugins(vmux_ecs::host::UiStatePlugin::<SettingsUiState>::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<SettingsUiState>::default())
             .add_systems(
                 Update,
                 (localize_metadata, project_schema, project_fields, publish).chain(),
@@ -38,6 +38,12 @@ fn spawn_status(mut commands: Commands) {
 
 #[derive(Component, Default)]
 pub(super) struct SettingsRenderProjection(SettingsUiState);
+
+impl SettingsRenderProjection {
+    pub(super) fn field(&self, path: &str) -> Option<&SettingsRenderField> {
+        self.0.fields.iter().find(|field| field.path == path)
+    }
+}
 
 fn localize_metadata(
     settings: Res<AppSettings>,
@@ -56,6 +62,7 @@ fn project_schema(
     settings: Res<AppSettings>,
     manifests: Query<&SettingsManifest, Without<Settings>>,
     changed_manifests: Query<(), Changed<SettingsManifest>>,
+    profile: vmux_ecs::profile::CurrentProfile,
     mut views: Query<&mut SettingsSchema, With<Settings>>,
 ) {
     let added = views.iter_mut().any(|schema| schema.is_added());
@@ -69,7 +76,8 @@ fn project_schema(
         schema.fields.extend(manifest.fields.iter().cloned());
     }
     schema.sections.sort_by_key(|section| section.order);
-    schema.localize(&locale);
+    let locales = profile.paths().map(|paths| paths.config().join("locales"));
+    schema.localize(&locale, locales.as_deref());
     for mut current in &mut views {
         if *current != schema {
             current.clone_from(&schema);
@@ -80,18 +88,26 @@ fn project_schema(
 fn project_fields(
     settings: Res<AppSettings>,
     status: Single<Ref<CurrentUpdateCheckStatus>>,
-    mut views: Query<(Ref<SettingsSchema>, &mut SettingsRenderProjection), With<Settings>>,
+    mut views: Query<
+        (
+            Ref<SettingsSchema>,
+            Ref<SettingsViewState>,
+            &mut SettingsRenderProjection,
+        ),
+        With<Settings>,
+    >,
 ) {
     let locale = Locale::requested(Some(&settings.appearance.locale));
-    for (schema, mut projection) in &mut views {
+    for (schema, view, mut projection) in &mut views {
         if !settings.is_changed()
             && !status.is_changed()
             && !schema.is_changed()
+            && !view.is_changed()
             && !projection.0.sections.is_empty()
         {
             continue;
         }
-        let next = SettingsUiState::projected(&settings, &schema, &status.0, &locale);
+        let next = SettingsUiState::projected(&settings, &schema, &status.0, &locale, &view);
         if projection.0 != next {
             projection.0 = next;
         }
@@ -106,7 +122,7 @@ fn publish(
         if !ready.is_changed() && !projection.is_changed() {
             continue;
         }
-        commands.trigger(vmux_ecs::host::UiStateWrite::<SettingsUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<SettingsUiState>::from_event(
             entity,
             &projection.0,
         ));
@@ -119,13 +135,23 @@ impl SettingsUiState {
         schema: &SettingsSchema,
         status: &UpdateCheckStatus,
         locale: &Locale,
+        view: &SettingsViewState,
     ) -> Self {
         let Ok(Value::Object(settings)) = serde_json::to_value(settings) else {
             return Self::default();
         };
-        let mut render = SettingsRenderBuilder::default();
-        let sections = SettingsSection::projected(&settings, schema, status, locale, &mut render);
+        let mut render = SettingsRenderBuilder {
+            drafts: view.drafts.clone(),
+            ..Default::default()
+        };
+        let mut sections =
+            SettingsSection::projected(&settings, schema, status, locale, &mut render);
+        let query = view.query.trim().to_lowercase();
+        if !query.is_empty() {
+            sections.retain(|section| section.search_text.contains(&query));
+        }
         Self {
+            query: view.query.clone(),
             sections,
             fields: render.fields,
             items: render.items,
@@ -135,6 +161,7 @@ impl SettingsUiState {
 
 #[derive(Default)]
 struct SettingsRenderBuilder {
+    drafts: std::collections::BTreeMap<String, String>,
     fields: Vec<SettingsRenderField>,
     items: Vec<SettingsRenderItem>,
 }
@@ -313,14 +340,26 @@ impl SettingsRenderBuilder {
             match value {
                 Value::Bool(value) => SettingsRenderFieldKind::Toggle { value: *value },
                 Value::Number(value) if value.is_u64() => SettingsRenderFieldKind::Integer {
-                    value: value.as_u64().unwrap_or(0),
+                    value: self
+                        .drafts
+                        .get(&path)
+                        .cloned()
+                        .unwrap_or_else(|| value.to_string()),
                 },
                 Value::Number(value) => SettingsRenderFieldKind::Number {
-                    value: value.as_f64().unwrap_or(0.0),
+                    value: self
+                        .drafts
+                        .get(&path)
+                        .cloned()
+                        .unwrap_or_else(|| value.to_string()),
                     step: spec.step.unwrap_or(1.0),
                 },
                 Value::String(value) => SettingsRenderFieldKind::Text {
-                    value: value.clone(),
+                    value: self
+                        .drafts
+                        .get(&path)
+                        .cloned()
+                        .unwrap_or_else(|| value.clone()),
                     placeholder: spec.placeholder,
                 },
                 Value::Object(_) => SettingsRenderFieldKind::Group {
@@ -700,8 +739,7 @@ mod projection_tests {
             .insert_resource(AppSettings::default())
             .init_resource::<Emitted>()
             .add_observer(record_settings_state);
-        let feature =
-            vmux_ecs::host::manifest::FeatureManifest::parse(include_str!("../feature.ron"));
+        let feature = vmux_ecs::manifest::FeatureManifest::parse(include_str!("../feature.ron"));
         let settings = feature
             .settings::<SettingsManifest>()
             .unwrap()
@@ -749,7 +787,7 @@ mod projection_tests {
             .add_systems(Update, project_schema);
         let page = app.world_mut().spawn(Settings).id();
         for source in MANIFESTS {
-            let feature = vmux_ecs::host::manifest::FeatureManifest::parse(source);
+            let feature = vmux_ecs::manifest::FeatureManifest::parse(source);
             let settings = feature
                 .settings::<SettingsManifest>()
                 .unwrap()

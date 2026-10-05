@@ -10,7 +10,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
+use vmux_ecs::overlay::Overlay;
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
 
@@ -48,11 +48,8 @@ impl CefPointerButton {
     }
 }
 
-fn log_command_bar_keyboard(
-    mut events: MessageReader<KeyboardInput>,
-    overlay_q: OverlayStateQuery,
-) {
-    if !OverlayState::from_query(&overlay_q).owns_input() {
+fn log_command_bar_keyboard(mut events: MessageReader<KeyboardInput>, overlay: Overlay) {
+    if !overlay.owns_input() {
         return;
     }
     for event in events.read() {

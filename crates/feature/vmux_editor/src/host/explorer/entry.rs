@@ -1,30 +1,345 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
-use vmux_ecs::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
+use vmux_ecs::FileUiStateWrite;
+use vmux_ecs::event::{
+    ExplorerCreateDirectoryPromptRequest, ExplorerCreateFilePromptRequest,
+    ExplorerDeletePromptRequest, ExplorerPromptDismissRequest, ExplorerPromptDraftRequest,
+    ExplorerPromptState, ExplorerPromptSubmitRequest, ExplorerRenamePromptRequest,
+};
+use vmux_ecs::page::PageReady;
 
 use super::fs::ExplorerFs;
 use super::{
     ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
     UsesExplorerTree,
 };
-use crate::host::editor::FileView;
+use crate::host::editor::{FileNavigateRequest, FileView};
+use crate::host::feedback::ExplorerFeedback;
 
 pub(super) struct ExplorerEntryPlugin;
 
 impl Plugin for ExplorerEntryPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
-            ExplorerCreate,
-            ExplorerRename,
-            ExplorerDelete,
+            ExplorerCreateFilePromptRequest,
+            ExplorerCreateDirectoryPromptRequest,
+            ExplorerRenamePromptRequest,
+            ExplorerDeletePromptRequest,
+            ExplorerPromptDraftRequest,
+            ExplorerPromptSubmitRequest,
+            ExplorerPromptDismissRequest,
         )>::default())
-            .add_systems(Update, (drain_creates, drain_renames, drain_deletes))
+            .add_systems(
+                Update,
+                (
+                    clear_prompt,
+                    project.after(clear_prompt),
+                    drain_creates,
+                    drain_renames,
+                    drain_deletes,
+                ),
+            )
+            .add_observer(open_file_prompt)
+            .add_observer(open_directory_prompt)
+            .add_observer(open_rename_prompt)
+            .add_observer(open_delete_prompt)
+            .add_observer(update_draft)
+            .add_observer(submit_prompt)
+            .add_observer(dismiss_prompt)
             .add_observer(create)
             .add_observer(rename)
             .add_observer(delete);
+    }
+}
+
+#[derive(Component)]
+struct CreateFilePrompt;
+
+#[derive(Component)]
+struct CreateDirectoryPrompt;
+
+#[derive(Component)]
+struct RenamePrompt;
+
+#[derive(Component)]
+struct DeletePrompt;
+
+#[derive(Component)]
+struct PromptTarget {
+    path: PathBuf,
+    name: String,
+}
+
+#[derive(Component, Default)]
+struct PromptDraft(String);
+
+#[derive(Component)]
+struct PromptDirty;
+
+#[derive(EntityEvent)]
+struct CreateEntry {
+    #[event_target]
+    entity: Entity,
+    parent: PathBuf,
+    name: String,
+    is_dir: bool,
+}
+
+#[derive(EntityEvent)]
+struct RenameEntry {
+    #[event_target]
+    entity: Entity,
+    path: PathBuf,
+    name: String,
+}
+
+#[derive(EntityEvent)]
+struct DeleteEntry {
+    #[event_target]
+    entity: Entity,
+    path: PathBuf,
+}
+
+type PromptComponents = (
+    CreateFilePrompt,
+    CreateDirectoryPrompt,
+    RenamePrompt,
+    DeletePrompt,
+    PromptTarget,
+    PromptDraft,
+);
+
+fn open_file_prompt(
+    trigger: On<UiInput<ExplorerCreateFilePromptRequest>>,
+    views: Query<&UsesExplorerTree>,
+    trees: Query<&ExplorerTree>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(tree_of) = views.get(entity) else {
+        return;
+    };
+    let Ok(tree) = trees.get(tree_of.0) else {
+        return;
+    };
+    let parent = tree.create_parent(Path::new(&trigger.event().payload.path));
+    commands
+        .entity(entity)
+        .remove::<PromptComponents>()
+        .insert((
+            CreateFilePrompt,
+            PromptTarget {
+                path: parent,
+                name: String::new(),
+            },
+            PromptDraft::default(),
+            PromptDirty,
+        ));
+}
+
+fn open_directory_prompt(
+    trigger: On<UiInput<ExplorerCreateDirectoryPromptRequest>>,
+    views: Query<&UsesExplorerTree>,
+    trees: Query<&ExplorerTree>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(tree_of) = views.get(entity) else {
+        return;
+    };
+    let Ok(tree) = trees.get(tree_of.0) else {
+        return;
+    };
+    let parent = tree.create_parent(Path::new(&trigger.event().payload.path));
+    commands
+        .entity(entity)
+        .remove::<PromptComponents>()
+        .insert((
+            CreateDirectoryPrompt,
+            PromptTarget {
+                path: parent,
+                name: String::new(),
+            },
+            PromptDraft::default(),
+            PromptDirty,
+        ));
+}
+
+fn open_rename_prompt(trigger: On<UiInput<ExplorerRenamePromptRequest>>, mut commands: Commands) {
+    let entity = trigger.event().webview;
+    let request = &trigger.event().payload;
+    commands
+        .entity(entity)
+        .remove::<PromptComponents>()
+        .insert((
+            RenamePrompt,
+            PromptTarget {
+                path: PathBuf::from(&request.path),
+                name: request.name.clone(),
+            },
+            PromptDraft(request.name.clone()),
+            PromptDirty,
+        ));
+}
+
+fn open_delete_prompt(trigger: On<UiInput<ExplorerDeletePromptRequest>>, mut commands: Commands) {
+    let entity = trigger.event().webview;
+    let request = &trigger.event().payload;
+    commands
+        .entity(entity)
+        .remove::<PromptComponents>()
+        .insert((
+            DeletePrompt,
+            PromptTarget {
+                path: PathBuf::from(&request.path),
+                name: request.name.clone(),
+            },
+            PromptDraft::default(),
+            PromptDirty,
+        ));
+}
+
+fn update_draft(
+    trigger: On<UiInput<ExplorerPromptDraftRequest>>,
+    mut drafts: Query<&mut PromptDraft>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(mut draft) = drafts.get_mut(entity) else {
+        return;
+    };
+    if draft.0 == trigger.event().payload.draft {
+        return;
+    }
+    draft.0.clone_from(&trigger.event().payload.draft);
+    commands.entity(entity).insert(PromptDirty);
+}
+
+type Prompts<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static PromptTarget,
+        &'static PromptDraft,
+        Option<&'static CreateFilePrompt>,
+        Option<&'static CreateDirectoryPrompt>,
+        Option<&'static RenamePrompt>,
+        Option<&'static DeletePrompt>,
+    ),
+>;
+
+fn submit_prompt(
+    trigger: On<UiInput<ExplorerPromptSubmitRequest>>,
+    prompts: Prompts,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok((target, draft, create_file, create_directory, rename, delete)) = prompts.get(entity)
+    else {
+        return;
+    };
+    let name = draft.0.trim().to_string();
+    if create_file.is_some() || create_directory.is_some() {
+        if name.is_empty() {
+            return;
+        }
+        commands.trigger(CreateEntry {
+            entity,
+            parent: target.path.clone(),
+            name,
+            is_dir: create_directory.is_some(),
+        });
+    } else if rename.is_some() {
+        if name.is_empty() {
+            return;
+        }
+        commands.trigger(RenameEntry {
+            entity,
+            path: target.path.clone(),
+            name,
+        });
+    } else if delete.is_some() {
+        commands.trigger(DeleteEntry {
+            entity,
+            path: target.path.clone(),
+        });
+    } else {
+        return;
+    }
+    commands
+        .entity(entity)
+        .remove::<PromptComponents>()
+        .insert(PromptDirty);
+}
+
+fn dismiss_prompt(trigger: On<UiInput<ExplorerPromptDismissRequest>>, mut commands: Commands) {
+    commands
+        .entity(trigger.event().webview)
+        .remove::<PromptComponents>()
+        .insert(PromptDirty);
+}
+
+fn clear_prompt(
+    files: Query<Entity, (Changed<FileView>, With<PromptTarget>)>,
+    mut commands: Commands,
+) {
+    for entity in &files {
+        commands
+            .entity(entity)
+            .remove::<PromptComponents>()
+            .insert(PromptDirty);
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn project(
+    prompts: Query<
+        (
+            Entity,
+            Option<&PromptTarget>,
+            Option<&PromptDraft>,
+            Option<&CreateFilePrompt>,
+            Option<&CreateDirectoryPrompt>,
+            Option<&RenamePrompt>,
+            Option<&DeletePrompt>,
+        ),
+        (With<PromptDirty>, With<PageReady>),
+    >,
+    browsers: Option<NonSend<Browsers>>,
+    mut commands: Commands,
+) {
+    let Some(browsers) = browsers else {
+        return;
+    };
+    for (entity, target, draft, create_file, create_directory, rename, delete) in &prompts {
+        if !browsers.can_emit_to(&entity) {
+            continue;
+        }
+        let title_message_id = if create_file.is_some() {
+            "editor-new-file"
+        } else if create_directory.is_some() {
+            "editor-new-folder"
+        } else if rename.is_some() {
+            "common-rename"
+        } else if delete.is_some() {
+            "common-delete"
+        } else {
+            ""
+        };
+        commands.trigger(FileUiStateWrite::from_event(
+            entity,
+            &ExplorerPromptState {
+                open: !title_message_id.is_empty(),
+                title_message_id: title_message_id.to_string(),
+                name: target.map(|target| target.name.clone()).unwrap_or_default(),
+                draft: draft.map(|draft| draft.0.clone()).unwrap_or_default(),
+                destructive: delete.is_some(),
+            },
+        ));
+        commands.entity(entity).remove::<PromptDirty>();
     }
 }
 
@@ -66,23 +381,22 @@ struct ExplorerDeleteTask {
 }
 
 fn create(
-    trigger: On<UiInput<ExplorerCreate>>,
+    trigger: On<CreateEntry>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
+    let entity = trigger.event_target();
     let Ok(tree_of) = views.get(entity) else {
         return;
     };
     let Ok(tree) = trees.get(tree_of.0) else {
         return;
     };
-    let payload = &trigger.event().payload;
     let root = tree.root.clone();
-    let parent = PathBuf::from(&payload.parent);
-    let name = payload.name.clone();
-    let is_dir = payload.is_dir;
+    let parent = trigger.event().parent.clone();
+    let name = trigger.event().name.clone();
+    let is_dir = trigger.event().is_dir;
     let task = IoTaskPool::get().spawn(async move {
         let path = ExplorerFs::new(&root)?.create(&parent, &name, is_dir)?;
         Ok(ExplorerCreateOutcome {
@@ -98,22 +412,21 @@ fn create(
 }
 
 fn rename(
-    trigger: On<UiInput<ExplorerRename>>,
+    trigger: On<RenameEntry>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
+    let entity = trigger.event_target();
     let Ok(tree_of) = views.get(entity) else {
         return;
     };
     let Ok(tree) = trees.get(tree_of.0) else {
         return;
     };
-    let payload = &trigger.event().payload;
     let root = tree.root.clone();
-    let old_path = PathBuf::from(&payload.path);
-    let name = payload.name.clone();
+    let old_path = trigger.event().path.clone();
+    let name = trigger.event().name.clone();
     let task = IoTaskPool::get().spawn(async move {
         let parent = old_path
             .parent()
@@ -152,12 +465,12 @@ fn rename(
 }
 
 fn delete(
-    trigger: On<UiInput<ExplorerDelete>>,
+    trigger: On<DeleteEntry>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
+    let entity = trigger.event_target();
     let Ok(tree_of) = views.get(entity) else {
         return;
     };
@@ -165,7 +478,7 @@ fn delete(
         return;
     };
     let root = tree.root.clone();
-    let path = PathBuf::from(&trigger.event().payload.path);
+    let path = trigger.event().path.clone();
     let task = IoTaskPool::get().spawn(async move {
         let (parent, was_dir) = ExplorerFs::new(&root)?.delete(&path)?;
         Ok(ExplorerDeleteOutcome {
@@ -184,7 +497,6 @@ fn drain_creates(
     mut tasks: Query<(Entity, &mut ExplorerCreateTask)>,
     views: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (task_entity, mut pending) in &mut tasks {
@@ -199,16 +511,7 @@ fn drain_creates(
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) => {
-                if browsers.can_emit_to(&webview) {
-                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                        webview,
-                        &ExplorerFsResult {
-                            ok: false,
-                            message: error,
-                            open_path: String::new(),
-                        },
-                    ));
-                }
+                commands.trigger(ExplorerFeedback::new(webview, false, error));
                 continue;
             }
         };
@@ -224,29 +527,22 @@ fn drain_creates(
         commands
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
-        if browsers.can_emit_to(&webview) {
-            let kind = if outcome.is_dir { "folder" } else { "file" };
-            let open_path = if outcome.is_dir {
-                String::new()
-            } else {
-                outcome.path.to_string_lossy().into_owned()
-            };
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                webview,
-                &ExplorerFsResult {
-                    ok: true,
-                    message: format!(
-                        "Created {kind} {}",
-                        outcome
-                            .path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                    ),
-                    open_path,
-                },
-            ));
+        let kind = if outcome.is_dir { "folder" } else { "file" };
+        if !outcome.is_dir {
+            commands.trigger(FileNavigateRequest::new(webview, outcome.path.clone(), 0));
         }
+        commands.trigger(ExplorerFeedback::new(
+            webview,
+            true,
+            format!(
+                "Created {kind} {}",
+                outcome
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ),
+        ));
     }
 }
 
@@ -254,7 +550,6 @@ fn drain_renames(
     mut tasks: Query<(Entity, &mut ExplorerRenameTask)>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (task_entity, mut pending) in &mut tasks {
@@ -269,16 +564,7 @@ fn drain_renames(
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) => {
-                if browsers.can_emit_to(&webview) {
-                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                        webview,
-                        &ExplorerFsResult {
-                            ok: false,
-                            message: error,
-                            open_path: String::new(),
-                        },
-                    ));
-                }
+                commands.trigger(ExplorerFeedback::new(webview, false, error));
                 continue;
             }
         };
@@ -287,10 +573,9 @@ fn drain_renames(
                 *open = outcome.new_path.join(suffix);
             }
         }
-        let open_path = if let Ok(suffix) = file_view.path.strip_prefix(&outcome.old_path) {
-            outcome.new_path.join(suffix).to_string_lossy().into_owned()
-        } else {
-            String::new()
+        let open_path = match file_view.path.strip_prefix(&outcome.old_path) {
+            Ok(suffix) => Some(outcome.new_path.join(suffix)),
+            Err(_) => None,
         };
         if let Ok(mut tree) = trees.get_mut(tree_of.0) {
             if outcome.was_dir {
@@ -307,23 +592,21 @@ fn drain_renames(
         commands
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
-        if browsers.can_emit_to(&webview) {
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                webview,
-                &ExplorerFsResult {
-                    ok: true,
-                    message: format!(
-                        "Renamed to {}",
-                        outcome
-                            .new_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                    ),
-                    open_path,
-                },
-            ));
+        if let Some(path) = open_path {
+            commands.trigger(FileNavigateRequest::new(webview, path, 0));
         }
+        commands.trigger(ExplorerFeedback::new(
+            webview,
+            true,
+            format!(
+                "Renamed to {}",
+                outcome
+                    .new_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ),
+        ));
     }
 }
 
@@ -331,7 +614,6 @@ fn drain_deletes(
     mut tasks: Query<(Entity, &mut ExplorerDeleteTask)>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (task_entity, mut pending) in &mut tasks {
@@ -346,16 +628,7 @@ fn drain_deletes(
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) => {
-                if browsers.can_emit_to(&webview) {
-                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                        webview,
-                        &ExplorerFsResult {
-                            ok: false,
-                            message: error,
-                            open_path: String::new(),
-                        },
-                    ));
-                }
+                commands.trigger(ExplorerFeedback::new(webview, false, error));
                 continue;
             }
         };
@@ -363,9 +636,9 @@ fn drain_deletes(
             .open_editors
             .retain(|open| !open.starts_with(&outcome.path));
         let open_path = if file_view.path.starts_with(&outcome.path) {
-            outcome.parent.to_string_lossy().into_owned()
+            Some(outcome.parent.clone())
         } else {
-            String::new()
+            None
         };
         if let Ok(mut tree) = trees.get_mut(tree_of.0) {
             if outcome.was_dir {
@@ -382,22 +655,20 @@ fn drain_deletes(
         commands
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
-        if browsers.can_emit_to(&webview) {
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                webview,
-                &ExplorerFsResult {
-                    ok: true,
-                    message: format!(
-                        "Deleted {}",
-                        outcome
-                            .path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                    ),
-                    open_path,
-                },
-            ));
+        if let Some(path) = open_path {
+            commands.trigger(FileNavigateRequest::new(webview, path, 0));
         }
+        commands.trigger(ExplorerFeedback::new(
+            webview,
+            true,
+            format!(
+                "Deleted {}",
+                outcome
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ),
+        ));
     }
 }

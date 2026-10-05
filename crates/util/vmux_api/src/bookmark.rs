@@ -175,6 +175,30 @@ pub struct BookmarkTextInputRequest {
     pub active: bool,
 }
 
+#[vmux_api::ui_event(Default, Eq)]
+pub struct BookmarkFolderEditOpenRequest {
+    pub parent: Option<String>,
+    pub draft: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct BookmarkRenameEditOpenRequest {
+    pub uuid: String,
+    pub folder: bool,
+    pub draft: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct BookmarkEditInputRequest {
+    pub draft: String,
+}
+
+#[vmux_api::ui_event]
+pub struct BookmarkEditSubmitRequest;
+
+#[vmux_api::ui_event]
+pub struct BookmarkEditCloseRequest;
+
 #[vmux_api::ui_event(Eq)]
 pub struct BookmarkContextMenuRequest {
     pub active: bool,
@@ -196,4 +220,25 @@ pub struct BookmarkRenameEffect {
 pub struct BookmarkMenuEffect {
     pub create_folder: BookmarkFolderCreateEffect,
     pub rename: BookmarkRenameEffect,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct BookmarkFolderEditState {
+    pub open: bool,
+    pub parent: Option<String>,
+    pub draft: String,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct BookmarkRenameEditState {
+    pub open: bool,
+    pub uuid: String,
+    pub folder: bool,
+    pub draft: String,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct BookmarkEditState {
+    pub create: BookmarkFolderEditState,
+    pub rename: BookmarkRenameEditState,
 }

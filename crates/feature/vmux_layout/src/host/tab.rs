@@ -11,11 +11,11 @@ use moonshine_save::prelude::*;
 use vmux_command::CommandDefinition;
 #[cfg(test)]
 use vmux_command::CommandManifest;
-use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 use vmux_ecs::launcher::LauncherDismissRequest;
+#[cfg(test)]
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::TabCommandSet;
 use vmux_ecs::{Active, Order};
 use vmux_flex::prelude::*;
@@ -73,8 +73,7 @@ impl Plugin for TabCommandPlugin {
             .add_message::<CreateRequest>()
             .add_message::<CloseRequest>()
             .add_message::<FocusRequest>()
-            .add_message::<MoveRequest>()
-            .add_systems(Startup, bind_commands.in_set(BindCommands));
+            .add_message::<MoveRequest>();
     }
 }
 
@@ -94,6 +93,7 @@ fn dismiss_launcher(
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub url: Option<String>,
@@ -112,6 +112,7 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CreateRequest;
 
@@ -123,6 +124,7 @@ impl TryFrom<&CommandInvocation> for CreateRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseRequest;
 
@@ -134,6 +136,7 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusRequest(pub TabFocus);
 
@@ -158,6 +161,7 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MoveRequest(pub SiblingDirection);
 
@@ -171,14 +175,6 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
             _ => Err(()),
         }
     }
-}
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenRequest>(&mut commands);
-    registry.message::<CreateRequest>(&mut commands);
-    registry.message::<CloseRequest>(&mut commands);
-    registry.message::<FocusRequest>(&mut commands);
-    registry.message::<MoveRequest>(&mut commands);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

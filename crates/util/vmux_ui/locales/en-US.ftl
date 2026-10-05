@@ -172,6 +172,9 @@ lsp-status-running = Running
 lsp-status-failed = Failed
 
 spaces-title = Spaces
+space-initialize-git-question = Initialize Git repository?
+space-initialize-git = Initialize Git
+space-not-now = Not now
 spaces-new-placeholder = New space name
 spaces-empty = No spaces
 spaces-default-name = Space { $number }

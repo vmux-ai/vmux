@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_ecs::event::{
-    FileDirEntry, FileDirectoryActivateRequest, FileDirectoryAscendRequest,
-    FileDirectoryBackRequest, FileDirectoryDescendRequest, FileDirectoryNextRequest,
-    FileDirectoryOpenRequest, FileDirectoryParentRequest, FileDirectoryPreviousRequest,
-    FileDirectorySelectRequest, FileDirectoryState, FileDirectoryToggleHiddenRequest,
-    FilePreviewRequest,
+    FileBreadcrumbRequest, FileBreadcrumbState, FileDirEntry, FileDirectoryActivateRequest,
+    FileDirectoryAscendRequest, FileDirectoryBackRequest, FileDirectoryDescendRequest,
+    FileDirectoryNextRequest, FileDirectoryOpenRequest, FileDirectoryParentRequest,
+    FileDirectoryPreviousRequest, FileDirectorySelectRequest, FileDirectoryState,
+    FileDirectoryToggleHiddenRequest, FilePreviewRequest,
 };
 
 use crate::host::editor::{FileNavigateRequest, FileView};
@@ -31,12 +32,14 @@ impl Plugin for DirectoryPlugin {
             FileDirectoryOpenRequest,
             FileDirectoryBackRequest,
             FileDirectoryToggleHiddenRequest,
+            FileBreadcrumbRequest,
         )>::default())
             .add_systems(
                 Update,
                 (
                     initialize.after(EditorFileLoadedSet),
                     publish.after(initialize),
+                    finish_breadcrumb,
                 ),
             )
             .add_observer(select)
@@ -48,7 +51,8 @@ impl Plugin for DirectoryPlugin {
             .add_observer(parent)
             .add_observer(open)
             .add_observer(back)
-            .add_observer(toggle_hidden);
+            .add_observer(toggle_hidden)
+            .add_observer(breadcrumb);
     }
 }
 
@@ -122,6 +126,9 @@ struct FileBackDirectory {
 #[derive(Component)]
 struct DirectorySelectionTarget(String);
 
+#[derive(Component)]
+struct BreadcrumbTask(Task<FileBreadcrumbState>);
+
 type ReadyDirectory = (
     Without<FileInitialMetaSent>,
     With<vmux_ecs::page::PageReady>,
@@ -179,7 +186,7 @@ fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut co
             continue;
         }
         let state = navigation.state(file, &directory);
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(entity, &state));
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
         commands.entity(entity).insert(FileInitialMetaSent);
         if let Some(entry) = state.entries.get(state.selected as usize) {
             commands.trigger(FilePreviewLoad {
@@ -203,6 +210,54 @@ fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut co
                 },
                 selected_only: false,
             });
+        }
+    }
+}
+
+fn breadcrumb(
+    trigger: On<UiInput<FileBreadcrumbRequest>>,
+    views: Query<&FileView>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(view) = views.get(entity) else {
+        return;
+    };
+    let path = PathBuf::from(&trigger.event().payload.path);
+    if !view.path.starts_with(&path) || !path.is_dir() {
+        return;
+    }
+    let path_text = path.to_string_lossy().into_owned();
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        entity,
+        &FileBreadcrumbState {
+            path: path_text.clone(),
+            entries: Vec::new(),
+            pending: true,
+        },
+    ));
+    let task = IoTaskPool::get().spawn(async move {
+        FileBreadcrumbState {
+            path: path_text,
+            entries: FileDir::read(&path),
+            pending: false,
+        }
+    });
+    commands.entity(entity).insert(BreadcrumbTask(task));
+}
+
+fn finish_breadcrumb(
+    mut tasks: Query<(Entity, &mut BreadcrumbTask)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(state) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<BreadcrumbTask>();
+        if browsers.can_emit_to(&entity) {
+            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
         }
     }
 }

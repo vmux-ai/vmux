@@ -8,27 +8,24 @@ use vmux_ecs::service::ServiceMessageSet;
 mod operation;
 mod tool_call;
 
-pub(crate) struct CommandPlugin;
-
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum CommandSet {
     ToolCalls,
     Commands,
 }
 
-impl Plugin for CommandPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandResponse>()
-            .configure_sets(
-                Update,
-                (CommandSet::ToolCalls, CommandSet::Commands)
-                    .chain()
-                    .in_set(WriteCommandRequests)
-                    .after(ServiceMessageSet),
-            )
-            .add_plugins((operation::AgentOperationPlugin, tool_call::ToolCallPlugin))
-            .add_systems(Update, notify.in_set(CommandSet::Commands));
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_message::<AgentCommandResponse>()
+        .configure_sets(
+            Update,
+            (CommandSet::ToolCalls, CommandSet::Commands)
+                .chain()
+                .in_set(WriteCommandRequests)
+                .after(ServiceMessageSet),
+        )
+        .add_systems(Update, notify.in_set(CommandSet::Commands));
+    operation::add(app);
+    tool_call::add(app);
 }
 
 fn notify(

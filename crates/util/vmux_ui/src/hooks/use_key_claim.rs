@@ -2,7 +2,7 @@ use crate::hooks::use_ui_state::use_ui_state;
 use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
 use dioxus::prelude::*;
-use vmux_api::input::{KeyClaims, KeyStroke, UiKeyContext};
+use vmux_api::input::{KeyClaimsUiState, KeyContextRequest, KeyStroke};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unclaimed {
@@ -18,7 +18,7 @@ enum KeyVerdict {
 
 impl KeyVerdict {
     fn decide(
-        claims: &KeyClaims,
+        claims: &KeyClaimsUiState,
         unclaimed: Unclaimed,
         stroke: &KeyStroke,
         wanted_locally: bool,
@@ -40,14 +40,14 @@ pub fn use_key_claim(
     unclaimed: Unclaimed,
     context: impl Fn() -> Vec<String> + 'static,
 ) -> KeyClaim {
-    let claims = use_ui_state::<KeyClaims>().state;
+    let claims = use_ui_state::<KeyClaimsUiState>().state;
     let resolves = use_hook(crate::transport::Host::resolves_keys);
 
     use_effect(move || {
         if !resolves {
             return;
         }
-        let _ = send(&UiKeyContext { keys: context() });
+        let _ = send(&KeyContextRequest { keys: context() });
     });
 
     KeyClaim {
@@ -59,7 +59,7 @@ pub fn use_key_claim(
 
 #[derive(Clone, Copy)]
 pub struct KeyClaim {
-    claims: Signal<KeyClaims>,
+    claims: Signal<KeyClaimsUiState>,
     unclaimed: Unclaimed,
     resolves: bool,
 }

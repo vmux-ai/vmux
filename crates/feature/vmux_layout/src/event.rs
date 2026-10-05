@@ -1,7 +1,8 @@
 use std::path::Path;
 
+use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
-use vmux_ecs::{PageIcon, PageMetadata};
+use vmux_ecs::PageMetadata;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ReloadEffect {
@@ -95,8 +96,6 @@ pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
 pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 
 pub const WINDOW_PAD_PX: f32 = 8.0;
-
-pub const TERMINAL_CEF_BG_COLOR: &str = "#1e1e2e";
 
 pub const PANE_GAP_PX: f32 = 4.0;
 

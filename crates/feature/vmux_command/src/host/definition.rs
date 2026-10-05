@@ -2,13 +2,8 @@ use std::collections::HashSet;
 
 use bevy::{ecs::system::SystemParam, prelude::*};
 use vmux_api::JsonSchema;
-use vmux_api::json::JsonValue;
-use vmux_api::protocol::AgentCommandTool;
 use vmux_ecs::JsonArguments;
-use vmux_ecs::host::manifest::{self, FeatureManifest};
-use vmux_ui::i18n::Locale;
-
-use crate::host::shortcut::{Binding, KeyCombo, Shortcut, Source, When};
+use vmux_ecs::manifest::{self, FeatureManifest};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteCommandRequests;
@@ -54,6 +49,12 @@ impl Plugin for CommandRuntimePlugin {
                     .chain()
                     .in_set(DispatchCommandInvocations),
             );
+        for binding in inventory::iter::<CommandBindingRegistration> {
+            (binding.register)(app);
+        }
+        for message in inventory::iter::<CommandMessageRegistration> {
+            (message.register)(app);
+        }
     }
 }
 
@@ -63,48 +64,16 @@ pub enum ShortcutDefinition {
     Chord(String),
 }
 
-impl From<manifest::ShortcutKind> for ShortcutDefinition {
-    fn from(shortcut: manifest::ShortcutKind) -> Self {
-        match shortcut {
-            manifest::ShortcutKind::Direct(value) => Self::Direct(value),
-            manifest::ShortcutKind::Chord(value) => Self::Chord(value),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandShortcut {
     pub shortcut: ShortcutDefinition,
     pub when: Option<String>,
 }
 
-impl From<manifest::Shortcut> for CommandShortcut {
-    fn from(shortcut: manifest::Shortcut) -> Self {
-        Self {
-            shortcut: shortcut.shortcut.into(),
-            when: shortcut.when,
-        }
-    }
-}
-
-pub struct CommandManifest(Vec<manifest::Command>);
-
-impl CommandManifest {
-    pub fn for_feature<M: manifest::FeatureManifestSource>() -> Self {
-        Self(FeatureManifest::of::<M>().commands)
-    }
-
-    pub fn from_feature_ron(source: &str) -> Self {
-        Self(FeatureManifest::parse(source).commands)
-    }
-
-    pub fn into_vec(self) -> Vec<CommandDefinition> {
-        self.0.into_iter().map(CommandDefinition::from).collect()
-    }
-}
+pub struct CommandManifest(pub(super) Vec<manifest::Command>);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AgentAccess {
+pub(super) enum AgentAccess {
     Denied,
     Allowed,
 }
@@ -113,35 +82,7 @@ enum AgentAccess {
 pub struct CommandMcp {
     pub description: String,
     pub input_schema: JsonSchema,
-    agent_access: AgentAccess,
-}
-
-impl From<manifest::CommandMcp> for CommandMcp {
-    fn from(mcp: manifest::CommandMcp) -> Self {
-        let definition = Self::new(
-            mcp.description,
-            mcp.input_schema.unwrap_or_else(JsonSchema::object),
-        );
-        if mcp.allow_agent {
-            return definition.allow_agent();
-        }
-        definition
-    }
-}
-
-impl CommandMcp {
-    pub fn new(description: impl Into<String>, input_schema: JsonSchema) -> Self {
-        Self {
-            description: description.into(),
-            input_schema,
-            agent_access: AgentAccess::Denied,
-        }
-    }
-
-    pub fn allow_agent(mut self) -> Self {
-        self.agent_access = AgentAccess::Allowed;
-        self
-    }
+    pub(super) agent_access: AgentAccess,
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -155,350 +96,14 @@ pub struct CommandDefinition {
     pub native_menu: bool,
     pub shortcut_label: Option<String>,
     pub shortcuts: Vec<CommandShortcut>,
+    pub toolbar: Option<CommandToolbar>,
     pub mcp: Option<CommandMcp>,
 }
 
-impl From<manifest::Command> for CommandDefinition {
-    fn from(command: manifest::Command) -> Self {
-        Self {
-            id: command.id,
-            aliases: command.aliases,
-            label: command.label,
-            group: command.group,
-            accelerator: command.accelerator,
-            hidden: command.hidden,
-            native_menu: command.native_menu,
-            shortcut_label: command.shortcut_label,
-            shortcuts: command.shortcuts.into_iter().map(Into::into).collect(),
-            mcp: command.mcp.map(Into::into),
-        }
-    }
-}
-
-impl CommandDefinition {
-    pub fn new(id: impl Into<String>, label: impl Into<String>, group: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            aliases: Vec::new(),
-            label: label.into(),
-            group: group.into(),
-            accelerator: None,
-            hidden: false,
-            native_menu: true,
-            shortcut_label: None,
-            shortcuts: Vec::new(),
-            mcp: None,
-        }
-    }
-
-    pub fn alias(mut self, alias: impl Into<String>) -> Self {
-        self.aliases.push(alias.into());
-        self
-    }
-
-    #[cfg(test)]
-    fn message<T>(self) -> (Self, CommandMessage)
-    where
-        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
-    {
-        (self, CommandMessage::of::<T>())
-    }
-
-    pub fn agent_tool(&self) -> Option<AgentCommandTool> {
-        let mcp = self.mcp.as_ref()?;
-        Some(AgentCommandTool {
-            name: self.id.clone(),
-            description: mcp.description.clone(),
-            input_schema: JsonValue::from(mcp.input_schema.to_json()),
-        })
-    }
-
-    pub fn matches(&self, id: &str) -> bool {
-        self.id == id || self.aliases.iter().any(|alias| alias == id)
-    }
-
-    pub fn user_invocation(
-        &self,
-        caller: Entity,
-        arguments: serde_json::Value,
-    ) -> Result<CommandInvocation, String> {
-        self.validated_invocation(caller, arguments, false)
-    }
-
-    pub fn agent_invocation(
-        &self,
-        caller: Entity,
-        arguments: serde_json::Value,
-    ) -> Result<CommandInvocation, String> {
-        self.validated_invocation(caller, arguments, true)
-    }
-
-    fn validated_invocation(
-        &self,
-        caller: Entity,
-        arguments: serde_json::Value,
-        require_agent_access: bool,
-    ) -> Result<CommandInvocation, String> {
-        let Some(mcp) = &self.mcp else {
-            return Err(format!("unknown app command: {}", self.id));
-        };
-        if require_agent_access && mcp.agent_access != AgentAccess::Allowed {
-            return Err("focus-changing app command is disabled for agents".to_string());
-        }
-        self.validate_arguments(&arguments)?;
-        Ok(CommandInvocation::new(caller, &self.id).with_arguments(arguments))
-    }
-
-    pub fn mcp(mut self, definition: CommandMcp) -> Self {
-        self.mcp = Some(definition);
-        self
-    }
-
-    pub fn expose_to_mcp(mut self) -> Self {
-        self.mcp = Some(CommandMcp::new(self.label.clone(), JsonSchema::object()));
-        self
-    }
-
-    pub fn allow_agent(mut self) -> Self {
-        let mcp = self
-            .mcp
-            .as_mut()
-            .expect("agent access requires an MCP command definition");
-        mcp.agent_access = AgentAccess::Allowed;
-        self
-    }
-
-    fn validate_arguments(&self, arguments: &serde_json::Value) -> Result<(), String> {
-        let Some(mcp) = &self.mcp else {
-            return Err(format!("unknown app command: {}", self.id));
-        };
-        mcp.input_schema
-            .validate_value(arguments)
-            .map_err(|error| format!("{}: invalid arguments: {error}", self.id))
-    }
-
-    pub fn accelerator(mut self, accelerator: impl Into<String>) -> Self {
-        self.accelerator = Some(accelerator.into());
-        self
-    }
-
-    pub fn hidden(mut self) -> Self {
-        self.hidden = true;
-        self
-    }
-
-    pub fn native_menu(mut self, native_menu: bool) -> Self {
-        self.native_menu = native_menu;
-        self
-    }
-
-    pub fn with_shortcut_label(mut self, shortcut_label: impl Into<String>) -> Self {
-        self.shortcut_label = Some(shortcut_label.into());
-        self
-    }
-
-    pub fn direct(self, shortcut: impl Into<String>) -> Self {
-        self.direct_when(shortcut, None::<String>)
-    }
-
-    pub fn direct_when(
-        mut self,
-        shortcut: impl Into<String>,
-        when: Option<impl Into<String>>,
-    ) -> Self {
-        self.shortcuts.push(CommandShortcut {
-            shortcut: ShortcutDefinition::Direct(shortcut.into()),
-            when: when.map(Into::into),
-        });
-        self
-    }
-
-    pub fn chord(self, shortcut: impl Into<String>) -> Self {
-        self.chord_when(shortcut, None::<String>)
-    }
-
-    pub fn chord_when(
-        mut self,
-        shortcut: impl Into<String>,
-        when: Option<impl Into<String>>,
-    ) -> Self {
-        self.shortcuts.push(CommandShortcut {
-            shortcut: ShortcutDefinition::Chord(shortcut.into()),
-            when: when.map(Into::into),
-        });
-        self
-    }
-
-    pub fn command_bar_name(&self) -> String {
-        format!("{} > {}", self.group, self.label)
-    }
-
-    pub fn localized_name(&self, locale: &str) -> String {
-        let locale = Locale::from(locale);
-        let message_id = format!("command-{}", self.id.replace('_', "-"));
-        let translated = locale.translate(&message_id);
-        if translated == message_id {
-            return self.command_bar_name();
-        }
-        let mut segments = translated
-            .split(" > ")
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        let group_count = self.group.split(" > ").count();
-        if segments.len() <= group_count {
-            return translated;
-        }
-        for (index, group) in self.group.split(" > ").enumerate() {
-            let prefix = if index == 0 { "menu" } else { "command-group" };
-            let group_id = format!("{prefix}-{}", Self::kebab_case(group));
-            let localized = locale.translate(&group_id);
-            if localized != group_id {
-                segments[index] = localized;
-            }
-        }
-        segments.join(" > ")
-    }
-
-    fn kebab_case(value: &str) -> String {
-        value
-            .split_whitespace()
-            .map(str::to_ascii_lowercase)
-            .collect::<Vec<_>>()
-            .join("-")
-    }
-
-    pub fn shortcut_label(&self) -> String {
-        if let Some(label) = &self.shortcut_label {
-            return label.clone();
-        }
-        self.bindings()
-            .into_iter()
-            .next()
-            .map(|binding| binding.shortcut.display())
-            .unwrap_or_default()
-    }
-
-    pub fn bindings(&self) -> Vec<Binding> {
-        let mut bindings = Vec::new();
-        for definition in &self.shortcuts {
-            let shortcut = match &definition.shortcut {
-                ShortcutDefinition::Direct(value) => {
-                    let Some(combo) = KeyCombo::parse(value) else {
-                        continue;
-                    };
-                    Shortcut::Direct(combo)
-                }
-                ShortcutDefinition::Chord(value) => {
-                    let Some((prefix, second)) = value.split_once(',') else {
-                        continue;
-                    };
-                    let (Some(prefix), Some(second)) = (
-                        KeyCombo::parse(prefix.trim()),
-                        KeyCombo::parse(second.trim()),
-                    ) else {
-                        continue;
-                    };
-                    Shortcut::Chord(prefix, second)
-                }
-            };
-            bindings.push(Binding {
-                shortcut,
-                command: self.id.to_string(),
-                when: definition.when.as_deref().and_then(When::parse),
-            });
-        }
-        if let Some(accelerator) = &self.accelerator
-            && let Some(combo) = KeyCombo::parse(accelerator)
-        {
-            let shortcut = Shortcut::Direct(combo);
-            if !bindings.iter().any(|binding| binding.shortcut == shortcut) {
-                bindings.push(Binding {
-                    shortcut,
-                    command: self.id.to_string(),
-                    when: None,
-                });
-            }
-        }
-        bindings
-    }
-
-    pub fn default_shortcuts(definitions: &[Self]) -> Vec<Binding> {
-        let mut bindings = Vec::new();
-        for definition in definitions {
-            bindings.extend(definition.bindings());
-        }
-        bindings
-    }
-
-    pub fn extend_keymap(definitions: &[Self], keymap: &mut crate::host::shortcut::Keymap) {
-        for definition in definitions {
-            keymap.register(
-                std::iter::once(definition.id.as_str())
-                    .chain(definition.aliases.iter().map(String::as_str)),
-            );
-        }
-        keymap.extend(Source::Default, Self::default_shortcuts(definitions));
-    }
-
-    pub fn append_native_menus(
-        definitions: &[Self],
-        menu: &mut muda::Menu,
-    ) -> Result<(), muda::Error> {
-        for definition in definitions {
-            if definition.hidden || !definition.native_menu {
-                continue;
-            }
-            let mut path = definition.group.split(" > ");
-            let Some(root_name) = path.next() else {
-                continue;
-            };
-            let existing = menu
-                .items()
-                .into_iter()
-                .filter_map(|item| item.as_submenu().cloned())
-                .find(|submenu| submenu.text() == root_name);
-            let mut submenu = if let Some(existing) = existing {
-                existing
-            } else {
-                let created = muda::Submenu::new(root_name, true);
-                menu.append(&created)?;
-                created
-            };
-            for name in path {
-                let existing = submenu
-                    .items()
-                    .into_iter()
-                    .filter_map(|item| item.as_submenu().cloned())
-                    .find(|child| child.text() == name);
-                submenu = if let Some(existing) = existing {
-                    existing
-                } else {
-                    let created = muda::Submenu::new(name, true);
-                    submenu.append(&created)?;
-                    created
-                };
-            }
-            let accelerator = definition
-                .accelerator
-                .as_deref()
-                .or_else(|| {
-                    definition.shortcuts.iter().find_map(|shortcut| {
-                        if shortcut.when.is_some() {
-                            return None;
-                        }
-                        let ShortcutDefinition::Direct(value) = &shortcut.shortcut else {
-                            return None;
-                        };
-                        Some(value.as_str())
-                    })
-                })
-                .and_then(|value| value.parse::<muda::accelerator::Accelerator>().ok());
-            let item =
-                muda::MenuItem::with_id(&definition.id, &definition.label, true, accelerator);
-            submenu.append(&item)?;
-        }
-        Ok(())
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CommandToolbar {
+    pub icon: vmux_api::BuiltinIcon,
+    pub rank: i32,
 }
 
 #[derive(Message, Clone, Debug, PartialEq)]
@@ -509,49 +114,63 @@ pub struct CommandInvocation {
 }
 
 #[derive(Component, Clone, Copy)]
-struct CommandMessage(fn(&CommandInvocation, &mut Commands));
+pub(super) struct CommandMessage(pub(super) fn(&CommandInvocation, &mut Commands));
 
 pub trait CommandBinding: Bundle + Sized {
     fn for_command(id: &str) -> Option<Self>;
 }
 
-impl CommandMessage {
-    fn of<T>() -> Self
+pub struct CommandBindingRegistration {
+    register: fn(&mut App),
+}
+
+impl CommandBindingRegistration {
+    pub const fn of<T: CommandBinding>() -> Self {
+        Self {
+            register: register_binding::<T>,
+        }
+    }
+}
+
+inventory::collect!(CommandBindingRegistration);
+
+pub struct CommandMessageRegistration {
+    register: fn(&mut App),
+}
+
+impl CommandMessageRegistration {
+    pub const fn of<T>() -> Self
     where
         T: Message + for<'a> TryFrom<&'a CommandInvocation>,
     {
-        Self(write_command_message::<T>)
+        Self {
+            register: register_message::<T>,
+        }
     }
 }
 
-fn write_command_message<T>(invocation: &CommandInvocation, commands: &mut Commands)
+inventory::collect!(CommandMessageRegistration);
+
+fn register_binding<T: CommandBinding>(app: &mut App) {
+    app.add_systems(Startup, bind::<T>.in_set(BindCommands));
+}
+
+fn bind<T: CommandBinding>(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind::<T>(&mut commands);
+}
+
+fn register_message<T>(app: &mut App)
 where
     T: Message + for<'a> TryFrom<&'a CommandInvocation>,
 {
-    let Ok(message) = T::try_from(invocation) else {
-        warn!(command = %invocation.id, "command message rejected its registered definition");
-        return;
-    };
-    commands.write_message(message);
+    app.add_systems(Startup, bind_message::<T>.in_set(BindCommands));
 }
 
-impl CommandInvocation {
-    pub fn new(caller: Entity, id: impl Into<String>) -> Self {
-        Self {
-            caller,
-            id: id.into(),
-            arguments: JsonArguments(serde_json::json!({})),
-        }
-    }
-
-    pub fn with_arguments(mut self, arguments: serde_json::Value) -> Self {
-        self.arguments = JsonArguments(arguments);
-        self
-    }
-
-    pub fn argument<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
-        serde_json::from_value(self.arguments.0.get(name)?.clone()).ok()
-    }
+fn bind_message<T>(registry: CommandRegistry, mut commands: Commands)
+where
+    T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+{
+    registry.message::<T>(&mut commands);
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -596,7 +215,7 @@ impl CommandRegistry<'_, '_> {
 fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Command keymap"),
-        crate::host::shortcut::Keymap::default(),
+        crate::host::shortcut_driver::Keymap::default(),
     ));
 }
 
@@ -641,18 +260,8 @@ fn validate(
 #[derive(EntityEvent)]
 pub struct CommandDispatch {
     #[event_target]
-    command: Entity,
-    invocation: CommandInvocation,
-}
-
-impl CommandDispatch {
-    pub fn command(&self) -> Entity {
-        self.command
-    }
-
-    pub fn invocation(&self) -> &CommandInvocation {
-        &self.invocation
-    }
+    pub(super) command: Entity,
+    pub(super) invocation: CommandInvocation,
 }
 
 fn dispatch(

@@ -17,7 +17,6 @@ vmux_api = { path = "../vmux_api", features = ["bevy"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-tempfile = "3"
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
@@ -29,9 +28,11 @@ bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
 sha2 = "0.10"
+tokio = { workspace = true }
 toml = { workspace = true }
 url = { workspace = true }
 vmux_flex = { path = "../vmux_flex" }
+vmux_transport = { path = "../vmux_transport" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints]

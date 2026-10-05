@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use vmux_api::protocol::AcpModeOption;
 
+use crate::cn::cn;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[component]
 pub fn PermissionMenu(

@@ -16,21 +16,14 @@ impl Default for SpaceRecord {
 
 impl SpaceRecord {
     pub fn bootstrap() -> Self {
+        Self::bootstrap_for("Personal")
+    }
+
+    pub fn bootstrap_for(profile: impl Into<String>) -> Self {
         Self {
             id: BOOTSTRAP_SPACE_ID.to_string(),
             name: BOOTSTRAP_SPACE_NAME.to_string(),
-            profile: Self::current_profile_name(),
-        }
-    }
-
-    pub fn current_profile_name() -> String {
-        #[cfg(host)]
-        {
-            vmux_ecs::profile::Profile::current().display_name()
-        }
-        #[cfg(not(host))]
-        {
-            "Personal".to_string()
+            profile: profile.into(),
         }
     }
 

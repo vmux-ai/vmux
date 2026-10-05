@@ -346,14 +346,19 @@ fn toggle_hidden(
 fn load(
     trigger: On<DirectoryLoad>,
     mut pages: Query<&mut vmux_ecs::PageMetadata>,
-    mut views: Query<(&mut super::state::GitState, &mut GitDirectoryNavigation)>,
+    mut navigation: Query<&mut GitDirectoryNavigation>,
+    mut states: super::state::GitStates,
     mut commands: Commands,
 ) {
-    let Ok((mut view, mut navigation)) = views.get_mut(trigger.event_target()) else {
+    let entity = trigger.event_target();
+    if !states.contains(entity) {
+        return;
+    }
+    let Ok(mut navigation) = navigation.get_mut(entity) else {
         return;
     };
     let listing = DirectoryListing::read(Path::new(&trigger.event().path));
-    view.start_directory(&listing.path);
+    states.start_directory(entity, &listing.path);
     let path_changed = navigation
         .current
         .as_ref()
@@ -369,7 +374,7 @@ fn load(
         .visible_entry(navigation.show_hidden, navigation.selected)
         .filter(|entry| entry.is_dir)
         .map(|entry| DirectoryListing::read(Path::new(&entry.path)));
-    if let Ok(mut page) = pages.get_mut(trigger.event_target()) {
+    if let Ok(mut page) = pages.get_mut(entity) {
         if let Some(url) = crate::GitUrl::from_path(&listing.path) {
             page.url = url;
         }
@@ -384,12 +389,12 @@ fn load(
     let repo_root = listing.repo_root.clone();
     navigation.current = Some(listing);
     let Some(repo_root) = repo_root else {
-        view.finish_directory();
+        states.finish_directory(entity);
         return;
     };
     let repo_root = repo_root.to_string_lossy().into_owned();
     commands.trigger(UiInput {
-        webview: trigger.event_target(),
+        webview: entity,
         payload: ProjectActivateRequest {
             path: repo_root.clone(),
             branch: String::new(),
@@ -398,7 +403,7 @@ fn load(
         },
     });
     commands.trigger(UiInput {
-        webview: trigger.event_target(),
+        webview: entity,
         payload: GitRepositoryRequest { path: repo_root },
     });
 }

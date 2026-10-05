@@ -157,6 +157,9 @@ lsp-status-running = 运行中
 lsp-status-failed = 失败
 
 spaces-title = 工作区
+space-initialize-git-question = 初始化 Git 仓库？
+space-initialize-git = 初始化 Git
+space-not-now = 暂不
 spaces-new-placeholder = 新工作区名称
 spaces-empty = 没有工作区
 spaces-default-name = 工作区 { $number }

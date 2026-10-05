@@ -33,7 +33,7 @@ mod macos {
     use vmux_api::bookmark::{
         BookmarkFolderCreateEffect, BookmarkMenuEffect, BookmarkRenameEffect,
     };
-    use vmux_ecs::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid, host::UiStateWrite};
+    use vmux_ecs::{Bookmark, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
     use vmux_layout::bookmark::{
         AddRequest, BookmarkMenuTarget, MoveFolderRequest, MoveRequest, PinRequest,
         RemoveFolderRequest, RemoveRequest, ShowBookmarkMenuRequest, ToggleFolderRequest,
@@ -41,7 +41,7 @@ mod macos {
     };
     use vmux_layout::stack::OpenRequest;
     use vmux_layout::state::LayoutUiState;
-    use vmux_native::menu::{
+    use vmux_page::menu::{
         OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet,
     };
     use vmux_ui::i18n::{Locale, TranslationValue};
@@ -121,6 +121,79 @@ mod macos {
         commands: Commands<'w, 's>,
     }
 
+    impl BookmarkMenuBuilder<'_, '_> {
+        fn folders(&self) -> Vec<FolderMenuRow> {
+            let mut folders = Vec::new();
+            for (entity, uuid, name, _, _, _, folder, _, parent) in &self.entries {
+                if !folder {
+                    continue;
+                }
+                folders.push(FolderMenuRow {
+                    entity,
+                    uuid: uuid.0.clone(),
+                    name: name
+                        .map(|name| name.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    parent: parent.map(Relationship::get),
+                });
+            }
+            folders
+        }
+
+        fn folder_choices(folders: &[FolderMenuRow]) -> Vec<FolderChoice> {
+            let mut choices = Vec::new();
+            Self::append_folder_choices(folders, None, "", &mut HashSet::new(), &mut choices);
+            choices
+        }
+
+        fn append_folder_choices(
+            folders: &[FolderMenuRow],
+            parent: Option<Entity>,
+            prefix: &str,
+            visited: &mut HashSet<Entity>,
+            choices: &mut Vec<FolderChoice>,
+        ) {
+            for folder in folders.iter().filter(|folder| folder.parent == parent) {
+                if !visited.insert(folder.entity) {
+                    continue;
+                }
+                let label = if prefix.is_empty() {
+                    folder.name.clone()
+                } else {
+                    format!("{prefix} / {}", folder.name)
+                };
+                choices.push(FolderChoice {
+                    entity: folder.entity,
+                    uuid: folder.uuid.clone(),
+                    label: label.clone(),
+                });
+                Self::append_folder_choices(folders, Some(folder.entity), &label, visited, choices);
+            }
+        }
+
+        fn is_descendant(candidate: Entity, ancestor: Entity, folders: &[FolderMenuRow]) -> bool {
+            let mut current = Some(candidate);
+            let mut visited = HashSet::new();
+            while let Some(entity) = current {
+                if !visited.insert(entity) {
+                    return false;
+                }
+                let Some(folder) = folders.iter().find(|folder| folder.entity == entity) else {
+                    return false;
+                };
+                let Some(parent) = folder.parent else {
+                    return false;
+                };
+                if parent == ancestor {
+                    return true;
+                }
+                current = Some(parent);
+            }
+            false
+        }
+    }
+
     #[derive(Message, Clone)]
     struct NewFolderInputRequest {
         webview: Entity,
@@ -162,7 +235,7 @@ mod macos {
             builder.commands.entity(entity).despawn();
         }
         let locale = Locale::requested(Some(&builder.settings.appearance.locale));
-        let folders = FolderMenuRow::collect(&builder.entries);
+        let folders = builder.folders();
         let menu = builder.commands.spawn(OsContextMenu::new(view_ptr)).id();
         match request.target {
             BookmarkMenuTarget::Root => {
@@ -303,7 +376,7 @@ mod macos {
                 }),
             ));
         }
-        for folder in FolderChoice::collect(folders) {
+        for folder in BookmarkMenuBuilder::folder_choices(folders) {
             if parent.is_some_and(|parent| parent.parent() == folder.entity) {
                 continue;
             }
@@ -414,9 +487,9 @@ mod macos {
                 }),
             ));
         }
-        for folder in FolderChoice::collect(folders) {
+        for folder in BookmarkMenuBuilder::folder_choices(folders) {
             if folder.entity == entity
-                || FolderMenuRow::is_descendant(folder.entity, entity, folders)
+                || BookmarkMenuBuilder::is_descendant(folder.entity, entity, folders)
             {
                 continue;
             }
@@ -445,85 +518,10 @@ mod macos {
         ));
     }
 
-    impl FolderMenuRow {
-        fn collect(entries: &BookmarkMenuEntries<'_, '_>) -> Vec<Self> {
-            let mut folders = Vec::new();
-            for (entity, uuid, name, _, _, _, folder, _, parent) in entries {
-                if !folder {
-                    continue;
-                }
-                folders.push(Self {
-                    entity,
-                    uuid: uuid.0.clone(),
-                    name: name
-                        .map(|name| name.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    parent: parent.map(Relationship::get),
-                });
-            }
-            folders
-        }
-
-        fn is_descendant(candidate: Entity, ancestor: Entity, folders: &[Self]) -> bool {
-            let mut current = Some(candidate);
-            let mut visited = HashSet::new();
-            while let Some(entity) = current {
-                if !visited.insert(entity) {
-                    return false;
-                }
-                let Some(folder) = folders.iter().find(|folder| folder.entity == entity) else {
-                    return false;
-                };
-                let Some(parent) = folder.parent else {
-                    return false;
-                };
-                if parent == ancestor {
-                    return true;
-                }
-                current = Some(parent);
-            }
-            false
-        }
-    }
-
     struct FolderChoice {
         entity: Entity,
         uuid: String,
         label: String,
-    }
-
-    impl FolderChoice {
-        fn collect(folders: &[FolderMenuRow]) -> Vec<Self> {
-            let mut choices = Vec::new();
-            Self::append(folders, None, "", &mut HashSet::new(), &mut choices);
-            choices
-        }
-
-        fn append(
-            folders: &[FolderMenuRow],
-            parent: Option<Entity>,
-            prefix: &str,
-            visited: &mut HashSet<Entity>,
-            choices: &mut Vec<Self>,
-        ) {
-            for folder in folders.iter().filter(|folder| folder.parent == parent) {
-                if !visited.insert(folder.entity) {
-                    continue;
-                }
-                let label = if prefix.is_empty() {
-                    folder.name.clone()
-                } else {
-                    format!("{prefix} / {}", folder.name)
-                };
-                choices.push(Self {
-                    entity: folder.entity,
-                    uuid: folder.uuid.clone(),
-                    label: label.clone(),
-                });
-                Self::append(folders, Some(folder.entity), &label, visited, choices);
-            }
-        }
     }
 
     fn forward_message<M: Message + Clone>(

@@ -7,37 +7,36 @@ use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Agent, Profile};
 #[cfg(test)]
 use vmux_layout::active_pane::ActiveStack;
-use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
+use vmux_layout::stack::ComputeFocusSet;
+#[cfg(test)]
+use vmux_layout::stack::Stack;
 
+use super::attention_driver::AttentionContext;
 use crate::host::event::AgentRequestInput;
 use vmux_ecs::agent::SessionId;
-
-pub(super) struct AttentionPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct TurnEndedSet;
 
-impl Plugin for AttentionPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                bell,
-                handle_turn_ended
-                    .in_set(TurnEndedSet)
-                    .after(ServiceMessageSet),
-            )
-                .chain()
-                .after(ComputeFocusSet),
+pub(super) fn add(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            bell,
+            handle_turn_ended
+                .in_set(TurnEndedSet)
+                .after(ServiceMessageSet),
         )
-        .add_systems(
-            Update,
-            (mark_done, clear_done)
-                .chain()
-                .after(ComputeFocusSet)
-                .after(super::tidy::TidySet),
-        );
-    }
+            .chain()
+            .after(ComputeFocusSet),
+    )
+    .add_systems(
+        Update,
+        (mark_done, clear_done)
+            .chain()
+            .after(ComputeFocusSet)
+            .after(super::tidy::TidySet),
+    );
 }
 
 fn bell(
@@ -57,36 +56,6 @@ fn bell(
 }
 
 const DONE_DEDUP_WINDOW_SECS: f64 = 3.0;
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct AttentionContext<'w, 's> {
-    windows: Query<'w, 's, &'static Window, With<bevy::window::PrimaryWindow>>,
-    focused: FocusedStack<'w, 's>,
-    stacks: Query<'w, 's, (), With<Stack>>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-}
-
-impl AttentionContext<'_, '_> {
-    fn foreground(&self) -> bool {
-        self.windows
-            .iter()
-            .next()
-            .map(|window| window.focused && window.visible)
-            .unwrap_or(false)
-    }
-
-    fn stack(&self, entity: Entity) -> Option<Entity> {
-        self.stacks
-            .get(entity)
-            .is_ok()
-            .then_some(entity)
-            .or_else(|| self.child_of.get(entity).ok().map(|child| child.parent()))
-    }
-
-    fn viewed(&self, entity: Entity) -> bool {
-        self.foreground() && self.focused.stack == self.stack(entity)
-    }
-}
 
 fn mark_done(
     mut reader: MessageReader<AgentAttention>,

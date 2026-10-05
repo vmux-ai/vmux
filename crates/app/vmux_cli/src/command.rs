@@ -7,7 +7,7 @@ use bevy_app::{App, AppExit, First, Last, Plugin, PreUpdate};
 use bevy_ecs::prelude::*;
 use clap::error::ErrorKind;
 use vmux_ecs::cli::{CliInvocation, CliResult, CliWake};
-use vmux_ecs::host::manifest::FeatureManifest;
+use vmux_ecs::manifest::FeatureManifest;
 
 use catalog::CliCatalog;
 use parser::CliParser;

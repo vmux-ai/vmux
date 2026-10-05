@@ -1,6 +1,6 @@
+use crate::cn::cn;
 use crate::components::badge::Badge;
 use crate::components::skeleton::Skeleton;
-use crate::util::cn;
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]

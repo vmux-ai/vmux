@@ -1,5 +1,5 @@
 use crate::SimulatorPlugin;
-use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorReady};
+use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorUiState};
 use crate::url::SimulatorRoute;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -10,9 +10,9 @@ use stream::StreamServer;
 pub use tool::SimulatorToolPlugin;
 use vmux_api::protocol::{AgentImage, AgentQueryResult, AgentRequestId, ClientMessage};
 use vmux_ecs::PageMetadata;
-use vmux_ecs::host::page::{NativelyHosted, PageReady};
-use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::page::{HostedPage, PageReady};
 use vmux_ecs::service::ServiceRequest;
+use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_input::{NativeKeyClaimSet, NativeKeyInputSet};
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
 use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
@@ -72,9 +72,9 @@ impl Plugin for SimulatorPlugin {
         app.add_plugins(
             Self::MANIFEST
                 .plugin()
-                .hosted(NativelyHosted::subtree(Self::URL, Self::MANIFEST.title)),
+                .hosted(HostedPage::subtree(Self::URL, Self::MANIFEST.title)),
         )
-        .add_plugins(UiStatePlugin::<SimulatorReady>::default())
+        .add_plugins(UiStatePlugin::<SimulatorUiState>::default())
         .add_plugins(SimulatorToolPlugin)
         .configure_sets(
             Update,
@@ -371,7 +371,7 @@ type SimulatorViews<'w, 's> = Query<
         Entity,
         &'static PageMetadata,
         Option<&'static ChildOf>,
-        Option<&'static UiState<SimulatorReady>>,
+        Option<&'static UiState<SimulatorUiState>>,
     ),
     With<PageReady>,
 >;
@@ -476,7 +476,7 @@ fn start_device_attachments(
             DevicePoints,
             DevicePixels,
             StreamServer,
-            UiState<SimulatorReady>,
+            UiState<SimulatorUiState>,
             input::DeviceTouchSession,
         )>();
         let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
@@ -584,7 +584,7 @@ fn announce(
             continue;
         }
         let payload = match attachments.get(entity) {
-            Ok((server, device)) => SimulatorReady {
+            Ok((server, device)) => SimulatorUiState {
                 port: server.port(),
                 capability: server.capability().to_string(),
                 version: device
@@ -597,7 +597,7 @@ fn announce(
                 frame_height: server.frame_height(),
                 frame_stride: server.frame_stride(),
             },
-            Err(_) => SimulatorReady::default(),
+            Err(_) => SimulatorUiState::default(),
         };
         if let Ok((_, device)) = attachments.get(entity)
             && let Some(canonical_url) = device.canonical_url()
@@ -613,7 +613,9 @@ fn announce(
         if announced.is_some_and(|announced| announced.current() == Some(&payload)) {
             continue;
         }
-        commands.trigger(UiStateWrite::<SimulatorReady>::from_event(entity, &payload));
+        commands.trigger(UiStateWrite::<SimulatorUiState>::from_event(
+            entity, &payload,
+        ));
     }
 }
 

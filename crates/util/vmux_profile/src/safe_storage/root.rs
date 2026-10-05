@@ -2,7 +2,9 @@ use std::sync::{Mutex, OnceLock};
 
 use ring::rand::SecureRandom;
 
-use super::{ROOT_KEY_LENGTH, RootKey, RootKeySource, SafeStorageContext, SafeStorageError};
+#[cfg(any(test, debug_assertions))]
+use super::RootKeySource;
+use super::{ROOT_KEY_LENGTH, RootKey, SafeStorageContext, SafeStorageError};
 
 const ROOT_HEADER: &[u8] = b"vmux-safe-storage-root-v1\0";
 const STATE_VERSION: &[u8] = b"1\n";

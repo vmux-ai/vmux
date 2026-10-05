@@ -157,6 +157,9 @@ lsp-status-running = قيد التشغيل
 lsp-status-failed = فشل
 
 spaces-title = مساحات العمل
+space-initialize-git-question = هل تريد تهيئة مستودع Git؟
+space-initialize-git = تهيئة Git
+space-not-now = ليس الآن
 spaces-new-placeholder = اسم مساحة العمل الجديدة
 spaces-empty = لا توجد مساحات عمل
 spaces-default-name = مساحة العمل { $number }

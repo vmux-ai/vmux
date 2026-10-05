@@ -1,4 +1,4 @@
-use crate::util::cn;
+use crate::cn::cn;
 use dioxus::prelude::*;
 use dioxus_primitives::dialog::{
     self, DialogContentProps, DialogDescriptionProps, DialogRootProps, DialogTitleProps,

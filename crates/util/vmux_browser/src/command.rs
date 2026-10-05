@@ -16,13 +16,17 @@ use vmux_command::CommandManifest;
 use vmux_command::{
     ClaimedUrls, CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPages,
 };
-use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests, ResolvedLocale};
-#[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_command::{CommandInvocation, ReadCommandRequests, ResolvedLocale};
+use vmux_ecs::host_spawn::HostSpawnRoute;
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
+use vmux_ecs::manifest::FeatureManifest;
+#[cfg(test)]
+use vmux_ecs::manifest::FeaturePlugin;
+#[cfg(test)]
+use vmux_ecs::page::HostHistoryObserve;
+use vmux_ecs::page::HostedPage;
 use vmux_ecs::{
-    HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
-    host::{UiStateWrite, page::NativelyHosted},
+    PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
     page::{HostHistory, HostHistoryDelta, HostHistoryStep, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -58,12 +62,12 @@ impl Plugin for CommandPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_message::<NavigationRequest>()
+        app.add_message::<HostHistoryStep>()
+            .add_message::<NavigationRequest>()
             .add_message::<OpenRequest>()
             .add_message::<ZoomRequest>()
             .add_message::<ShowDevToolsRequest>()
             .add_plugins(UiEventPlugin::<(CommandBarPageOpenRequest, InvokeRequest)>::default())
-            .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
             .add_observer(header_back)
             .add_observer(header_forward)
             .add_observer(header_reload)
@@ -156,21 +160,48 @@ impl Home {
     }
 }
 
-fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
+#[derive(SystemParam)]
+struct SearchEngines<'w, 's> {
+    manifests: Query<'w, 's, &'static FeatureManifest>,
+}
+
+impl SearchEngines<'_, '_> {
+    fn resolve(&self, id: &str) -> Option<SearchEngine> {
+        for manifest in &self.manifests {
+            for engine in &manifest.search_engines {
+                if engine.id != id {
+                    continue;
+                }
+                return Some(SearchEngine {
+                    id: engine.id.clone(),
+                    name: engine.name.clone(),
+                    hosts: engine.hosts.clone(),
+                    query_url: engine.query_url.clone(),
+                });
+            }
+        }
+        None
+    }
+}
+
+fn normalize_url(value: &str, search_engine: Option<&SearchEngine>) -> String {
     let value = value.trim();
     let query = vmux_path::NavigationText::new(value);
     if query.is_data_uri() || (value.contains("://") && query.looks_like_url()) {
         value.to_string()
     } else if query.looks_like_url() {
         format!("https://{value}")
-    } else {
+    } else if let Some(search_engine) = search_engine {
         search_engine.query_url(value)
+    } else {
+        value.to_string()
     }
 }
 
 fn open_from_bar(
     trigger: On<UiInput<CommandBarPageOpenRequest>>,
     search_engine: Option<Single<&SearchEngineSetting>>,
+    search_engines: SearchEngines,
     child_of: Query<&ChildOf>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
     claimed_urls: ClaimedUrls,
@@ -224,10 +255,11 @@ fn open_from_bar(
             custom_keyboard_restore = true;
         }
     } else {
-        let url = normalize_url(
-            &value,
-            search_engine.map(|setting| setting.0).unwrap_or_default(),
-        );
+        let search_engine = search_engine
+            .map(|setting| setting.0.as_str())
+            .unwrap_or("google");
+        let search_engine = search_engines.resolve(search_engine);
+        let url = normalize_url(&value, search_engine.as_ref());
         let inline_transitioned = if matches!(request.open, None | Some(OpenTarget::InPlace))
             && VmuxRoute::parse(&url).is_some_and(|route| route.supports_inline_transition())
             && let Some(stack) = inline_stack
@@ -291,6 +323,7 @@ fn invoke_from_bar(
     commands.trigger(CommandBarDismiss::new(webview, !custom_keyboard_restore));
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavigationRequest {
     Back,
@@ -316,6 +349,7 @@ impl TryFrom<&CommandInvocation> for NavigationRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub url: Option<String>,
@@ -344,6 +378,7 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZoomRequest {
     In,
@@ -365,6 +400,7 @@ impl TryFrom<&CommandInvocation> for ZoomRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShowDevToolsRequest;
 
@@ -376,13 +412,6 @@ impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
             .then_some(Self)
             .ok_or(())
     }
-}
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<NavigationRequest>(&mut commands);
-    registry.message::<OpenRequest>(&mut commands);
-    registry.message::<ZoomRequest>(&mut commands);
-    registry.message::<ShowDevToolsRequest>(&mut commands);
 }
 
 fn handle_navigation_requests(
@@ -463,7 +492,7 @@ struct BrowserOpen<'w, 's> {
     >,
     kinds: Query<'w, 's, (Has<Terminal>, Has<vmux_editor::FileView>)>,
     focused_space: vmux_layout::space::FocusedSpace<'w, 's>,
-    native_pages: Query<'w, 's, &'static NativelyHosted>,
+    hosted_pages: Query<'w, 's, &'static HostedPage>,
     host_spawn_routes: Query<'w, 's, &'static HostSpawnRoute>,
     metadata: Query<'w, 's, &'static mut PageMetadata, With<Browser>>,
 }
@@ -480,7 +509,7 @@ impl BrowserOpen<'_, '_> {
     }
 
     fn hosted(&self, url: &str) -> bool {
-        self.native_pages.iter().any(|page| page.answers_for(url))
+        self.hosted_pages.iter().any(|page| page.answers_for(url))
             || self
                 .host_spawn_routes
                 .iter()
@@ -522,7 +551,7 @@ fn handle_open_requests(
         if let Ok(mut metadata) = browser.metadata.get_mut(webview) {
             metadata.url = resolved.clone();
             metadata.title = resolved.clone();
-            metadata.icon = vmux_ecs::PageIcon::None;
+            metadata.icon = vmux_api::PageIcon::None;
         }
         commands
             .entity(webview)
@@ -926,11 +955,16 @@ mod tests {
     impl NavArrow {
         fn over(page: impl Bundle) -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_ecs::EcsPlugin, CommandPlugin))
-                .add_message::<PageOpenRequest>()
-                .add_message::<vmux_terminal::TerminalFontSizeCommand>()
-                .init_resource::<CefNavigations>()
-                .add_observer(CefNavigations::record_back);
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_ecs::PrimitivesPlugin,
+                vmux_ecs::page::PagePlugin,
+                CommandPlugin,
+            ))
+            .add_message::<PageOpenRequest>()
+            .add_message::<vmux_terminal::TerminalFontSizeCommand>()
+            .init_resource::<CefNavigations>()
+            .add_observer(CefNavigations::record_back);
 
             let tab = app
                 .world_mut()
@@ -957,11 +991,17 @@ mod tests {
             Self { app, view }
         }
 
-        fn over_a_natively_hosted_page() -> Self {
-            let mut history = HostHistory::default();
-            history.observe("file:///a.rs", 0);
-            history.observe("file:///b.rs", 0);
-            Self::over(history)
+        fn over_a_hosted_page() -> Self {
+            let mut fixture = Self::over(HostHistory::default());
+            for url in ["file:///a.rs", "file:///b.rs"] {
+                fixture.app.world_mut().write_message(HostHistoryObserve {
+                    webview: fixture.view,
+                    url: url.to_string(),
+                    top_line: 0,
+                });
+                fixture.app.update();
+            }
+            fixture
         }
 
         fn pressed_back(&mut self) {
@@ -996,8 +1036,7 @@ mod tests {
         .add_message::<NavigationRequest>()
         .add_message::<OpenRequest>()
         .add_message::<ZoomRequest>()
-        .add_message::<ShowDevToolsRequest>()
-        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands));
+        .add_message::<ShowDevToolsRequest>();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([
@@ -1029,7 +1068,7 @@ mod tests {
 
     #[test]
     fn the_back_arrow_walks_host_history_instead_of_asking_chromium() {
-        let mut arrow = NavArrow::over_a_natively_hosted_page();
+        let mut arrow = NavArrow::over_a_hosted_page();
 
         arrow.pressed_back();
 
@@ -1039,7 +1078,7 @@ mod tests {
         );
         assert!(
             arrow.cef_navigations().is_empty(),
-            "a natively hosted page has no Chromium browser to walk back"
+            "a hosted page has no Chromium browser to walk back"
         );
     }
 

@@ -107,9 +107,7 @@ impl GotoActions<'_, '_> {
             && browsers.can_emit_to(&entity)
         {
             self.commands
-                .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                    entity, &scroll,
-                ));
+                .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
         }
         edit.core.top_row = viewport.top_row;
     }
@@ -152,7 +150,7 @@ fn apply_file(
     if let Some(page_url) = &request.page_url {
         metadata.title.clone_from(page_url);
         metadata.url.clone_from(page_url);
-        metadata.icon = vmux_ecs::PageIcon::None;
+        metadata.icon = vmux_api::PageIcon::None;
     }
     viewport.top_row = request.top_line;
     let entity = request.entity;
@@ -233,7 +231,7 @@ fn knowledge_link_open(
                 Ok(path) => path,
                 Err(error) => {
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: error,
@@ -394,10 +392,10 @@ mod tests {
     use crate::keymap::EditorKeymap;
     use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
-    use vmux_ecs::event::{FileUiState, FileUiStatePatch};
+    use vmux_ecs::event::FileUiState;
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<FileUiStatePatch>);
+    struct Emitted(Vec<FileUiState>);
 
     struct GotoSession {
         app: App,
@@ -425,7 +423,7 @@ mod tests {
                 .add_message::<crate::lsp::manager::LspGoto>()
                 .add_plugins((
                     NavigationPlugin,
-                    vmux_ecs::host::UiStatePlugin::<FileUiState>::default(),
+                    vmux_ecs::UiStatePlugin::<FileUiState>::default(),
                 ))
                 .init_resource::<Emitted>()
                 .add_observer(
@@ -437,7 +435,7 @@ mod tests {
                             trigger.event().payload(),
                         )
                         .unwrap();
-                        emitted.0.extend(event.patches);
+                        emitted.0.push(event);
                     },
                 );
             app.world_mut().spawn(crate::lsp::manager::LspManager::new(
@@ -463,7 +461,7 @@ mod tests {
                     PageMetadata {
                         title: String::new(),
                         url: String::new(),
-                        icon: vmux_ecs::PageIcon::None,
+                        icon: vmux_api::PageIcon::None,
                         bg_color: None,
                     },
                 ))
@@ -530,7 +528,7 @@ mod tests {
                 .resource::<Emitted>()
                 .0
                 .iter()
-                .any(|patch| patch.scroll_by.is_some()),
+                .any(|state| state.viewport.scroll_by.is_some()),
             "the window was repainted at row {top}, so a page still parked at row 0 \
              would render the band off screen unless the move is announced: {:?}",
             session.app.world().resource::<Emitted>().0

@@ -13,7 +13,7 @@ use vmux_ui::components::manager::{
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-#[vmux_native::page(component = Page)]
+#[vmux_page::page(component = Page)]
 pub(crate) struct ExtensionPage;
 
 #[derive(Clone, PartialEq)]
@@ -42,35 +42,25 @@ impl From<&ExtRow> for Approval {
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ExtensionsEvent>().state;
-    let mut search = use_signal(String::new);
+    let state = use_ui_state::<ExtensionsUiState>().state;
 
     let snapshot = state();
-    let query = search().trim().to_lowercase();
-    let visible: Vec<ExtRow> = snapshot
-        .extensions
-        .iter()
-        .filter(|extension| {
-            query.is_empty()
-                || extension.name.to_lowercase().contains(&query)
-                || extension.id.to_lowercase().contains(&query)
-                || extension.version.to_lowercase().contains(&query)
-        })
-        .cloned()
-        .collect();
     let installing = &snapshot.installing;
+    let browse_query = snapshot.query.clone();
 
     rsx! {
         ManagerPage {
             ManagerHeader {
                 title: translate("extensions-title"),
                 count: snapshot.extensions.len(),
-                search_value: search(),
+                search_value: snapshot.query.clone(),
                 search_placeholder: translate("extensions-search"),
-                onsearch: move |event: FormEvent| search.set(event.value()),
+                onsearch: move |event: FormEvent| {
+                    let _ = send(&ExtFilterRequest { query: event.value() });
+                },
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key() == Key::Enter {
-                        let query = search();
+                        let query = browse_query.clone();
                         if !query.trim().is_empty() {
                             let _ = send(&ExtBrowseStoreRequest { query });
                         }
@@ -105,7 +95,7 @@ pub fn Page() -> Element {
             ManagerList {
                 if !snapshot.loaded {
                     ManagerSkeleton {}
-                } else if visible.is_empty() {
+                } else if snapshot.visible.is_empty() {
                     ManagerEmpty {
                         title: if snapshot.extensions.is_empty() { translate("extensions-empty") } else { translate("extensions-no-match") },
                         detail: if snapshot.extensions.is_empty() {
@@ -115,7 +105,7 @@ pub fn Page() -> Element {
                         },
                     }
                 }
-                for extension in visible.iter() {
+                for extension in snapshot.visible.iter() {
                     ExtensionRow { extension: extension.clone() }
                 }
             }

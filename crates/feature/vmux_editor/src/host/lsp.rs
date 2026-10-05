@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_tool::{
-    ToolInventory, ToolInventoryItem, ToolOperator, ToolProviderId, ToolProviderSnapshot,
+    ToolInventory, ToolInventoryItem, ToolOperator, ToolProviderBinding, ToolProviderSnapshot,
     ToolScanner, ToolStore, ToolsManifest,
 };
 
@@ -38,6 +39,8 @@ pub struct LspPlugin;
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
         let (diagnostics, inbox) = LspDiagnosticsSender::channel();
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        registry::add(app);
         app.add_plugins((
             catalog::CatalogPlugin,
             server_request::ServerRequestPlugin,
@@ -50,14 +53,14 @@ impl Plugin for LspPlugin {
 
 fn spawn_tool_provider(mut commands: Commands) {
     commands.spawn((
-        Name::new("LSP tool provider"),
-        ToolProviderId(ToolProvider::Lsp),
+        ToolProviderBinding::new::<crate::Feature>(0),
         ToolScanner::new(scan_tools),
         ToolOperator::new(operate_tool),
     ));
 }
 
 fn scan_tools(
+    provider: &ToolProvider,
     _tool_store: &ToolStore,
     manifest: &mut ToolsManifest,
     refresh: bool,
@@ -141,7 +144,7 @@ fn scan_tools(
             removable: false,
         });
     }
-    Ok(ToolInventory::new(ToolProvider::Lsp, inventory)
+    Ok(ToolInventory::new(provider.clone(), inventory)
         .reconcile(manifest)
         .into())
 }
@@ -164,7 +167,7 @@ fn operate_tool(
                 .find(|package| package.name.as_str() == id)
                 .ok_or_else(|| format!("language tool not found: {id}"))?;
             package.install(&store, PlatformTarget::current(), |_, _, _| {})?;
-            tool_store.set_managed_package(ToolProvider::Lsp, id, true)?;
+            tool_store.set_managed_package(&operation.provider, id, true)?;
             let operation = if operation.kind == ToolOperationKind::Install {
                 "installed"
             } else {
@@ -180,23 +183,23 @@ fn operate_tool(
             store::PackageStore::lsp()
                 .remove(&name)
                 .map_err(|error| error.to_string())?;
-            tool_store.set_managed_package(ToolProvider::Lsp, id, false)?;
+            tool_store.set_managed_package(&operation.provider, id, false)?;
             Ok(format!("{id} removed"))
         }
         ToolOperationKind::Forget => {
-            tool_store.set_managed_package(ToolProvider::Lsp, id, false)?;
+            tool_store.set_managed_package(&operation.provider, id, false)?;
             Ok(format!("{id} removed from tools.toml"))
         }
         ToolOperationKind::Adopt => {
-            tool_store.set_managed_package(ToolProvider::Lsp, id, true)?;
+            tool_store.set_managed_package(&operation.provider, id, true)?;
             Ok(format!("{id} is now managed"))
         }
         ToolOperationKind::Import => {
             let mut manifest = tool_store.load()?;
-            let before = manifest.managed_packages(ToolProvider::Lsp.id()).len();
-            let _ = scan_tools(tool_store, &mut manifest, false)?;
+            let before = manifest.managed_packages(operation.provider.id()).len();
+            let _ = scan_tools(&operation.provider, tool_store, &mut manifest, false)?;
             let imported = manifest
-                .managed_packages(ToolProvider::Lsp.id())
+                .managed_packages(operation.provider.id())
                 .len()
                 .saturating_sub(before);
             tool_store.save(&manifest)?;

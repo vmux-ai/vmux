@@ -3,12 +3,12 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::extension::{
-    ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest, ExtToggleRequest,
-    ExtUninstallRequest, ExtensionsEvent,
+    ExtFilterRequest, ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest,
+    ExtToggleRequest, ExtUninstallRequest, ExtensionsUiState,
 };
 use vmux_ecs::PageMetadata;
-use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::host::page::NativelyHosted;
+use vmux_ecs::UiStateWrite;
+use vmux_ecs::page::HostedPage;
 use vmux_layout::LayoutUiStateUpdates;
 
 use crate::store;
@@ -25,6 +25,7 @@ impl Plugin for ExtensionCatalogPlugin {
                     ExtUninstallRequest,
                     ExtPinRequest,
                     ExtOpenManagerRequest,
+                    ExtFilterRequest,
                 )>::default(),
             ))
             .add_observer(page_ready)
@@ -32,6 +33,7 @@ impl Plugin for ExtensionCatalogPlugin {
             .add_observer(uninstall)
             .add_observer(pin)
             .add_observer(open_manager)
+            .add_observer(filter)
             .add_systems(Startup, spawn)
             .add_systems(Update, (finish, publish).chain());
 
@@ -39,9 +41,9 @@ impl Plugin for ExtensionCatalogPlugin {
         app.add_plugins(
             crate::ui::ExtensionPage::MANIFEST
                 .plugin()
-                .hosted(NativelyHosted::page(
+                .hosted(HostedPage::page(
                     crate::ui::ExtensionPage::URL,
-                    crate::ui::ExtensionPage::NATIVE.title,
+                    crate::ui::ExtensionPage::PAGE.title,
                 )),
         )
         .add_systems(Update, open_page);
@@ -53,12 +55,12 @@ pub struct OpenManagerRequest;
 
 #[derive(Component, Default)]
 pub(crate) struct ExtensionCatalog {
-    snapshot: ExtensionsEvent,
+    snapshot: ExtensionsUiState,
     revision: u64,
 }
 
 impl ExtensionCatalog {
-    pub(crate) fn replace(&mut self, mut snapshot: ExtensionsEvent) {
+    pub(crate) fn replace(&mut self, mut snapshot: ExtensionsUiState) {
         snapshot.loaded = true;
         snapshot.installing = std::mem::take(&mut self.snapshot.installing);
         self.snapshot = snapshot;
@@ -89,11 +91,57 @@ impl ExtensionCatalog {
 
 #[derive(Component, Default)]
 struct ExtensionSubscriber {
+    catalog_revision: u64,
     revision: u64,
+    emitted_revision: u64,
+    state: ExtensionsUiState,
+}
+
+impl ExtensionSubscriber {
+    fn filter(&mut self, query: &str) {
+        if self.state.query == query {
+            return;
+        }
+        self.state.query = query.to_string();
+        self.project();
+        self.touch();
+    }
+
+    fn synchronize(&mut self, catalog: &ExtensionCatalog) {
+        if self.catalog_revision == catalog.revision {
+            return;
+        }
+        self.catalog_revision = catalog.revision;
+        let query = std::mem::take(&mut self.state.query);
+        self.state = catalog.snapshot.clone();
+        self.state.query = query;
+        self.project();
+        self.touch();
+    }
+
+    fn project(&mut self) {
+        let query = self.state.query.trim().to_ascii_lowercase();
+        self.state.visible = self
+            .state
+            .extensions
+            .iter()
+            .filter(|extension| {
+                query.is_empty()
+                    || extension.name.to_ascii_lowercase().contains(&query)
+                    || extension.id.to_ascii_lowercase().contains(&query)
+                    || extension.version.to_ascii_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect();
+    }
+
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1).max(1);
+    }
 }
 
 #[derive(Component)]
-struct ExtensionCatalogTask(Task<Result<Option<ExtensionsEvent>, String>>);
+struct ExtensionCatalogTask(Task<Result<Option<ExtensionsUiState>, String>>);
 
 #[derive(Component)]
 struct ExtensionCatalogKey(String);
@@ -101,11 +149,18 @@ struct ExtensionCatalogKey(String);
 #[derive(Component)]
 struct InitialCatalogLoad;
 
-fn spawn(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
-    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+fn spawn(
+    profile: vmux_ecs::profile::CurrentProfile,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+        return;
+    };
+    let profile = profile.clone().into_id();
+    let store = store::ExtensionStore::at(paths.extensions());
+    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
     let task = IoTaskPool::get().spawn(async move {
-        let store = store::ExtensionStore::current();
-        let profile = vmux_ecs::profile::Profile::current().into_id();
         let result = store.snapshot(&profile).map(Some);
         drop(wake);
         result
@@ -121,7 +176,7 @@ fn spawn(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
 fn page_ready(
     trigger: On<UiInput<vmux_api::PageReady>>,
     pages: Query<(Has<vmux_layout::LayoutCef>, Option<&PageMetadata>)>,
-    extension_pages: Query<(&NativelyHosted, &vmux_ecs::page::PageManifest)>,
+    extension_pages: Query<(&HostedPage, &vmux_ecs::page::PageManifest)>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -142,14 +197,18 @@ fn page_ready(
 
 fn toggle(
     trigger: On<UiInput<ExtToggleRequest>>,
+    profile: vmux_ecs::profile::CurrentProfile,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+        return;
+    };
+    let profile = profile.clone().into_id();
+    let store = store::ExtensionStore::at(paths.extensions());
     let request = trigger.event().payload.clone();
-    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
     let task = IoTaskPool::get().spawn(async move {
-        let store = store::ExtensionStore::current();
-        let profile = vmux_ecs::profile::Profile::current().into_id();
         let result = store.update_index(|index| {
             index.set_enabled_for(
                 &profile,
@@ -167,14 +226,18 @@ fn toggle(
 
 fn uninstall(
     trigger: On<UiInput<ExtUninstallRequest>>,
+    profile: vmux_ecs::profile::CurrentProfile,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+        return;
+    };
+    let profile = profile.clone().into_id();
+    let store = store::ExtensionStore::at(paths.extensions());
     let request = trigger.event().payload.clone();
-    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
     let task = IoTaskPool::get().spawn(async move {
-        let store = store::ExtensionStore::current();
-        let profile = vmux_ecs::profile::Profile::current().into_id();
         let result = store
             .uninstall_for_profile(&profile, &request.id)
             .and_then(|()| store.snapshot(&profile))
@@ -187,15 +250,19 @@ fn uninstall(
 
 fn pin(
     trigger: On<UiInput<ExtPinRequest>>,
+    profile: vmux_ecs::profile::CurrentProfile,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+        return;
+    };
+    let profile = profile.clone().into_id();
+    let store = store::ExtensionStore::at(paths.extensions());
     let request = trigger.event().payload.clone();
     let key = request.id.clone();
-    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
     let task = IoTaskPool::get().spawn(async move {
-        let store = store::ExtensionStore::current();
-        let profile = vmux_ecs::profile::Profile::current().into_id();
         let loaded = store.loaded_ids(&profile);
         let result = store.update_index_if_changed(|index| {
             index
@@ -241,7 +308,7 @@ fn finish(
                         message: error,
                     });
                 } else if initial {
-                    catalog.replace(ExtensionsEvent {
+                    catalog.replace(ExtensionsUiState {
                         loaded: true,
                         ..default()
                     });
@@ -256,6 +323,16 @@ fn open_manager(
     mut requests: MessageWriter<OpenManagerRequest>,
 ) {
     requests.write(OpenManagerRequest);
+}
+
+fn filter(
+    trigger: On<UiInput<ExtFilterRequest>>,
+    mut subscribers: Query<&mut ExtensionSubscriber>,
+) {
+    let Ok(mut subscriber) = subscribers.get_mut(trigger.event().webview) else {
+        return;
+    };
+    subscriber.filter(&trigger.event().payload.query);
 }
 
 #[cfg(ui)]
@@ -280,12 +357,13 @@ fn publish(
         return;
     };
     for (entity, mut subscriber) in &mut subscribers {
-        if subscriber.revision == catalog.revision {
+        subscriber.synchronize(catalog);
+        if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        commands.trigger(UiStateWrite::<ExtensionsEvent>::from_event(
+        commands.trigger(UiStateWrite::<ExtensionsUiState>::from_event(
             entity,
-            &catalog.snapshot,
+            &subscriber.state,
         ));
         if layout_ui.contains(entity) {
             commands.trigger(
@@ -295,7 +373,7 @@ fn publish(
                 ),
             );
         }
-        subscriber.revision = catalog.revision;
+        subscriber.emitted_revision = subscriber.revision;
     }
 }
 
@@ -309,7 +387,7 @@ mod tests {
         app.add_observer(page_ready);
         app.world_mut().spawn((
             crate::ExtensionPlugin::MANIFEST,
-            NativelyHosted::page("vmux://extensions/", "Extensions"),
+            HostedPage::page("vmux://extensions/", "Extensions"),
         ));
         let extension = app
             .world_mut()

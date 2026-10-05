@@ -11,7 +11,7 @@ pub use terminal::{
     FLAG_STRIKETHROUGH, FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine,
     TermSelectionRange, TermSpan,
 };
-pub use ui_state::{BatchedUiState, UiState, UiStatePatch};
+pub use ui_state::{UiState, UiStatePatch, UiStateProjection};
 pub use vmux_macro::{
     agent, bidirectional_event, contract, host_event, service_message, ui_event, ui_event_variants,
     ui_state, ui_state_patch,

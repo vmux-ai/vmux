@@ -1,12 +1,51 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::net::UnixStream;
-use tokio::sync::Mutex;
-use vmux_api::protocol::{ClientMessage, ServiceMessage};
+use tokio::sync::{Mutex, broadcast, mpsc};
+use vmux_api::protocol::{
+    ClientMessage, ServiceMessage, SharedEvent, SharedMessage, SharedResponse,
+};
+use vmux_api::room::ClientOpId;
 use vmux_profile::ServicePaths;
 
 use crate::framing::LengthPrefixed;
 
 const CODEC: LengthPrefixed = LengthPrefixed::new(64 * 1024 * 1024);
+
+pub type RemoteFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+pub trait ServiceProtocolDriver: Send + Sync {
+    fn connect(
+        &self,
+        outbound: mpsc::UnboundedSender<ServiceMessage>,
+    ) -> Box<dyn ServiceProtocolConnection>;
+}
+
+pub trait ServiceProtocolConnection: Send {
+    fn dispatch(&mut self, message: ClientMessage) -> RemoteFuture<'_, Result<(), ClientMessage>>;
+
+    fn disconnect(&mut self) -> RemoteFuture<'_, ()> {
+        Box::pin(async {})
+    }
+}
+
+pub trait RemoteDriver: Send + Sync {
+    fn dispatch(&self, request: SharedMessage) -> RemoteFuture<'_, SharedResponse>;
+    fn subscription(&self, request: &SharedMessage) -> Option<String>;
+    fn subscribe(
+        &self,
+        sid: String,
+    ) -> RemoteFuture<'_, Option<broadcast::Receiver<ServiceMessage>>>;
+    fn resolve(&self, sid: String, event: SharedEvent) -> RemoteFuture<'_, Option<SharedEvent>>;
+    fn snapshot(&self, sid: String) -> RemoteFuture<'_, Option<SharedEvent>>;
+}
+
+pub trait RemoteOperationStore: Send + Sync {
+    fn claim(&self, id: ClientOpId) -> RemoteFuture<'_, bool>;
+    fn release(&self, id: ClientOpId) -> RemoteFuture<'_, ()>;
+}
 
 pub struct ServiceConnection {
     reader: Mutex<BufReader<tokio::net::unix::OwnedReadHalf>>,

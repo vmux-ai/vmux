@@ -34,6 +34,17 @@ pub struct SettingsRequest {
     pub value: vmux_api::json::JsonValue,
 }
 
+#[vmux_api::ui_event(Default, Eq)]
+pub struct SettingsEditRequest {
+    pub path: String,
+    pub draft: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct SettingsFilterRequest {
+    pub query: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

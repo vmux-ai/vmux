@@ -5,54 +5,18 @@ use vmux_ui::components::progress::{Progress, ProgressIndicator};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-#[derive(Clone, PartialEq)]
-pub(crate) enum UpdatePhase {
-    Downloading {
-        version: String,
-        downloaded: u64,
-        total: u64,
-    },
-    Installing {
-        version: String,
-    },
-    Ready {
-        version: String,
-    },
-}
-
-impl From<&crate::event::UpdateProgress> for UpdatePhase {
-    fn from(event: &crate::event::UpdateProgress) -> Self {
-        if event.installing {
-            return Self::Installing {
-                version: event.version.clone(),
-            };
-        }
-        Self::Downloading {
-            version: event.version.clone(),
-            downloaded: event.downloaded,
-            total: event.total,
-        }
-    }
-}
-
-impl From<&crate::event::UpdateReady> for UpdatePhase {
-    fn from(event: &crate::event::UpdateReady) -> Self {
-        Self::Ready {
-            version: event.version.clone(),
-        }
-    }
-}
+use crate::state::UpdateStatus;
 
 #[component]
-pub(crate) fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
+pub(crate) fn UpdateNoticeFooter(phase: UpdateStatus) -> Element {
     let (label, version) = match &phase {
-        UpdatePhase::Downloading { version, .. } => {
+        UpdateStatus::Downloading { version, .. } => {
             (translate("layout-update-downloading"), version.clone())
         }
-        UpdatePhase::Installing { version } => {
+        UpdateStatus::Installing { version } => {
             (translate("layout-update-installing"), version.clone())
         }
-        UpdatePhase::Ready { version } => (translate("layout-update-ready"), version.clone()),
+        UpdateStatus::Ready { version } => (translate("layout-update-ready"), version.clone()),
     };
     rsx! {
         div {
@@ -65,13 +29,13 @@ pub(crate) fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
                 }
             }
             {match phase {
-                UpdatePhase::Downloading { downloaded, total, .. } => rsx! {
+                UpdateStatus::Downloading { downloaded, total, .. } => rsx! {
                     UpdateProgressBar { downloaded, total }
                 },
-                UpdatePhase::Installing { .. } => rsx! {
+                UpdateStatus::Installing { .. } => rsx! {
                     UpdateProgressBar { downloaded: 0, total: 0 }
                 },
-                UpdatePhase::Ready { .. } => rsx! {
+                UpdateStatus::Ready { .. } => rsx! {
                     button {
                         r#type: "button",
                         class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",

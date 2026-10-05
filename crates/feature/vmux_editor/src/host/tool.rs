@@ -7,12 +7,10 @@ use vmux_api::protocol::{
     ProcessId, ServiceMessage,
 };
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_layout::{AgentOpenBeside, AgentPaneDirection};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
-use vmux_tool::{
-    AgentWorkingDirectory, ToolAppExt, ToolCommand, ToolDispatchError, ToolDispatchSet,
-};
+use vmux_tool::{AgentWorkingDirectory, ToolCommand, ToolDispatchError, ToolDispatchSet};
 use vmux_transport::service::ServiceConnection;
 
 use std::io::{BufRead, Read};
@@ -22,9 +20,6 @@ pub struct FileToolPlugin;
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<OpenFileArgs>()
-            .bind_tool::<ReadFileArgs>()
-            .bind_tool::<GrepArgs>()
             .add_systems(Update, (open_file, read_file, grep).in_set(ToolDispatchSet));
     }
 }
@@ -52,7 +47,7 @@ impl From<PaneDirection> for AgentPaneDirection {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OpenFileArgs {
+struct OpenFileTool {
     path: String,
     direction: Option<PaneDirection>,
     #[serde(default)]
@@ -62,7 +57,7 @@ struct OpenFileArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct ReadFileArgs {
+struct ReadFileTool {
     path: String,
     offset: Option<std::num::NonZeroU32>,
     limit: Option<usize>,
@@ -71,14 +66,14 @@ struct ReadFileArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct GrepArgs {
+struct GrepTool {
     query: String,
     path: Option<String>,
 }
 
 fn open_file(
     mut commands: Commands,
-    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenFileArgs), Added<OpenFileArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenFileTool), Added<OpenFileTool>>,
     protocol_requests: Query<&McpRequest>,
 ) {
     for (entity, name, anchor, args) in &requests {
@@ -123,7 +118,7 @@ fn open_file(
 
 fn read_file(
     mut commands: Commands,
-    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &ReadFileArgs), Added<ReadFileArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &ReadFileTool), Added<ReadFileTool>>,
     protocol_requests: Query<(), With<McpRequest>>,
 ) {
     for (entity, name, anchor, args) in &requests {
@@ -149,7 +144,7 @@ fn read_file(
 
 fn grep(
     mut commands: Commands,
-    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &GrepArgs), Added<GrepArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &GrepTool), Added<GrepTool>>,
     protocol_requests: Query<(), With<McpRequest>>,
 ) {
     for (entity, name, anchor, args) in &requests {

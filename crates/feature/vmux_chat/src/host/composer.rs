@@ -9,9 +9,9 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 #[cfg(host)]
 use super::session::ChatView;
-use crate::event::ChatComposerEffect;
 #[cfg(host)]
 use crate::event::ChatDraftChanged;
+use crate::event::{ChatComposerDraft, ChatComposerEffect};
 #[cfg(host)]
 use crate::event::{ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest};
 use crate::selector::SelectorMode;
@@ -149,9 +149,8 @@ fn slash_command(
         return;
     };
     let effect = composer.slash_effect(command);
-    commands.trigger(
-        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
-    );
+    commands
+        .trigger(vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect));
     commands.trigger(ComposerChanged::new(webview));
     match command {
         SlashCommand::Upload => commands.trigger(UiInput {
@@ -172,6 +171,14 @@ fn project_queries(
     let Ok((composer, mut selectors)) = composers.get_mut(webview) else {
         return;
     };
+    commands.trigger(
+        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            webview,
+            &ChatComposerDraft {
+                text: composer.draft.clone(),
+            },
+        ),
+    );
     let media_query = InlineMediaQuery::parse(&composer.draft)
         .map(|query| query.query.to_string())
         .unwrap_or_default();

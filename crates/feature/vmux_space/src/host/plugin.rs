@@ -3,17 +3,18 @@ use bevy_cef::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandManifest;
 use vmux_command::{
-    BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
+    CommandBarDismiss, CommandBarOpenRequest, ResolvedLocale, WriteCommandBarRequests,
 };
-use vmux_command::{CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests};
-use vmux_ecs::host::{UiStateWrite, persistence::WorkspaceRestore};
+use vmux_command::{CommandInvocation, CommandRuntimePlugin, ReadCommandRequests};
 use vmux_ecs::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
 use vmux_ecs::{
     ActivateRequest, Active, EffectiveStartupUrl, Order, PageMetadata, PageOpenRequest,
     PageOpenTarget,
 };
+use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
+use vmux_ecs::{UiStateWrite, persistence::WorkspaceRestore};
 use vmux_history::LastActivatedAt;
-use vmux_layout::native_open::HostedUiPlugin;
+use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::projection::SpacesProjection;
 #[cfg(test)]
 use vmux_layout::space::CurrentSpace;
@@ -37,14 +38,18 @@ use super::agent::SpaceAgentPlugin;
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
     ProjectActivateRequest, ProjectForgetRequest, SpaceAttachRequest, SpaceCreateRequest,
-    SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
+    SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest,
+    SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
     SpacesUiState,
 };
 use crate::model::SpaceRecord;
-use vmux_api::command_bar::{CommandBarPicker, SwitchSpaceRequest};
+use vmux_api::command_bar::{CommandBarPicker, OpenRequest as CommandBarOpenUrlRequest};
+use vmux_ui::i18n::{Locale, TranslationValue, translate, translate_with};
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct SpacePlugin;
+
+const PICKER_ID: &str = "space";
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
@@ -60,7 +65,7 @@ impl Plugin for SpacePlugin {
         ))
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(LayoutContractPlugin)
-        .add_plugins(vmux_ecs::host::UiStatePlugin::<SpacesUiState>::default())
+        .add_plugins(vmux_ecs::UiStatePlugin::<SpacesUiState>::default())
         .add_message::<CommandBarOpenRequest>()
         .add_message::<SpaceAttachRequest>()
         .add_message::<SpaceCreateRequest>()
@@ -70,7 +75,6 @@ impl Plugin for SpacePlugin {
         .add_message::<OpenRequest>()
         .add_message::<CommandBarSpaceOpenRequest>()
         .add_systems(Update, open_command_bar.in_set(WriteCommandBarRequests))
-        .add_systems(Startup, bind_command.in_set(BindCommands))
         .add_systems(
             Update,
             (
@@ -110,9 +114,11 @@ impl Plugin for SpacePlugin {
                 SpaceDeleteRequest,
                 SpaceOpenPageRequest,
                 SpaceRenameRequest,
+                SpaceFormOpenRequest,
+                SpaceFormInputRequest,
+                SpaceFormCloseRequest,
                 ProjectActivateRequest,
                 ProjectForgetRequest,
-                SwitchSpaceRequest,
                 vmux_ecs::event::ProjectTreeToggle,
             )>::default(),
         ))
@@ -121,9 +127,13 @@ impl Plugin for SpacePlugin {
         .add_observer(delete)
         .add_observer(open_page)
         .add_observer(rename)
+        .add_observer(open_form)
+        .add_observer(edit_form)
+        .add_observer(close_form)
         .add_observer(project_activate)
         .add_observer(project_forget)
-        .add_observer(switch)
+        .add_observer(contribute)
+        .add_observer(activate_contribution)
         .add_observer(reset_sent)
         .add_systems(Update, handle_open_in_new.in_set(ReadCommandRequests))
         .add_systems(Update, broadcast_spaces_to_views);
@@ -133,19 +143,22 @@ impl Plugin for SpacePlugin {
 fn ensure_bootstrap(
     spaces: Query<(), With<Space>>,
     restore: Query<&WorkspaceRestore>,
+    profile: vmux_ecs::profile::CurrentProfile,
     mut commands: Commands,
 ) {
     if !spaces.is_empty() || restore.single().is_ok_and(|restore| restore.store_present) {
         return;
     }
-    commands.spawn(SpaceRecord::bootstrap().bundle());
+    commands.spawn(SpaceRecord::bootstrap_for(profile.label().unwrap_or("Personal")).bundle());
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub url: Option<String>,
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarSpaceOpenRequest;
 
@@ -169,17 +182,166 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
     }
 }
 
-fn bind_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenRequest>(&mut commands);
-    registry.message::<CommandBarSpaceOpenRequest>(&mut commands);
-}
-
 fn open_command_bar(
     mut requests: MessageReader<CommandBarSpaceOpenRequest>,
+    locale: Option<Res<ResolvedLocale>>,
     mut open: MessageWriter<CommandBarOpenRequest>,
 ) {
     if requests.read().next().is_some() {
-        open.write(CommandBarOpenRequest::picker(CommandBarPicker::Space));
+        let locale = locale
+            .as_deref()
+            .map(|locale| locale.0.clone())
+            .unwrap_or_else(Locale::preferred);
+        open.write(CommandBarOpenRequest::picker_with(
+            CommandBarPicker::new(PICKER_ID),
+            Vec::new(),
+            String::new(),
+            locale.translate("command-switch-space"),
+            false,
+            true,
+        ));
+    }
+}
+
+#[derive(Component)]
+struct SpaceContribution(String);
+
+#[derive(Component)]
+struct ManageSpacesContribution;
+
+fn contribute(
+    trigger: On<CommandBarQueryChanged>,
+    existing: Query<
+        (Entity, &ChildOf),
+        Or<(With<SpaceContribution>, With<ManageSpacesContribution>)>,
+    >,
+    rows: SpaceRows,
+    space_window: SpaceWindow,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    for (entity, parent) in &existing {
+        if parent.parent() == request.target {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    let picker = request
+        .picker
+        .as_ref()
+        .is_some_and(|picker| picker.is(PICKER_ID));
+    if request.picker.is_some() && !picker {
+        return;
+    }
+    let query = request.query.trim();
+    let page = query == SpacePlugin::URL
+        || query == SpacePlugin::URL.trim_end_matches('/')
+        || query.starts_with(SpacePlugin::URL);
+    if !picker
+        && !page
+        && (query.is_empty()
+            || query.starts_with('>')
+            || vmux_path::NavigationText::new(query).looks_like_path())
+    {
+        return;
+    }
+
+    let main = space_window
+        .for_webview(request.target)
+        .map(|(_, main)| main);
+    let rows = rows.list(main);
+    let needle = query.to_ascii_lowercase();
+    let numbered = picker && request.numbered;
+    let mut rank = 0;
+    for row in rows {
+        if !picker
+            && !page
+            && !row.name.to_ascii_lowercase().contains(&needle)
+            && !row.id.to_ascii_lowercase().contains(&needle)
+            && !row.profile.to_ascii_lowercase().contains(&needle)
+        {
+            continue;
+        }
+        commands.spawn((
+            Name::new(format!("Space command-bar row: {}", row.id)),
+            CommandBarContribution {
+                row: vmux_api::command_bar::CommandBarResultItem {
+                    key: format!("space:{}", row.id),
+                    leading: if numbered {
+                        rank.to_string()
+                    } else {
+                        String::new()
+                    },
+                    title: row.name,
+                    subtitle: row.profile,
+                    trailing: translate_with(
+                        "command-tabs",
+                        &[("count", TranslationValue::Number(i64::from(row.tab_count)))],
+                    ),
+                    active: row.is_active,
+                    ..Default::default()
+                },
+                rank,
+                close: false,
+                picker: request.picker.clone(),
+                numbered,
+                preferred: row.is_active,
+                pre_filtered: true,
+                ..Default::default()
+            },
+            SpaceContribution(row.id),
+            ChildOf(request.target),
+        ));
+        rank += 1;
+    }
+
+    if picker {
+        commands.spawn((
+            Name::new("Manage spaces command-bar row"),
+            CommandBarContribution {
+                row: vmux_api::command_bar::CommandBarResultItem {
+                    key: "space:manage".to_string(),
+                    title: translate("command-manage-spaces"),
+                    url: SpacePlugin::URL.to_string(),
+                    ..Default::default()
+                },
+                rank: i32::MAX,
+                close: true,
+                picker: request.picker.clone(),
+                pre_filtered: true,
+                ..Default::default()
+            },
+            ManageSpacesContribution,
+            ChildOf(request.target),
+        ));
+    }
+}
+
+fn activate_contribution(
+    trigger: On<CommandBarContributionActivated>,
+    spaces: Query<&SpaceContribution>,
+    manage: Query<(), With<ManageSpacesContribution>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if let Ok(space) = spaces.get(event.target) {
+        commands.trigger(UiInput {
+            webview: event.webview,
+            payload: SpaceAttachRequest {
+                space_id: space.0.clone(),
+            },
+        });
+        commands.trigger(CommandBarDismiss::new(event.webview, false));
+        return;
+    }
+    if manage.contains(event.target) {
+        commands.trigger(UiInput {
+            webview: event.webview,
+            payload: CommandBarOpenUrlRequest {
+                value: SpacePlugin::URL.to_string(),
+                open: event.open,
+            },
+        });
     }
 }
 
@@ -225,6 +387,9 @@ fn update_effective_startup(
 #[derive(Component)]
 struct SpacesListSent;
 
+#[derive(Component)]
+struct SpaceForm(SpaceFormState);
+
 fn reset_sent(
     trigger: On<UiInput<PageReady>>,
     spaces_views: Query<(), With<Spaces>>,
@@ -236,6 +401,58 @@ fn reset_sent(
         return;
     }
     commands.entity(entity).remove::<SpacesListSent>();
+}
+
+fn open_form(trigger: On<UiInput<SpaceFormOpenRequest>>, mut commands: Commands) {
+    let form = SpaceFormState {
+        open: true,
+        space_id: trigger.event().payload.space_id.clone(),
+        draft: trigger.event().payload.draft.clone(),
+    };
+    commands
+        .entity(trigger.event().webview)
+        .insert(SpaceForm(form.clone()));
+    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        trigger.event().webview,
+        &form,
+    ));
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+        trigger.event().webview,
+        &form,
+    ));
+}
+
+fn edit_form(
+    trigger: On<UiInput<SpaceFormInputRequest>>,
+    mut forms: Query<&mut SpaceForm>,
+    mut commands: Commands,
+) {
+    let Ok(mut form) = forms.get_mut(trigger.event().webview) else {
+        return;
+    };
+    form.0.draft.clone_from(&trigger.event().payload.draft);
+    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        trigger.event().webview,
+        &form.0,
+    ));
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+        trigger.event().webview,
+        &form.0,
+    ));
+}
+
+fn close_form(trigger: On<UiInput<SpaceFormCloseRequest>>, mut commands: Commands) {
+    commands
+        .entity(trigger.event().webview)
+        .remove::<SpaceForm>();
+    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        trigger.event().webview,
+        &SpaceFormState::default(),
+    ));
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+        trigger.event().webview,
+        &SpaceFormState::default(),
+    ));
 }
 
 type SpaceListQuery<'w, 's> = Query<
@@ -253,61 +470,72 @@ type SpaceListQuery<'w, 's> = Query<
     With<Space>,
 >;
 
-fn display_dir(path: &std::path::Path) -> String {
-    if let Some(home) = std::env::home_dir()
-        && let Ok(rel) = path.strip_prefix(&home)
-    {
-        return format!("~/{}", rel.to_string_lossy());
-    }
-    path.to_string_lossy().to_string()
+#[derive(bevy::ecs::system::SystemParam)]
+struct SpaceRows<'w, 's> {
+    spaces: SpaceListQuery<'w, 's>,
+    tabs: Query<'w, 's, (), With<Tab>>,
+    settings: Option<Res<'w, AppSettings>>,
+    profile: vmux_ecs::profile::CurrentProfile<'w, 's>,
 }
 
-fn space_rows_from_world(
-    spaces: &SpaceListQuery,
-    tab_q: &Query<(), With<Tab>>,
-    settings: Option<&AppSettings>,
-    main: Option<Entity>,
-) -> Vec<SpaceRow> {
-    let profile = SpaceRecord::current_profile_name();
-    let mut rows: Vec<(u32, SpaceRow)> = Vec::new();
-    for (_, sid, name, is_active, order, children, parent) in spaces.iter() {
-        let local = main.is_none_or(|main| parent.parent() == main);
-        let local_tab_count = children
-            .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
-            .unwrap_or(0) as u32;
-        if let Some((existing_order, row)) =
-            rows.iter_mut().find(|(_, existing)| existing.id == sid.0)
-        {
-            *existing_order = (*existing_order).min(order.map(|o| o.0).unwrap_or(u32::MAX));
-            if local {
-                row.is_active = is_active;
-                row.tab_count = local_tab_count;
+impl SpaceRows<'_, '_> {
+    fn list(&self, main: Option<Entity>) -> Vec<SpaceRow> {
+        let mut rows: Vec<(u32, SpaceRow)> = Vec::new();
+        for (_, sid, name, is_active, order, children, parent) in &self.spaces {
+            let local = main.is_none_or(|main| parent.parent() == main);
+            let local_tab_count = children
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter(|entity| self.tabs.contains(*entity))
+                        .count()
+                })
+                .unwrap_or_default() as u32;
+            if let Some((existing_order, row)) =
+                rows.iter_mut().find(|(_, existing)| existing.id == sid.0)
+            {
+                *existing_order =
+                    (*existing_order).min(order.map(|order| order.0).unwrap_or(u32::MAX));
+                if local {
+                    row.is_active = is_active;
+                    row.tab_count = local_tab_count;
+                }
+                continue;
             }
-            continue;
+            let startup_dir = self
+                .settings
+                .as_deref()
+                .and_then(|settings| settings.startup_dir(&sid.0))
+                .map(|path| Self::display_dir(&path))
+                .unwrap_or_default();
+            rows.push((
+                order.map(|order| order.0).unwrap_or(u32::MAX),
+                SpaceRow {
+                    id: sid.0.clone(),
+                    name: name.to_string(),
+                    profile: self.profile.label().unwrap_or("Personal").to_string(),
+                    is_active: local && is_active,
+                    tab_count: if local { local_tab_count } else { 0 },
+                    startup_dir,
+                },
+            ));
         }
-        let startup_dir = settings
-            .and_then(|s| s.startup_dir(&sid.0))
-            .map(|path| display_dir(&path))
-            .unwrap_or_default();
-        rows.push((
-            order.map(|o| o.0).unwrap_or(u32::MAX),
-            SpaceRow {
-                id: sid.0.clone(),
-                name: name.to_string(),
-                profile: profile.clone(),
-                is_active: local && is_active,
-                tab_count: if local { local_tab_count } else { 0 },
-                startup_dir,
-            },
-        ));
+        rows.sort_by_key(|(order, _)| *order);
+        rows.into_iter().map(|(_, row)| row).collect()
     }
-    rows.sort_by_key(|(order, _)| *order);
-    rows.into_iter().map(|(_, row)| row).collect()
+
+    fn display_dir(path: &std::path::Path) -> String {
+        if let Some(home) = std::env::home_dir()
+            && let Ok(relative) = path.strip_prefix(&home)
+        {
+            return format!("~/{}", relative.to_string_lossy());
+        }
+        path.to_string_lossy().to_string()
+    }
 }
 
 fn broadcast_spaces_to_views(
-    spaces: SpaceListQuery,
-    tab_q: Query<(), With<Tab>>,
+    rows: SpaceRows,
     mut views: Query<
         (
             Entity,
@@ -318,7 +546,6 @@ fn broadcast_spaces_to_views(
         (With<PageReady>, Or<(With<Spaces>, With<LayoutCef>)>),
     >,
     browsers: NonSend<Browsers>,
-    settings: Option<Res<AppSettings>>,
     space_window: SpaceWindow,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
@@ -328,8 +555,8 @@ fn broadcast_spaces_to_views(
         let main = space_window
             .window_of(entity)
             .and_then(|window| space_window.main(window));
-        let rows = space_rows_from_world(&spaces, &tab_q, settings.as_deref(), main);
-        let active = rows
+        let projected = rows.list(main);
+        let active = projected
             .iter()
             .position(|space| space.is_active)
             .unwrap_or_default();
@@ -337,14 +564,14 @@ fn broadcast_spaces_to_views(
             if !sent {
                 selection.0 = active;
             } else {
-                selection.0 = selection.0.min(rows.len().saturating_sub(1));
+                selection.0 = selection.0.min(projected.len().saturating_sub(1));
             }
             selection.0
         } else {
             active
         };
         let payload = SpacesListEvent {
-            spaces: rows,
+            spaces: projected,
             selected: selected as u32,
         };
         if sent && snapshot.is_some_and(|snapshot| snapshot.0 == payload) {
@@ -760,20 +987,6 @@ fn attach(
     graph.bump_tab(entity, &mut commands);
 }
 
-fn switch(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands) {
-    let webview = trigger.event().webview;
-    let id = &trigger.event().payload.id;
-    if !id.is_empty() {
-        commands.trigger(UiInput {
-            webview,
-            payload: SpaceAttachRequest {
-                space_id: id.clone(),
-            },
-        });
-    }
-    commands.trigger(CommandBarDismiss::new(webview, false));
-}
-
 fn create(
     trigger: On<UiInput<SpaceCreateRequest>>,
     graph: SpaceGraph,
@@ -999,7 +1212,7 @@ mod tests {
         SpaceRecord {
             id: "work".to_string(),
             name: "Work".to_string(),
-            profile: SpaceRecord::current_profile_name(),
+            profile: "Personal".to_string(),
         }
     }
 
@@ -1307,7 +1520,7 @@ mod tests {
             SpaceRecord {
                 id: "work".into(),
                 name: "Work".into(),
-                profile: SpaceRecord::current_profile_name(),
+                profile: "Personal".into(),
             }
             .bundle(),
             CurrentSpace,

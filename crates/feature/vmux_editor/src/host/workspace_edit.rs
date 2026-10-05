@@ -1,5 +1,6 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+#[cfg(test)]
+use bevy_cef::prelude::Browsers;
 
 use super::editing::EditRequest;
 use super::editor::{Editor, FileView};
@@ -21,7 +22,6 @@ impl Plugin for WorkspaceEditPlugin {
 
 fn apply_lsp(
     requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
-    browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
     mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
     mut edits: WorkspaceEdits,
@@ -53,14 +53,9 @@ fn apply_lsp(
         let Some(reason) = refusal else {
             continue;
         };
-        if browsers.can_emit_to(&rename.entity) {
-            edits
-                .commands
-                .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                    rename.entity,
-                    &vmux_ecs::event::FileEditFailure { reason },
-                ));
-        }
+        edits
+            .commands
+            .trigger(super::feedback::EditFailure::new(rename.entity, reason));
     }
 }
 

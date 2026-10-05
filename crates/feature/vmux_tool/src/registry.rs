@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::marker::PhantomData;
 use vmux_api::protocol::{AgentCommandTool, AgentRequest};
-use vmux_ecs::host::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
+use vmux_ecs::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
 use vmux_ecs::{HostShell, JsonArguments, RegistrationOrder};
 
 use vmux_api::JsonSchema;
@@ -18,17 +18,28 @@ impl Plugin for ToolRegistryPlugin {
             Startup,
             (
                 ToolStartupSet::Registry,
+                ToolStartupSet::RegistryFlush,
                 ToolStartupSet::Manifest,
+                ToolStartupSet::ManifestFlush,
                 ToolStartupSet::Binding,
             )
                 .chain(),
         )
         .add_systems(Startup, spawn.in_set(ToolStartupSet::Registry))
+        .add_systems(
+            Startup,
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolStartupSet::RegistryFlush),
+        )
         .add_systems(Startup, register.in_set(ToolStartupSet::Manifest))
+        .add_systems(
+            Startup,
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolStartupSet::ManifestFlush),
+        )
         .configure_sets(
             Update,
             (
                 ToolResolveSet,
+                ToolResolveFlush,
                 ToolRequestSet,
                 ToolRequestFlush,
                 ToolDispatchSet,
@@ -39,36 +50,39 @@ impl Plugin for ToolRegistryPlugin {
         .add_systems(Update, (catalogs, invocations).in_set(ToolResolveSet))
         .add_systems(
             Update,
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolResolveFlush),
+        )
+        .add_systems(
+            Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
         )
         .add_systems(
             Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
         );
-    }
-}
-
-pub trait ToolAppExt {
-    fn bind_tool<T: ToolInput>(&mut self) -> &mut Self;
-}
-
-impl ToolAppExt for App {
-    fn bind_tool<T: ToolInput>(&mut self) -> &mut Self {
-        if !self.is_plugin_added::<ToolRegistryPlugin>() {
-            self.add_plugins(ToolRegistryPlugin);
+        for input in inventory::iter::<ToolInputRegistration> {
+            (input.register)(app);
         }
-        self.add_systems(
-            Startup,
-            (move |mut commands: Commands| {
-                commands.spawn(ToolBindingSource::<T> {
-                    marker: PhantomData,
-                });
-            })
-            .in_set(ToolStartupSet::Registry),
-        )
-        .add_systems(Startup, bind::<T>.in_set(ToolStartupSet::Binding))
-        .add_systems(Update, parse::<T>.in_set(ToolRequestSet))
     }
+}
+
+pub struct ToolInputRegistration {
+    register: fn(&mut App),
+}
+
+impl ToolInputRegistration {
+    pub const fn of<T: ToolInput>() -> Self {
+        Self {
+            register: register_input::<T>,
+        }
+    }
+}
+
+inventory::collect!(ToolInputRegistration);
+
+fn register_input<T: ToolInput>(app: &mut App) {
+    app.add_systems(Startup, bind::<T>.in_set(ToolStartupSet::Binding))
+        .add_systems(Update, parse::<T>.in_set(ToolRequestSet));
 }
 
 pub trait ToolInput: Component + serde::de::DeserializeOwned {
@@ -106,29 +120,18 @@ fn register(
 }
 
 #[derive(Component)]
-struct ToolBindingSource<T> {
-    marker: PhantomData<fn() -> T>,
-}
-
-#[derive(Component)]
 struct ToolBinding<T>(PhantomData<fn() -> T>);
 
-fn bind<T>(
-    bindings: Query<(Entity, &ToolBindingSource<T>)>,
-    tools: Query<(Entity, &Name), With<RegisteredTool>>,
-    mut commands: Commands,
-) where
+fn bind<T>(tools: Query<(Entity, &Name), With<RegisteredTool>>, mut commands: Commands)
+where
     T: ToolInput,
 {
-    for (binding_entity, _) in &bindings {
-        let Some((tool_entity, _)) = tools.iter().find(|(_, name)| name.as_str() == T::NAME) else {
-            panic!("tool manifest does not define {}", T::NAME);
-        };
-        commands
-            .entity(tool_entity)
-            .insert(ToolBinding::<T>(PhantomData));
-        commands.entity(binding_entity).despawn();
-    }
+    let Some((tool_entity, _)) = tools.iter().find(|(_, name)| name.as_str() == T::NAME) else {
+        return;
+    };
+    commands
+        .entity(tool_entity)
+        .insert(ToolBinding::<T>(PhantomData));
 }
 
 fn parse<T>(
@@ -159,9 +162,14 @@ fn parse<T>(
 pub struct ToolResolveSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolResolveFlush;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 enum ToolStartupSet {
     Registry,
+    RegistryFlush,
     Manifest,
+    ManifestFlush,
     Binding,
 }
 

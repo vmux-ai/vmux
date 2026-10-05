@@ -1,16 +1,16 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_space::AgentRenameProfile;
-use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet};
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet};
+
+use crate::AgentRenameProfile;
 
 pub struct TeamToolPlugin;
 
 impl Plugin for TeamToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<RenameProfileArgs>()
             .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
     }
 }
@@ -18,13 +18,13 @@ impl Plugin for TeamToolPlugin {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RenameProfileArgs {
+struct RenameProfileTool {
     name: String,
 }
 
 fn rename_profile(
     mut commands: Commands,
-    requests: Query<(Entity, &RenameProfileArgs), AddedTool<RenameProfileArgs>>,
+    requests: Query<(Entity, &RenameProfileTool), AddedTool<RenameProfileTool>>,
 ) {
     for (entity, args) in &requests {
         let name = args.name.trim();
@@ -43,14 +43,16 @@ fn rename_profile(
 mod tests {
     use super::*;
     use vmux_ecs::JsonArguments;
-    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{
+        ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation, ToolRegistryPlugin,
+    };
 
     struct TeamToolFixture;
 
     impl TeamToolFixture {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins(TeamToolPlugin);
+            app.add_plugins((ToolRegistryPlugin, TeamToolPlugin));
             app.update();
             app
         }

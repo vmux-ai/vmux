@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_ecs::PageMetadata;
-use vmux_ecs::host::page::{HostHistory, HostHistorySet, HostHistoryTraversed};
+use vmux_ecs::page::{HostHistory, HostHistoryObserve, HostHistorySet, HostHistoryTraversed};
 use vmux_path::FileUrl;
 
 use crate::host::editor::{FileNavigateRequest, FileView};
@@ -37,13 +37,18 @@ fn show_traversed_file_view(
 }
 
 fn record_file_view_visit(
-    mut views: Query<(&PageMetadata, &FileViewport, &mut HostHistory), With<FileView>>,
+    views: Query<(Entity, &PageMetadata, &FileViewport, &HostHistory), With<FileView>>,
+    mut observations: MessageWriter<HostHistoryObserve>,
 ) {
-    for (metadata, viewport, mut history) in &mut views {
+    for (entity, metadata, viewport, history) in &views {
         if metadata.url.is_empty() || history.showing(&metadata.url, viewport.top_row) {
             continue;
         }
-        history.observe(&metadata.url, viewport.top_row);
+        observations.write(HostHistoryObserve {
+            webview: entity,
+            url: metadata.url.clone(),
+            top_line: viewport.top_row,
+        });
     }
 }
 
@@ -52,9 +57,9 @@ mod tests {
     use super::*;
     use bevy_cef::prelude::UiInput;
     use vmux_ecs::event::FileOpenEvent;
-    use vmux_ecs::host::page::{HostHistoryDelta, HostHistoryStep};
+    use vmux_ecs::page::{HostHistoryDelta, HostHistoryStep};
     use vmux_ecs::page_open::PageOpenTask;
-    use vmux_ecs::{EcsPlugin, PageOpenId};
+    use vmux_ecs::{PageOpenId, PrimitivesPlugin};
 
     use crate::host::navigation::NavigationPlugin;
     use crate::host::page_open::PageOpenPlugin;
@@ -73,7 +78,8 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(EcsPlugin)
+                .add_plugins(vmux_ecs::page::PagePlugin)
+                .add_plugins(PrimitivesPlugin)
                 .add_plugins(NavigationPlugin)
                 .add_plugins(HistoryPlugin)
                 .add_plugins(PageOpenPlugin);

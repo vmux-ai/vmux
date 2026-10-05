@@ -16,14 +16,13 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
-    McpServerStatus, McpServers, McpServersRequest,
+    McpServerStatus, McpServersRequest, McpServersUiState,
 };
-use vmux_ecs::host::manifest::FeatureManifest;
-use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
-use vmux_ecs::profile::mcp_credentials::{
-    McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
-};
+use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::profile::McpCredentials;
+use vmux_ecs::profile::mcp_credentials::McpOauthCredentials;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{UiStatePlugin, UiStateWrite};
 
 pub struct McpConnectionPlugin;
 
@@ -31,7 +30,7 @@ impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
-            UiStatePlugin::<McpServers>::default(),
+            UiStatePlugin::<McpServersUiState>::default(),
         ))
         .add_systems(Startup, spawn_mcp_catalog)
         .add_message::<PageOpenRequest>()
@@ -81,7 +80,7 @@ fn begin_mcp_snapshot(
         Err(_) => {
             let state = McpPageState {
                 generation: 1,
-                snapshot: McpServers {
+                snapshot: McpServersUiState {
                     loading: true,
                     ..Default::default()
                 },
@@ -137,14 +136,19 @@ fn request_mcp_server(
 fn start_mcp_operation(
     pending: Query<(Entity, &PendingMcpOperation), Without<McpOperationTask>>,
     catalog: McpCatalog,
+    credentials: Query<&McpCredentials>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let Ok(credentials) = credentials.single() else {
+        return;
+    };
     for (entity, pending) in &pending {
         let generation = pending.generation;
         let id = pending.id.clone();
         let operation = pending.operation;
         let server = catalog.server(&id);
+        let credentials = (*credentials).clone();
         let task_id = id.clone();
         let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let progress_wake = completion_wake.clone();
@@ -152,7 +156,7 @@ fn start_mcp_operation(
         let task = IoTaskPool::get().spawn(async move {
             let result = match (operation, server.as_ref()) {
                 (McpServerOperation::Connect, Some(server)) => {
-                    McpConnection::connect(server, |url| {
+                    McpConnection::connect(server, &credentials, |url| {
                         if progress_sender.send(url).is_ok()
                             && let Some(wake) = &progress_wake
                         {
@@ -160,7 +164,9 @@ fn start_mcp_operation(
                         }
                     })
                 }
-                (McpServerOperation::Disconnect, Some(server)) => McpConnection::disconnect(server),
+                (McpServerOperation::Disconnect, Some(server)) => {
+                    McpConnection::disconnect(server, &credentials)
+                }
                 (_, None) => Err(format!("Unknown MCP server: {task_id}")),
             };
             if let Some(wake) = completion_wake {
@@ -223,13 +229,18 @@ fn drain_mcp_operations(
 fn start_mcp_snapshots(
     requests: Query<(Entity, &PendingMcpSnapshot), Without<McpSnapshotTask>>,
     catalog: McpCatalog,
+    credentials: Query<&McpCredentials>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let Ok(credentials) = credentials.single() else {
+        return;
+    };
     for (target, request) in &requests {
         let generation = request.generation;
         let result = request.result.clone();
         let source = catalog.snapshot_source();
+        let credentials = (*credentials).clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         commands
             .entity(target)
@@ -237,7 +248,7 @@ fn start_mcp_snapshots(
             .insert(McpSnapshotTask {
                 generation,
                 task: IoTaskPool::get().spawn(async move {
-                    let snapshot = source.load(result);
+                    let snapshot = source.load(result, &credentials);
                     if let Some(wake) = wake {
                         let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
                     }
@@ -273,7 +284,7 @@ fn publish_mcp_connections(
 ) {
     for (target, state) in &states {
         if browsers.can_emit_to(&target) {
-            commands.trigger(UiStateWrite::<McpServers>::from_event(
+            commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
                 target,
                 &state.snapshot,
             ));
@@ -282,7 +293,7 @@ fn publish_mcp_connections(
 }
 
 #[derive(EntityEvent)]
-pub struct McpSnapshotRequest {
+pub(crate) struct McpSnapshotRequest {
     #[event_target]
     pub target: Entity,
 }
@@ -290,7 +301,7 @@ pub struct McpSnapshotRequest {
 #[derive(Component, Default)]
 struct McpPageState {
     generation: u64,
-    snapshot: McpServers,
+    snapshot: McpServersUiState,
 }
 
 #[derive(Component)]
@@ -318,7 +329,7 @@ struct McpOperationTask {
 #[derive(Component)]
 struct McpSnapshotTask {
     generation: u64,
-    task: Task<McpServers>,
+    task: Task<McpServersUiState>,
 }
 
 #[derive(Component, Clone)]
@@ -388,7 +399,11 @@ impl McpCatalog<'_, '_> {
 struct McpSnapshotSource(Vec<(String, McpCatalogServer)>);
 
 impl McpSnapshotSource {
-    fn load(self, result: Option<McpServerResult>) -> McpServers {
+    fn load(
+        self,
+        result: Option<McpServerResult>,
+        credentials: &McpCredentials,
+    ) -> McpServersUiState {
         let manifest = ToolStore::current().load().unwrap_or_default();
         let mut servers = Vec::new();
         let mut catalog_ids = BTreeSet::new();
@@ -401,7 +416,9 @@ impl McpSnapshotSource {
                 .is_some_and(|manifest| server.owns(manifest));
             let occupied = manifest.mcp.servers.contains_key(&server.id);
             let authenticated = configured
-                && McpCredentialStorage::load(&server.id)
+                && credentials
+                    .storage
+                    .load(&server.id)
                     .ok()
                     .flatten()
                     .is_some_and(|credentials| credentials.authorizes(&server.url));
@@ -433,7 +450,7 @@ impl McpSnapshotSource {
                 status: McpServerStatus::Configured,
             });
         }
-        McpServers {
+        McpServersUiState {
             loaded: true,
             loading: false,
             servers,
@@ -446,7 +463,11 @@ impl McpSnapshotSource {
 struct McpConnection;
 
 impl McpConnection {
-    fn connect(server: &McpCatalogServer, progress: impl FnOnce(String)) -> Result<(), String> {
+    fn connect(
+        server: &McpCatalogServer,
+        credentials: &McpCredentials,
+        progress: impl FnOnce(String),
+    ) -> Result<(), String> {
         Self::ensure_catalog_slot(server)?;
         let listener = TcpListener::bind("127.0.0.1:0")
             .map_err(|error| format!("failed to open OAuth callback: {error}"))?;
@@ -497,7 +518,7 @@ impl McpConnection {
             &redirect_uri,
             &server.url,
         )?;
-        let credentials = McpOauthCredentials {
+        let oauth = McpOauthCredentials {
             token_endpoint: authorization.token_endpoint,
             client_id: registration.client_id,
             client_secret: registration.client_secret,
@@ -508,25 +529,25 @@ impl McpConnection {
             resource: server.url.clone(),
         };
         let id = &server.id;
-        McpCredentialAccess::write(|| {
+        credentials.access.write(|| {
             Self::ensure_catalog_slot(server)?;
-            let original_credentials = McpCredentialStorage::load(id)?;
-            McpCredentialStorage::store(id, &credentials)?;
+            let original_credentials = credentials.storage.load(id)?;
+            credentials.storage.store(id, &oauth)?;
             if let Err(error) = Self::write_manifest(server) {
                 let credentials_rollback = original_credentials
                     .as_ref()
-                    .map(|credentials| McpCredentialStorage::store(id, credentials))
-                    .unwrap_or_else(|| McpCredentialStorage::remove(id));
+                    .map(|original| credentials.storage.store(id, original))
+                    .unwrap_or_else(|| credentials.storage.remove(id));
                 return Err(Self::rollback_error(error, Ok(()), credentials_rollback));
             }
             Ok(())
         })
     }
 
-    fn disconnect(server: &McpCatalogServer) -> Result<(), String> {
+    fn disconnect(server: &McpCatalogServer, credentials: &McpCredentials) -> Result<(), String> {
         let id = &server.id;
-        McpCredentialAccess::write(|| {
-            let credentials = McpCredentialStorage::load(id)?;
+        credentials.access.write(|| {
+            let stored = credentials.storage.load(id)?;
             let store = ToolStore::current();
             let original = store.load()?;
             let configured = original
@@ -542,11 +563,11 @@ impl McpConnection {
             let mut updated = original.clone();
             updated.mcp.servers.remove(id);
             store.save(&updated)?;
-            if let Err(error) = McpCredentialStorage::remove(id) {
+            if let Err(error) = credentials.storage.remove(id) {
                 let manifest_rollback = store.save(&original);
-                let credentials_rollback = credentials
+                let credentials_rollback = stored
                     .as_ref()
-                    .map(|credentials| McpCredentialStorage::store(id, credentials))
+                    .map(|stored| credentials.storage.store(id, stored))
                     .unwrap_or(Ok(()));
                 return Err(Self::rollback_error(
                     error,
@@ -843,7 +864,9 @@ mod tests {
     };
     use bevy::prelude::*;
     use bevy_cef::prelude::UiInput;
-    use vmux_api::mcp::{McpServerOperation, McpServerPending, McpServerRequest, McpServers};
+    use vmux_api::mcp::{
+        McpServerOperation, McpServerPending, McpServerRequest, McpServersUiState,
+    };
 
     #[test]
     fn pkce_uses_unpadded_url_safe_base64() {
@@ -887,7 +910,7 @@ mod tests {
             .world_mut()
             .spawn(McpPageState {
                 generation: 1,
-                snapshot: McpServers {
+                snapshot: McpServersUiState {
                     loaded: true,
                     servers: vec![vmux_api::mcp::McpServerEntry {
                         id: "linear".to_string(),

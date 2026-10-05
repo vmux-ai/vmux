@@ -43,7 +43,7 @@ mod tests {
         let (name, profile, space_id) = query.single(app.world()).unwrap();
 
         assert_eq!(name.as_str(), BOOTSTRAP_SPACE_NAME);
-        assert_eq!(profile.name, SpaceRecord::current_profile_name());
+        assert_eq!(profile.name, "Personal");
         assert_eq!(space_id.0, BOOTSTRAP_SPACE_ID);
     }
 }

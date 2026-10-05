@@ -7,7 +7,7 @@ pub use crate::transport::event_listener::{EventListenerError, send};
 pub use use_key_claim::{KeyClaim, Unclaimed, use_key_claim};
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;
-pub use use_ui_state::{UiStateBinding, UiStatePatchBatch, UiStateValue, use_ui_state};
+pub use use_ui_state::{UiStateBinding, use_ui_state};
 pub use vmux_api::UiStatePatch;
 
 #[cfg(ui)]

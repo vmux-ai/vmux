@@ -1,18 +1,18 @@
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{BTreeMap, HashMap, HashSet};
+#[cfg(test)]
+use std::path::PathBuf;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
+use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_ecs::Active;
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
+use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, UnixMillis,
@@ -38,10 +38,6 @@ struct ReopenClosedPage;
 #[vmux_command::command]
 struct StackReopenBinding;
 
-fn bind_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<StackReopenBinding>(&mut commands);
-}
-
 fn issue_reopen_closed_page(
     trigger: On<CommandDispatch>,
     registered: Query<(), With<StackReopenBinding>>,
@@ -61,13 +57,18 @@ impl Plugin for ArchivePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<ReopenClosedPage>()
+        app.register_persisted::<ArchivedPage>()
+            .register_persisted::<ArchivedPagePosition>()
+            .register_persisted::<ArchivedTabPage>()
+            .register_type::<PaneStep>()
+            .register_type::<SplitAxis>()
+            .register_type::<Vec<PaneStep>>()
+            .add_message::<ReopenClosedPage>()
             .add_message::<PageArchiveRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<TabLayoutSpawnRequest>()
             .init_resource::<LayoutSettings>()
-            .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_reopen_closed_page)
             .add_systems(Update, (capture_archived_pages, maintain))
             .add_systems(
@@ -637,31 +638,18 @@ fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Comman
     if page.url.is_empty() {
         return;
     }
-    if vmux_api::VmuxRoute::parse(&page.url).is_some_and(|route| route.is_terminal()) {
-        let cwd = page
-            .launch
-            .as_ref()
-            .map(|l| l.cwd.clone())
-            .filter(|c| !c.is_empty())
-            .map(PathBuf::from);
-        let request = TerminalSpawnRequest {
-            cwd,
-            target: TerminalSpawnTarget::Stack(stack),
-            metadata: None,
-        };
-        commands.queue(move |world: &mut World| {
-            world.write_message(request);
-        });
-    } else {
-        let request = PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url: page.url.clone(),
-            request_id: None,
-        };
-        commands.queue(move |world: &mut World| {
-            world.write_message(request);
-        });
+    commands.entity(stack).insert(PageRestore);
+    if let Some(launch) = page.launch.as_ref() {
+        commands.entity(stack).insert(launch.clone());
     }
+    let request = PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url: page.url.clone(),
+        request_id: None,
+    };
+    commands.queue(move |world: &mut World| {
+        world.write_message(request);
+    });
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1736,7 +1724,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ReopenClosedPage>()
             .add_message::<PageOpenRequest>()
-            .add_message::<TerminalSpawnRequest>()
             .init_resource::<crate::settings::LayoutSettings>()
             .add_systems(Update, super::handle_reopen_closed_page);
         app.world_mut()
@@ -1758,41 +1745,9 @@ mod tests {
             .collect()
     }
 
-    #[derive(Resource, Default)]
-    struct CapturedTerminalSpawnTargets(Vec<bool>);
-
-    fn capture_terminal_spawn_targets(
-        mut reader: MessageReader<TerminalSpawnRequest>,
-        stacks: Query<(), With<Stack>>,
-        mut captured: ResMut<CapturedTerminalSpawnTargets>,
-    ) {
-        for request in reader.read() {
-            let restored_into_a_real_stack = match request.target {
-                TerminalSpawnTarget::Stack(stack) => stacks.contains(stack),
-                _ => false,
-            };
-            captured.0.push(restored_into_a_real_stack);
-        }
-    }
-
     #[test]
-    fn reopen_terminal_dispatches_after_target_stack_materializes() {
-        let mut app = App::new();
-        app.add_message::<ReopenClosedPage>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<TerminalSpawnRequest>()
-            .init_resource::<crate::settings::LayoutSettings>()
-            .init_resource::<CapturedTerminalSpawnTargets>()
-            .add_systems(
-                Update,
-                (
-                    super::handle_reopen_closed_page,
-                    capture_terminal_spawn_targets,
-                )
-                    .chain_ignore_deferred(),
-            );
-        app.world_mut()
-            .spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
+    fn reopen_targets_materialized_stack() {
+        let mut app = reopen_app();
         app.world_mut().spawn((Space, SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
             url: "vmux://terminal/".to_string(),
@@ -1802,12 +1757,13 @@ mod tests {
         });
 
         dispatch_reopen(&mut app);
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<CapturedTerminalSpawnTargets>().0,
-            vec![true]
-        );
+        let opens = drain_opens(&mut app);
+        assert_eq!(opens.len(), 1);
+        let PageOpenTarget::Stack(stack) = opens[0].target else {
+            panic!("reopened page must target a stack");
+        };
+        assert!(app.world().get::<Stack>(stack).is_some());
+        assert!(app.world().get::<PageRestore>(stack).is_some());
     }
 
     #[test]
@@ -2101,15 +2057,16 @@ mod tests {
             tab_index: None,
         });
         dispatch_reopen(&mut app);
-        assert!(drain_opens(&mut app).is_empty());
-        let spawns: Vec<TerminalSpawnRequest> = app
-            .world_mut()
-            .resource_mut::<Messages<TerminalSpawnRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(spawns.len(), 1);
-        assert_eq!(spawns[0].cwd, Some(PathBuf::from("/work")));
-        assert!(matches!(spawns[0].target, TerminalSpawnTarget::Stack(_)));
+        let opens = drain_opens(&mut app);
+        assert_eq!(opens.len(), 1);
+        let PageOpenTarget::Stack(stack) = opens[0].target else {
+            panic!("reopened page must target a stack");
+        };
+        assert_eq!(
+            app.world().get::<TerminalLaunch>(stack).unwrap().cwd,
+            "/work"
+        );
+        assert!(app.world().get::<PageRestore>(stack).is_some());
     }
 
     #[test]

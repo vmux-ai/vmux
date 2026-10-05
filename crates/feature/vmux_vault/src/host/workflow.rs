@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::UiStateWrite;
 use vmux_ecs::page::PageReady;
 
 use crate::state::{

@@ -447,7 +447,7 @@ fn ToolArg(argument: ChatToolArgument) -> Element {
 }
 
 #[component]
-fn ToolArgs(arguments: ChatToolArguments) -> Element {
+fn ToolArguments(arguments: ChatToolArguments) -> Element {
     match arguments {
         ChatToolArguments::None => rsx! {},
         ChatToolArguments::Fields(fields) => rsx! {
@@ -507,7 +507,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
                         DisclosureIcon {}
                     }
                     div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
-                    ToolArgs { arguments: call.arguments.clone() }
+                    ToolArguments { arguments: call.arguments.clone() }
                 }
                 if !children.is_empty() {
                     div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
@@ -721,7 +721,7 @@ fn ToolChildCall(call: ChatToolChildCall) -> Element {
                 DisclosureIcon {}
             }
             div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
-            ToolArgs { arguments: call.arguments }
+            ToolArguments { arguments: call.arguments }
         }
     }
 }

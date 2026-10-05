@@ -1,13 +1,12 @@
 use crate::host::definition::CommandDefinition;
 use crate::host::snapshot::{
-    CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
+    CommandBarContextSnapshot, CommandBarPagesSnapshot, CommandBarProjectRoots,
     ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPages,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::Query;
 use vmux_api::command_bar::{
-    AgentModels, AgentModes, CommandBarCommandEntry, CommandBarPick, CommandBarPickRow,
-    CommandBarPicker, CommandBarSpace, CommandBarTab,
+    AgentModels, AgentModes, CommandBarCommandEntry, CommandBarControl, CommandBarTab,
 };
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_api::open_target::OpenTarget;
@@ -17,82 +16,6 @@ struct CommandBarEntry {
     pub id: String,
     pub name: String,
     pub shortcut: String,
-}
-
-pub(super) struct CommandBarPicks;
-
-impl CommandBarPicks {
-    pub fn for_picker(picker: CommandBarPicker, locale: &Locale) -> Vec<CommandBarPickRow> {
-        match picker {
-            CommandBarPicker::Space | CommandBarPicker::GotoLine => Vec::new(),
-            CommandBarPicker::Indent => Self::indents(locale),
-            CommandBarPicker::LineEnding => vec![
-                Self::row("LF", CommandBarPick::LineEnding { crlf: false }),
-                Self::row("CRLF", CommandBarPick::LineEnding { crlf: true }),
-            ],
-            CommandBarPicker::Encoding => vec![
-                Self::row(
-                    locale.translate(Self::label(CommandBarPicker::EncodingReopen)),
-                    CommandBarPick::Picker(CommandBarPicker::EncodingReopen),
-                ),
-                Self::row(
-                    locale.translate(Self::label(CommandBarPicker::EncodingSave)),
-                    CommandBarPick::Picker(CommandBarPicker::EncodingSave),
-                ),
-            ],
-            CommandBarPicker::EncodingReopen => Self::encodings(false),
-            CommandBarPicker::EncodingSave => Self::encodings(true),
-        }
-    }
-
-    fn indents(locale: &Locale) -> Vec<CommandBarPickRow> {
-        let mut rows = Vec::with_capacity(6);
-        for spaces in [true, false] {
-            for width in [2u16, 4, 8] {
-                let id = match spaces {
-                    true => "editor-status-spaces",
-                    false => "editor-status-tabs",
-                };
-                let label = locale
-                    .translate_with(id, &[("width", TranslationValue::Number(i64::from(width)))]);
-                rows.push(Self::row(label, CommandBarPick::Indent { spaces, width }));
-            }
-        }
-        rows
-    }
-
-    fn encodings(save: bool) -> Vec<CommandBarPickRow> {
-        let mut rows = Vec::with_capacity(vmux_ecs::event::FileEncoding::ALL.len());
-        for encoding in vmux_ecs::event::FileEncoding::ALL {
-            rows.push(Self::row(
-                encoding.label(),
-                CommandBarPick::Encoding {
-                    label: encoding.label().to_string(),
-                    save,
-                },
-            ));
-        }
-        rows
-    }
-
-    fn row(label: impl Into<String>, pick: CommandBarPick) -> CommandBarPickRow {
-        CommandBarPickRow {
-            label: label.into(),
-            pick,
-        }
-    }
-
-    const fn label(picker: CommandBarPicker) -> &'static str {
-        match picker {
-            CommandBarPicker::Space => "",
-            CommandBarPicker::GotoLine => "editor-status-goto-title",
-            CommandBarPicker::Indent => "editor-status-indent-title",
-            CommandBarPicker::LineEnding => "editor-status-eol-title",
-            CommandBarPicker::Encoding => "editor-status-encoding-title",
-            CommandBarPicker::EncodingReopen => "editor-status-encoding-reopen",
-            CommandBarPicker::EncodingSave => "editor-status-encoding-save",
-        }
-    }
 }
 
 #[derive(SystemParam)]
@@ -107,15 +30,12 @@ pub struct CommandBarProjector<'w, 's> {
 pub struct CommandBarOpenProjection {
     pub open_id: OpenId,
     pub native_windowed: bool,
-    pub space_name: String,
+    pub context: CommandBarContextSnapshot,
     pub url: String,
-    pub spaces: CommandBarSpacesSnapshot,
-    pub terminal_page_url: String,
     pub pages: CommandBarPagesSnapshot,
     pub projects: CommandBarProjectRoots,
     pub work: crate::host::snapshot::CommandBarWorkSnapshot,
     pub locale: Locale,
-    pub active_stack_count: usize,
     pub tabs: Vec<CommandBarTab>,
     pub target: Option<OpenTarget>,
 }
@@ -195,21 +115,40 @@ impl CommandBarProjector<'_, '_> {
             });
         }
 
-        let mut spaces = Vec::new();
-        for space in &projection.spaces.spaces {
-            let is_active = space.id == projection.spaces.active_space_id;
-            spaces.push(CommandBarSpace {
-                id: space.id.clone(),
-                name: space.name.clone(),
-                profile: space.profile.clone(),
-                is_active,
-                tab_count: if is_active {
-                    projection.active_stack_count as u32
+        let mut controls = self
+            .definitions
+            .iter()
+            .filter_map(|definition| {
+                let toolbar = definition.toolbar?;
+                let title = definition.localized_name(projection.locale.as_str());
+                let label = title
+                    .rsplit(" > ")
+                    .next()
+                    .unwrap_or(title.as_str())
+                    .to_string();
+                let shortcut = definition.shortcut_label();
+                let title = if shortcut.is_empty() {
+                    title
                 } else {
-                    0
-                },
-            });
-        }
+                    format!("{title} ({shortcut})")
+                };
+                Some((
+                    toolbar.rank,
+                    CommandBarControl {
+                        id: definition.id.clone(),
+                        label,
+                        title,
+                        icon: toolbar.icon,
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        controls.sort_by(|(left_rank, left), (right_rank, right)| {
+            left_rank
+                .cmp(right_rank)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let controls = controls.into_iter().map(|(_, control)| control).collect();
 
         let mut agent_models = self
             .agent_models
@@ -229,13 +168,11 @@ impl CommandBarProjector<'_, '_> {
             native_windowed: projection.native_windowed,
             caret_at_end: false,
             url: projection.url,
-            space_name: projection.space_name,
-            spaces,
-            spaces_page_url: projection.spaces.spaces_page_url,
+            context_label: projection.context.label,
             tabs: projection.tabs,
             commands,
+            controls,
             pages,
-            terminal_page_url: projection.terminal_page_url,
             work_dirs: projection.work.work_dirs,
             recent_files: projection.work.recent_files,
             projects: projection.projects.roots,
@@ -246,6 +183,10 @@ impl CommandBarProjector<'_, '_> {
             target: projection.target,
             picker: None,
             picks: Vec::new(),
+            picker_label: String::new(),
+            picker_placeholder: String::new(),
+            picker_typed: false,
+            picker_numbered: false,
         }
     }
 }

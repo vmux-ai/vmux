@@ -1,8 +1,4 @@
-use std::time::Duration;
-
-use super::model::{
-    AgentSegment, PaletteDecision, PaletteDraft, PaletteQuery, PaletteRows, PaletteState,
-};
+use super::driver::{PaletteDecision, PaletteDraft, PaletteRows, PaletteState};
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
@@ -11,29 +7,31 @@ use vmux_api::command_bar::{
     CommandPaletteRemoveAttachmentRequest, CommandPaletteSubmitRequest, CommandPaletteUiState,
     OpenId,
 };
-use vmux_api::mcp::{McpServerRequest, McpServers};
-#[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::{UiState, UiStateWrite};
-use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
-use vmux_tool::McpSnapshotRequest;
-
-use crate::{
-    BindCommands, CommandDispatch, CommandPaletteSurface, CommandRegistry, CommandRuntimePlugin,
+use vmux_ecs::UiStateWrite;
+use vmux_ecs::launcher::{
+    CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged, HostsLauncher,
+    RendersLauncherPanel,
 };
+#[cfg(test)]
+use vmux_ecs::manifest::FeaturePlugin;
+
+use crate::{CommandDispatch, CommandPaletteSurface, CommandRuntimePlugin, ResolvedLocale};
 
 use self::menu::{
     AgentMenuOpen, BranchMenuOpen, ModelMenuOpen, PaletteMenuCursor, PermissionMenuOpen,
     ProjectMenuOpen,
 };
+use self::request_driver::{OpenVersion, RequestDelay, RequestGeneration};
 use super::CommandBarDismiss;
 
 mod branch;
 mod media;
 mod menu;
 mod prompt;
-mod resume;
+mod prompt_driver;
+mod request_driver;
 mod search;
+mod search_driver;
 
 pub(super) struct PalettePlugin;
 
@@ -53,16 +51,13 @@ impl Plugin for PalettePlugin {
             CommandPaletteRemoveAttachmentRequest,
         )>::default())
             .add_plugins((
-                vmux_ecs::host::UiStatePlugin::<CommandPaletteUiState>::default(),
                 menu::MenuPlugin,
                 search::PaletteSearchPlugin,
                 prompt::PalettePromptPlugin,
                 branch::PaletteBranchPlugin,
                 media::PaletteMediaPlugin,
-                resume::PaletteResumePlugin,
             ))
             .add_observer(open)
-            .add_observer(receive_mcp)
             .add_observer(update)
             .add_observer(highlight)
             .add_observer(history)
@@ -74,9 +69,8 @@ impl Plugin for PalettePlugin {
             .add_observer(complete)
             .add_observer(dismiss)
             .add_observer(submit)
-            .add_systems(Startup, bind.in_set(BindCommands))
             .add_systems(PreUpdate, (attach, detach))
-            .add_systems(PostUpdate, (project, publish).chain())
+            .add_systems(PostUpdate, (query, rows, project, publish).chain())
             .add_systems(Last, wake);
     }
 }
@@ -109,17 +103,29 @@ struct PaletteDraftInput {
     history_scratch: String,
 }
 
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+struct PublishedQuery {
+    open_id: OpenId,
+    query: String,
+    start: bool,
+    open: Option<vmux_api::open_target::OpenTarget>,
+    picker: Option<vmux_api::command_bar::CommandBarPicker>,
+    numbered: bool,
+}
+
 type NewPalette<T> = (
     Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
     Without<T>,
 );
 type ProjectionRow = (
+    Entity,
     &'static PaletteOpen,
-    &'static PaletteDraftInput,
+    &'static mut PaletteDraftInput,
     Option<&'static PaletteMenuCursor>,
-    &'static PaletteMcp,
     &'static mut PaletteContext,
     &'static mut PaletteSnapshot,
+    &'static PaletteRowsSnapshot,
+    &'static mut PaletteContributionRows,
     Has<AgentMenuOpen>,
     Has<ModelMenuOpen>,
     Has<PermissionMenuOpen>,
@@ -132,94 +138,11 @@ type DetachedPalette = (
     Without<HostsLauncher>,
 );
 
-impl PaletteDraftInput {
-    fn history(&mut self, history: &[String], older: bool) -> bool {
-        if history.is_empty() {
-            return false;
-        }
-        let current = self.query.clone();
-        let (query, cursor, scratch) = if older {
-            let next = self
-                .history_cursor
-                .map_or(history.len() - 1, |index| index.saturating_sub(1));
-            let scratch = match self.history_cursor {
-                Some(_) => self.history_scratch.clone(),
-                None => current.clone(),
-            };
-            (history[next].clone(), Some(next), scratch)
-        } else {
-            match self.history_cursor {
-                Some(index) if index + 1 < history.len() => (
-                    history[index + 1].clone(),
-                    Some(index + 1),
-                    self.history_scratch.clone(),
-                ),
-                Some(_) => (
-                    self.history_scratch.clone(),
-                    None,
-                    self.history_scratch.clone(),
-                ),
-                None => return false,
-            }
-        };
-        self.query = query;
-        self.history_cursor = cursor;
-        self.history_scratch = scratch;
-        self.selected = 0;
-        self.navigating = false;
-        self.input_revision = self.input_revision.wrapping_add(1).max(1);
-        true
-    }
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+struct PaletteRowsSnapshot(PaletteRows);
 
-    fn next(&mut self, snapshot: &CommandPaletteUiState) {
-        let rows = if snapshot.projection.mcp_open {
-            snapshot.projection.mcp_entries.len()
-        } else {
-            snapshot.projection.rows.len()
-        };
-        self.selected = (self.selected + 1).min(rows.saturating_sub(1));
-        self.navigating = true;
-        self.changed();
-    }
-
-    fn previous(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-        self.navigating = true;
-        self.changed();
-    }
-
-    fn complete(&mut self, snapshot: &CommandPaletteUiState) {
-        if snapshot.projection.mcp_open || snapshot.projection.ghost.is_empty() {
-            return;
-        }
-        self.query.push_str(&snapshot.projection.ghost);
-        self.selected = 0;
-        self.navigating = false;
-        self.changed();
-    }
-
-    fn dismiss(&mut self, snapshot: &CommandPaletteUiState) -> bool {
-        if snapshot.projection.mcp_open {
-            self.query.clear();
-            self.selected = 0;
-            self.navigating = false;
-            self.changed();
-            return false;
-        }
-        self.close_revision = self.close_revision.wrapping_add(1).max(1);
-        true
-    }
-
-    fn changed(&mut self) {
-        self.input_revision = self.input_revision.wrapping_add(1).max(1);
-    }
-}
-
-#[derive(Component, Default)]
-struct PaletteMcp(McpServers);
-
-#[derive(Component)]
-struct PaletteMcpActive;
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+struct PaletteContributionRows(Vec<Entity>);
 
 #[vmux_command::command]
 struct CommandBarNextBinding;
@@ -243,14 +166,6 @@ struct PaletteDecisionReady {
     decision: PaletteDecision,
 }
 
-fn bind(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<CommandBarNextBinding>(&mut commands);
-    registry.bind::<CommandBarPreviousBinding>(&mut commands);
-    registry.bind::<CommandBarCompleteBinding>(&mut commands);
-    registry.bind::<CommandBarDismissBinding>(&mut commands);
-    registry.bind::<CommandBarSubmitBinding>(&mut commands);
-}
-
 fn attach(pages: Query<Entity, NewPalette<PaletteSnapshot>>, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert((
@@ -258,17 +173,11 @@ fn attach(pages: Query<Entity, NewPalette<PaletteSnapshot>>, mut commands: Comma
             PaletteOpen::default(),
             PaletteContext::default(),
             PaletteDraftInput::default(),
-            PaletteMcp::default(),
-            UiState::<CommandPaletteUiState>::default(),
+            PublishedQuery::default(),
+            PaletteRowsSnapshot::default(),
+            PaletteContributionRows::default(),
         ));
     }
-}
-
-fn receive_mcp(trigger: On<UiStateWrite<McpServers>>, mut palettes: Query<&mut PaletteMcp>) {
-    let Ok(mut mcp) = palettes.get_mut(trigger.event().webview()) else {
-        return;
-    };
-    mcp.0.clone_from(trigger.event().update());
 }
 
 fn open(
@@ -277,17 +186,19 @@ fn open(
         &mut PaletteOpen,
         &mut PaletteDraftInput,
         &mut PaletteSnapshot,
+        Has<HostsLauncher>,
     )>,
     mut commands: Commands,
 ) {
     let Some(opened) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
-            trigger.event().patch(),
+            trigger.event().update(),
         )
     else {
         return;
     };
-    let Ok((mut current, mut draft, mut snapshot)) = palettes.get_mut(trigger.event().webview())
+    let Ok((mut current, mut draft, mut snapshot, start)) =
+        palettes.get_mut(trigger.event().webview())
     else {
         return;
     };
@@ -298,7 +209,7 @@ fn open(
     draft.open_id = opened.open_id;
     draft.query.clone_from(&opened.url);
     draft.target_url.clear();
-    draft.selected = PaletteState::opening_selection(opened);
+    draft.selected = 0;
     draft.navigating = false;
     draft.history_cursor = None;
     draft.history_scratch.clear();
@@ -309,12 +220,19 @@ fn open(
     draft.close_revision = 0;
     snapshot.0.open_id = opened.open_id;
     snapshot.0.projection = Default::default();
+    commands.trigger(UiInput {
+        webview: trigger.event().webview(),
+        payload: CommandPaletteDraftRequest {
+            open_id: opened.open_id,
+            query: opened.url.clone(),
+            start,
+        },
+    });
 }
 
 fn update(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>,
-    active: Query<(), With<PaletteMcpActive>>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
@@ -335,17 +253,6 @@ fn update(
         commands.entity(target).remove::<menu::OpenMenu>();
     }
     draft.start = request.start;
-    let wants_mcp = PaletteQuery::new(&request.query).mcp_filter().is_some();
-    match (wants_mcp, active.contains(target)) {
-        (true, false) => {
-            commands.entity(target).insert(PaletteMcpActive);
-            commands.trigger(McpSnapshotRequest { target });
-        }
-        (false, true) => {
-            commands.entity(target).remove::<PaletteMcpActive>();
-        }
-        _ => {}
-    }
 }
 
 fn highlight(
@@ -360,10 +267,7 @@ fn highlight(
     if request.open_id != opened.0.open_id {
         return;
     }
-    let rows = match snapshot.0.projection.mcp_open {
-        true => snapshot.0.projection.mcp_entries.len(),
-        false => snapshot.0.projection.rows.len(),
-    };
+    let rows = snapshot.0.projection.rows.len();
     input.selected = (request.index as usize).min(rows.saturating_sub(1));
     input.navigating = true;
 }
@@ -380,42 +284,82 @@ fn history(
     if request.open_id != opened.0.open_id {
         return;
     }
-    input.history(&snapshot.0.prompt_history, request.older);
+    let history = &snapshot.0.prompt_history;
+    if history.is_empty() {
+        return;
+    }
+    let current = input.query.clone();
+    let (query, cursor, scratch) = if request.older {
+        let next = input
+            .history_cursor
+            .map_or(history.len() - 1, |index| index.saturating_sub(1));
+        let scratch = match input.history_cursor {
+            Some(_) => input.history_scratch.clone(),
+            None => current,
+        };
+        (history[next].clone(), Some(next), scratch)
+    } else {
+        match input.history_cursor {
+            Some(index) if index + 1 < history.len() => (
+                history[index + 1].clone(),
+                Some(index + 1),
+                input.history_scratch.clone(),
+            ),
+            Some(_) => (
+                input.history_scratch.clone(),
+                None,
+                input.history_scratch.clone(),
+            ),
+            None => return,
+        }
+    };
+    input.query = query;
+    input.history_cursor = cursor;
+    input.history_scratch = scratch;
+    input.selected = 0;
+    input.navigating = false;
+    input.input_revision = input.input_revision.wrapping_add(1).max(1);
 }
 
 fn submit_input(
     trigger: On<UiInput<CommandPaletteSubmitRequest>>,
-    palettes: Query<(&PaletteOpen, &PaletteDraftInput, &PaletteSnapshot)>,
+    palettes: Query<(
+        &PaletteOpen,
+        &PaletteDraftInput,
+        &PaletteSnapshot,
+        &PaletteRowsSnapshot,
+        &PaletteContributionRows,
+    )>,
+    contributions: Query<&CommandBarContribution>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    let Ok((opened, input, snapshot)) = palettes.get(target) else {
+    let Ok((opened, input, snapshot, rows, contributed)) = palettes.get(target) else {
         return;
     };
     if trigger.event().payload.open_id != opened.0.open_id {
         return;
     }
-    if snapshot.0.projection.mcp_open {
-        let Some(server) = snapshot
-            .0
-            .projection
-            .mcp_entries
-            .get(snapshot.0.projection.selected as usize)
-        else {
-            return;
-        };
-        commands.trigger(UiInput {
+    let selected = snapshot.0.projection.selected as usize;
+    if let Some(entity) = selected
+        .checked_sub(rows.0.items.len())
+        .and_then(|index| contributed.0.get(index).copied())
+        && let Ok(contribution) = contributions.get(entity)
+    {
+        commands.trigger(CommandBarContributionActivated {
+            target: entity,
             webview: target,
-            payload: McpServerRequest {
-                id: server.id.clone(),
-            },
+            query: input.query.clone(),
+            open: opened.0.target,
         });
+        if contribution.close {
+            commands.trigger(CommandBarDismiss::new(target, true));
+        }
         return;
     }
-    let rows = PaletteRows::from_projection(&snapshot.0.projection);
     let draft = PaletteDraft {
         query: input.query.clone(),
-        selected: input.selected,
+        selected,
         nav_mode: input.navigating,
         target_url: input.target_url.clone(),
         ..Default::default()
@@ -424,7 +368,7 @@ fn submit_input(
         true => CommandPaletteSurface::Start,
         false => CommandPaletteSurface::Modal,
     };
-    let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
+    let palette = PaletteState::from_rows(&rows.0, &opened.0, &draft, surface);
     let decision = match surface {
         CommandPaletteSurface::Start => palette.submit_start(&snapshot.0.attachments),
         CommandPaletteSurface::Modal => palette.submit_modal(&snapshot.0.attachments),
@@ -434,30 +378,40 @@ fn submit_input(
 
 fn activate(
     trigger: On<UiInput<CommandPaletteActivateRequest>>,
-    palettes: Query<(&PaletteOpen, &PaletteDraftInput, &PaletteSnapshot)>,
+    palettes: Query<(
+        &PaletteOpen,
+        &PaletteDraftInput,
+        &PaletteSnapshot,
+        &PaletteRowsSnapshot,
+        &PaletteContributionRows,
+    )>,
+    contributions: Query<&CommandBarContribution>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    let Ok((opened, input, snapshot)) = palettes.get(target) else {
+    let Ok((opened, input, snapshot, rows, contributed)) = palettes.get(target) else {
         return;
     };
     if trigger.event().payload.open_id != opened.0.open_id {
         return;
     }
     let index = trigger.event().payload.index as usize;
-    if snapshot.0.projection.mcp_open {
-        let Some(server) = snapshot.0.projection.mcp_entries.get(index) else {
-            return;
-        };
-        commands.trigger(UiInput {
+    if let Some(entity) = index
+        .checked_sub(rows.0.items.len())
+        .and_then(|index| contributed.0.get(index).copied())
+        && let Ok(contribution) = contributions.get(entity)
+    {
+        commands.trigger(CommandBarContributionActivated {
+            target: entity,
             webview: target,
-            payload: McpServerRequest {
-                id: server.id.clone(),
-            },
+            query: input.query.clone(),
+            open: opened.0.target,
         });
+        if contribution.close {
+            commands.trigger(CommandBarDismiss::new(target, true));
+        }
         return;
     }
-    let rows = PaletteRows::from_projection(&snapshot.0.projection);
     let draft = PaletteDraft {
         query: input.query.clone(),
         selected: input.selected,
@@ -469,7 +423,7 @@ fn activate(
         true => CommandPaletteSurface::Start,
         false => CommandPaletteSurface::Modal,
     };
-    let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
+    let palette = PaletteState::from_rows(&rows.0, &opened.0, &draft, surface);
     let Some(row) = palette.row(index) else {
         return;
     };
@@ -517,19 +471,7 @@ fn apply(
                 payload: request.clone(),
             });
         }
-        PaletteDecision::Terminal(request) => {
-            commands.trigger(UiInput {
-                webview: target,
-                payload: request.clone(),
-            });
-        }
         PaletteDecision::Invoke(request) => {
-            commands.trigger(UiInput {
-                webview: target,
-                payload: request.clone(),
-            });
-        }
-        PaletteDecision::SwitchSpace(request) => {
             commands.trigger(UiInput {
                 webview: target,
                 payload: request.clone(),
@@ -568,7 +510,10 @@ fn next(
     let Ok((mut input, snapshot)) = palettes.get_mut(target) else {
         return;
     };
-    input.next(&snapshot.0);
+    let rows = snapshot.0.projection.rows.len();
+    input.selected = (input.selected + 1).min(rows.saturating_sub(1));
+    input.navigating = true;
+    input.input_revision = input.input_revision.wrapping_add(1).max(1);
 }
 
 fn previous(
@@ -583,7 +528,9 @@ fn previous(
     let Ok(mut input) = palettes.get_mut(target) else {
         return;
     };
-    input.previous();
+    input.selected = input.selected.saturating_sub(1);
+    input.navigating = true;
+    input.input_revision = input.input_revision.wrapping_add(1).max(1);
 }
 
 fn complete(
@@ -598,25 +545,30 @@ fn complete(
     let Ok((mut input, snapshot)) = palettes.get_mut(target) else {
         return;
     };
-    input.complete(&snapshot.0);
+    if snapshot.0.projection.ghost.is_empty() {
+        return;
+    }
+    input.query.push_str(&snapshot.0.projection.ghost);
+    input.selected = 0;
+    input.navigating = false;
+    input.input_revision = input.input_revision.wrapping_add(1).max(1);
 }
 
 fn dismiss(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<CommandBarDismissBinding>>,
-    mut palettes: Query<(&mut PaletteDraftInput, &PaletteSnapshot)>,
+    mut palettes: Query<&mut PaletteDraftInput>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
         return;
     }
     let target = trigger.event().invocation().caller;
-    let Ok((mut input, snapshot)) = palettes.get_mut(target) else {
+    let Ok(mut input) = palettes.get_mut(target) else {
         return;
     };
-    if input.dismiss(&snapshot.0) {
-        commands.trigger(CommandBarDismiss::new(target, true));
-    }
+    input.close_revision = input.close_revision.wrapping_add(1).max(1);
+    commands.trigger(CommandBarDismiss::new(target, true));
 }
 
 fn submit(
@@ -640,14 +592,87 @@ fn submit(
     });
 }
 
-fn project(mut palettes: Query<ProjectionRow>) {
+fn query(
+    mut palettes: Query<(
+        Entity,
+        &PaletteOpen,
+        &PaletteDraftInput,
+        &mut PublishedQuery,
+    )>,
+    mut commands: Commands,
+) {
+    for (target, opened, input, mut published) in &mut palettes {
+        let next = PublishedQuery {
+            open_id: opened.0.open_id,
+            query: input.query.clone(),
+            start: input.start,
+            open: opened.0.target,
+            picker: opened.0.picker.clone(),
+            numbered: opened.0.picker_numbered,
+        };
+        if *published == next {
+            continue;
+        }
+        *published = next.clone();
+        commands.trigger(CommandBarQueryChanged {
+            target,
+            open_id: next.open_id,
+            query: next.query,
+            start: next.start,
+            open: next.open,
+            picker: next.picker,
+            numbered: next.numbered,
+        });
+    }
+}
+
+fn rows(
+    mut palettes: Query<(
+        &PaletteOpen,
+        &PaletteDraftInput,
+        &PaletteSnapshot,
+        &mut PaletteRowsSnapshot,
+    )>,
+) {
+    for (opened, input, snapshot, mut projected) in &mut palettes {
+        if input.open_id != opened.0.open_id || snapshot.0.open_id != opened.0.open_id {
+            continue;
+        }
+        let draft = PaletteDraft {
+            query: input.query.clone(),
+            selected: input.selected,
+            nav_mode: input.navigating,
+            target_url: input.target_url.clone(),
+            completions: snapshot.0.completions.clone(),
+            completions_partial: snapshot.0.completions_partial,
+            completions_total: snapshot.0.completions_total as usize,
+            history: snapshot.0.history.clone(),
+        };
+        let surface = match input.start {
+            true => CommandPaletteSurface::Start,
+            false => CommandPaletteSurface::Modal,
+        };
+        let next = PaletteRows::build(&opened.0, &draft, surface);
+        if projected.0 != next {
+            projected.0 = next;
+        }
+    }
+}
+
+fn project(
+    mut palettes: Query<ProjectionRow>,
+    contributions: Query<(Entity, &CommandBarContribution, Option<&ChildOf>)>,
+    locale: Option<Res<ResolvedLocale>>,
+) {
     for (
+        target,
         opened,
-        input,
+        mut input,
         cursor,
-        mcp,
         mut context,
         mut snapshot,
+        projected_rows,
+        mut projected_contributions,
         agent_menu,
         model_menu,
         permission_menu,
@@ -668,36 +693,71 @@ fn project(mut palettes: Query<ProjectionRow>) {
             completions_partial: current.0.completions_partial,
             completions_total: current.0.completions_total as usize,
             history: current.0.history.clone(),
-            sessions: current.0.sessions.clone(),
-            sessions_pending: current.0.sessions_loading,
         };
         let surface = match input.start {
             true => CommandPaletteSurface::Start,
             false => CommandPaletteSurface::Modal,
         };
-        let rows = PaletteRows::build(&opened.0, &draft, surface);
-        let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
+        let rows = &projected_rows.0;
+        let palette = PaletteState::from_rows(rows, &opened.0, &draft, surface);
         let mut projection = palette.projection();
         projection.history_recalling = input.history_cursor.is_some();
-        if let Some(filter) = PaletteQuery::new(&input.query).mcp_filter() {
-            let filter = filter.trim().to_ascii_lowercase();
-            projection.mcp_open = true;
-            for server in &mcp.0.servers {
-                if filter.is_empty()
-                    || server.id.to_ascii_lowercase().contains(&filter)
-                    || server.name.to_ascii_lowercase().contains(&filter)
-                    || server.description.to_ascii_lowercase().contains(&filter)
-                {
-                    projection.mcp_entries.push(server.clone());
-                }
+        let mut contribution_entities = Vec::new();
+        let mut contributed = contributions
+            .iter()
+            .filter(|(_, contribution, parent)| {
+                parent.is_none_or(|parent| parent.parent() == target)
+                    && match (&opened.0.picker, &contribution.picker) {
+                        (Some(opened), Some(contributed)) => opened == contributed,
+                        (None, None) => true,
+                        _ => false,
+                    }
+                    && contribution.matches(&input.query)
+            })
+            .collect::<Vec<_>>();
+        contributed.sort_by(|(left_entity, left, _), (right_entity, right, _)| {
+            left.rank
+                .cmp(&right.rank)
+                .then_with(|| left.row.title.cmp(&right.row.title))
+                .then_with(|| left_entity.cmp(right_entity))
+        });
+        let mut preferred = None;
+        let mut numbered_count = 0;
+        for (entity, contribution, _) in contributed {
+            if contribution.preferred && preferred.is_none() {
+                preferred = Some(projection.rows.len());
             }
-            projection.selected = input
-                .selected
-                .min(projection.mcp_entries.len().saturating_sub(1))
-                as u32;
-        } else {
-            projection.selected = rows.selected(input.selected) as u32;
+            if contribution.numbered {
+                numbered_count += 1;
+            }
+            contribution_entities.push(entity);
+            let mut row = contribution.row.clone();
+            if !contribution.title_message_id.is_empty() {
+                row.title = locale.as_ref().map_or_else(
+                    || vmux_ui::i18n::translate(&contribution.title_message_id),
+                    |locale| locale.0.translate(&contribution.title_message_id),
+                );
+            }
+            if !contribution.subtitle_message_id.is_empty() {
+                row.subtitle = locale.as_ref().map_or_else(
+                    || vmux_ui::i18n::translate(&contribution.subtitle_message_id),
+                    |locale| locale.0.translate(&contribution.subtitle_message_id),
+                );
+            }
+            projection.rows.push(row);
         }
+        projection.numbered_count = numbered_count;
+        let selected = if contribution_entities.is_empty() {
+            rows.selected(input.selected)
+        } else if !input.navigating {
+            preferred.unwrap_or(input.selected.min(projection.rows.len().saturating_sub(1)))
+        } else {
+            input.selected.min(projection.rows.len().saturating_sub(1))
+        };
+        if input.selected != selected {
+            input.selected = selected;
+        }
+        projection.selected = selected as u32;
         projection.navigating = input.navigating;
         projection.menus.agent = agent_menu;
         projection.menus.model = model_menu;
@@ -707,14 +767,22 @@ fn project(mut palettes: Query<ProjectionRow>) {
         projection.menu_cursor = cursor.map_or(0, |cursor| cursor.0 as u32);
         projection.input_revision = input.input_revision;
         projection.close_revision = input.close_revision;
+        let agent = if !palette.composer.model_agent_key.is_empty() {
+            palette.composer.model_agent_key.clone()
+        } else {
+            palette.composer.permission_agent_key.clone()
+        };
         let next_context = PaletteContext {
             open_id: opened.0.open_id,
-            agent: AgentSegment::in_url(&palette.composer.agent_url).unwrap_or_default(),
+            agent,
             cwd: palette.composer.cwd,
             project: palette.composer.project,
         };
         if *context != next_context {
             *context = next_context;
+        }
+        if projected_contributions.0 != contribution_entities {
+            projected_contributions.0 = contribution_entities;
         }
         if current.0.projection == projection {
             continue;
@@ -728,7 +796,7 @@ fn publish(
     mut commands: Commands,
 ) {
     for (target, snapshot) in &snapshots {
-        commands.trigger(UiStateWrite::<CommandPaletteUiState>::from_event(
+        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
             target,
             &snapshot.0,
         ));
@@ -743,87 +811,17 @@ fn detach(pages: Query<Entity, DetachedPalette>, mut commands: Commands) {
             PaletteOpen,
             PaletteContext,
             PaletteDraftInput,
-            PaletteMcp,
+            PublishedQuery,
+            PaletteRowsSnapshot,
+            PaletteContributionRows,
         )>();
         page.remove::<menu::OpenMenu>();
         page.remove::<(
-            UiState<CommandPaletteUiState>,
             search::PaletteSearch,
             prompt::PalettePrompt,
             branch::PaletteBranch,
             media::PaletteMedia,
-            resume::PaletteResume,
         )>();
-    }
-}
-
-#[derive(Default)]
-struct OpenVersion {
-    initialized: bool,
-    open_id: OpenId,
-    generation: RequestGeneration,
-}
-
-impl OpenVersion {
-    fn accept(&mut self, open_id: OpenId) -> Option<bool> {
-        if self.initialized && self.open_id == open_id {
-            return Some(false);
-        }
-        if self.initialized && open_id.0 < self.open_id.0 {
-            return None;
-        }
-        self.initialized = true;
-        self.open_id = open_id;
-        self.generation.advance();
-        Some(true)
-    }
-
-    fn matches(&self, open_id: OpenId) -> bool {
-        self.initialized && self.open_id == open_id
-    }
-
-    fn generation(&self) -> u64 {
-        self.generation.current()
-    }
-}
-
-#[derive(Default)]
-struct RequestGeneration(u64);
-
-impl RequestGeneration {
-    fn advance(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(1).max(1);
-        self.0
-    }
-
-    fn current(&self) -> u64 {
-        self.0
-    }
-
-    fn matches(&self, generation: u64) -> bool {
-        generation != 0 && self.0 == generation
-    }
-}
-
-struct RequestDelay {
-    target: Entity,
-    generation: u64,
-    query: String,
-    due: std::time::Instant,
-}
-
-impl RequestDelay {
-    fn new(target: Entity, generation: u64, query: String, delay: Duration) -> Self {
-        Self {
-            target,
-            generation,
-            query,
-            due: std::time::Instant::now() + delay,
-        }
-    }
-
-    fn ready(&self) -> bool {
-        std::time::Instant::now() >= self.due
     }
 }
 
@@ -847,14 +845,10 @@ fn wake(
 mod tests {
     use super::*;
     use crate::CommandInvocation;
-    use vmux_api::command_bar::{CommandBarCommandEntry, CommandBarResultItem, InvokeRequest};
-    use vmux_api::mcp::{McpServerEntry, McpServerStatus};
+    use vmux_api::command_bar::{CommandBarCommandEntry, InvokeRequest};
 
     #[derive(Component, Default)]
     struct CapturedInvocations(Vec<InvokeRequest>);
-
-    #[derive(Component, Default)]
-    struct CapturedMcpSnapshots(u32);
 
     fn capture_invocation(
         trigger: On<UiInput<InvokeRequest>>,
@@ -864,16 +858,6 @@ mod tests {
             return;
         };
         captured.0.push(trigger.event().payload.clone());
-    }
-
-    fn capture_mcp_snapshot(
-        trigger: On<McpSnapshotRequest>,
-        mut captured: Query<&mut CapturedMcpSnapshots>,
-    ) {
-        let Ok(mut captured) = captured.get_mut(trigger.event().target) else {
-            return;
-        };
-        captured.0 += 1;
     }
 
     #[test]
@@ -929,9 +913,14 @@ mod tests {
         app.update();
 
         let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
-        assert!(snapshot.0.projection.rows.iter().any(
-            |row| matches!(row, CommandBarResultItem::Command { id, .. } if id == "close_tab")
-        ));
+        assert!(
+            snapshot
+                .0
+                .projection
+                .rows
+                .iter()
+                .any(|row| row.title == "Close Tab")
+        );
     }
 
     #[test]
@@ -1064,110 +1053,6 @@ mod tests {
     }
 
     #[test]
-    fn mcp_filter_and_key_selection_stay_in_host_state() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .add_plugins(PalettePlugin);
-        let page = app.world_mut().spawn(HostsLauncher).id();
-        app.update();
-
-        let open_id = OpenId(9);
-        app.world_mut().entity_mut(page).insert((
-            PaletteOpen(CommandBarOpenEvent {
-                open_id,
-                ..Default::default()
-            }),
-            PaletteDraftInput {
-                open_id,
-                query: "/mcp lin".to_string(),
-                ..Default::default()
-            },
-            PaletteSnapshot(CommandPaletteUiState {
-                open_id,
-                ..Default::default()
-            }),
-        ));
-        app.world_mut()
-            .trigger(UiStateWrite::<McpServers>::from_event(
-                page,
-                &McpServers {
-                    loaded: true,
-                    servers: vec![
-                        McpServerEntry {
-                            id: "linear".to_string(),
-                            name: "Linear".to_string(),
-                            description: String::new(),
-                            status: McpServerStatus::Connected,
-                        },
-                        McpServerEntry {
-                            id: "github".to_string(),
-                            name: "GitHub".to_string(),
-                            description: String::new(),
-                            status: McpServerStatus::Available,
-                        },
-                    ],
-                    ..Default::default()
-                },
-            ));
-        app.update();
-
-        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
-        assert!(snapshot.0.projection.mcp_open);
-        assert_eq!(snapshot.0.projection.mcp_entries.len(), 1);
-        assert_eq!(snapshot.0.projection.mcp_entries[0].id, "linear");
-
-        app.world_mut()
-            .resource_mut::<Messages<CommandInvocation>>()
-            .write(CommandInvocation::new(page, "command_bar_dismiss"));
-        app.update();
-
-        let input = app.world().get::<PaletteDraftInput>(page).unwrap();
-        assert!(input.query.is_empty());
-        assert_eq!(input.input_revision, 1);
-    }
-
-    #[test]
-    fn entering_mcp_mode_requests_one_tool_snapshot() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .add_plugins(PalettePlugin)
-            .add_observer(capture_mcp_snapshot);
-        let page = app
-            .world_mut()
-            .spawn((HostsLauncher, CapturedMcpSnapshots::default()))
-            .id();
-        app.update();
-
-        let open_id = OpenId(10);
-        app.world_mut().entity_mut(page).insert((
-            PaletteOpen(CommandBarOpenEvent {
-                open_id,
-                ..Default::default()
-            }),
-            PaletteDraftInput {
-                open_id,
-                ..Default::default()
-            },
-        ));
-        for query in ["/mcp", "/mcp linear"] {
-            app.world_mut().trigger(UiInput {
-                webview: page,
-                payload: CommandPaletteDraftRequest {
-                    open_id,
-                    query: query.to_string(),
-                    ..Default::default()
-                },
-            });
-            app.update();
-        }
-
-        assert_eq!(app.world().get::<CapturedMcpSnapshots>(page).unwrap().0, 1);
-        assert!(app.world().get::<PaletteMcpActive>(page).is_some());
-    }
-
-    #[test]
     fn submission_dispatches_the_projected_row_in_host_ecs() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1197,7 +1082,6 @@ mod tests {
                 navigating: true,
                 ..Default::default()
             },
-            PaletteMcp::default(),
             PaletteSnapshot(CommandPaletteUiState {
                 open_id,
                 ..Default::default()

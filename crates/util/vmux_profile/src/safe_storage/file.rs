@@ -9,7 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 
 static FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) struct ProtectedFile {
+pub struct ProtectedFile {
     root: PathBuf,
     path: PathBuf,
 }
@@ -23,7 +23,7 @@ impl ProtectedFile {
         &self.path
     }
 
-    pub(crate) fn read(&self) -> Result<Option<Vec<u8>>, SafeStorageError> {
+    pub fn read(&self) -> Result<Option<Vec<u8>>, SafeStorageError> {
         match std::fs::read(&self.path) {
             Ok(bytes) => Ok(Some(bytes)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -34,7 +34,7 @@ impl ProtectedFile {
         }
     }
 
-    pub(crate) fn write(&self, bytes: &[u8]) -> Result<(), SafeStorageError> {
+    pub fn write(&self, bytes: &[u8]) -> Result<(), SafeStorageError> {
         let Some(parent) = self.path.parent() else {
             return Err(SafeStorageError::Io(
                 "Vmux Safe Storage path has no parent".to_string(),

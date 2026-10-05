@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use super::super::model::CompletionQuery;
+use super::super::driver::CompletionQuery;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{
@@ -8,8 +8,9 @@ use vmux_api::command_bar::{
     HistorySuggestionsRequest, HistorySuggestionsResponse, PathCompleteRequest,
     PathCompleteResponse,
 };
-use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::UiStateWrite;
 
+use super::search_driver::HistoryQuery;
 use super::{
     NewPalette, OpenVersion, PaletteSnapshot, PendingPaletteRequest, RequestDelay,
     RequestGeneration,
@@ -84,7 +85,7 @@ fn receive_files(
 ) {
     let Some(response) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<PathCompleteResponse>>::payload(
-            trigger.event().patch(),
+            trigger.event().update(),
         )
     else {
         return;
@@ -106,7 +107,7 @@ fn receive_history(
 ) {
     let Some(response) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
         HistorySuggestionsResponse,
-    >>::payload(trigger.event().patch()) else {
+    >>::payload(trigger.event().update()) else {
         return;
     };
     let Ok((search, mut snapshot)) = palettes.get_mut(trigger.event().webview()) else {
@@ -225,40 +226,5 @@ fn request_history(
                 request_id: delay.0.generation,
             },
         });
-    }
-}
-
-struct HistoryQuery;
-
-impl HistoryQuery {
-    fn parse(query: &str) -> Option<&str> {
-        let trimmed = query.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with('>')
-            || trimmed.starts_with('/')
-            || trimmed.starts_with('~')
-            || trimmed.starts_with("vmux://")
-            || trimmed.starts_with("file:")
-        {
-            return None;
-        }
-        Some(trimmed)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn history_only_queries_page_like_text() {
-        assert_eq!(HistoryQuery::parse("rust docs"), Some("rust docs"));
-        assert_eq!(HistoryQuery::parse("example.com"), Some("example.com"));
-        assert_eq!(HistoryQuery::parse(""), None);
-        assert_eq!(HistoryQuery::parse("> close"), None);
-        assert_eq!(HistoryQuery::parse("/usr/bin"), None);
-        assert_eq!(HistoryQuery::parse("~/notes"), None);
-        assert_eq!(HistoryQuery::parse("vmux://settings/"), None);
-        assert_eq!(HistoryQuery::parse("file:///tmp/a"), None);
     }
 }

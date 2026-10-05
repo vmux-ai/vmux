@@ -13,8 +13,8 @@ use crate::process::ToolProcess;
 use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
     ToolOperationRequest, ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded,
-    ToolOperationTask, ToolOperator, ToolProviderId, ToolProviderSnapshot, ToolScanner,
-    ToolStoreOperation, ToolStoreTarget,
+    ToolOperationTask, ToolOperator, ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget,
+    ToolScanner, ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct NpmToolPlugin;
@@ -28,16 +28,18 @@ impl Plugin for NpmToolPlugin {
     }
 }
 
+#[derive(Component)]
 struct NpmProvider;
 
 impl NpmProvider {
     fn scan(
+        provider: &ToolProvider,
         _store: &ToolStore,
         manifest: &mut ToolsManifest,
         refresh: bool,
     ) -> Result<ToolProviderSnapshot, String> {
         Ok(
-            ToolInventory::new(ToolProvider::Npm, Self::inventory(refresh)?)
+            ToolInventory::new(provider.clone(), Self::inventory(refresh)?)
                 .reconcile(manifest)
                 .into(),
         )
@@ -111,33 +113,33 @@ impl NpmProvider {
         match operation.kind {
             ToolOperationKind::Install => {
                 Self::package_command("install", id)?;
-                store.set_managed_package(ToolProvider::Npm, id, true)?;
+                store.set_managed_package(&operation.provider, id, true)?;
                 Ok(format!("{id} installed"))
             }
             ToolOperationKind::Update => {
                 Self::package_command("update", id)?;
-                store.set_managed_package(ToolProvider::Npm, id, true)?;
+                store.set_managed_package(&operation.provider, id, true)?;
                 Ok(format!("{id} updated"))
             }
             ToolOperationKind::Uninstall => {
                 Self::package_command("uninstall", id)?;
-                store.set_managed_package(ToolProvider::Npm, id, false)?;
+                store.set_managed_package(&operation.provider, id, false)?;
                 Ok(format!("{id} removed"))
             }
             ToolOperationKind::Forget => {
-                store.set_managed_package(ToolProvider::Npm, id, false)?;
+                store.set_managed_package(&operation.provider, id, false)?;
                 Ok(format!("{id} removed from tools.toml"))
             }
             ToolOperationKind::Adopt => {
-                store.set_managed_package(ToolProvider::Npm, id, true)?;
+                store.set_managed_package(&operation.provider, id, true)?;
                 Ok(format!("{id} is now managed"))
             }
             ToolOperationKind::Import if value.trim().is_empty() => {
                 let mut manifest = store.load()?;
-                let before = manifest.managed_packages(ToolProvider::Npm.id()).len();
-                let _ = Self::scan(store, &mut manifest, false)?;
+                let before = manifest.managed_packages(operation.provider.id()).len();
+                let _ = Self::scan(&operation.provider, store, &mut manifest, false)?;
                 let imported = manifest
-                    .managed_packages(ToolProvider::Npm.id())
+                    .managed_packages(operation.provider.id())
                     .len()
                     .saturating_sub(before);
                 store.save(&manifest)?;
@@ -168,22 +170,30 @@ impl NpmProvider {
 
 fn spawn(mut commands: Commands) {
     commands.spawn((
-        Name::new("NPM tool provider"),
-        ToolProviderId(ToolProvider::Npm),
+        ToolProviderBinding::new::<crate::Feature>(2),
+        NpmProvider,
         ToolScanner::new(NpmProvider::scan),
         ToolOperator::new(NpmProvider::operate),
     ));
 }
 
 fn route(
-    requests: Query<(Entity, &ToolOperationRequest<ToolImportRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolImportRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<NpmProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
-        let request = &operation.0;
-        if request.provider != ToolProvider::Npm {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
             continue;
         }
+        let request = &operation.0;
         let path = request.value.trim();
         if path.is_empty() {
             continue;

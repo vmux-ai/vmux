@@ -3,14 +3,15 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiInput};
+use vmux_ecs::FileUiStateWrite;
 #[cfg(test)]
 use vmux_ecs::event::FileLine;
 use vmux_ecs::event::{
-    CompletionItem, DiagSeverity, EditorCapability, FileCodeActionPick, FileCodeActions,
-    FileDiagnostic, FileDiagnostics, FileEditFailure, FileHover, FileLspStatus, HoverBlock,
-    LspServerState, OutlineEvent, RefItem,
+    CompletionItem, DiagSeverity, EditorCapability, FileCodeActionDismissRequest,
+    FileCodeActionMoveRequest, FileCodeActionPick, FileCodeActions, FileDiagnostic,
+    FileDiagnostics, FileHover, FileHoverState, FileLspStatus, HoverBlock, LspServerState,
+    OutlineEvent, RefItem,
 };
-use vmux_ecs::host::FileUiStateWrite;
 use vmux_ecs::page::PageReady;
 use vmux_path::PathIdentity;
 use vmux_setting::AppSettings;
@@ -20,7 +21,7 @@ use crate::host::highlight::{HIGHLIGHT_MAX_BYTES, Highlighter};
 use crate::host::markdown::ParsedNote;
 use crate::host::viewport::ViewportRenderRequest;
 use crate::lsp::client::ServerClient;
-use crate::lsp::registry::{LinterSpec, ServerSpec};
+use crate::lsp::registry::{LspRegistry, ServerSpec};
 use crate::lsp::server_request::ServerInputSender;
 use crate::lsp::{
     LintDiagnosticsInbox, LintDiagnosticsSender, LspDiagnosticsInbox, LspDiagnosticsSender,
@@ -880,10 +881,12 @@ fn server_overrides(settings: &AppSettings) -> ServerOverrides {
             (
                 ext.clone(),
                 ServerSpec {
+                    extensions: vec![ext.clone()],
                     command: o.command.clone(),
                     args: o.args.clone(),
                     language_id: o.language_id.clone(),
                     root_markers: o.root_markers.clone(),
+                    package: None,
                 },
             )
         })
@@ -977,6 +980,7 @@ fn open_documents(
     q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
     starts: Query<&LspServerStartTask>,
     failures: Query<&LspServerFailed>,
+    registry: Single<&LspRegistry>,
     settings: Res<AppSettings>,
     mut manager: Single<&mut LspManager>,
     mut commands: Commands,
@@ -994,7 +998,7 @@ fn open_documents(
         if let Some(document) = manager.open_docs.get_mut(&fv.path) {
             document.refs += 1;
         } else if let Some(ext) = fv.path.extension().and_then(|extension| extension.to_str())
-            && let Some(mut spec) = ServerSpec::resolve(ext, &overrides)
+            && let Some(mut spec) = registry.server(ext, &overrides)
         {
             match store::PackageStore::lsp().resolve_command(&spec.command) {
                 store::Resolution::Managed(path) => {
@@ -1092,10 +1096,12 @@ fn drain_requests(
                 if !blocks.is_empty() && ready {
                     commands.trigger(FileUiStateWrite::from_event(
                         request.target,
-                        &FileHover {
-                            line: *line,
-                            col: *col,
-                            blocks,
+                        &FileHoverState {
+                            value: Some(FileHover {
+                                line: *line,
+                                col: *col,
+                                blocks,
+                            }),
                         },
                     ));
                 }
@@ -1135,22 +1141,23 @@ fn drain_requests(
                     .collect();
                 commands
                     .entity(request.target)
-                    .insert(OfferedCodeActions(offered));
+                    .insert((OfferedCodeActions(offered), CodeActionSelection::default()));
                 if !ready {
                     continue;
                 }
                 if titles.is_empty() {
-                    commands.trigger(FileUiStateWrite::from_event(
+                    commands.trigger(crate::host::feedback::EditFailure::new(
                         request.target,
-                        &FileEditFailure {
-                            reason: "no code actions here".to_string(),
-                        },
+                        "no code actions here".to_string(),
                     ));
                     continue;
                 }
                 commands.trigger(FileUiStateWrite::from_event(
                     request.target,
-                    &FileCodeActions { titles },
+                    &FileCodeActions {
+                        titles,
+                        selected: 0,
+                    },
                 ));
             }
             ReqKind::Formatting { path, root } => {
@@ -1306,7 +1313,9 @@ impl Plugin for ManagerPlugin {
             .add_message::<LspCodeActionRequest>()
             .add_message::<LspDocumentChangeRequest>()
             .add_message::<LspDocumentCloseRequest>()
+            .add_observer(move_code_action)
             .add_observer(file_code_action_pick)
+            .add_observer(dismiss_code_actions)
             .add_systems(
                 Update,
                 (
@@ -1358,13 +1367,57 @@ fn start(
     commands.entity(entity).despawn();
 }
 
+fn move_code_action(
+    trigger: On<UiInput<FileCodeActionMoveRequest>>,
+    mut menus: Query<(&OfferedCodeActions, &mut CodeActionSelection)>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok((actions, mut selection)) = menus.get_mut(entity) else {
+        return;
+    };
+    let len = actions.0.len();
+    if len == 0 {
+        return;
+    }
+    let delta = if trigger.event().payload.next { 1 } else { -1 };
+    let next = selection.0 as i64 + delta;
+    selection.0 = next.rem_euclid(len as i64) as usize;
+    let mut titles = Vec::with_capacity(len);
+    for action in &actions.0 {
+        let title = match action {
+            lsp_types::CodeActionOrCommand::Command(command) => command.title.clone(),
+            lsp_types::CodeActionOrCommand::CodeAction(action) => action.title.clone(),
+        };
+        titles.push(title);
+    }
+    commands.trigger(FileUiStateWrite::from_event(
+        entity,
+        &FileCodeActions {
+            titles,
+            selected: selection.0 as u32,
+        },
+    ));
+}
+
 fn file_code_action_pick(
     trigger: On<UiInput<FileCodeActionPick>>,
     views: Query<(&Editor, &OfferedCodeActions)>,
     manager: Single<&LspManager>,
     mut edits: MessageWriter<LspRequestedEdit>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
+    commands.trigger(FileUiStateWrite::from_event(
+        entity,
+        &FileCodeActions {
+            titles: Vec::new(),
+            selected: 0,
+        },
+    ));
+    commands
+        .entity(entity)
+        .remove::<(OfferedCodeActions, CodeActionSelection)>();
     let Ok((editor, actions)) = views.get(entity) else {
         return;
     };
@@ -1405,6 +1458,23 @@ fn file_code_action_pick(
     }
 }
 
+fn dismiss_code_actions(
+    trigger: On<UiInput<FileCodeActionDismissRequest>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    commands.trigger(FileUiStateWrite::from_event(
+        entity,
+        &FileCodeActions {
+            titles: Vec::new(),
+            selected: 0,
+        },
+    ));
+    commands
+        .entity(entity)
+        .remove::<(OfferedCodeActions, CodeActionSelection)>();
+}
+
 #[derive(Component, Default)]
 struct LspDiagnostics {
     mapped: Vec<FileDiagnostic>,
@@ -1416,6 +1486,9 @@ struct LintDiagnostics(Vec<FileDiagnostic>);
 
 #[derive(Component, Default)]
 pub(crate) struct OfferedCodeActions(pub(crate) Vec<lsp_types::CodeActionOrCommand>);
+
+#[derive(Component, Default)]
+struct CodeActionSelection(usize);
 
 #[derive(Component, Default)]
 pub struct DiagSent(Vec<FileDiagnostic>);
@@ -1531,6 +1604,7 @@ pub struct LintRan;
 fn lint_on_open(
     q: Query<(Entity, &FileView, &Editor), Without<LintRan>>,
     outbox: Single<&LintDiagnosticsSender>,
+    registry: Single<&LspRegistry>,
     mut commands: Commands,
 ) {
     let store = store::PackageStore::lsp();
@@ -1539,7 +1613,7 @@ fn lint_on_open(
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
-        let Some(spec) = LinterSpec::for_extension(ext) else {
+        let Some(spec) = registry.linter(ext) else {
             continue;
         };
         if matches!(
@@ -1565,6 +1639,7 @@ pub struct LspStatusSent {
 
 fn publish_status(
     q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<PageReady>>,
+    registry: Single<&LspRegistry>,
     settings: Res<AppSettings>,
     manager: Single<&LspManager>,
     browsers: NonSend<Browsers>,
@@ -1577,7 +1652,7 @@ fn publish_status(
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
-        let Some(spec) = ServerSpec::resolve(ext, &overrides) else {
+        let Some(spec) = registry.server(ext, &overrides) else {
             continue;
         };
         let desired = match store.resolve_command(&spec.command) {
@@ -1592,7 +1667,7 @@ fn publish_status(
             continue;
         }
         let package = (!overrides.contains_key(ext))
-            .then(|| ServerSpec::preferred_package(ext))
+            .then(|| registry.package(ext))
             .flatten()
             .map(str::to_string);
         commands.trigger(FileUiStateWrite::from_event(

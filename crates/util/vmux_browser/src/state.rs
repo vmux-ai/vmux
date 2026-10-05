@@ -1,14 +1,13 @@
 use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_api::VmuxRoute;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
     SmartBookmarkFolder,
 };
+use vmux_api::{PageIcon, VmuxRoute};
 use vmux_ecs::{
-    Active, Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageIdentity, PageMetadata, Pin,
-    Uuid,
-    host::UiStateWrite,
+    Active, Bookmark, BookmarkOrder, Collapsed, Folder, PageIdentity, PageMetadata, Pin,
+    UiStateWrite, Uuid,
     notify::AgentDoneUnseen,
     page::{HostHistory, PageReady},
 };

@@ -1,10 +1,9 @@
 use crate::CommandBar;
-use crate::host::payload::CommandBarPicks;
 use crate::{CommandBarOpenProjection, CommandBarProjector};
 use std::time::{Duration, Instant};
 use vmux_api::command_bar::{
-    CommandBarOpenEvent, CommandBarPicker, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, DismissRequest, OpenId,
+    CommandBarOpenEvent, CommandBarPickRow, CommandBarPicker, CommandBarReadyEvent,
+    CommandBarRenderedEvent, CommandBarSizeEvent, DismissRequest, OpenId,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_ecs::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKeyboardToStack};
@@ -12,18 +11,18 @@ use vmux_ecs::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKe
 use crate::host::command_bar::CommandBarDismiss;
 use crate::host::command_bar::panel::CommandBarPanelActive;
 use crate::host::snapshot::{
-    CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
-    CommandBarTerminalPage, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
+    CommandBarContextSnapshot, CommandBarPagesSnapshot, CommandBarProjectRoots,
+    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
 };
-use crate::{CommandInvocation, CommandRegistry, ReadCommandRequests};
+use crate::{CommandInvocation, ReadCommandRequests};
 use bevy::{
     ecs::{message::MessageReader, system::SystemParam},
     prelude::*,
 };
 use bevy_cef::prelude::*;
 use vmux_ecs::PageMetadata;
-use vmux_ecs::host::page::HostsPage;
-use vmux_history::UnixMillis;
+use vmux_ecs::UnixMillis;
+use vmux_ecs::page::HostsPage;
 use vmux_ui::i18n::Locale;
 
 use crate::ResolvedLocale;
@@ -46,7 +45,6 @@ impl bevy::app::Plugin for Plugin {
                     .chain()
                     .in_set(ReadCommandRequests),
             )
-            .add_systems(Startup, bind.in_set(crate::BindCommands))
             .add_message::<LauncherDismissRequest>()
             .add_message::<vmux_ecs::ContributedCommandChosen>()
             .add_message::<RestoreKeyboardToStack>()
@@ -94,6 +92,7 @@ fn wake(
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarToggleRequest;
 
@@ -107,6 +106,7 @@ impl TryFrom<&CommandInvocation> for CommandBarToggleRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarEditPageRequest;
 
@@ -120,6 +120,7 @@ impl TryFrom<&CommandInvocation> for CommandBarEditPageRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarPathRequest;
 
@@ -133,6 +134,7 @@ impl TryFrom<&CommandInvocation> for CommandBarPathRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CommandBarCommandsRequest;
 
@@ -150,6 +152,11 @@ impl TryFrom<&CommandInvocation> for CommandBarCommandsRequest {
 pub struct CommandBarOpenRequest {
     query: Option<String>,
     picker: Option<CommandBarPicker>,
+    picks: Vec<CommandBarPickRow>,
+    picker_label: String,
+    picker_placeholder: String,
+    picker_typed: bool,
+    picker_numbered: bool,
     replace_active_stack: bool,
 }
 
@@ -161,10 +168,22 @@ impl CommandBarOpenRequest {
         }
     }
 
-    pub fn picker(picker: CommandBarPicker) -> Self {
+    pub fn picker_with(
+        picker: CommandBarPicker,
+        picks: Vec<CommandBarPickRow>,
+        label: impl Into<String>,
+        placeholder: impl Into<String>,
+        typed: bool,
+        numbered: bool,
+    ) -> Self {
         Self {
             query: Some(String::new()),
             picker: Some(picker),
+            picks,
+            picker_label: label.into(),
+            picker_placeholder: placeholder.into(),
+            picker_typed: typed,
+            picker_numbered: numbered,
             ..default()
         }
     }
@@ -175,13 +194,6 @@ pub struct WriteCommandBarRequests;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ApplyCommandBarRequests;
-
-fn bind(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<CommandBarToggleRequest>(&mut commands);
-    registry.message::<CommandBarEditPageRequest>(&mut commands);
-    registry.message::<CommandBarPathRequest>(&mut commands);
-    registry.message::<CommandBarCommandsRequest>(&mut commands);
-}
 
 #[derive(Component)]
 struct CommandBarReady;
@@ -207,91 +219,16 @@ pub struct CommandBarNativeSize {
 
 #[derive(Component)]
 pub struct PendingCommandBarReveal {
-    frames: u8,
-    open_id: OpenId,
-    payload: Option<CommandBarOpenEvent>,
-    started_at: Option<Instant>,
-    last_retry: Option<Instant>,
+    pub(super) frames: u8,
+    pub(super) open_id: OpenId,
+    pub(super) payload: Option<CommandBarOpenEvent>,
+    pub(super) started_at: Option<Instant>,
+    pub(super) last_retry: Option<Instant>,
 }
 
-impl PendingCommandBarReveal {
-    pub fn is_active(&self) -> bool {
-        self.open_id.is_open()
-    }
-
-    fn next_frame(
-        &self,
-        rendered_open_id: Option<OpenId>,
-        native_windowed: bool,
-        native_overlay: bool,
-        has_native_size: bool,
-    ) -> Option<u8> {
-        if (native_windowed || native_overlay)
-            && self.open_id.is_open()
-            && (rendered_open_id != Some(self.open_id) || (native_windowed && !has_native_size))
-        {
-            return Some(self.frames.saturating_add(1));
-        }
-        if !self.open_id.is_open() {
-            return Some(self.frames);
-        }
-        if rendered_open_id != Some(self.open_id) {
-            if self.frames >= COMMAND_BAR_REVEAL_FALLBACK_FRAMES {
-                return None;
-            }
-            return Some(self.frames + 1);
-        }
-        if self.frames >= COMMAND_BAR_REVEAL_FRAMES {
-            None
-        } else {
-            Some(self.frames + 1)
-        }
-    }
-
-    fn timed_out(
-        &self,
-        now: Instant,
-        rendered_open_id: Option<OpenId>,
-        native_windowed: bool,
-        native_overlay: bool,
-        has_native_size: bool,
-    ) -> bool {
-        let elapsed = self
-            .started_at
-            .map(|started_at| now.duration_since(started_at))
-            .unwrap_or_default();
-        (native_windowed || native_overlay)
-            && self.open_id.is_open()
-            && elapsed >= COMMAND_BAR_NATIVE_REVEAL_TIMEOUT
-            && (rendered_open_id != Some(self.open_id) || (native_windowed && !has_native_size))
-    }
-
-    fn should_retry(&self, rendered_open_id: Option<OpenId>) -> bool {
-        self.open_id.is_open() && self.payload.is_some() && rendered_open_id != Some(self.open_id)
-    }
-
-    fn accepts_size(&self) -> bool {
-        self.open_id.is_open() && self.payload.is_some()
-    }
-
-    #[cfg(test)]
-    fn waiting(frames: u8, open_id: OpenId) -> Self {
-        Self {
-            frames,
-            open_id,
-            payload: Some(CommandBarOpenEvent {
-                open_id,
-                ..Default::default()
-            }),
-            started_at: Some(Instant::now()),
-            last_retry: None,
-        }
-    }
-}
-
-const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
-const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
-const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
+pub(super) const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
+pub(super) const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
+pub(super) const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 type PrewarmRow = (
@@ -336,23 +273,41 @@ type LauncherLayout = (
 );
 type BrowserPageFilter = Or<(With<WebviewSource>, With<HostsPage>)>;
 
-impl CommandBar {
-    fn prepare(node: &mut Node, visibility: &mut Visibility, native_overlay: bool) {
-        node.display = Display::Flex;
-        *visibility = if native_overlay {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
+#[derive(SystemParam)]
+struct CommandBarSurface<'w, 's> {
+    bars: Query<'w, 's, CloseRow, With<CommandBar>>,
+}
 
-    fn close(node: &mut Node, visibility: &mut Visibility, native_overlay: bool) {
+impl CommandBarSurface<'_, '_> {
+    fn close(&mut self) -> Option<Entity> {
+        let Ok((entity, mut node, mut visibility, native_overlay)) = self.bars.single_mut() else {
+            return None;
+        };
         if native_overlay {
-            Self::prepare(node, visibility, true);
+            node.display = Display::Flex;
+            *visibility = Visibility::Visible;
         } else {
             node.display = Display::None;
             *visibility = Visibility::Hidden;
         }
+        Some(entity)
+    }
+
+    fn close_visible(&mut self) -> Option<Entity> {
+        let Ok((entity, mut node, mut visibility, native_overlay)) = self.bars.single_mut() else {
+            return None;
+        };
+        if node.display == Display::None {
+            return None;
+        }
+        if native_overlay {
+            node.display = Display::Flex;
+            *visibility = Visibility::Visible;
+        } else {
+            node.display = Display::None;
+            *visibility = Visibility::Hidden;
+        }
+        Some(entity)
     }
 }
 
@@ -371,7 +326,12 @@ fn prewarm(mut commands: Commands, mut modal_q: Query<PrewarmRow, With<CommandBa
     if has_keyboard_target || pending_reveal {
         return;
     }
-    CommandBar::prepare(&mut modal_node, &mut modal_vis, native_overlay);
+    modal_node.display = Display::Flex;
+    *modal_vis = if native_overlay {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
     commands.entity(modal_e).insert(PendingCommandBarReveal {
         frames: 0,
         open_id: OpenId::NONE,
@@ -474,64 +434,11 @@ struct CommandBarOpenState {
     replace_active_stack: bool,
     url_override: Option<String>,
     picker: Option<CommandBarPicker>,
-}
-
-impl CommandBarOpenState {
-    fn from_requests<'a>(
-        toggle: bool,
-        edit_page: bool,
-        path: bool,
-        commands: bool,
-        open: impl IntoIterator<Item = &'a CommandBarOpenRequest>,
-        ids: impl IntoIterator<Item = &'a str>,
-    ) -> Self {
-        let mut request = Self::default();
-        if toggle {
-            request.should_toggle = true;
-            request.url_override = Some(String::new());
-        }
-        if edit_page {
-            request.should_toggle = true;
-            request.replace_active_stack = true;
-        }
-        if path {
-            request.should_toggle = true;
-            request.url_override = Some("/".to_string());
-        }
-        if commands {
-            request.should_toggle = true;
-            request.url_override = Some(">".to_string());
-        }
-        for open in open {
-            request.should_toggle = true;
-            request.replace_active_stack |= open.replace_active_stack;
-            if open.query.is_some() {
-                request.url_override.clone_from(&open.query);
-            }
-            if open.picker.is_some() {
-                request.picker = open.picker;
-            }
-        }
-        for id in ids {
-            match id {
-                "stack_close" => {
-                    request.should_dismiss = true;
-                }
-                "stack_next" | "stack_previous" | "select_pane_left" | "select_pane_right"
-                | "select_pane_up" | "select_pane_down" => {
-                    request.should_dismiss_nav = true;
-                }
-                _ => {
-                    continue;
-                }
-            }
-        }
-        request
-    }
-
-    fn closes_visible_bar(&self, is_open: bool) -> bool {
-        self.should_toggle && is_open && self.picker.is_none()
-    }
+    picks: Vec<CommandBarPickRow>,
+    picker_label: String,
+    picker_placeholder: String,
+    picker_typed: bool,
+    picker_numbered: bool,
 }
 
 #[derive(SystemParam)]
@@ -546,16 +453,55 @@ struct OpenRequests<'w, 's> {
 
 impl OpenRequests<'_, '_> {
     fn read(&mut self) -> CommandBarOpenState {
-        CommandBarOpenState::from_requests(
-            self.toggle.read().next().is_some(),
-            self.edit_page.read().next().is_some(),
-            self.path.read().next().is_some(),
-            self.commands.read().next().is_some(),
-            self.open.read(),
-            self.invocations
-                .read()
-                .map(|invocation| invocation.id.as_str()),
-        )
+        let mut request = CommandBarOpenState::default();
+        if self.toggle.read().next().is_some() {
+            request.should_toggle = true;
+            request.url_override = Some(String::new());
+        }
+        if self.edit_page.read().next().is_some() {
+            request.should_toggle = true;
+            request.replace_active_stack = true;
+        }
+        if self.path.read().next().is_some() {
+            request.should_toggle = true;
+            request.url_override = Some("/".to_string());
+        }
+        if self.commands.read().next().is_some() {
+            request.should_toggle = true;
+            request.url_override = Some(">".to_string());
+        }
+        for open in self.open.read() {
+            request.should_toggle = true;
+            request.replace_active_stack |= open.replace_active_stack;
+            if open.query.is_some() {
+                request.url_override.clone_from(&open.query);
+            }
+            if open.picker.is_some() {
+                request.picker.clone_from(&open.picker);
+                request.picks.clone_from(&open.picks);
+                request.picker_label.clone_from(&open.picker_label);
+                request
+                    .picker_placeholder
+                    .clone_from(&open.picker_placeholder);
+                request.picker_typed = open.picker_typed;
+                request.picker_numbered = open.picker_numbered;
+            }
+        }
+        for invocation in self.invocations.read() {
+            match invocation.id.as_str() {
+                "stack_close" => {
+                    request.should_dismiss = true;
+                }
+                "stack_next" | "stack_previous" | "select_pane_left" | "select_pane_right"
+                | "select_pane_up" | "select_pane_down" => {
+                    request.should_dismiss_nav = true;
+                }
+                _ => {
+                    continue;
+                }
+            }
+        }
+        request
     }
 }
 
@@ -567,10 +513,9 @@ struct OpenSources<'w, 's> {
     metadata: Query<'w, 's, &'static PageMetadata, BrowserPageFilter>,
     workspace: Single<'w, 's, &'static CommandBarWorkspaceSnapshot>,
     projects: Single<'w, 's, &'static CommandBarProjectRoots>,
-    spaces: Single<'w, 's, &'static CommandBarSpacesSnapshot>,
+    context: Single<'w, 's, &'static CommandBarContextSnapshot>,
     pages: Single<'w, 's, &'static CommandBarPagesSnapshot>,
     work: Single<'w, 's, &'static CommandBarWorkSnapshot>,
-    terminal_page: Option<Single<'w, 's, &'static CommandBarTerminalPage>>,
     projector: CommandBarProjector<'w, 's>,
     locale: Option<Res<'w, ResolvedLocale>>,
 }
@@ -610,13 +555,6 @@ impl OpenSources<'_, '_> {
             .map(|locale| locale.0.clone())
             .unwrap_or_else(Locale::preferred)
     }
-
-    fn terminal_page_url(&self) -> String {
-        self.terminal_page
-            .as_deref()
-            .map(|page| page.0.clone())
-            .unwrap_or_default()
-    }
 }
 
 fn open(
@@ -634,17 +572,20 @@ fn open(
         return;
     };
     let focus = &*sources.workspace;
-    let active_stack_count = focus.stack_count;
-    let spaces_snapshot = &*sources.spaces;
-    let space_name = spaces_snapshot.active_space_name.clone();
+    let context = (*sources.context).clone();
     let locale = sources.locale();
-    let toggle_closes = request.closes_visible_bar(is_open);
+    let toggle_closes = request.should_toggle && is_open && request.picker.is_none();
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
     let should_dismiss_nav = request.should_dismiss_nav;
     let replace_active_stack = request.replace_active_stack;
     let url_override = request.url_override;
     let picker = request.picker;
+    let picks = request.picks;
+    let picker_label = request.picker_label;
+    let picker_placeholder = request.picker_placeholder;
+    let picker_typed = request.picker_typed;
+    let picker_numbered = request.picker_numbered;
 
     if (should_dismiss || toggle_closes) && is_open {
         commands.trigger(CommandBarPanelClose { layout: layout_e });
@@ -671,24 +612,24 @@ fn open(
     let mut payload = sources.projector.project(CommandBarOpenProjection {
         open_id: OpenId(UnixMillis::now().0 as u64),
         native_windowed: false,
-        space_name,
+        context,
         url: current_url,
-        spaces: (*spaces_snapshot).clone(),
-        terminal_page_url: sources.terminal_page_url(),
         pages: (*sources.pages).clone(),
         projects: (*sources.projects).clone(),
         work: (*sources.work).clone(),
         locale: locale.clone(),
-        active_stack_count,
         tabs: bar_tabs,
         target,
     });
     payload.picker = picker;
-    payload.caret_at_end = super::model::PaletteRows::opens_at_end(&payload.url, payload.picker);
-    if let Some(picker) = picker {
-        payload.picks = CommandBarPicks::for_picker(picker, &locale);
-    }
-    commands.trigger(vmux_ecs::host::UiStateWrite::<
+    payload.picker_label = picker_label;
+    payload.picker_placeholder = picker_placeholder;
+    payload.picker_typed = picker_typed;
+    payload.picker_numbered = picker_numbered;
+    payload.caret_at_end =
+        super::driver::PaletteQuery::new(&payload.url).opens_at_end(payload.picker.as_ref());
+    payload.picks = picks;
+    commands.trigger(vmux_ecs::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(layout_e, &payload));
 }
@@ -700,7 +641,7 @@ struct CommandBarPanelClose {
 }
 
 fn close_panel(trigger: On<CommandBarPanelClose>, mut commands: Commands) {
-    commands.trigger(vmux_ecs::host::UiStateWrite::<
+    commands.trigger(vmux_ecs::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(
         trigger.event().layout, &CommandBarOpenEvent::default()
@@ -714,12 +655,11 @@ fn dismiss(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
 fn close(
     trigger: On<CommandBarDismiss>,
     workspace: Single<&CommandBarWorkspaceSnapshot>,
-    mut modal_q: Query<CloseRow, With<CommandBar>>,
+    mut surface: CommandBarSurface,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut commands: Commands,
 ) {
-    if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut() {
-        CommandBar::close(&mut modal_node, &mut modal_vis, native_overlay);
+    if let Some(modal_e) = surface.close() {
         commands
             .entity(modal_e)
             .remove::<KeyboardOwner>()
@@ -736,7 +676,7 @@ fn close(
 
 fn dismiss_requested(
     mut requests: MessageReader<LauncherDismissRequest>,
-    mut modal_q: Query<CloseRow, With<CommandBar>>,
+    mut surface: CommandBarSurface,
     panel_q: Query<Entity, (With<RendersLauncherPanel>, With<CommandBarPanelActive>)>,
     mut commands: Commands,
 ) {
@@ -746,10 +686,7 @@ fn dismiss_requested(
     for layout_e in &panel_q {
         commands.trigger(CommandBarPanelClose { layout: layout_e });
     }
-    if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut()
-        && modal_node.display != Display::None
-    {
-        CommandBar::close(&mut modal_node, &mut modal_vis, native_overlay);
+    if let Some(modal_e) = surface.close_visible() {
         commands
             .entity(modal_e)
             .remove::<KeyboardOwner>()
@@ -821,7 +758,7 @@ fn retry(
         {
             continue;
         }
-        commands.trigger(vmux_ecs::host::UiStateWrite::<
+        commands.trigger(vmux_ecs::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(entity, payload));
         pending.started_at.get_or_insert(now);
@@ -838,7 +775,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
     use vmux_api::open_target::OpenTarget;
-    use vmux_ecs::host::UiStateWrite;
+    use vmux_ecs::UiStateWrite;
     use vmux_ecs::launcher::HostsLauncher;
     use vmux_ecs::overlay::OverlayState;
 
@@ -901,6 +838,7 @@ mod tests {
             native_menu: false,
             shortcut_label: None,
             shortcuts: Vec::new(),
+            toolbar: None,
             mcp: None,
         });
         let payload = world
@@ -908,15 +846,12 @@ mod tests {
                 projector.project(CommandBarOpenProjection {
                     open_id: OpenId(7),
                     native_windowed: false,
-                    space_name: String::new(),
+                    context: Default::default(),
                     url: String::new(),
-                    spaces: Default::default(),
-                    terminal_page_url: String::new(),
                     pages: Default::default(),
                     projects: Default::default(),
                     work: Default::default(),
                     locale: Locale::from("en-US"),
-                    active_stack_count: 0,
                     tabs: Vec::new(),
                     target: Some(OpenTarget::InPlace),
                 })
@@ -993,18 +928,6 @@ mod tests {
         app.update();
 
         assert!(!app.world().resource::<CapturedCommandBarOpen>().0);
-    }
-
-    #[test]
-    fn closed_native_overlay_stays_renderable_without_being_open() {
-        let mut node = Node::default();
-        let mut visibility = Visibility::Hidden;
-
-        CommandBar::close(&mut node, &mut visibility, true);
-
-        assert_eq!(node.display, Display::Flex);
-        assert_eq!(visibility, Visibility::Visible);
-        assert!(!OverlayState::resolve(node.display, visibility, false, false).owns_input());
     }
 
     #[test]
@@ -1283,110 +1206,6 @@ mod tests {
         assert_eq!(pending.next_frame(None, true, false, true), Some(1));
     }
 
-    #[test]
-    fn the_generic_bar_commands_assert_no_picker() {
-        for (id, request) in [
-            (
-                "command_bar_open",
-                CommandBarOpenState::from_requests(
-                    true,
-                    false,
-                    false,
-                    false,
-                    std::iter::empty(),
-                    std::iter::empty(),
-                ),
-            ),
-            (
-                "command_bar_open_path",
-                CommandBarOpenState::from_requests(
-                    false,
-                    false,
-                    true,
-                    false,
-                    std::iter::empty(),
-                    std::iter::empty(),
-                ),
-            ),
-            (
-                "command_bar_open_commands",
-                CommandBarOpenState::from_requests(
-                    false,
-                    false,
-                    false,
-                    true,
-                    std::iter::empty(),
-                    std::iter::empty(),
-                ),
-            ),
-        ] {
-            assert_eq!(request.picker, None, "{id}");
-            assert!(request.should_toggle, "{id}");
-        }
-    }
-
-    #[test]
-    fn duplicate_open_is_ignored_while_command_bar_is_visible() {
-        let toggle = CommandBarOpenState {
-            should_toggle: true,
-            ..Default::default()
-        };
-        assert!(!toggle.closes_visible_bar(false));
-        assert!(toggle.closes_visible_bar(true));
-
-        let picker = CommandBarOpenState {
-            should_toggle: true,
-            picker: Some(CommandBarPicker::Space),
-            ..Default::default()
-        };
-        assert!(!picker.closes_visible_bar(true));
-        assert!(!picker.closes_visible_bar(false));
-    }
-
-    #[test]
-    fn open_in_new_stack_does_not_dismiss_command_bar() {
-        let request = CommandBarOpenState::from_requests(
-            false,
-            false,
-            false,
-            false,
-            std::iter::empty(),
-            ["open_in_new_stack"],
-        );
-
-        assert!(!request.should_dismiss);
-    }
-
-    #[test]
-    fn open_command_bar_forces_empty_url_override() {
-        let request = CommandBarOpenState::from_requests(
-            true,
-            false,
-            false,
-            false,
-            std::iter::empty(),
-            std::iter::empty(),
-        );
-
-        assert!(request.should_toggle);
-        assert_eq!(request.url_override, Some(String::new()));
-    }
-
-    #[test]
-    fn open_page_in_command_bar_leaves_url_override_unset_so_current_url_is_prefilled() {
-        let request = CommandBarOpenState::from_requests(
-            false,
-            true,
-            false,
-            false,
-            std::iter::empty(),
-            std::iter::empty(),
-        );
-
-        assert!(request.should_toggle);
-        assert_eq!(request.url_override, None);
-    }
-
     #[derive(Resource, Default)]
     struct EmittedToPage(Vec<(Entity, CommandBarUiStatePatch)>);
 
@@ -1396,7 +1215,7 @@ mod tests {
     ) {
         emitted
             .0
-            .push((trigger.event().webview(), trigger.event().patch().clone()));
+            .push((trigger.event().webview(), trigger.event().update().clone()));
     }
 
     fn panel_app() -> App {
@@ -1416,7 +1235,7 @@ mod tests {
         app.world_mut().spawn((
             CommandBarWorkspaceSnapshot::default(),
             CommandBarProjectRoots::default(),
-            CommandBarSpacesSnapshot::default(),
+            CommandBarContextSnapshot::default(),
             CommandBarPagesSnapshot::default(),
             CommandBarWorkSnapshot::default(),
         ));

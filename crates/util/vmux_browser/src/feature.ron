@@ -1,9 +1,41 @@
 (
+    search_engines: [
+        (
+            id: "google",
+            name: "Google",
+            hosts: ["google.com"],
+            query_url: "https://www.google.com/search?q={query}",
+        ),
+        (
+            id: "bing",
+            name: "Bing",
+            hosts: ["bing.com"],
+            query_url: "https://www.bing.com/search?q={query}",
+        ),
+        (
+            id: "duckduckgo",
+            name: "DuckDuckGo",
+            hosts: ["duckduckgo.com"],
+            query_url: "https://duckduckgo.com/?q={query}",
+        ),
+        (
+            id: "brave",
+            name: "Brave Search",
+            hosts: ["search.brave.com"],
+            query_url: "https://search.brave.com/search?q={query}",
+        ),
+        (
+            id: "kagi",
+            name: "Kagi",
+            hosts: ["kagi.com"],
+            query_url: "https://kagi.com/search?q={query}",
+        ),
+    ],
     settings: Some((
         defaults: (
             browser: Some((
                 startup_url: "",
-                search_engine: google,
+                search_engine: "google",
                 bookmark_folders: [],
             )),
         ),

@@ -1,7 +1,7 @@
 use super::format::{PromptEdit, PromptHistoryDirection};
 use super::state::Chat;
 use dioxus::prelude::*;
-use vmux_api::input::{KeyStroke, UiKeyContext};
+use vmux_api::input::{KeyContextRequest, KeyStroke};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptFocus};
 use vmux_ui::dom::DomSelection;
 use vmux_ui::hooks::Unclaimed;
@@ -22,7 +22,7 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
         }),
     };
     use_drop(move || {
-        let _ = send(&UiKeyContext { keys: Vec::new() });
+        let _ = send(&KeyContextRequest { keys: Vec::new() });
     });
     keys
 }
@@ -121,7 +121,7 @@ impl ChatKeyHandler {
             _ => return,
         };
         event.prevent_default();
-        let current = self.0.composer.draft.peek().clone();
+        let current = self.0.draft();
         let end = current.encode_utf16().count() as u32;
         let (value, _caret) = edit.apply(&current, end, end);
         self.0.edit_draft(value);

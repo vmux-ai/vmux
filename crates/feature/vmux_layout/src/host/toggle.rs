@@ -6,7 +6,7 @@ use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_flex::prelude::*;
 
 use super::command::LayoutRequestSet;
@@ -21,7 +21,6 @@ impl Plugin for TogglePlugin {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
         app.add_message::<ToggleLayoutRequest>()
-            .add_systems(Startup, bind_command.in_set(vmux_command::BindCommands))
             .add_systems(
                 Update,
                 handle_visibility_requests.in_set(LayoutRequestSet::Handle),
@@ -33,6 +32,7 @@ impl Plugin for TogglePlugin {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message)]
 struct ToggleLayoutRequest;
 
@@ -42,10 +42,6 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
     fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "toggle_layout").then_some(Self).ok_or(())
     }
-}
-
-fn bind_command(registry: vmux_command::CommandRegistry, mut commands: Commands) {
-    registry.message::<ToggleLayoutRequest>(&mut commands);
 }
 
 #[derive(Component, Default, Debug)]

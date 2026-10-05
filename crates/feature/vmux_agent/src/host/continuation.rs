@@ -7,20 +7,16 @@ use vmux_ecs::agent::AgentContinuationRequest;
 use vmux_ecs::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 use vmux_session::{AcpSession, AgentRunState};
 
-pub(super) struct AgentContinuationPlugin;
-
-impl Plugin for AgentContinuationPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<AgentContinuationRequest>()
-            .add_message::<ServiceRequest>()
-            .add_systems(
-                Update,
-                (queue_continuations, send_continuations)
-                    .chain()
-                    .in_set(WriteCommandRequests)
-                    .after(ServiceMessageSet),
-            );
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_message::<AgentContinuationRequest>()
+        .add_message::<ServiceRequest>()
+        .add_systems(
+            Update,
+            (queue_continuations, send_continuations)
+                .chain()
+                .in_set(WriteCommandRequests)
+                .after(ServiceMessageSet),
+        );
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]

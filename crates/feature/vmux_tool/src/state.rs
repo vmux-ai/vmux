@@ -1,48 +1,34 @@
-#[vmux_api::contract(Copy, Eq, PartialOrd, Ord, Hash)]
-pub enum ToolProvider {
-    HomebrewFormula,
-    HomebrewCask,
-    Npm,
-    Acp,
-    Lsp,
-    Dotfiles,
-    Mcp,
-}
+#[vmux_api::contract(Default, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
+pub struct ToolProvider(pub String);
 
 impl ToolProvider {
-    pub const ALL: [Self; 7] = [
-        Self::HomebrewFormula,
-        Self::HomebrewCask,
-        Self::Npm,
-        Self::Acp,
-        Self::Lsp,
-        Self::Mcp,
-        Self::Dotfiles,
-    ];
-
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::HomebrewFormula => "homebrew-formula",
-            Self::HomebrewCask => "homebrew-cask",
-            Self::Npm => "npm",
-            Self::Acp => "acp",
-            Self::Lsp => "lsp",
-            Self::Dotfiles => "dotfiles",
-            Self::Mcp => "mcp",
-        }
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
     }
 
-    pub const fn title(self) -> &'static str {
-        match self {
-            Self::HomebrewFormula => "Homebrew Formulae",
-            Self::HomebrewCask => "Homebrew Casks",
-            Self::Npm => "NPM Globals",
-            Self::Acp => "Agents",
-            Self::Lsp => "LSP Servers",
-            Self::Dotfiles => "Dotfiles",
-            Self::Mcp => "MCP Servers",
-        }
+    pub fn id(&self) -> &str {
+        &self.0
     }
+
+    pub fn is(&self, id: &str) -> bool {
+        self.0 == id
+    }
+}
+
+#[vmux_api::contract(Eq)]
+pub struct ToolProviderMetadata {
+    pub provider: ToolProvider,
+    pub title: String,
+    pub title_message_id: String,
+    pub route_title: String,
+    pub route_title_message_id: String,
+    pub short_label: String,
+    pub route: String,
+    pub rank: i32,
+    pub thumbnails: bool,
+    pub apply: bool,
+    pub brewfile: bool,
 }
 
 #[vmux_api::contract(Copy, Eq)]
@@ -92,10 +78,31 @@ pub struct ToolsSnapshot {
     pub loaded: bool,
     pub root: String,
     pub categories: Vec<ToolCategory>,
+    pub providers: Vec<ToolProviderMetadata>,
     pub installed: u32,
     pub updates: u32,
     pub conflicts: u32,
     pub error: String,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ToolsView {
+    pub route: String,
+    pub query: String,
+    pub route_title: String,
+    pub route_title_message_id: String,
+    pub categories: Vec<ToolCategory>,
+    pub visible_count: u32,
+    pub apply_provider: Option<ToolProvider>,
+    pub show_brewfile: bool,
+}
+
+impl ToolsSnapshot {
+    pub fn provider(&self, provider: &ToolProvider) -> Option<&ToolProviderMetadata> {
+        self.providers
+            .iter()
+            .find(|metadata| &metadata.provider == provider)
+    }
 }
 
 #[vmux_api::contract(Eq, PartialOrd, Ord, Hash)]
@@ -126,9 +133,10 @@ pub struct ToolOperationNotice {
     pub message: String,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 6)]
+#[vmux_api::ui_state(Default, Eq, version = 9)]
 pub struct ToolsUiState {
     pub snapshot: ToolsSnapshot,
+    pub view: ToolsView,
     pub pending: Vec<ToolOperationKey>,
     pub notice: Option<ToolOperationNotice>,
 }
@@ -146,6 +154,11 @@ pub struct ToolOpenRequest {
 #[vmux_api::ui_event(Eq)]
 pub struct ToolsNavigateRequest {
     pub url: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ToolsFilterRequest {
+    pub query: String,
 }
 
 #[vmux_api::ui_event(Eq)]
@@ -191,8 +204,10 @@ pub struct ToolUnlinkRequest {
     pub id: String,
 }
 
-#[vmux_api::ui_event]
-pub struct ToolApplyRequest;
+#[vmux_api::ui_event(version = 2)]
+pub struct ToolApplyRequest {
+    pub provider: ToolProvider,
+}
 
 #[vmux_api::ui_event(Eq)]
 pub struct ToolImportRequest {
@@ -243,8 +258,8 @@ impl From<ToolUnlinkRequest> for ToolOperationKey {
 }
 
 impl From<ToolApplyRequest> for ToolOperationKey {
-    fn from(_: ToolApplyRequest) -> Self {
-        Self::new(ToolProvider::Dotfiles, ToolOperationKind::Apply, "")
+    fn from(request: ToolApplyRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Apply, "")
     }
 }
 

@@ -135,12 +135,12 @@ mod system_tests {
     use bevy_cef_core::prelude::{
         CefTransitionCore, CefTransitionQualifiers, WebviewCommittedNavigationEvent,
     };
-    use vmux_ecs::EcsPlugin;
+    use vmux_ecs::PrimitivesPlugin;
 
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(EcsPlugin)
+            .add_plugins(PrimitivesPlugin)
             .add_message::<WebviewCommittedNavigationEvent>()
             .add_systems(Update, spawn);
         app
@@ -270,7 +270,7 @@ mod system_tests {
     fn ready_vmux_page_is_recorded_but_history_shell_is_not() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(EcsPlugin)
+            .add_plugins(PrimitivesPlugin)
             .add_systems(Update, record_vmux_pages);
         app.world_mut().spawn((
             PageMetadata {
@@ -308,7 +308,7 @@ mod system_tests {
     fn record_request_spawns_url_with_title() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(EcsPlugin)
+            .add_plugins(PrimitivesPlugin)
             .add_message::<vmux_ecs::event::RecordVisitRequest>()
             .add_systems(Update, record_requested_visits);
         app.world_mut()

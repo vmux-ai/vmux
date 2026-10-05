@@ -1,20 +1,16 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
 use serde::Deserialize;
 use vmux_editor::lsp::package_path::Sha256Digest;
 
-pub const REGISTRY_URL: &str =
-    "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
+use crate::policy::AcpRegistryPolicy;
+use crate::policy::PolicyLoaded;
 
-pub(crate) struct RegistryPlugin;
-
-impl Plugin for RegistryPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, fetch).add_systems(Update, receive);
-    }
+pub(crate) fn add(app: &mut App) {
+    app.add_systems(Startup, fetch.after(PolicyLoaded))
+        .add_systems(Update, receive);
 }
 
 #[derive(Component)]
@@ -22,10 +18,11 @@ struct RegistryFetch {
     rx: Receiver<Vec<RegistryAgent>>,
 }
 
-fn fetch(mut commands: Commands) {
+fn fetch(policy: Single<&AcpRegistryPolicy>, mut commands: Commands) {
+    let url = policy.url.clone();
     let (tx, rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
-        let agents = Registry::fetch_blocking()
+        let agents = Registry::fetch_blocking(&url)
             .ok()
             .or_else(Registry::cached)
             .map(|registry| registry.agents)
@@ -65,46 +62,6 @@ pub struct Registry {
     pub agents: Vec<RegistryAgent>,
 }
 
-impl std::str::FromStr for Registry {
-    type Err = String;
-
-    fn from_str(json: &str) -> Result<Self, Self::Err> {
-        serde_json::from_str(json).map_err(|error| format!("acp registry: parse failed: {error}"))
-    }
-}
-
-impl Registry {
-    pub fn agent(self, id: &str) -> Option<RegistryAgent> {
-        self.agents.into_iter().find(|agent| agent.id == id)
-    }
-
-    pub fn cached() -> Option<Self> {
-        std::fs::read_to_string(Self::cache_path())
-            .ok()?
-            .parse()
-            .ok()
-    }
-
-    pub fn fetch_blocking() -> Result<Self, String> {
-        let text = reqwest::blocking::get(REGISTRY_URL)
-            .and_then(|response| response.error_for_status())
-            .and_then(|response| response.text())
-            .map_err(|error| format!("acp registry: fetch failed: {error}"))?;
-        let registry = text.parse()?;
-        let dir = vmux_ecs::profile::ProfilePaths::current().agents();
-        if std::fs::create_dir_all(&dir).is_ok() {
-            let _ = vmux_path::AtomicFile::write(Self::cache_path(), text.as_bytes());
-        }
-        Ok(registry)
-    }
-
-    fn cache_path() -> PathBuf {
-        vmux_ecs::profile::ProfilePaths::current()
-            .agents()
-            .join("registry.json")
-    }
-}
-
 #[derive(Component, Debug, Clone, Deserialize)]
 pub struct RegistryAgent {
     pub id: String,
@@ -132,22 +89,15 @@ pub struct Distribution {
 pub struct BinaryTarget {
     pub archive: String,
     pub cmd: String,
-    #[serde(default, deserialize_with = "deserialize_sha256")]
+    #[serde(
+        default,
+        deserialize_with = "super::registry_driver::deserialize_sha256"
+    )]
     pub sha256: Option<Sha256Digest>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
-}
-
-fn deserialize_sha256<'de, D>(deserializer: D) -> Result<Option<Sha256Digest>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    value
-        .map(|value| Sha256Digest::parse(&value).map_err(serde::de::Error::custom))
-        .transpose()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,36 +114,6 @@ pub enum Runtime {
     None,
     Node,
     Uv,
-}
-
-impl RegistryAgent {
-    pub fn host_target() -> Option<&'static str> {
-        match (std::env::consts::OS, std::env::consts::ARCH) {
-            ("macos", "aarch64") => Some("darwin-aarch64"),
-            ("macos", "x86_64") => Some("darwin-x86_64"),
-            ("linux", "aarch64") => Some("linux-aarch64"),
-            ("linux", "x86_64") => Some("linux-x86_64"),
-            ("windows", "aarch64") => Some("windows-aarch64"),
-            ("windows", "x86_64") => Some("windows-x86_64"),
-            _ => None,
-        }
-    }
-
-    pub fn binary_for_host(&self) -> Option<&BinaryTarget> {
-        self.distribution.binary.as_ref()?.get(Self::host_target()?)
-    }
-
-    pub fn preferred_runtime(&self) -> Runtime {
-        if self.binary_for_host().is_some() {
-            Runtime::None
-        } else if self.distribution.npx.is_some() {
-            Runtime::Node
-        } else if self.distribution.uvx.is_some() {
-            Runtime::Uv
-        } else {
-            Runtime::None
-        }
-    }
 }
 
 #[cfg(test)]

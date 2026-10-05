@@ -99,9 +99,7 @@ impl ExplorerTreeActions<'_, '_> {
         }
         let effect = state.focus_effect(current, reveal);
         self.commands
-            .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                entity, &effect,
-            ));
+            .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &effect));
     }
 }
 
@@ -328,7 +326,7 @@ fn emit(
         };
         actions
             .commands
-            .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+            .trigger(vmux_ecs::FileUiStateWrite::from_event(
                 entity,
                 &ExplorerTreeEvent {
                     root_name: ExplorerRoot::name(&tree.root),

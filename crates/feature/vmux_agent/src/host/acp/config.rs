@@ -2,10 +2,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::host::event::AgentRequestInput;
-#[cfg(test)]
-use crate::host::model_selection::SavedAgentModel;
-use crate::host::model_selection::{AcpSessionConfigRequestCounter, ModelSelectionPlugin};
-use crate::host::model_selection::{AgentModeSelections, AgentModelSelections};
+use crate::host::model_selection::{
+    AcpSessionConfigRequestCounter, AgentModeSelections, AgentModelSelections, ModelSelectionSet,
+    RememberMode, RememberModel, RememberModels, RememberModes,
+};
 use crate::host::runtime::{AcpSessionConfigState, PendingAcpSessionConfig};
 use vmux_api::command_bar::{AgentModels, AgentModes};
 use vmux_api::command_bar::{StartSelectMode, StartSelectModel};
@@ -14,54 +14,49 @@ use vmux_api::protocol::{
     ClientMessage,
 };
 use vmux_api::room::RemoteModelState;
-use vmux_chat::event::{
-    ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
-};
+use vmux_chat::event::{ModelOptionEntry, SelectMode, SelectModel, SetAgentEffort};
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
 use vmux_command::{ContributedAgentModels, ContributedAgentModes};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
 
+use super::config_driver::AcpConfigProjection;
 use crate::route::AcpRoute;
 
-pub struct AcpSessionConfigPlugin;
-
-impl Plugin for AcpSessionConfigPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(ModelSelectionPlugin)
-            .add_message::<ServiceRequest>()
-            .add_message::<SessionConfigSelectRequest>()
-            .add_message::<AcpSetSessionConfigRequest>()
-            .add_plugins(UiEventPlugin::<(
-                SelectModel,
-                SetAgentEffort,
-                SelectMode,
-                PageReady,
-            )>::default())
-            .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
-            .add_observer(select_model)
-            .add_observer(select_mode)
-            .add_observer(set_effort)
-            .add_observer(start_select_model)
-            .add_observer(start_select_mode)
-            .add_observer(sync_page_model_state)
-            .add_systems(
-                Update,
-                (
-                    answer_remote_model_commands.after(ServiceMessageSet),
-                    apply_session_selection,
-                    push_state_to_page,
-                    remove_state,
-                    apply_last_used_model.after(crate::host::runtime::AcpSessionConfigSet),
-                    send_session_requests,
-                    remember_model_lists,
-                    remember_mode_lists,
-                    publish_models.after(remember_model_lists),
-                    publish_modes.after(remember_mode_lists),
-                ),
-            );
-    }
+pub(crate) fn add(app: &mut App) {
+    crate::host::model_selection::add(app);
+    app.add_message::<ServiceRequest>()
+        .add_message::<SessionConfigSelectRequest>()
+        .add_message::<AcpSetSessionConfigRequest>()
+        .add_plugins(UiEventPlugin::<(
+            SelectModel,
+            SetAgentEffort,
+            SelectMode,
+            PageReady,
+        )>::default())
+        .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
+        .add_observer(select_model)
+        .add_observer(select_mode)
+        .add_observer(set_effort)
+        .add_observer(start_select_model)
+        .add_observer(start_select_mode)
+        .add_observer(sync_page_model_state)
+        .add_systems(
+            Update,
+            (
+                answer_remote_model_commands.after(ServiceMessageSet),
+                apply_session_selection.before(ModelSelectionSet),
+                push_state_to_page,
+                remove_state,
+                apply_last_used_model.after(crate::host::runtime::AcpSessionConfigSet),
+                send_session_requests,
+                remember_model_lists.before(ModelSelectionSet),
+                remember_mode_lists.before(ModelSelectionSet),
+                publish_models.after(ModelSelectionSet),
+                publish_modes.after(ModelSelectionSet),
+            ),
+        );
 }
 
 #[derive(Message)]
@@ -161,8 +156,8 @@ fn apply_session_selection(
     mut reader: MessageReader<SessionConfigSelectRequest>,
     mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
     mut counter: Single<&mut AcpSessionConfigRequestCounter>,
-    mut last_models: Single<&mut AgentModelSelections>,
-    mut last_modes: Single<&mut AgentModeSelections>,
+    mut remembered_models: MessageWriter<RememberModel>,
+    mut remembered_modes: MessageWriter<RememberMode>,
     mut requests: MessageWriter<AcpSetSessionConfigRequest>,
 ) {
     for request in reader.read() {
@@ -183,11 +178,18 @@ fn apply_session_selection(
         {
             continue;
         }
-        let request_id = counter.next();
+        counter.0 = counter.0.wrapping_add(1);
+        let request_id = counter.0;
         if request.category == "model" {
-            last_models.select(&session.agent_id, &request.value);
+            remembered_models.write(RememberModel {
+                agent_id: session.agent_id.clone(),
+                model_id: request.value.clone(),
+            });
         } else if request.category == "mode" {
-            last_modes.select(&session.agent_id, &request.value);
+            remembered_modes.write(RememberMode {
+                agent_id: session.agent_id.clone(),
+                mode_id: request.value.clone(),
+            });
         }
         requests.write(AcpSetSessionConfigRequest {
             sid: session.sid.clone(),
@@ -214,97 +216,37 @@ struct AcpSetSessionConfigRequest {
     value: String,
 }
 
-struct AcpConfigProjection<'a> {
-    configs: Option<&'a AcpSessionConfigState>,
-    session: &'a AcpSession,
-}
-
-impl AcpConfigProjection<'_> {
-    fn model_state(&self) -> ModelState {
-        let agent_key = self.session.agent_id.as_str();
-        let Some(configs) = self.configs else {
-            return ModelState {
-                agent_key: agent_key.to_string(),
-                ..Default::default()
-            };
-        };
-        let mut state = ModelState {
-            agent_key: agent_key.to_string(),
-            ..Default::default()
-        };
-        if let Some(model) = configs.category("model") {
-            state.current_model_id = configs.display_value(model).to_string();
-            state.current_model_name = configs.display_name(model).to_string();
-            state.default_model_id = configs.initial_value(model).to_string();
-            state.models = model
-                .values
-                .iter()
-                .map(|option| ModelOptionEntry {
-                    id: option.value.clone(),
-                    name: option.name.clone(),
-                    description: option.description.clone().unwrap_or_default(),
-                })
-                .collect();
-        }
-        if let Some(thought) = configs.category("thought_level") {
-            state.effort_current = configs.display_value(thought).to_string();
-            state.effort_default = configs.initial_value(thought).to_string();
-            state.effort_levels = thought
-                .values
-                .iter()
-                .map(|option| option.value.clone())
-                .collect();
-        }
-        state
-    }
-
-    fn mode_state(&self) -> ModeState {
-        let Some(configs) = self.configs else {
-            return ModeState::default();
-        };
-        let Some(mode) = configs.category("mode") else {
-            return ModeState::default();
-        };
-        ModeState {
-            current_mode_id: configs.display_value(mode).to_string(),
-            modes: mode
-                .values
-                .iter()
-                .map(|option| AcpModeOption {
-                    id: option.value.clone(),
-                    name: option.name.clone(),
-                    description: option.description.clone(),
-                })
-                .collect(),
-        }
-    }
-}
-
 fn start_select_model(
     trigger: On<UiInput<StartSelectModel>>,
-    mut last_used: Single<&mut AgentModelSelections>,
+    mut remembered: MessageWriter<RememberModel>,
 ) {
     let request = &trigger.event().payload;
     if request.agent_key.is_empty() || request.model_id.is_empty() {
         return;
     }
-    last_used.select(&request.agent_key, &request.model_id);
+    remembered.write(RememberModel {
+        agent_id: request.agent_key.clone(),
+        model_id: request.model_id.clone(),
+    });
 }
 
 fn start_select_mode(
     trigger: On<UiInput<StartSelectMode>>,
-    mut last_used: Single<&mut AgentModeSelections>,
+    mut remembered: MessageWriter<RememberMode>,
 ) {
     let request = &trigger.event().payload;
     if request.agent_key.is_empty() || request.mode_id.is_empty() {
         return;
     }
-    last_used.select(&request.agent_key, &request.mode_id);
+    remembered.write(RememberMode {
+        agent_id: request.agent_key.clone(),
+        mode_id: request.mode_id.clone(),
+    });
 }
 
 fn remember_model_lists(
     sessions: Query<(&AcpSession, &AcpSessionConfigState), Changed<AcpSessionConfigState>>,
-    mut last_used: Single<&mut AgentModelSelections>,
+    mut remembered: MessageWriter<RememberModels>,
 ) {
     for (session, state) in &sessions {
         let Some(model) = state.category("model") else {
@@ -321,13 +263,18 @@ fn remember_model_lists(
             .collect::<Vec<_>>();
         let current = state.display_value(model).to_string();
         let url = AcpRoute::agent(&session.agent_id).url();
-        last_used.remember_catalog(&session.agent_id, &url, &current, &listed);
+        remembered.write(RememberModels {
+            agent_id: session.agent_id.clone(),
+            url,
+            selected: current,
+            models: listed,
+        });
     }
 }
 
 fn remember_mode_lists(
     sessions: Query<(&AcpSession, &AcpSessionConfigState), Changed<AcpSessionConfigState>>,
-    mut last_used: Single<&mut AgentModeSelections>,
+    mut remembered: MessageWriter<RememberModes>,
 ) {
     for (session, state) in &sessions {
         let Some(mode) = state.category("mode") else {
@@ -343,7 +290,12 @@ fn remember_mode_lists(
             })
             .collect::<Vec<_>>();
         let url = AcpRoute::agent(&session.agent_id).url();
-        last_used.remember_catalog(&session.agent_id, &url, state.display_value(mode), &modes);
+        remembered.write(RememberModes {
+            agent_id: session.agent_id.clone(),
+            url,
+            selected: state.display_value(mode).to_string(),
+            modes,
+        });
     }
 }
 
@@ -410,78 +362,64 @@ fn publish_modes(
 }
 
 fn push_state_to_page(
-    sessions: Query<(Entity, &AcpSession, &AcpSessionConfigState), Changed<AcpSessionConfigState>>,
+    sessions: Query<Entity, (With<AcpSession>, Changed<AcpSessionConfigState>)>,
     children: Query<&Children>,
     chat_views: Query<(), With<ChatView>>,
+    projection: AcpConfigProjection,
     mut commands: Commands,
 ) {
-    for (stack, session, configs) in &sessions {
+    for stack in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let projection = AcpConfigProjection {
-            configs: Some(configs),
-            session,
+        let Some((model, mode)) = projection.get(stack) else {
+            continue;
         };
-        commands.trigger(ChatModelStateChanged::new(
-            webview,
-            projection.model_state(),
-        ));
-        commands.trigger(ChatModeStateChanged::new(webview, projection.mode_state()));
+        commands.trigger(ChatModelStateChanged::new(webview, model));
+        commands.trigger(ChatModeStateChanged::new(webview, mode));
     }
 }
 
 fn remove_state(
     mut removed: RemovedComponents<AcpSessionConfigState>,
-    sessions: Query<&AcpSession>,
     children: Query<&Children>,
     chat_views: Query<(), With<ChatView>>,
+    projection: AcpConfigProjection,
     mut commands: Commands,
 ) {
     for stack in removed.read() {
-        let Ok(session) = sessions.get(stack) else {
-            continue;
-        };
         let Ok(kids) = children.get(stack) else {
             continue;
         };
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let projection = AcpConfigProjection {
-            configs: None,
-            session,
+        let Some((model, mode)) = projection.get(stack) else {
+            continue;
         };
-        commands.trigger(ChatModelStateChanged::new(
-            webview,
-            projection.model_state(),
-        ));
-        commands.trigger(ChatModeStateChanged::new(webview, projection.mode_state()));
+        commands.trigger(ChatModelStateChanged::new(webview, model));
+        commands.trigger(ChatModeStateChanged::new(webview, mode));
     }
 }
 
 fn sync_page_model_state(
     trigger: On<UiInput<PageReady>>,
     views: Query<&ChildOf, With<ChatView>>,
-    sessions: Query<(&AcpSession, Option<&AcpSessionConfigState>)>,
+    projection: AcpConfigProjection,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let Ok(parent) = views.get(webview) else {
         return;
     };
-    let Ok((session, configs)) = sessions.get(parent.parent()) else {
+    let Some((model, mode)) = projection.get(parent.parent()) else {
         return;
     };
-    let projection = AcpConfigProjection { configs, session };
-    commands.trigger(ChatModelStateChanged::new(
-        webview,
-        projection.model_state(),
-    ));
-    commands.trigger(ChatModeStateChanged::new(webview, projection.mode_state()));
+    commands.trigger(ChatModelStateChanged::new(webview, model));
+    commands.trigger(ChatModeStateChanged::new(webview, mode));
 }
 
 fn select_model(
@@ -563,7 +501,8 @@ fn apply_last_used_model(
         {
             continue;
         }
-        let request_id = counter.next();
+        counter.0 = counter.0.wrapping_add(1);
+        let request_id = counter.0;
         requests.write(AcpSetSessionConfigRequest {
             sid: session.sid.clone(),
             request_id,
@@ -598,18 +537,14 @@ mod tests {
     use crate::host::model_selection::AgentModelMemory;
 
     #[test]
-    fn model_selection_updates_cached_state_before_response() {
+    fn model_selection_emits_remembered_state_before_response() {
         let mut app = App::new();
-        let registry = app
-            .world_mut()
-            .spawn((
-                AcpSessionConfigRequestCounter::default(),
-                AgentModelSelections::default(),
-                AgentModeSelections::default(),
-            ))
-            .id();
+        app.world_mut()
+            .spawn(AcpSessionConfigRequestCounter::default());
         app.add_message::<AcpSetSessionConfigRequest>()
             .add_message::<SessionConfigSelectRequest>()
+            .add_message::<RememberModel>()
+            .add_message::<RememberMode>()
             .add_observer(select_model)
             .add_systems(Update, apply_session_selection);
         let stack = app
@@ -678,13 +613,14 @@ mod tests {
         assert_eq!(requests[0].request_id, 1);
         assert_eq!(requests[0].config_id.as_deref(), Some("model"));
         assert_eq!(requests[0].value, "fable");
-        assert_eq!(
-            app.world()
-                .get::<AgentModelSelections>(registry)
-                .unwrap()
-                .selected_for("claude"),
-            "fable"
-        );
+        let remembered = app
+            .world_mut()
+            .resource_mut::<Messages<RememberModel>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(remembered.len(), 1);
+        assert_eq!(remembered[0].agent_id, "claude");
+        assert_eq!(remembered[0].model_id, "fable");
 
         app.world_mut().trigger(UiInput {
             webview,
@@ -718,6 +654,8 @@ mod tests {
         ));
         app.add_message::<AcpSetSessionConfigRequest>()
             .add_message::<SessionConfigSelectRequest>()
+            .add_message::<RememberModel>()
+            .add_message::<RememberMode>()
             .add_observer(select_mode)
             .add_systems(Update, apply_session_selection);
         let stack = app
@@ -787,30 +725,10 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_agent_models_file_still_names_the_remembered_model() {
-        let legacy = br#"{"claude":"fable","codex":{"selected":"gpt","models":[]}}"#;
-        let saved: std::collections::BTreeMap<String, SavedAgentModel> =
-            serde_json::from_slice(legacy).expect("parse");
-        let mut models = AgentModelSelections::default();
-        for (agent, entry) in saved {
-            models.by_agent.insert(agent, AgentModelMemory::from(entry));
-        }
-
-        assert_eq!(models.selected_for("claude"), "fable");
-        assert_eq!(models.selected_for("codex"), "gpt");
-    }
-
-    #[test]
-    fn acp_mode_catalog_uses_the_session_agent_identity() {
+    fn acp_mode_catalog_remembers_the_session_agent_identity() {
         let mut app = App::new();
-        let registry = app.world_mut().spawn(AgentModeSelections::default()).id();
-        app.add_systems(
-            Update,
-            (
-                remember_mode_lists,
-                publish_modes.after(remember_mode_lists),
-            ),
-        );
+        app.add_message::<RememberModes>()
+            .add_systems(Update, remember_mode_lists);
         app.world_mut().spawn((
             AcpSession {
                 agent_id: "codex-acp".into(),
@@ -840,21 +758,15 @@ mod tests {
 
         app.update();
 
-        let published = app
-            .world()
-            .iter_entities()
-            .find_map(|entity| entity.get::<ContributedAgentModes>())
-            .unwrap();
-        assert_eq!(published.0.agent_key, "codex-acp");
-        assert_eq!(published.0.url, "vmux://sessions/codex-acp");
-        assert_eq!(published.0.selected, "agent");
-        assert_eq!(
-            app.world()
-                .get::<AgentModeSelections>(registry)
-                .unwrap()
-                .selected_for("codex-acp"),
-            "agent"
-        );
+        let remembered = app
+            .world_mut()
+            .resource_mut::<Messages<RememberModes>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(remembered.len(), 1);
+        assert_eq!(remembered[0].agent_id, "codex-acp");
+        assert_eq!(remembered[0].url, "vmux://sessions/codex-acp");
+        assert_eq!(remembered[0].selected, "agent");
     }
 
     #[test]
@@ -873,15 +785,18 @@ mod tests {
         app.world_mut()
             .get_mut::<AgentModelSelections>(registry)
             .unwrap()
-            .remember_catalog(
-                "claude",
-                "vmux://sessions/claude",
-                "fable",
-                &[ModelOptionEntry {
-                    id: "fable".into(),
-                    name: "Fable".into(),
-                    description: String::new(),
-                }],
+            .by_agent
+            .insert(
+                "claude".to_string(),
+                AgentModelMemory {
+                    url: "vmux://sessions/claude".to_string(),
+                    selected: "fable".to_string(),
+                    models: vec![ModelOptionEntry {
+                        id: "fable".into(),
+                        name: "Fable".into(),
+                        description: String::new(),
+                    }],
+                },
             );
         let stack = app
             .world_mut()

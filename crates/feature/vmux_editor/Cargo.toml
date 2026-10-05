@@ -18,7 +18,7 @@ serde = { workspace = true }
 rkyv = { workspace = true }
 unicode-width = "0.2"
 vmux_ecs = { path = "../../util/vmux_ecs" }
-vmux_native = { path = "../../util/vmux_native" }
+vmux_page = { path = "../../util/vmux_page" }
 vmux_git = { path = "../vmux_git" }
 vmux_knowledge = { path = "../vmux_knowledge" }
 vmux_api = { path = "../../util/vmux_api" }

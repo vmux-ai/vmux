@@ -1,25 +1,77 @@
-use super::server::RemoteState;
+use std::sync::Arc;
+use std::time::Duration;
+
+use super::authorization::RemoteAuthorizations;
+use super::file_driver::PrivateFile;
 use crate::AuthorizationOutcome;
 use crate::RemotePaths;
-use std::time::Duration;
-use tokio::sync::watch;
-use vmux_api::protocol::{ServiceMessage, SharedMessage};
+use tokio::sync::{mpsc, watch};
+use vmux_api::protocol::{ServiceMessage, SharedEvent, SharedMessage};
 use vmux_transport::DeviceId;
 use vmux_transport::framing::{Frame, FrameError, FrameStream};
 use vmux_transport::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 use vmux_transport::quic::{
     ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted,
 };
-
-use vmux_api::protocol::SharedEvent as Shared;
-
-pub mod dispatch;
-
-pub(crate) mod dialer;
+use vmux_transport::service::RemoteDriver;
 
 const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
 
 const MAX_HELLO_BYTES: usize = 16 * 1024;
+
+#[derive(Clone)]
+pub(crate) struct RemoteState {
+    pub(crate) relay_token: Arc<str>,
+    pub(crate) authorizations: RemoteAuthorizations,
+    pub(crate) remote: Arc<dyn RemoteDriver>,
+    pub(crate) sessions: SessionPublisher,
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionPublisher {
+    started: mpsc::UnboundedSender<SessionStarted>,
+    ended: mpsc::UnboundedSender<SessionEnded>,
+}
+
+impl SessionPublisher {
+    pub(crate) fn channel() -> (
+        Self,
+        mpsc::UnboundedReceiver<SessionStarted>,
+        mpsc::UnboundedReceiver<SessionEnded>,
+    ) {
+        let (started, started_inbox) = mpsc::unbounded_channel();
+        let (ended, ended_inbox) = mpsc::unbounded_channel();
+        (Self { started, ended }, started_inbox, ended_inbox)
+    }
+
+    fn open(&self, id: usize, device: DeviceId) -> SessionLease {
+        let _ = self.started.send(SessionStarted { id, device });
+        SessionLease {
+            id,
+            ended: self.ended.clone(),
+        }
+    }
+}
+
+pub(crate) struct SessionStarted {
+    pub(crate) id: usize,
+    pub(crate) device: DeviceId,
+}
+
+pub(crate) struct SessionEnded {
+    pub(crate) id: usize,
+}
+
+struct SessionLease {
+    id: usize,
+    ended: mpsc::UnboundedSender<SessionEnded>,
+}
+
+impl Drop for SessionLease {
+    fn drop(&mut self) {
+        let _ = self.ended.send(SessionEnded { id: self.id });
+    }
+}
 
 pub(crate) struct IdentityStore(RemotePaths);
 
@@ -49,7 +101,7 @@ impl IdentityStore {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&cert_path, &identity.certificate_pem)?;
-        super::PrivateFile::new(key_path).write(&identity.private_key_pem)?;
+        PrivateFile::new(key_path).write(&identity.private_key_pem)?;
         self.persist_fingerprint(&identity.fingerprint)?;
         Ok(identity)
     }
@@ -214,6 +266,10 @@ impl RemoteConnection {
         if SETUP.open(&mut send, &frame).await.is_err() || send.finish().is_err() {
             return;
         }
+        let _session = self
+            .state
+            .sessions
+            .open(self.connection.stable_id(), authorization.client_id.clone());
         let mut authorization_poll = tokio::time::interval(AUTHORIZATION_POLL);
         authorization_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         authorization_poll.tick().await;
@@ -300,7 +356,7 @@ impl ControlStream {
             return;
         }
 
-        let response = state.dispatch(request).await;
+        let response = state.remote.dispatch(request).await;
         let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
             self.refuse(Rejection::Malformed);
             return;
@@ -325,14 +381,12 @@ struct SessionEvents {
 
 impl SessionEvents {
     fn new(state: RemoteState, request: SharedMessage) -> Option<Self> {
-        let SharedMessage::AgentAttach { sid } = request else {
-            return None;
-        };
+        let sid = state.remote.subscription(&request)?;
         Some(Self { state, sid })
     }
 
     async fn stream(self, send: quinn::SendStream) {
-        let Some(mut events) = self.state.acp.subscribe(self.sid.clone()).await else {
+        let Some(mut events) = self.state.remote.subscribe(self.sid.clone()).await else {
             let mut writer = SessionEventWriter::new(send);
             writer.finish();
             return;
@@ -350,7 +404,8 @@ impl SessionEvents {
                     let ServiceMessage::Shared(event) = message else {
                         continue;
                     };
-                    let Some(event) = self.resolve(event).await else {
+                    let Some(event) = self.state.remote.resolve(self.sid.clone(), event).await
+                    else {
                         continue;
                     };
                     if writer.write(&event).await.is_err() {
@@ -373,25 +428,8 @@ impl SessionEvents {
         }
     }
 
-    async fn resolve(
-        &self,
-        event: vmux_api::protocol::SharedEvent,
-    ) -> Option<vmux_api::protocol::SharedEvent> {
-        match event {
-            Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => {
-                let session = self.state.current_session(&self.sid).await?;
-                Some(Shared::Session { session })
-            }
-            other => Some(other),
-        }
-    }
-
-    async fn snapshot(&self) -> Option<vmux_api::protocol::SharedEvent> {
-        let snapshot = self.state.acp.snapshot(self.sid.clone()).await?;
-        match snapshot {
-            ServiceMessage::Shared(event) => Some(event),
-            _ => None,
-        }
+    async fn snapshot(&self) -> Option<SharedEvent> {
+        self.state.remote.snapshot(self.sid.clone()).await
     }
 }
 
@@ -408,7 +446,7 @@ impl SessionEventWriter {
         }
     }
 
-    async fn write(&mut self, event: &vmux_api::protocol::SharedEvent) -> Result<(), ()> {
+    async fn write(&mut self, event: &SharedEvent) -> Result<(), ()> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(event).map_err(|_| ())?;
         let frame = Frame::new(MessageType::SESSION_EVENT, bytes.to_vec());
         let written = if self.opened {
@@ -429,7 +467,7 @@ pub(crate) struct InnerEndpoint(quinn::Endpoint);
 
 impl InnerEndpoint {
     pub(crate) fn open(
-        socket: std::sync::Arc<vmux_transport::quic::tunnel::TunnelSocket>,
+        socket: Arc<vmux_transport::quic::tunnel::TunnelSocket>,
         identity: &SelfSignedIdentity,
     ) -> Result<Self, String> {
         let config = identity.server_config()?;
@@ -437,7 +475,7 @@ impl InnerEndpoint {
             quinn::EndpointConfig::default(),
             Some(config),
             socket,
-            std::sync::Arc::new(quinn::TokioRuntime),
+            Arc::new(quinn::TokioRuntime),
         )
         .map_err(|error| format!("tunnel endpoint failed: {error}"))?;
         Ok(Self(endpoint))
@@ -510,10 +548,52 @@ mod live {
     use bevy::prelude::{App, MinimalPlugins, Name};
     use std::net::Ipv4Addr;
     use std::sync::Arc;
-    use tokio::sync::{broadcast, mpsc};
-    use vmux_api::protocol::SharedResponse;
+    use tokio::sync::mpsc;
+    use vmux_api::protocol::{
+        ServiceMessage, SharedEvent, SharedFailure, SharedMessage, SharedResponse,
+    };
     use vmux_transport::DeviceId;
     use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
+    use vmux_transport::service::{RemoteDriver, RemoteFuture};
+
+    struct ClosedRemote;
+
+    impl RemoteDriver for ClosedRemote {
+        fn dispatch(&self, request: SharedMessage) -> RemoteFuture<'_, SharedResponse> {
+            Box::pin(async move {
+                match request {
+                    SharedMessage::ListSessions => SharedResponse::Sessions(Vec::new()),
+                    _ => SharedResponse::Failed(SharedFailure::NotFound),
+                }
+            })
+        }
+
+        fn subscription(&self, request: &SharedMessage) -> Option<String> {
+            let SharedMessage::AgentAttach { sid } = request else {
+                return None;
+            };
+            Some(sid.clone())
+        }
+
+        fn subscribe(
+            &self,
+            _sid: String,
+        ) -> RemoteFuture<'_, Option<tokio::sync::broadcast::Receiver<ServiceMessage>>> {
+            Box::pin(async { None })
+        }
+
+        fn resolve(
+            &self,
+            _sid: String,
+            event: SharedEvent,
+        ) -> RemoteFuture<'_, Option<SharedEvent>> {
+            Box::pin(async move { Some(event) })
+        }
+
+        fn snapshot(&self, _sid: String) -> RemoteFuture<'_, Option<SharedEvent>> {
+            Box::pin(async { None })
+        }
+    }
 
     struct Harness {
         _directory: tempfile::TempDir,
@@ -543,23 +623,12 @@ mod live {
                     authorization_app.update();
                 }
             });
-            let (agent_tx, _) = broadcast::channel(8);
-            let (acp_wake, acp_wake_inbox) = mpsc::unbounded_channel();
-            drop(acp_wake_inbox);
-            let (acp, acp_runtime) =
-                vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), acp_wake);
-            drop(acp_runtime);
-            let state = super::super::server::RemoteState {
+            let (sessions, _, _) = SessionPublisher::channel();
+            let state = RemoteState {
                 relay_token: Arc::from("relay-token"),
                 authorizations: authorizations.clone(),
-                acp,
-                broker: vmux_agent::broker::AgentBroker::new(
-                    agent_tx,
-                    Default::default(),
-                    Default::default(),
-                    Default::default(),
-                ),
-                client_ops: super::super::client_operation::ClientOperations::closed(),
+                remote: Arc::new(ClosedRemote),
+                sessions,
             };
             let identity =
                 SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");
@@ -647,10 +716,10 @@ mod live {
         rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(body).expect("decode")
     }
 
-    async fn read_event(recv: &mut quinn::RecvStream) -> Option<vmux_api::protocol::SharedEvent> {
+    async fn read_event(recv: &mut quinn::RecvStream) -> Option<SharedEvent> {
         let frame = CONTROL.accept(recv).await.ok()?;
         let body = frame.body_of(MessageType::SESSION_EVENT).ok()?;
-        rkyv::from_bytes::<vmux_api::protocol::SharedEvent, rkyv::rancor::Error>(body).ok()
+        rkyv::from_bytes::<SharedEvent, rkyv::rancor::Error>(body).ok()
     }
 
     #[tokio::test]

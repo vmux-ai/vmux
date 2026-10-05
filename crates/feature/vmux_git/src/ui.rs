@@ -16,13 +16,13 @@ mod shortcuts;
 mod state;
 mod status;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
     subtree
 )]
 pub(crate) struct GitPage;
 
-#[vmux_native::page(
+#[vmux_page::page(
     page = "document",
     component = Page
 )]

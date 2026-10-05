@@ -2,8 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
-use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::UiStateWrite;
 
+use super::prompt_driver::PromptContext;
 use super::{NewPalette, OpenVersion, PaletteContext, PaletteSnapshot};
 
 pub(super) struct PalettePromptPlugin;
@@ -68,7 +69,7 @@ fn receive_history(
     mut palettes: Query<(&mut PalettePrompt, &mut PaletteSnapshot)>,
 ) {
     let Some(response) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<PromptHistory>>::payload(
-        trigger.event().patch(),
+        trigger.event().update(),
     ) else {
         return;
     };
@@ -109,23 +110,6 @@ fn request_history(mut palettes: Query<(Entity, &mut PalettePrompt)>, mut comman
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct PromptContext {
-    agent: String,
-    cwd: String,
-}
-
-impl PromptContext {
-    fn new(agent: &str, cwd: &str) -> Option<Self> {
-        if agent.is_empty() || cwd.is_empty() {
-            return None;
-        }
-        Some(Self {
-            agent: agent.to_string(),
-            cwd: cwd.to_string(),
-        })
-    }
-}
-
 struct PromptFlight {
     open_generation: u64,
     context: PromptContext,

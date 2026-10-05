@@ -20,8 +20,8 @@ pub(super) fn ChangesCard(
     repository: GitRepositorySnapshot,
     selected_path_bytes: Vec<u8>,
     confirm_discard: Vec<u8>,
-    commit_message: Signal<String>,
-    pending_commit_message: Signal<String>,
+    commit_message: String,
+    commit_pending: String,
     focused_panel: GitPanel,
     operations: GitOperationEligibility,
 ) -> Element {
@@ -122,10 +122,9 @@ pub(super) fn ChangesCard(
                 }
             }
             CommitPanel {
-                repo_root: repository.repo_root,
                 staged_count,
                 commit_message,
-                pending_commit_message,
+                commit_pending,
                 can_commit: operations.commit,
             }
         }
@@ -261,14 +260,12 @@ fn FileRow(
 
 #[component]
 fn CommitPanel(
-    repo_root: String,
     staged_count: u32,
-    commit_message: Signal<String>,
-    pending_commit_message: Signal<String>,
+    commit_message: String,
+    commit_pending: String,
     can_commit: bool,
 ) -> Element {
-    let can_commit =
-        can_commit && !commit_message().trim().is_empty() && pending_commit_message().is_empty();
+    let can_commit = can_commit && !commit_message.trim().is_empty() && commit_pending.is_empty();
 
     rsx! {
         div { class: "shrink-0 border-t border-foreground/[0.07] bg-foreground/[0.015] p-1.5",
@@ -277,7 +274,11 @@ fn CommitPanel(
                 class: "min-h-8 w-full resize-none rounded-md border border-foreground/[0.09] bg-background/65 px-2 py-1.5 text-[11px] shadow-inner outline-none placeholder:text-muted-foreground focus:border-primary/40 focus:ring-2 focus:ring-primary/10",
                 placeholder: translate("git-commit-message"),
                 value: "{commit_message}",
-                oninput: move |event: Event<FormData>| commit_message.set(event.value()),
+                oninput: move |event: Event<FormData>| {
+                    let _ = send(&GitCommitDraftRequest {
+                        message: event.value(),
+                    });
+                },
                 onkeydown: move |event: KeyboardEvent| event.stop_propagation(),
             }
             div { class: "mt-1.5 flex items-center gap-1",
@@ -287,18 +288,7 @@ fn CommitPanel(
                     class: "ml-auto h-6 shrink-0 rounded-md px-2 text-[10px] font-medium shadow-sm disabled:opacity-40",
                     disabled: !can_commit,
                     onclick: move |_| {
-                        let text = commit_message().trim().to_string();
-                        if text.is_empty() {
-                            return;
-                        }
-                        if send(&GitCommitRequest {
-                            path: repo_root.clone(),
-                            message: text.clone(),
-                        })
-                        .is_ok()
-                        {
-                            pending_commit_message.set(text);
-                        }
+                        let _ = send(&GitCommitSubmitRequest);
                     },
                     {translate_with("git-commit", &[("count", TranslationValue::Number(staged_count as i64))])}
                 }

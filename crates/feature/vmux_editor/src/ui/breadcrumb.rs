@@ -8,7 +8,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use super::explorer::OutlineGlyph;
-use super::state::use_file_ui;
+use super::state::FileUi;
 
 const PATH_CRUMBS_MAX: usize = 4;
 
@@ -22,15 +22,8 @@ pub fn EditorBreadcrumbs(
 ) -> Element {
     let menus = CrumbMenus {
         open: use_signal(|| None::<CrumbMenu>),
-        siblings: use_signal(Vec::<FileDirEntry>::new),
-        pending: use_signal(|| false),
+        state: FileUi::current().use_value(|state| Some(&state.document.breadcrumb)),
     };
-    let preview = use_file_ui::<FilePreviewEvent>();
-    use_effect(move || {
-        preview.for_each(|event| {
-            menus.receive(event);
-        })
-    });
 
     let trail = PathTrail::build(&display_path, &abs_path, leaf_is_dir);
     if trail.is_empty() {
@@ -287,21 +280,13 @@ const CRUMB_ITEM_ACTIVE_CLASS: &str = "flex w-full items-center gap-2 rounded-md
 #[derive(Clone, Copy)]
 struct CrumbMenus {
     open: Signal<Option<CrumbMenu>>,
-    siblings: Signal<Vec<FileDirEntry>>,
-    pending: Signal<bool>,
+    state: Memo<Option<FileBreadcrumbState>>,
 }
 
 impl CrumbMenus {
     fn show(mut self, next: CrumbMenu) {
         if let CrumbMenuKind::Siblings { dir, .. } = &next.kind {
-            self.siblings.set(Vec::new());
-            self.pending.set(true);
-            let _ = send(&FilePreviewRequest {
-                path: dir.clone(),
-                thumb: false,
-            });
-        } else {
-            self.pending.set(false);
+            let _ = send(&FileBreadcrumbRequest { path: dir.clone() });
         }
         self.open.set(Some(next));
     }
@@ -315,31 +300,36 @@ impl CrumbMenus {
     }
 
     fn entries(self) -> Vec<FileDirEntry> {
-        (self.siblings)()
+        let open = self.open.peek();
+        let Some(CrumbMenu {
+            kind: CrumbMenuKind::Siblings { dir, .. },
+            ..
+        }) = open.as_ref()
+        else {
+            return Vec::new();
+        };
+        self.state
+            .read()
+            .as_ref()
+            .filter(|state| state.path.as_str() == dir.as_str())
+            .map(|state| state.entries.clone())
+            .unwrap_or_default()
     }
 
     fn waiting(self) -> bool {
-        (self.pending)()
-    }
-
-    fn receive(mut self, event: FilePreviewEvent) {
-        if event.thumb {
-            return;
-        }
-        let Some(current) = self.open.peek().clone() else {
-            return;
+        let open = self.open.peek();
+        let Some(CrumbMenu {
+            kind: CrumbMenuKind::Siblings { dir, .. },
+            ..
+        }) = open.as_ref()
+        else {
+            return false;
         };
-        let CrumbMenuKind::Siblings { dir, .. } = current.kind else {
-            return;
-        };
-        if dir != event.path {
-            return;
-        }
-        let PreviewKind::Dir(entries) = event.kind else {
-            return;
-        };
-        self.siblings.set(entries);
-        self.pending.set(false);
+        self.state
+            .read()
+            .as_ref()
+            .filter(|state| state.path.as_str() == dir.as_str())
+            .is_none_or(|state| state.pending)
     }
 }
 

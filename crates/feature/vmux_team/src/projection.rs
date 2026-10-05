@@ -1,11 +1,11 @@
 use vmux_api::team::{
-    ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamEvent, TeamMemberRow,
+    ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, TeamUiState,
 };
 
 pub(crate) struct TeamStateProjection;
 
 impl TeamStateProjection {
-    pub(crate) fn build(members: Vec<TeamMemberRow>, profiles: Vec<ProfileRow>) -> TeamEvent {
+    pub(crate) fn build(members: Vec<TeamMemberRow>, profiles: Vec<ProfileRow>) -> TeamUiState {
         let active_profile = profiles.iter().find(|profile| profile.is_active).cloned();
         let mut agents = Vec::new();
         for member in &members {
@@ -28,11 +28,12 @@ impl TeamStateProjection {
                 subtitle,
             });
         }
-        TeamEvent {
+        TeamUiState {
             members,
             profiles,
             active_profile,
             agents,
+            profile_form: None,
         }
     }
 }

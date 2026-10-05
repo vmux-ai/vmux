@@ -1,81 +1,21 @@
 use bevy::prelude::*;
-use std::path::PathBuf;
 use vmux_chat::host::ImportedConversation;
 
+#[cfg(test)]
 use vmux_api::protocol::AgentPromptEnvelope;
-use vmux_api::room::Message;
 
-pub struct Plugin;
+use super::handoff_driver::HandoffDriver;
 
-impl bevy::app::Plugin for Plugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn)
-            .add_systems(Update, load)
-            .add_systems(Update, persist.after(vmux_ecs::service::ServiceMessageSet));
-    }
-}
-
-#[derive(Component)]
-struct HandoffDirectory(PathBuf);
-
-impl HandoffDirectory {
-    fn save(
-        &self,
-        imported: &ImportedConversation,
-        agent_id: &str,
-        session_id: &str,
-    ) -> Result<(), String> {
-        let path = self.record_path(agent_id, session_id);
-        let parent = path
-            .parent()
-            .ok_or_else(|| format!("invalid handoff path {}", path.display()))?;
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("create handoff directory {}: {error}", parent.display()))?;
-        let bytes = serde_json::to_vec(imported)
-            .map_err(|error| format!("serialize handoff record: {error}"))?;
-        std::fs::write(&path, bytes)
-            .map_err(|error| format!("write handoff record {}: {error}", path.display()))
-    }
-
-    fn load(&self, agent_id: &str, session_id: &str) -> Option<ImportedConversation> {
-        let bytes = std::fs::read(self.record_path(agent_id, session_id)).ok()?;
-        let mut imported = serde_json::from_slice::<ImportedConversation>(&bytes).ok()?;
-        let mut fallback = imported.first_prompt.as_deref();
-        for message in &mut imported.messages {
-            let Message::User { text, .. } = message else {
-                continue;
-            };
-            let prompt = AgentPromptEnvelope::new(text);
-            if let Some(display_text) = prompt.display().map(str::to_string) {
-                *text = display_text;
-            } else if prompt.has_private_context()
-                && let Some(display_text) = fallback.take()
-            {
-                *text = display_text.to_string();
-            }
-        }
-        Some(imported)
-    }
-
-    fn record_path(&self, agent_id: &str, session_id: &str) -> PathBuf {
-        self.0
-            .join(Self::hex_component(agent_id))
-            .join(format!("{}.json", Self::hex_component(session_id)))
-    }
-
-    fn hex_component(value: &str) -> String {
-        value
-            .as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_systems(Startup, spawn)
+        .add_systems(Update, load)
+        .add_systems(Update, persist.after(vmux_ecs::service::ServiceMessageSet));
 }
 
 fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent handoff directory"),
-        HandoffDirectory(
+        HandoffDriver(
             vmux_ecs::profile::ProfilePaths::current()
                 .profile()
                 .join("handoffs"),
@@ -84,7 +24,7 @@ fn spawn(mut commands: Commands) {
 }
 
 fn load(
-    directory: Single<&HandoffDirectory>,
+    directory: Single<&HandoffDriver>,
     sessions: Query<
         (Entity, &vmux_session::AcpSession),
         (
@@ -106,8 +46,8 @@ fn load(
 }
 
 fn persist(
-    directory: Single<&HandoffDirectory>,
-    mut created: MessageReader<crate::host::event::UiAgentSessionCreated>,
+    directory: Single<&HandoffDriver>,
+    mut created: MessageReader<crate::host::event::AcpSessionCreated>,
     sessions: Query<(&vmux_session::AcpSession, &ImportedConversation)>,
 ) {
     for event in created.read() {
@@ -132,32 +72,6 @@ pub struct PendingHandoff {
 mod tests {
     use super::*;
     use vmux_api::room::{AssistantBlock, Message};
-
-    struct TestHandoffDirectory {
-        directory: HandoffDirectory,
-    }
-
-    impl TestHandoffDirectory {
-        fn new(name: &str) -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "vmux-handoff-{name}-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            Self {
-                directory: HandoffDirectory(root),
-            }
-        }
-    }
-
-    impl Drop for TestHandoffDirectory {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.directory.0);
-        }
-    }
 
     fn user(text: &str) -> Message {
         Message::user(text)
@@ -188,7 +102,8 @@ mod tests {
             assistant("done"),
         ];
 
-        let directory = TestHandoffDirectory::new("replay");
+        let root = tempfile::tempdir().unwrap();
+        let directory = HandoffDriver(root.path().to_path_buf());
         let imported = ImportedConversation {
             source_agent: String::new(),
             source_sid: String::new(),
@@ -196,15 +111,8 @@ mod tests {
             truncated: false,
             first_prompt: Some("continue here".into()),
         };
-        directory
-            .directory
-            .save(&imported, "agent", "session")
-            .unwrap();
-        let messages = directory
-            .directory
-            .load("agent", "session")
-            .unwrap()
-            .messages;
+        directory.save(&imported, "agent", "session").unwrap();
+        let messages = directory.load("agent", "session").unwrap().messages;
 
         assert_eq!(messages[0], user("continue here"));
         assert_eq!(messages[1], assistant("done"));
@@ -223,7 +131,8 @@ mod tests {
             )),
         ];
 
-        let directory = TestHandoffDirectory::new("retry");
+        let root = tempfile::tempdir().unwrap();
+        let directory = HandoffDriver(root.path().to_path_buf());
         let imported = ImportedConversation {
             source_agent: String::new(),
             source_sid: String::new(),
@@ -231,11 +140,8 @@ mod tests {
             truncated: false,
             first_prompt: Some("stale sidecar text".into()),
         };
-        directory
-            .directory
-            .save(&imported, "agent", "retry")
-            .unwrap();
-        let messages = directory.directory.load("agent", "retry").unwrap().messages;
+        directory.save(&imported, "agent", "retry").unwrap();
+        let messages = directory.load("agent", "retry").unwrap().messages;
 
         assert_eq!(messages, vec![user("first try"), user("second try")]);
     }
@@ -245,7 +151,8 @@ mod tests {
         let text = "<vmux_handoff_context> ordinary user text";
         let messages = vec![user(text)];
 
-        let directory = TestHandoffDirectory::new("plain");
+        let root = tempfile::tempdir().unwrap();
+        let directory = HandoffDriver(root.path().to_path_buf());
         let imported = ImportedConversation {
             source_agent: String::new(),
             source_sid: String::new(),
@@ -253,11 +160,8 @@ mod tests {
             truncated: false,
             first_prompt: Some("fallback".into()),
         };
-        directory
-            .directory
-            .save(&imported, "agent", "plain")
-            .unwrap();
-        let messages = directory.directory.load("agent", "plain").unwrap().messages;
+        directory.save(&imported, "agent", "plain").unwrap();
+        let messages = directory.load("agent", "plain").unwrap().messages;
 
         assert_eq!(messages, vec![user(text)]);
     }
@@ -280,7 +184,7 @@ mod tests {
             first_prompt: Some("continue".into()),
         };
 
-        let directory = HandoffDirectory(root.clone());
+        let directory = HandoffDriver(root.clone());
         directory
             .save(&imported, "claude/custom", "target?1")
             .unwrap();
@@ -306,7 +210,7 @@ mod tests {
                 .as_nanos()
         ));
 
-        let directory = HandoffDirectory(root.clone());
+        let directory = HandoffDriver(root.clone());
         assert!(directory.load("claude", "missing").is_none());
         let path = directory.record_path("claude", "bad");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();

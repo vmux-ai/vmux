@@ -8,7 +8,7 @@ use vmux_api::extension::{
     ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
 use vmux_ecs::overlay::WindowOverlay;
-use vmux_ecs::{KeyboardOwner, host::UiStateWrite};
+use vmux_ecs::{KeyboardOwner, UiStateWrite};
 use vmux_flex::prelude::{LayoutSystems, Visibility};
 use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
 
@@ -110,16 +110,20 @@ fn open_request(
     trigger: On<UiInput<ExtensionPopupOpenRequest>>,
     layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
     host_windows: Query<&HostWindow>,
+    profile: vmux_ecs::profile::CurrentProfile,
     mut actions: PopupActions,
 ) {
+    let Some((profile, paths)) = profile.profile().zip(profile.paths()) else {
+        return;
+    };
     let id = trigger.event().payload.id.clone();
-    let index = store::ExtensionStore::current()
+    let index = store::ExtensionStore::at(paths.extensions())
         .load_index()
         .unwrap_or_default();
     let Some(entry) = index.entries.into_iter().find(|entry| entry.id == id) else {
         return;
     };
-    if !entry.enabled_for(vmux_ecs::profile::Profile::current().id()) {
+    if !entry.enabled_for(profile.id()) {
         return;
     }
     let Some(popup) = entry.popup else {

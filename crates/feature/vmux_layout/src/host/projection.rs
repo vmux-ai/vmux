@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
-use vmux_ecs::event::team::{TeamEvent, TeamMemberRow};
+use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
 
 use crate::cef::LayoutCef;
 use crate::event::{
@@ -49,7 +49,7 @@ pub struct PaneTreeProjection(pub PaneTreeState);
 pub struct ProjectProjection(pub TabBoundaryState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct TeamProjection(pub TeamEvent);
+pub struct TeamProjection(pub TeamUiState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct StackProjection(pub StackNavigationState);
@@ -269,7 +269,7 @@ impl ActiveSession {
     fn from_projections(
         panes: &PaneTreeState,
         projects: &TabBoundaryState,
-        team: &TeamEvent,
+        team: &TeamUiState,
     ) -> Option<Self> {
         let pane = panes
             .panes
@@ -291,13 +291,11 @@ impl ActiveSession {
     }
 
     fn agent_for(page: &StackNode, team: &[TeamMemberRow]) -> Option<TeamMemberRow> {
-        if !vmux_api::VmuxRoute::parse(&page.url).is_some_and(|route| route.is_agent()) {
-            return None;
-        }
         if let Some(agent_id) = page.agent_id.as_deref()
             && let Some(agent) = team
                 .iter()
                 .find(|member| !member.is_user && member.id == agent_id)
+            && Self::same_page_family(&page.url, &agent.url)
         {
             return Some(agent.clone());
         }
@@ -306,13 +304,23 @@ impl ActiveSession {
             .find(|member| page.url.trim_end_matches('/') == member.url.trim_end_matches('/'))
             .cloned()
     }
+
+    fn same_page_family(page: &str, member: &str) -> bool {
+        let Some(page) = vmux_api::VmuxRoute::parse(page) else {
+            return false;
+        };
+        let Some(member) = vmux_api::VmuxRoute::parse(member) else {
+            return false;
+        };
+        page.in_subtree(&member) || member.in_subtree(&page)
+    }
 }
 
 impl HeaderState {
     fn from_projections(
         stacks: &StackNavigationState,
         bookmarks: &BookmarkStateEvent,
-        team: &TeamEvent,
+        team: &TeamUiState,
     ) -> Self {
         let active = stacks.stacks.iter().find(|stack| stack.is_active).cloned();
         let user = team.members.iter().find(|member| member.is_user).cloned();
@@ -474,7 +482,7 @@ fn publish_active_session(
 ) {
     let empty_panes = PaneTreeState::default();
     let empty_projects = TabBoundaryState::default();
-    let empty_team = TeamEvent::default();
+    let empty_team = TeamUiState::default();
     for (entity, panes, projects, team) in &layouts {
         let panes = panes
             .map(|projection| &projection.0)
@@ -489,18 +497,15 @@ fn publish_active_session(
         if last.get(&entity) == Some(&event) {
             continue;
         }
-        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
             entity, &event,
         ));
         last.insert(entity, event);
     }
 }
 
-fn capture_tab_list(
-    trigger: On<vmux_ecs::host::UiStateWrite<LayoutUiState>>,
-    mut commands: Commands,
-) {
-    let Some(tabs) = &trigger.event().patch().tabs else {
+fn capture_tab_list(trigger: On<vmux_ecs::UiStateWrite<LayoutUiState>>, mut commands: Commands) {
+    let Some(tabs) = &trigger.event().update().tabs else {
         return;
     };
     commands
@@ -523,7 +528,7 @@ fn project_header(
 ) {
     let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
-    let empty_team = TeamEvent::default();
+    let empty_team = TeamUiState::default();
     for (entity, stacks, bookmarks, team, current) in &layouts {
         let stacks = stacks
             .map(|projection| &projection.0)
@@ -566,7 +571,7 @@ fn publish_header(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.0,
         ));
@@ -578,7 +583,7 @@ fn publish_tab_strip(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.0,
         ));
@@ -635,7 +640,7 @@ fn publish_side_sheet(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.state,
         ));
@@ -647,7 +652,7 @@ fn publish_bookmark_ui(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.0,
         ));
@@ -747,6 +752,7 @@ mod tests {
         let team = vec![TeamMemberRow {
             id: "agent".into(),
             name: "Codex".into(),
+            url: "vmux://sessions/codex/".into(),
             ..Default::default()
         }];
 
@@ -769,7 +775,7 @@ mod tests {
         let state = HeaderState::from_projections(
             &StackNavigationState::default(),
             &BookmarkStateEvent::default(),
-            &TeamEvent {
+            &TeamUiState {
                 members: vec![user.clone(), agent.clone()],
                 ..Default::default()
             },

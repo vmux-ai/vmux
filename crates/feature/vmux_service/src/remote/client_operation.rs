@@ -1,6 +1,10 @@
 use bevy::prelude::*;
-use tokio::sync::{mpsc, oneshot};
 use vmux_api::room::ClientOpId;
+
+pub(crate) use super::client_operation_driver::ClientOperations;
+use super::client_operation_driver::{
+    ClaimClientOperation, ClientOperationInbox, ReleaseClientOperation,
+};
 
 const MAX_CLIENT_OPERATIONS: usize = 4096;
 
@@ -20,99 +24,6 @@ impl Plugin for ClientOperationPlugin {
                 .chain(),
         );
     }
-}
-
-#[derive(Clone)]
-pub(crate) struct ClientOperations {
-    claims: mpsc::UnboundedSender<ClaimClientOperation>,
-    releases: mpsc::UnboundedSender<ReleaseClientOperation>,
-    wake: mpsc::UnboundedSender<()>,
-}
-
-impl ClientOperations {
-    pub(crate) fn new(wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
-        let (claims, claim_inbox) = mpsc::unbounded_channel();
-        let (releases, release_inbox) = mpsc::unbounded_channel();
-        (
-            Self {
-                claims,
-                releases,
-                wake,
-            },
-            ClientOperationInbox(ClientOperationReceivers {
-                claims: claim_inbox,
-                releases: release_inbox,
-            }),
-        )
-    }
-    pub(crate) async fn claim(&self, id: ClientOpId) -> bool {
-        let (response, receiver) = oneshot::channel();
-        if self
-            .claims
-            .send(ClaimClientOperation {
-                id,
-                response: Some(response),
-            })
-            .is_err()
-        {
-            return false;
-        }
-        if self.wake.send(()).is_err() {
-            return false;
-        }
-        receiver.await.unwrap_or(false)
-    }
-
-    pub(crate) async fn release(&self, id: ClientOpId) {
-        let (response, receiver) = oneshot::channel();
-        if self
-            .releases
-            .send(ReleaseClientOperation {
-                id,
-                response: Some(response),
-            })
-            .is_err()
-        {
-            return;
-        }
-        if self.wake.send(()).is_err() {
-            return;
-        }
-        let _ = receiver.await;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn closed() -> Self {
-        let (claims, claim_inbox) = mpsc::unbounded_channel();
-        let (releases, release_inbox) = mpsc::unbounded_channel();
-        let (wake, wake_inbox) = mpsc::unbounded_channel();
-        drop((claim_inbox, release_inbox, wake_inbox));
-        Self {
-            claims,
-            releases,
-            wake,
-        }
-    }
-}
-
-struct ClientOperationReceivers {
-    claims: mpsc::UnboundedReceiver<ClaimClientOperation>,
-    releases: mpsc::UnboundedReceiver<ReleaseClientOperation>,
-}
-
-#[derive(Component)]
-struct ClientOperationInbox(ClientOperationReceivers);
-
-#[derive(Component)]
-struct ClaimClientOperation {
-    id: ClientOpId,
-    response: Option<oneshot::Sender<bool>>,
-}
-
-#[derive(Component)]
-struct ReleaseClientOperation {
-    id: ClientOpId,
-    response: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Component, Clone, Eq, PartialEq)]
@@ -196,6 +107,7 @@ fn claim_client_operations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::mpsc;
 
     async fn claim(app: &mut App, operations: ClientOperations, id: ClientOpId) -> bool {
         let task = tokio::spawn(async move { operations.claim(id).await });

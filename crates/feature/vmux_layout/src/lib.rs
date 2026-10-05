@@ -13,7 +13,7 @@ pub use host::{
     LayoutStartupSet, LayoutUiStateUpdates, Loading, NavigationState, NewTabRequest, Open,
     OpenBesideRequest, OpenInNewStackRequest, PendingWebviewReveal, ReloadRevision,
     TabLayoutSpawnContent, TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, UpdateState, active,
-    active_pane, apply, archive, bookmark, cef, contract, native_open, overlay, page_context, pane,
+    active_pane, apply, archive, bookmark, cef, contract, hosted_page, overlay, page_context, pane,
     pending_stack, placement, plugin, profile, projection, settings, side_sheet, snapshot, space,
     stack, tab, target, toggle, tool, unit, warm_page, window, workspace_snapshot,
     workspace_snapshot_publish, worktree,
@@ -23,7 +23,7 @@ pub use host::{
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

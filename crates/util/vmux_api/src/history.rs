@@ -25,6 +25,11 @@ pub struct HistoryDeleteRequest {
 #[vmux_api::ui_event]
 pub struct HistoryClearAllRequest;
 
+#[vmux_api::ui_event(Eq)]
+pub struct HistoryClearConfirmRequest {
+    pub open: bool,
+}
+
 #[vmux_api::ui_event]
 pub struct HistoryOpenRequest {
     pub url: String,

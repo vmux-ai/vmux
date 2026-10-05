@@ -17,7 +17,7 @@ pub struct McpServerEntry {
 }
 
 #[vmux_api::ui_state(Default, Eq)]
-pub struct McpServers {
+pub struct McpServersUiState {
     pub loaded: bool,
     pub loading: bool,
     pub servers: Vec<McpServerEntry>,
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn server_result_round_trips_inside_state() {
-        let state = McpServers {
+        let state = McpServersUiState {
             loaded: true,
             loading: false,
             servers: Vec::new(),
@@ -73,7 +73,7 @@ mod tests {
             }),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
-        let decoded = rkyv::from_bytes::<McpServers, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<McpServersUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert!(matches!(
             decoded.result,

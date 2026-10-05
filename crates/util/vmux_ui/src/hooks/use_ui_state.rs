@@ -2,27 +2,15 @@ use crate::listener_guard::GuardedListener;
 use crate::transport::Host;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
-use std::marker::PhantomData;
-use vmux_api::{BatchedUiState, UiState, UiStatePatch};
+use vmux_api::UiState;
 
 struct UiStateListener {
     error: Signal<Option<String>>,
 }
 
-pub struct UiStatePatchBatch<S, T> {
-    state: Signal<S>,
-    handled_sequence: Signal<u64>,
-    payload: PhantomData<fn() -> T>,
-}
-
 pub struct UiStateBinding<T> {
     pub state: Signal<T>,
     pub error: Signal<Option<String>>,
-}
-
-pub struct UiStateValue<T> {
-    pub value: Signal<T>,
-    pub ready: Signal<bool>,
 }
 
 fn use_ui_state_listener<T, F>(on_state: F) -> UiStateListener
@@ -78,137 +66,6 @@ impl<T> Clone for UiStateBinding<T> {
 }
 
 impl<T> Copy for UiStateBinding<T> {}
-
-impl<T> Clone for UiStateValue<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for UiStateValue<T> {}
-
-impl<T: 'static> PartialEq for UiStateValue<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value && self.ready == other.ready
-    }
-}
-
-impl<S, T> Clone for UiStatePatchBatch<S, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<S, T> Copy for UiStatePatchBatch<S, T> {}
-
-impl<S, T> UiStatePatchBatch<S, T>
-where
-    S: BatchedUiState,
-    S::Patch: UiStatePatch<T>,
-    T: Clone + 'static,
-{
-    pub fn take(mut self) -> Vec<T> {
-        let (sequence, payloads) = {
-            let event = self.state.read();
-            let sequence = event.sequence();
-            if sequence == 0 || sequence == *self.handled_sequence.peek() {
-                return Vec::new();
-            }
-            let payloads = event
-                .patches()
-                .iter()
-                .filter_map(<S::Patch as UiStatePatch<T>>::payload)
-                .cloned()
-                .collect();
-            (sequence, payloads)
-        };
-        self.handled_sequence.set(sequence);
-        payloads
-    }
-
-    pub fn for_each(self, mut callback: impl FnMut(T)) {
-        for payload in self.take() {
-            callback(payload);
-        }
-    }
-}
-
-impl<S> UiStateBinding<S>
-where
-    S: BatchedUiState,
-{
-    pub fn use_patch<T>(self) -> UiStatePatchBatch<S, T>
-    where
-        S::Patch: UiStatePatch<T>,
-        T: Clone + 'static,
-    {
-        UiStatePatchBatch {
-            state: self.state,
-            handled_sequence: use_signal(|| 0),
-            payload: PhantomData,
-        }
-    }
-
-    pub fn use_value<T>(self) -> UiStateValue<T>
-    where
-        S::Patch: UiStatePatch<T>,
-        T: Clone + Default + PartialEq + 'static,
-    {
-        let patches = self.use_patch::<T>();
-        let mut value = use_signal(T::default);
-        let mut ready = use_signal(|| false);
-        use_effect(move || {
-            for next in patches.take() {
-                if value.peek().ne(&next) {
-                    value.set(next);
-                }
-                if !*ready.peek() {
-                    ready.set(true);
-                }
-            }
-        });
-        UiStateValue { value, ready }
-    }
-
-    pub fn use_updates<T>(self, mut apply: impl FnMut(T) + 'static)
-    where
-        S::Patch: UiStatePatch<T>,
-        T: Clone + 'static,
-    {
-        let patches = self.use_patch::<T>();
-        use_effect(move || patches.for_each(&mut apply));
-    }
-
-    pub fn use_patches(self, mut apply: impl FnMut(&S::Patch) + 'static) -> Signal<Option<String>> {
-        let mut handled_sequence = use_signal(|| 0);
-        use_effect(move || {
-            let event = self.state.read();
-            let sequence = event.sequence();
-            if sequence == 0 || sequence == *handled_sequence.peek() {
-                return;
-            }
-            handled_sequence.set(sequence);
-            for patch in event.patches() {
-                apply(patch);
-            }
-        });
-        self.error
-    }
-
-    pub fn use_projection<T>(
-        self,
-        mut apply: impl FnMut(&mut T, &S::Patch) + 'static,
-    ) -> UiStateBinding<T>
-    where
-        T: Default + 'static,
-    {
-        let mut state = use_signal(T::default);
-        let error = self.use_patches(move |patch| {
-            state.with_mut(|state| apply(state, patch));
-        });
-        UiStateBinding { state, error }
-    }
-}
 
 pub fn use_ui_state<T>() -> UiStateBinding<T>
 where

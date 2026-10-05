@@ -35,8 +35,6 @@ fn main() {
         }
     );
 
-    vmux_ecs::profile::ProfilePaths::current().migrate_legacy_personal_layout();
-
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);
     run_update_on_one_thread(&mut app);

@@ -1,9 +1,8 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
 use vmux_ecs::ProcessId;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::team::Profile;
 use vmux_ecs::{LastActivatedAt, PageMetadata};
@@ -15,38 +14,34 @@ use vmux_layout::worktree::TabWorktreeReady;
 use vmux_terminal::ReattachedTerminalBundle;
 
 use super::handoff::PendingHandoff;
-use crate::host::acp::registry::RegistryPlugin;
-use crate::host::acp::{AcpLaunchStarted, AcpToolPlugin};
+#[cfg(test)]
+use super::runtime_driver::AcpWorkspaceState;
+use super::runtime_driver::PromptWorkspace;
+use crate::host::acp::AcpLaunchStarted;
 use crate::host::event::{
-    AgentApprovalRequest, UiAgentAcpTerminalCreated, UiAgentInfo,
-    UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
-    UiAgentWorkspaceChanged,
+    AcpAgentInfo, AcpSessionConfigSelectionResult, AcpSessionConfigSnapshot, AcpSessionCreated,
+    AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest,
 };
-use crate::policy::{AcpWorkspacePolicy, AgentPolicyPlugin};
+use crate::policy::AcpWorkspacePolicy;
 use vmux_chat::host::{ChatView, ImportedConversation};
 use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
 
-pub struct AgentRuntimePlugin;
-
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AcpSessionConfigSet;
 
-impl Plugin for AgentRuntimePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins((
-            FeaturePlugin::<crate::Feature>::default(),
-            AgentPolicyPlugin,
-            RegistryPlugin,
-        ))
-        .add_message::<ServiceRequest>()
-        .add_plugins(AcpToolPlugin)
-        .add_message::<UiAgentInfo>()
-        .add_message::<UiAgentWorkspaceChanged>()
-        .add_message::<UiAgentSessionConfigState>()
-        .add_message::<UiAgentSessionConfigSelectionResult>()
-        .add_message::<UiAgentSessionCreated>()
-        .add_message::<UiAgentAcpTerminalCreated>()
+pub(super) fn add(app: &mut App) {
+    app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+    crate::policy::add(app);
+    crate::host::acp::add_registry(app);
+    crate::host::acp::add(app);
+    app.add_message::<ServiceRequest>()
+        .add_message::<AcpAgentInfo>()
+        .add_message::<AcpWorkspaceChanged>()
+        .add_message::<AcpSessionConfigSnapshot>()
+        .add_message::<AcpSessionConfigSelectionResult>()
+        .add_message::<AcpSessionCreated>()
+        .add_message::<AcpTerminalCreated>()
         .add_systems(
             Update,
             (
@@ -63,70 +58,6 @@ impl Plugin for AgentRuntimePlugin {
         )
         .add_observer(close_on_remove)
         .add_observer(auto_allow);
-    }
-}
-
-impl AcpWorkspaceState {
-    fn context(self, policy: &AcpWorkspacePolicy) -> Option<&str> {
-        match self {
-            Self::Bound => None,
-            Self::Unbound => Some(&policy.unbound),
-            Self::PendingWorktree => Some(&policy.pending_worktree),
-            Self::RepositoryNeedsWorktree => Some(&policy.repository_needs_worktree),
-        }
-    }
-
-    fn prompt(
-        policy: &AcpWorkspacePolicy,
-        handoff: Option<String>,
-        state: Option<Self>,
-    ) -> Option<String> {
-        let policy = state.and_then(|state| state.context(policy));
-        match (handoff, policy) {
-            (Some(handoff), Some(policy)) => Some(format!("{handoff}\n\n{policy}")),
-            (Some(handoff), None) => Some(handoff),
-            (None, Some(policy)) => Some(policy.to_string()),
-            (None, None) => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AcpWorkspaceState {
-    Bound,
-    Unbound,
-    PendingWorktree,
-    RepositoryNeedsWorktree,
-}
-
-#[derive(SystemParam)]
-struct PromptWorkspace<'w, 's> {
-    child_of: Query<'w, 's, &'static ChildOf>,
-    tabs: Query<'w, 's, &'static Tab>,
-    workspaces: Query<'w, 's, (), With<TabWorkspace>>,
-    pending: Query<'w, 's, (), With<vmux_space::PendingProject>>,
-    worktrees: Query<'w, 's, (), With<vmux_space::RepositoryNeedsWorktree>>,
-}
-
-impl PromptWorkspace<'_, '_> {
-    fn state(&self, entity: Entity) -> Option<AcpWorkspaceState> {
-        let mut current = entity;
-        loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                let state = match tab.startup_dir.as_deref() {
-                    Some(_) if self.worktrees.contains(current) => {
-                        AcpWorkspaceState::RepositoryNeedsWorktree
-                    }
-                    Some(_) => AcpWorkspaceState::Bound,
-                    None if self.workspaces.contains(current) => AcpWorkspaceState::Bound,
-                    None if self.pending.contains(current) => AcpWorkspaceState::PendingWorktree,
-                    None => AcpWorkspaceState::Unbound,
-                };
-                return Some(state);
-            }
-            current = self.child_of.get(current).ok()?.parent();
-        }
-    }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -149,41 +80,7 @@ pub(super) struct InitialAcpSessionConfig {
     pub(super) value: String,
 }
 
-impl AcpSessionConfigState {
-    pub fn category(&self, category: &str) -> Option<&AcpSessionConfig> {
-        self.configs
-            .iter()
-            .find(|config| config.category.as_deref() == Some(category))
-    }
-
-    pub fn display_value<'a>(&'a self, config: &'a AcpSessionConfig) -> &'a str {
-        self.pending
-            .iter()
-            .find(|pending| pending.config_id == config.config_id)
-            .map(|pending| pending.value.as_str())
-            .unwrap_or(&config.current_value)
-    }
-
-    pub fn display_name<'a>(&'a self, config: &'a AcpSessionConfig) -> &'a str {
-        let value = self.display_value(config);
-        config
-            .values
-            .iter()
-            .find(|option| option.value == value)
-            .map(|option| option.name.as_str())
-            .unwrap_or(value)
-    }
-
-    pub fn initial_value<'a>(&'a self, config: &'a AcpSessionConfig) -> &'a str {
-        self.initial
-            .iter()
-            .find(|initial| initial.config_id == config.config_id)
-            .map(|initial| initial.value.as_str())
-            .unwrap_or(&config.current_value)
-    }
-}
-
-fn info(mut reader: MessageReader<UiAgentInfo>, mut sessions: Query<(&AcpSession, &mut Profile)>) {
+fn info(mut reader: MessageReader<AcpAgentInfo>, mut sessions: Query<(&AcpSession, &mut Profile)>) {
     for event in reader.read() {
         let name = event.name.trim();
         if name.is_empty() {
@@ -194,16 +91,6 @@ fn info(mut reader: MessageReader<UiAgentInfo>, mut sessions: Query<(&AcpSession
                 *profile = Profile::registry(name, &session.agent_id);
             }
         }
-    }
-}
-
-impl UiAgentWorkspaceChanged {
-    fn validated(&self) -> Result<ValidatedLinkedWorkspace, String> {
-        ValidatedLinkedWorkspace::new(
-            std::path::Path::new(&self.cwd),
-            std::path::Path::new(&self.workspace_cwd),
-            &self.branch,
-        )
     }
 }
 
@@ -222,7 +109,7 @@ fn ancestor_tab(
 }
 
 fn workspace(
-    mut reader: MessageReader<UiAgentWorkspaceChanged>,
+    mut reader: MessageReader<AcpWorkspaceChanged>,
     mut sessions: Query<(Entity, &mut AcpSession)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
@@ -232,7 +119,11 @@ fn workspace(
     mut commands: Commands,
 ) {
     for event in reader.read() {
-        let Ok(validated) = event.validated() else {
+        let Ok(validated) = ValidatedLinkedWorkspace::new(
+            std::path::Path::new(&event.cwd),
+            std::path::Path::new(&event.workspace_cwd),
+            &event.branch,
+        ) else {
             bevy::log::warn!(sid = %event.sid, "ignored invalid ACP worktree metadata");
             continue;
         };
@@ -287,7 +178,7 @@ fn workspace(
 }
 
 fn config(
-    mut reader: MessageReader<UiAgentSessionConfigState>,
+    mut reader: MessageReader<AcpSessionConfigSnapshot>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpSessionConfigState>)>,
     mut commands: Commands,
 ) {
@@ -345,7 +236,7 @@ fn config(
 }
 
 fn selection(
-    mut reader: MessageReader<UiAgentSessionConfigSelectionResult>,
+    mut reader: MessageReader<AcpSessionConfigSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
 ) {
     for event in reader.read() {
@@ -396,7 +287,7 @@ fn auto_allow(
 
 #[allow(clippy::type_complexity)]
 fn session(
-    mut reader: MessageReader<UiAgentSessionCreated>,
+    mut reader: MessageReader<AcpSessionCreated>,
     mut sessions: Query<(Entity, &mut AcpSession, &mut PageMetadata), Without<ChatView>>,
     children: Query<&Children>,
     mut page_meta: Query<&mut PageMetadata, With<ChatView>>,
@@ -425,7 +316,7 @@ fn session(
 }
 
 fn terminal(
-    mut reader: MessageReader<UiAgentAcpTerminalCreated>,
+    mut reader: MessageReader<AcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     mut ctx: PanePlacement,
     mut commands: Commands,
@@ -498,10 +389,11 @@ fn input(
             imported.first_prompt = Some(text.clone());
         }
         let workspace_state = workspace.state(entity);
-        let context = AcpWorkspaceState::prompt(&policy, handoff, workspace_state);
+        let context = PromptWorkspace::prompt(&policy, handoff, workspace_state);
         let preferred_mode = modes
             .as_ref()
-            .map(|modes| modes.selected_for(&session.agent_id).to_string())
+            .and_then(|modes| modes.by_agent.get(&session.agent_id))
+            .map(|memory| memory.selected.clone())
             .filter(|mode| !mode.is_empty());
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
@@ -612,9 +504,9 @@ mod tests {
 
     #[test]
     fn unbound_workspace_context_requires_project_selection_before_file_access() {
-        let policy = AcpWorkspacePolicy::bundled();
+        let policy = crate::policy_driver::PolicyDriver::bundled();
         let context =
-            AcpWorkspaceState::prompt(&policy, None, Some(AcpWorkspaceState::Unbound)).unwrap();
+            PromptWorkspace::prompt(&policy, None, Some(AcpWorkspaceState::Unbound)).unwrap();
 
         assert!(context.contains("Before accessing project files"));
         assert!(context.contains("select_project"));
@@ -630,8 +522,8 @@ mod tests {
 
     #[test]
     fn repository_context_defers_worktree_until_mutation() {
-        let policy = AcpWorkspacePolicy::bundled();
-        let context = AcpWorkspaceState::prompt(
+        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let context = PromptWorkspace::prompt(
             &policy,
             None,
             Some(AcpWorkspaceState::RepositoryNeedsWorktree),
@@ -648,8 +540,8 @@ mod tests {
 
     #[test]
     fn pending_worktree_context_requires_waiting_for_activation() {
-        let policy = AcpWorkspacePolicy::bundled();
-        let context = AcpWorkspaceState::prompt(
+        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let context = PromptWorkspace::prompt(
             &policy,
             Some("prior conversation".into()),
             Some(AcpWorkspaceState::PendingWorktree),
@@ -664,9 +556,9 @@ mod tests {
 
     #[test]
     fn bound_workspace_keeps_only_handoff_context() {
-        let policy = AcpWorkspacePolicy::bundled();
+        let policy = crate::policy_driver::PolicyDriver::bundled();
         assert_eq!(
-            AcpWorkspaceState::prompt(
+            PromptWorkspace::prompt(
                 &policy,
                 Some("prior conversation".into()),
                 Some(AcpWorkspaceState::Bound),
@@ -752,7 +644,7 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let worktree_dir = worktree.canonicalize().unwrap();
         let mut app = App::new();
-        app.add_message::<crate::host::event::UiAgentWorkspaceChanged>()
+        app.add_message::<crate::host::event::AcpWorkspaceChanged>()
             .add_systems(Update, workspace);
         let tab = app
             .world_mut()
@@ -787,8 +679,8 @@ mod tests {
             })
             .id();
         app.world_mut()
-            .resource_mut::<Messages<crate::host::event::UiAgentWorkspaceChanged>>()
-            .write(crate::host::event::UiAgentWorkspaceChanged {
+            .resource_mut::<Messages<crate::host::event::AcpWorkspaceChanged>>()
+            .write(crate::host::event::AcpWorkspaceChanged {
                 sid: "matching-sid".into(),
                 branch: "vibe/quiet-amber-wolf".into(),
                 cwd: worktree_dir.to_string_lossy().into_owned(),
@@ -818,8 +710,8 @@ mod tests {
     #[test]
     fn live_acp_identity_updates_only_matching_profile() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AgentRuntimePlugin);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default());
+        add(&mut app);
         let matching = app
             .world_mut()
             .spawn((
@@ -847,7 +739,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().write_message(UiAgentInfo {
+        app.world_mut().write_message(AcpAgentInfo {
             sid: "s1".into(),
             name: "Antigravity".into(),
         });
@@ -862,7 +754,7 @@ mod tests {
             "Claude"
         );
 
-        app.world_mut().write_message(UiAgentInfo {
+        app.world_mut().write_message(AcpAgentInfo {
             sid: "s1".into(),
             name: "   ".into(),
         });
@@ -877,8 +769,8 @@ mod tests {
     #[test]
     fn live_acp_config_state_updates_only_matching_session() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AgentRuntimePlugin);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default());
+        add(&mut app);
         let matching = app
             .world_mut()
             .spawn(AcpSession {
@@ -900,7 +792,7 @@ mod tests {
             })
             .id();
 
-        app.world_mut().write_message(UiAgentSessionConfigState {
+        app.world_mut().write_message(AcpSessionConfigSnapshot {
             sid: "s1".into(),
             configs: vec![AcpSessionConfig {
                 config_id: Some("model".into()),
@@ -941,8 +833,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut app = App::new();
-        app.add_message::<UiAgentSessionConfigState>()
-            .add_message::<UiAgentSessionConfigSelectionResult>()
+        app.add_message::<AcpSessionConfigSnapshot>()
+            .add_message::<AcpSessionConfigSelectionResult>()
             .add_systems(Update, (config, selection).chain());
         let entity = app
             .world_mut()
@@ -976,7 +868,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().write_message(UiAgentSessionConfigState {
+        app.world_mut().write_message(AcpSessionConfigSnapshot {
             sid: "s1".into(),
             configs: vec![AcpSessionConfig {
                 config_id: Some("model".into()),
@@ -996,7 +888,7 @@ mod tests {
         assert_eq!(state.display_name(model), "fable");
 
         app.world_mut()
-            .write_message(UiAgentSessionConfigSelectionResult {
+            .write_message(AcpSessionConfigSelectionResult {
                 sid: "s1".into(),
                 request_id: 1,
                 config_id: Some("model".into()),
@@ -1014,7 +906,7 @@ mod tests {
         );
 
         app.world_mut()
-            .write_message(UiAgentSessionConfigSelectionResult {
+            .write_message(AcpSessionConfigSelectionResult {
                 sid: "s1".into(),
                 request_id: 2,
                 config_id: Some("model".into()),
@@ -1039,7 +931,7 @@ mod tests {
             });
         }
         app.world_mut()
-            .write_message(UiAgentSessionConfigSelectionResult {
+            .write_message(AcpSessionConfigSelectionResult {
                 sid: "s1".into(),
                 request_id: 3,
                 config_id: Some("model".into()),
@@ -1056,7 +948,7 @@ mod tests {
     #[test]
     fn acp_terminal_stack_does_not_take_focus_from_agent() {
         let mut app = App::new();
-        app.add_message::<UiAgentAcpTerminalCreated>()
+        app.add_message::<AcpTerminalCreated>()
             .add_systems(Update, terminal);
         let tab = app.world_mut().spawn(Tab::bundle()).id();
         let pane = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
@@ -1079,7 +971,7 @@ mod tests {
             url: "vmux://sessions/claude".into(),
             ..default()
         });
-        app.world_mut().write_message(UiAgentAcpTerminalCreated {
+        app.world_mut().write_message(AcpTerminalCreated {
             sid: "s1".into(),
             process_id: ProcessId::new(),
         });
@@ -1113,8 +1005,8 @@ mod tests {
     #[test]
     fn plugin_builds_and_runs_without_panic() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AgentRuntimePlugin);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default());
+        add(&mut app);
         app.world_mut().spawn(AcpSession {
             agent_id: "vibe-acp".to_string(),
             sid: "s1".to_string(),

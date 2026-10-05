@@ -14,19 +14,9 @@ pub struct OpenRequest {
 }
 
 #[vmux_api::ui_event(Eq)]
-pub struct TerminalRequest {
-    pub value: String,
-}
-
-#[vmux_api::ui_event(Eq)]
 pub struct InvokeRequest {
     pub id: String,
     pub open: Option<crate::open_target::OpenTarget>,
-}
-
-#[vmux_api::ui_event(Eq)]
-pub struct SwitchSpaceRequest {
-    pub id: String,
 }
 
 #[vmux_api::ui_event(Eq)]
@@ -47,11 +37,6 @@ pub struct PickRequest {
 
 #[vmux_api::ui_event]
 pub struct DismissRequest;
-
-#[vmux_api::ui_event(Copy, Default, Eq)]
-pub struct CommandBarPanelRequest {
-    pub active: bool,
-}
 
 #[vmux_api::ui_event(Default, Eq)]
 pub struct CommandPaletteDraftRequest {

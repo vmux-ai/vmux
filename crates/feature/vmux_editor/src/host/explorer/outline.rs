@@ -145,7 +145,7 @@ fn emit_markdown(
             continue;
         }
         let items = OutlineRows::from_markdown(&edit.core.buffer.text()).into_vec();
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
             entity,
             &OutlineEvent { items },
         ));
@@ -160,7 +160,7 @@ fn clear_on_file_change(
 ) {
     for entity in &query {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
                 entity,
                 &OutlineEvent { items: Vec::new() },
             ));

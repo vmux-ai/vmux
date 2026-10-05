@@ -1,8 +1,10 @@
 use crate::host::snapshot::{CommandBarWorkDirectory, CommandBarWorkSnapshot};
 use bevy::prelude::*;
-use vmux_api::command_bar::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
-use vmux_ecs::{LastVisitedAt, PageMetadata, Url, VisitCount};
-use vmux_history::LastActivatedAt;
+use vmux_api::command_bar::{CommandBarWorkDir, SearchEngine};
+use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::{LastActivatedAt, LastVisitedAt, PageMetadata, Url, VisitCount};
+
+use super::work_snapshot_driver::{RecentFile, WorkDirectories};
 
 const WORK_DIR_ENTRIES_CAP: usize = 40;
 const RECENT_FILES_CAP: usize = 20;
@@ -26,86 +28,12 @@ fn spawn(mut commands: Commands) {
     ));
 }
 
-struct WorkDirectories(Vec<(String, i64)>);
-
-impl WorkDirectories {
-    fn add(&mut self, path: &str, activated_at: i64) {
-        if path.is_empty() {
-            return;
-        }
-        if let Some(existing) = self.0.iter_mut().find(|(candidate, _)| candidate == path) {
-            existing.1 = existing.1.max(activated_at);
-            return;
-        }
-        self.0.push((path.to_string(), activated_at));
-    }
-
-    fn paths(mut self) -> Vec<String> {
-        self.0
-            .sort_by_key(|(_, activated_at)| std::cmp::Reverse(*activated_at));
-        self.0.into_iter().map(|(path, _)| path).collect()
-    }
-}
-
-impl CommandBarWorkDirectory {
-    fn entries(&self) -> Vec<CommandBarWorkDir> {
-        let Ok(read) = std::fs::read_dir(&self.0) else {
-            return Vec::new();
-        };
-        let mut rows = Vec::new();
-        for entry in read.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let is_dir = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
-            let path = entry.path().to_string_lossy().to_string();
-            rows.push((name, is_dir, path));
-        }
-        rows.sort_by(|a, b| {
-            let a_hidden = a.0.starts_with('.');
-            let b_hidden = b.0.starts_with('.');
-            b.1.cmp(&a.1)
-                .then(a_hidden.cmp(&b_hidden))
-                .then(a.0.to_lowercase().cmp(&b.0.to_lowercase()))
-        });
-        rows.into_iter()
-            .map(|(_, is_dir, path)| CommandBarWorkDir { path, is_dir })
-            .collect()
-    }
-}
-
-struct RecentFile {
-    score: f32,
-    value: CommandBarRecentFile,
-}
-
-impl RecentFile {
-    fn from_page(
-        metadata: &PageMetadata,
-        visit_count: VisitCount,
-        last_visited_at: LastVisitedAt,
-        now: i64,
-    ) -> Option<Self> {
-        let path = metadata.url.strip_prefix("file://")?;
-        if std::path::Path::new(path).is_dir() {
-            return None;
-        }
-        let age_hours = ((now - last_visited_at.0).max(0) as f32) / 3_600_000.0;
-        let decay = 1.0 / (1.0 + age_hours / 24.0);
-        Some(Self {
-            score: (visit_count.0 as f32) * decay,
-            value: CommandBarRecentFile {
-                url: metadata.url.clone(),
-                title: metadata.title.clone(),
-            },
-        })
-    }
-}
-
 fn directories(
     directories: Query<(&CommandBarWorkDirectory, Option<&LastActivatedAt>)>,
     mut last_cwds: Local<Vec<String>>,
     mut state: Single<&mut CommandBarWorkSnapshot>,
 ) {
-    let mut current = WorkDirectories(Vec::new());
+    let mut current = WorkDirectories::default();
     for (directory, activated_at) in &directories {
         current.add(
             &directory.0,
@@ -144,10 +72,14 @@ fn directories(
 fn recent(
     changed: Query<(), RecentPageChange>,
     urls: Query<(&PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
+    manifests: Query<Ref<FeatureManifest>>,
     mut initialized: Local<bool>,
     mut state: Single<&mut CommandBarWorkSnapshot>,
 ) {
-    if *initialized && changed.is_empty() {
+    let catalog_changed = manifests
+        .iter()
+        .any(|manifest| manifest.is_added() || manifest.is_changed());
+    if *initialized && changed.is_empty() && !catalog_changed {
         return;
     }
     *initialized = true;
@@ -168,11 +100,28 @@ fn recent(
         recent_files.push(file.value);
     }
 
+    let mut catalog = Vec::new();
+    for manifest in &manifests {
+        for engine in &manifest.search_engines {
+            if catalog
+                .iter()
+                .any(|candidate: &SearchEngine| candidate.id == engine.id)
+            {
+                continue;
+            }
+            catalog.push(SearchEngine {
+                id: engine.id.clone(),
+                name: engine.name.clone(),
+                hosts: engine.hosts.clone(),
+                query_url: engine.query_url.clone(),
+            });
+        }
+    }
     let mut engine_recency = Vec::new();
-    for engine in SearchEngine::ALL {
+    for engine in catalog {
         let mut latest = i64::MIN;
         for (metadata, _, visited) in &urls {
-            if SearchEngine::from_url(&metadata.url) == Some(engine) {
+            if engine.matches_url(&metadata.url) {
                 latest = latest.max(visited.0);
             }
         }
@@ -206,6 +155,20 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query::<&CommandBarWorkSnapshot>();
             query.single(world).unwrap().clone()
+        }
+
+        fn search_manifest() -> FeatureManifest {
+            FeatureManifest::parse(
+                r#"(
+                    search_engines: [
+                        (id: "google", name: "Google", hosts: ["google.com"], query_url: "https://www.google.com/search?q={query}"),
+                        (id: "bing", name: "Bing", hosts: ["bing.com"], query_url: "https://www.bing.com/search?q={query}"),
+                        (id: "duckduckgo", name: "DuckDuckGo", hosts: ["duckduckgo.com"], query_url: "https://duckduckgo.com/?q={query}"),
+                        (id: "brave", name: "Brave Search", hosts: ["search.brave.com"], query_url: "https://search.brave.com/search?q={query}"),
+                        (id: "kagi", name: "Kagi", hosts: ["kagi.com"], query_url: "https://kagi.com/search?q={query}"),
+                    ],
+                )"#,
+            )
         }
     }
 
@@ -318,6 +281,7 @@ mod tests {
     fn search_engines_are_ordered_by_most_recent_visit() {
         let mut app = App::new();
         app.add_plugins(Plugin);
+        app.world_mut().spawn(WorkSnapshot::search_manifest());
         for (url, visited) in [
             ("https://www.google.com/search?q=old", 1000),
             ("https://kagi.com/search?q=new", 3000),
@@ -338,14 +302,13 @@ mod tests {
 
         let snapshot = WorkSnapshot::read(&mut app);
         let engines = &snapshot.search_engines;
-        assert_eq!(engines.len(), SearchEngine::ALL.len());
+        assert_eq!(engines.len(), 5);
         assert_eq!(
-            &engines[..3],
-            &[
-                SearchEngine::Kagi,
-                SearchEngine::Brave,
-                SearchEngine::Google
-            ]
+            engines[..3]
+                .iter()
+                .map(|engine| engine.id.as_str())
+                .collect::<Vec<_>>(),
+            ["kagi", "brave", "google"]
         );
     }
 }

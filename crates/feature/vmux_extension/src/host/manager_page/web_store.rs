@@ -65,6 +65,7 @@ const INJECTOR_JS: &str = include_str!("../add_to_vmux.js");
 struct WebStoreInjection<'w, 's> {
     browsers: NonSend<'w, Browsers>,
     injectors: Query<'w, 's, &'static WebStoreInjector>,
+    profile: vmux_ecs::profile::CurrentProfile<'w, 's>,
     commands: Commands<'w, 's>,
 }
 
@@ -78,9 +79,12 @@ impl WebStoreInjection<'_, '_> {
             self.commands.entity(webview).remove::<WebStoreInjector>();
             return;
         };
+        let Some((profile, paths)) = self.profile.profile().zip(self.profile.paths()) else {
+            return;
+        };
+        let profile = profile.clone().into_id();
         let injector = WebStoreInjector::resolve(self.injectors.get(webview).ok(), extension_id);
-        let profile = vmux_ecs::profile::Profile::current().into_id();
-        let index = store::ExtensionStore::current()
+        let index = store::ExtensionStore::at(paths.extensions())
             .load_index()
             .unwrap_or_default();
         let installed = index

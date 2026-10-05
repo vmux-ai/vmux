@@ -15,12 +15,12 @@ impl Mock {
         let file = dir.join(name);
         std::fs::write(&file, "fn x() {}\n").unwrap();
 
-        let spec = ServerSpec {
-            command: env!("CARGO_BIN_EXE_vmux_mock_lsp").to_string(),
-            args: vec![],
-            language_id: "rust".into(),
-            root_markers: vec![".git".into()],
-        };
+        let spec = ServerSpec::new(
+            env!("CARGO_BIN_EXE_vmux_mock_lsp").to_string(),
+            Vec::new(),
+            "rust".into(),
+            vec![".git".into()],
+        );
 
         let (diagnostics, inbox) = LspDiagnosticsSender::channel();
         let client = ServerClient::spawn(

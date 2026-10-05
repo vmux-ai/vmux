@@ -1,3 +1,5 @@
+use bevy::prelude::Component;
+
 use crate::event::{
     GitBranchLog, GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot,
 };
@@ -111,6 +113,7 @@ pub struct GitOperationEligibility {
     pub stash_drop: bool,
 }
 
+#[derive(Component)]
 #[vmux_api::contract(Default, Eq)]
 pub struct GitPageControllerState {
     pub selected_path: String,
@@ -123,12 +126,11 @@ pub struct GitPageControllerState {
     pub confirm_discard: Vec<u8>,
     pub focused_panel: GitPanel,
     pub shortcut_help_visible: bool,
+    pub branch_prompt: Option<GitBranchPrompt>,
+    pub branch_draft: String,
+    pub commit_message: String,
+    pub commit_pending: String,
     pub operations: GitOperationEligibility,
-}
-
-#[vmux_api::contract(Eq)]
-pub struct GitBranchPromptRequested {
-    pub prompt: GitBranchPrompt,
 }
 
 #[vmux_api::contract(Eq)]
@@ -230,14 +232,44 @@ pub struct GitUiStatePatch {
     pub snapshot: Option<Box<GitPageSnapshot>>,
     pub directory: Option<Box<GitDirectoryState>>,
     pub controller: Option<Box<GitPageControllerState>>,
-    pub branch_prompt: Option<GitBranchPromptRequested>,
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 2)]
 pub struct GitUiState {
-    pub sequence: u64,
-    pub patches: Vec<GitUiStatePatch>,
+    pub context: Option<GitPageContext>,
+    pub repository_picked: Option<GitRepositoryPicked>,
+    pub workspace: Option<GitWorkspaceChanged>,
+    pub snapshot: GitPageSnapshot,
+    pub directory: GitDirectoryState,
+    pub controller: GitPageControllerState,
+    pub selection_reveal: Option<GitSelectionReveal>,
+}
+
+impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
+    fn apply(&mut self, patch: GitUiStatePatch) {
+        if let Some(context) = patch.context {
+            self.context = Some(context);
+        }
+        if let Some(repository_picked) = patch.repository_picked {
+            self.repository_picked = Some(repository_picked);
+        }
+        if let Some(workspace) = patch.workspace {
+            self.workspace = Some(workspace);
+        }
+        if let Some(snapshot) = patch.snapshot {
+            self.snapshot = *snapshot;
+        }
+        if let Some(directory) = patch.directory {
+            self.directory = *directory;
+        }
+        if let Some(controller) = patch.controller {
+            self.controller = *controller;
+        }
+        if let Some(selection_reveal) = patch.selection_reveal {
+            self.selection_reveal = Some(selection_reveal);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -246,9 +278,9 @@ mod tests {
 
     #[test]
     fn snapshot_round_trips_through_ui_state() {
-        let event = GitUiState {
-            sequence: 2,
-            patches: vec![
+        let event = <GitUiState as vmux_api::UiState>::from_updates(
+            None,
+            vec![
                 GitPageContext {
                     working_directory: "/tmp".to_string(),
                     page_url: "git://tmp/repo".to_string(),
@@ -260,24 +292,17 @@ mod tests {
                 }
                 .into(),
             ],
-        };
+        );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
-        assert_eq!(decoded.sequence, 2);
         assert_eq!(
-            decoded.patches[0]
+            decoded
                 .context
                 .as_ref()
                 .map(|context| context.working_directory.as_str()),
             Some("/tmp")
         );
-        assert_eq!(
-            decoded.patches[1]
-                .snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.workspace.as_str()),
-            Some("/tmp/repo")
-        );
+        assert_eq!(decoded.snapshot.workspace, "/tmp/repo");
     }
 }

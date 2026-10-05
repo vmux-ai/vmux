@@ -10,6 +10,7 @@ use crate::event::{
     GitPushRequest, GitRebaseRequest, GitRevertRequest, GitStageAllRequest, GitStageRequest,
     GitStashDropRequest, GitStashPopRequest, GitStashPushRequest, GitUnstageRequest,
 };
+use crate::state::GitPageControllerState;
 
 use super::job::{
     AmendJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob, DeleteBranchJob,
@@ -105,12 +106,10 @@ fn commit_request(trigger: On<UiInput<GitCommitRequest>>, mut commands: Commands
 
 fn fetch_request(
     trigger: On<UiInput<GitFetchRequest>>,
-    mut views: Query<&mut super::state::GitState>,
+    mut states: super::state::GitStates,
     mut commands: Commands,
 ) {
-    if let Ok(mut view) = views.get_mut(trigger.event().webview) {
-        view.start_fetch();
-    }
+    states.start_fetch(trigger.event().webview);
     commands.spawn((
         GitJob::new(trigger.event().webview),
         FetchJob {
@@ -152,12 +151,12 @@ fn cherry_pick_request(trigger: On<UiInput<GitCherryPickRequest>>, mut commands:
 
 fn create_branch_request(
     trigger: On<UiInput<GitCreateBranchRequest>>,
-    mut controllers: Query<&mut super::controller::GitController>,
+    mut pending: Query<&mut super::controller::PendingBranchCheckout>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    if let Ok(mut controller) = controllers.get_mut(trigger.event().webview) {
-        controller.begin_branch_creation(request.branch.clone());
+    if let Ok(mut pending) = pending.get_mut(trigger.event().webview) {
+        pending.0.clone_from(&request.branch);
     }
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -171,7 +170,7 @@ fn create_branch_request(
 
 fn delete_branch_request(
     trigger: On<UiInput<GitDeleteBranchRequest>>,
-    pages: Query<(&super::state::GitState, &super::controller::GitController)>,
+    pages: Query<(&super::state::GitState, &GitPageControllerState)>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
@@ -182,8 +181,8 @@ fn delete_branch_request(
         return;
     };
     if repository.repo_root != request.repo_root
-        || controller.state().selected_branch != request.branch
-        || !controller.state().operations.delete_branch
+        || controller.selected_branch != request.branch
+        || !controller.operations.delete_branch
     {
         return;
     }
@@ -231,7 +230,7 @@ fn rebase_request(trigger: On<UiInput<GitRebaseRequest>>, mut commands: Commands
 
 fn revert_request(
     trigger: On<UiInput<GitRevertRequest>>,
-    pages: Query<(&super::state::GitState, &super::controller::GitController)>,
+    pages: Query<(&super::state::GitState, &GitPageControllerState)>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
@@ -242,8 +241,8 @@ fn revert_request(
         return;
     };
     if repository.repo_root != request.repo_root
-        || controller.state().selected_commit != request.commit
-        || !controller.state().operations.revert_commit
+        || controller.selected_commit != request.commit
+        || !controller.operations.revert_commit
     {
         return;
     }
@@ -258,7 +257,7 @@ fn revert_request(
 
 fn stash_drop_request(
     trigger: On<UiInput<GitStashDropRequest>>,
-    pages: Query<(&super::state::GitState, &super::controller::GitController)>,
+    pages: Query<(&super::state::GitState, &GitPageControllerState)>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
@@ -269,8 +268,8 @@ fn stash_drop_request(
         return;
     };
     if repository.repo_root != request.repo_root
-        || controller.state().selected_stash != request.reference
-        || !controller.state().operations.stash_drop
+        || controller.selected_stash != request.reference
+        || !controller.operations.stash_drop
     {
         return;
     }

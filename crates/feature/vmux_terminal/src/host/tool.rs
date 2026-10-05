@@ -3,15 +3,15 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 use vmux_api::protocol::{
-    AgentRequest, AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
+    AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript, AgentRequest,
+    AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_transport::service::ServiceConnection;
 
-use vmux_process::{AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript};
-use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery};
+use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet, ToolQuery};
 
 use super::{AgentRun, AgentRunWithPlacementOverride, AgentTerminalSend, PlacementMode};
 use vmux_layout::AgentPaneDirection;
@@ -26,9 +26,6 @@ pub struct TerminalToolPlugin;
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<RunArgs>()
-            .bind_tool::<ReadTerminalArgs>()
-            .bind_tool::<TerminalSendArgs>()
             .add_systems(Update, (run, read, dispatch).in_set(ToolDispatchSet));
     }
 }
@@ -74,7 +71,7 @@ impl From<RunMode> for PlacementMode {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RunArgs {
+struct Run {
     command: String,
     shell: Option<String>,
     direction: Option<PaneDirection>,
@@ -88,14 +85,14 @@ struct RunArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ReadTerminalArgs {
+struct ReadTerminal {
     terminal: String,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct TerminalSendArgs {
+struct TerminalSend {
     text: String,
     terminal: Option<String>,
     enter: Option<bool>,
@@ -109,9 +106,9 @@ fn run(
             &Name,
             Option<&ProcessAnchor>,
             Option<&HostShell>,
-            &RunArgs,
+            &Run,
         ),
-        Added<RunArgs>,
+        Added<Run>,
     >,
     protocol_requests: Query<&McpRequest>,
 ) {
@@ -182,10 +179,7 @@ fn run(
     }
 }
 
-fn read(
-    mut commands: Commands,
-    requests: Query<(Entity, &ReadTerminalArgs), AddedTool<ReadTerminalArgs>>,
-) {
+fn read(mut commands: Commands, requests: Query<(Entity, &ReadTerminal), AddedTool<ReadTerminal>>) {
     for (entity, args) in &requests {
         let query = match args.terminal.parse() {
             Ok(process_id) => AgentRequest::encode(&AgentReadProcessOutput { process_id }),
@@ -197,7 +191,7 @@ fn read(
 
 fn dispatch(
     mut commands: Commands,
-    requests: Query<(Entity, &TerminalSendArgs), AddedTool<TerminalSendArgs>>,
+    requests: Query<(Entity, &TerminalSend), AddedTool<TerminalSend>>,
 ) {
     for (entity, args) in &requests {
         let text = if args.enter.unwrap_or(false) {

@@ -77,7 +77,7 @@ fn poll_repository_pickers(
             continue;
         };
         if let Some(path) = selected {
-            commands.trigger(vmux_ecs::host::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                 picker.webview,
                 &GitRepositoryPicked {
                     path: path.to_string_lossy().into_owned(),

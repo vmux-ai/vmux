@@ -9,22 +9,18 @@ use super::CommandSet;
 use crate::host::acp::registry::RegistryAgent;
 use crate::route::AcpRoute;
 
-pub(super) struct AgentOperationPlugin;
-
-impl Plugin for AgentOperationPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                acknowledge_file_touched,
-                acknowledge_file_search,
-                acknowledge_turn_ended,
-                new_chat,
-                list_agents,
-            )
-                .in_set(CommandSet::Commands),
-        );
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            acknowledge_file_touched,
+            acknowledge_file_search,
+            acknowledge_turn_ended,
+            new_chat,
+            list_agents,
+        )
+            .in_set(CommandSet::Commands),
+    );
 }
 
 fn acknowledge_file_touched(

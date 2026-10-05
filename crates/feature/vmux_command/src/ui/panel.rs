@@ -1,6 +1,6 @@
 use super::{CommandPalette, use_command_bar_ui};
 use dioxus::prelude::*;
-use vmux_api::command_bar::CommandBarPanelRequest;
+use vmux_api::command_bar::DismissRequest;
 use vmux_ui::hooks::send;
 
 use crate::CommandPaletteSurface;
@@ -9,16 +9,10 @@ use crate::CommandPaletteSurface;
 pub fn CommandBarPanel() -> Element {
     let state = use_command_bar_ui();
     let close = EventHandler::new(move |()| {
-        let _ = send(&CommandBarPanelRequest { active: false });
+        let _ = send(&DismissRequest);
     });
-    use_effect(move || {
-        if state().open_id.is_open() {
-            let _ = send(&CommandBarPanelRequest { active: true });
-        }
-    });
-    use_drop(move || close.call(()));
 
-    if !state().open_id.is_open() {
+    if !state().snapshot.open_id.is_open() {
         return rsx! {};
     }
 

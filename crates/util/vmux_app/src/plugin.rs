@@ -72,7 +72,8 @@ impl Plugin for VmuxEcsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             vmux_flex::FlexPlugin,
-            vmux_ecs::EcsPlugin,
+            vmux_ecs::PrimitivesPlugin,
+            vmux_ecs::profile::ProfilePlugin,
             vmux_ecs::page::PagePlugin,
         ));
     }

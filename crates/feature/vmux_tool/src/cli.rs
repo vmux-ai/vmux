@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 
 use crate::DotfileLinkState;
 
@@ -113,9 +113,7 @@ fn route(
 
 fn execute_status(requests: Query<Entity, Added<ToolStatusRequest>>, mut commands: Commands) {
     for entity in &requests {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_unit(status()));
+        commands.entity(entity).insert(CliResult::from(status()));
     }
 }
 
@@ -130,7 +128,7 @@ fn execute_apply(requests: Query<Entity, Added<ToolApplyRequest>>, mut commands:
         match result {
             Ok(linked) => {
                 println!("linked {linked} file(s)");
-                commands.entity(entity).insert(CliResult::success());
+                commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {
                 commands
@@ -151,7 +149,7 @@ fn execute_homebrew_import(
         match result {
             Ok((formulae, casks)) => {
                 println!("imported {formulae} formulae and {casks} casks");
-                commands.entity(entity).insert(CliResult::success());
+                commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {
                 commands
@@ -174,7 +172,7 @@ fn execute_npm_import(
         match result {
             Ok(imported) => {
                 println!("imported {imported} NPM package(s)");
-                commands.entity(entity).insert(CliResult::success());
+                commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {
                 commands
@@ -199,7 +197,7 @@ fn execute_mcp_import(
         match result {
             Ok(imported) => {
                 println!("imported {imported} MCP server(s)");
-                commands.entity(entity).insert(CliResult::success());
+                commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {
                 commands
@@ -223,7 +221,7 @@ fn execute_dotfile_import(
         match result {
             Ok(imported) => {
                 println!("imported {imported} dotfile package(s)");
-                commands.entity(entity).insert(CliResult::success());
+                commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {
                 commands
@@ -246,7 +244,7 @@ fn execute_adopt(
         {
             Ok(destination) => {
                 println!("{}", destination.display());
-                commands.entity(entity).insert(CliResult::success());
+                commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {
                 commands
@@ -269,7 +267,7 @@ fn execute_unlink(
         {
             Ok(removed) => {
                 println!("unlinked {removed} file(s)");
-                commands.entity(entity).insert(CliResult::success());
+                commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {
                 commands

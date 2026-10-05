@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiInput, WebviewSource};
-use vmux_api::input::{KeyClaims, UiKeyContext};
+use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
 use vmux_command::{KeyContext, Keymap};
-use vmux_ecs::host::page::HostsPage;
-use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::page::HostsPage;
+use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 
 pub(crate) struct ClaimPlugin;
 
@@ -12,7 +12,7 @@ type MissingKeyContext = (PageHost, Without<KeyContext>);
 
 impl Plugin for ClaimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiStatePlugin::<KeyClaims>::default())
+        app.add_plugins(UiStatePlugin::<KeyClaimsUiState>::default())
             .add_observer(receive)
             .add_systems(Update, (spawn, publish).chain());
     }
@@ -20,14 +20,15 @@ impl Plugin for ClaimPlugin {
 
 fn spawn(pages: Query<Entity, MissingKeyContext>, mut commands: Commands) {
     for entity in pages.iter() {
-        commands
-            .entity(entity)
-            .insert((KeyContext::default(), UiState::<KeyClaims>::default()));
+        commands.entity(entity).insert((
+            KeyContext::default(),
+            UiState::<KeyClaimsUiState>::default(),
+        ));
     }
 }
 
 fn receive(
-    trigger: On<UiInput<UiKeyContext>>,
+    trigger: On<UiInput<KeyContextRequest>>,
     mut contexts: Query<&mut KeyContext>,
     mut commands: Commands,
 ) {
@@ -40,7 +41,7 @@ fn receive(
         Err(_) => {
             commands
                 .entity(target)
-                .insert((next, UiState::<KeyClaims>::default()));
+                .insert((next, UiState::<KeyClaimsUiState>::default()));
         }
     }
 }
@@ -57,8 +58,10 @@ fn publish(
         if !keymap.is_changed() && !context.is_changed() {
             continue;
         }
-        let claims: KeyClaims = keymap.in_context(&context).claims();
-        commands.trigger(UiStateWrite::<KeyClaims>::from_event(entity, &claims));
+        let claims: KeyClaimsUiState = keymap.in_context(&context).claims();
+        commands.trigger(UiStateWrite::<KeyClaimsUiState>::from_event(
+            entity, &claims,
+        ));
     }
 }
 
@@ -71,7 +74,7 @@ mod tests {
     use vmux_command::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
 
     #[derive(Resource, Default)]
-    struct Pushed(Vec<(Entity, KeyClaims)>);
+    struct Pushed(Vec<(Entity, KeyClaimsUiState)>);
 
     impl Pushed {
         fn codes(world: &World, page: Entity) -> Vec<Vec<String>> {
@@ -93,11 +96,12 @@ mod tests {
             mut pushed: ResMut<Self>,
             mut rejected: ResMut<Rejected>,
         ) {
-            if trigger.id() != KeyClaims::id() {
+            if trigger.id() != KeyClaimsUiState::id() {
                 rejected.0.push(trigger.id().to_string());
                 return;
             }
-            let Ok(claims) = rkyv::from_bytes::<KeyClaims, rkyv::rancor::Error>(trigger.payload())
+            let Ok(claims) =
+                rkyv::from_bytes::<KeyClaimsUiState, rkyv::rancor::Error>(trigger.payload())
             else {
                 rejected.0.push("undecodable payload".to_string());
                 return;
@@ -179,7 +183,7 @@ mod tests {
         fn publish(app: &mut App, page: Entity, keys: &[&str]) {
             app.world_mut().trigger(UiInput {
                 webview: page,
-                payload: UiKeyContext {
+                payload: KeyContextRequest {
                     keys: keys.iter().map(|key| (*key).to_string()).collect(),
                 },
             });
@@ -230,7 +234,7 @@ mod tests {
 
         app.world_mut().trigger(UiInput {
             webview: page,
-            payload: vmux_ecs::host::page::PageReady {},
+            payload: vmux_ecs::page::PageReady {},
         });
         app.update();
 

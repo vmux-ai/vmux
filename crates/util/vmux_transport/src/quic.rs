@@ -5,7 +5,7 @@ pub mod endpoint;
 
 pub mod tunnel;
 
-pub const ALPN: &[u8] = b"vmux/10";
+pub const ALPN: &[u8] = b"vmux/11";
 
 pub const PROBE_ALPN: &[u8] = b"vmux-probe/1";
 

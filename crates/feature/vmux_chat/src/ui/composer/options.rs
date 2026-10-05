@@ -17,7 +17,7 @@ pub(super) fn ChatComposerMenus(chat: Chat) -> Element {
         ComposerMenus {
             opened: menu.opened(),
             cursor: menu.cursor(),
-            on_hover: move |index| menu.point_at(index),
+            on_hover: move |index| chat.point_at_list(index),
             on_dismiss: move |()| chat.dismiss_selector(),
             on_selected: move |()| chat.dismiss_selector(),
             effort: Some(menus.effort),
@@ -99,12 +99,11 @@ impl ChatMenuSet {
 
 #[component]
 pub(super) fn ChatModelMenu(chat: Chat) -> Element {
-    let menu_sel = chat.slash.menu_sel;
     rsx! {
         ModelMenu {
             models: chat.filtered_models(),
             current_model_id: chat.models.current().current_model_id,
-            selected: menu_sel(),
+            selected: chat.list_selection(),
             on_hover: move |index| chat.point_at_list(index),
             on_select: move |(index, _model): (usize, ModelOptionEntry)| chat.choose_list(index),
             on_dismiss: move |()| chat.dismiss_selector(),

@@ -9,7 +9,7 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::BuiltinIconView;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page
 )]
 pub(crate) struct ShortcutPage;
@@ -70,7 +70,7 @@ pub fn Page() -> Element {
                         span { class: "absolute left-5 top-4 flex items-center gap-2 text-xs font-semibold text-foreground/80",
                             span { class: "flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20",
                                 BuiltinIconView {
-                                    icon: vmux_ecs::BuiltinIcon::Keyboard,
+                                    icon: vmux_api::BuiltinIcon::Keyboard,
                                     class: "h-4 w-4".to_string(),
                                 }
                             }

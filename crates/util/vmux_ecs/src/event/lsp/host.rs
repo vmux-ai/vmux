@@ -38,6 +38,12 @@ pub struct LspPackageStatus {
     pub version: Option<String>,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct LspInstallNotice {
+    pub progress: Option<LspInstallProgress>,
+    pub installed: bool,
+}
+
 #[vmux_api::ui_state(Eq)]
 pub struct LspManagerUiState {
     pub packages: Vec<LspPackage>,
@@ -62,21 +68,29 @@ pub struct FileHover {
     pub blocks: Vec<HoverBlock>,
 }
 
+#[vmux_api::contract(Default)]
+pub struct FileHoverState {
+    pub value: Option<FileHover>,
+}
+
 #[vmux_api::contract(Eq)]
 pub struct FileCodeActions {
     pub titles: Vec<String>,
+    pub selected: u32,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct FileEditFailure {
-    pub reason: String,
+#[vmux_api::contract(Default, Eq)]
+pub struct FileEditNotice {
+    pub reason: Option<String>,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct FileRenamePrompt {
+#[vmux_api::contract(Default, Eq)]
+pub struct FileRenameState {
+    pub open: bool,
     pub line: u32,
     pub col: u32,
     pub current: String,
+    pub draft: String,
 }
 
 #[vmux_api::contract(Copy, Eq, Default)]

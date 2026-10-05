@@ -34,7 +34,7 @@ pub struct TermLoadingEvent {
     pub segment: String,
 }
 
-#[vmux_api::contract(Eq)]
+#[vmux_api::contract(Default, Eq)]
 pub struct AgentPromptDraftEvent {
     pub draft: String,
     pub skipped: bool,
@@ -154,10 +154,96 @@ pub struct TerminalUiStatePatch {
     pub prompt_draft: Option<AgentPromptDraftEvent>,
 }
 
-#[vmux_api::ui_state(Default)]
+#[vmux_api::contract(Default)]
+pub struct TerminalViewportState {
+    pub rows: Vec<(u32, TermLine)>,
+    pub cursor: Option<TermCursor>,
+    pub cols: u16,
+    pub selection: Option<TermSelectionRange>,
+    pub copy_mode: bool,
+    pub first_row: u32,
+    pub total_rows: u32,
+    pub alt: bool,
+    pub mouse: bool,
+}
+
+#[vmux_api::ui_state(Default, patch = TerminalUiStatePatch)]
 pub struct TerminalUiState {
-    pub sequence: u64,
-    pub patches: Vec<TerminalUiStatePatch>,
+    pub service_error: String,
+    pub viewport: TerminalViewportState,
+    pub theme: Option<TermThemeEvent>,
+    pub title: String,
+    pub loading: Option<TermLoadingEvent>,
+    pub prompt_draft: AgentPromptDraftEvent,
+}
+
+impl vmux_api::UiStateProjection<TerminalUiStatePatch> for TerminalUiState {
+    fn apply(&mut self, patch: TerminalUiStatePatch) {
+        if let Some(error) = patch.service_unavailable {
+            self.service_error = error.message;
+        }
+        if let Some(viewport) = patch.viewport {
+            let first = viewport.first_row;
+            let overscan = crate::scroll::Overscan::new(
+                viewport.rows,
+                crate::scroll::TERMINAL_OVERSCAN_K,
+                crate::scroll::OVERSCAN_FLOOR,
+                crate::scroll::OVERSCAN_CAP,
+            )
+            .rows();
+            let keep_hi = (first + viewport.rows as u32 + overscan * 2 + 2)
+                .min(viewport.total_rows.saturating_sub(1));
+            if viewport.full {
+                self.viewport.rows = viewport
+                    .changed_lines
+                    .into_iter()
+                    .filter(|(row, _)| *row >= first && *row <= keep_hi)
+                    .collect();
+            } else {
+                for (row, line) in viewport.changed_lines {
+                    if let Some((_, current)) = self
+                        .viewport
+                        .rows
+                        .iter_mut()
+                        .find(|(current, _)| *current == row)
+                    {
+                        *current = line;
+                    } else if row >= first && row <= keep_hi {
+                        self.viewport.rows.push((row, line));
+                    }
+                }
+                self.viewport
+                    .rows
+                    .retain(|(row, _)| *row >= first && *row <= keep_hi);
+            }
+            self.viewport.rows.sort_by_key(|(row, _)| *row);
+            self.viewport.cursor = Some(viewport.cursor);
+            self.viewport.cols = viewport.cols;
+            self.viewport.selection = viewport.selection;
+            self.viewport.copy_mode = viewport.copy_mode;
+            self.viewport.first_row = first;
+            self.viewport.total_rows = viewport.total_rows;
+            self.viewport.alt = viewport.alt;
+            self.viewport.mouse = viewport.mouse;
+        }
+        if let Some(theme) = patch.theme {
+            self.theme = Some(theme);
+        }
+        if let Some(title) = patch.title {
+            self.title = title.title;
+        }
+        if let Some(loading) = patch.loading {
+            if loading.loading {
+                self.loading = Some(loading);
+            } else {
+                self.loading = None;
+                self.prompt_draft = AgentPromptDraftEvent::default();
+            }
+        }
+        if let Some(prompt_draft) = patch.prompt_draft {
+            self.prompt_draft = prompt_draft;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -165,10 +251,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn terminal_ui_state_preserves_patch_order() {
-        let event = TerminalUiState {
-            sequence: 5,
-            patches: vec![
+    fn terminal_ui_state_builds_a_retained_tree() {
+        let event = <TerminalUiState as vmux_api::UiState>::from_updates(
+            None,
+            vec![
                 TermTitleEvent {
                     title: "Terminal".into(),
                 }
@@ -180,11 +266,10 @@ mod tests {
                 }
                 .into(),
             ],
-        };
+        );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<TerminalUiState, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded.sequence, 5);
-        assert!(decoded.patches[0].title.is_some());
-        assert!(decoded.patches[1].loading.is_some());
+        assert_eq!(decoded.title, "Terminal");
+        assert_eq!(decoded.loading.unwrap().label, "Agent");
     }
 }

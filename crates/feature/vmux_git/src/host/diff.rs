@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{DiffKind, DiffLine, GitDiffRevealRequest, GitLineMarker, GitLineStatus};
-use crate::state::GitPanel;
+use crate::state::{GitPageControllerState, GitPanel};
 
 use super::GitUpdateSet;
 use super::job::DiffJob;
@@ -32,23 +32,22 @@ impl Plugin for DiffPlugin {
 
 fn reveal(
     trigger: On<UiInput<GitDiffRevealRequest>>,
-    mut states: Query<&mut super::state::GitState>,
-    mut files: Query<&mut super::status::FileGit>,
+    mut states: Query<(
+        &mut super::state::GitState,
+        &mut super::state::GitDiffRevealRanges,
+    )>,
+    mut files: super::status::FileGitStates,
 ) {
     let request = &trigger.event().payload;
     let entity = trigger.event().webview;
-    if let Ok(mut state) = states.get_mut(entity) {
-        if state
-            .bypass_change_detection()
-            .reveal_diff(request.start, request.end)
-        {
-            state.set_changed();
+    if let Ok((_, mut revealed)) = states.get_mut(entity) {
+        let range = (request.start as usize, request.end as usize);
+        if range.0 < range.1 && !revealed.0.contains(&range) {
+            revealed.0.push(range);
         }
         return;
     }
-    if let Ok(mut file) = files.get_mut(entity) {
-        file.reveal_diff(request.start, request.end);
-    }
+    files.reveal_diff(entity, request.start, request.end);
 }
 
 #[derive(Component, Clone, Debug, Default)]
@@ -68,10 +67,9 @@ struct GitDiffTarget {
 impl GitDiffTarget {
     fn for_page(
         state: &super::state::GitState,
-        controller: &super::controller::GitController,
+        controller: &GitPageControllerState,
     ) -> Option<Self> {
         state.repository()?;
-        let controller = controller.state();
         let repo_root = PathBuf::from(state.workspace());
         if repo_root.as_os_str().is_empty() {
             return None;
@@ -152,7 +150,7 @@ type GitDiffPages<'w, 's> = Query<
     (
         Entity,
         Ref<'static, super::state::GitState>,
-        Ref<'static, super::controller::GitController>,
+        Ref<'static, GitPageControllerState>,
         Option<&'static PendingGitDiff>,
         Option<&'static GitDiffQuery>,
     ),
@@ -209,8 +207,11 @@ fn start_requests(
         Option<&GitDiffQuery>,
         Option<&GitDiffSource>,
     )>,
-    mut pages: Query<&mut super::state::GitState>,
-    mut files: Query<&mut super::status::FileGit>,
+    mut pages: Query<(
+        &mut super::state::GitState,
+        &mut super::state::GitDiffRevealRanges,
+    )>,
+    mut files: super::status::FileGitStates,
     mut commands: Commands,
 ) {
     for (entity, pending, current, source) in &pending {
@@ -220,10 +221,15 @@ fn start_requests(
             .unwrap_or_default()
             .wrapping_add(1)
             .max(1);
-        if let Ok(mut page) = pages.get_mut(entity) {
-            page.start_diff(target_changed);
-        } else if let Ok(mut file) = files.get_mut(entity) {
-            file.start_diff(target_changed);
+        if let Ok((mut page, mut revealed)) = pages.get_mut(entity) {
+            page.snapshot.diff_loading = target_changed || page.snapshot.diff_viewport.is_none();
+            if target_changed {
+                page.snapshot.diff_viewport = None;
+                page.snapshot.diff_rows.clear();
+                revealed.0.clear();
+            }
+        } else if files.contains(entity) {
+            files.start_diff(entity, target_changed);
         } else {
             commands.entity(entity).remove::<PendingGitDiff>();
             continue;
@@ -483,8 +489,8 @@ mod tests {
     #[test]
     fn file_diff_query_rejects_previous_document_and_refresh() {
         bevy::tasks::IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
-        let mut file = super::super::status::FileGit::new("/repo/a.rs", 7);
-        let query = GitDiffQuery {
+        let file = super::super::status::FileGit::new("/repo/a.rs", 7);
+        let mut query = GitDiffQuery {
             target: GitDiffTarget {
                 repo_root: "/repo".into(),
                 path: "/repo/a.rs".into(),
@@ -501,7 +507,7 @@ mod tests {
 
         assert!(query.accepts_file(3, &file));
 
-        let _refresh = file.changed(None);
+        query.file.as_mut().unwrap().refresh = 1;
         assert!(!query.accepts_file(3, &file));
 
         let replacement = super::super::status::FileGit::new("/repo/a.rs", 8);

@@ -32,7 +32,7 @@ pub use window_drag::WindowDragRegion;
 
 pub(crate) struct Feature;
 
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -76,6 +76,17 @@ pub struct BrowserLoadSet;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct BrowserOverlaySet;
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostedPageLifecycle {
+    pub mount_revision: u64,
+    pub remount_revision: u64,
+    pub frame_pending: bool,
+    pub ui_events: u64,
+    pub host_events: u64,
+    pub listeners: usize,
+    pub measurements: usize,
+}
 
 pub struct BrowserPlugin;
 

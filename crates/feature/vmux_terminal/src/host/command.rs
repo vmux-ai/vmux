@@ -1,5 +1,6 @@
 use vmux_command::CommandInvocation;
 
+#[vmux_command::command(message)]
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalCloseRequest;
 
@@ -13,6 +14,7 @@ impl TryFrom<&CommandInvocation> for TerminalCloseRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalNextRequest;
 
@@ -24,6 +26,7 @@ impl TryFrom<&CommandInvocation> for TerminalNextRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalPrevRequest;
 
@@ -35,6 +38,7 @@ impl TryFrom<&CommandInvocation> for TerminalPrevRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalClearRequest;
 
@@ -48,6 +52,7 @@ impl TryFrom<&CommandInvocation> for TerminalClearRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(bevy::prelude::Message)]
 pub(super) struct CopyModeRequest;
 

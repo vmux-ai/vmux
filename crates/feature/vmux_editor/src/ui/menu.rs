@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 use vmux_ecs::event::{
-    EditorCapability, FileCodeActionPick, FileDefinitionRequest, FilePanelPick,
-    FileReferencesRequest, FileRenameRequest, RefItem,
+    EditorCapability, FileCodeActionDismissRequest, FileCodeActionMoveRequest, FileCodeActionPick,
+    FileDefinitionRequest, FilePanelPick, FileReferencesRequest, FileRenameDismissRequest,
+    FileRenameDraftRequest, FileRenameRequest, FileRenameState, RefItem,
 };
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -15,19 +16,12 @@ const RENAME_ID: &str = "file-rename";
 const CODE_ACTION_ID: &str = "file-code-action";
 
 #[component]
-pub(super) fn CodeActionMenu(
-    titles: Signal<Vec<String>>,
-    selected: Signal<usize>,
-    top: f64,
-    left: f64,
-) -> Element {
-    let mut titles = titles;
-    let mut selected = selected;
-    let entries = titles();
-    if entries.is_empty() {
+pub(super) fn CodeActionMenu(titles: Vec<String>, selected: u32, top: f64, left: f64) -> Element {
+    if titles.is_empty() {
         return rsx! {};
     }
-    let chosen = selected().min(entries.len() - 1);
+    let len = titles.len();
+    let chosen = (selected as usize).min(len - 1);
     rsx! {
         div {
             id: CODE_ACTION_ID,
@@ -37,39 +31,38 @@ pub(super) fn CodeActionMenu(
             style: "left:{left}px;top:{top}px;",
             onkeydown: move |event| {
                 event.stop_propagation();
-                let len = titles().len();
                 match event.key() {
                     Key::ArrowDown => {
                         event.prevent_default();
-                        selected.set((chosen + 1) % len);
+                        let _ = send(&FileCodeActionMoveRequest { next: true });
                     }
                     Key::ArrowUp => {
                         event.prevent_default();
-                        selected.set((chosen + len - 1) % len);
+                        let _ = send(&FileCodeActionMoveRequest { next: false });
                     }
                     Key::Enter => {
                         event.prevent_default();
                         let _ = send(&FileCodeActionPick { index: chosen as u32 });
-                        titles.set(Vec::new());
                         EditorFocus::file();
                     }
                     Key::Escape => {
                         event.prevent_default();
-                        titles.set(Vec::new());
+                        let _ = send(&FileCodeActionDismissRequest);
                         EditorFocus::file();
                     }
                     _ => {}
                 }
             },
-            onblur: move |_| titles.set(Vec::new()),
-            for (index, title) in entries.iter().enumerate() {
+            onblur: move |_| {
+                let _ = send(&FileCodeActionDismissRequest);
+            },
+            for (index, title) in titles.iter().enumerate() {
                 div {
                     key: "{index}",
                     class: if index == chosen { "cursor-default px-3 py-1 bg-primary/15" } else { "cursor-default px-3 py-1" },
                     onmousedown: move |event: Event<MouseData>| {
                         event.prevent_default();
                         let _ = send(&FileCodeActionPick { index: index as u32 });
-                        titles.set(Vec::new());
                         EditorFocus::file();
                     },
                     "{title}"
@@ -79,51 +72,8 @@ pub(super) fn CodeActionMenu(
     }
 }
 
-#[derive(Clone, PartialEq)]
-pub(super) struct RenameBox {
-    line: u32,
-    col: u32,
-    original: String,
-    draft: String,
-}
-
-impl RenameBox {
-    pub(super) fn new(line: u32, col: u32, current: String) -> Self {
-        Self {
-            line,
-            col,
-            original: current.clone(),
-            draft: current,
-        }
-    }
-
-    pub(super) fn line(&self) -> u32 {
-        self.line
-    }
-
-    pub(super) fn col(&self) -> u32 {
-        self.col
-    }
-
-    fn submit(&self) {
-        let name = self.draft.trim();
-        if name.is_empty() || name == self.original {
-            return;
-        }
-        let _ = send(&FileRenameRequest {
-            line: self.line,
-            col: self.col,
-            new_name: name.to_string(),
-        });
-    }
-}
-
 #[component]
-pub(super) fn RenameInput(state: Signal<Option<RenameBox>>, top: f64, left: f64) -> Element {
-    let mut state = state;
-    let Some(rename) = state() else {
-        return rsx! {};
-    };
+pub(super) fn RenameInput(rename: FileRenameState, top: f64, left: f64) -> Element {
     let ime = use_ime_guard();
     rsx! {
         input {
@@ -135,9 +85,9 @@ pub(super) fn RenameInput(state: Signal<Option<RenameBox>>, top: f64, left: f64)
             style: "left:{left}px;top:{top}px;",
             value: "{rename.draft}",
             oninput: move |event| {
-                if let Some(open) = state.write().as_mut() {
-                    open.draft = event.value();
-                }
+                let _ = send(&FileRenameDraftRequest {
+                    draft: event.value(),
+                });
             },
             oncompositionstart: move |_| ime.start(),
             oncompositionend: move |_| ime.commit(),
@@ -149,21 +99,28 @@ pub(super) fn RenameInput(state: Signal<Option<RenameBox>>, top: f64, left: f64)
                 match event.key() {
                     Key::Enter => {
                         event.prevent_default();
-                        if let Some(open) = state() {
-                            open.submit();
+                        let name = rename.draft.trim().to_string();
+                        if !name.is_empty() && name != rename.current {
+                            let _ = send(&FileRenameRequest {
+                                line: rename.line,
+                                col: rename.col,
+                                new_name: name,
+                            });
                         }
-                        state.set(None);
+                        let _ = send(&FileRenameDismissRequest);
                         EditorFocus::file();
                     }
                     Key::Escape => {
                         event.prevent_default();
-                        state.set(None);
+                        let _ = send(&FileRenameDismissRequest);
                         EditorFocus::file();
                     }
                     _ => {}
                 }
             },
-            onblur: move |_| state.set(None),
+            onblur: move |_| {
+                let _ = send(&FileRenameDismissRequest);
+            },
         }
     }
 }
@@ -171,7 +128,7 @@ pub(super) fn RenameInput(state: Signal<Option<RenameBox>>, top: f64, left: f64)
 #[component]
 pub(super) fn EditorContextMenu(
     position: Signal<Option<(f64, f64, u32, u32)>>,
-    offered: Signal<Vec<EditorCapability>>,
+    offered: ReadSignal<Vec<EditorCapability>>,
 ) -> Element {
     let mut position = position;
     let Some((x, y, line, col)) = position() else {

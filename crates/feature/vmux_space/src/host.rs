@@ -1,7 +1,7 @@
 pub use agent::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
-    AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentRenameProfile,
-    AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+    AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentSpaceCreate,
+    AgentSpaceDelete, AgentSpaceRename,
 };
 pub use cwd::WorkspaceCwd;
 pub use plugin::SpacePlugin;
@@ -27,4 +27,4 @@ mod spaces;
 mod tool;
 mod workspace;
 
-type SpacesUiStateUpdates = vmux_ecs::host::UiState<vmux_api::space::SpacesUiState>;
+type SpacesUiStateUpdates = vmux_ecs::UiState<vmux_api::space::SpacesUiState>;

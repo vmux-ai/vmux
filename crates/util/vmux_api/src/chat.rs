@@ -429,6 +429,7 @@ impl SlashCommand {
 pub struct SlashCommandEntry {
     pub command: SlashCommand,
     pub description: String,
+    pub delegated: bool,
 }
 #[vmux_api::contract(Default)]
 pub struct SlashCommands {

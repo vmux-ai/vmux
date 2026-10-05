@@ -19,7 +19,7 @@ serde = { workspace = true }
 uuid = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_input = { path = "../vmux_input" }
-vmux_native = { path = "../../util/vmux_native" }
+vmux_page = { path = "../../util/vmux_page" }
 vmux_api = { path = "../../util/vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]

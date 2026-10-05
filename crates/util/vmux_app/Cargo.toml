@@ -55,6 +55,17 @@ desktop = [
     "vault",
 ]
 mobile = ["chat", "dep:vmux_start", "dep:vmux_team"]
+service-daemon = [
+    "service",
+    "dep:tokio",
+    "dep:tracing",
+    "dep:tracing-appender",
+    "dep:tracing-subscriber",
+    "dep:vmux_agent",
+    "dep:vmux_profile",
+    "dep:vmux_transport",
+    "vmux_agent/service",
+]
 tool = ["dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
 bookmark = ["layout", "dep:vmux_bookmark"]
@@ -83,6 +94,7 @@ agent = [
     "space",
     "terminal",
     "dep:vmux_agent",
+    "vmux_agent/app",
 ]
 knowledge = ["ecs", "dep:vmux_knowledge"]
 history = ["ecs", "dep:vmux_history"]
@@ -98,7 +110,7 @@ vault = ["layout", "dep:vmux_vault"]
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
-vmux_agent = { path = "../../feature/vmux_agent", optional = true }
+vmux_agent = { path = "../../feature/vmux_agent", default-features = false, optional = true }
 vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_chat = { path = "../../feature/vmux_chat", optional = true }
@@ -126,6 +138,17 @@ vmux_team = { path = "../../feature/vmux_team", optional = true }
 vmux_terminal = { path = "../../feature/vmux_terminal", optional = true }
 vmux_tool = { path = "../../feature/vmux_tool", optional = true }
 vmux_vault = { path = "../../feature/vmux_vault", optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-appender = { version = "0.2", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
+vmux_profile = { path = "../vmux_profile", optional = true }
+vmux_transport = { path = "../vmux_transport", optional = true }
+
+[[bin]]
+name = "vmux_service"
+path = "src/bin/vmux_service.rs"
+required-features = ["service-daemon"]
 
 [lints]
 workspace = true

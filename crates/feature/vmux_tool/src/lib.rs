@@ -10,7 +10,7 @@ use bevy_tasks::{Task, futures_lite::future};
 #[cfg(host)]
 pub use cli::ToolCliPlugin;
 #[cfg(not(target_os = "ios"))]
-pub use connection::{McpConnectionPlugin, McpSnapshotRequest};
+pub use connection::McpConnectionPlugin;
 pub use dotfiles::*;
 pub use homebrew::*;
 pub use manifest::*;
@@ -20,19 +20,26 @@ pub use provider::*;
 #[cfg(host)]
 pub use query::*;
 pub use registry::*;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 pub use vmux_macro::input;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use inventory;
+}
 
 extern crate self as vmux_tool;
 
 pub(crate) struct Feature;
 
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
 #[cfg(host)]
 mod cli;
+#[cfg(all(host, not(target_os = "ios")))]
+mod command_bar;
 #[cfg(not(target_os = "ios"))]
 mod connection;
 mod dotfiles;
@@ -53,7 +60,7 @@ pub mod state;
 #[cfg(ui)]
 mod ui;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct ToolPlugin;
 
 impl Plugin for ToolPlugin {
@@ -63,9 +70,14 @@ impl Plugin for ToolPlugin {
         app.add_plugins(ui::ToolsPage::plugin());
 
         #[cfg(all(host, ui))]
-        app.add_plugins(Self::MANIFEST.plugin().hosted(
-            vmux_ecs::host::page::NativelyHosted::subtree(Self::URL, ui::ToolsPage::NATIVE.title),
-        ));
+        app.add_plugins(
+            Self::MANIFEST
+                .plugin()
+                .hosted(vmux_ecs::page::HostedPage::subtree(
+                    Self::URL,
+                    ui::ToolsPage::PAGE.title,
+                )),
+        );
 
         app.add_plugins((
             ToolRuntimePlugin,
@@ -74,6 +86,9 @@ impl Plugin for ToolPlugin {
             mcp::McpToolPlugin,
             dotfiles::DotfileToolPlugin,
         ));
+
+        #[cfg(all(host, not(target_os = "ios")))]
+        app.add_plugins(command_bar::Plugin);
 
         #[cfg(all(host, ui))]
         app.add_plugins(host::ToolHostPlugin);
@@ -84,6 +99,9 @@ pub struct ToolRuntimePlugin;
 
 impl Plugin for ToolRuntimePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ToolRegistryPlugin>() {
+            app.add_plugins(ToolRegistryPlugin);
+        }
         app.configure_sets(
             Update,
             (ToolOperationRouteSet, ToolOperationRouteFlush).chain(),
@@ -153,6 +171,7 @@ pub struct ToolOperationFinished;
 pub struct ToolOperationSucceeded(pub String);
 
 pub type ToolStoreTarget = vmux_ecs::EntityTarget<ToolStore>;
+pub type ToolProviderTarget = vmux_ecs::EntityTarget<ToolProviderId>;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationFailed(pub String);
@@ -347,7 +366,7 @@ brew "ripgrep"
             .world_mut()
             .spawn((
                 ToolOperationRequest(ToolImportRequest {
-                    provider: state::ToolProvider::Npm,
+                    provider: state::ToolProvider::new("npm"),
                     value: package_json.to_string_lossy().into_owned(),
                 }),
                 ToolStoreTarget::new(store_entity),
@@ -405,7 +424,7 @@ brew "ripgrep"
             .world_mut()
             .spawn((
                 ToolOperationRequest(ToolImportRequest {
-                    provider: state::ToolProvider::Mcp,
+                    provider: state::ToolProvider::new("mcp"),
                     value: String::new(),
                 }),
                 ToolStoreTarget::new(store_entity),

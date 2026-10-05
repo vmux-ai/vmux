@@ -7,16 +7,18 @@ use crate::host::bundle::CommandBar;
 pub use controller::{
     CommandBarNativeSize, CommandBarOpenRequest, PendingCommandBarReveal, WriteCommandBarRequests,
 };
-pub use model::ResumeRows;
 pub use panel::CommandBarPanelActive;
 
 mod completion;
+mod completion_driver;
 mod controller;
-mod model;
+mod controller_driver;
+mod driver;
 mod palette;
 mod panel;
-mod project_files;
+mod project_driver;
 mod work_snapshot;
+mod work_snapshot_driver;
 
 #[derive(EntityEvent)]
 pub struct CommandBarDismiss {
@@ -48,26 +50,20 @@ impl Plugin for CommandBarPlugin {
     }
 }
 
-impl CommandBar {
-    fn surface() -> impl Bundle {
-        (
-            CommandBar,
-            WindowOverlay,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                display: Display::None,
-                ..default()
-            },
-            Transform::default(),
-            Visibility::Hidden,
-        )
-    }
-}
-
 fn spawn(mut commands: Commands) {
-    commands.spawn(CommandBar::surface());
+    commands.spawn((
+        CommandBar,
+        WindowOverlay,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            display: Display::None,
+            ..default()
+        },
+        Transform::default(),
+        Visibility::Hidden,
+    ));
 }

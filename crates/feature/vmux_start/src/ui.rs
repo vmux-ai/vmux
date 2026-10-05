@@ -6,7 +6,7 @@ use vmux_ui::hooks::use_theme;
 
 use vmux_command::{CommandPalette, CommandPaletteSurface, use_command_bar_ui};
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page
 )]
 pub(crate) struct StartPage;

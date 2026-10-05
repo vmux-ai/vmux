@@ -10,14 +10,16 @@ use moonshine_save::prelude::*;
 use moonshine_save::save::EntityFilter;
 use std::path::{Path, PathBuf};
 
-use vmux_ecs::BuiltinIcon;
+use vmux_api::BuiltinIcon;
 #[cfg(test)]
-use vmux_ecs::host::persistence::PersistenceAppExt;
-use vmux_ecs::host::persistence::{
+use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::persistence::{
     PersistenceDirty, WorkspacePersisted, WorkspaceRestore, WorkspaceSaveRequest,
     WorkspaceStoreValidators,
 };
-use vmux_ecs::profile::{ProfilePaths, SessionEnvironment};
+#[cfg(test)]
+use vmux_ecs::profile::ProfilePaths;
+use vmux_ecs::profile::{CurrentProfile, SessionEnvironment};
 #[cfg(test)]
 use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 use vmux_layout::space::Space;
@@ -56,12 +58,25 @@ impl Plugin for WorkspacePersistencePlugin {
     }
 }
 
-fn spawn(registry: Res<AppTypeRegistry>, mut commands: Commands) {
+fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: Commands) {
     let components = WorkspacePersisted::filter(&registry.read())
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
         .allow::<Name>();
+    let path = match profile.paths() {
+        Some(paths) => paths.store().join("store.ron"),
+        None => {
+            #[cfg(test)]
+            {
+                ProfilePaths::current().store().join("store.ron")
+            }
+            #[cfg(not(test))]
+            {
+                return;
+            }
+        }
+    };
     commands.spawn((
         Name::new("Space persistence"),
         AutoSave {
@@ -71,6 +86,7 @@ fn spawn(registry: Res<AppTypeRegistry>, mut commands: Commands) {
             components,
         },
         WorkspaceRestore::default(),
+        WorkspaceStorePath(path),
     ));
 }
 
@@ -110,7 +126,6 @@ fn complete_restore(
 }
 
 #[derive(Component)]
-#[require(WorkspaceStorePath)]
 struct AutoSave {
     debounce: Timer,
     periodic: Timer,
@@ -176,6 +191,7 @@ const STORE_SCHEMA_VERSION: u32 = 4;
 #[derive(Component)]
 struct WorkspaceStorePath(PathBuf);
 
+#[cfg(test)]
 impl Default for WorkspaceStorePath {
     fn default() -> Self {
         Self(ProfilePaths::current().store().join("store.ron"))
@@ -618,7 +634,7 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_ecs::EcsPlugin);
+        app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
         app_save.add_observer(save_on_default_event);
 
         let url_e = app_save
@@ -629,7 +645,7 @@ mod tests {
                 PageMetadata {
                     url: "https://example.com".into(),
                     title: "Example".into(),
-                    icon: vmux_ecs::PageIcon::None,
+                    icon: vmux_api::PageIcon::None,
                     bg_color: None,
                 },
                 vmux_ecs::VisitCount(3),
@@ -654,7 +670,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .add_observer(load_on_default_event);
         app_load.update();
 
@@ -708,14 +724,14 @@ mod tests {
         let mut app_save = App::new();
         app_save
             .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .add_observer(save_on_default_event);
         app_save.world_mut().spawn((
             Save,
             PageMetadata {
                 title: "Git".into(),
                 url: "vmux://git/".into(),
-                icon: vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Project),
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Project),
                 bg_color: None,
             },
         ));
@@ -730,7 +746,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .add_observer(load_on_default_event);
         app_load.update();
         app_load
@@ -746,7 +762,7 @@ mod tests {
             .expect("legacy page metadata loaded");
         assert_eq!(
             metadata.icon,
-            vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::GitBranch)
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::GitBranch)
         );
     }
 
@@ -777,7 +793,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_type::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
             .add_observer(load_on_default_event);
         app.update();
@@ -801,7 +817,7 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_ecs::EcsPlugin);
+        app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
         app_save
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
@@ -823,7 +839,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::EcsPlugin);
+            .add_plugins(vmux_ecs::PrimitivesPlugin);
         app_load
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
@@ -887,7 +903,7 @@ mod tests {
         let mut app_save = App::new();
         app_save
             .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_persisted::<Space>()
             .register_persisted::<SpaceId>()
             .register_persisted::<WindowGeometry>()
@@ -924,7 +940,7 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_ecs::EcsPlugin);
+        app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
         app_save.register_persisted::<PaneId>();
         app_save.add_observer(save_on_default_event);
         app_save
@@ -960,7 +976,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_type::<PaneId>()
             .add_observer(load_on_default_event);
         app_load.update();
@@ -998,7 +1014,7 @@ mod tests {
     fn registry_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::EcsPlugin);
+            .add_plugins(vmux_ecs::PrimitivesPlugin);
         app
     }
 
@@ -1072,7 +1088,7 @@ mod tests {
         let (normalized, _) = normalized_store_icons(body).expect("unknown icon");
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .add_observer(load_on_default_event);
         app.update();
         app.world_mut()
@@ -1087,7 +1103,7 @@ mod tests {
             .query::<&PageMetadata>()
             .single(app.world())
             .expect("page metadata loaded");
-        assert_eq!(metadata.icon, vmux_ecs::PageIcon::None);
+        assert_eq!(metadata.icon, vmux_api::PageIcon::None);
         assert_eq!(metadata.url, "vmux://projects/");
     }
 
@@ -1164,7 +1180,7 @@ mod tests {
             components: WorldFilter::allow_all(),
         });
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
@@ -1197,7 +1213,7 @@ mod tests {
             components: WorldFilter::allow_all(),
         });
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()

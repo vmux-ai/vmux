@@ -556,7 +556,7 @@ fn reload_changed_files(
                     .map(|duration| duration.as_millis())
                     .unwrap_or(0);
                 let url = format!("{}&v={nonce}", file.raw_media_url());
-                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
                     entity,
                     &FileMediaEvent {
                         kind,

@@ -1,21 +1,29 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use vmux_api::PageIcon;
 use vmux_api::bookmark::SmartBookmarkFolder;
-use vmux_ecs::profile::{ProfilePaths, SessionEnvironment};
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
+use vmux_ecs::profile::SessionEnvironment;
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
-use vmux_setting::{AppSettings, BookmarkFolderSettings};
+use vmux_setting::AppSettings;
 use vmux_shortcut::ShortcutUrl;
+
+use crate::persistence_driver::{BookmarkFilter, BookmarkPersistencePath};
 
 pub(super) struct BookmarkPersistencePlugin;
 
 impl Plugin for BookmarkPersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<OfferedBookmarkDefaults>()
+        app.register_type::<BookmarkOrder>()
+            .register_type::<Pin>()
+            .register_type::<Bookmark>()
+            .register_type::<Folder>()
+            .register_type::<SmartBookmarkFolder>()
+            .register_type::<Collapsed>()
+            .register_type::<Uuid>()
+            .register_type::<OfferedBookmarkDefaults>()
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
@@ -34,64 +42,27 @@ impl Plugin for BookmarkPersistencePlugin {
     }
 }
 
-fn spawn(mut commands: Commands) {
+fn spawn(profile: vmux_ecs::profile::CurrentProfile, mut commands: Commands) {
+    let path = match profile.paths() {
+        Some(paths) => paths.profile().join("bookmarks.ron"),
+        None => {
+            #[cfg(test)]
+            {
+                vmux_ecs::profile::ProfilePaths::current()
+                    .profile()
+                    .join("bookmarks.ron")
+            }
+            #[cfg(not(test))]
+            {
+                return;
+            }
+        }
+    };
     commands.spawn((
         Name::new("Bookmark persistence"),
         BookmarkAutoSave::default(),
+        BookmarkPersistencePath(path),
     ));
-}
-
-type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
-
-#[derive(Component)]
-struct BookmarkPersistencePath(PathBuf);
-
-impl Default for BookmarkPersistencePath {
-    fn default() -> Self {
-        Self(ProfilePaths::current().profile().join("bookmarks.ron"))
-    }
-}
-
-impl BookmarkPersistencePath {
-    fn scene_filter() -> WorldFilter {
-        WorldFilter::deny_all()
-            .allow::<ChildOf>()
-            .allow::<Children>()
-            .allow::<Name>()
-            .allow::<Pin>()
-            .allow::<Bookmark>()
-            .allow::<Folder>()
-            .allow::<SmartBookmarkFolder>()
-            .allow::<Collapsed>()
-            .allow::<Uuid>()
-            .allow::<BookmarkOrder>()
-            .allow::<PageMetadata>()
-    }
-
-    fn resource_filter() -> WorldFilter {
-        WorldFilter::deny_all().allow::<OfferedBookmarkDefaults>()
-    }
-
-    fn load(&self) -> std::io::Result<LoadWorld<BookmarkFilter>> {
-        let mut source = std::fs::read_to_string(&self.0)?;
-        for (legacy, current) in [
-            (
-                "vmux_desktop::bookmark_persistence::OfferedBookmarkDefaults",
-                "vmux_bookmark::OfferedBookmarkDefaults",
-            ),
-            ("vmux_core::BookmarkOrder", "vmux_ecs::BookmarkOrder"),
-            ("vmux_core::Pin", "vmux_ecs::Pin"),
-            ("vmux_core::Bookmark", "vmux_ecs::Bookmark"),
-            ("vmux_core::Folder", "vmux_ecs::Folder"),
-            ("vmux_core::Collapsed", "vmux_ecs::Collapsed"),
-            ("vmux_core::Uuid", "vmux_ecs::Uuid"),
-        ] {
-            source = source.replace(legacy, current);
-        }
-        Ok(LoadWorld::<BookmarkFilter>::from_stream(
-            std::io::Cursor::new(source.into_bytes()),
-        ))
-    }
 }
 
 fn load_bookmarks_on_startup(
@@ -138,7 +109,7 @@ struct BookmarkLoadPending;
 #[derive(Resource, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Resource)]
 #[type_path = "vmux_bookmark"]
-struct OfferedBookmarkDefaults {
+pub(super) struct OfferedBookmarkDefaults {
     urls: Vec<String>,
     #[reflect(default)]
     folders: Vec<String>,
@@ -146,54 +117,7 @@ struct OfferedBookmarkDefaults {
     folder_bookmarks: Vec<String>,
 }
 
-impl OfferedBookmarkDefaults {
-    fn claim_new_urls(&mut self, defaults: &[String]) -> Vec<String> {
-        let mut offered = self
-            .urls
-            .iter()
-            .map(|url| BookmarkDefaults::key(url))
-            .collect::<HashSet<_>>();
-        let mut claimed = Vec::new();
-        for url in defaults {
-            let key = BookmarkDefaults::key(url);
-            if key.is_empty() || !offered.insert(key) {
-                continue;
-            }
-            self.urls.push(url.clone());
-            claimed.push(url.clone());
-        }
-        claimed
-    }
-
-    fn claim_new_folders(&mut self, defaults: &[BookmarkFolderSettings]) -> Vec<String> {
-        let mut offered = self
-            .folders
-            .iter()
-            .map(|name| BookmarkDefaults::key(name))
-            .collect::<HashSet<_>>();
-        let mut claimed = Vec::new();
-        for folder in defaults {
-            let key = BookmarkDefaults::key(&folder.name);
-            if key.is_empty() || !offered.insert(key) {
-                continue;
-            }
-            self.folders.push(folder.name.clone());
-            claimed.push(folder.name.clone());
-        }
-        claimed
-    }
-}
-
-struct BookmarkDefaults<'a> {
-    urls: &'a [String],
-    folders: &'a [BookmarkFolderSettings],
-}
-
-impl<'a> BookmarkDefaults<'a> {
-    fn new(urls: &'a [String], folders: &'a [BookmarkFolderSettings]) -> Self {
-        Self { urls, folders }
-    }
-
+impl BookmarkSeed<'_, '_> {
     fn key(url: &str) -> String {
         if let Some(canonical) = ShortcutUrl::canonical(url) {
             return canonical.trim_end_matches('/').to_ascii_lowercase();
@@ -218,12 +142,38 @@ fn insert_defaults(
     settings: Res<AppSettings>,
     mut seed: BookmarkSeed,
 ) {
-    let defaults = BookmarkDefaults::new(
-        &settings.browser.bookmarks,
-        &settings.browser.bookmark_folders,
-    );
-    let claimed_urls = seed.offered.claim_new_urls(defaults.urls);
-    let claimed_folders = seed.offered.claim_new_folders(defaults.folders);
+    let urls = &settings.browser.bookmarks;
+    let folders = &settings.browser.bookmark_folders;
+    let mut offered_urls = seed
+        .offered
+        .urls
+        .iter()
+        .map(|url| BookmarkSeed::key(url))
+        .collect::<HashSet<_>>();
+    let mut claimed_urls = Vec::new();
+    for url in urls {
+        let key = BookmarkSeed::key(url);
+        if key.is_empty() || !offered_urls.insert(key) {
+            continue;
+        }
+        seed.offered.urls.push(url.clone());
+        claimed_urls.push(url.clone());
+    }
+    let mut offered_folders = seed
+        .offered
+        .folders
+        .iter()
+        .map(|name| BookmarkSeed::key(name))
+        .collect::<HashSet<_>>();
+    let mut claimed_folders = Vec::new();
+    for folder in folders {
+        let key = BookmarkSeed::key(&folder.name);
+        if key.is_empty() || !offered_folders.insert(key) {
+            continue;
+        }
+        seed.offered.folders.push(folder.name.clone());
+        claimed_folders.push(folder.name.clone());
+    }
     let legacy_folder_bookmarks = !seed.offered.folder_bookmarks.is_empty();
     seed.offered.folder_bookmarks.clear();
     let mut changed =
@@ -231,7 +181,7 @@ fn insert_defaults(
     let mut pinned = seed
         .pins
         .iter()
-        .map(|metadata| BookmarkDefaults::key(&metadata.url))
+        .map(|metadata| BookmarkSeed::key(&metadata.url))
         .collect::<HashSet<_>>();
     let mut next_order = seed
         .orders
@@ -240,7 +190,7 @@ fn insert_defaults(
         .max()
         .map_or(0, |order| order.saturating_add(1));
     for url in claimed_urls {
-        if !pinned.insert(BookmarkDefaults::key(&url)) {
+        if !pinned.insert(BookmarkSeed::key(&url)) {
             continue;
         }
         seed.commands.spawn((
@@ -259,22 +209,16 @@ fn insert_defaults(
     let mut existing_folders = seed
         .folders
         .iter()
-        .map(|(entity, name, smart)| {
-            (
-                BookmarkDefaults::key(name.as_str()),
-                (entity, smart.copied()),
-            )
-        })
+        .map(|(entity, name, smart)| (BookmarkSeed::key(name.as_str()), (entity, smart.copied())))
         .collect::<HashMap<_, _>>();
     for name in claimed_folders {
-        let key = BookmarkDefaults::key(&name);
+        let key = BookmarkSeed::key(&name);
         if existing_folders.contains_key(&key) {
             continue;
         }
-        let setting = defaults
-            .folders
+        let setting = folders
             .iter()
-            .find(|folder| BookmarkDefaults::key(&folder.name) == key);
+            .find(|folder| BookmarkSeed::key(&folder.name) == key);
         let mut entity = seed.commands.spawn((
             Folder,
             Uuid(uuid::Uuid::new_v4().to_string()),
@@ -288,11 +232,11 @@ fn insert_defaults(
         existing_folders.insert(key, (entity, setting.and_then(|folder| folder.smart)));
         next_order = next_order.saturating_add(1);
     }
-    for setting in defaults.folders {
+    for setting in folders {
         let Some(smart) = setting.smart else {
             continue;
         };
-        let Some((entity, current)) = existing_folders.get(&BookmarkDefaults::key(&setting.name))
+        let Some((entity, current)) = existing_folders.get(&BookmarkSeed::key(&setting.name))
         else {
             continue;
         };
@@ -307,7 +251,6 @@ fn insert_defaults(
 }
 
 #[derive(Component, Default)]
-#[require(BookmarkPersistencePath)]
 struct BookmarkAutoSave {
     dirty: bool,
 }
@@ -385,7 +328,7 @@ mod tests {
         save_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_type::<OfferedBookmarkDefaults>()
             .insert_resource(OfferedBookmarkDefaults {
                 urls: vec!["vmux://start/".into()],
@@ -404,7 +347,7 @@ mod tests {
             PageMetadata {
                 title: "A".into(),
                 url: "https://a.test".into(),
-                icon: vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Smartphone),
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Smartphone),
                 bg_color: None,
             },
             BookmarkOrder(1),
@@ -431,7 +374,7 @@ mod tests {
         load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_type::<OfferedBookmarkDefaults>()
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
@@ -456,7 +399,7 @@ mod tests {
         assert_eq!(bookmarks.len(), 1, "bookmark rebuilt");
         assert_eq!(
             bookmarks[0].icon,
-            vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Smartphone)
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Smartphone)
         );
         assert_eq!(folders, 1, "folder rebuilt");
         let excluded = load_app
@@ -480,36 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn removed_default_bookmarks_are_not_offered_again() {
-        let defaults = vec!["vmux://start/".into(), "vmux://terminal/".into()];
-        let mut offered = OfferedBookmarkDefaults::default();
-
-        assert_eq!(offered.claim_new_urls(&defaults), defaults);
-        assert!(offered.claim_new_urls(&defaults).is_empty());
-    }
-
-    #[test]
-    fn removed_default_folders_are_not_offered_again() {
-        let defaults = vec![
-            vmux_setting::BookmarkFolderSettings {
-                name: "Projects".into(),
-                smart: Some(SmartBookmarkFolder::Projects),
-            },
-            vmux_setting::BookmarkFolderSettings {
-                name: "Knowledge".into(),
-                smart: Some(SmartBookmarkFolder::Knowledge),
-            },
-        ];
-        let mut offered = OfferedBookmarkDefaults::default();
-
-        assert_eq!(
-            offered.claim_new_folders(&defaults),
-            ["Projects", "Knowledge"]
-        );
-        assert!(offered.claim_new_folders(&defaults).is_empty());
-    }
-
-    #[test]
     fn existing_bookmark_store_receives_missing_defaults() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("bookmarks.ron");
@@ -517,7 +430,7 @@ mod tests {
         save_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>);
         save_app.world_mut().spawn((
             Pin,
@@ -525,7 +438,7 @@ mod tests {
             PageMetadata {
                 title: "Existing".into(),
                 url: "https://example.com".into(),
-                icon: vmux_ecs::PageIcon::None,
+                icon: vmux_api::PageIcon::None,
                 bg_color: None,
             },
             BookmarkOrder(4),
@@ -558,7 +471,7 @@ mod tests {
         load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(vmux_ecs::EcsPlugin)
+            .add_plugins(vmux_ecs::PrimitivesPlugin)
             .insert_resource(settings)
             .register_type::<OfferedBookmarkDefaults>()
             .init_resource::<OfferedBookmarkDefaults>()
@@ -619,6 +532,25 @@ mod tests {
                 ("Knowledge".into(), SmartBookmarkFolder::Knowledge),
                 ("Projects".into(), SmartBookmarkFolder::Projects),
             ]
+        );
+
+        load_app.world_mut().trigger(SeedBookmarkDefaults);
+        load_app.update();
+        assert_eq!(
+            load_app
+                .world_mut()
+                .query_filtered::<Entity, With<Pin>>()
+                .iter(load_app.world())
+                .count(),
+            3
+        );
+        assert_eq!(
+            load_app
+                .world_mut()
+                .query_filtered::<Entity, With<Folder>>()
+                .iter(load_app.world())
+                .count(),
+            2
         );
     }
 }

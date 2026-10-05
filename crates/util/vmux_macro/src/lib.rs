@@ -1,12 +1,14 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, parse_macro_input};
+use syn::parse::Parser;
+use syn::punctuated::Punctuated;
+use syn::{DeriveInput, Meta, Token, Type, parse_macro_input};
 
 mod app_plugin;
 mod bin_event;
 mod command;
 mod contract;
-mod native_page;
+mod page;
 mod service_message;
 mod string_id;
 mod tool_input;
@@ -89,11 +91,37 @@ pub fn bidirectional_event(args: TokenStream, input: TokenStream) -> TokenStream
 #[proc_macro_attribute]
 pub fn ui_state(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let state = match ui_state::derive_state(&input) {
+    let args = match Punctuated::<Meta, Token![,]>::parse_terminated.parse(args) {
+        Ok(args) => args,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    let mut event_args = Punctuated::<Meta, Token![,]>::new();
+    let mut patch = None::<Type>;
+    for arg in args {
+        let Meta::NameValue(value) = &arg else {
+            event_args.push(arg);
+            continue;
+        };
+        if !value.path.is_ident("patch") {
+            event_args.push(arg);
+            continue;
+        }
+        if patch.is_some() {
+            return syn::Error::new_spanned(value, "duplicate patch")
+                .to_compile_error()
+                .into();
+        }
+        let patch_value = &value.value;
+        patch = match syn::parse2(quote!(#patch_value)) {
+            Ok(patch) => Some(patch),
+            Err(error) => return error.to_compile_error().into(),
+        };
+    }
+    let state = match ui_state::derive_state(&input, patch.as_ref()) {
         Ok(tokens) => tokens,
         Err(error) => return error.to_compile_error().into(),
     };
-    match bin_event::expand(args.into(), input, bin_event::Direction::Host) {
+    match bin_event::expand(quote!(#event_args), input, bin_event::Direction::Host) {
         Ok(event) => quote!(#event #state).into(),
         Err(error) => error.to_compile_error().into(),
     }
@@ -115,7 +143,7 @@ pub fn ui_state_patch(args: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn page(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    match native_page::expand(args.into(), input) {
+    match page::expand(args.into(), input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }

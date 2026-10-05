@@ -1,4 +1,11 @@
 (
+    tool_providers: [
+        (id: "homebrew-formula", title: "Homebrew Formulae", title_message_id: "tools-provider-homebrew-formulae", route_title: "Homebrew", route_title_message_id: "tools-homebrew", short_label: "brew", route: "homebrew", rank: 20, brewfile: true),
+        (id: "homebrew-cask", title: "Homebrew Casks", title_message_id: "tools-provider-homebrew-casks", route_title: "Homebrew", route_title_message_id: "tools-homebrew", short_label: "brew", route: "homebrew", rank: 21, brewfile: true),
+        (id: "npm", title: "NPM Globals", title_message_id: "tools-provider-npm", route_title: "NPM", route_title_message_id: "tools-provider-npm", short_label: "NPM", route: "npm", rank: 30),
+        (id: "mcp", title: "MCP Servers", title_message_id: "tools-provider-mcp-servers", route_title: "MCP", route_title_message_id: "tools-provider-mcp-servers", short_label: "mcp", route: "mcp", rank: 40),
+        (id: "dotfiles", title: "Dotfiles", title_message_id: "tools-provider-dotfiles", route_title: "Dotfiles", route_title_message_id: "tools-provider-dotfiles", short_label: "dotfiles", route: "dotfiles", rank: 50, apply: true),
+    ],
     pages: [
         (
             url: "vmux://tools/",
@@ -26,6 +33,7 @@
                 "AgentSetupUiState",
                 "ToolsUiState",
                 "ToolsRefreshRequest",
+                "ToolsFilterRequest",
                 "ToolOpenRequest",
                 "ToolsNavigateRequest",
                 "ToolInstallRequest",

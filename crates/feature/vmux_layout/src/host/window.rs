@@ -13,11 +13,11 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
+use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageEmbedSet;
+use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{
     Active, EffectiveStartupUrl, Order, PageOpenRequest, PageOpenSet, PageOpenTarget, PendingPrompt,
 };
@@ -53,7 +53,6 @@ impl Plugin for WindowLayoutPlugin {
                 Startup,
                 request_default.in_set(LayoutStartupSet::DefaultTab),
             )
-            .add_systems(Startup, bind_commands.in_set(BindCommands))
             .add_systems(
                 Startup,
                 fit_to_screen
@@ -115,6 +114,7 @@ impl FocusedWindow<'_, '_> {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message)]
 struct MinimizeWindowRequest;
 
@@ -128,6 +128,7 @@ impl TryFrom<&CommandInvocation> for MinimizeWindowRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NewWindowRequest;
 
@@ -139,6 +140,7 @@ impl TryFrom<&CommandInvocation> for NewWindowRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseFocusedWindowRequest;
 
@@ -150,6 +152,7 @@ impl TryFrom<&CommandInvocation> for CloseFocusedWindowRequest {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToggleFullscreenRequest;
 
@@ -161,13 +164,6 @@ impl TryFrom<&CommandInvocation> for ToggleFullscreenRequest {
             .then_some(Self)
             .ok_or(())
     }
-}
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<MinimizeWindowRequest>(&mut commands);
-    registry.message::<NewWindowRequest>(&mut commands);
-    registry.message::<CloseFocusedWindowRequest>(&mut commands);
-    registry.message::<ToggleFullscreenRequest>(&mut commands);
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

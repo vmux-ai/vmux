@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
 use vmux_ecs::overlay::WindowOverlay;
 use vmux_ecs::page::PageReady;
+use vmux_ecs::{UiStatePlugin, UiStateWrite};
 use vmux_layout::LayoutCef;
 
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
-use vmux_ui::theme::ThemeEvent;
+use vmux_ui::theme::ThemeUiState;
 
 pub(crate) struct BrowserLocale(String);
 
@@ -56,9 +56,9 @@ impl BrowserAppearance<'_> {
         }
     }
 
-    fn theme(&self) -> ThemeEvent {
+    fn theme(&self) -> ThemeUiState {
         let locale = BrowserLocale::requested(&self.0.appearance.locale);
-        ThemeEvent {
+        ThemeUiState {
             radius: self.0.layout.radius,
             catalog: locale.catalog(),
             locale: locale.0,
@@ -70,7 +70,7 @@ pub(crate) struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiStatePlugin::<ThemeEvent>::default())
+        app.add_plugins(UiStatePlugin::<ThemeUiState>::default())
             .add_observer(webview_ready_send_theme)
             .add_systems(
                 Update,
@@ -107,7 +107,7 @@ fn webview_ready_send_theme(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    commands.trigger(UiStateWrite::<ThemeEvent>::from_event(
+    commands.trigger(UiStateWrite::<ThemeUiState>::from_event(
         entity,
         &BrowserAppearance(&settings).theme(),
     ));
@@ -147,7 +147,7 @@ fn sync_to_cef(
     }
     let payload = appearance.theme();
     for entity in &ready {
-        commands.trigger(UiStateWrite::<ThemeEvent>::from_event(entity, &payload));
+        commands.trigger(UiStateWrite::<ThemeUiState>::from_event(entity, &payload));
     }
 }
 

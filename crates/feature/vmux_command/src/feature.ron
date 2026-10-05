@@ -26,7 +26,7 @@
             (
                 id: "command_bar_open",
                 label: "Command Bar",
-                group: "Browser > Bar",
+                group: "Command Bar",
                 accelerator: Some("super+k"),
                 shortcuts: [
                     (shortcut: Direct("Super+k"), when: None),
@@ -37,7 +37,7 @@
             (
                 id: "command_bar_edit_page",
                 label: "Edit Page",
-                group: "Browser > Bar",
+                group: "Command Bar",
                 accelerator: Some("super+l"),
                 shortcuts: [(shortcut: Direct("Super+l"), when: None)],
                 mcp: Some((description: "Edit Page")),
@@ -45,7 +45,7 @@
             (
                 id: "command_bar_open_path",
                 label: "Path Navigator",
-                group: "Browser > Bar",
+                group: "Command Bar",
                 accelerator: Some("super+/"),
                 shortcuts: [(shortcut: Direct("Super+/"), when: None)],
                 mcp: Some((description: "Path Navigator")),
@@ -53,7 +53,7 @@
             (
                 id: "command_bar_open_commands",
                 label: "Commands",
-                group: "Browser > Bar",
+                group: "Command Bar",
                 shortcuts: [(shortcut: Direct(">"), when: None)],
                 mcp: Some((description: "Commands")),
             ),

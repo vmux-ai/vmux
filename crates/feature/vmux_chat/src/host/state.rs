@@ -8,7 +8,7 @@ use bevy_ecs::prelude::*;
 #[cfg(not(host))]
 use vmux_api::page::UiStateEmit;
 #[cfg(host)]
-use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
+use vmux_ecs::{UiStatePlugin, UiStateWrite};
 
 pub struct ChatUiStatePlugin;
 
@@ -17,7 +17,8 @@ impl Plugin for ChatUiStatePlugin {
         #[cfg(not(host))]
         app.add_message::<UiStateEmit>();
         #[cfg(host)]
-        app.add_plugins(UiStatePlugin::<ChatUiState>::default());
+        app.add_plugins(UiStatePlugin::<ChatUiState>::default())
+            .add_observer(project_mcp);
         app.add_message::<PublishComposerEffect>()
             .add_message::<RepublishChatUiState>()
             .add_systems(Startup, spawn_runtime)
@@ -38,7 +39,7 @@ pub struct RepublishChatUiState;
 #[derive(Component, Default)]
 pub struct ChatUiStateProjection {
     #[cfg(not(host))]
-    sequence: u64,
+    state: ChatUiState,
     patches: Vec<ChatUiStatePatch>,
 }
 
@@ -47,7 +48,10 @@ impl ChatUiStateProjection {
     where
         T: Clone + Into<ChatUiStatePatch>,
     {
-        self.patches.push(payload.clone().into());
+        let patch = payload.clone().into();
+        #[cfg(not(host))]
+        vmux_api::UiStateProjection::apply(&mut self.state, patch.clone());
+        self.patches.push(patch);
     }
 }
 
@@ -83,6 +87,21 @@ fn publish_composer_effects(
     }
 }
 
+#[cfg(host)]
+fn project_mcp(
+    trigger: On<UiStateWrite<vmux_api::mcp::McpServersUiState>>,
+    views: Query<(), With<super::session::ChatView>>,
+    mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
+) {
+    if !views.contains(trigger.event().webview()) {
+        return;
+    }
+    let Ok(mut projection) = runtimes.single_mut() else {
+        return;
+    };
+    projection.write(trigger.event().update());
+}
+
 #[cfg(not(host))]
 fn emit_ui(
     mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
@@ -94,12 +113,8 @@ fn emit_ui(
     if projection.patches.is_empty() {
         return;
     }
-    projection.sequence = projection.sequence.wrapping_add(1).max(1);
-    let state = ChatUiState {
-        sequence: projection.sequence,
-        patches: std::mem::take(&mut projection.patches),
-    };
-    let Some(emit) = UiStateEmit::from_state(&state) else {
+    projection.patches.clear();
+    let Some(emit) = UiStateEmit::from_state(&projection.state) else {
         return;
     };
     emits.write(emit);
@@ -132,15 +147,14 @@ mod tests {
     use crate::event::{ChatSnapshot, ModelState};
 
     #[test]
-    fn batches_preserve_patch_order() {
-        let event = ChatUiState {
-            sequence: 3,
-            patches: vec![ChatSnapshot::default().into(), ModelState::default().into()],
-        };
+    fn patches_build_a_retained_tree() {
+        let event = <ChatUiState as vmux_api::UiState>::from_updates(
+            None,
+            vec![ChatSnapshot::default().into(), ModelState::default().into()],
+        );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<ChatUiState, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded.sequence, 3);
-        assert!(decoded.patches[0].snapshot.is_some());
-        assert!(decoded.patches[1].model.is_some());
+        assert!(decoded.snapshot_ready);
+        assert!(decoded.model_ready);
     }
 }

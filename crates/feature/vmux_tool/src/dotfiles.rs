@@ -17,10 +17,14 @@ use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
     ToolApplier, ToolOperationFailed, ToolOperationFinished, ToolOperationRequest,
     ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask,
-    ToolProviderId, ToolProviderSnapshot, ToolScanner, ToolStoreOperation, ToolStoreTarget,
+    ToolProviderBinding, ToolProviderSnapshot, ToolProviderTarget, ToolScanner, ToolStoreOperation,
+    ToolStoreTarget,
 };
 
 pub(crate) struct DotfileToolPlugin;
+
+#[derive(EcsComponent)]
+struct DotfileProvider;
 
 impl Plugin for DotfileToolPlugin {
     fn build(&self, app: &mut App) {
@@ -68,8 +72,8 @@ impl Plugin for DotfileToolPlugin {
 
 fn spawn_provider(mut commands: Commands) {
     commands.spawn((
-        bevy_ecs::name::Name::new("Dotfile tool provider"),
-        ToolProviderId(ToolProvider::Dotfiles),
+        ToolProviderBinding::new::<crate::Feature>(4),
+        DotfileProvider,
         ToolScanner::new(scan),
         ToolApplier::new(apply),
     ));
@@ -81,6 +85,7 @@ fn apply(store: &ToolStore) -> Result<usize, String> {
 }
 
 fn scan(
+    provider: &ToolProvider,
     store: &ToolStore,
     manifest: &mut ToolsManifest,
     _refresh: bool,
@@ -131,7 +136,7 @@ fn scan(
             ),
         };
         items.push(ToolItem {
-            provider: ToolProvider::Dotfiles,
+            provider: provider.clone(),
             id: package.clone(),
             name: package,
             icon: None,
@@ -143,21 +148,29 @@ fn scan(
         });
     }
     Ok(ToolCategory {
-        provider: ToolProvider::Dotfiles,
+        provider: provider.clone(),
         items,
     }
     .into())
 }
 
 fn route_import(
-    requests: Query<(Entity, &ToolOperationRequest<ToolImportRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolImportRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<DotfileProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
-        let request = &operation.0;
-        if request.provider != ToolProvider::Dotfiles {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
             continue;
         }
+        let request = &operation.0;
         let value = request.value.trim();
         let mut entity = commands.entity(entity);
         if value.is_empty() {
@@ -169,15 +182,23 @@ fn route_import(
 }
 
 fn route_adopt(
-    requests: Query<(Entity, &ToolOperationRequest<ToolAdoptRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolAdoptRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<DotfileProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider != ToolProvider::Dotfiles
-            || request.id.trim().is_empty()
-            || request.value.trim().is_empty()
-        {
+        if request.id.trim().is_empty() || request.value.trim().is_empty() {
             continue;
         }
         commands.entity(entity).insert((
@@ -188,12 +209,23 @@ fn route_adopt(
 }
 
 fn route_install(
-    requests: Query<(Entity, &ToolOperationRequest<ToolInstallRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolInstallRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<DotfileProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+        if !request.id.trim().is_empty() {
             commands.entity(entity).insert((
                 ToolStoreOperation,
                 LinkDotfilePackage::new(request.id.trim()),
@@ -203,12 +235,23 @@ fn route_install(
 }
 
 fn route_update(
-    requests: Query<(Entity, &ToolOperationRequest<ToolUpdateRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolUpdateRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<DotfileProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+        if !request.id.trim().is_empty() {
             commands.entity(entity).insert((
                 ToolStoreOperation,
                 LinkDotfilePackage::new(request.id.trim()),
@@ -218,12 +261,23 @@ fn route_update(
 }
 
 fn route_link(
-    requests: Query<(Entity, &ToolOperationRequest<ToolLinkRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolLinkRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<DotfileProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+        if !request.id.trim().is_empty() {
             commands.entity(entity).insert((
                 ToolStoreOperation,
                 LinkDotfilePackage::new(request.id.trim()),
@@ -233,12 +287,23 @@ fn route_link(
 }
 
 fn route_uninstall(
-    requests: Query<(Entity, &ToolOperationRequest<ToolUninstallRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolUninstallRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<DotfileProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+        if !request.id.trim().is_empty() {
             commands.entity(entity).insert((
                 ToolStoreOperation,
                 DisableDotfilePackage::new(request.id.trim()),
@@ -248,12 +313,23 @@ fn route_uninstall(
 }
 
 fn route_unlink(
-    requests: Query<(Entity, &ToolOperationRequest<ToolUnlinkRequest>), Added<ToolStoreTarget>>,
+    requests: Query<
+        (
+            Entity,
+            &ToolOperationRequest<ToolUnlinkRequest>,
+            &ToolProviderTarget,
+        ),
+        Added<ToolStoreTarget>,
+    >,
+    providers: Query<(), With<DotfileProvider>>,
     mut commands: Commands,
 ) {
-    for (entity, operation) in &requests {
+    for (entity, operation, provider) in &requests {
+        if !providers.contains(provider.entity()) {
+            continue;
+        }
         let request = &operation.0;
-        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+        if !request.id.trim().is_empty() {
             commands.entity(entity).insert((
                 ToolStoreOperation,
                 DisableDotfilePackage::new(request.id.trim()),

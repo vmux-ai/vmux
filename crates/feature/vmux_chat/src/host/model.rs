@@ -151,7 +151,7 @@ fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
         .entity(event.webview)
         .insert(ModelPickerProjection(event.state.clone()));
     commands.trigger(
-        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
             event.webview,
             &event.state,
         ),
@@ -160,20 +160,24 @@ fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
         SlashCommandEntry {
             command: SlashCommand::Upload,
             description: "Attach files".to_string(),
+            delegated: false,
         },
         SlashCommandEntry {
             command: SlashCommand::Resume,
             description: "Resume a past session".to_string(),
+            delegated: true,
         },
         SlashCommandEntry {
             command: SlashCommand::Mcp,
-            description: String::new(),
+            description: vmux_ui::i18n::translate("mcp-command-description"),
+            delegated: true,
         },
     ];
     if !event.state.models.is_empty() {
         commands_list.push(SlashCommandEntry {
             command: SlashCommand::Model,
             description: "Select model".to_string(),
+            delegated: false,
         });
     }
     commands
@@ -190,7 +194,7 @@ fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands)
         .entity(event.webview)
         .insert(ModeProjection(event.state.clone()));
     commands.trigger(
-        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
             event.webview,
             &event.state,
         ),
@@ -200,7 +204,7 @@ fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_ecs::host::UiStateWrite;
+    use vmux_ecs::UiStateWrite;
 
     #[derive(Resource, Default)]
     struct Published(Vec<crate::state::ChatUiStatePatch>);
@@ -210,7 +214,7 @@ mod tests {
             trigger: On<UiStateWrite<crate::state::ChatUiState>>,
             mut published: ResMut<Self>,
         ) {
-            published.0.push(trigger.event().patch().clone());
+            published.0.push(trigger.event().update().clone());
         }
     }
 

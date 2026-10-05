@@ -11,8 +11,8 @@ use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
 use vmux_api::BinEvent;
 use vmux_api::command_bar::CommandBarUiState;
+use vmux_ecs::overlay::Overlay;
 use vmux_ecs::overlay::WindowOverlay;
-use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
@@ -156,7 +156,7 @@ fn refresh_active_windowed_hover(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     focused_window: vmux_layout::window::FocusedWindow,
-    overlay_q: OverlayStateQuery,
+    overlay: Overlay,
     active_q: Query<
         (Entity, &Transform, &ComputedNode, Option<&HostWindow>),
         (
@@ -171,7 +171,7 @@ fn refresh_active_windowed_hover(
     >,
     mut state: Local<WindowedHoverRefreshState>,
 ) {
-    if OverlayState::from_query(&overlay_q).owns_input() {
+    if overlay.owns_input() {
         *state = WindowedHoverRefreshState::default();
         return;
     }
@@ -414,8 +414,8 @@ mod tests {
         app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
             &CommandBarUiState {
-                sequence: 1,
-                patches: vec![CommandBarOpenEvent::default().into()],
+                snapshot: CommandBarOpenEvent::default(),
+                ..Default::default()
             },
         ));
         assert_eq!(

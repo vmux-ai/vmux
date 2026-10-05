@@ -1,18 +1,15 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::CommandBar;
-use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPanelRequest, CommandBarUiState};
-use vmux_ecs::host::UiStateWrite;
+use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
+use vmux_ecs::UiStateWrite;
 use vmux_ecs::overlay::OverlayShownInline;
 
 pub(super) struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(CommandBarPanelRequest,)>::default())
-            .add_observer(active)
-            .add_systems(Update, sync_inline);
+        app.add_observer(active).add_systems(Update, sync_inline);
     }
 }
 
@@ -37,18 +34,21 @@ fn sync_inline(
     }
 }
 
-fn active(trigger: On<UiInput<CommandBarPanelRequest>>, mut commands: Commands) {
-    let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
+fn active(trigger: On<UiStateWrite<CommandBarUiState>>, mut commands: Commands) {
+    let Some(opened) =
+        <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
+            trigger.event().update(),
+        )
+    else {
         return;
     };
-    if trigger.event().payload.active {
+    let Ok(mut webview) = commands.get_entity(trigger.event().webview()) else {
+        return;
+    };
+    if opened.open_id.is_open() {
         webview.insert(CommandBarPanelActive);
     } else {
         webview.remove::<CommandBarPanelActive>();
-        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
-            trigger.event().webview,
-            &CommandBarOpenEvent::default(),
-        ));
     }
 }
 
@@ -69,17 +69,22 @@ mod tests {
         let mut app = app();
         let webview = app.world_mut().spawn_empty().id();
 
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: CommandBarPanelRequest { active: true },
-        });
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                webview,
+                &CommandBarOpenEvent {
+                    open_id: vmux_api::command_bar::OpenId(1),
+                    ..Default::default()
+                },
+            ));
         app.update();
         assert!(app.world().get::<CommandBarPanelActive>(webview).is_some());
 
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: CommandBarPanelRequest { active: false },
-        });
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                webview,
+                &CommandBarOpenEvent::default(),
+            ));
         app.update();
         assert!(app.world().get::<CommandBarPanelActive>(webview).is_none());
     }

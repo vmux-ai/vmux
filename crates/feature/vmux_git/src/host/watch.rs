@@ -486,8 +486,8 @@ impl GitWatch {
 fn drain(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: Single<&mut RepoInfoCache>,
-    mut views: Query<&mut super::state::GitState>,
-    mut files: Query<&mut super::status::FileGit>,
+    mut states: super::state::GitStates,
+    mut files: super::status::FileGitStates,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -530,17 +530,16 @@ fn drain(
         .map(|(entity, _)| *entity)
         .collect();
     for entity in affected {
-        if let Ok(mut view) = views.get_mut(entity) {
-            if let Some(path) = view.mark_changed() {
+        if states.contains(entity) {
+            if let Some(path) = states.mark_changed(entity) {
                 commands.spawn((
                     super::job_runner::GitJob::new(entity),
                     super::job::RepositoryJob { path: path.into() },
                 ));
             }
-        } else if let Ok(mut file) = files.get_mut(entity) {
-            let refresh = file
-                .bypass_change_detection()
-                .changed(wake.as_deref().map(|wake| (**wake).clone()));
+        } else if let Some(refresh) =
+            files.schedule_changed(entity, wake.as_deref().map(|wake| (**wake).clone()))
+        {
             commands.entity(entity).insert(refresh);
         }
     }

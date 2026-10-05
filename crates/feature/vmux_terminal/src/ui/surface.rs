@@ -24,7 +24,7 @@ const CONTAINER_ID: &str = "term-container";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
     claims = crate::Terminal
 )]
@@ -478,7 +478,7 @@ pub fn Page() -> Element {
                                             style: "--terminal-row-top:{top}px;",
                                             TerminalRow {
                                                 row_idx: *doc_row as usize,
-                                                row: *row,
+                                                row: row.clone(),
                                                 selection,
                                                 cols,
                                             }
@@ -511,12 +511,11 @@ const _TW_SAFELIST: &[&str] = &[
 #[component]
 fn TerminalRow(
     row_idx: usize,
-    row: Signal<TerminalRowState>,
-    selection: Signal<Option<TermSelectionRange>>,
-    cols: Signal<u16>,
+    row: TerminalRowState,
+    selection: Memo<Option<TermSelectionRange>>,
+    cols: Memo<u16>,
 ) -> Element {
-    let state = row();
-    let line = &state.line;
+    let line = &row.line;
     let selected_cols = row_selection_cols(&selection(), row_idx, cols());
 
     rsx! {
@@ -535,7 +534,7 @@ fn TerminalRow(
                 TermSpanView {
                     span: span.clone(),
                     span_idx,
-                    cursor: state.cursor.clone(),
+                    cursor: row.cursor.clone(),
                     cursor_style: CursorStyle::Block,
                 }
             }

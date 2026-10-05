@@ -1,4 +1,4 @@
-use crate::util::cn;
+use crate::cn::cn;
 use dioxus::prelude::*;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";

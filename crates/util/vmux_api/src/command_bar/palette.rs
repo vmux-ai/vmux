@@ -1,12 +1,10 @@
-use super::{CommandBarPick, CommandBarPicker, SearchEngine};
+use super::CommandBarPicker;
 use crate::PageIcon;
-use crate::chat::ResumableSessionEntry;
-use crate::mcp::McpServerEntry;
 use crate::protocol::AcpModeOption;
 use crate::room::ModelOptionEntry;
 use crate::space::ProjectRow;
 
-#[vmux_api::contract(Copy, Default, Eq)]
+#[vmux_api::contract(Default, Eq)]
 pub enum PaletteMode {
     #[default]
     Search,
@@ -45,6 +43,8 @@ pub struct CommandPaletteComposer {
     pub permission_modes: Vec<AcpModeOption>,
     pub permission_agent_key: String,
     pub permission_current_id: String,
+    pub permission_name: String,
+    pub permission_title: String,
     pub workspace_label: String,
     pub workspace_title: String,
     pub branch_label: String,
@@ -74,103 +74,30 @@ impl CommandPaletteMenus {
     }
 }
 
-#[vmux_api::contract(Eq)]
-pub struct ResumeSection {
-    pub agent: String,
-    pub project: String,
-    pub branch: String,
-    pub count: usize,
+#[vmux_api::contract(Default, Eq)]
+pub struct CommandBarSection {
+    pub labels: Vec<String>,
+    pub count: u32,
 }
 
-#[vmux_api::contract(Eq)]
-pub enum CommandBarResultItem {
-    Pick {
-        label: String,
-        pick: CommandBarPick,
-    },
-    Terminal {
-        path: String,
-    },
-    Editor {
-        path: String,
-    },
-    Stack {
-        title: String,
-        url: String,
-        icon: PageIcon,
-        pane_id: u64,
-        tab_index: usize,
-        location: String,
-    },
-    Space {
-        id: String,
-        name: String,
-        profile: String,
-        is_active: bool,
-        tab_count: usize,
-    },
-    Command {
-        id: String,
-        name: String,
-        shortcut: String,
-    },
-    Ex {
-        name: String,
-        hint: String,
-    },
-    Page {
-        url: String,
-        title: String,
-        icon: PageIcon,
-        shortcut: String,
-        prompt_target: bool,
-        prompt_hint: bool,
-    },
-    Navigate {
-        url: String,
-        is_url: bool,
-    },
-    Search {
-        engine: SearchEngine,
-        query: String,
-    },
-    File {
-        path: String,
-        is_dir: bool,
-        project: String,
-        relative: String,
-    },
-    History {
-        url: String,
-        title: String,
-        favicon_url: String,
-        visit_count: u32,
-        last_visited_at: i64,
-    },
-    WorkDir {
-        path: String,
-        is_dir: bool,
-    },
-    RecentFile {
-        url: String,
-        title: String,
-    },
-    Slash {
-        name: String,
-        hint: String,
-    },
-    Resume {
-        entry: Box<ResumableSessionEntry>,
-        section: Option<ResumeSection>,
-    },
-    ResumePending {
-        row: usize,
-    },
-    PartialIndex,
-    MoreMatches {
-        shown: usize,
-        total: usize,
-    },
+#[vmux_api::contract(Default, Eq)]
+pub struct CommandBarResultItem {
+    pub key: String,
+    pub leading: String,
+    pub title: String,
+    pub subtitle: String,
+    pub detail: String,
+    pub trailing: String,
+    pub badge: String,
+    pub url: String,
+    pub favicon_url: String,
+    pub file_path: String,
+    pub icon: PageIcon,
+    pub active: bool,
+    pub directory: bool,
+    pub pending: bool,
+    pub disabled: bool,
+    pub section: Option<CommandBarSection>,
 }
 
 #[vmux_api::contract(Default)]
@@ -182,18 +109,17 @@ pub struct CommandPaletteProjection {
     pub history_recalling: bool,
     pub row_text: Option<String>,
     pub placeholder: String,
+    pub mode_label: String,
     pub glyph: Option<PaletteGlyph>,
-    pub space_switch: bool,
-    pub space_count: u32,
-    pub space_name: String,
+    pub numbered: bool,
+    pub numbered_count: u32,
+    pub context_label: String,
     pub accent_agent: Option<String>,
     pub composer: CommandPaletteComposer,
     pub menus: CommandPaletteMenus,
     pub menu_cursor: u32,
     pub input_revision: u64,
     pub close_revision: u64,
-    pub mcp_open: bool,
-    pub mcp_entries: Vec<McpServerEntry>,
     pub prompt_targets: Vec<CommandBarResultItem>,
     pub default_target: Option<CommandBarResultItem>,
     pub ghost: String,

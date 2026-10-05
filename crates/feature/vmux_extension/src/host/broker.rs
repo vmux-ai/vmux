@@ -10,7 +10,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
@@ -42,7 +42,7 @@ impl Plugin for ExtensionBrokerPlugin {
     }
 }
 
-fn spawn(manifests: Query<&vmux_ecs::host::manifest::FeatureManifest>, mut commands: Commands) {
+fn spawn(manifests: Query<&vmux_ecs::manifest::FeatureManifest>, mut commands: Commands) {
     let mut matrix = None;
     for manifest in &manifests {
         let candidate = CapabilityMatrix::from_manifest(manifest)

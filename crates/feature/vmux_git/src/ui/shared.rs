@@ -63,27 +63,6 @@ pub fn GitFooter(
     always_visible: bool,
     children: Element,
 ) -> Element {
-    let mut commit_msg = use_signal(String::new);
-    let mut pending_commit_msg = use_signal(String::new);
-    let mut result_sequence = use_signal(|| 0u64);
-    use_effect(move || {
-        let state = git_state();
-        if state.result_sequence == 0 || state.result_sequence == result_sequence() {
-            return;
-        }
-        result_sequence.set(state.result_sequence);
-        let Some(result) = state.result else {
-            return;
-        };
-        if result.operation != "commit" {
-            return;
-        }
-        if result.ok && commit_msg().trim() == pending_commit_msg() {
-            commit_msg.set(String::new());
-        }
-        pending_commit_msg.set(String::new());
-    });
-
     let state = git_state();
     let has_branch = !state.branch.is_empty();
     if !has_branch && !always_visible {
@@ -124,24 +103,19 @@ pub fn GitFooter(
                         class: "min-w-0 flex-1 rounded border border-white/15 bg-transparent px-2 py-0.5 text-term-fg outline-none placeholder:text-muted-foreground",
                         r#type: "text",
                         placeholder: translate("git-commit-message"),
-                        value: "{commit_msg}",
-                        oninput: move |e| commit_msg.set(e.value()),
+                        value: "{state.commit_message}",
+                        oninput: move |event: Event<FormData>| {
+                            let _ = send(&GitCommitDraftRequest {
+                                message: event.value(),
+                            });
+                        },
                     }
                     Button {
                         variant: ButtonVariant::Ghost,
                         class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-white/10 disabled:opacity-40",
-                        disabled: commit_msg().trim().is_empty() || !pending_commit_msg().is_empty(),
+                        disabled: state.commit_message.trim().is_empty() || !state.commit_pending.is_empty(),
                         onclick: move |_| {
-                            let m = commit_msg().trim().to_string();
-                            if !m.is_empty()
-                                && send(&GitCommitRequest {
-                                    path: git_state().path,
-                                    message: m.clone(),
-                                })
-                                .is_ok()
-                            {
-                                pending_commit_msg.set(m);
-                            }
+                            let _ = send(&GitCommitSubmitRequest);
                         },
                         {translate_with(
                             "git-commit",

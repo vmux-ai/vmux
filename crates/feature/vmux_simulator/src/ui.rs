@@ -5,7 +5,7 @@ use crate::event::{
     SimulatorClipboardPasteRequest, SimulatorClipboardSelectAllRequest,
     SimulatorInputHardwareButtonRequest, SimulatorInputKeyRequest,
     SimulatorInputModifiedKeyRequest, SimulatorInputTextRequest, SimulatorKeyModifiers,
-    SimulatorReady, SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase,
+    SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase, SimulatorUiState,
 };
 use crate::url::SimulatorRoute;
 use dioxus::html::geometry::ClientPoint;
@@ -18,7 +18,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::platform::Platform;
 use vmux_ui::script::PageScript;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
     subtree,
     takes = vmux_ecs::PageMetadata
@@ -28,7 +28,7 @@ pub(crate) struct SimulatorPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let ready = use_ui_state::<SimulatorReady>().state;
+    let ready = use_ui_state::<SimulatorUiState>().state;
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).ok());
 

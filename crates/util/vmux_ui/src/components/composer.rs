@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 pub use vmux_api::prompt_media::PromptComposerAttachment;
 
+use crate::cn::cn;
 use crate::components::prompt_box::PromptBox;
 use crate::i18n::translate;
 use crate::ime::use_ime_guard;
-use crate::util::cn;
 
 pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
 

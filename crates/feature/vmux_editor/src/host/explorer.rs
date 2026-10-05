@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::event::{
-    ExplorerCloseEditor, ExplorerCollapseAll, ExplorerPanelSetVisible, ExplorerPanelViewSet,
-    ExplorerPanelWidth, ExplorerRevealCurrent, ExplorerTreePrefetch, ExplorerTreeRefresh,
-    ExplorerTreeToggle, FileDirEntry, TreeRow,
+    ExplorerCloseEditor, ExplorerCollapseAll, ExplorerFilesToggle, ExplorerOpenEditorsToggle,
+    ExplorerOutlineToggle, ExplorerPanelSetVisible, ExplorerPanelViewSet,
+    ExplorerPanelViewportWidth, ExplorerPanelWidth, ExplorerRevealCurrent, ExplorerTreePrefetch,
+    ExplorerTreeRefresh, ExplorerTreeToggle, FileDirEntry, TreeRow,
 };
 
 use entry::ExplorerEntryPlugin;
@@ -49,12 +50,6 @@ pub(super) struct OpenEditorsDirty;
 #[derive(Component)]
 pub(super) struct ExplorerTreeDirty;
 
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct StackExplorerRevision {
-    client_id: u64,
-    request_id: u64,
-}
-
 #[derive(Component, Clone, Copy)]
 struct ExplorerPanelDefaults {
     default_visible: bool,
@@ -88,6 +83,26 @@ impl ExplorerTree {
 
     fn allows(&self, path: &Path) -> bool {
         path.starts_with(&self.root)
+    }
+
+    fn create_parent(&self, selected: &Path) -> PathBuf {
+        if selected.as_os_str().is_empty() {
+            return self.root.clone();
+        }
+        if selected == self.root
+            || self
+                .children
+                .values()
+                .flatten()
+                .any(|entry| entry.is_dir && Path::new(&entry.path) == selected)
+        {
+            return selected.to_path_buf();
+        }
+        selected
+            .parent()
+            .filter(|parent| parent.starts_with(&self.root))
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.root.clone())
     }
 
     pub(super) fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
@@ -197,7 +212,11 @@ impl Plugin for ExplorerPlugin {
             ExplorerCloseEditor,
             ExplorerPanelSetVisible,
             ExplorerPanelViewSet,
+            ExplorerPanelViewportWidth,
             ExplorerPanelWidth,
+            ExplorerOpenEditorsToggle,
+            ExplorerFilesToggle,
+            ExplorerOutlineToggle,
         )>::default())
         .add_plugins(UiEventPlugin::<(ExplorerCollapseAll,)>::default());
     }

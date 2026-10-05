@@ -3,12 +3,12 @@ use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
 use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
+    ToolQueryRouteSet,
 };
 
 #[vmux_api::agent(Copy, Eq)]
@@ -22,8 +22,6 @@ impl Plugin for VaultToolPlugin {
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
-            .bind_tool::<VaultStatusArgs>()
-            .bind_tool::<OpenVaultArgs>()
             .add_systems(Update, (status, open).in_set(ToolDispatchSet));
     }
 }
@@ -42,7 +40,7 @@ impl Plugin for VaultAgentPlugin {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct VaultStatusArgs {}
+struct VaultStatusTool {}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +53,7 @@ enum VaultProvider {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OpenVaultArgs {
+struct OpenVaultTool {
     provider: Option<VaultProvider>,
 }
 
@@ -64,7 +62,7 @@ struct VaultStatusRequest {
     request_id: AgentRequestId,
 }
 
-fn status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusArgs>>) {
+fn status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusTool>>) {
     for request in &calls {
         commands
             .entity(request)
@@ -74,7 +72,7 @@ fn status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusArgs
 
 fn open(
     mut commands: Commands,
-    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenVaultArgs), Added<OpenVaultArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenVaultTool), Added<OpenVaultTool>>,
 ) {
     for (entity, name, anchor, args) in &requests {
         let command = anchor
@@ -138,7 +136,7 @@ fn answer_queries(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
-        let snapshot = vmux_ecs::profile::vault::VaultStatus::current().snapshot();
+        let snapshot = crate::storage::VaultStatus::current().snapshot();
         let result = serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string());
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
             AgentQueryResult::text(request.request_id, result),

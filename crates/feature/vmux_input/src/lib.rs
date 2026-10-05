@@ -9,7 +9,7 @@ pub use pointer::{NativePointer, NativePointerSnapshot};
 
 pub(crate) struct Feature;
 
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -27,7 +27,7 @@ impl Plugin for InputPlugin {
             capture::CapturePlugin,
             bevy_cef::prelude::UiEventPlugin::<(
                 vmux_api::input::KeyStroke,
-                vmux_api::input::UiKeyContext,
+                vmux_api::input::KeyContextRequest,
             )>::default(),
         ));
         #[cfg(target_os = "macos")]

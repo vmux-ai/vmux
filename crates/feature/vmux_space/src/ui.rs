@@ -1,23 +1,22 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceRenameRequest, SpaceRow,
-    SpacesListEvent, SpacesUiState,
+    SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceFormCloseRequest,
+    SpaceFormInputRequest, SpaceFormOpenRequest, SpaceFormState, SpaceRenameRequest, SpaceRow,
+    SpacesUiState,
 };
 use dioxus::prelude::*;
-use vmux_api::input::UiKeyContext;
-use vmux_ecs::event::team::{TeamEvent, TeamProfileSwitchRequest};
+use vmux_api::input::KeyContextRequest;
+use vmux_ecs::event::team::TeamProfileSwitchRequest;
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
-use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::platform::Platform;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page
 )]
 pub(crate) struct SpacesPage;
@@ -25,23 +24,17 @@ pub(crate) struct SpacesPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<SpacesUiState>()
-        .use_projection::<SpacesListEvent>(|state, patch| {
-            if let Some(snapshot) = &patch.snapshot {
-                *state = *snapshot.clone();
-            }
-        })
-        .state;
-    let team = use_ui_state::<TeamEvent>().state;
+    let state = use_ui_state::<SpacesUiState>().state;
 
     let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
     use_drop(move || {
-        let _ = send(&UiKeyContext { keys: Vec::new() });
+        let _ = send(&KeyContextRequest { keys: Vec::new() });
     });
 
-    let spaces = state.read().spaces.clone();
+    let current = state();
+    let spaces = current.snapshot.spaces;
     let count = spaces.len();
-    let selected = state().selected as usize;
+    let selected = current.snapshot.selected as usize;
     let active_name = spaces
         .iter()
         .find(|space| space.is_active)
@@ -52,7 +45,8 @@ pub fn Page() -> Element {
                 &[("number", TranslationValue::Number(1))],
             )
         });
-    let profiles = team().profiles;
+    let profiles = current.team.profiles;
+    let form = current.form;
     let active_profile = profiles
         .iter()
         .find(|profile| profile.is_active)
@@ -106,9 +100,10 @@ pub fn Page() -> Element {
                                     space: space.clone(),
                                     selected: index == selected,
                                     deletable: count > 1,
+                                    form: form.clone(),
                                 }
                             }
-                            NewSpaceCard {}
+                            NewSpaceCard { form }
                         }
                     }
                 }
@@ -118,13 +113,16 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
-    let editing = use_signal(|| false);
-    let draft = use_signal(|| space.name.clone());
-    let menu_value = use_signal(|| space.id.clone());
+fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFormState) -> Element {
+    let editing = form.open && form.space_id.as_deref() == Some(space.id.as_str());
+    let menu_value = Signal::new(space.id.clone());
     let nav_id = space.id.clone();
     let delete_id = space.id.clone();
     let rename_id = space.id.clone();
+    let rename_name = space.name.clone();
+    let menu_rename_id = space.id.clone();
+    let menu_rename_name = space.name.clone();
+    let menu_delete_id = space.id.clone();
     let class = if selected {
         "relative flex min-h-24 cursor-pointer items-center justify-between rounded-xl border border-primary/40 bg-primary/[0.08] px-3 py-3 shadow-[0_0_18px_-6px_color-mix(in_oklab,var(--primary)_50%,transparent)]"
     } else {
@@ -142,14 +140,14 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                     class: "{class}",
                     button {
                         r#type: "button",
-                        class: if editing() {
+                        class: if editing {
                             "pointer-events-none absolute inset-0 z-0 rounded-xl outline-none"
                         } else {
                             "absolute inset-0 z-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
                         },
                         title: space.name.clone(),
                         aria_label: space.name.clone(),
-                        disabled: editing(),
+                        disabled: editing,
                         onclick: move |_| {
                         let _ = send(&SpaceAttachRequest { space_id: nav_id.clone() });
                         },
@@ -157,18 +155,22 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                     div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center justify-between",
                         div { class: "min-w-0 flex-1",
                             div { class: "flex min-w-0 items-center gap-2",
-                                EditableText {
-                                    value: space.name.clone(),
-                                    editing,
-                                    draft,
-                                    display_class: "pointer-events-auto min-w-0 cursor-text truncate rounded px-1 py-0.5 text-left text-sm font-medium text-foreground hover:bg-foreground/[0.06]".to_string(),
-                                    input_class: "pointer-events-auto min-w-0 flex-1 rounded-md bg-background/70 px-2 py-1 text-sm font-medium text-foreground outline-none ring-1 ring-inset ring-primary/40".to_string(),
-                                    title: translate("common-rename"),
-                                    placeholder: translate("spaces-new-placeholder"),
-                                    on_commit: move |name| { let _ = send(&SpaceRenameRequest {
-                                        space_id: rename_id.clone(),
-                                        name,
-                                    }); },
+                                if editing {
+                                    SpaceFormView { form: form.clone() }
+                                } else {
+                                    button {
+                                        r#type: "button",
+                                        class: "pointer-events-auto min-w-0 cursor-text truncate rounded px-1 py-0.5 text-left text-sm font-medium text-foreground hover:bg-foreground/[0.06]",
+                                        title: translate("common-rename"),
+                                        onclick: move |event| {
+                                            event.stop_propagation();
+                                            let _ = send(&SpaceFormOpenRequest {
+                                                space_id: Some(rename_id.clone()),
+                                                draft: rename_name.clone(),
+                                            });
+                                        },
+                                        "{space.name}"
+                                    }
                                 }
                             if space.is_active {
                                 span { class: "rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary", {translate("common-active")} }
@@ -199,8 +201,12 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_value),
                     on_select: {
-                        let name = space.name.clone();
-                        move |_: String| begin_space_rename(editing, draft, name.clone())
+                        move |_: String| {
+                            let _ = send(&SpaceFormOpenRequest {
+                                space_id: Some(menu_rename_id.clone()),
+                                draft: menu_rename_name.clone(),
+                            });
+                        }
                     },
                     attributes: vec![],
                     {translate("common-rename")}
@@ -209,7 +215,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_value),
                     disabled: !deletable,
-                    on_select: move |_: String| { let _ = send(&SpaceDeleteRequest { space_id: space.id.clone() }); },
+                    on_select: move |_: String| { let _ = send(&SpaceDeleteRequest { space_id: menu_delete_id.clone() }); },
                     attributes: vec![],
                     {translate("spaces-delete")}
                 }
@@ -219,26 +225,11 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
 }
 
 #[component]
-fn NewSpaceCard() -> Element {
-    let mut creating = use_signal(|| false);
-    let mut draft = use_signal(String::new);
-
-    if creating() {
+fn NewSpaceCard(form: SpaceFormState) -> Element {
+    if form.open && form.space_id.is_none() {
         return rsx! {
             div { class: "glass flex min-h-24 items-center rounded-xl border border-border/70 p-2",
-                InlineEdit {
-                    draft,
-                    class: "m-1 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50".to_string(),
-                    placeholder: translate("spaces-new-placeholder"),
-                    aria_label: translate("spaces-new-placeholder"),
-                    allow_empty: true,
-                    restore_focus_id: "new-space".to_string(),
-                    on_commit: move |name: String| {
-                        creating.set(false);
-                        let _ = send(&SpaceCreateRequest { name });
-                    },
-                    on_cancel: move |_| creating.set(false),
-                }
+                SpaceFormView { form }
             }
         };
     }
@@ -249,8 +240,10 @@ fn NewSpaceCard() -> Element {
             r#type: "button",
             class: "flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed border-border text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:bg-foreground/[0.035] hover:text-foreground",
             onclick: move |_| {
-                draft.set(String::new());
-                creating.set(true);
+                let _ = send(&SpaceFormOpenRequest {
+                    space_id: None,
+                    draft: String::new(),
+                });
             },
             svg { class: "size-4", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
                 path { d: "M12 5v14M5 12h14" }
@@ -260,10 +253,66 @@ fn NewSpaceCard() -> Element {
     }
 }
 
-fn begin_space_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
-    draft.set(name);
-    spawn(async move {
-        Platform::sleep(0).await;
-        editing.set(true);
-    });
+#[component]
+fn SpaceFormView(form: SpaceFormState) -> Element {
+    let mut finished = use_signal(|| false);
+    let submission = SpaceFormSubmission(form.clone());
+    let enter = submission.clone();
+    let blur = submission.clone();
+    rsx! {
+        input {
+            r#type: "text",
+            class: "pointer-events-auto m-1 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50",
+            placeholder: translate("spaces-new-placeholder"),
+            aria_label: translate("spaces-new-placeholder"),
+            value: form.draft,
+            autofocus: true,
+            autocomplete: "off",
+            onclick: move |event| event.stop_propagation(),
+            oninput: move |event: FormEvent| {
+                let _ = send(&SpaceFormInputRequest { draft: event.value() });
+            },
+            onkeydown: move |event: KeyboardEvent| match event.key() {
+                Key::Enter if !finished() => {
+                    event.prevent_default();
+                    finished.set(true);
+                    enter.submit();
+                }
+                Key::Escape if !finished() => {
+                    event.prevent_default();
+                    finished.set(true);
+                    let _ = send(&SpaceFormCloseRequest);
+                }
+                _ => {}
+            },
+            onblur: move |_| {
+                if !finished() {
+                    finished.set(true);
+                    blur.submit();
+                }
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SpaceFormSubmission(SpaceFormState);
+
+impl SpaceFormSubmission {
+    fn submit(&self) {
+        let name = self.0.draft.trim().to_string();
+        match &self.0.space_id {
+            Some(space_id) if !name.is_empty() => {
+                let _ = send(&SpaceRenameRequest {
+                    space_id: space_id.clone(),
+                    name,
+                });
+            }
+            Some(_) => {}
+            None => {
+                let _ = send(&SpaceCreateRequest { name });
+            }
+        }
+        let _ = send(&SpaceFormCloseRequest);
+    }
 }

@@ -1,20 +1,23 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use std::collections::BTreeMap;
 use vmux_command::{
-    BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
-    WriteCommandRequests,
+    CommandDispatch, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
 };
-use vmux_ecs::host::UiState;
+use vmux_ecs::UiState;
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
-    native_open::HostedUiPlugin,
+    hosted_page::HostedUiPlugin,
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
 
-use crate::event::{CheckForUpdatesEvent, CheckForUpdatesRequest, SettingsRequest};
+use crate::event::{
+    CheckForUpdatesEvent, CheckForUpdatesRequest, SettingsEditRequest, SettingsFilterRequest,
+    SettingsRequest,
+};
 use crate::state::SettingsUiState;
 use crate::{AppSettings, SettingsSaveRequest};
 
@@ -31,14 +34,20 @@ impl Plugin for StatePlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_message::<OpenSettingsRequest>()
-            .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_open_settings)
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
                 HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
-                UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
+                UiEventPlugin::<(
+                    SettingsRequest,
+                    SettingsEditRequest,
+                    SettingsFilterRequest,
+                    CheckForUpdatesEvent,
+                )>::default(),
             ))
             .add_observer(settings_request)
+            .add_observer(edit)
+            .add_observer(filter)
             .add_observer(check_for_updates)
             .add_systems(
                 Update,
@@ -50,20 +59,27 @@ impl Plugin for StatePlugin {
 }
 
 #[derive(Component, Default)]
-#[require(SettingsUiStateUpdates, SettingsSchema, SettingsRenderProjection)]
+#[require(
+    SettingsUiStateUpdates,
+    SettingsSchema,
+    SettingsRenderProjection,
+    SettingsViewState
+)]
 pub struct Settings;
 
 type SettingsUiStateUpdates = UiState<SettingsUiState>;
+
+#[derive(Component, Default)]
+pub(super) struct SettingsViewState {
+    pub(super) query: String,
+    pub(super) drafts: BTreeMap<String, String>,
+}
 
 #[derive(Message)]
 struct OpenSettingsRequest;
 
 #[vmux_command::command]
 struct OpenSettingsBinding;
-
-fn bind_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<OpenSettingsBinding>(&mut commands);
-}
 
 fn issue_open_settings(
     trigger: On<CommandDispatch>,
@@ -94,6 +110,56 @@ fn settings_request(
         }
         Err(e) => bevy::log::warn!("settings: update {} rejected: {}", evt.path, e),
     }
+}
+
+fn edit(
+    trigger: On<UiInput<SettingsEditRequest>>,
+    mut views: Query<(&mut SettingsViewState, &SettingsRenderProjection), With<Settings>>,
+    mut settings: ResMut<AppSettings>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
+) {
+    let event = trigger.event();
+    let Ok((mut view, projection)) = views.get_mut(event.webview) else {
+        return;
+    };
+    let path = &event.payload.path;
+    let draft = &event.payload.draft;
+    view.drafts.insert(path.clone(), draft.clone());
+    let Some(field) = projection.field(path) else {
+        return;
+    };
+    let value = match &field.kind {
+        crate::state::SettingsRenderFieldKind::Integer { .. } => {
+            let Ok(value) = draft.parse::<u64>() else {
+                return;
+            };
+            serde_json::json!(value)
+        }
+        crate::state::SettingsRenderFieldKind::Number { .. } => {
+            let Ok(value) = draft.parse::<f64>() else {
+                return;
+            };
+            serde_json::json!(value)
+        }
+        crate::state::SettingsRenderFieldKind::Text { .. } => serde_json::json!(draft),
+        _ => return,
+    };
+    match settings.apply_update(path, value) {
+        Ok(()) => {
+            saves.write(SettingsSaveRequest);
+        }
+        Err(error) => bevy::log::warn!("settings: update {path} rejected: {error}"),
+    }
+}
+
+fn filter(
+    trigger: On<UiInput<SettingsFilterRequest>>,
+    mut views: Query<&mut SettingsViewState, With<Settings>>,
+) {
+    let Ok(mut view) = views.get_mut(trigger.event().webview) else {
+        return;
+    };
+    view.query.clone_from(&trigger.event().payload.query);
 }
 
 fn check_for_updates(
@@ -128,13 +194,13 @@ fn handle_open_settings_command(
 mod page_open_tests {
     use super::*;
     use vmux_ecs::{PageOpenHandled, PageOpenId, PageOpenTask};
-    use vmux_layout::native_open::{HostedUiPlugin, NativeOpenPlugin};
+    use vmux_layout::hosted_page::{HostedPagePlugin, HostedUiPlugin};
 
     #[test]
     fn settings_page_open_spawns_marker_and_handles() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(NativeOpenPlugin)
+            .add_plugins(HostedPagePlugin)
             .add_plugins(HostedUiPlugin::<Settings>::new(
                 super::super::SettingsPlugin::MANIFEST,
             ));
@@ -168,7 +234,7 @@ mod page_open_tests {
     fn settings_page_open_dedupes_per_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(NativeOpenPlugin)
+            .add_plugins(HostedPagePlugin)
             .add_plugins(HostedUiPlugin::<Settings>::new(
                 super::super::SettingsPlugin::MANIFEST,
             ));

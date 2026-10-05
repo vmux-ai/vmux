@@ -182,7 +182,7 @@ fn render(
     let Ok((mut edit, viewport)) = views.get_mut(entity) else {
         return;
     };
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &viewport.patch(&mut edit),
     ));
@@ -260,7 +260,7 @@ fn render_cursor(
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &FileCursorEvent {
             search_total,
@@ -409,9 +409,7 @@ fn sync_wrap_settings(
                 if let Some(scroll) = viewport.set_top(wanted.unwrap_or(0))
                     && browsers.can_emit_to(&entity)
                 {
-                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                        entity, &scroll,
-                    ));
+                    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
                 }
                 edit.core.top_row = viewport.top_row;
             }

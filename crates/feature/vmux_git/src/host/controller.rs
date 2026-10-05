@@ -1,28 +1,31 @@
 use std::path::Path;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::UiStateWrite;
 use vmux_ecs::event::space::ProjectActivateRequest;
-use vmux_ecs::host::UiStateWrite;
 
 use crate::event::{
-    GitAmendRequest, GitBranchCollectionSelectRequest, GitBranchLogRequest, GitBranchSelectRequest,
-    GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitSelectRequest, GitConfigEditRequest,
-    GitDiscardFileRequest, GitDiscardRequest, GitFastForwardRequest, GitFileSelectRequest,
-    GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest,
-    GitRepositoryPickerRequest, GitRepositoryRequest, GitRepositorySnapshot, GitRevertRequest,
-    GitShortcutHelpRequest, GitStageAllRequest, GitStageRequest, GitStashDropRequest,
-    GitStashPopRequest, GitStashPushRequest, GitStashSelectRequest, GitUnstageRequest,
-    GitUpdateCheckRequest,
+    GitAmendRequest, GitBranchCollectionSelectRequest, GitBranchDraftRequest, GitBranchLogRequest,
+    GitBranchPromptCloseRequest, GitBranchPromptOpenRequest, GitBranchSelectRequest,
+    GitBranchSubmitRequest, GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitDraftRequest,
+    GitCommitRequest, GitCommitSelectRequest, GitCommitSubmitRequest, GitConfigEditRequest,
+    GitCreateBranchRequest, GitDeleteBranchRequest, GitDiscardFileRequest, GitDiscardRequest,
+    GitFastForwardRequest, GitFileSelectRequest, GitKeyRequest, GitMergeRequest,
+    GitPanelSelectRequest, GitRebaseRequest, GitRepositoryPickerRequest, GitRepositoryRequest,
+    GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest,
+    GitStageRequest, GitStashDropRequest, GitStashPopRequest, GitStashPushRequest,
+    GitStashSelectRequest, GitUnstageRequest, GitUpdateCheckRequest,
 };
 use crate::state::{
-    GitBranchCollection, GitBranchPrompt, GitBranchPromptRequested, GitOperationEligibility,
-    GitPageContext, GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal,
-    GitUiState, GitWorkspaceChanged,
+    GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
+    GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState,
+    GitWorkspaceChanged,
 };
 
 use super::directory::GitDirectoryNavigation;
-use super::state::GitState;
+use super::state::{GitDiffRevealRanges, GitState};
 
 pub(super) struct ControllerPlugin;
 
@@ -48,102 +51,67 @@ impl Plugin for ControllerPlugin {
             .add_observer(branch_select_request)
             .add_observer(commit_select_request)
             .add_observer(stash_select_request)
-            .add_observer(discard_file_request);
+            .add_observer(discard_file_request)
+            .add_observer(open_branch_prompt)
+            .add_observer(close_branch_prompt)
+            .add_observer(edit_branch_draft)
+            .add_observer(submit_branch)
+            .add_observer(edit_commit_draft)
+            .add_observer(submit_commit)
+            .configure_sets(
+                Update,
+                (
+                    ControllerSet::Reconcile,
+                    ControllerSet::Operations,
+                    ControllerSet::BranchLog,
+                )
+                    .chain()
+                    .after(super::GitUpdateSet::Jobs),
+            )
+            .add_systems(
+                Update,
+                (
+                    (reconcile, settle_commit)
+                        .chain()
+                        .in_set(ControllerSet::Reconcile),
+                    operations.in_set(ControllerSet::Operations),
+                    branch_log.in_set(ControllerSet::BranchLog),
+                ),
+            );
     }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum ControllerSet {
+    Reconcile,
+    Operations,
+    BranchLog,
 }
 
 #[derive(Component, Default)]
-pub(super) struct GitController {
-    state: GitPageControllerState,
-    pending_branch_checkout: String,
-    selection_reveal_revision: u64,
-}
+pub(super) struct PendingBranchCheckout(pub(super) String);
 
-impl GitController {
-    pub(super) fn state(&self) -> &GitPageControllerState {
-        &self.state
-    }
+#[derive(Component, Default)]
+pub(super) struct SelectionRevealRevision(u64);
 
+#[derive(Component, Default)]
+pub(super) struct GitCommitResultSequence(u64);
+
+impl GitPageControllerState {
     pub(super) fn reset(&mut self, branch: String) {
-        self.state = GitPageControllerState {
+        *self = GitPageControllerState {
             selected_branch: branch,
             ..Default::default()
         };
-        self.pending_branch_checkout.clear();
     }
 
-    pub(super) fn reconcile_repository(&mut self, repository: &GitRepositorySnapshot) {
-        let next_file = repository
-            .files
-            .iter()
-            .find(|entry| entry.path_bytes == self.state.selected_path_bytes)
-            .or_else(|| repository.files.first());
-        self.state.selected_abs_path = next_file
-            .map(|entry| {
-                Path::new(&repository.repo_root)
-                    .join(&entry.path)
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .unwrap_or_default();
-        self.state.selected_path = next_file
-            .map(|entry| entry.path.clone())
-            .unwrap_or_default();
-        self.state.selected_path_bytes = next_file
-            .map(|entry| entry.path_bytes.clone())
-            .unwrap_or_default();
-        self.state.selected_commit = repository
-            .commits
-            .iter()
-            .find(|entry| entry.sha == self.state.selected_commit)
-            .or_else(|| repository.commits.first())
-            .map(|entry| entry.sha.clone())
-            .unwrap_or_default();
-        self.state.selected_branch = self
-            .state
-            .branch_collection
-            .selected_reference(repository, &self.state.selected_branch);
-        self.state.selected_stash = repository
-            .stashes
-            .iter()
-            .find(|entry| entry.reference == self.state.selected_stash)
-            .or_else(|| repository.stashes.first())
-            .map(|entry| entry.reference.clone())
-            .unwrap_or_default();
-        if !repository
-            .files
-            .iter()
-            .any(|entry| entry.path_bytes == self.state.confirm_discard && entry.can_discard())
-        {
-            self.state.confirm_discard.clear();
-        }
-        self.refresh_operations(repository);
+    fn select_panel(&mut self, panel: GitPanel) {
+        self.focused_panel = panel;
     }
 
-    pub(super) fn begin_branch_creation(&mut self, branch: String) {
-        self.pending_branch_checkout = branch;
-    }
-
-    pub(super) fn apply_result(
-        &mut self,
-        result: &crate::event::GitOperationResult,
-    ) -> Option<String> {
-        if result.operation != "new branch" {
-            return None;
-        }
-        let branch = std::mem::take(&mut self.pending_branch_checkout);
-        (result.ok && !branch.is_empty()).then_some(branch)
-    }
-
-    fn refresh_operations(&mut self, repository: &GitRepositorySnapshot) {
-        self.state.operations = GitOperationEligibility::for_controller(&self.state, repository);
-    }
-
-    fn select_panel(&mut self, panel: GitPanel, repository: Option<&GitRepositorySnapshot>) {
-        self.state.focused_panel = panel;
-        if let Some(repository) = repository {
-            self.refresh_operations(repository);
-        }
+    fn open_branch_prompt(&mut self, prompt: GitBranchPrompt) {
+        self.branch_prompt = Some(prompt);
+        self.branch_draft.clear();
     }
 
     fn select_file(&mut self, path_bytes: &[u8], repository: &GitRepositorySnapshot) -> bool {
@@ -154,14 +122,13 @@ impl GitController {
         else {
             return false;
         };
-        self.state.focused_panel = GitPanel::Files;
-        self.state.selected_path.clone_from(&entry.path);
-        self.state.selected_path_bytes.clone_from(&entry.path_bytes);
-        self.state.selected_abs_path = Path::new(&repository.repo_root)
+        self.focused_panel = GitPanel::Files;
+        self.selected_path.clone_from(&entry.path);
+        self.selected_path_bytes.clone_from(&entry.path_bytes);
+        self.selected_abs_path = Path::new(&repository.repo_root)
             .join(&entry.path)
             .to_string_lossy()
             .into_owned();
-        self.refresh_operations(repository);
         true
     }
 
@@ -170,14 +137,12 @@ impl GitController {
         collection: GitBranchCollection,
         repository: &GitRepositorySnapshot,
     ) {
-        self.state.branch_collection = collection;
-        self.state.selected_branch = collection.selected_reference(repository, "");
-        self.refresh_operations(repository);
+        self.branch_collection = collection;
+        self.selected_branch = collection.selected_reference(repository, "");
     }
 
     fn select_branch(&mut self, reference: &str, repository: &GitRepositorySnapshot) -> bool {
         if !self
-            .state
             .branch_collection
             .references(repository)
             .iter()
@@ -185,9 +150,8 @@ impl GitController {
         {
             return false;
         }
-        self.state.focused_panel = GitPanel::Branches;
-        self.state.selected_branch = reference.to_string();
-        self.refresh_operations(repository);
+        self.focused_panel = GitPanel::Branches;
+        self.selected_branch = reference.to_string();
         true
     }
 
@@ -195,9 +159,8 @@ impl GitController {
         if !repository.commits.iter().any(|entry| entry.sha == commit) {
             return false;
         }
-        self.state.focused_panel = GitPanel::Commits;
-        self.state.selected_commit = commit.to_string();
-        self.refresh_operations(repository);
+        self.focused_panel = GitPanel::Commits;
+        self.selected_commit = commit.to_string();
         true
     }
 
@@ -209,56 +172,28 @@ impl GitController {
         {
             return false;
         }
-        self.state.focused_panel = GitPanel::Stash;
-        self.state.selected_stash = reference.to_string();
-        self.refresh_operations(repository);
+        self.focused_panel = GitPanel::Stash;
+        self.selected_stash = reference.to_string();
         true
-    }
-
-    pub(super) fn branch_log_request(&self, state: &GitState) -> Option<GitBranchLogRequest> {
-        if self.state.focused_panel != GitPanel::Branches || self.state.selected_branch.is_empty() {
-            return None;
-        }
-        let repository = state.repository()?;
-        if state.branch_log().is_some_and(|event| {
-            event.repo_root == repository.repo_root && event.branch == self.state.selected_branch
-        }) {
-            return None;
-        }
-        Some(GitBranchLogRequest {
-            repo_root: repository.repo_root.clone(),
-            branch: self.state.selected_branch.clone(),
-        })
-    }
-
-    fn branch_log_input(
-        &self,
-        webview: Entity,
-        state: &GitState,
-    ) -> Option<UiInput<GitBranchLogRequest>> {
-        Some(UiInput {
-            webview,
-            payload: self.branch_log_request(state)?,
-        })
     }
 
     fn move_selection(
         &mut self,
         direction: SelectionDirection,
         repository: &GitRepositorySnapshot,
+        revision: &mut SelectionRevealRevision,
     ) -> Option<GitSelectionReveal> {
-        let id = match self.state.focused_panel {
+        let id = match self.focused_panel {
             GitPanel::Status => return None,
             GitPanel::Files => self.move_file_selection(direction, repository),
             GitPanel::Branches => self.move_branch_selection(direction, repository),
             GitPanel::Commits => self.move_commit_selection(direction, repository),
             GitPanel::Stash => self.move_stash_selection(direction, repository),
         }?;
-        self.refresh_operations(repository);
-        self.selection_reveal_revision = self.selection_reveal_revision.wrapping_add(1).max(1);
+        revision.0 = revision.0.wrapping_add(1).max(1);
         Some(GitSelectionReveal {
             id,
-            revision: self.selection_reveal_revision,
+            revision: revision.0,
         })
     }
 
@@ -274,13 +209,13 @@ impl GitController {
         let current = repository
             .files
             .iter()
-            .position(|entry| entry.path_bytes == self.state.selected_path_bytes)
+            .position(|entry| entry.path_bytes == self.selected_path_bytes)
             .unwrap_or(direction.fallback(len));
         let index = direction.index(current, len);
         let entry = &repository.files[index];
-        self.state.selected_path.clone_from(&entry.path);
-        self.state.selected_path_bytes.clone_from(&entry.path_bytes);
-        self.state.selected_abs_path = Path::new(&repository.repo_root)
+        self.selected_path.clone_from(&entry.path);
+        self.selected_path_bytes.clone_from(&entry.path_bytes);
+        self.selected_abs_path = Path::new(&repository.repo_root)
             .join(&entry.path)
             .to_string_lossy()
             .into_owned();
@@ -293,17 +228,17 @@ impl GitController {
         direction: SelectionDirection,
         repository: &GitRepositorySnapshot,
     ) -> Option<String> {
-        let references = self.state.branch_collection.references(repository);
+        let references = self.branch_collection.references(repository);
         let len = references.len();
         if len == 0 {
             return None;
         }
         let current = references
             .iter()
-            .position(|reference| reference == &self.state.selected_branch)
+            .position(|reference| reference == &self.selected_branch)
             .unwrap_or(direction.fallback(len));
         let index = direction.index(current, len);
-        self.state.selected_branch.clone_from(&references[index]);
+        self.selected_branch.clone_from(&references[index]);
         Some(format!("git-branch-row-{index}"))
     }
 
@@ -319,11 +254,10 @@ impl GitController {
         let current = repository
             .commits
             .iter()
-            .position(|entry| entry.sha == self.state.selected_commit)
+            .position(|entry| entry.sha == self.selected_commit)
             .unwrap_or(direction.fallback(len));
         let index = direction.index(current, len);
-        self.state
-            .selected_commit
+        self.selected_commit
             .clone_from(&repository.commits[index].sha);
         Some(format!("git-commit-row-{index}"))
     }
@@ -340,11 +274,10 @@ impl GitController {
         let current = repository
             .stashes
             .iter()
-            .position(|entry| entry.reference == self.state.selected_stash)
+            .position(|entry| entry.reference == self.selected_stash)
             .unwrap_or(direction.fallback(len));
         let index = direction.index(current, len);
-        self.state
-            .selected_stash
+        self.selected_stash
             .clone_from(&repository.stashes[index].reference);
         Some(format!("git-stash-row-{index}"))
     }
@@ -358,9 +291,9 @@ impl GitController {
             .files
             .iter()
             .find(|entry| entry.path_bytes == path_bytes && entry.can_discard())?;
-        self.state.focused_panel = GitPanel::Files;
-        let request = if self.state.confirm_discard == entry.path_bytes {
-            self.state.confirm_discard.clear();
+        self.focused_panel = GitPanel::Files;
+        if self.confirm_discard == entry.path_bytes {
+            self.confirm_discard.clear();
             Some(GitDiscardRequest {
                 repo_root: repository.repo_root.clone(),
                 path: Path::new(&repository.repo_root)
@@ -370,16 +303,23 @@ impl GitController {
                 path_bytes: entry.path_bytes.clone(),
             })
         } else {
-            self.state.confirm_discard.clone_from(&entry.path_bytes);
+            self.confirm_discard.clone_from(&entry.path_bytes);
             None
-        };
-        self.refresh_operations(repository);
-        request
+        }
     }
 }
 
+type OperationPage<'a> = (&'a GitState, &'a mut GitPageControllerState);
+type ChangedOperationPage = Or<(Changed<GitState>, Changed<GitPageControllerState>)>;
+
+#[derive(SystemParam)]
+struct OperationPages<'w, 's> {
+    values: Query<'w, 's, OperationPage<'static>, ChangedOperationPage>,
+}
+
 fn dispatch_git_key(
-    controller: &mut GitController,
+    controller: &mut GitPageControllerState,
+    revision: &mut SelectionRevealRevision,
     webview: Entity,
     request: &GitKeyRequest,
     state: &GitState,
@@ -389,11 +329,8 @@ fn dispatch_git_key(
         let Some(repository) = state.repository() else {
             return;
         };
-        if let Some(effect) = controller.move_selection(direction, repository) {
+        if let Some(effect) = controller.move_selection(direction, repository, revision) {
             commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
-            if let Some(input) = controller.branch_log_input(webview, state) {
-                commands.trigger(input);
-            }
         }
         return;
     }
@@ -405,30 +342,21 @@ fn dispatch_git_key(
         return;
     }
     if request.key == "?" {
-        controller.state.shortcut_help_visible = !controller.state.shortcut_help_visible;
+        controller.shortcut_help_visible = !controller.shortcut_help_visible;
         return;
     }
     if request.key == "Tab" {
-        controller.select_panel(
-            controller.state.focused_panel.next(request.modifiers.shift),
-            state.repository(),
-        );
-        if let Some(input) = controller.branch_log_input(webview, state) {
-            commands.trigger(input);
-        }
+        controller.select_panel(controller.focused_panel.next(request.modifiers.shift));
         return;
     }
     if let Some(panel) = GitPanel::from_key(&request.key) {
-        controller.select_panel(panel, state.repository());
-        if let Some(input) = controller.branch_log_input(webview, state) {
-            commands.trigger(input);
-        }
+        controller.select_panel(panel);
         return;
     }
     let Some(repository) = state.repository() else {
         return;
     };
-    match (controller.state.focused_panel, request.key.as_str()) {
+    match (controller.focused_panel, request.key.as_str()) {
         (GitPanel::Status, "e") => commands.trigger(UiInput {
             webview,
             payload: GitConfigEditRequest {
@@ -445,31 +373,29 @@ fn dispatch_git_key(
                 path: repository.repo_root.clone(),
             },
         }),
-        (GitPanel::Files, "a") if controller.state.operations.stage_all => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitStageAllRequest {
-                    path: repository.repo_root.clone(),
-                },
-            })
-        }
-        (GitPanel::Files, "s") if controller.state.operations.stash => commands.trigger(UiInput {
+        (GitPanel::Files, "a") if controller.operations.stage_all => commands.trigger(UiInput {
+            webview,
+            payload: GitStageAllRequest {
+                path: repository.repo_root.clone(),
+            },
+        }),
+        (GitPanel::Files, "s") if controller.operations.stash => commands.trigger(UiInput {
             webview,
             payload: GitStashPushRequest {
                 repo_root: repository.repo_root.clone(),
             },
         }),
-        (GitPanel::Files, "A") if controller.state.operations.amend => commands.trigger(UiInput {
+        (GitPanel::Files, "A") if controller.operations.amend => commands.trigger(UiInput {
             webview,
             payload: GitAmendRequest {
                 repo_root: repository.repo_root.clone(),
             },
         }),
-        (GitPanel::Files, " " | "Space") if controller.state.operations.toggle_stage => {
+        (GitPanel::Files, " " | "Space") if controller.operations.toggle_stage => {
             let Some(entry) = repository
                 .files
                 .iter()
-                .find(|entry| entry.path_bytes == controller.state.selected_path_bytes)
+                .find(|entry| entry.path_bytes == controller.selected_path_bytes)
             else {
                 return;
             };
@@ -497,19 +423,19 @@ fn dispatch_git_key(
                 });
             }
         }
-        (GitPanel::Files, "x") if controller.state.operations.discard => {
-            let selected = controller.state.selected_path_bytes.clone();
+        (GitPanel::Files, "x") if controller.operations.discard => {
+            let selected = controller.selected_path_bytes.clone();
             if let Some(payload) = controller.discard_file(&selected, repository) {
                 commands.trigger(UiInput { webview, payload });
             }
         }
         (GitPanel::Branches, "Enter" | " " | "Space" | "c")
-            if controller.state.operations.checkout_branch =>
+            if controller.operations.checkout_branch =>
         {
             let Some(branch) = repository
                 .branches
                 .iter()
-                .find(|branch| branch.name == controller.state.selected_branch)
+                .find(|branch| branch.name == controller.selected_branch)
             else {
                 return;
             };
@@ -523,106 +449,175 @@ fn dispatch_git_key(
                 },
             });
         }
-        (GitPanel::Branches, "r") if controller.state.operations.rebase => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitRebaseRequest {
-                    repo_root: repository.repo_root.clone(),
-                    branch: controller.state.selected_branch.clone(),
-                },
-            })
-        }
-        (GitPanel::Branches, "M") if controller.state.operations.merge => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitMergeRequest {
-                    repo_root: repository.repo_root.clone(),
-                    branch: controller.state.selected_branch.clone(),
-                },
-            })
-        }
-        (GitPanel::Branches, "f") if controller.state.operations.fast_forward => {
+        (GitPanel::Branches, "r") if controller.operations.rebase => commands.trigger(UiInput {
+            webview,
+            payload: GitRebaseRequest {
+                repo_root: repository.repo_root.clone(),
+                branch: controller.selected_branch.clone(),
+            },
+        }),
+        (GitPanel::Branches, "M") if controller.operations.merge => commands.trigger(UiInput {
+            webview,
+            payload: GitMergeRequest {
+                repo_root: repository.repo_root.clone(),
+                branch: controller.selected_branch.clone(),
+            },
+        }),
+        (GitPanel::Branches, "f") if controller.operations.fast_forward => {
             commands.trigger(UiInput {
                 webview,
                 payload: GitFastForwardRequest {
                     repo_root: repository.repo_root.clone(),
-                    branch: controller.state.selected_branch.clone(),
+                    branch: controller.selected_branch.clone(),
                 },
             })
         }
-        (GitPanel::Branches, "n") if controller.state.operations.create_branch => {
-            commands.trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitBranchPromptRequested {
-                    prompt: GitBranchPrompt::Create {
-                        base: controller.state.selected_branch.clone(),
-                    },
-                },
-            ));
+        (GitPanel::Branches, "n") if controller.operations.create_branch => {
+            controller.open_branch_prompt(GitBranchPrompt::Create {
+                base: controller.selected_branch.clone(),
+            });
         }
-        (GitPanel::Branches, "d") if controller.state.operations.delete_branch => {
-            commands.trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitBranchPromptRequested {
-                    prompt: GitBranchPrompt::Delete {
-                        branch: controller.state.selected_branch.clone(),
-                    },
-                },
-            ));
+        (GitPanel::Branches, "d") if controller.operations.delete_branch => {
+            controller.open_branch_prompt(GitBranchPrompt::Delete {
+                branch: controller.selected_branch.clone(),
+            });
         }
-        (GitPanel::Commits, " " | "Space") if controller.state.operations.checkout_commit => {
-            commands.trigger(UiInput {
+        (GitPanel::Commits, " " | "Space") if controller.operations.checkout_commit => commands
+            .trigger(UiInput {
                 webview,
                 payload: GitCheckoutCommitRequest {
                     repo_root: repository.repo_root.clone(),
-                    commit: controller.state.selected_commit.clone(),
+                    commit: controller.selected_commit.clone(),
                 },
-            })
-        }
-        (GitPanel::Commits, "C" | "V") if controller.state.operations.cherry_pick => commands
-            .trigger(UiInput {
+            }),
+        (GitPanel::Commits, "C" | "V") if controller.operations.cherry_pick => {
+            commands.trigger(UiInput {
                 webview,
                 payload: GitCherryPickRequest {
                     repo_root: repository.repo_root.clone(),
-                    commit: controller.state.selected_commit.clone(),
+                    commit: controller.selected_commit.clone(),
                 },
-            }),
-        (GitPanel::Commits, "t") if controller.state.operations.revert_commit => {
+            })
+        }
+        (GitPanel::Commits, "t") if controller.operations.revert_commit => {
             commands.trigger(UiInput {
                 webview,
                 payload: GitRevertRequest {
                     repo_root: repository.repo_root.clone(),
-                    commit: controller.state.selected_commit.clone(),
+                    commit: controller.selected_commit.clone(),
                 },
             })
         }
-        (GitPanel::Stash, "g") if controller.state.operations.stash_pop => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitStashPopRequest {
-                    repo_root: repository.repo_root.clone(),
-                    reference: controller.state.selected_stash.clone(),
-                },
-            })
-        }
-        (GitPanel::Stash, "d") if controller.state.operations.stash_drop => {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitStashDropRequest {
-                    repo_root: repository.repo_root.clone(),
-                    reference: controller.state.selected_stash.clone(),
-                },
-            })
-        }
+        (GitPanel::Stash, "g") if controller.operations.stash_pop => commands.trigger(UiInput {
+            webview,
+            payload: GitStashPopRequest {
+                repo_root: repository.repo_root.clone(),
+                reference: controller.selected_stash.clone(),
+            },
+        }),
+        (GitPanel::Stash, "d") if controller.operations.stash_drop => commands.trigger(UiInput {
+            webview,
+            payload: GitStashDropRequest {
+                repo_root: repository.repo_root.clone(),
+                reference: controller.selected_stash.clone(),
+            },
+        }),
         _ => {}
     }
 }
 
-impl GitOperationEligibility {
-    fn for_controller(
-        controller: &GitPageControllerState,
-        repository: &GitRepositorySnapshot,
-    ) -> Self {
+fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<GitState>>) {
+    for (state, mut controller) in &mut pages {
+        let Some(repository) = state.repository() else {
+            continue;
+        };
+        let mut next = controller.clone();
+        let next_file = repository
+            .files
+            .iter()
+            .find(|entry| entry.path_bytes == next.selected_path_bytes)
+            .or_else(|| repository.files.first());
+        next.selected_abs_path = next_file
+            .map(|entry| {
+                Path::new(&repository.repo_root)
+                    .join(&entry.path)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .unwrap_or_default();
+        next.selected_path = next_file
+            .map(|entry| entry.path.clone())
+            .unwrap_or_default();
+        next.selected_path_bytes = next_file
+            .map(|entry| entry.path_bytes.clone())
+            .unwrap_or_default();
+        next.selected_commit = repository
+            .commits
+            .iter()
+            .find(|entry| entry.sha == next.selected_commit)
+            .or_else(|| repository.commits.first())
+            .map(|entry| entry.sha.clone())
+            .unwrap_or_default();
+        next.selected_branch = next
+            .branch_collection
+            .selected_reference(repository, &next.selected_branch);
+        next.selected_stash = repository
+            .stashes
+            .iter()
+            .find(|entry| entry.reference == next.selected_stash)
+            .or_else(|| repository.stashes.first())
+            .map(|entry| entry.reference.clone())
+            .unwrap_or_default();
+        if !repository
+            .files
+            .iter()
+            .any(|entry| entry.path_bytes == next.confirm_discard && entry.can_discard())
+        {
+            next.confirm_discard.clear();
+        }
+        if *controller != next {
+            *controller = next;
+        }
+    }
+}
+
+fn settle_commit(
+    mut pages: Query<
+        (
+            &GitState,
+            &mut GitPageControllerState,
+            &mut GitCommitResultSequence,
+        ),
+        Changed<GitState>,
+    >,
+) {
+    for (state, mut controller, mut handled) in &mut pages {
+        let sequence = state.snapshot.result_sequence;
+        if sequence == 0 || sequence == handled.0 {
+            continue;
+        }
+        handled.0 = sequence;
+        let Some(result) = state.snapshot.result.as_ref() else {
+            continue;
+        };
+        if result.operation != "commit" {
+            continue;
+        }
+        if result.ok && controller.commit_message.trim() == controller.commit_pending {
+            controller.commit_message.clear();
+        }
+        controller.commit_pending.clear();
+    }
+}
+
+fn operations(mut pages: OperationPages) {
+    for (state, mut controller) in &mut pages.values {
+        let Some(repository) = state.repository() else {
+            if controller.operations != GitOperationEligibility::default() {
+                controller.operations = GitOperationEligibility::default();
+            }
+            continue;
+        };
         let file = repository
             .files
             .iter()
@@ -646,7 +641,7 @@ impl GitOperationEligibility {
         let staged = repository.files.iter().any(|entry| entry.staged);
         let branch_selected = branch.is_some();
         let branch_mutable = branch.is_some_and(|branch| !branch.current);
-        Self {
+        let next = GitOperationEligibility {
             stage_all: true,
             stash: !repository.files.is_empty(),
             amend: staged && !repository.commits.is_empty(),
@@ -666,7 +661,39 @@ impl GitOperationEligibility {
             revert_commit: commit,
             stash_pop: stash,
             stash_drop: stash,
+        };
+        if controller.operations != next {
+            controller.operations = next;
         }
+    }
+}
+
+fn branch_log(
+    pages: Query<(Entity, Ref<GitState>, Ref<GitPageControllerState>)>,
+    mut commands: Commands,
+) {
+    for (webview, state, controller) in &pages {
+        if !state.is_changed() && !controller.is_changed() {
+            continue;
+        }
+        if controller.focused_panel != GitPanel::Branches || controller.selected_branch.is_empty() {
+            continue;
+        }
+        let Some(repository) = state.repository() else {
+            continue;
+        };
+        if state.branch_log().is_some_and(|event| {
+            event.repo_root == repository.repo_root && event.branch == controller.selected_branch
+        }) {
+            continue;
+        }
+        commands.trigger(UiInput {
+            webview,
+            payload: GitBranchLogRequest {
+                repo_root: repository.repo_root.clone(),
+                branch: controller.selected_branch.clone(),
+            },
+        });
     }
 }
 
@@ -713,17 +740,32 @@ impl SelectionDirection {
 fn ui_state_write(
     trigger: On<UiStateWrite<GitUiState>>,
     mut pages: Query<(
-        &mut GitState,
-        &mut GitController,
+        &mut GitPageControllerState,
         &mut GitDirectoryNavigation,
+        &mut PendingBranchCheckout,
+        &mut SelectionRevealRevision,
+        &mut GitCommitResultSequence,
+        &mut GitDiffRevealRanges,
     )>,
+    mut states: super::state::GitStates,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview();
-    let Ok((mut state, mut controller, mut directory)) = pages.get_mut(webview) else {
+    if !states.contains(webview) {
+        return;
+    }
+    let Ok((
+        mut controller,
+        mut directory,
+        mut pending,
+        mut revision,
+        mut commit_result,
+        mut revealed,
+    )) = pages.get_mut(webview)
+    else {
         return;
     };
-    let patch = trigger.event().patch();
+    let patch = trigger.event().update();
     if let Some(GitPageContext {
         working_directory,
         page_url,
@@ -732,8 +774,12 @@ fn ui_state_write(
         let path = crate::GitUrl::parse(page_url)
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| working_directory.clone());
-        state.reset(path.clone());
+        states.reset(webview, path.clone());
         controller.reset(String::new());
+        pending.0.clear();
+        revision.0 = 0;
+        commit_result.0 = 0;
+        revealed.0.clear();
         *directory = GitDirectoryNavigation::default();
         commands.trigger(UiInput {
             webview,
@@ -758,14 +804,18 @@ fn ui_state_write(
         return;
     };
     if !error.is_empty() {
-        state.apply_workspace_error(error.clone());
+        states.apply_workspace_error(webview, error.clone());
         return;
     }
-    if path.is_empty() || path == state.workspace() {
+    if path.is_empty() || states.workspace(webview).as_deref() == Some(path) {
         return;
     }
-    state.reset(path.clone());
+    states.reset(webview, path.clone());
     controller.reset(branch.clone());
+    pending.0.clear();
+    revision.0 = 0;
+    commit_result.0 = 0;
+    revealed.0.clear();
     *directory = GitDirectoryNavigation::default();
     commands.trigger(UiInput {
         webview,
@@ -775,54 +825,54 @@ fn ui_state_write(
 
 fn key_request(
     trigger: On<UiInput<GitKeyRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
+    mut pages: Query<(
+        &GitState,
+        &mut GitPageControllerState,
+        &mut SelectionRevealRevision,
+    )>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let Ok((state, mut controller)) = pages.get_mut(webview) else {
+    let Ok((state, mut controller, mut revision)) = pages.get_mut(webview) else {
         return;
     };
-    let previous = controller.state().clone();
+    let previous = controller.clone();
     dispatch_git_key(
         controller.bypass_change_detection(),
+        &mut revision,
         webview,
         &trigger.event().payload,
         state,
         &mut commands,
     );
-    if controller.state() != &previous {
+    if *controller != previous {
         controller.set_changed();
     }
 }
 
 fn panel_select_request(
     trigger: On<UiInput<GitPanelSelectRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let Ok((state, mut controller)) = pages.get_mut(webview) else {
-        return;
-    };
-    controller.select_panel(trigger.event().payload.panel, state.repository());
-    if let Some(input) = controller.branch_log_input(webview, state) {
-        commands.trigger(input);
-    }
-}
-
-fn shortcut_help_request(
-    trigger: On<UiInput<GitShortcutHelpRequest>>,
-    mut pages: Query<&mut GitController>,
+    mut pages: Query<&mut GitPageControllerState>,
 ) {
     let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
         return;
     };
-    controller.state.shortcut_help_visible = trigger.event().payload.visible;
+    controller.select_panel(trigger.event().payload.panel);
+}
+
+fn shortcut_help_request(
+    trigger: On<UiInput<GitShortcutHelpRequest>>,
+    mut pages: Query<&mut GitPageControllerState>,
+) {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller.shortcut_help_visible = trigger.event().payload.visible;
 }
 
 fn file_select_request(
     trigger: On<UiInput<GitFileSelectRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
 ) {
     let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
         return;
@@ -835,44 +885,33 @@ fn file_select_request(
 
 fn select_branch_collection(
     trigger: On<UiInput<GitBranchCollectionSelectRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
-    mut commands: Commands,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
 ) {
-    let webview = trigger.event().webview;
-    let Ok((state, mut controller)) = pages.get_mut(webview) else {
+    let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
         return;
     };
     let Some(repository) = state.repository() else {
         return;
     };
     controller.select_branch_collection(trigger.event().payload.collection, repository);
-    if let Some(input) = controller.branch_log_input(webview, state) {
-        commands.trigger(input);
-    }
 }
 
 fn branch_select_request(
     trigger: On<UiInput<GitBranchSelectRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
-    mut commands: Commands,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
 ) {
-    let webview = trigger.event().webview;
-    let Ok((state, mut controller)) = pages.get_mut(webview) else {
+    let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
         return;
     };
     let Some(repository) = state.repository() else {
         return;
     };
-    if controller.select_branch(&trigger.event().payload.reference, repository)
-        && let Some(input) = controller.branch_log_input(webview, state)
-    {
-        commands.trigger(input);
-    }
+    controller.select_branch(&trigger.event().payload.reference, repository);
 }
 
 fn commit_select_request(
     trigger: On<UiInput<GitCommitSelectRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
 ) {
     let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
         return;
@@ -885,7 +924,7 @@ fn commit_select_request(
 
 fn stash_select_request(
     trigger: On<UiInput<GitStashSelectRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
 ) {
     let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
         return;
@@ -898,7 +937,7 @@ fn stash_select_request(
 
 fn discard_file_request(
     trigger: On<UiInput<GitDiscardFileRequest>>,
-    mut pages: Query<(&GitState, &mut GitController)>,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -912,4 +951,112 @@ fn discard_file_request(
     {
         commands.trigger(UiInput { webview, payload });
     }
+}
+
+fn open_branch_prompt(
+    trigger: On<UiInput<GitBranchPromptOpenRequest>>,
+    mut pages: Query<&mut GitPageControllerState>,
+) {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller.open_branch_prompt(trigger.event().payload.prompt.clone());
+}
+
+fn close_branch_prompt(
+    trigger: On<UiInput<GitBranchPromptCloseRequest>>,
+    mut pages: Query<&mut GitPageControllerState>,
+) {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller.branch_prompt = None;
+    controller.branch_draft.clear();
+}
+
+fn edit_branch_draft(
+    trigger: On<UiInput<GitBranchDraftRequest>>,
+    mut pages: Query<&mut GitPageControllerState>,
+) {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller
+        .branch_draft
+        .clone_from(&trigger.event().payload.draft);
+}
+
+fn submit_branch(
+    trigger: On<UiInput<GitBranchSubmitRequest>>,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok((state, mut controller)) = pages.get_mut(webview) else {
+        return;
+    };
+    let Some(prompt) = controller.branch_prompt.clone() else {
+        return;
+    };
+    let repo_root = state.snapshot.workspace.clone();
+    match prompt {
+        GitBranchPrompt::Create { base } => {
+            let branch = controller.branch_draft.trim().to_string();
+            if branch.is_empty() {
+                return;
+            }
+            commands.trigger(UiInput {
+                webview,
+                payload: GitCreateBranchRequest {
+                    repo_root,
+                    branch,
+                    start_point: base,
+                },
+            });
+        }
+        GitBranchPrompt::Delete { branch } => {
+            commands.trigger(UiInput {
+                webview,
+                payload: GitDeleteBranchRequest { repo_root, branch },
+            });
+        }
+    }
+    controller.branch_prompt = None;
+    controller.branch_draft.clear();
+}
+
+fn edit_commit_draft(
+    trigger: On<UiInput<GitCommitDraftRequest>>,
+    mut pages: Query<&mut GitPageControllerState>,
+) {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller
+        .commit_message
+        .clone_from(&trigger.event().payload.message);
+}
+
+fn submit_commit(
+    trigger: On<UiInput<GitCommitSubmitRequest>>,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok((state, mut controller)) = pages.get_mut(webview) else {
+        return;
+    };
+    let message = controller.commit_message.trim().to_string();
+    if message.is_empty() || !controller.operations.commit || !controller.commit_pending.is_empty()
+    {
+        return;
+    }
+    controller.commit_pending.clone_from(&message);
+    commands.trigger(UiInput {
+        webview,
+        payload: GitCommitRequest {
+            path: state.snapshot.workspace.clone(),
+            message,
+        },
+    });
 }

@@ -1,12 +1,12 @@
 use bevy::prelude::*;
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::persistence::PersistenceAppExt;
 
 pub(crate) use agent::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
 
 mod agent;
 mod index;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct KnowledgePlugin;
 
 impl Plugin for KnowledgePlugin {
@@ -25,4 +25,4 @@ impl Plugin for KnowledgePlugin {
 #[reflect(Component)]
 #[type_path = "vmux_desktop::knowledge"]
 #[require(moonshine_save::prelude::Save)]
-pub struct ExpandedKnowledgeDirs(Vec<String>);
+pub(crate) struct ExpandedKnowledgeDirs(Vec<String>);

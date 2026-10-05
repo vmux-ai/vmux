@@ -9,7 +9,7 @@ pub use host::VaultPlugin;
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -18,5 +18,7 @@ mod agent;
 #[cfg(host)]
 mod host;
 mod state;
+#[cfg(host)]
+mod storage;
 #[cfg(ui)]
 mod ui;

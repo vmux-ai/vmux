@@ -1,8 +1,39 @@
 #![cfg(host)]
 
+use std::sync::Arc;
+
 use bevy::prelude::*;
+use tokio::sync::mpsc;
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
 use vmux_api::service::ServiceMessageVariant;
+use vmux_transport::service::{RemoteDriver, RemoteOperationStore, ServiceProtocolDriver};
+
+#[derive(Component, Clone)]
+pub struct Executor(pub tokio::runtime::Handle);
+
+#[derive(Component, Clone)]
+pub struct Wake(pub mpsc::UnboundedSender<()>);
+
+#[derive(Component)]
+pub struct AbortTask(pub tokio::task::JoinHandle<()>);
+
+impl Drop for AbortTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+#[derive(Component, Clone)]
+pub struct Operations(pub Arc<dyn RemoteOperationStore>);
+
+#[derive(Component, Default)]
+pub struct Protocols(pub Vec<Arc<dyn ServiceProtocolDriver>>);
+
+#[derive(Component, Default)]
+pub struct Remote(pub Option<Arc<dyn RemoteDriver>>);
+
+#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct Register;
 
 #[derive(Clone, Message)]
 pub struct ServiceRequest(pub ClientMessage);

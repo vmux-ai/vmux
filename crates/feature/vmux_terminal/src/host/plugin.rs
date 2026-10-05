@@ -8,7 +8,7 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use vmux_api::command_bar::TerminalRequest as CommandBarTerminalRequest;
+use vmux_api::PageIcon;
 use vmux_api::input::KeyStroke;
 use vmux_api::protocol::{ClientMessage, CopyModeKey, ProcessId};
 use vmux_clipboard::Clipboard;
@@ -16,25 +16,24 @@ use vmux_command::CommandBarDismiss;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 use vmux_command::{
-    CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
-    WriteCommandRequests,
+    CommandInvocation, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
 };
 use vmux_command::{KeyCombo, Keymap, Modifiers};
 #[cfg(test)]
 use vmux_ecs::PageOpenId;
+use vmux_ecs::UiStateWrite;
 use vmux_ecs::event::TerminalUiState;
-use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::host::page::{BindsEditingChords, HostsPage};
-use vmux_ecs::host::persistence::{PageRestore, PersistenceAppExt};
+use vmux_ecs::page::{BindsEditingChords, HostsPage};
+use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
 use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
 use vmux_ecs::{
-    KeyboardOwner, PageIcon, PageIdentity, PageMetadata, PageOpenError, PageOpenHandled,
-    PageOpenSet, PageOpenTask,
+    KeyboardOwner, PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet,
+    PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack};
 #[cfg(test)]
@@ -72,7 +71,7 @@ use vmux_ecs::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
 use vmux_ui::i18n::Locale;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct TerminalPlugin;
 
 impl Plugin for TerminalPlugin {
@@ -85,7 +84,9 @@ impl Plugin for TerminalPlugin {
         app.add_plugins(
             Self::MANIFEST
                 .plugin()
-                .route(vmux_ecs::HostSpawnRoute::page("vmux://terminal/")),
+                .route(vmux_ecs::host_spawn::HostSpawnRoute::page(
+                    "vmux://terminal/",
+                )),
         )
         .add_message::<ServiceRequest>()
         .add_message::<super::command::TerminalCloseRequest>()
@@ -93,15 +94,15 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::TerminalPrevRequest>()
         .add_message::<super::command::TerminalClearRequest>()
         .add_message::<super::command::CopyModeRequest>()
-        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
         .add_plugins((
-            vmux_ecs::host::UiStatePlugin::<TerminalUiState>::default(),
+            vmux_ecs::UiStatePlugin::<TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
             crate::TerminalToolPlugin,
         ))
         .add_plugins(crate::contract::TerminalContractPlugin)
-        .add_plugins(UiEventPlugin::<(CommandBarTerminalRequest,)>::default())
-        .add_observer(open_from_command_bar)
+        .add_observer(open)
+        .add_observer(contribute)
+        .add_observer(activate)
         .register_persisted::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
         .add_message::<TerminalStackSpawnRequest>()
@@ -119,8 +120,68 @@ impl Plugin for TerminalPlugin {
     }
 }
 
-fn open_from_command_bar(
-    trigger: On<UiInput<CommandBarTerminalRequest>>,
+#[derive(Component)]
+struct TerminalContribution(String);
+
+#[derive(EntityEvent)]
+struct OpenFromCommandBar {
+    #[event_target]
+    target: Entity,
+    value: String,
+}
+
+fn contribute(
+    trigger: On<CommandBarQueryChanged>,
+    existing: Query<(Entity, &ChildOf), With<TerminalContribution>>,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    for (entity, parent) in &existing {
+        if parent.parent() == request.target {
+            commands.entity(entity).despawn();
+        }
+    }
+    let query = request.query.trim();
+    if request.start || !vmux_path::NavigationText::new(query).looks_like_path() {
+        return;
+    }
+    let path = query.to_string();
+    commands.spawn((
+        Name::new("Terminal command-bar row"),
+        CommandBarContribution {
+            row: vmux_api::command_bar::CommandBarResultItem {
+                key: "terminal".to_string(),
+                leading: ">_".to_string(),
+                title: vmux_ui::i18n::translate("command-open-terminal"),
+                subtitle: path.clone(),
+                file_path: path.clone(),
+                ..Default::default()
+            },
+            rank: if query.ends_with('/') { -200 } else { -100 },
+            close: false,
+            ..Default::default()
+        },
+        TerminalContribution(path),
+        ChildOf(request.target),
+    ));
+}
+
+fn activate(
+    trigger: On<CommandBarContributionActivated>,
+    contributions: Query<&TerminalContribution>,
+    mut commands: Commands,
+) {
+    let Ok(contribution) = contributions.get(trigger.event().target) else {
+        return;
+    };
+    commands.trigger(OpenFromCommandBar {
+        target: trigger.event().webview,
+        value: contribution.0.clone(),
+    });
+}
+
+fn open(
+    trigger: On<OpenFromCommandBar>,
     focus: FocusedStack,
     pid_indexes: Query<&pid::PidToEntity>,
     locale: Option<Res<vmux_command::ResolvedLocale>>,
@@ -129,8 +190,8 @@ fn open_from_command_bar(
     mut invocations: MessageWriter<CommandInvocation>,
     mut commands: Commands,
 ) {
-    let webview = trigger.event().webview;
-    let value = &trigger.event().payload.value;
+    let webview = trigger.event().target;
+    let value = &trigger.event().value;
     let running = pid_indexes.iter().find_map(|index| {
         index
             .iter()
@@ -182,14 +243,6 @@ fn open_from_command_bar(
         );
     }
     commands.trigger(CommandBarDismiss::new(webview, true));
-}
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<super::command::TerminalCloseRequest>(&mut commands);
-    registry.message::<super::command::TerminalNextRequest>(&mut commands);
-    registry.message::<super::command::TerminalPrevRequest>(&mut commands);
-    registry.message::<super::command::TerminalClearRequest>(&mut commands);
-    registry.message::<super::command::CopyModeRequest>(&mut commands);
 }
 
 struct TerminalServicePlugin;
@@ -407,13 +460,15 @@ fn handle_page_open(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     pid_indexes: Query<&pid::PidToEntity>,
     tabs: TabHierarchy,
+    restored_stacks: Query<(), (With<Stack>, With<PageRestore>)>,
     saved_launches: Query<&TerminalLaunch, With<Stack>>,
     settings: Res<AppSettings>,
     active_space: FocusedSpace,
     mut commands: Commands,
 ) {
     let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
-    for (entity, task, restoring) in &tasks {
+    for (entity, task, restoring_task) in &tasks {
+        let restoring = restoring_task || restored_stacks.contains(task.stack);
         if task.url != TerminalPlugin::URL.trim_end_matches('/')
             && !task.url.starts_with(TerminalPlugin::URL)
         {
@@ -486,7 +541,7 @@ fn handle_page_open(
         commands.entity(task.stack).insert(PageMetadata {
             url: TerminalPlugin::URL.to_string(),
             title,
-            bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
+            bg_color: None,
             ..default()
         });
         let terminal = commands
@@ -655,7 +710,7 @@ fn respond_stack_spawn(
         commands.entity(stack).insert(PageMetadata {
             url: TerminalPlugin::URL.to_string(),
             title,
-            bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
+            bg_color: None,
             ..default()
         });
         let terminal = commands

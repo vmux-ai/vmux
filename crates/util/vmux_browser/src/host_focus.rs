@@ -2,7 +2,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, HostWindow, WebviewWindowed};
 use vmux_ecs::KeyboardOwner;
-use vmux_ecs::overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
+use vmux_ecs::overlay::{Overlay, OverlayState, WindowOverlay};
 use vmux_input::{KeyboardContext, KeyboardContextSet};
 use vmux_layout::Header;
 use vmux_layout::side_sheet::SideSheet;
@@ -52,10 +52,10 @@ fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {
 
 fn sync_keyboard_context(
     terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
-    overlay_q: OverlayStateQuery,
+    overlay: Overlay,
     mut context: Single<&mut KeyboardContext>,
 ) {
-    let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input();
+    let overlay_owns_input = overlay.owns_input();
     **context = KeyboardContext {
         page_owns_escape: page_owns_escape(!terminal_focus_q.is_empty(), overlay_owns_input),
         text_entry_owns_keys: overlay_owns_input,
@@ -66,14 +66,14 @@ fn sync_keyboard_context(
 pub enum HostFocusIntent {
     Windowed(Entity),
     LayoutView,
-    NativePane(Entity),
+    HostedPane(Entity),
     #[default]
     WinitHost,
 }
 
-fn host_focus_intent(active_webview: Option<Entity>, is_native: bool) -> HostFocusIntent {
+fn host_focus_intent(active_webview: Option<Entity>, is_hosted: bool) -> HostFocusIntent {
     match active_webview {
-        Some(webview) if is_native => HostFocusIntent::NativePane(webview),
+        Some(webview) if is_hosted => HostFocusIntent::HostedPane(webview),
         Some(webview) => HostFocusIntent::Windowed(webview),
         None => HostFocusIntent::WinitHost,
     }
@@ -96,7 +96,7 @@ fn compute_intent(
     >,
     layout_keyboard_q: Query<(Entity, Option<&HostWindow>), crate::present::LayoutKeyboardHost>,
     focused_window: vmux_layout::window::FocusedWindow,
-    native_q: Query<(), With<vmux_ecs::host::page::HostsPage>>,
+    hosted: Query<(), With<vmux_ecs::page::HostsPage>>,
     mut intent: Single<&mut HostFocusIntent>,
 ) {
     let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
@@ -134,8 +134,8 @@ fn compute_intent(
                     .unwrap_or(false)
             })
         });
-        let is_native = active.is_some_and(|webview| native_q.contains(webview));
-        host_focus_intent(active, is_native)
+        let is_hosted = active.is_some_and(|webview| hosted.contains(webview));
+        host_focus_intent(active, is_hosted)
     };
     set_intent(&mut intent, next);
 }
@@ -250,16 +250,11 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
         let terminal = app
             .world_mut()
-            .spawn((
-                Browser,
-                Terminal,
-                vmux_ecs::host::page::HostsPage,
-                ChildOf(stack),
-            ))
+            .spawn((Browser, Terminal, vmux_ecs::page::HostsPage, ChildOf(stack)))
             .id();
         set_focus(&mut app, stack);
         app.update();
-        assert_eq!(intent(&app), HostFocusIntent::NativePane(terminal));
+        assert_eq!(intent(&app), HostFocusIntent::HostedPane(terminal));
     }
 
     #[test]

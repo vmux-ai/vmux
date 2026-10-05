@@ -3,7 +3,7 @@ use std::time::Duration;
 use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_profile::ServicePaths;
 use vmux_transport::service::ServiceCodec;
 
@@ -113,7 +113,7 @@ fn status(requests: Query<Entity, Added<ServiceStatusRequest>>, mut commands: Co
         print!("{}", info.render());
         commands
             .entity(entity)
-            .insert(CliResult::from_io(Ok(if live { 0 } else { 1 })));
+            .insert(CliResult::from(Ok(if live { 0 } else { 1 })));
     }
 }
 
@@ -128,7 +128,7 @@ fn start(requests: Query<Entity, Added<ServiceStartRequest>>, mut commands: Comm
             eprintln!("vmux service: launchd commands are macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 
@@ -141,7 +141,7 @@ fn stop(requests: Query<Entity, Added<ServiceStopRequest>>, mut commands: Comman
             eprintln!("vmux service: launchd commands are macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 
@@ -159,7 +159,7 @@ fn restart(requests: Query<Entity, Added<ServiceRestartRequest>>, mut commands: 
             eprintln!("vmux service: launchd commands are macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 
@@ -175,7 +175,9 @@ fn logs(
         command.arg(ServicePaths::current().current_log());
         commands
             .entity(entity)
-            .insert(CliResult::from_io(Err(command.exec())));
+            .insert(CliResult::from(Result::<i32, std::io::Error>::Err(
+                command.exec(),
+            )));
     }
 }
 
@@ -192,7 +194,7 @@ fn install(requests: Query<Entity, Added<ServiceInstallRequest>>, mut commands: 
             eprintln!("vmux service: launchd commands are macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 
@@ -211,7 +213,7 @@ fn uninstall(requests: Query<Entity, Added<ServiceUninstallRequest>>, mut comman
             eprintln!("vmux service: launchd commands are macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 
@@ -252,7 +254,7 @@ fn pair(
             eprintln!("vmux remote is currently macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 
@@ -272,7 +274,7 @@ fn list(requests: Query<Entity, Added<RemoteListRequest>>, mut commands: Command
             eprintln!("vmux remote is currently macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 
@@ -302,7 +304,7 @@ fn revoke(
             eprintln!("vmux remote is currently macOS-only");
             Ok(2)
         };
-        commands.entity(entity).insert(CliResult::from_io(result));
+        commands.entity(entity).insert(CliResult::from(result));
     }
 }
 

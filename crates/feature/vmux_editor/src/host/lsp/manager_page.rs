@@ -2,13 +2,19 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashSet;
-use vmux_ecs::event::{InstallPhase, LspInstallProgress, LspPackageStatus, LspPkgStatus};
+use std::time::Duration;
+use vmux_ecs::event::{
+    InstallPhase, LspInstallNotice, LspInstallProgress, LspPackageStatus, LspPkgStatus,
+};
 #[cfg(test)]
 use vmux_path::Executable;
 
 use crate::lsp::catalog::{CatalogReady, Package};
-use crate::lsp::registry::ServerSpec;
+use crate::lsp::registry::LspRegistry;
 use crate::lsp::{store, target::PlatformTarget};
+
+const DONE_NOTICE: Duration = Duration::from_millis(2_500);
+const FAILED_NOTICE: Duration = Duration::from_millis(6_000);
 
 pub struct ManagerPlugin;
 
@@ -20,9 +26,15 @@ impl Plugin for ManagerPlugin {
                 (enqueue_package_installs, start_install_jobs).chain(),
             )
             .add_systems(Update, poll_install_jobs)
+            .add_systems(Update, clear_notices)
             .add_systems(
                 PostUpdate,
-                (deliver_progress_outputs, deliver_status_outputs).chain(),
+                (
+                    deliver_progress_outputs,
+                    ApplyDeferred,
+                    deliver_status_outputs,
+                )
+                    .chain(),
             );
     }
 }
@@ -45,16 +57,25 @@ struct PackageStatusOutput {
     status: LspPackageStatus,
 }
 
+#[derive(Component)]
+struct PackageNotice {
+    target: Entity,
+}
+
+#[derive(Component)]
+struct PackageNoticeTimer(Timer);
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct PackageTargets<'w, 's> {
     views: Query<'w, 's, (Entity, &'static crate::host::editor::FileView)>,
+    registry: Single<'w, 's, &'static LspRegistry>,
 }
 
 impl PackageTargets<'_, '_> {
     fn matching(&self, target: Entity, package: &str) -> Vec<Entity> {
         let mut targets = vec![target];
         for (entity, view) in &self.views {
-            if view.uses_lsp_package(package) && !targets.contains(&entity) {
+            if self.view_uses_package(view, package) && !targets.contains(&entity) {
                 targets.push(entity);
             }
         }
@@ -68,7 +89,49 @@ impl PackageTargets<'_, '_> {
     fn uses_package(&self, entity: Entity, package: &str) -> bool {
         self.views
             .get(entity)
-            .is_ok_and(|(_, view)| view.uses_lsp_package(package))
+            .is_ok_and(|(_, view)| self.view_uses_package(view, package))
+    }
+
+    fn view_uses_package(&self, view: &crate::host::editor::FileView, package: &str) -> bool {
+        view.path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .and_then(|extension| self.registry.package(extension))
+            == Some(package)
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct PackageNotices<'w, 's> {
+    active: Query<'w, 's, (Entity, &'static PackageNotice)>,
+}
+
+impl PackageNotices<'_, '_> {
+    fn publish(
+        &self,
+        target: Entity,
+        progress: LspInstallProgress,
+        installed: bool,
+        duration: Option<Duration>,
+        commands: &mut Commands,
+    ) {
+        for (entity, notice) in &self.active {
+            if notice.target == target {
+                commands.entity(entity).despawn();
+            }
+        }
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+            target,
+            &LspInstallNotice {
+                progress: Some(progress),
+                installed,
+            },
+        ));
+        let mut notice =
+            commands.spawn((Name::new("LSP install notice"), PackageNotice { target }));
+        if let Some(duration) = duration {
+            notice.insert(PackageNoticeTimer(Timer::new(duration, TimerMode::Once)));
+        }
     }
 }
 
@@ -180,16 +243,6 @@ fn enqueue_package_installs(
     }
 }
 
-impl crate::host::editor::FileView {
-    fn uses_lsp_package(&self, package: &str) -> bool {
-        self.path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .and_then(ServerSpec::preferred_package)
-            == Some(package)
-    }
-}
-
 fn poll_install_jobs(mut jobs: Query<(Entity, &mut PackageInstallJob)>, mut commands: Commands) {
     for (entity, mut job) in &mut jobs {
         for progress in job.progress.try_iter() {
@@ -222,15 +275,24 @@ fn poll_install_jobs(mut jobs: Query<(Entity, &mut PackageInstallJob)>, mut comm
 fn deliver_progress_outputs(
     outputs: Query<(Entity, &PackageProgressOutput)>,
     targets: PackageTargets,
+    notices: PackageNotices,
     mut commands: Commands,
 ) {
     for (output_entity, output) in &outputs {
         for target in targets.matching(output.target, &output.progress.name) {
             if targets.contains(target) {
-                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                let duration = match output.progress.phase {
+                    InstallPhase::Done => Some(DONE_NOTICE),
+                    InstallPhase::Failed => Some(FAILED_NOTICE),
+                    _ => None,
+                };
+                notices.publish(
                     target,
-                    &output.progress,
-                ));
+                    output.progress.clone(),
+                    false,
+                    duration,
+                    &mut commands,
+                );
             }
         }
         commands.entity(output_entity).despawn();
@@ -240,6 +302,7 @@ fn deliver_progress_outputs(
 fn deliver_status_outputs(
     outputs: Query<(Entity, &PackageStatusOutput)>,
     targets: PackageTargets,
+    notices: PackageNotices,
     mut commands: Commands,
 ) {
     for (output_entity, output) in &outputs {
@@ -256,13 +319,42 @@ fn deliver_status_outputs(
         }
         for target in matching {
             if targets.contains(target) {
-                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                notices.publish(
                     target,
-                    &output.status,
-                ));
+                    LspInstallProgress {
+                        name: output.status.name.clone(),
+                        phase: InstallPhase::Done,
+                        pct: Some(100),
+                        message: String::new(),
+                    },
+                    true,
+                    Some(DONE_NOTICE),
+                    &mut commands,
+                );
             }
         }
         commands.entity(output_entity).despawn();
+    }
+}
+
+fn clear_notices(
+    time: Res<Time>,
+    mut notices: Query<(Entity, &PackageNotice, &mut PackageNoticeTimer)>,
+    targets: PackageTargets,
+    mut commands: Commands,
+) {
+    for (entity, notice, mut timer) in &mut notices {
+        timer.0.tick(time.delta());
+        if !timer.0.just_finished() {
+            continue;
+        }
+        if targets.contains(notice.target) {
+            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                notice.target,
+                &LspInstallNotice::default(),
+            ));
+        }
+        commands.entity(entity).despawn();
     }
 }
 

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -5,8 +6,8 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_api::media::MediaKind;
 use vmux_ecs::event::{
-    FileMediaEvent, FileOpenExternalRequest, FilePreviewEvent, FilePreviewRequest, FileVideoRect,
-    PreviewKind,
+    FileMediaEvent, FileOpenExternalRequest, FilePreviewItem, FilePreviewRequest, FilePreviewState,
+    FileThumbnail, FileVideoRect, PreviewKind,
 };
 
 use crate::host::directory::FileDirectoryNavigation;
@@ -37,6 +38,7 @@ impl Plugin for MediaPlugin {
             )
             .add_observer(file_preview_request)
             .add_observer(load_file_preview)
+            .add_observer(project_preview)
             .add_observer(file_open_external)
             .add_observer(file_video_rect);
     }
@@ -51,7 +53,15 @@ pub struct FileMedia {
 #[derive(Component)]
 struct ThumbTask {
     webview: Entity,
+    root: PathBuf,
     task: Task<(String, Result<Vec<u8>, String>)>,
+}
+
+#[derive(Component, Clone, Default)]
+struct FilePreviewProjection {
+    root: PathBuf,
+    selected: Option<FilePreviewItem>,
+    thumbnails: BTreeMap<String, String>,
 }
 
 #[derive(EntityEvent)]
@@ -60,6 +70,16 @@ pub(crate) struct FilePreviewLoad {
     pub(crate) webview: Entity,
     pub(crate) request: FilePreviewRequest,
     pub(crate) selected_only: bool,
+}
+
+#[derive(EntityEvent)]
+struct FilePreviewReady {
+    #[event_target]
+    webview: Entity,
+    root: PathBuf,
+    path: String,
+    thumb: bool,
+    kind: PreviewKind,
 }
 
 type ReadyMedia = (
@@ -87,7 +107,7 @@ fn send_initial(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
             entity,
             &FileMediaEvent {
                 kind: media.kind,
@@ -153,15 +173,16 @@ fn file_preview_request(trigger: On<UiInput<FilePreviewRequest>>, mut commands: 
 
 fn load_file_preview(
     trigger: On<FilePreviewLoad>,
-    file_views: Query<(), With<FileView>>,
+    file_views: Query<&FileView>,
     directories: Query<(&FileDir, &FileDirectoryNavigation)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    if file_views.get(entity).is_err() {
+    let Ok(file) = file_views.get(entity) else {
         return;
-    }
+    };
+    let root = file.path.clone();
     let request = trigger.event().request.clone();
     let selected_navigation = if trigger.event().selected_only {
         let Ok((directory, navigation)) = directories.get(entity) else {
@@ -196,6 +217,7 @@ fn load_file_preview(
         });
         commands.spawn(ThumbTask {
             webview: entity,
+            root,
             task,
         });
         return;
@@ -209,14 +231,13 @@ fn load_file_preview(
     {
         *entries = FileDirectoryNavigation::visible(entries, navigation.show_hidden);
     }
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-        entity,
-        &FilePreviewEvent {
-            path: request.path,
-            thumb: false,
-            kind,
-        },
-    ));
+    commands.trigger(FilePreviewReady {
+        webview: entity,
+        root,
+        path: request.path,
+        thumb: false,
+        kind,
+    });
 }
 
 fn drain_thumb_tasks(
@@ -229,23 +250,70 @@ fn drain_thumb_tasks(
             continue;
         };
         let webview = task.webview;
+        let root = task.root.clone();
         commands.entity(task_entity).despawn();
         if let Ok(bytes) = result
             && browsers.can_emit_to(&webview)
         {
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+            commands.trigger(FilePreviewReady {
                 webview,
-                &FilePreviewEvent {
-                    path,
-                    thumb: true,
-                    kind: PreviewKind::Image {
-                        mime: "image/png".to_string(),
-                        bytes,
-                    },
+                root,
+                path,
+                thumb: true,
+                kind: PreviewKind::Image {
+                    url: PreviewBuilder::image_url("image/png", &bytes),
                 },
-            ));
+            });
         }
     }
+}
+
+fn project_preview(
+    trigger: On<FilePreviewReady>,
+    files: Query<&FileView>,
+    projections: Query<&FilePreviewProjection>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let event = trigger.event();
+    let Ok(file) = files.get(entity) else {
+        return;
+    };
+    if file.path != event.root {
+        return;
+    }
+    let mut projection = projections.get(entity).cloned().unwrap_or_default();
+    if projection.root != event.root {
+        projection = FilePreviewProjection {
+            root: event.root.clone(),
+            ..Default::default()
+        };
+    }
+    if event.thumb {
+        if let PreviewKind::Image { url } = &event.kind {
+            projection
+                .thumbnails
+                .insert(event.path.clone(), url.clone());
+        }
+    } else {
+        projection.selected = Some(FilePreviewItem {
+            path: event.path.clone(),
+            kind: event.kind.clone(),
+        });
+    }
+    let state = FilePreviewState {
+        selected: projection.selected.clone(),
+        thumbnails: projection
+            .thumbnails
+            .iter()
+            .map(|(path, url)| FileThumbnail {
+                path: path.clone(),
+                url: url.clone(),
+            })
+            .collect(),
+    };
+    commands.entity(entity).insert(projection);
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
 }
 
 fn file_open_external(

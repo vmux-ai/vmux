@@ -1,19 +1,20 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
+use vmux_api::PageIcon;
 use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentQueryResult, AgentRequest,
     AgentRequestId, ClientMessage,
 };
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::bookmark::{
     AddRequest, CreateFolderRequest, PinRequest, PinUrlRequest, RemoveRequest, UnpinRequest,
 };
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
+    ToolQueryRouteSet,
 };
 
 pub struct BookmarkToolPlugin;
@@ -24,12 +25,6 @@ impl Plugin for BookmarkToolPlugin {
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
-            .bind_tool::<BookmarkListArgs>()
-            .bind_tool::<BookmarkAddArgs>()
-            .bind_tool::<BookmarkRemoveArgs>()
-            .bind_tool::<BookmarkPinArgs>()
-            .bind_tool::<BookmarkUnpinArgs>()
-            .bind_tool::<BookmarkFolderCreateArgs>()
             .add_message::<BookmarkListRequest>()
             .add_systems(
                 Update,
@@ -43,12 +38,12 @@ impl Plugin for BookmarkToolPlugin {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BookmarkListArgs {}
+struct BookmarkListTool {}
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BookmarkAddArgs {
+struct BookmarkAddTool {
     url: String,
     title: Option<String>,
     favicon_url: Option<String>,
@@ -58,26 +53,26 @@ struct BookmarkAddArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BookmarkRemoveArgs {
+struct BookmarkRemoveTool {
     uuid: String,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BookmarkUnpinArgs {
+struct BookmarkUnpinTool {
     uuid: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ExistingPinArgs {
+struct ExistingPin {
     uuid: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PagePinArgs {
+struct PagePin {
     url: String,
     title: Option<String>,
     favicon_url: Option<String>,
@@ -86,15 +81,15 @@ struct PagePinArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(untagged)]
-enum BookmarkPinArgs {
-    Existing(ExistingPinArgs),
-    Page(PagePinArgs),
+enum BookmarkPinTool {
+    Existing(ExistingPin),
+    Page(PagePin),
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BookmarkFolderCreateArgs {
+struct BookmarkFolderCreateTool {
     name: String,
 }
 
@@ -106,7 +101,7 @@ struct BookmarkListRequest {
 #[vmux_api::agent]
 struct AgentBookmarkList;
 
-fn list(mut commands: Commands, calls: Query<Entity, AddedTool<BookmarkListArgs>>) {
+fn list(mut commands: Commands, calls: Query<Entity, AddedTool<BookmarkListTool>>) {
     for request in &calls {
         commands
             .entity(request)
@@ -116,7 +111,7 @@ fn list(mut commands: Commands, calls: Query<Entity, AddedTool<BookmarkListArgs>
 
 fn add(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkAddArgs), AddedTool<BookmarkAddArgs>>,
+    requests: Query<(Entity, &BookmarkAddTool), AddedTool<BookmarkAddTool>>,
 ) {
     for (entity, args) in &requests {
         let command =
@@ -137,7 +132,7 @@ fn add(
 
 fn remove(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkRemoveArgs), AddedTool<BookmarkRemoveArgs>>,
+    requests: Query<(Entity, &BookmarkRemoveTool), AddedTool<BookmarkRemoveTool>>,
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required")
@@ -148,15 +143,15 @@ fn remove(
 
 fn pin(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkPinArgs), AddedTool<BookmarkPinArgs>>,
+    requests: Query<(Entity, &BookmarkPinTool), AddedTool<BookmarkPinTool>>,
 ) {
     for (entity, args) in &requests {
         let command = match args {
-            BookmarkPinArgs::Existing(args) => {
+            BookmarkPinTool::Existing(args) => {
                 RequiredText::get(args.uuid.clone(), "bookmark_pin.uuid is required")
                     .and_then(|uuid| AgentRequest::encode(&PinRequest { uuid }))
             }
-            BookmarkPinArgs::Page(args) => RequiredText::get(
+            BookmarkPinTool::Page(args) => RequiredText::get(
                 args.url.clone(),
                 "bookmark_pin.url is required",
             )
@@ -177,7 +172,7 @@ fn pin(
 
 fn unpin(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkUnpinArgs), AddedTool<BookmarkUnpinArgs>>,
+    requests: Query<(Entity, &BookmarkUnpinTool), AddedTool<BookmarkUnpinTool>>,
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required")
@@ -188,7 +183,7 @@ fn unpin(
 
 fn create_folder(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkFolderCreateArgs), AddedTool<BookmarkFolderCreateArgs>>,
+    requests: Query<(Entity, &BookmarkFolderCreateTool), AddedTool<BookmarkFolderCreateTool>>,
 ) {
     for (entity, args) in &requests {
         let command =

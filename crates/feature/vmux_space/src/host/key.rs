@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
-use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
-use vmux_ecs::host::UiStateWrite;
+use vmux_command::{CommandDispatch, CommandRuntimePlugin};
+use vmux_ecs::UiStateWrite;
 #[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, SpacesUiState};
@@ -17,8 +17,7 @@ impl Plugin for SpaceKeyPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_systems(Startup, bind_commands.in_set(BindCommands))
-            .add_observer(select_next)
+        app.add_observer(select_next)
             .add_observer(select_previous)
             .add_observer(attach_selected)
             .add_observer(delete_selected);
@@ -36,13 +35,6 @@ struct SpaceAttachBinding;
 
 #[vmux_command::command]
 struct SpaceDeleteBinding;
-
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<SpaceNextBinding>(&mut commands);
-    registry.bind::<SpacePreviousBinding>(&mut commands);
-    registry.bind::<SpaceAttachBinding>(&mut commands);
-    registry.bind::<SpaceDeleteBinding>(&mut commands);
-}
 
 fn select_next(
     trigger: On<CommandDispatch>,

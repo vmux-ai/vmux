@@ -71,7 +71,7 @@ fn save_with(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &FileEncodingEvent {
             encoding: edit.core.buffer.encoding,

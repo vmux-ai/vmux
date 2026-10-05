@@ -2,14 +2,14 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 
 use crate::host::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
     AgentBrowserScroll, AgentBrowserSnapshot,
 };
 
-use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery};
+use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet, ToolQuery};
 
 pub struct BrowserToolPlugin;
 
@@ -17,12 +17,6 @@ impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_systems(Startup, register_agent_policy)
-            .bind_tool::<BrowserNavigateArgs>()
-            .bind_tool::<BrowserGoBackArgs>()
-            .bind_tool::<BrowserGoForwardArgs>()
-            .bind_tool::<BrowserHistorySearchArgs>()
-            .bind_tool::<BrowserSnapshotArgs>()
-            .bind_tool::<BrowserScrollArgs>()
             .add_systems(
                 Update,
                 (
@@ -60,7 +54,7 @@ fn register_agent_policy(mut commands: Commands) {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserNavigateArgs {
+struct NavigateTool {
     url: String,
     pane: Option<String>,
 }
@@ -68,21 +62,21 @@ struct BrowserNavigateArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserGoBackArgs {
+struct GoBackTool {
     pane: Option<String>,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserGoForwardArgs {
+struct GoForwardTool {
     pane: Option<String>,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserHistorySearchArgs {
+struct HistorySearchTool {
     query: String,
     limit: Option<u32>,
 }
@@ -90,7 +84,7 @@ struct BrowserHistorySearchArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserSnapshotArgs {
+struct SnapshotTool {
     target: Option<String>,
 }
 
@@ -112,14 +106,14 @@ impl From<ScrollTarget> for String {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserScrollPositionArgs {
+struct ScrollPosition {
     to: ScrollTarget,
     target: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserScrollDeltaArgs {
+struct ScrollDelta {
     delta: i32,
     target: Option<String>,
 }
@@ -127,9 +121,9 @@ struct BrowserScrollDeltaArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(untagged)]
-enum BrowserScrollArgs {
-    Position(BrowserScrollPositionArgs),
-    Delta(BrowserScrollDeltaArgs),
+enum ScrollTool {
+    Position(ScrollPosition),
+    Delta(ScrollDelta),
 }
 
 struct BrowserPane(Option<String>);
@@ -152,7 +146,7 @@ impl From<BrowserPane> for Option<String> {
 
 fn navigate(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserNavigateArgs), AddedTool<BrowserNavigateArgs>>,
+    requests: Query<(Entity, &NavigateTool), AddedTool<NavigateTool>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.url.trim().is_empty() {
@@ -167,10 +161,7 @@ fn navigate(
     }
 }
 
-fn go_back(
-    mut commands: Commands,
-    requests: Query<(Entity, &BrowserGoBackArgs), AddedTool<BrowserGoBackArgs>>,
-) {
+fn go_back(mut commands: Commands, requests: Query<(Entity, &GoBackTool), AddedTool<GoBackTool>>) {
     for (entity, args) in &requests {
         commands
             .entity(entity)
@@ -182,7 +173,7 @@ fn go_back(
 
 fn go_forward(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserGoForwardArgs), AddedTool<BrowserGoForwardArgs>>,
+    requests: Query<(Entity, &GoForwardTool), AddedTool<GoForwardTool>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -195,7 +186,7 @@ fn go_forward(
 
 fn history_search(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserHistorySearchArgs), AddedTool<BrowserHistorySearchArgs>>,
+    requests: Query<(Entity, &HistorySearchTool), AddedTool<HistorySearchTool>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.query.trim().is_empty() {
@@ -212,10 +203,7 @@ fn history_search(
 
 fn snapshot(
     mut commands: Commands,
-    requests: Query<
-        (Entity, Option<&ProcessAnchor>, &BrowserSnapshotArgs),
-        Added<BrowserSnapshotArgs>,
-    >,
+    requests: Query<(Entity, Option<&ProcessAnchor>, &SnapshotTool), Added<SnapshotTool>>,
 ) {
     for (entity, anchor, args) in &requests {
         commands
@@ -229,12 +217,12 @@ fn snapshot(
 
 fn scroll(
     mut commands: Commands,
-    requests: Query<(Entity, Option<&ProcessAnchor>, &BrowserScrollArgs), Added<BrowserScrollArgs>>,
+    requests: Query<(Entity, Option<&ProcessAnchor>, &ScrollTool), Added<ScrollTool>>,
 ) {
     for (entity, anchor, args) in &requests {
         let (to, delta, target) = match args {
-            BrowserScrollArgs::Position(args) => (Some(args.to.into()), None, args.target.clone()),
-            BrowserScrollArgs::Delta(args) => (None, Some(args.delta), args.target.clone()),
+            ScrollTool::Position(args) => (Some(args.to.into()), None, args.target.clone()),
+            ScrollTool::Delta(args) => (None, Some(args.delta), args.target.clone()),
         };
         commands
             .entity(entity)

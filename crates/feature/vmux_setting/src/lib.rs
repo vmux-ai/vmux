@@ -9,17 +9,17 @@ pub use host::{
     AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkFolderSettings,
     BrowserSettings, ColorScheme, ColorSchemeChanged, DirSource, EXPLORER_DEFAULT_WIDTH,
     EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH, KeyComboDef, ResolvedColorScheme, ResolvedScheme,
-    SearchEngine, SearchEngineSetting, SettingToolPlugin, Settings, SettingsLoadSet,
-    SettingsPlugin, SettingsRuntimePlugin, SettingsSaveRequest, ShortcutDef, ShortcutEntry,
-    ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir, SystemAppearance, TerminalSettings,
-    TerminalTheme, UpdateChannel,
+    SearchEngineSetting, SettingToolPlugin, Settings, SettingsLoadSet, SettingsPlugin,
+    SettingsRuntimePlugin, SettingsSaveRequest, ShortcutDef, ShortcutEntry, ShortcutSettings,
+    SpaceOverrides, SpaceProject, StartupDir, SystemAppearance, TerminalSettings, TerminalTheme,
+    UpdateChannel,
 };
 
 #[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

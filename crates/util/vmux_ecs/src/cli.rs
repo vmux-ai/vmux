@@ -108,20 +108,24 @@ impl CliInvocation {
 #[derive(Component, Debug)]
 pub struct CliResult(pub Result<u8, String>);
 
-impl CliResult {
-    pub fn success() -> Self {
+impl Default for CliResult {
+    fn default() -> Self {
         Self(Ok(0))
     }
+}
 
-    pub fn from_io(result: std::io::Result<i32>) -> Self {
+impl From<std::io::Result<i32>> for CliResult {
+    fn from(result: std::io::Result<i32>) -> Self {
         Self(
             result
                 .map(|code| u8::try_from(code).unwrap_or(1))
                 .map_err(|error| error.to_string()),
         )
     }
+}
 
-    pub fn from_unit(result: std::io::Result<()>) -> Self {
+impl From<std::io::Result<()>> for CliResult {
+    fn from(result: std::io::Result<()>) -> Self {
         Self(result.map(|()| 0).map_err(|error| error.to_string()))
     }
 }
@@ -129,7 +133,7 @@ impl CliResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::manifest::FeatureManifest;
+    use crate::manifest::FeatureManifest;
 
     #[test]
     fn parses_nested_command_manifest() {

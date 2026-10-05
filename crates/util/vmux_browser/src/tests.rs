@@ -1033,7 +1033,7 @@ mod open_in_place_flow {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_ecs::EcsPlugin,
+            vmux_ecs::PrimitivesPlugin,
             vmux_command::CommandPlugin,
             vmux_terminal::TerminalContractPlugin,
             crate::command::CommandPlugin,
@@ -1051,9 +1051,13 @@ mod open_in_place_flow {
             },
         );
         app.world_mut()
-            .spawn(vmux_ecs::HostSpawnRoute::page("vmux://terminal/"));
+            .spawn(vmux_ecs::host_spawn::HostSpawnRoute::page(
+                "vmux://terminal/",
+            ));
         app.world_mut()
-            .spawn(vmux_ecs::HostSpawnRoute::subtree("vmux://sessions/"));
+            .spawn(vmux_ecs::host_spawn::HostSpawnRoute::subtree(
+                "vmux://sessions/",
+            ));
         for (url, title) in [
             ("vmux://services/", "Services"),
             ("vmux://settings/", "Settings"),
@@ -1061,10 +1065,10 @@ mod open_in_place_flow {
             ("vmux://spaces/", "Spaces"),
         ] {
             app.world_mut()
-                .spawn(vmux_ecs::host::page::NativelyHosted::subtree(url, title));
+                .spawn(vmux_ecs::page::HostedPage::subtree(url, title));
         }
         app.world_mut()
-            .spawn(vmux_ecs::HostSpawnRoute::scheme("file"));
+            .spawn(vmux_ecs::host_spawn::HostSpawnRoute::scheme("file"));
         app
     }
 
@@ -1179,7 +1183,7 @@ mod open_in_place_flow {
                 vmux_ecs::PageMetadata {
                     url: native_url.to_string(),
                     title: native_url.to_string(),
-                    icon: vmux_ecs::PageIcon::None,
+                    icon: vmux_api::PageIcon::None,
                     bg_color: None,
                 },
             ))

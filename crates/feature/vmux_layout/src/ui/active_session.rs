@@ -195,7 +195,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     if root.is_worktree {
                         LineIconView { icon: LineIcon::GitFork, class: "size-3.5 shrink-0".to_string() }
                     } else {
-                        BuiltinIconView { icon: vmux_ecs::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
+                        BuiltinIconView { icon: vmux_api::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
                     }
                     div { class: "min-w-0 flex-1",
                         div { class: "truncate text-[10px] font-medium text-foreground", "{root.label}" }
@@ -265,7 +265,7 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
                 });
             },
             BuiltinIconView {
-                icon: vmux_ecs::BuiltinIcon::Project,
+                icon: vmux_api::BuiltinIcon::Project,
                 class: "size-3.5 shrink-0".to_string(),
             }
             div { class: "min-w-0 flex-1",

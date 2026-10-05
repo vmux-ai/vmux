@@ -2,7 +2,7 @@ use crate::protocol::{
     BRIDGE_CHANNEL, BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE,
     BRIDGE_PROTOCOL_VERSION, KEEPALIVE_CHANNEL,
 };
-use crate::{manifest, store};
+use crate::{driver, store};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -101,7 +101,7 @@ impl PreparedRuntime {
         }
         Self::copy_tree(&source, &temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
         if let Some(key) = entry.public_key_b64.as_deref() {
-            manifest::ExtensionManifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
+            driver::ExtensionManifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
                 .map_err(PrepareRuntimeError::Infrastructure)?;
         }
         std::fs::write(temp_dir.join("vmux_runtime.js"), worker_source)

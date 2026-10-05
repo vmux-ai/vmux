@@ -2,19 +2,18 @@ use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkDropRequest, BookmarkDropSource,
-    BookmarkDropTarget, BookmarkFolderCreateRequest, BookmarkFolderMoveRequest,
-    BookmarkFolderRemoveRequest, BookmarkFolderRenameRequest, BookmarkFolderToggleRequest,
-    BookmarkMenuEffect, BookmarkMenuEntryRequest, BookmarkMenuFolderRequest,
-    BookmarkMenuPinRequest, BookmarkMenuRootRequest, BookmarkMoveRequest, BookmarkOpenRequest,
-    BookmarkPinRequest, BookmarkRemoveRequest, BookmarkRenameRequest, BookmarkRow,
-    BookmarkTextInputRequest, BookmarkUnpinRequest,
+    BookmarkDropTarget, BookmarkEditCloseRequest, BookmarkEditInputRequest, BookmarkEditState,
+    BookmarkEditSubmitRequest, BookmarkFolderEditOpenRequest, BookmarkFolderMoveRequest,
+    BookmarkFolderRemoveRequest, BookmarkFolderToggleRequest, BookmarkMenuEntryRequest,
+    BookmarkMenuFolderRequest, BookmarkMenuPinRequest, BookmarkMenuRootRequest,
+    BookmarkMoveRequest, BookmarkOpenRequest, BookmarkPinRequest, BookmarkRemoveRequest,
+    BookmarkRenameEditOpenRequest, BookmarkRow, BookmarkTextInputRequest, BookmarkUnpinRequest,
 };
 use vmux_ecs::PageMetadata;
 #[cfg(not(target_os = "macos"))]
 use vmux_ui::components::context_menu::ContextMenuTrigger;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::inline_edit::InlineEdit;
 use vmux_ui::components::tree_row::{
     SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN,
     SIDEBAR_TREE_SCROLLER, SidebarTreeRow, SidebarTreeRowGroup,
@@ -33,6 +32,7 @@ use crate::event::{
 #[component]
 pub(super) fn BookmarksSection(
     bookmarks: BookmarkUiState,
+    edit: BookmarkEditState,
     pane_id: u64,
     expanded: bool,
 ) -> Element {
@@ -43,21 +43,7 @@ pub(super) fn BookmarksSection(
         active_page,
     } = bookmarks;
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let mut creating_folder = use_signal(|| false);
-    let new_folder_draft = use_signal(|| translate("layout-new-folder"));
-    let bookmark_menu: Memo<BookmarkMenuEffect> = use_context();
-    let initial_menu_revision = bookmark_menu.peek().create_folder.revision;
-    let mut handled_menu_revision = use_signal(|| initial_menu_revision);
-    use_effect(move || {
-        let effect = bookmark_menu().create_folder;
-        if effect.revision <= handled_menu_revision() {
-            return;
-        }
-        handled_menu_revision.set(effect.revision);
-        if effect.parent.is_none() {
-            begin_new_folder(creating_folder, new_folder_draft);
-        }
-    });
+    let creating_folder = edit.create.open && edit.create.parent.is_none();
     let root_targeted = bookmark_drop_targeted(drag_state, &BookmarkDragTarget::Root);
     let root_drop_label = drag_state()
         .filter(|drag| drag.active)
@@ -105,7 +91,10 @@ pub(super) fn BookmarksSection(
                             onclick: move |event| {
                                 event.prevent_default();
                                 event.stop_propagation();
-                                begin_new_folder(creating_folder, new_folder_draft);
+                                let _ = send(&BookmarkFolderEditOpenRequest {
+                                    parent: None,
+                                    draft: translate("layout-new-folder"),
+                                });
                             },
                             Icon { class: "h-3.5 w-3.5 pointer-events-none",
                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
@@ -158,29 +147,20 @@ pub(super) fn BookmarksSection(
                                 }
                             }
                         }
-                        if creating_folder() {
+                        if creating_folder {
                             div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
                                 Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                                     path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                                 }
-                                InlineEdit {
-                                    draft: new_folder_draft,
+                                BookmarkEditInput {
+                                    draft: edit.create.draft.clone(),
                                     class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
                                     placeholder: translate("layout-folder-name"),
                                     aria_label: translate("layout-folder-name"),
-                                    on_active_change: set_bookmark_text_input_active,
-                                    on_commit: move |name| {
-                                        creating_folder.set(false);
-                                        let _ = send(&BookmarkFolderCreateRequest {
-                                            name,
-                                            parent: None,
-                                        });
-                                    },
-                                    on_cancel: move |_| creating_folder.set(false),
                                 }
                             }
                         }
-                        if pins.is_empty() && rows.is_empty() && !creating_folder() {
+                        if pins.is_empty() && rows.is_empty() && !creating_folder {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-pins-bookmarks")} }
                         } else {
                             div { class: SIDEBAR_TREE_SCROLLER,
@@ -192,12 +172,14 @@ pub(super) fn BookmarksSection(
                                                 key: "{folder.uuid}",
                                                 folder: folder.clone(),
                                                 active_page: active_page.clone(),
+                                                edit: edit.clone(),
                                             }
                                         },
                                         BookmarkTreeState::Entry(entry) => rsx! {
                                             BookmarkEntry {
                                                 key: "{entry.row.uuid}",
                                                 entry: entry.clone(),
+                                                edit: edit.clone(),
                                             }
                                         },
                                     }
@@ -400,10 +382,6 @@ pub(super) struct BookmarkInput;
 impl BookmarkInput {
     pub(super) fn set_active(active: bool) {
         set_bookmark_text_input_active(active);
-    }
-
-    pub(super) fn begin_rename(editing: Signal<bool>, draft: Signal<String>, name: String) {
-        begin_inline_rename(editing, draft, name);
     }
 }
 
@@ -653,53 +631,68 @@ fn set_bookmark_context_menu_active(active: bool) {
     let _ = send(&BookmarkContextMenuRequest { active });
 }
 
-fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
-    draft.set(name);
-    spawn(async move {
-        Platform::sleep(0).await;
-        editing.set(true);
-    });
+#[component]
+fn BookmarkEditInput(
+    draft: String,
+    class: String,
+    placeholder: String,
+    aria_label: String,
+) -> Element {
+    let mut finished = use_signal(|| false);
+    rsx! {
+        input {
+            r#type: "text",
+            class,
+            value: draft,
+            placeholder,
+            aria_label,
+            autofocus: true,
+            autocomplete: "off",
+            onfocus: move |_| set_bookmark_text_input_active(true),
+            oninput: move |event: FormEvent| {
+                let _ = send(&BookmarkEditInputRequest {
+                    draft: event.value(),
+                });
+            },
+            onkeydown: move |event: KeyboardEvent| match event.key() {
+                Key::Enter if !finished() => {
+                    event.prevent_default();
+                    finished.set(true);
+                    set_bookmark_text_input_active(false);
+                    let _ = send(&BookmarkEditSubmitRequest);
+                }
+                Key::Escape if !finished() => {
+                    event.prevent_default();
+                    finished.set(true);
+                    set_bookmark_text_input_active(false);
+                    let _ = send(&BookmarkEditCloseRequest);
+                }
+                _ => {}
+            },
+            onblur: move |_| {
+                set_bookmark_text_input_active(false);
+                if !finished() {
+                    finished.set(true);
+                    let _ = send(&BookmarkEditSubmitRequest);
+                }
+            },
+        }
+    }
 }
 
 #[component]
-fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>) -> Element {
+fn BookmarkFolder(
+    folder: BookmarkFolderState,
+    active_page: Option<PageMetadata>,
+    edit: BookmarkEditState,
+) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let uuid = folder.uuid.clone();
     let collapsed = folder.collapsed;
-    let mut editing = use_signal(|| false);
-    let draft = use_signal(|| folder.name.clone());
-    let mut creating_child = use_signal(|| false);
-    let child_draft = use_signal(|| translate("layout-new-folder"));
+    let editing = edit.rename.open && edit.rename.folder && edit.rename.uuid == uuid;
+    let creating_child = edit.create.open && edit.create.parent.as_deref() == Some(uuid.as_str());
     let menu_val = use_signal(|| folder.uuid.clone());
     let new_folder_uuid = uuid.clone();
-    let bookmark_menu: Memo<BookmarkMenuEffect> = use_context();
-    let initial_create_revision = bookmark_menu.peek().create_folder.revision;
-    let initial_rename_revision = bookmark_menu.peek().rename.revision;
-    let mut handled_create_revision = use_signal(|| initial_create_revision);
-    let mut handled_rename_revision = use_signal(|| initial_rename_revision);
-    let menu_uuid = uuid.clone();
-    let create_menu_uuid = menu_uuid.clone();
-    let menu_name = folder.name.clone();
-    use_effect(move || {
-        let effect = bookmark_menu().create_folder;
-        if effect.revision <= handled_create_revision() {
-            return;
-        }
-        handled_create_revision.set(effect.revision);
-        if effect.parent.as_deref() == Some(create_menu_uuid.as_str()) {
-            begin_new_folder(creating_child, child_draft);
-        }
-    });
-    use_effect(move || {
-        let effect = bookmark_menu().rename;
-        if effect.revision <= handled_rename_revision() {
-            return;
-        }
-        handled_rename_revision.set(effect.revision);
-        if effect.uuid == menu_uuid {
-            begin_inline_rename(editing, draft, menu_name.clone());
-        }
-    });
     let root_target_count = usize::from(folder.move_to_root);
     let remove_index = 4 + root_target_count + folder.move_targets.len();
     let drop_target = BookmarkDragTarget::Folder(uuid.clone());
@@ -715,7 +708,7 @@ fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>
             style: "{row_style}",
             onpointerenter: move |_| set_bookmark_drop_target(drag_state, drop_target.clone()),
             onpointerleave: move |_| clear_bookmark_drop_target(drag_state, &leave_target),
-            if editing() {
+            if editing {
                 div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
                     Icon {
                         class: if collapsed {
@@ -725,23 +718,11 @@ fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>
                         },
                         path { d: "m9 18 6-6-6-6" }
                     }
-                    InlineEdit {
-                        draft,
+                    BookmarkEditInput {
+                        draft: edit.rename.draft.clone(),
                         class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
                         placeholder: translate("layout-folder-name"),
                         aria_label: translate("layout-folder-name"),
-                        on_active_change: set_bookmark_text_input_active,
-                        on_commit: {
-                            let id = uuid.clone();
-                            move |name| {
-                                editing.set(false);
-                                let _ = send(&BookmarkFolderRenameRequest {
-                                    uuid: id.clone(),
-                                    name,
-                                });
-                            }
-                        },
-                        on_cancel: move |_| editing.set(false),
                     }
                 }
             } else {
@@ -836,7 +817,10 @@ fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>
                                         uuid: new_folder_uuid.clone(),
                                     });
                                 }
-                                begin_new_folder(creating_child, child_draft);
+                                let _ = send(&BookmarkFolderEditOpenRequest {
+                                    parent: Some(new_folder_uuid.clone()),
+                                    draft: translate("layout-new-folder"),
+                                });
                             },
                             attributes: vec![],
                             {translate("layout-new-folder")}
@@ -846,7 +830,14 @@ fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: {
                                 let name = folder.name.clone();
-                                move |_: String| begin_inline_rename(editing, draft, name.clone())
+                                let id = uuid.clone();
+                                move |_: String| {
+                                    let _ = send(&BookmarkRenameEditOpenRequest {
+                                        uuid: id.clone(),
+                                        folder: true,
+                                        draft: name.clone(),
+                                    });
+                                }
                             },
                             attributes: vec![],
                             {translate("layout-rename-folder")}
@@ -901,28 +892,16 @@ fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>
                     },
                 }
             }
-            if creating_child() {
+            if creating_child {
                 div { class: "ml-3 flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
                     Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                         path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                     }
-                    InlineEdit {
-                        draft: child_draft,
+                    BookmarkEditInput {
+                        draft: edit.create.draft.clone(),
                         class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
                         placeholder: translate("layout-folder-name"),
                         aria_label: translate("layout-folder-name"),
-                        on_active_change: set_bookmark_text_input_active,
-                        on_commit: {
-                            let parent = uuid.clone();
-                            move |name| {
-                                creating_child.set(false);
-                                let _ = send(&BookmarkFolderCreateRequest {
-                                    name,
-                                    parent: Some(parent.clone()),
-                                });
-                            }
-                        },
-                        on_cancel: move |_| creating_child.set(false),
                     }
                 }
             }
@@ -933,13 +912,8 @@ fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>
     }
 }
 
-fn begin_new_folder(mut creating: Signal<bool>, mut draft: Signal<String>) {
-    draft.set(translate("layout-new-folder"));
-    creating.set(true);
-}
-
 #[component]
-fn BookmarkEntry(entry: BookmarkEntryState) -> Element {
+fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element {
     let BookmarkEntryState {
         row,
         depth,
@@ -957,23 +931,7 @@ fn BookmarkEntry(entry: BookmarkEntryState) -> Element {
     } else {
         row.metadata.title.clone()
     };
-    let mut editing = use_signal(|| false);
-    let draft = use_signal(|| title.clone());
-    let bookmark_menu: Memo<BookmarkMenuEffect> = use_context();
-    let initial_menu_revision = bookmark_menu.peek().rename.revision;
-    let mut handled_menu_revision = use_signal(|| initial_menu_revision);
-    let menu_uuid = row.uuid.clone();
-    let menu_name = title.clone();
-    use_effect(move || {
-        let effect = bookmark_menu().rename;
-        if effect.revision <= handled_menu_revision() {
-            return;
-        }
-        handled_menu_revision.set(effect.revision);
-        if effect.uuid == menu_uuid {
-            begin_inline_rename(editing, draft, menu_name.clone());
-        }
-    });
+    let editing = edit.rename.open && !edit.rename.folder && edit.rename.uuid == row.uuid;
     let root_target_count = usize::from(move_to_root);
     let remove_index = 3 + root_target_count + move_targets.len();
     let row_style = format!("margin-left:{}px;", depth.saturating_mul(12));
@@ -982,7 +940,7 @@ fn BookmarkEntry(entry: BookmarkEntryState) -> Element {
     };
     rsx! {
         div { style: "{row_style}",
-        if editing() {
+        if editing {
             div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
                 PageIconView {
                     icon: row.metadata.icon.clone(),
@@ -990,23 +948,11 @@ fn BookmarkEntry(entry: BookmarkEntryState) -> Element {
                     img_class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
                     icon_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                 }
-                InlineEdit {
-                    draft,
+                BookmarkEditInput {
+                    draft: edit.rename.draft.clone(),
                     class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none".to_string(),
                     placeholder: String::new(),
                     aria_label: translate("common-rename"),
-                    on_active_change: set_bookmark_text_input_active,
-                    on_commit: {
-                        let id = uuid_rename.clone();
-                        move |name| {
-                            editing.set(false);
-                            let _ = send(&BookmarkRenameRequest {
-                                uuid: id.clone(),
-                                name,
-                            });
-                        }
-                    },
-                    on_cancel: move |_| editing.set(false),
                 }
             }
         } else {
@@ -1065,7 +1011,14 @@ fn BookmarkEntry(entry: BookmarkEntryState) -> Element {
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: {
                             let name = title.clone();
-                            move |_: String| begin_inline_rename(editing, draft, name.clone())
+                            let id = uuid_rename.clone();
+                            move |_: String| {
+                                let _ = send(&BookmarkRenameEditOpenRequest {
+                                    uuid: id.clone(),
+                                    folder: false,
+                                    draft: name.clone(),
+                                });
+                            }
                         },
                         attributes: vec![],
                         {translate("common-rename")}

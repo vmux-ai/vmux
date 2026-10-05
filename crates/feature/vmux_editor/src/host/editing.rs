@@ -1,11 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::command_bar::ExRequest;
+use vmux_api::editor::KeymapKind;
 use vmux_api::input::KeyStroke;
-use vmux_command::{BindCommands, CommandInvocation, CommandRegistry};
+use vmux_command::CommandInvocation;
 use vmux_command::{CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests};
 use vmux_command::{KeyCombo, KeyContext, Keymap};
 use vmux_ecs::event::*;
+use vmux_setting::AppSettings;
 
 #[cfg(test)]
 use crate::edit::EditCore;
@@ -45,7 +47,6 @@ impl Plugin for EditorPlugin {
             )>::default())
             .add_message::<ExLineSubmitted>()
             .add_message::<OpenExRequest>()
-            .add_systems(Startup, bind_ex_command.in_set(BindCommands))
             .add_systems(Update, open_ex.in_set(WriteCommandBarRequests))
             .add_observer(file_key)
             .add_observer(file_text_input)
@@ -59,6 +60,7 @@ impl Plugin for EditorPlugin {
     }
 }
 
+#[vmux_command::command(message)]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct OpenExRequest;
 
@@ -73,13 +75,9 @@ impl TryFrom<&CommandInvocation> for OpenExRequest {
 }
 
 #[derive(Message, Clone)]
-struct ExLineSubmitted {
-    stack: Option<Entity>,
-    line: String,
-}
-
-fn bind_ex_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenExRequest>(&mut commands);
+pub(super) struct ExLineSubmitted {
+    pub(super) stack: Option<Entity>,
+    pub(super) line: String,
 }
 
 fn open_ex(
@@ -105,10 +103,12 @@ fn submit_ex(
     commands.trigger(CommandBarDismiss::new(webview, true));
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FileFindState {
     open: bool,
     forward: bool,
+    query: String,
+    regex: bool,
     revision: u64,
 }
 
@@ -117,6 +117,8 @@ impl Default for FileFindState {
         Self {
             open: false,
             forward: true,
+            query: String::new(),
+            regex: false,
             revision: 0,
         }
     }
@@ -149,6 +151,7 @@ impl From<Entity> for FileFindCloseRequest {
 
 fn open_file_find(
     trigger: On<FileFindOpenRequest>,
+    settings: Option<Res<AppSettings>>,
     mut states: Query<&mut FileFindState>,
     mut commands: Commands,
 ) {
@@ -158,12 +161,18 @@ fn open_file_find(
     };
     state.open = true;
     state.forward = trigger.event().forward;
+    state.query.clear();
+    state.regex = settings
+        .as_deref()
+        .is_some_and(|settings| settings.editor.keymap == KeymapKind::Vim);
     state.revision = state.revision.wrapping_add(1).max(1);
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &FileFindEvent {
             open: state.open,
             forward: state.forward,
+            query: state.query.clone(),
+            regex: state.regex,
             revision: state.revision,
         },
     ));
@@ -179,12 +188,15 @@ fn close_file_find(
         return;
     };
     state.open = false;
+    state.query.clear();
     state.revision = state.revision.wrapping_add(1).max(1);
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &FileFindEvent {
             open: state.open,
             forward: state.forward,
+            query: state.query.clone(),
+            regex: state.regex,
             revision: state.revision,
         },
     ));
@@ -299,7 +311,7 @@ impl EditRequest {
 }
 
 fn reapply_keymap_on_change(
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     mut last: Local<Option<KeymapConfig>>,
     mut q: Query<(
         Entity,
@@ -362,9 +374,7 @@ fn apply_edit_request(
             if let Some(scroll) = vp.set_top(target)
                 && browsers.can_emit_to(&entity)
             {
-                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                    entity, &scroll,
-                ));
+                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
             }
             edit.core.top_row = vp.top_row;
             if vp.follow_scrolled_cursor(&mut edit) {
@@ -386,9 +396,7 @@ fn apply_edit_request(
             if let Some(scroll) = vp.set_top(target)
                 && browsers.can_emit_to(&entity)
             {
-                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                    entity, &scroll,
-                ));
+                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
             }
             edit.core.top_row = vp.top_row;
             continue;
@@ -465,7 +473,7 @@ fn apply_edit_request(
                 Err(unmappable) => {
                     tracing::warn!(path = %path.display(), "editor save refused: {unmappable}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {unmappable}"),
@@ -495,7 +503,7 @@ fn apply_edit_request(
                 Err(e) => {
                     tracing::warn!(path = %path.display(), "editor save failed: {e}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {e}"),
@@ -566,9 +574,7 @@ fn apply_edit_request(
         if let Some(scroll) = vp.set_top(top)
             && browsers.can_emit_to(&entity)
         {
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                entity, &scroll,
-            ));
+            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
         }
         edit.core.top_row = vp.top_row;
     }
@@ -588,7 +594,7 @@ fn apply_edit_request(
     if text_changed || dirty_changed {
         diff_source.content = edit.core.buffer.text();
         diff_source.dirty = edit.core.dirty;
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
             entity,
             &FileDirtyEvent {
                 dirty: edit.core.dirty,
@@ -696,7 +702,7 @@ fn file_property_edit(
         match vmux_knowledge::Frontmatter::from(text.as_str()).apply(&trigger.event().payload) {
             Ok(updated) => updated,
             Err(message) => {
-                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
                     entity,
                     &FileErrorEvent {
                         message,
@@ -741,14 +747,20 @@ fn run_submitted_ex_lines(
 
 fn file_find_request(
     trigger: On<UiInput<FileFindRequest>>,
-    mut q: Query<&mut Editor>,
+    mut q: Query<(&mut Editor, &mut FileFindState)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = trigger.event().payload.clone();
-    let Ok(mut edit) = q.get_mut(entity) else {
+    let Ok((mut edit, mut state)) = q.get_mut(entity) else {
         return;
     };
+    let changed = state.query != request.query
+        || state.regex != request.regex
+        || state.forward != request.forward;
+    state.query.clone_from(&request.query);
+    state.regex = request.regex;
+    state.forward = request.forward;
     if request.done || request.query.is_empty() {
         edit.core.apply(EditCommand::ClearSearchHighlight);
         if request.done {
@@ -767,6 +779,18 @@ fn file_find_request(
             pattern,
             forward: request.forward,
         });
+    }
+    if changed && !request.done {
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+            entity,
+            &FileFindEvent {
+                open: state.open,
+                forward: state.forward,
+                query: state.query.clone(),
+                regex: state.regex,
+                revision: state.revision,
+            },
+        ));
     }
     commands.trigger(CursorRenderRequest::new(entity));
 }
@@ -815,25 +839,29 @@ mod edit_flow_tests {
             .trigger(FileFindOpenRequest::new(first, false));
 
         assert_eq!(
-            *app.world().get::<FileFindState>(first).unwrap(),
-            FileFindState {
+            app.world().get::<FileFindState>(first).unwrap(),
+            &FileFindState {
                 open: true,
                 forward: false,
+                query: String::new(),
+                regex: false,
                 revision: 1,
             }
         );
         assert_eq!(
-            *app.world().get::<FileFindState>(second).unwrap(),
-            FileFindState::default()
+            app.world().get::<FileFindState>(second).unwrap(),
+            &FileFindState::default()
         );
 
         app.world_mut().trigger(FileFindCloseRequest::from(first));
 
         assert_eq!(
-            *app.world().get::<FileFindState>(first).unwrap(),
-            FileFindState {
+            app.world().get::<FileFindState>(first).unwrap(),
+            &FileFindState {
                 open: false,
                 forward: false,
+                query: String::new(),
+                regex: false,
                 revision: 2,
             }
         );

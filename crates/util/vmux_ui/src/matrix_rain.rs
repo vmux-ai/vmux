@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::util::cn;
+use crate::cn::cn;
 
 const DEFAULT_COLUMNS: usize = 120;
 const COLUMN_GLYPHS: usize = 96;

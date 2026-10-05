@@ -3,7 +3,7 @@ use crate::settings::LayoutSettings;
 use bevy::prelude::*;
 #[cfg(target_os = "macos")]
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
 #[cfg(target_os = "macos")]

@@ -3,7 +3,7 @@ use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, StartBranchesRequest, StartProjectBranches,
 };
-use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::UiStateWrite;
 
 use super::{NewPalette, OpenVersion, PaletteContext, PaletteSnapshot};
 
@@ -71,7 +71,7 @@ fn receive_branches(
 ) {
     let Some(response) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<StartProjectBranches>>::payload(
-            trigger.event().patch(),
+            trigger.event().update(),
         )
     else {
         return;

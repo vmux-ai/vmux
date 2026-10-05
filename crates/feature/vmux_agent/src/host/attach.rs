@@ -1,60 +1,14 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::agent::SessionId;
-use vmux_ecs::{AgentWorkingDir, EntityTarget, PageIcon, PageMetadata};
+use vmux_ecs::{AgentWorkingDir, EntityTarget, PageMetadata};
 
-pub(super) struct AttachPlugin;
+pub(super) use super::attach_driver::AcpAgentAttachment;
+use super::attach_driver::{AcpAgentId, AcpAttachmentIcon, AcpResume, PendingAcpAgentAttachment};
 
-impl Plugin for AttachPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, attach);
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_systems(Update, attach);
 }
-
-#[derive(Bundle)]
-pub(super) struct AcpAgentAttachment {
-    pending: PendingAcpAgentAttachment,
-    name: Name,
-    agent_id: AcpAgentId,
-    session_id: SessionId,
-    working_directory: AgentWorkingDir,
-    icon: AcpAttachmentIcon,
-    resume: AcpResume,
-}
-
-impl AcpAgentAttachment {
-    pub(super) fn new(
-        agent_id: impl Into<String>,
-        name: impl Into<String>,
-        sid: impl Into<String>,
-        cwd: impl Into<std::path::PathBuf>,
-        icon: Option<String>,
-        resume: Option<String>,
-    ) -> Self {
-        let name = name.into();
-        Self {
-            pending: PendingAcpAgentAttachment,
-            name: Name::new(name),
-            agent_id: AcpAgentId(agent_id.into()),
-            session_id: SessionId(sid.into()),
-            working_directory: AgentWorkingDir(cwd.into()),
-            icon: AcpAttachmentIcon(PageIcon::favicon(icon.unwrap_or_default())),
-            resume: AcpResume(resume),
-        }
-    }
-}
-
-#[derive(Component)]
-struct PendingAcpAgentAttachment;
-
-#[derive(Component)]
-struct AcpAgentId(String);
-
-#[derive(Component)]
-struct AcpAttachmentIcon(PageIcon);
-
-#[derive(Component)]
-struct AcpResume(Option<String>);
 
 fn attach(
     attachments: Query<
@@ -86,13 +40,13 @@ fn attach(
         let agent_id = agent_id.as_str();
         let name = name.as_str();
         let url = match resume.as_deref() {
-            Some(acp_sid) => format!("{}{agent_id}/{acp_sid}", vmux_chat::ChatPlugin::URL),
-            None => format!("{}{agent_id}", vmux_chat::ChatPlugin::URL),
+            Some(acp_sid) => format!("{}{agent_id}/{acp_sid}", vmux_api::VmuxRoute::SESSIONS_ROOT),
+            None => format!("{}{agent_id}", vmux_api::VmuxRoute::SESSIONS_ROOT),
         };
         commands.entity(entity).insert(PageMetadata {
             url: url.clone(),
             title: name.to_string(),
-            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            bg_color: None,
             icon: icon.clone(),
         });
         let anchor = ProcessId::new();
@@ -113,7 +67,7 @@ fn attach(
         } else {
             commands
                 .spawn((
-                    vmux_layout::Browser::native_page_with_icon(&url, name, icon.clone()),
+                    vmux_layout::Browser::hosted_page_with_icon(&url, name, icon.clone()),
                     vmux_chat::host::ChatView,
                     ChildOf(entity),
                     anchor,
@@ -155,7 +109,8 @@ mod tests {
     #[test]
     fn acp_attach_gives_profile_agent_and_icon() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AttachPlugin));
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut()
             .entity_mut(stack)

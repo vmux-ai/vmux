@@ -9,7 +9,7 @@ use crate::DaemonBinary;
 use crate::registry::RegistrationStep;
 use crate::registry::{Backend, RegistrationError};
 use vmux_api::protocol::ClientMessage;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{
     ServiceConnected, ServiceInbound, ServiceMessageIngressSet, ServiceRequest, ServiceUnavailable,
 };

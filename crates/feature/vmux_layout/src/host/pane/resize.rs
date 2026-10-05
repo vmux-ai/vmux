@@ -1,7 +1,7 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
-use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 #[cfg(test)]
 use vmux_history::LastActivatedAt;

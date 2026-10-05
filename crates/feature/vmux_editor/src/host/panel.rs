@@ -327,7 +327,7 @@ fn receive_completion(
         event.line,
         edit,
     );
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         trigger.event_target(),
         &panel.state(),
     ));
@@ -342,7 +342,7 @@ fn receive_references(
         return;
     };
     panel.show_references(trigger.event().items.clone());
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         trigger.event_target(),
         &panel.state(),
     ));
@@ -356,7 +356,7 @@ fn refresh_changed_panels(
         if !panel.refresh(edit) {
             continue;
         }
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
             entity,
             &panel.state(),
         ));
@@ -371,7 +371,7 @@ fn clear_navigated_panels(
         if !panel.reset() {
             continue;
         }
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
             entity,
             &panel.state(),
         ));
@@ -397,7 +397,7 @@ fn select_next_item(
     if !panel.select_next() {
         return;
     }
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &panel.state(),
     ));
@@ -415,7 +415,7 @@ fn select_previous_item(
     if !panel.select_previous() {
         return;
     }
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &panel.state(),
     ));
@@ -467,7 +467,7 @@ fn choose_item(
         None => {}
     }
     if let Some(state) = state {
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(entity, &state));
+        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
     }
 }
 
@@ -483,7 +483,7 @@ fn dismiss(
     if !panel.dismiss() {
         return;
     }
-    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
         entity,
         &panel.state(),
     ));

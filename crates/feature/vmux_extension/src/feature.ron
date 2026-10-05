@@ -20,6 +20,7 @@
                 "ExtPinRequest",
                 "ExtOpenManagerRequest",
                 "ExtBrowseStoreRequest",
+                "ExtFilterRequest",
                 "RelaunchRequest",
             ],
         ),

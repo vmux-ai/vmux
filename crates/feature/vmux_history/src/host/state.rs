@@ -4,13 +4,13 @@ use vmux_ecs::page::PageReady;
 
 use crate::state::HistoryUiState;
 
-type HistoryUiStateUpdates = vmux_ecs::host::UiState<HistoryUiState>;
+type HistoryUiStateUpdates = vmux_ecs::UiState<HistoryUiState>;
 
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::host::UiStatePlugin::<HistoryUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<HistoryUiState>::default())
             .add_observer(page_ready);
     }
 }
@@ -21,6 +21,7 @@ pub(super) struct HistoryPageState {
     pub(super) query: Option<String>,
     pub(super) limit: u32,
     pub(super) has_more: bool,
+    pub(super) clear_confirm_open: bool,
 }
 
 impl Default for HistoryPageState {
@@ -29,6 +30,7 @@ impl Default for HistoryPageState {
             query: None,
             limit: 50,
             has_more: false,
+            clear_confirm_open: false,
         }
     }
 }
@@ -51,6 +53,10 @@ impl HistoryPageState {
         }
         self.has_more = false;
         self.limit = self.limit.saturating_add(50);
+    }
+
+    pub(super) fn set_clear_confirm_open(&mut self, open: bool) {
+        self.clear_confirm_open = open;
     }
 }
 

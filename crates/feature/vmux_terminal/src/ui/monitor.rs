@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-use std::collections::VecDeque;
-
 use dioxus::prelude::*;
 use vmux_api::service::*;
 use vmux_ui::components::manager::{
@@ -9,136 +7,22 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerTone,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
-use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-#[vmux_native::page(page = "process_monitor", component = Page)]
+#[vmux_page::page(page = "process_monitor", component = Page)]
 pub struct ProcessMonitorPage;
-
-#[derive(Clone, Copy)]
-struct ProcessMonitorUi {
-    snapshot: Signal<ProcessesUiState>,
-    history: Signal<ServiceHistory>,
-    search: Signal<String>,
-    processes: Memo<Vec<ProcessEntry>>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProcessMemory(u64);
-
-impl ProcessMemory {
-    fn label(self) -> String {
-        const MB: f64 = 1024.0 * 1024.0;
-        const GB: f64 = MB * 1024.0;
-        let bytes = self.0 as f64;
-        if self.0 == 0 {
-            "—".to_string()
-        } else if bytes < MB {
-            "<1 MB".to_string()
-        } else if bytes < GB {
-            format!("{:.0} MB", bytes / MB)
-        } else {
-            format!("{:.1} GB", bytes / GB)
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ProcessUptime(u64);
-
-impl ProcessUptime {
-    fn label(self) -> String {
-        let seconds = self.0;
-        if seconds < 60 {
-            translate_with(
-                "services-uptime-seconds",
-                &[("seconds", TranslationValue::Number(seconds as i64))],
-            )
-        } else if seconds < 3600 {
-            translate_with(
-                "services-uptime-minutes",
-                &[
-                    ("minutes", TranslationValue::Number((seconds / 60) as i64)),
-                    ("seconds", TranslationValue::Number((seconds % 60) as i64)),
-                ],
-            )
-        } else if seconds < 86400 {
-            translate_with(
-                "services-uptime-hours",
-                &[
-                    ("hours", TranslationValue::Number((seconds / 3600) as i64)),
-                    (
-                        "minutes",
-                        TranslationValue::Number(((seconds % 3600) / 60) as i64),
-                    ),
-                ],
-            )
-        } else {
-            translate_with(
-                "services-uptime-days",
-                &[
-                    ("days", TranslationValue::Number((seconds / 86400) as i64)),
-                    (
-                        "hours",
-                        TranslationValue::Number(((seconds % 86400) / 3600) as i64),
-                    ),
-                ],
-            )
-        }
-    }
-}
-
-fn use_process_monitor_ui() -> ProcessMonitorUi {
-    use_theme();
-    let snapshot = use_ui_state::<ProcessesUiState>().state;
-    let mut history = use_signal(ServiceHistory::default);
-    let search = use_signal(String::new);
-
-    use_effect(move || history.write().push(&snapshot.read()));
-
-    let processes = use_memo(move || {
-        let snapshot = snapshot.read();
-        let query = search.read().trim().to_lowercase();
-        let mut processes = Vec::new();
-        for process in &snapshot.processes {
-            if query.is_empty()
-                || process.id.to_lowercase().contains(&query)
-                || process.shell.to_lowercase().contains(&query)
-                || process.cwd.to_lowercase().contains(&query)
-                || process.pid.to_string().contains(&query)
-            {
-                processes.push(process.clone());
-            }
-        }
-        processes.sort_by(|left, right| {
-            right
-                .cpu_percent
-                .total_cmp(&left.cpu_percent)
-                .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
-                .then_with(|| left.pid.cmp(&right.pid))
-        });
-        processes
-    });
-
-    ProcessMonitorUi {
-        snapshot,
-        history,
-        search,
-        processes,
-    }
-}
 
 #[component]
 pub fn Page() -> Element {
-    let ui = use_process_monitor_ui();
-    let snapshot = (ui.snapshot)();
-    let processes = (ui.processes)();
-    let history = (ui.history)();
-    let mut search = ui.search;
+    use_theme();
+    let state = use_ui_state::<ProcessesUiState>().state;
+    let snapshot = state();
+    let processes = snapshot.processes.clone();
     let connected = snapshot.connected;
-    let has_processes = !snapshot.processes.is_empty();
-    let has_managed_processes = snapshot.processes.iter().any(|process| process.managed);
-    let process_count = snapshot.processes.len();
+    let has_processes = snapshot.total_count != 0;
+    let has_managed_processes = snapshot.managed_count != 0;
+    let process_count = snapshot.total_count as usize;
 
     let empty_detail = format!(
         "{} {}",
@@ -151,9 +35,11 @@ pub fn Page() -> Element {
             ManagerHeader {
                 title: translate("services-title"),
                 count: process_count,
-                search_value: search(),
+                search_value: snapshot.query.clone(),
                 search_placeholder: translate("services-filter"),
-                onsearch: move |event: FormEvent| search.set(event.value()),
+                onsearch: move |event: FormEvent| {
+                    let _ = send(&ProcessSearchRequest { query: event.value() });
+                },
                 onkeydown: None,
                 actions: rsx! {
                     StatusBadge { connected }
@@ -180,7 +66,8 @@ pub fn Page() -> Element {
                 } else {
                     ServiceDashboard {
                         processes,
-                        history,
+                        cpu: snapshot.cpu.clone(),
+                        memory: snapshot.memory.clone(),
                     }
                 }
             }
@@ -188,95 +75,27 @@ pub fn Page() -> Element {
     }
 }
 
-#[derive(Clone, Default, PartialEq)]
-struct ServiceHistory {
-    cpu: VecDeque<f32>,
-    memory: VecDeque<f32>,
-}
-
-impl ServiceHistory {
-    const LIMIT: usize = 72;
-
-    fn push(&mut self, event: &ProcessesUiState) {
-        let cpu = event
-            .processes
-            .iter()
-            .map(|process| process.cpu_percent)
-            .sum();
-        let memory = event
-            .processes
-            .iter()
-            .map(|process| process.mem_bytes as f64)
-            .sum::<f64>()
-            / (1024.0 * 1024.0);
-        Self::push_sample(&mut self.cpu, cpu);
-        Self::push_sample(&mut self.memory, memory as f32);
-    }
-
-    fn push_sample(samples: &mut VecDeque<f32>, value: f32) {
-        samples.push_back(value.max(0.0));
-        while samples.len() > Self::LIMIT {
-            samples.pop_front();
-        }
-    }
-}
-
 #[component]
-fn ServiceDashboard(processes: Vec<ProcessEntry>, history: ServiceHistory) -> Element {
-    let total_cpu = processes
-        .iter()
-        .map(|process| process.cpu_percent)
-        .sum::<f32>();
-    let total_memory = processes
-        .iter()
-        .map(|process| process.mem_bytes)
-        .sum::<u64>();
-    let peak_cpu = history.cpu.iter().copied().fold(0.0_f32, f32::max);
-    let peak_memory_mb = history.memory.iter().copied().fold(0.0_f32, f32::max);
-    let memory_mb = total_memory as f64 / (1024.0 * 1024.0);
+fn ServiceDashboard(
+    processes: Vec<ProcessEntry>,
+    cpu: ProcessUsageUiState,
+    memory: ProcessUsageUiState,
+) -> Element {
     rsx! {
         div { class: "grid min-h-0 gap-3 xl:grid-cols-2",
             UsageChart {
                 class: "xl:col-span-2".to_string(),
-                label: "CPU".to_string(),
-                value: format!("{total_cpu:.1}%"),
-                peak: format!("↑ {peak_cpu:.1}%"),
-                samples: history.cpu.iter().copied().collect(),
-                floor: 100.0,
-                tone: UsageTone::Cpu,
+                usage: cpu,
+                line_class: "text-sky-400".to_string(),
+                fill: "rgba(56,189,248,0.12)".to_string(),
             }
             UsageChart {
                 class: String::new(),
-                label: translate("services-memory"),
-                value: ProcessMemory(total_memory).label(),
-                peak: format!("↑ {:.0} MB", peak_memory_mb.max(memory_mb as f32)),
-                samples: history.memory.iter().copied().collect(),
-                floor: 128.0,
-                tone: UsageTone::Memory,
+                usage: memory,
+                line_class: "text-violet-400".to_string(),
+                fill: "rgba(167,139,250,0.12)".to_string(),
             }
             ProcessTable { processes }
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum UsageTone {
-    Cpu,
-    Memory,
-}
-
-impl UsageTone {
-    fn line_class(self) -> &'static str {
-        match self {
-            Self::Cpu => "text-sky-400",
-            Self::Memory => "text-violet-400",
-        }
-    }
-
-    fn fill(self) -> &'static str {
-        match self {
-            Self::Cpu => "rgba(56,189,248,0.12)",
-            Self::Memory => "rgba(167,139,250,0.12)",
         }
     }
 }
@@ -284,24 +103,18 @@ impl UsageTone {
 #[component]
 fn UsageChart(
     class: String,
-    label: String,
-    value: String,
-    peak: String,
-    samples: Vec<f32>,
-    floor: f32,
-    tone: UsageTone,
+    usage: ProcessUsageUiState,
+    line_class: String,
+    fill: String,
 ) -> Element {
-    let graph = Sparkline::plot(&samples, floor);
-    let line_class = tone.line_class();
-    let fill = tone.fill();
     rsx! {
         section { class: "min-w-0 overflow-hidden rounded-xl bg-foreground/[0.025] ring-1 ring-inset ring-foreground/10 {class}",
             div { class: "flex h-9 items-center justify-between border-b border-foreground/[0.07] px-3",
                 div { class: "flex items-baseline gap-2",
-                    h2 { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground", "{label}" }
-                    span { class: "font-mono text-xs font-semibold {line_class}", "{value}" }
+                    h2 { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground", "{usage.label}" }
+                    span { class: "font-mono text-xs font-semibold {line_class}", "{usage.value}" }
                 }
-                span { class: "font-mono text-[9px] text-muted-foreground", "{peak}" }
+                span { class: "font-mono text-[9px] text-muted-foreground", "{usage.peak}" }
             }
             div { class: "relative h-36 bg-background/30 px-2 py-2",
                 svg {
@@ -312,39 +125,11 @@ fn UsageChart(
                     for y in [10, 20, 30] {
                         line { x1: "0", x2: "100", y1: "{y}", y2: "{y}", stroke: "currentColor", stroke_opacity: "0.08", stroke_width: "0.5" }
                     }
-                    polygon { points: "{graph.area}", fill }
-                    polyline { points: "{graph.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", vector_effect: "non-scaling-stroke" }
+                    polygon { points: "{usage.area}", fill }
+                    polyline { points: "{usage.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", vector_effect: "non-scaling-stroke" }
                 }
             }
         }
-    }
-}
-
-struct Sparkline {
-    line: String,
-    area: String,
-}
-
-impl Sparkline {
-    fn plot(samples: &[f32], floor: f32) -> Self {
-        let samples = if samples.is_empty() {
-            vec![0.0, 0.0]
-        } else if samples.len() == 1 {
-            vec![samples[0], samples[0]]
-        } else {
-            samples.to_vec()
-        };
-        let ceiling = samples.iter().copied().fold(floor, f32::max).max(1.0);
-        let last = (samples.len() - 1) as f32;
-        let mut points = Vec::with_capacity(samples.len());
-        for (index, sample) in samples.iter().enumerate() {
-            let x = index as f32 / last * 100.0;
-            let y = 39.0 - (sample / ceiling).clamp(0.0, 1.0) * 37.0;
-            points.push(format!("{x:.2},{y:.2}"));
-        }
-        let line = points.join(" ");
-        let area = format!("0,40 {line} 100,40");
-        Self { line, area }
     }
 }
 
@@ -401,18 +186,7 @@ fn StatusBadge(connected: bool) -> Element {
 
 #[component]
 fn ProcessRow(process: ProcessEntry) -> Element {
-    let uptime = ProcessUptime(process.uptime_secs).label();
-    let shell_name = process
-        .shell
-        .rsplit('/')
-        .next()
-        .unwrap_or(&process.shell)
-        .to_string();
     let managed = process.managed;
-    let cwd = match process.cwd.as_str() {
-        "" | "/" => None,
-        cwd => Some(cwd.to_string()),
-    };
     let nav_id = process.id.clone();
     let kill_id = process.id.clone();
     let onclick = move |_| {
@@ -445,18 +219,18 @@ fn ProcessRow(process: ProcessEntry) -> Element {
             span { class: "font-mono text-[9px] tabular-nums text-muted-foreground", "{process.pid}" }
             div { class: "min-w-0",
                 div { class: "flex min-w-0 items-center gap-1.5",
-                    span { class: "min-w-0 truncate font-mono text-[10px] font-semibold text-foreground", title: "{process.shell}", "{shell_name}" }
+                    span { class: "min-w-0 truncate font-mono text-[10px] font-semibold text-foreground", title: "{process.shell}", "{process.shell_label}" }
                     if process.attached {
                         span { class: "size-1.5 shrink-0 rounded-full bg-primary shadow-[0_0_7px_color-mix(in_oklab,var(--primary)_60%,transparent)]" }
                     }
                 }
-                if let Some(cwd) = cwd {
+                if let Some(cwd) = process.cwd_label {
                     div { class: "truncate font-mono text-[8px] text-muted-foreground/65", title: "{cwd}", "{cwd}" }
                 }
             }
-            span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_percent:.1}" }
-            span { class: "text-right font-mono text-[9px] tabular-nums text-foreground", {ProcessMemory(process.mem_bytes).label()} }
-            span { class: "hidden text-right font-mono text-[9px] tabular-nums text-muted-foreground sm:block", "{uptime}" }
+            span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_label}" }
+            span { class: "text-right font-mono text-[9px] tabular-nums text-foreground", "{process.memory_label}" }
+            span { class: "hidden text-right font-mono text-[9px] tabular-nums text-muted-foreground sm:block", "{process.uptime_label}" }
             if managed {
                 button {
                     r#type: "button",
@@ -472,37 +246,5 @@ fn ProcessRow(process: ProcessEntry) -> Element {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn service_history_keeps_the_newest_samples() {
-        let mut history = ServiceHistory::default();
-        for value in 0..ServiceHistory::LIMIT + 3 {
-            ServiceHistory::push_sample(&mut history.cpu, value as f32);
-        }
-
-        assert_eq!(history.cpu.len(), ServiceHistory::LIMIT);
-        assert_eq!(history.cpu.front(), Some(&3.0));
-    }
-
-    #[test]
-    fn sparkline_scales_against_a_floor() {
-        let graph = Sparkline::plot(&[0.0, 50.0, 100.0], 100.0);
-
-        assert_eq!(graph.line, "0.00,39.00 50.00,20.50 100.00,2.00");
-        assert!(graph.area.starts_with("0,40 "));
-    }
-
-    #[test]
-    fn process_memory_uses_readable_units() {
-        assert_eq!(ProcessMemory(0).label(), "—");
-        assert_eq!(ProcessMemory(512 * 1024).label(), "<1 MB");
-        assert_eq!(ProcessMemory(332 * 1024 * 1024).label(), "332 MB");
-        assert_eq!(ProcessMemory(3 * 1024 * 1024 * 1024 / 2).label(), "1.5 GB");
     }
 }

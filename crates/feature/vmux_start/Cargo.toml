@@ -24,7 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_ecs = { path = "../../util/vmux_ecs" }
-vmux_native = { path = "../../util/vmux_native" }
+vmux_page = { path = "../../util/vmux_page" }
 vmux_ui = { path = "../../util/vmux_ui" }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 

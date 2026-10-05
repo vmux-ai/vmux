@@ -2,17 +2,19 @@ use bevy::prelude::*;
 use vmux_api::command_bar::{
     CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine,
 };
+use vmux_ecs::CommandBarContribution;
 use vmux_ecs::launcher::RendersLauncherPanel;
+use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::page::PageManifest;
 
-pub type CommandBarState = vmux_ecs::host::UiState<vmux_api::command_bar::CommandBarUiState>;
+pub type CommandBarState = vmux_ecs::UiState<vmux_api::command_bar::CommandBarUiState>;
 
 pub(super) struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (spawn, ApplyDeferred, update).chain())
-            .add_plugins(vmux_ecs::host::UiStatePlugin::<
+        app.add_systems(Startup, (spawn, ApplyDeferred, update, contribute).chain())
+            .add_plugins(vmux_ecs::UiStatePlugin::<
                 vmux_api::command_bar::CommandBarUiState,
             >::default())
             .add_systems(PreUpdate, attach);
@@ -104,38 +106,52 @@ pub struct ContributedCommand {
     pub args: Vec<(String, String)>,
 }
 
-#[derive(Component, Clone, Debug)]
-pub struct ClaimedUrl(pub String);
-
-impl ClaimedUrl {
-    fn matches(&self, url: &str) -> bool {
-        match (
-            vmux_api::VmuxRoute::canonical(&self.0),
-            vmux_api::VmuxRoute::canonical(url),
-        ) {
-            (Some(claimed), Some(candidate)) => claimed == candidate,
-            _ => self.0 == url,
-        }
+fn contribute(features: Query<&FeatureManifest>, mut commands: Commands) {
+    let mut entries = Vec::new();
+    for feature in &features {
+        entries.extend(feature.command_bar.iter().cloned());
+    }
+    entries.sort_by(|left, right| {
+        left.rank
+            .cmp(&right.rank)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    entries.dedup_by(|left, right| left.id == right.id);
+    for entry in entries {
+        commands.spawn((
+            Name::new(entry.title.clone()),
+            CommandBarContribution {
+                row: vmux_api::command_bar::CommandBarResultItem {
+                    key: entry.id,
+                    leading: entry.leading,
+                    title: entry.title,
+                    subtitle: entry.subtitle,
+                    detail: entry.detail,
+                    trailing: entry.trailing,
+                    badge: entry.badge,
+                    url: entry.url,
+                    ..Default::default()
+                },
+                title_message_id: entry.title_message_id,
+                subtitle_message_id: entry.subtitle_message_id,
+                query_prefix: entry.query_prefix,
+                value: entry.value,
+                keywords: entry.keywords,
+                rank: entry.rank,
+                close: entry.close,
+                ..Default::default()
+            },
+        ));
     }
 }
 
+#[derive(Component, Clone, Debug)]
+pub struct ClaimedUrl(pub String);
+
 #[derive(Component, Default, Clone, Debug, PartialEq)]
-pub struct CommandBarSpacesSnapshot {
-    pub spaces: Vec<SpaceSummary>,
-    pub active_space_id: String,
-    pub active_space_name: String,
-    pub spaces_page_url: String,
+pub struct CommandBarContextSnapshot {
+    pub label: String,
 }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SpaceSummary {
-    pub id: String,
-    pub name: String,
-    pub profile: String,
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct CommandBarTerminalPage(pub String);
 
 #[derive(Component, Default, Clone, Debug)]
 pub struct CommandBarPagesSnapshot {
@@ -175,7 +191,7 @@ fn update(manifests: Query<&PageManifest>, mut snapshot: Single<&mut CommandBarP
                 keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
                 icon: manifest
                     .icon
-                    .map(vmux_ecs::PageIcon::Builtin)
+                    .map(vmux_api::PageIcon::Builtin)
                     .unwrap_or_default(),
                 shortcut: String::new(),
                 prompt_target: false,
@@ -317,6 +333,7 @@ mod tests {
         app.add_systems(Update, update);
         app.world_mut().spawn(CommandBarPagesSnapshot::default());
         app.world_mut().spawn(PageManifest {
+            route: "vmux://services/",
             url: "vmux://services/",
             asset_host: "services",
             owns_subtree: false,
@@ -324,11 +341,14 @@ mod tests {
             title_message_id: Some("services-title"),
             replaces_command: Some("service_open"),
             keywords: &["daemon"],
-            icon: Some(vmux_ecs::BuiltinIcon::Settings),
+            icon: Some(vmux_api::BuiltinIcon::Settings),
             command_bar: true,
             startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement::DEFAULT,
         });
         app.world_mut().spawn(PageManifest {
+            route: "vmux://layout/",
             url: "vmux://layout/",
             asset_host: "layout",
             owns_subtree: false,
@@ -339,6 +359,8 @@ mod tests {
             icon: None,
             command_bar: false,
             startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement::DEFAULT,
         });
 
         app.update();

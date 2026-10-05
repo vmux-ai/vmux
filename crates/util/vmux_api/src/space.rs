@@ -7,12 +7,36 @@ pub struct SpacesListEvent {
 #[vmux_api::ui_state_patch(Default)]
 pub struct SpacesUiStatePatch {
     pub snapshot: Option<Box<SpacesListEvent>>,
+    pub team: Option<Box<crate::team::TeamUiState>>,
+    pub form: Option<Box<SpaceFormState>>,
 }
 
-#[vmux_api::ui_state(Default)]
+#[vmux_api::ui_state(Default, patch = SpacesUiStatePatch, version = 2)]
 pub struct SpacesUiState {
-    pub sequence: u64,
-    pub patches: Vec<SpacesUiStatePatch>,
+    pub snapshot: SpacesListEvent,
+    pub team: crate::team::TeamUiState,
+    pub form: SpaceFormState,
+}
+
+impl crate::UiStateProjection<SpacesUiStatePatch> for SpacesUiState {
+    fn apply(&mut self, patch: SpacesUiStatePatch) {
+        if let Some(snapshot) = patch.snapshot {
+            self.snapshot = *snapshot;
+        }
+        if let Some(team) = patch.team {
+            self.team = *team;
+        }
+        if let Some(form) = patch.form {
+            self.form = *form;
+        }
+    }
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct SpaceFormState {
+    pub open: bool,
+    pub space_id: Option<String>,
+    pub draft: String,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -53,6 +77,20 @@ pub struct SpaceRenameRequest {
 pub struct SpaceCreateRequest {
     pub name: String,
 }
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct SpaceFormOpenRequest {
+    pub space_id: Option<String>,
+    pub draft: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct SpaceFormInputRequest {
+    pub draft: String,
+}
+
+#[vmux_api::ui_event]
+pub struct SpaceFormCloseRequest;
 
 #[vmux_api::ui_event(Eq)]
 pub struct ProjectActivateRequest {

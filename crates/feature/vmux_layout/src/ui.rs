@@ -22,7 +22,7 @@ mod tab_drag;
 mod update;
 mod window_drag;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
     placement = layout,
     transparent,
@@ -36,8 +36,6 @@ pub fn Page() -> Element {
     use_theme();
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
-    let bookmark_menu_state = use_memo(move || layout_ui.value().bookmark_menu);
-    use_context_provider(|| bookmark_menu_state);
 
     rsx! {
         div { class: "fixed inset-0 pointer-events-none text-foreground",

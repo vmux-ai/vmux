@@ -1,24 +1,12 @@
 use dioxus::prelude::*;
-use vmux_api::mcp::{McpServerEntry, McpServerStatus, McpServers};
+use vmux_api::mcp::{McpServerEntry, McpServerStatus, McpServersUiState};
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
-use crate::hooks::use_ui_state;
 use crate::i18n::translate;
-
-#[derive(Clone, Copy, PartialEq)]
-pub struct McpConnections {
-    state: Signal<McpServers>,
-}
-
-pub fn use_mcp_connections() -> McpConnections {
-    McpConnections {
-        state: use_ui_state::<McpServers>().state,
-    }
-}
 
 #[component]
 pub fn McpMenu(
-    connections: McpConnections,
+    state: McpServersUiState,
     entries: Vec<McpServerEntry>,
     selected: usize,
     #[props(default)] placement: PromptPopupPlacement,
@@ -26,13 +14,12 @@ pub fn McpMenu(
     on_hover: EventHandler<usize>,
     on_dismiss: EventHandler<()>,
 ) -> Element {
-    let snapshot = (connections.state)();
-    let pending = snapshot
+    let pending = state
         .pending
         .as_ref()
         .map(|pending| pending.id.clone())
         .unwrap_or_default();
-    let error = snapshot
+    let error = state
         .result
         .as_ref()
         .filter(|result| !result.success)
@@ -48,7 +35,7 @@ pub fn McpMenu(
                     "{error}"
                 }
             }
-            if snapshot.loading && !snapshot.loaded {
+            if state.loading && !state.loaded {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("common-loading")} }
             } else if entries.is_empty() {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("tools-empty")} }

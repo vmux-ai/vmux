@@ -11,24 +11,21 @@ use crate::host::event::{AgentRequestInput, AgentToolCallRequest, CommandOrigin}
 
 use super::CommandSet;
 
-pub(super) struct ToolCallPlugin;
-
-impl Plugin for ToolCallPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
-            .add_systems(
-                Update,
-                handle_tool_calls
-                    .in_set(CommandSet::ToolCalls)
-                    .before(ToolResolveSet),
-            )
-            .add_systems(
-                Update,
-                (forward_commands, forward_queries, report_errors)
-                    .after(ToolDispatchFlush)
-                    .before(CommandSet::Commands),
-            );
-    }
+pub(super) fn add(app: &mut App) {
+    app.add_message::<ServiceRequest>()
+        .add_systems(
+            Update,
+            (handle_tool_calls, ApplyDeferred)
+                .chain()
+                .in_set(CommandSet::ToolCalls)
+                .before(ToolResolveSet),
+        )
+        .add_systems(
+            Update,
+            (forward_commands, forward_queries, report_errors)
+                .after(ToolDispatchFlush)
+                .before(CommandSet::Commands),
+        );
 }
 
 #[derive(Component)]
@@ -143,16 +140,16 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use vmux_api::protocol::AgentRequest;
-    use vmux_ecs::host::manifest::FeaturePlugin;
-    use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery};
+    use vmux_ecs::manifest::FeaturePlugin;
+    use vmux_tool::{AddedTool, ToolDispatchSet, ToolQuery, ToolRegistryPlugin};
 
     #[vmux_tool::input]
     #[derive(Component, Deserialize)]
-    struct TestQueryArgs {}
+    struct TestQueryInput {}
 
     struct TestFeature;
 
-    impl vmux_ecs::host::manifest::FeatureManifestSource for TestFeature {
+    impl vmux_ecs::manifest::FeatureManifestSource for TestFeature {
         const SOURCE: &'static str =
             r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#;
     }
@@ -160,17 +157,18 @@ mod tests {
     #[derive(Resource, Default)]
     struct CapturedAgentQueries(Vec<AgentRequest>);
 
-    impl CapturedAgentQueries {
-        fn read(mut requests: MessageReader<ToolQueryRequest>, mut captured: ResMut<Self>) {
-            for request in requests.read() {
-                captured.0.push(request.query.clone());
-            }
+    fn capture(
+        mut requests: MessageReader<ToolQueryRequest>,
+        mut captured: ResMut<CapturedAgentQueries>,
+    ) {
+        for request in requests.read() {
+            captured.0.push(request.query.clone());
         }
     }
 
     fn create_test_query(
         mut commands: Commands,
-        requests: Query<Entity, AddedTool<TestQueryArgs>>,
+        requests: Query<Entity, AddedTool<TestQueryInput>>,
     ) {
         for request in &requests {
             commands.entity(request).insert(ToolQuery(Ok(AgentRequest {
@@ -186,9 +184,8 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             FeaturePlugin::<TestFeature>::default(),
-            ToolCallPlugin,
+            ToolRegistryPlugin,
         ))
-        .bind_tool::<TestQueryArgs>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<AgentRequestInput>()
         .add_message::<ToolQueryRequest>()
@@ -197,9 +194,10 @@ mod tests {
             Update,
             (
                 create_test_query.in_set(ToolDispatchSet),
-                CapturedAgentQueries::read.after(CommandSet::Commands),
+                capture.after(CommandSet::Commands),
             ),
         );
+        add(&mut app);
         app.update();
 
         app.world_mut()

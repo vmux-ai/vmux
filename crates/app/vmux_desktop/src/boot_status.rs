@@ -1,7 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_ecs::host::persistence::WorkspaceRestore;
 use vmux_ecs::page::PageReady;
+use vmux_ecs::persistence::WorkspaceRestore;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;

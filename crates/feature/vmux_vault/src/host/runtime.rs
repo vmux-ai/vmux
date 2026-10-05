@@ -1,10 +1,10 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::storage::VaultStorage;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_ecs::profile::vault::VaultStorage;
 
 use crate::state::{VaultOperationKind, VaultRepository, VaultSnapshot, VaultSyncRequest};
 
@@ -309,9 +309,9 @@ fn queue_auto_sync(
 impl VaultSnapshot {
     fn scan(load_repositories: bool, previous: Self) -> Self {
         let status = if load_repositories {
-            vmux_ecs::profile::vault::VaultStatus::current_with_repositories()
+            crate::storage::VaultStatus::current_with_repositories()
         } else {
-            vmux_ecs::profile::vault::VaultStatus::current()
+            crate::storage::VaultStatus::current()
         };
         let mut snapshot = Self {
             root: status.root.to_string_lossy().into_owned(),

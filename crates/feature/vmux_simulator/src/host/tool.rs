@@ -1,25 +1,19 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 
 use super::{
     AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,
     AgentSimulatorSwipe, AgentSimulatorTap, AgentSimulatorTypeText, SimulatorButton,
 };
-use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery};
+use vmux_tool::{AddedTool, ToolDispatchSet, ToolQuery};
 
 pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<SimulatorScreenshotArgs>()
-            .bind_tool::<SimulatorTapArgs>()
-            .bind_tool::<SimulatorSwipeArgs>()
-            .bind_tool::<SimulatorTypeArgs>()
-            .bind_tool::<SimulatorKeyArgs>()
-            .bind_tool::<SimulatorButtonArgs>()
             .add_systems(
                 Update,
                 (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
@@ -30,12 +24,12 @@ impl Plugin for SimulatorToolPlugin {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SimulatorScreenshotArgs {}
+struct SimulatorScreenshot {}
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SimulatorTapArgs {
+struct SimulatorTap {
     x: u32,
     y: u32,
 }
@@ -43,7 +37,7 @@ struct SimulatorTapArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SimulatorSwipeArgs {
+struct SimulatorSwipe {
     start_x: u32,
     start_y: u32,
     end_x: u32,
@@ -54,14 +48,14 @@ struct SimulatorSwipeArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SimulatorTypeArgs {
+struct SimulatorType {
     text: String,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SimulatorKeyArgs {
+struct SimulatorKey {
     keycode: u8,
 }
 
@@ -86,11 +80,11 @@ impl From<ButtonArg> for SimulatorButton {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SimulatorButtonArgs {
+struct SimulatorButtonInput {
     button: ButtonArg,
 }
 
-fn screenshot(mut commands: Commands, calls: Query<Entity, AddedTool<SimulatorScreenshotArgs>>) {
+fn screenshot(mut commands: Commands, calls: Query<Entity, AddedTool<SimulatorScreenshot>>) {
     for entity in &calls {
         commands
             .entity(entity)
@@ -98,10 +92,7 @@ fn screenshot(mut commands: Commands, calls: Query<Entity, AddedTool<SimulatorSc
     }
 }
 
-fn tap(
-    mut commands: Commands,
-    requests: Query<(Entity, &SimulatorTapArgs), AddedTool<SimulatorTapArgs>>,
-) {
+fn tap(mut commands: Commands, requests: Query<(Entity, &SimulatorTap), AddedTool<SimulatorTap>>) {
     for (entity, args) in &requests {
         commands
             .entity(entity)
@@ -114,7 +105,7 @@ fn tap(
 
 fn swipe(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorSwipeArgs), AddedTool<SimulatorSwipeArgs>>,
+    requests: Query<(Entity, &SimulatorSwipe), AddedTool<SimulatorSwipe>>,
 ) {
     for (entity, args) in &requests {
         let duration_ms = args.duration_ms.unwrap_or(300);
@@ -135,7 +126,7 @@ fn swipe(
 
 fn type_text(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorTypeArgs), AddedTool<SimulatorTypeArgs>>,
+    requests: Query<(Entity, &SimulatorType), AddedTool<SimulatorType>>,
 ) {
     for (entity, args) in &requests {
         let query = if args.text.is_empty() {
@@ -149,10 +140,7 @@ fn type_text(
     }
 }
 
-fn key(
-    mut commands: Commands,
-    requests: Query<(Entity, &SimulatorKeyArgs), AddedTool<SimulatorKeyArgs>>,
-) {
+fn key(mut commands: Commands, requests: Query<(Entity, &SimulatorKey), AddedTool<SimulatorKey>>) {
     for (entity, args) in &requests {
         commands
             .entity(entity)
@@ -164,7 +152,7 @@ fn key(
 
 fn button(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorButtonArgs), AddedTool<SimulatorButtonArgs>>,
+    requests: Query<(Entity, &SimulatorButtonInput), AddedTool<SimulatorButtonInput>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -181,14 +169,16 @@ fn button(
 mod tests {
     use super::*;
     use vmux_ecs::JsonArguments;
-    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{
+        ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation, ToolRegistryPlugin,
+    };
 
     struct SimulatorToolFixture;
 
     impl SimulatorToolFixture {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins(SimulatorToolPlugin);
+            app.add_plugins((ToolRegistryPlugin, SimulatorToolPlugin));
             app.update();
             app
         }

@@ -157,6 +157,9 @@ lsp-status-running = Запущено
 lsp-status-failed = Сбой
 
 spaces-title = Пространства
+space-initialize-git-question = Инициализировать репозиторий Git?
+space-initialize-git = Инициализировать Git
+space-not-now = Не сейчас
 spaces-new-placeholder = Имя нового пространства
 spaces-empty = Пространств нет
 spaces-default-name = Пространство { $number }

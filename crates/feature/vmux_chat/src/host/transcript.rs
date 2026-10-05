@@ -229,14 +229,11 @@ fn push_to_page(
             );
         }
         commands.trigger(
-            vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &snapshot.0,
-            ),
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
         );
         if transcript_changed {
             commands.trigger(
-                vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                     webview,
                     &transcript.state,
                 ),
@@ -437,19 +434,16 @@ fn sync_ready_views(
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
         commands.trigger(
-            vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &snapshot.0,
-            ),
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
         );
         commands.trigger(
-            vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 webview,
                 &transcript.state,
             ),
         );
         commands.trigger(
-            vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 webview,
                 &attachments.state(),
             ),
@@ -487,10 +481,7 @@ fn request_more(
     };
     commands.spawn(query);
     commands.trigger(
-        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
-            webview,
-            &transcript.state,
-        ),
+        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &transcript.state),
     );
 }
 
@@ -558,7 +549,7 @@ fn apply_results(
         commands.entity(entity).despawn();
         if changed {
             commands.trigger(
-                vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
                     result.webview,
                     &transcript.state,
                 ),

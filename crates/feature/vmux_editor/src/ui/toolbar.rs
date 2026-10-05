@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_ecs::event::{ExplorerCloseEditor, FileFindRequest, FileOpenEvent, OpenEditorItem};
 use vmux_ui::file_icon::TypeIcon;
@@ -9,56 +7,6 @@ use vmux_ui::ime::use_ime_guard;
 use vmux_ui::scroll::ScrollIntoView;
 
 use super::EditorFocus;
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub(super) struct EditorTabItem {
-    name: String,
-    context: String,
-    path: String,
-    active: bool,
-    dirty: bool,
-    is_dir: bool,
-}
-
-impl EditorTabItem {
-    pub(super) fn all(items: &[OpenEditorItem]) -> Vec<Self> {
-        let mut seen: HashMap<&str, usize> = HashMap::new();
-        for item in items {
-            *seen.entry(item.name.as_str()).or_insert(0) += 1;
-        }
-        let mut tabs = Vec::with_capacity(items.len());
-        for item in items {
-            let shared = seen.get(item.name.as_str()).copied().unwrap_or(0) > 1;
-            let context = match shared {
-                true => Self::parent_of(&item.path),
-                false => String::new(),
-            };
-            tabs.push(Self {
-                name: item.name.clone(),
-                context,
-                path: item.path.clone(),
-                active: item.active,
-                dirty: item.dirty,
-                is_dir: item.is_dir,
-            });
-        }
-        tabs
-    }
-
-    fn element_id(&self) -> String {
-        format!("editor-tab-{}", self.path)
-    }
-
-    fn parent_of(path: &str) -> String {
-        let Some((parent, _)) = path.trim_end_matches('/').rsplit_once('/') else {
-            return String::new();
-        };
-        match parent.rsplit('/').next() {
-            Some("") | None => "/".to_string(),
-            Some(name) => name.to_string(),
-        }
-    }
-}
 
 #[component]
 pub(super) fn VimStatus(label: String) -> Element {
@@ -75,53 +23,18 @@ pub(super) fn VimStatus(label: String) -> Element {
 
 #[component]
 pub(super) fn FindBar(
-    query: Signal<String>,
-    forward: Signal<bool>,
+    query: String,
+    forward: bool,
+    regex: bool,
     vim: bool,
     total: u32,
     index: u32,
 ) -> Element {
-    let mut query = query;
-    let mut regex = use_signal(|| vim);
     let ime = use_ime_guard();
-    let mut close = move || {
-        query.set(String::new());
-        let _ = send(&FileFindRequest {
-            done: true,
-            ..Default::default()
-        });
-        EditorFocus::file();
-    };
-    let ask = move |text: String| {
-        let _ = send(&FileFindRequest {
-            query: text,
-            step: false,
-            reverse: false,
-            done: false,
-            regex: regex(),
-            forward: forward(),
-        });
-    };
-    let mut retype = move |text: String| {
-        query.set(text.clone());
-        ask(text);
-    };
-    let step = move |reverse: bool| {
-        let _ = send(&FileFindRequest {
-            query: query.peek().clone(),
-            step: true,
-            reverse,
-            done: false,
-            regex: regex(),
-            forward: forward(),
-        });
-    };
-    let confirm = move |reverse: bool| {
-        step(reverse);
-        if vim {
-            EditorFocus::file();
-        }
-    };
+    let key_query = query.clone();
+    let regex_query = query.clone();
+    let previous_query = query.clone();
+    let next_query = query.clone();
     let count = match (total, index) {
         (0, _) => translate("editor-find-no-results"),
         (total, 0) => format!("{total}"),
@@ -137,7 +50,16 @@ pub(super) fn FindBar(
                 class: "w-40 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
                 placeholder: translate("editor-find-placeholder"),
                 value: "{query}",
-                oninput: move |event| retype(event.value()),
+                oninput: move |event| {
+                    let _ = send(&FileFindRequest {
+                        query: event.value(),
+                        step: false,
+                        reverse: false,
+                        done: false,
+                        regex,
+                        forward,
+                    });
+                },
                 oncompositionstart: move |_| ime.start(),
                 oncompositionend: move |_| ime.commit(),
                 onkeydown: move |event: Event<KeyboardData>| {
@@ -148,11 +70,25 @@ pub(super) fn FindBar(
                     match event.key() {
                         Key::Enter => {
                             event.prevent_default();
-                            confirm(event.modifiers().shift());
+                            let _ = send(&FileFindRequest {
+                                query: key_query.clone(),
+                                step: true,
+                                reverse: event.modifiers().shift(),
+                                done: false,
+                                regex,
+                                forward,
+                            });
+                            if vim {
+                                EditorFocus::file();
+                            }
                         }
                         Key::Escape => {
                             event.prevent_default();
-                            close();
+                            let _ = send(&FileFindRequest {
+                                done: true,
+                                ..Default::default()
+                            });
+                            EditorFocus::file();
                         }
                         _ => {}
                     }
@@ -160,20 +96,26 @@ pub(super) fn FindBar(
             }
             button {
                 r#type: "button",
-                class: if regex() {
+                class: if regex {
                     "shrink-0 rounded bg-foreground/15 px-1 font-mono text-[10px] text-foreground"
                 } else {
                     "shrink-0 rounded px-1 font-mono text-[10px] text-foreground/50 hover:bg-foreground/10 hover:text-foreground"
                 },
                 title: translate("editor-find-regex"),
                 onclick: move |_| {
-                    regex.toggle();
-                    ask(query.peek().clone());
+                    let _ = send(&FileFindRequest {
+                        query: regex_query.clone(),
+                        step: false,
+                        reverse: false,
+                        done: false,
+                        regex: !regex,
+                        forward,
+                    });
                 },
                 ".*"
             }
             span {
-                class: if total == 0 && !query().is_empty() {
+                class: if total == 0 && !query.is_empty() {
                     "shrink-0 tabular-nums text-[10px] text-destructive"
                 } else {
                     "shrink-0 tabular-nums text-[10px] text-muted-foreground"
@@ -184,21 +126,45 @@ pub(super) fn FindBar(
                 r#type: "button",
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-previous"),
-                onclick: move |_| step(true),
+                onclick: move |_| {
+                    let _ = send(&FileFindRequest {
+                        query: previous_query.clone(),
+                        step: true,
+                        reverse: true,
+                        done: false,
+                        regex,
+                        forward,
+                    });
+                },
                 "‹"
             }
             button {
                 r#type: "button",
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-next"),
-                onclick: move |_| step(false),
+                onclick: move |_| {
+                    let _ = send(&FileFindRequest {
+                        query: next_query.clone(),
+                        step: true,
+                        reverse: false,
+                        done: false,
+                        regex,
+                        forward,
+                    });
+                },
                 "›"
             }
             button {
                 r#type: "button",
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-close"),
-                onclick: move |_| close(),
+                onclick: move |_| {
+                    let _ = send(&FileFindRequest {
+                        done: true,
+                        ..Default::default()
+                    });
+                    EditorFocus::file();
+                },
                 "✕"
             }
         }
@@ -206,9 +172,9 @@ pub(super) fn FindBar(
 }
 
 #[component]
-pub(super) fn EditorTabStrip(tabs: Vec<EditorTabItem>) -> Element {
+pub(super) fn EditorTabStrip(tabs: Vec<OpenEditorItem>) -> Element {
     let active_id = match tabs.iter().find(|tab| tab.active) {
-        Some(tab) => tab.element_id(),
+        Some(tab) => format!("editor-tab-{}", tab.path),
         None => String::new(),
     };
 
@@ -230,9 +196,10 @@ pub(super) fn EditorTabStrip(tabs: Vec<EditorTabItem>) -> Element {
 }
 
 #[component]
-fn EditorTab(tab: EditorTabItem) -> Element {
+fn EditorTab(tab: OpenEditorItem) -> Element {
     let open_path = tab.path.clone();
     let close_path = tab.path.clone();
+    let element_id = format!("editor-tab-{}", tab.path);
     let class = match tab.active {
         true => {
             "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.10] px-2.5 text-ui text-foreground"
@@ -248,7 +215,7 @@ fn EditorTab(tab: EditorTabItem) -> Element {
 
     rsx! {
         div {
-            id: tab.element_id(),
+            id: element_id,
             class,
             title: "{tab.path}",
             onclick: move |_| {
@@ -280,46 +247,5 @@ fn EditorTab(tab: EditorTabItem) -> Element {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct OpenEditorFixture;
-
-    impl OpenEditorFixture {
-        fn build(name: &str, path: &str) -> OpenEditorItem {
-            OpenEditorItem {
-                name: name.to_string(),
-                path: path.to_string(),
-                active: false,
-                dirty: false,
-                is_dir: false,
-            }
-        }
-    }
-
-    #[test]
-    fn only_a_shared_basename_carries_its_directory() {
-        let tabs = EditorTabItem::all(&[
-            OpenEditorFixture::build("mod.rs", "/w/alpha/mod.rs"),
-            OpenEditorFixture::build("page.rs", "/w/beta/page.rs"),
-            OpenEditorFixture::build("mod.rs", "/w/beta/mod.rs"),
-        ]);
-        assert_eq!(tabs[0].context, "alpha");
-        assert_eq!(tabs[1].context, "");
-        assert_eq!(tabs[2].context, "beta");
-    }
-
-    #[test]
-    fn a_shared_basename_at_the_root_names_the_root() {
-        let tabs = EditorTabItem::all(&[
-            OpenEditorFixture::build("a.rs", "/a.rs"),
-            OpenEditorFixture::build("a.rs", "/w/a.rs"),
-        ]);
-        assert_eq!(tabs[0].context, "/");
-        assert_eq!(tabs[1].context, "w");
     }
 }

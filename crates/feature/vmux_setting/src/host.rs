@@ -9,7 +9,6 @@ pub use runtime::{
 };
 pub use state::Settings;
 pub use tool::SettingToolPlugin;
-pub use vmux_api::command_bar::SearchEngine;
 use vmux_command::ReadCommandRequests;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 
@@ -20,10 +19,10 @@ mod runtime;
 mod state;
 mod tool;
 
-#[derive(bevy::prelude::Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SearchEngineSetting(pub SearchEngine);
+#[derive(bevy::prelude::Component, Clone, Debug, PartialEq, Eq)]
+pub struct SearchEngineSetting(pub String);
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {

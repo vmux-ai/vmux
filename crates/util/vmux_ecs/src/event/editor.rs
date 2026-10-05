@@ -241,11 +241,21 @@ pub struct NoteBlock {
 pub struct FileNoteEvent {
     pub title: String,
     pub properties: Vec<vmux_api::knowledge::KnowledgeProperty>,
+    pub properties_open: bool,
+    pub property_drafts: Vec<FilePropertyDraftState>,
     pub blocks: Vec<NoteBlock>,
     pub active: Option<u32>,
+    pub editing: bool,
+    pub edit_line: Option<u32>,
     pub references: Vec<vmux_api::knowledge::KnowledgeReference>,
     pub reveal_line: Option<u32>,
 }
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileNoteEditRequest;
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileNoteEditDismissRequest;
 
 #[vmux_api::ui_event(Eq)]
 pub struct FilePropertyEdit {
@@ -255,6 +265,22 @@ pub struct FilePropertyEdit {
     pub values: Vec<String>,
     pub remove: bool,
 }
+
+#[vmux_api::contract(Default, Eq)]
+pub struct FilePropertyDraftState {
+    pub original_key: String,
+    pub key: String,
+    pub scalar: String,
+    pub item: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct FilePropertyDraftRequest {
+    pub draft: FilePropertyDraftState,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct FileNotePropertiesToggleRequest;
 
 #[vmux_api::ui_event(Eq)]
 pub struct KnowledgeLinkOpen {
@@ -309,6 +335,18 @@ pub struct FileDirEntry {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileBreadcrumbRequest {
+    pub path: String,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct FileBreadcrumbState {
+    pub path: String,
+    pub entries: Vec<FileDirEntry>,
+    pub pending: bool,
 }
 
 #[vmux_api::contract(Eq)]
@@ -377,8 +415,7 @@ pub enum PreviewKind {
     Dir(Vec<FileDirEntry>),
     Text(Vec<FileLine>),
     Image {
-        mime: String,
-        bytes: Vec<u8>,
+        url: String,
     },
     Video {
         url: String,
@@ -394,10 +431,21 @@ pub enum PreviewKind {
 }
 
 #[vmux_api::contract]
-pub struct FilePreviewEvent {
+pub struct FilePreviewItem {
     pub path: String,
-    pub thumb: bool,
     pub kind: PreviewKind,
+}
+
+#[vmux_api::contract]
+pub struct FileThumbnail {
+    pub path: String,
+    pub url: String,
+}
+
+#[vmux_api::contract(Default)]
+pub struct FilePreviewState {
+    pub selected: Option<FilePreviewItem>,
+    pub thumbnails: Vec<FileThumbnail>,
 }
 
 #[vmux_api::ui_event(Eq)]
@@ -507,7 +555,7 @@ pub struct FileEncodingSaveRequest {
     pub encoding: FileEncoding,
 }
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event(Eq)]
 pub struct FileStatusPickerOpen {
     pub picker: CommandBarPicker,
 }
@@ -518,16 +566,18 @@ impl From<CommandBarPicker> for FileStatusPickerOpen {
     }
 }
 
-#[vmux_api::contract(Copy, Eq)]
+#[vmux_api::contract(Eq)]
 pub struct FileFindEvent {
     pub open: bool,
     pub forward: bool,
+    pub query: String,
+    pub regex: bool,
     pub revision: u64,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub struct FileTidyPromptEvent {
-    pub count: u32,
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct FileTidyState {
+    pub count: Option<u32>,
 }
 
 #[vmux_api::contract(Copy, Eq)]

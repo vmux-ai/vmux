@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use vmux_api::room::ModelOptionEntry;
 
+use crate::cn::cn;
 use crate::components::prompt_box::{
     PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
 };
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[component]
 pub fn ModelMenu(

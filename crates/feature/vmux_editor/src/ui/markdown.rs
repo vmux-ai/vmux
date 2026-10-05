@@ -2,10 +2,10 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::prelude::*;
 use vmux_api::editor::SelSpan;
 use vmux_ecs::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
+use vmux_ui::cn::cn;
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::util::cn;
 
 use super::text_style::StyledSpanStyle;
 

@@ -1,333 +1,69 @@
 use bevy::prelude::{
-    App, ApplyDeferred, Bundle, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin,
-    Query, Single, Update,
+    App, ApplyDeferred, Bundle, Commands, Component, Entity, IntoScheduleConfigs, Name, Query,
+    Single, Update,
 };
 pub use driver::AcpInput;
-use driver::AcpShared;
-use projector::{AcpProjector, ApprovalDetailsQuery};
+#[cfg(test)]
+use driver::AcpMcpServers;
+use driver::{
+    AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpShared,
+    AcpTranscriptInput,
+};
+use projection_driver::AcpProjector;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use vmux_api::protocol::{
-    AcpSessionConfig, AcpSessionConfigValue, AgentAttachment, AgentFileTouched, AgentRequest,
-    AgentRequestId, AgentRunStatus, ManagedMcpServer, ManagedMcpTransport, ServiceMessage,
-    SharedEvent,
-};
+use vmux_api::protocol::{AcpSessionConfig, AgentRunStatus, ServiceMessage, SharedEvent};
+#[cfg(test)]
+use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport};
 use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::agent::SessionId;
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
 
-use agent_client_protocol::schema::v1::{
-    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectOptions, SessionModeState, SessionUpdate,
-};
+use agent_client_protocol::schema::v1::McpServer;
 
 mod driver;
-mod projector;
+mod projection;
+mod projection_driver;
+mod session_driver;
+mod workspace_driver;
 
-pub struct AcpSessionPlugin;
-
-impl Plugin for AcpSessionPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                receive,
-                ApplyDeferred,
-                spawn,
-                projector::project,
-                project_info,
-                project_config_state,
-                project_selected_config,
-                project_status,
-                project_approval_requested,
-                project_approval_resolved,
-                snapshot_selection,
-                route_input,
-                subscribe,
-                read,
-                list,
-                rebind,
-                close,
-                reap,
-            )
-                .chain(),
-        );
-    }
-}
-
-enum AcpTranscriptInput {
-    BeginHistoryReplay,
-    Update(Box<SessionUpdate>),
-    FinishHistoryReplay(bool),
-    PushUser {
-        text: String,
-        attachments: Vec<AgentAttachment>,
-    },
-    Snapshot,
-    ApprovalDetails {
-        query: ApprovalDetailsQuery,
-        response: oneshot::Sender<Option<(String, String)>>,
-    },
-}
-
-struct AcpConfigStateInput {
-    config_options: Vec<SessionConfigOption>,
-    modes: Option<SessionModeState>,
-}
-
-struct AcpSelectedConfigInput {
-    config_id: Option<String>,
-    value: String,
-    config_options: Vec<SessionConfigOption>,
-}
-
-struct AcpProjectionSenders {
-    transcript: mpsc::UnboundedSender<AcpTranscriptInput>,
-    agent_info: mpsc::UnboundedSender<String>,
-    config_state: mpsc::UnboundedSender<AcpConfigStateInput>,
-    selected_config: mpsc::UnboundedSender<AcpSelectedConfigInput>,
-    status: mpsc::UnboundedSender<AgentRunStatus>,
-    approval_requested: mpsc::UnboundedSender<RemoteApproval>,
-    approval_resolved: mpsc::UnboundedSender<String>,
-    selection_snapshot: mpsc::UnboundedSender<oneshot::Sender<AcpSelectionSnapshot>>,
-    wake: mpsc::UnboundedSender<()>,
-}
-
-impl AcpProjectionSenders {
-    fn open(wake: mpsc::UnboundedSender<()>) -> (Self, AcpProjectionInboxes) {
-        let (transcript, transcript_inbox) = mpsc::unbounded_channel();
-        let (agent_info, agent_info_inbox) = mpsc::unbounded_channel();
-        let (config_state, config_state_inbox) = mpsc::unbounded_channel();
-        let (selected_config, selected_config_inbox) = mpsc::unbounded_channel();
-        let (status, status_inbox) = mpsc::unbounded_channel();
-        let (approval_requested, approval_requested_inbox) = mpsc::unbounded_channel();
-        let (approval_resolved, approval_resolved_inbox) = mpsc::unbounded_channel();
-        let (selection_snapshot, selection_snapshot_inbox) = mpsc::unbounded_channel();
+pub(crate) fn add(app: &mut App) {
+    projection::add(app);
+    app.add_systems(
+        Update,
         (
-            Self {
-                transcript,
-                agent_info,
-                config_state,
-                selected_config,
-                status,
-                approval_requested,
-                approval_resolved,
-                selection_snapshot,
-                wake,
-            },
-            AcpProjectionInboxes {
-                transcript: AcpTranscriptInbox(transcript_inbox),
-                agent_info: AcpAgentInfoInbox(agent_info_inbox),
-                config_state: AcpConfigStateInbox(config_state_inbox),
-                selected_config: AcpSelectedConfigInbox(selected_config_inbox),
-                status: AcpStatusInbox(status_inbox),
-                approval_requested: AcpApprovalRequestedInbox(approval_requested_inbox),
-                approval_resolved: AcpApprovalResolvedInbox(approval_resolved_inbox),
-                selection_snapshot: AcpSelectionSnapshotInbox(selection_snapshot_inbox),
-            },
+            receive,
+            ApplyDeferred,
+            spawn,
+            project_info,
+            project_config_state,
+            project_selected_config,
+            project_status,
+            project_approval_requested,
+            project_approval_resolved,
+            snapshot_selection,
+            route_input,
+            subscribe,
+            read,
+            list,
+            rebind,
+            close,
+            reap,
         )
-    }
-
-    fn sent(&self, accepted: bool) {
-        if accepted {
-            let _ = self.wake.send(());
-        }
-    }
-
-    fn transcript(&self, input: AcpTranscriptInput) {
-        self.sent(self.transcript.send(input).is_ok());
-    }
-
-    fn agent_info(&self, name: String) {
-        self.sent(self.agent_info.send(name).is_ok());
-    }
-
-    fn config_state(&self, input: AcpConfigStateInput) {
-        self.sent(self.config_state.send(input).is_ok());
-    }
-
-    fn selected_config(&self, input: AcpSelectedConfigInput) {
-        self.sent(self.selected_config.send(input).is_ok());
-    }
-
-    fn status(&self, status: AgentRunStatus) {
-        self.sent(self.status.send(status).is_ok());
-    }
-
-    fn approval_requested(&self, approval: RemoteApproval) {
-        self.sent(self.approval_requested.send(approval).is_ok());
-    }
-
-    fn approval_resolved(&self, call_id: String) {
-        self.sent(self.approval_resolved.send(call_id).is_ok());
-    }
-
-    fn approval_details(
-        &self,
-        query: ApprovalDetailsQuery,
-        response: oneshot::Sender<Option<(String, String)>>,
-    ) {
-        self.transcript(AcpTranscriptInput::ApprovalDetails { query, response });
-    }
-
-    async fn selection_snapshot(&self) -> AcpSelectionSnapshot {
-        let (response, receiver) = oneshot::channel();
-        self.sent(self.selection_snapshot.send(response).is_ok());
-        receiver.await.unwrap_or_default()
-    }
+            .chain(),
+    );
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 struct AcpSessionConfigs(Vec<AcpSessionConfig>);
 
-impl AcpSessionConfigs {
-    fn category_name(category: &SessionConfigOptionCategory) -> String {
-        match category {
-            SessionConfigOptionCategory::Mode => "mode".to_string(),
-            SessionConfigOptionCategory::Model => "model".to_string(),
-            SessionConfigOptionCategory::ModelConfig => "model_config".to_string(),
-            SessionConfigOptionCategory::ThoughtLevel => "thought_level".to_string(),
-            SessionConfigOptionCategory::Other(value) => value.clone(),
-            _ => "unknown".to_string(),
-        }
-    }
-
-    fn options(options: &SessionConfigSelectOptions) -> Vec<AcpSessionConfigValue> {
-        let mut values = Vec::new();
-        match options {
-            SessionConfigSelectOptions::Ungrouped(options) => {
-                for option in options {
-                    values.push(AcpSessionConfigValue {
-                        value: option.value.to_string(),
-                        name: option.name.clone(),
-                        description: option.description.clone(),
-                        group: None,
-                    });
-                }
-            }
-            SessionConfigSelectOptions::Grouped(groups) => {
-                for group in groups {
-                    for option in &group.options {
-                        values.push(AcpSessionConfigValue {
-                            value: option.value.to_string(),
-                            name: option.name.clone(),
-                            description: option.description.clone(),
-                            group: Some(group.name.clone()),
-                        });
-                    }
-                }
-            }
-            _ => {}
-        }
-        values
-    }
-
-    fn from_acp(config_options: &[SessionConfigOption], legacy: Option<&SessionModeState>) -> Self {
-        let mut configs = Vec::new();
-        for config in config_options {
-            let SessionConfigKind::Select(select) = &config.kind else {
-                continue;
-            };
-            configs.push(AcpSessionConfig {
-                config_id: Some(config.id.to_string()),
-                name: config.name.clone(),
-                description: config.description.clone(),
-                category: config.category.as_ref().map(Self::category_name),
-                current_value: select.current_value.to_string(),
-                values: Self::options(&select.options),
-            });
-        }
-        let has_mode = configs
-            .iter()
-            .any(|config| config.category.as_deref() == Some("mode"));
-        if !has_mode && let Some(legacy) = legacy {
-            configs.push(AcpSessionConfig {
-                config_id: None,
-                name: "Mode".to_string(),
-                description: None,
-                category: Some("mode".to_string()),
-                current_value: legacy.current_mode_id.to_string(),
-                values: legacy
-                    .available_modes
-                    .iter()
-                    .map(|mode| AcpSessionConfigValue {
-                        value: mode.id.to_string(),
-                        name: mode.name.clone(),
-                        description: mode.description.clone(),
-                        group: None,
-                    })
-                    .collect(),
-            });
-        }
-        Self(configs)
-    }
-}
-
 #[derive(Clone, Default)]
 struct AcpSelectionSnapshot {
     configs: Vec<AcpSessionConfig>,
-}
-
-struct AcpMcpServers(Vec<McpServer>);
-
-impl AcpMcpServers {
-    fn from_sources(
-        mcp_command: Option<String>,
-        mcp_args: Vec<String>,
-        managed: Vec<ManagedMcpServer>,
-    ) -> Self {
-        let mut servers = Vec::new();
-        if let Some(command) = mcp_command {
-            servers.push(McpServer::Stdio(
-                McpServerStdio::new("vmux", PathBuf::from(command)).args(mcp_args),
-            ));
-        }
-        for server in managed {
-            if let Some(server) = Self::from_managed(server) {
-                servers.push(server);
-            }
-        }
-        Self(servers)
-    }
-
-    fn from_managed(server: ManagedMcpServer) -> Option<McpServer> {
-        if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
-            tracing::warn!(
-                "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
-                server.name
-            );
-            return None;
-        }
-        let mut headers = Vec::new();
-        for (name, value) in server.headers {
-            headers.push(HttpHeader::new(name, value));
-        }
-        match server.transport {
-            ManagedMcpTransport::Stdio => {
-                let command = server.command?;
-                let mut env = Vec::new();
-                for (name, value) in server.env {
-                    env.push(EnvVariable::new(name, value));
-                }
-                Some(McpServer::Stdio(
-                    McpServerStdio::new(server.name, command)
-                        .args(server.args)
-                        .env(env),
-                ))
-            }
-            ManagedMcpTransport::Http => server
-                .url
-                .map(|url| McpServer::Http(McpServerHttp::new(server.name, url).headers(headers))),
-            ManagedMcpTransport::Sse => server
-                .url
-                .map(|url| McpServer::Sse(McpServerSse::new(server.name, url).headers(headers))),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -345,246 +81,6 @@ pub struct AcpSessions {
     rebinds: mpsc::UnboundedSender<RebindAcpSession>,
     closes: mpsc::UnboundedSender<CloseAcpSession>,
     wake: mpsc::UnboundedSender<()>,
-}
-
-impl AcpSessions {
-    pub fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
-        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
-        let (inputs, input_inbox) = mpsc::unbounded_channel();
-        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
-        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
-        let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
-        let (config_states, config_state_inbox) = mpsc::unbounded_channel();
-        let (statuses, status_inbox) = mpsc::unbounded_channel();
-        let (messages, message_inbox) = mpsc::unbounded_channel();
-        let (lists, list_inbox) = mpsc::unbounded_channel();
-        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
-        let (rebinds, rebind_inbox) = mpsc::unbounded_channel();
-        let (closes, close_inbox) = mpsc::unbounded_channel();
-        (
-            Self {
-                spawns,
-                inputs,
-                subscriptions,
-                snapshots,
-                agent_infos,
-                config_states,
-                statuses,
-                messages,
-                lists,
-                lookups,
-                rebinds,
-                closes,
-                wake: wake.clone(),
-            },
-            (
-                AcpSessionRuntime(runtime),
-                AcpSessionWake(wake),
-                AcpSessionInbox(AcpSessionReceivers {
-                    spawns: spawn_inbox,
-                    inputs: input_inbox,
-                    subscriptions: subscription_inbox,
-                    snapshots: snapshot_inbox,
-                    agent_infos: agent_info_inbox,
-                    config_states: config_state_inbox,
-                    statuses: status_inbox,
-                    messages: message_inbox,
-                    lists: list_inbox,
-                    lookups: lookup_inbox,
-                    rebinds: rebind_inbox,
-                    closes: close_inbox,
-                }),
-            ),
-        )
-    }
-    pub async fn spawn(
-        &self,
-        sid: String,
-        agent_id: String,
-        command: String,
-        args: Vec<String>,
-        env: Vec<(String, String)>,
-        cwd: PathBuf,
-        anchor: ProcessId,
-        processes: ProcessRuntime,
-        mcp_command: Option<String>,
-        mcp_args: Vec<String>,
-        managed_mcp_servers: Vec<ManagedMcpServer>,
-        resume: Option<String>,
-    ) -> Result<(), String> {
-        let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args, managed_mcp_servers);
-        let (response, receiver) = oneshot::channel();
-        self.spawns
-            .send(SpawnAcpSession {
-                sid,
-                agent_id,
-                command,
-                args,
-                env,
-                cwd,
-                anchor,
-                processes,
-                mcp_servers: mcp_servers.0,
-                resume,
-                response: Some(response),
-            })
-            .map_err(|_| "ACP session runtime unavailable".to_string())?;
-        self.wake
-            .send(())
-            .map_err(|_| "ACP session runtime unavailable".to_string())?;
-        receiver
-            .await
-            .map_err(|_| "ACP session spawn was cancelled".to_string())
-    }
-
-    pub async fn input(&self, sid: String, input: AcpInput) -> bool {
-        let (response, receiver) = oneshot::channel();
-        if self
-            .inputs
-            .send(AcpSessionInputRequest {
-                sid,
-                input: Some(input),
-                response: Some(response),
-            })
-            .is_err()
-            || self.wake.send(()).is_err()
-        {
-            return false;
-        }
-        receiver.await.unwrap_or(false)
-    }
-
-    pub async fn subscribe(&self, sid: String) -> Option<broadcast::Receiver<ServiceMessage>> {
-        let (response, receiver) = oneshot::channel();
-        self.subscriptions
-            .send(SubscribeAcpSession {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn snapshot(&self, sid: String) -> Option<ServiceMessage> {
-        let (response, receiver) = oneshot::channel();
-        self.snapshots
-            .send(SnapshotAcpSession {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn agent_info(&self, sid: String) -> Option<ServiceMessage> {
-        let (response, receiver) = oneshot::channel();
-        self.agent_infos
-            .send(AcpSessionAgentInfo {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn config_state(&self, sid: String) -> Option<ServiceMessage> {
-        let (response, receiver) = oneshot::channel();
-        self.config_states
-            .send(AcpSessionConfigRequest {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn status(&self, sid: String) -> Option<ServiceMessage> {
-        let (response, receiver) = oneshot::channel();
-        self.statuses
-            .send(AcpSessionStatusRequest {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
-        let (response, receiver) = oneshot::channel();
-        self.messages
-            .send(AcpSessionMessages {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn remote_sessions(&self) -> Vec<RemoteSession> {
-        let (response, receiver) = oneshot::channel();
-        if self
-            .lists
-            .send(ListAcpSessions {
-                response: Some(response),
-            })
-            .is_err()
-            || self.wake.send(()).is_err()
-        {
-            return Vec::new();
-        }
-        receiver.await.unwrap_or_default()
-    }
-
-    pub async fn remote_session(&self, sid: String) -> Option<RemoteSession> {
-        let (response, receiver) = oneshot::channel();
-        self.lookups
-            .send(FindAcpSession {
-                sid,
-                response: Some(response),
-            })
-            .ok()?;
-        self.wake.send(()).ok()?;
-        receiver.await.ok().flatten()
-    }
-
-    pub async fn rebind_cwd(&self, sid: String, cwd: PathBuf) -> Result<(), String> {
-        let (response, receiver) = oneshot::channel();
-        self.rebinds
-            .send(RebindAcpSession {
-                sid,
-                cwd,
-                response: Some(response),
-            })
-            .map_err(|_| "ACP session runtime unavailable".to_string())?;
-        self.wake
-            .send(())
-            .map_err(|_| "ACP session runtime unavailable".to_string())?;
-        receiver
-            .await
-            .map_err(|_| "ACP workspace rebind was cancelled".to_string())?
-    }
-
-    pub async fn close(&self, sid: String) -> bool {
-        let (response, receiver) = oneshot::channel();
-        if self
-            .closes
-            .send(CloseAcpSession {
-                sid,
-                response: Some(response),
-            })
-            .is_err()
-            || self.wake.send(()).is_err()
-        {
-            return false;
-        }
-        receiver.await.unwrap_or(false)
-    }
 }
 
 struct AcpSessionReceivers {
@@ -1201,7 +697,7 @@ fn list(
             let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
             result.push(RemoteSession {
                 sid: sid.0.clone(),
-                url: format!("{}{}", vmux_chat::ChatPlugin::URL, sid.0),
+                url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
                 room_id: vmux_api::room::RoomId::for_session(&sid.0),
                 title: vmux_session::ConversationTitle::from_messages(projector.messages(), &name),
                 name,
@@ -1232,7 +728,7 @@ fn list(
                 let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
                 result = Some(RemoteSession {
                     sid: sid.0.clone(),
-                    url: format!("{}{}", vmux_chat::ChatPlugin::URL, sid.0),
+                    url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
                     room_id: vmux_api::room::RoomId::for_session(&sid.0),
                     title: vmux_session::ConversationTitle::from_messages(
                         projector.messages(),

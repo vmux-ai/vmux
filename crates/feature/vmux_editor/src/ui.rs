@@ -24,14 +24,14 @@ mod text_style;
 mod toolbar;
 mod workspace;
 
-#[vmux_native::page(
+#[vmux_page::page(
     component = Page,
     dom_group = "editor",
     subtree
 )]
 pub(crate) struct FilePage;
 
-#[vmux_native::page(
+#[vmux_page::page(
     page = "projects",
     component = Page,
     dom_group = "editor",
@@ -39,7 +39,7 @@ pub(crate) struct FilePage;
 )]
 pub(crate) struct ProjectsPage;
 
-#[vmux_native::page(
+#[vmux_page::page(
     file = "../vmux_knowledge/src/feature.ron",
     component = Page,
     dom_group = "editor",

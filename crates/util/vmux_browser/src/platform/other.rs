@@ -13,6 +13,6 @@ impl Plugin for FallbackBrowserPlugin {
 fn report_missing_renderer() {
     static REPORTED: AtomicBool = AtomicBool::new(false);
     if !REPORTED.swap(true, Ordering::Relaxed) {
-        warn!("browser_platform: no renderer on this platform, native pages will be missing");
+        warn!("browser_platform: no renderer on this platform, hosted pages will be missing");
     }
 }

@@ -21,7 +21,6 @@ use super::workspace::{
     AgentWorkspacePicker, AgentWorkspaceState, ExistingWorktreeCandidates, PendingWorkspacePicker,
     WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED,
 };
-use vmux_ecs::profile::ProjectsDirectory;
 
 use bevy::ecs::relationship::Relationship;
 use vmux_api::protocol::{AgentCommandResult, ClientMessage};
@@ -183,8 +182,7 @@ fn requests(
                         && let Ok(selected) = Path::new(path).canonicalize()
                         && selected.is_dir()
                     {
-                        let trusted = ProjectsDirectory::ensure()
-                            .is_ok_and(|projects| projects.contains(&selected));
+                        let trusted = workspace_picker.trusted(&selected);
                         let task = if trusted {
                             workspace_picker.accept(selected)
                         } else {

@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, ClientMessage, JsonValue};
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
+    ToolQueryRouteSet,
 };
 
 use super::agent::{AgentGetSettings, AgentUpdateSettings};
@@ -16,8 +16,6 @@ pub struct SettingToolPlugin;
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<GetSettingsArgs>()
-            .bind_tool::<UpdateSettingsArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
@@ -63,17 +61,17 @@ fn answer_settings_queries(
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct GetSettingsArgs {}
+struct GetSettingsTool {}
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct UpdateSettingsArgs {
+struct UpdateSettingsTool {
     path: String,
     value: serde_json::Value,
 }
 
-fn get_settings(mut commands: Commands, calls: Query<Entity, AddedTool<GetSettingsArgs>>) {
+fn get_settings(mut commands: Commands, calls: Query<Entity, AddedTool<GetSettingsTool>>) {
     for request in &calls {
         commands
             .entity(request)
@@ -83,7 +81,7 @@ fn get_settings(mut commands: Commands, calls: Query<Entity, AddedTool<GetSettin
 
 fn update_settings(
     mut commands: Commands,
-    requests: Query<(Entity, &UpdateSettingsArgs), AddedTool<UpdateSettingsArgs>>,
+    requests: Query<(Entity, &UpdateSettingsTool), AddedTool<UpdateSettingsTool>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.path.trim().is_empty() {

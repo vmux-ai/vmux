@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use vmux_ecs::PageMetadata;
+use vmux_ecs::page::PagePlacementCatalog;
 
 use crate::active_pane::ActiveStack;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed};
@@ -26,6 +27,7 @@ pub struct LayoutSnapshotQuery<'w, 's> {
     >,
     pane_sizes: Query<'w, 's, &'static PaneSize>,
     zoomed: Query<'w, 's, &'static Zoomed>,
+    pages: PagePlacementCatalog<'w, 's>,
 }
 
 impl LayoutSnapshotQuery<'_, '_> {
@@ -106,7 +108,7 @@ impl LayoutSnapshotQuery<'_, '_> {
                     children
                         .iter()
                         .filter_map(|child| self.stacks.get(child).ok())
-                        .map(|(stack, _, page)| build_stack(stack, page, self_stack))
+                        .map(|(stack, _, page)| self.stack(stack, page, self_stack))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -122,33 +124,24 @@ impl LayoutSnapshotQuery<'_, '_> {
             stacks: Vec::new(),
         }
     }
-}
 
-fn stack_kind_for_url(url: &str) -> &'static str {
-    if vmux_api::VmuxRoute::parse(url).is_some_and(|route| route.is_terminal()) {
-        "terminal"
-    } else if url.starts_with("file:") {
-        "files"
-    } else {
-        "browser"
-    }
-}
-
-fn build_stack(
-    stack_entity: Entity,
-    page: Option<&PageMetadata>,
-    self_stack: Option<Entity>,
-) -> StackDto {
-    let url = page.map(|p| p.url.clone()).unwrap_or_default();
-    StackDto {
-        id: Some(NodeKind::Stack.id(stack_entity.to_bits())),
-        title: page.map(|p| p.title.clone()).unwrap_or_default(),
-        kind: stack_kind_for_url(&url).to_string(),
-        url,
-        is_loading: false,
-        icon: page.map(|p| p.icon.clone()).unwrap_or_default(),
-        is_self: Some(stack_entity) == self_stack,
-        process_id: None,
+    fn stack(
+        &self,
+        stack_entity: Entity,
+        page: Option<&PageMetadata>,
+        self_stack: Option<Entity>,
+    ) -> StackDto {
+        let url = page.map(|page| page.url.clone()).unwrap_or_default();
+        StackDto {
+            id: Some(NodeKind::Stack.id(stack_entity.to_bits())),
+            title: page.map(|page| page.title.clone()).unwrap_or_default(),
+            kind: self.pages.resolve(&url).group.to_string(),
+            url,
+            is_loading: false,
+            icon: page.map(|page| page.icon.clone()).unwrap_or_default(),
+            is_self: Some(stack_entity) == self_stack,
+            process_id: None,
+        }
     }
 }
 
@@ -158,20 +151,50 @@ mod tests {
     use crate::pane::Pane;
     use crate::stack::Stack;
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_ecs::page::{PageManifest, PagePlacement};
     use vmux_history::LastActivatedAt;
 
     fn make_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.world_mut().spawn(PageManifest {
+            route: "vmux://terminal/",
+            url: "vmux://terminal/",
+            asset_host: "terminal",
+            owns_subtree: true,
+            title: "Terminal",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: None,
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: PagePlacement {
+                group: "terminal",
+                ..PagePlacement::DEFAULT
+            },
+        });
+        app.world_mut().spawn(PageManifest {
+            route: "file://",
+            url: "vmux://files/",
+            asset_host: "files",
+            owns_subtree: false,
+            title: "Files",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: None,
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: PagePlacement {
+                group: "files",
+                ..PagePlacement::DEFAULT
+            },
+        });
         app.world_mut().spawn(ActiveStack::default().local_bundle());
         app
-    }
-
-    #[test]
-    fn files_url_maps_to_files_kind() {
-        assert_eq!(stack_kind_for_url("file:///a/b.rs"), "files");
-        assert_eq!(stack_kind_for_url("vmux://terminal/"), "terminal");
-        assert_eq!(stack_kind_for_url("https://x.com"), "browser");
     }
 
     #[test]
@@ -195,7 +218,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/x".into(),
             title: String::new(),
-            icon: vmux_ecs::PageIcon::None,
+            icon: vmux_api::PageIcon::None,
             bg_color: None,
         });
 
@@ -237,7 +260,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/123".into(),
             title: String::new(),
-            icon: vmux_ecs::PageIcon::None,
+            icon: vmux_api::PageIcon::None,
             bg_color: None,
         });
 
@@ -279,7 +302,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),
             title: "Example".into(),
-            icon: vmux_ecs::PageIcon::None,
+            icon: vmux_api::PageIcon::None,
             bg_color: None,
         });
 
@@ -475,7 +498,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),
             title: "Ex".into(),
-            icon: vmux_ecs::PageIcon::Favicon("https://example.com/icon.png".into()),
+            icon: vmux_api::PageIcon::Favicon("https://example.com/icon.png".into()),
             bg_color: None,
         });
 
@@ -494,7 +517,7 @@ mod tests {
         };
         assert_eq!(
             stacks[0].icon,
-            vmux_ecs::PageIcon::Favicon("https://example.com/icon.png".into())
+            vmux_api::PageIcon::Favicon("https://example.com/icon.png".into())
         );
     }
 }

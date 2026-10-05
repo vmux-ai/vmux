@@ -11,7 +11,7 @@ pub use install::{ExtensionInstallCompleted, ExtensionInstallRequest};
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -22,11 +22,11 @@ pub mod crx;
 #[cfg(host)]
 mod download;
 #[cfg(host)]
+pub mod driver;
+#[cfg(host)]
 mod host;
 #[cfg(host)]
 mod install;
-#[cfg(host)]
-pub mod manifest;
 #[cfg(host)]
 pub mod match_pattern;
 #[cfg(host)]

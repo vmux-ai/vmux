@@ -1,256 +1,154 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::BufReader;
 use tokio::net::UnixListener;
-use tokio::sync::{broadcast, mpsc};
-use vmux_api::protocol::{ClientMessage, ProcessId, ServiceMessage, SharedMessage};
-use vmux_process::{ProcessLaunch, ProcessRuntime};
-use vmux_transport::service::ServiceCodec;
+use tokio::sync::mpsc;
+use vmux_ecs::service::{AbortTask, Executor, Operations, Protocols, Register, Remote, Wake};
+use vmux_process::ProcessRuntime;
+use vmux_transport::service::RemoteOperationStore;
 
+use super::server_driver::{Connection, ConnectionRuntime, Listener as ListenerDriver};
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
-use vmux_agent::acp::AcpSessions;
-use vmux_agent::broker::AgentBroker;
-
-use vmux_api::protocol::AgentCommandResult;
 
 pub struct ServiceDaemonPlugin;
 
-impl ServiceDaemonPlugin {
-    pub fn runtime(
-        listener: UnixListener,
-        wake: mpsc::UnboundedSender<()>,
-        runtime: tokio::runtime::Handle,
-        exit: mpsc::Sender<()>,
-    ) -> impl Bundle {
-        let (processes, process_runtime) = ProcessRuntime::new(wake.clone());
-        let (client_operations, client_operation_runtime) = ClientOperations::new(wake.clone());
-        let (authorizations, authorization_runtime) = RemoteAuthorizations::new(wake.clone());
-        let (acp_sessions, acp_session_runtime) = AcpSessions::new(runtime.clone(), wake.clone());
-        let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
-        let broker = AgentBroker::new(
-            agent_tx.clone(),
-            Default::default(),
-            Default::default(),
-            Default::default(),
-        );
-        let remote_runtime = crate::remote::server::RemoteRuntimeStartup::new(
-            runtime.clone(),
-            authorizations,
-            acp_sessions.clone(),
-            broker.clone(),
-            client_operations,
-        );
-        (
-            Name::new("vmux service runtime"),
-            ServiceDaemonStartup(Some(ServiceDaemonStart {
-                listener,
-                processes,
-                acp_sessions,
-                agent_tx,
-                broker,
-                wake: wake.clone(),
-                runtime,
-                exit,
-            })),
-            process_runtime,
-            client_operation_runtime,
-            authorization_runtime,
-            acp_session_runtime,
-            remote_runtime,
-        )
-    }
+#[derive(Component)]
+pub struct Daemon;
+
+#[derive(Component)]
+pub struct SocketListener(pub Option<UnixListener>);
+
+#[derive(Component)]
+pub struct ExitSignal(pub mpsc::Sender<()>);
+
+#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
+struct Launch;
+
+#[derive(Component, Clone, Copy)]
+struct StartedAt(Instant);
+
+#[derive(Component)]
+struct ConnectionInbox(mpsc::UnboundedReceiver<tokio::net::UnixStream>);
+
+#[derive(Component, Clone)]
+struct Shutdown(mpsc::Sender<()>);
+
+#[derive(Component)]
+struct Client;
+
+type DaemonRuntimeState<'a> = (
+    &'a Executor,
+    &'a Wake,
+    &'a ProcessRuntime,
+    &'a Protocols,
+    &'a Shutdown,
+    &'a StartedAt,
+);
+
+#[derive(SystemParam)]
+struct DaemonRuntime<'w, 's> {
+    state: Single<'w, 's, DaemonRuntimeState<'static>, With<Daemon>>,
+    inbox: Single<'w, 's, &'static mut ConnectionInbox, With<Daemon>>,
 }
 
 impl Plugin for ServiceDaemonPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             vmux_process::ProcessPlugin,
+            vmux_process::ProcessServicePlugin,
             crate::remote::RemotePlugin,
-            vmux_agent::acp::AcpSessionPlugin,
         ))
-        .add_systems(Startup, start_daemon)
-        .add_systems(Update, (start_clients, reap_clients).chain());
-    }
-}
-
-#[derive(Component)]
-struct ServiceDaemonStartup(Option<ServiceDaemonStart>);
-
-struct ServiceDaemonStart {
-    listener: UnixListener,
-    processes: ProcessRuntime,
-    acp_sessions: AcpSessions,
-    agent_tx: broadcast::Sender<ServiceMessage>,
-    broker: AgentBroker,
-    wake: mpsc::UnboundedSender<()>,
-    runtime: tokio::runtime::Handle,
-    exit: mpsc::Sender<()>,
-}
-
-#[derive(Component)]
-struct ServiceDaemon;
-
-#[derive(Component, Clone, Copy)]
-struct ServiceStartedAt(Instant);
-
-#[derive(Component)]
-struct ServiceListenerTask(tokio::task::JoinHandle<()>);
-
-impl Drop for ServiceListenerTask {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-#[derive(Component, Clone)]
-struct ServiceClientRuntime {
-    runtime: tokio::runtime::Handle,
-    processes: ProcessRuntime,
-    agent_tx: broadcast::Sender<ServiceMessage>,
-    broker: AgentBroker,
-    acp_sessions: AcpSessions,
-    shutdown: mpsc::Sender<()>,
-    wake: mpsc::UnboundedSender<()>,
-    started_at: ServiceStartedAt,
-}
-
-#[derive(Component)]
-struct ServiceConnectionInbox(mpsc::UnboundedReceiver<tokio::net::UnixStream>);
-
-#[derive(Component)]
-struct ServiceClient;
-
-#[derive(Component)]
-struct ServiceClientTask(tokio::task::JoinHandle<()>);
-
-impl Drop for ServiceClientTask {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-fn start_daemon(mut startups: Query<(Entity, &mut ServiceDaemonStartup)>, mut commands: Commands) {
-    for (entity, mut startup) in &mut startups {
-        let Some(start) = startup.0.take() else {
-            continue;
-        };
-        let started_at = ServiceStartedAt(Instant::now());
-        let (connections, connection_inbox) = mpsc::unbounded_channel();
-        let (shutdown, shutdown_inbox) = mpsc::channel(1);
-        let listener = ServiceListener::new(
-            start.listener,
-            connections,
-            start.wake.clone(),
-            shutdown_inbox,
-            start.exit,
+        .configure_sets(Update, (Register, Launch).chain())
+        .add_systems(Startup, prepare)
+        .add_systems(
+            Update,
+            (
+                start.in_set(Launch),
+                ApplyDeferred,
+                start_clients,
+                reap_clients,
+            )
+                .chain(),
         );
-        let task = start.runtime.spawn(listener.run());
-        commands
-            .entity(entity)
-            .remove::<ServiceDaemonStartup>()
-            .insert((
-                ServiceDaemon,
-                started_at,
-                ServiceClientRuntime {
-                    runtime: start.runtime,
-                    processes: start.processes,
-                    agent_tx: start.agent_tx,
-                    broker: start.broker,
-                    acp_sessions: start.acp_sessions,
-                    shutdown,
-                    wake: start.wake,
-                    started_at,
-                },
-                ServiceConnectionInbox(connection_inbox),
-                ServiceListenerTask(task),
-            ));
     }
 }
 
-struct ServiceListener {
-    listener: UnixListener,
-    connections: mpsc::UnboundedSender<tokio::net::UnixStream>,
-    wake: mpsc::UnboundedSender<()>,
-    shutdown: mpsc::Receiver<()>,
-    exit: mpsc::Sender<()>,
-}
-
-impl ServiceListener {
-    fn new(
-        listener: UnixListener,
-        connections: mpsc::UnboundedSender<tokio::net::UnixStream>,
-        wake: mpsc::UnboundedSender<()>,
-        shutdown: mpsc::Receiver<()>,
-        exit: mpsc::Sender<()>,
-    ) -> Self {
-        Self {
-            listener,
-            connections,
-            wake,
-            shutdown,
-            exit,
-        }
-    }
-
-    async fn run(mut self) {
-        loop {
-            tokio::select! {
-                accepted = self.listener.accept() => {
-                    let (stream, _) = match accepted {
-                        Ok(connection) => connection,
-                        Err(error) => {
-                            tracing::error!(%error, "accept error");
-                            continue;
-                        }
-                    };
-                    if self.connections.send(stream).is_err() {
-                        break;
-                    }
-                    let _ = self.wake.send(());
-                }
-                _ = self.shutdown.recv() => {
-                    tracing::info!("server: drain signaled, closing listener");
-                    break;
-                }
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        tracing::info!("server: drain complete, exiting");
-        let _ = self.exit.send(()).await;
+fn prepare(daemons: Query<(Entity, &Wake), With<Daemon>>, mut commands: Commands) {
+    for (entity, wake) in &daemons {
+        let (processes, process_runtime) = ProcessRuntime::new(wake.0.clone());
+        let (client_operations, client_operation_runtime) = ClientOperations::new(wake.0.clone());
+        let (authorizations, authorization_runtime) = RemoteAuthorizations::new(wake.0.clone());
+        let operations: Arc<dyn RemoteOperationStore> = Arc::new(client_operations);
+        commands.entity(entity).insert((
+            Name::new("vmux service"),
+            processes,
+            Operations(operations),
+            Protocols::default(),
+            Remote::default(),
+            authorizations,
+            process_runtime,
+            client_operation_runtime,
+            authorization_runtime,
+        ));
     }
 }
 
-fn start_clients(
-    runtime: Single<&ServiceClientRuntime, With<ServiceDaemon>>,
-    mut inbox: Single<&mut ServiceConnectionInbox, With<ServiceDaemon>>,
+fn start(
+    mut servers: Query<(Entity, &mut SocketListener, &ExitSignal, &Executor, &Wake)>,
     mut commands: Commands,
 ) {
-    while let Ok(stream) = inbox.0.try_recv() {
-        let client = (*runtime).clone();
-        let executor = client.runtime.clone();
-        let wake = client.wake.clone();
-        let connection = ServiceConnection::new(stream, client);
-        let task = executor.spawn(async move {
+    for (entity, mut listener, exit, executor, wake) in &mut servers {
+        let Some(listener) = listener.0.take() else {
+            continue;
+        };
+        let started_at = StartedAt(Instant::now());
+        let (connections, connection_inbox) = mpsc::unbounded_channel();
+        let (shutdown, shutdown_inbox) = mpsc::channel(1);
+        let listener = ListenerDriver::new(
+            listener,
+            connections,
+            wake.0.clone(),
+            shutdown_inbox,
+            exit.0.clone(),
+        );
+        let task = executor.0.spawn(listener.run());
+        commands
+            .entity(entity)
+            .remove::<(SocketListener, ExitSignal)>()
+            .insert((
+                started_at,
+                ConnectionInbox(connection_inbox),
+                Shutdown(shutdown),
+                AbortTask(task),
+            ));
+        let _ = wake.0.send(());
+    }
+}
+
+fn start_clients(mut runtime: DaemonRuntime, mut commands: Commands) {
+    let (executor, wake, processes, protocols, shutdown, started_at) = *runtime.state;
+    while let Ok(stream) = runtime.inbox.0.try_recv() {
+        let client = ConnectionRuntime::new(
+            processes.clone(),
+            protocols.0.clone(),
+            shutdown.0.clone(),
+            started_at.0,
+        );
+        let connection = Connection::new(stream, client);
+        let wake = wake.0.clone();
+        let task = executor.0.spawn(async move {
             if let Err(error) = connection.run().await {
                 tracing::error!(%error, "client error");
             }
             let _ = wake.send(());
         });
-        commands.spawn((
-            Name::new("service client"),
-            ServiceClient,
-            ServiceClientTask(task),
-        ));
+        commands.spawn((Name::new("service client"), Client, AbortTask(task)));
     }
 }
 
-fn reap_clients(
-    clients: Query<(Entity, &ServiceClientTask), With<ServiceClient>>,
-    mut commands: Commands,
-) {
+fn reap_clients(clients: Query<(Entity, &AbortTask), With<Client>>, mut commands: Commands) {
     for (entity, task) in &clients {
         if task.0.is_finished() {
             commands.entity(entity).despawn();
@@ -258,695 +156,13 @@ fn reap_clients(
     }
 }
 
-struct AgentContent {
-    content: String,
-    is_error: bool,
-}
-
-impl From<AgentCommandResult> for AgentContent {
-    fn from(result: AgentCommandResult) -> Self {
-        match result {
-            AgentCommandResult::Ok => Self {
-                content: "ok".to_string(),
-                is_error: false,
-            },
-            AgentCommandResult::Text(content) => Self {
-                content,
-                is_error: false,
-            },
-            AgentCommandResult::Error(content) => Self {
-                content,
-                is_error: true,
-            },
-        }
-    }
-}
-
-impl TryFrom<ServiceMessage> for AgentContent {
-    type Error = ();
-
-    fn try_from(response: ServiceMessage) -> Result<Self, Self::Error> {
-        let ServiceMessage::AgentQueryResult(result) = response else {
-            return Err(());
-        };
-        Ok(Self {
-            content: result.content,
-            is_error: result.is_error,
-        })
-    }
-}
-
-struct AgentQueryResponse {
-    request_id: vmux_api::protocol::AgentRequestId,
-    response: ServiceMessage,
-}
-
-impl AgentQueryResponse {
-    async fn resolve(self, broker: &AgentBroker) {
-        if broker
-            .resolve_query(self.request_id, self.response.clone())
-            .await
-        {
-            return;
-        }
-        if let Ok(content) = AgentContent::try_from(self.response) {
-            broker
-                .resolve_tool(self.request_id, content.content, content.is_error)
-                .await;
-        }
-    }
-}
-
-struct ServiceConnection {
-    stream: tokio::net::UnixStream,
-    runtime: ServiceClientRuntime,
-}
-
-impl ServiceConnection {
-    fn new(stream: tokio::net::UnixStream, runtime: ServiceClientRuntime) -> Self {
-        Self { stream, runtime }
-    }
-
-    async fn run(self) -> std::io::Result<()> {
-        let Self { stream, runtime } = self;
-        let ServiceClientRuntime {
-            processes,
-            agent_tx,
-            broker,
-            acp_sessions,
-            shutdown: shutdown_tx,
-            started_at,
-            ..
-        } = runtime;
-        let (reader, writer) = stream.into_split();
-        let mut reader = BufReader::new(reader);
-        let writer = Arc::new(tokio::sync::Mutex::new(writer));
-
-        let attached: Arc<tokio::sync::Mutex<HashMap<ProcessId, tokio::task::JoinHandle<()>>>> =
-            Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-        let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
-        let mut agent_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
-
-        let mut created_processes: Vec<ProcessId> = Vec::new();
-
-        loop {
-            let msg: Option<ClientMessage> = match ServiceCodec::read_client(&mut reader).await {
-                Ok(msg) => msg,
-                Err(error) => {
-                    tracing::warn!(%error, "client stream ended mid-frame");
-                    break;
-                }
-            };
-            let Some(msg) = msg else {
-                break;
-            };
-
-            match msg {
-                ClientMessage::CreateProcess {
-                    process_id,
-                    command,
-                    args,
-                    cwd,
-                    env,
-                    cols,
-                    rows,
-                } => {
-                    let created = processes
-                        .create(ProcessLaunch {
-                            id: process_id,
-                            command,
-                            args,
-                            cwd,
-                            env,
-                            cols,
-                            rows,
-                            keep_after_exit: false,
-                        })
-                        .await;
-                    match created {
-                        Ok(created) => {
-                            created_processes.push(created.id);
-                            let resp = ServiceMessage::ProcessCreated {
-                                process_id: created.id,
-                                pid: created.pid,
-                            };
-                            let w = writer.clone();
-                            let mut w = w.lock().await;
-                            ServiceCodec::write_service(&mut *w, &resp).await?;
-                        }
-                        Err(reason) => {
-                            let resp = ServiceMessage::ProcessCreateFailed { process_id, reason };
-                            let w = writer.clone();
-                            let mut w = w.lock().await;
-                            ServiceCodec::write_service(&mut *w, &resp).await?;
-                        }
-                    }
-                }
-
-                ClientMessage::AttachProcess { process_id } => {
-                    if let Ok(mut rx) = processes.subscribe(process_id).await {
-                        let w = writer.clone();
-                        let handle = tokio::spawn(async move {
-                            loop {
-                                match rx.recv().await {
-                                    Ok(update) => {
-                                        let msg = update.into_service_message(process_id);
-                                        let bytes =
-                                            match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
-                                                Ok(b) => b,
-                                                Err(_) => break,
-                                            };
-                                        let mut w = w.lock().await;
-                                        if ServiceCodec::write_raw(&mut *w, &bytes).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(broadcast::error::RecvError::Lagged(dropped)) => {
-                                        tracing::warn!(
-                                            dropped,
-                                            "service stream lagged; frames were dropped"
-                                        );
-                                        continue;
-                                    }
-                                    Err(broadcast::error::RecvError::Closed) => break,
-                                }
-                            }
-                        });
-                        attached.lock().await.insert(process_id, handle);
-                    } else {
-                        let resp = ServiceMessage::Error {
-                            message: format!("process not found: {process_id}"),
-                        };
-                        let mut w = writer.lock().await;
-                        ServiceCodec::write_service(&mut *w, &resp).await?;
-                    }
-                }
-
-                ClientMessage::DetachProcess { process_id } => {
-                    if let Some(handle) = attached.lock().await.remove(&process_id) {
-                        handle.abort();
-                    }
-                }
-
-                ClientMessage::ProcessInput { process_id, data } => {
-                    let _ = processes.input(process_id, data).await;
-                }
-
-                ClientMessage::MouseWheel {
-                    process_id,
-                    up,
-                    col,
-                    row,
-                    modifiers,
-                } => {
-                    let _ = processes
-                        .mouse_wheel(process_id, up, col, row, modifiers)
-                        .await;
-                }
-
-                ClientMessage::ScrollWindow {
-                    process_id,
-                    top_row,
-                    follow,
-                } => {
-                    let _ = processes.scroll_window(process_id, top_row, follow).await;
-                }
-
-                ClientMessage::ResizeProcess {
-                    process_id,
-                    cols,
-                    rows,
-                } => {
-                    let _ = processes.resize(process_id, cols, rows).await;
-                }
-
-                ClientMessage::ListProcesses => {
-                    let process_list = processes.list().await.unwrap_or_default();
-                    let resp = ServiceMessage::ProcessList {
-                        processes: process_list,
-                    };
-                    let mut w = writer.lock().await;
-                    ServiceCodec::write_service(&mut *w, &resp).await?;
-                }
-
-                ClientMessage::KillProcess { process_id } => {
-                    let _ = processes.remove(process_id).await;
-                    if let Some(handle) = attached.lock().await.remove(&process_id) {
-                        handle.abort();
-                    }
-                }
-
-                ClientMessage::RequestSnapshot { process_id } => {
-                    if let Ok(snapshot) = processes.snapshot(process_id).await {
-                        let snap = snapshot.into_service_message(process_id);
-                        let mut w = writer.lock().await;
-                        ServiceCodec::write_service(&mut *w, &snap).await?;
-                    } else {
-                        let resp = ServiceMessage::Error {
-                            message: format!("process not found: {process_id}"),
-                        };
-                        let mut w = writer.lock().await;
-                        ServiceCodec::write_service(&mut *w, &resp).await?;
-                    }
-                }
-
-                ClientMessage::SetSelection { process_id, range } => {
-                    let _ = processes.set_selection(process_id, range).await;
-                }
-
-                ClientMessage::ExtendSelectionTo {
-                    process_id,
-                    col,
-                    row,
-                } => {
-                    let _ = processes.extend_selection(process_id, col, row).await;
-                }
-
-                ClientMessage::SelectWordAt {
-                    process_id,
-                    col,
-                    row,
-                } => {
-                    let _ = processes.select_word(process_id, col, row).await;
-                }
-
-                ClientMessage::SelectLineAt { process_id, row } => {
-                    let _ = processes.select_line(process_id, row).await;
-                }
-
-                ClientMessage::GetSelectionText { process_id } => {
-                    let text = processes
-                        .selection_text(process_id)
-                        .await
-                        .unwrap_or_default();
-                    let resp = ServiceMessage::SelectionText { process_id, text };
-                    let mut w = writer.lock().await;
-                    ServiceCodec::write_service(&mut *w, &resp).await?;
-                }
-
-                ClientMessage::EnterCopyMode { process_id } => {
-                    let _ = processes.enter_copy_mode(process_id).await;
-                }
-
-                ClientMessage::ExitCopyMode { process_id } => {
-                    let _ = processes.exit_copy_mode(process_id).await;
-                }
-
-                ClientMessage::CopyModeKey { process_id, key } => {
-                    if let Ok(Some(text)) = processes.copy_mode_key(process_id, key).await {
-                        let resp = ServiceMessage::SelectionText { process_id, text };
-                        let mut w = writer.lock().await;
-                        ServiceCodec::write_service(&mut *w, &resp).await?;
-                    }
-                }
-
-                ClientMessage::SubscribeAgentCommands => {
-                    if let Some(handle) = agent_subscription.take() {
-                        handle.abort();
-                    }
-                    let mut rx = agent_tx.subscribe();
-                    let w = writer.clone();
-                    agent_subscription = Some(tokio::spawn(async move {
-                        loop {
-                            match rx.recv().await {
-                                Ok(msg) => {
-                                    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
-                                        Ok(b) => b,
-                                        Err(_) => break,
-                                    };
-                                    let mut w = w.lock().await;
-                                    if ServiceCodec::write_raw(&mut *w, &bytes).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                Err(broadcast::error::RecvError::Lagged(dropped)) => {
-                                    tracing::warn!(
-                                        dropped,
-                                        "agent stream lagged; frames were dropped"
-                                    );
-                                    continue;
-                                }
-                                Err(broadcast::error::RecvError::Closed) => break,
-                            }
-                        }
-                    }));
-                }
-
-                ClientMessage::AgentRequest {
-                    request_id,
-                    anchor,
-                    request,
-                } => {
-                    let broker = broker.clone();
-                    let writer = writer.clone();
-                    tokio::spawn(async move {
-                        let resp = match broker.command(request_id, anchor, request).await {
-                            Ok(result) => ServiceMessage::AgentCommandResult { request_id, result },
-                            Err(message) => ServiceMessage::Error { message },
-                        };
-                        let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
-                            Ok(b) => b,
-                            Err(_) => return,
-                        };
-                        let mut w = writer.lock().await;
-                        let _ = ServiceCodec::write_raw(&mut *w, &bytes).await;
-                    });
-                }
-
-                ClientMessage::Shutdown => {
-                    tracing::info!("shutdown requested by client; draining");
-                    let _ = processes.shutdown().await;
-                    let resp = ServiceMessage::ProcessList {
-                        processes: Vec::new(),
-                    };
-                    let mut w = writer.lock().await;
-                    ServiceCodec::write_service(&mut *w, &resp).await?;
-                    shutdown_tx.send(()).await.ok();
-                    break;
-                }
-
-                ClientMessage::Status => {
-                    let uptime_secs = started_at.0.elapsed().as_secs();
-                    let process_count = processes.count().await.unwrap_or_default();
-                    let resp = ServiceMessage::StatusResponse {
-                        uptime_secs,
-                        process_count,
-                    };
-                    let mut w = writer.lock().await;
-                    ServiceCodec::write_service(&mut *w, &resp).await?;
-                }
-
-                ClientMessage::AgentQuery { request_id, query } => {
-                    let response = match processes.response(request_id, &query).await {
-                        Ok(Some(response)) => response,
-                        Ok(None) => {
-                            let broker = broker.clone();
-                            let writer = writer.clone();
-                            tokio::spawn(async move {
-                                let response = match broker.query(request_id, query).await {
-                                    Ok(response) => response,
-                                    Err(message) => ServiceMessage::Error { message },
-                                };
-                                let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
-                                    Ok(bytes) => bytes,
-                                    Err(_) => return,
-                                };
-                                let mut writer = writer.lock().await;
-                                let _ = ServiceCodec::write_raw(&mut *writer, &bytes).await;
-                            });
-                            continue;
-                        }
-                        Err(message) => ServiceMessage::Error { message },
-                    };
-                    let mut writer = writer.lock().await;
-                    ServiceCodec::write_service(&mut *writer, &response).await?;
-                }
-
-                ClientMessage::AgentQueryResult(result) => {
-                    let request_id = result.request_id;
-                    AgentQueryResponse {
-                        request_id,
-                        response: ServiceMessage::AgentQueryResult(result),
-                    }
-                    .resolve(&broker)
-                    .await;
-                }
-                ClientMessage::AgentCommandResponse { request_id, result } => {
-                    if !broker.resolve_command(request_id, result.clone()).await {
-                        let content = AgentContent::from(result);
-                        broker
-                            .resolve_tool(request_id, content.content, content.is_error)
-                            .await;
-                    }
-                }
-
-                ClientMessage::Shared(
-                    SharedMessage::ListSessions
-                    | SharedMessage::AgentNewChat { .. }
-                    | SharedMessage::AgentListAgents
-                    | SharedMessage::AgentListTeam
-                    | SharedMessage::AgentListModels { .. }
-                    | SharedMessage::AgentSelectModel { .. }
-                    | SharedMessage::AgentSetEffort { .. }
-                    | SharedMessage::AgentListMedia { .. },
-                ) => {
-                    tracing::warn!("local socket: ignoring a remote-only request");
-                }
-
-                ClientMessage::Shared(SharedMessage::AgentAttach { sid }) => {
-                    let rx = acp_sessions.subscribe(sid.clone()).await;
-                    if let Some(mut rx) = rx {
-                        if let Some(snapshot) = acp_sessions.snapshot(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &snapshot).await?;
-                        }
-                        if let Some(agent_info) = acp_sessions.agent_info(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &agent_info).await?;
-                        }
-                        if let Some(config_state) = acp_sessions.config_state(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &config_state).await?;
-                        }
-                        if let Some(status) = acp_sessions.status(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &status).await?;
-                        }
-                        if let Some(old) = agent_forwarders.remove(&sid) {
-                            old.abort();
-                        }
-                        let w = writer.clone();
-                        let handle = tokio::spawn(async move {
-                            loop {
-                                match rx.recv().await {
-                                    Ok(msg) => {
-                                        let bytes =
-                                            match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
-                                                Ok(b) => b,
-                                                Err(_) => break,
-                                            };
-                                        let mut w = w.lock().await;
-                                        if ServiceCodec::write_raw(&mut *w, &bytes).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(broadcast::error::RecvError::Lagged(dropped)) => {
-                                        tracing::warn!(
-                                            dropped,
-                                            "service stream lagged; frames were dropped"
-                                        );
-                                        continue;
-                                    }
-                                    Err(broadcast::error::RecvError::Closed) => break,
-                                }
-                            }
-                        });
-                        agent_forwarders.insert(sid, handle);
-                    }
-                }
-
-                ClientMessage::DetachAgentSession { sid } => {
-                    if let Some(handle) = agent_forwarders.remove(&sid) {
-                        handle.abort();
-                    }
-                }
-
-                ClientMessage::Shared(SharedMessage::AgentInput {
-                    sid,
-                    text,
-                    context,
-                    attachments,
-                    preferred_mode,
-                }) => {
-                    acp_sessions
-                        .input(
-                            sid,
-                            vmux_agent::acp::AcpInput::User {
-                                text,
-                                context,
-                                attachments,
-                                preferred_mode,
-                            },
-                        )
-                        .await;
-                }
-
-                ClientMessage::RebindAcpWorkspace { sid, cwd } => {
-                    if let Err(message) = acp_sessions
-                        .rebind_cwd(sid, std::path::PathBuf::from(cwd))
-                        .await
-                    {
-                        let resp = ServiceMessage::Error { message };
-                        let mut w = writer.lock().await;
-                        ServiceCodec::write_service(&mut *w, &resp).await?;
-                    }
-                }
-
-                ClientMessage::AcpSetSessionConfig {
-                    sid,
-                    request_id,
-                    config_id,
-                    value,
-                } => {
-                    acp_sessions
-                        .input(
-                            sid,
-                            vmux_agent::acp::AcpInput::SetConfig {
-                                request_id,
-                                config_id,
-                                value,
-                            },
-                        )
-                        .await;
-                }
-
-                ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
-                    acp_sessions
-                        .input(sid, vmux_agent::acp::AcpInput::Cancel)
-                        .await;
-                }
-
-                ClientMessage::Shared(SharedMessage::AgentApprove {
-                    sid,
-                    call_id,
-                    decision,
-                }) => {
-                    acp_sessions
-                        .input(
-                            sid,
-                            vmux_agent::acp::AcpInput::Approve { call_id, decision },
-                        )
-                        .await;
-                }
-
-                ClientMessage::CloseAgentSession { sid } => {
-                    acp_sessions.close(sid.clone()).await;
-                    if let Some(handle) = agent_forwarders.remove(&sid) {
-                        handle.abort();
-                    }
-                }
-
-                ClientMessage::AgentToolResult {
-                    request_id,
-                    content,
-                    is_error,
-                } => {
-                    broker.resolve_tool(request_id, content, is_error).await;
-                }
-
-                ClientMessage::SpawnAcpAgent {
-                    sid,
-                    agent_id,
-                    command,
-                    args,
-                    env,
-                    cwd,
-                    anchor,
-                    mcp_command,
-                    mcp_args,
-                    resume_acp_session_id,
-                    managed_mcp_servers,
-                } => {
-                    if let Err(message) = acp_sessions
-                        .spawn(
-                            sid.clone(),
-                            agent_id,
-                            command,
-                            args,
-                            env,
-                            std::path::PathBuf::from(cwd),
-                            anchor,
-                            processes.clone(),
-                            mcp_command,
-                            mcp_args,
-                            managed_mcp_servers,
-                            resume_acp_session_id,
-                        )
-                        .await
-                    {
-                        let response = ServiceMessage::Error { message };
-                        let mut writer = writer.lock().await;
-                        ServiceCodec::write_service(&mut *writer, &response).await?;
-                        continue;
-                    }
-                    let rx = acp_sessions.subscribe(sid.clone()).await;
-                    if let Some(mut rx) = rx {
-                        if let Some(snapshot) = acp_sessions.snapshot(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &snapshot).await?;
-                        }
-                        if let Some(agent_info) = acp_sessions.agent_info(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &agent_info).await?;
-                        }
-                        if let Some(config_state) = acp_sessions.config_state(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &config_state).await?;
-                        }
-                        if let Some(status) = acp_sessions.status(sid.clone()).await {
-                            let mut w = writer.lock().await;
-                            ServiceCodec::write_service(&mut *w, &status).await?;
-                        }
-                        if let Some(old) = agent_forwarders.remove(&sid) {
-                            old.abort();
-                        }
-                        let w = writer.clone();
-                        let handle = tokio::spawn(async move {
-                            loop {
-                                match rx.recv().await {
-                                    Ok(msg) => {
-                                        let bytes =
-                                            match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
-                                                Ok(b) => b,
-                                                Err(_) => break,
-                                            };
-                                        let mut w = w.lock().await;
-                                        if ServiceCodec::write_raw(&mut *w, &bytes).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(broadcast::error::RecvError::Lagged(dropped)) => {
-                                        tracing::warn!(
-                                            dropped,
-                                            "service stream lagged; frames were dropped"
-                                        );
-                                        continue;
-                                    }
-                                    Err(broadcast::error::RecvError::Closed) => break,
-                                }
-                            }
-                        });
-                        agent_forwarders.insert(sid, handle);
-                    }
-                }
-            }
-        }
-
-        for (_, handle) in attached.lock().await.drain() {
-            handle.abort();
-        }
-        if let Some(handle) = agent_subscription.take() {
-            handle.abort();
-        }
-        for (_, handle) in agent_forwarders.drain() {
-            handle.abort();
-        }
-
-        if !created_processes.is_empty() {
-            for id in &created_processes {
-                let _ = processes.remove(*id).await;
-            }
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use vmux_api::protocol::ClientMessage;
+    use vmux_api::protocol::{ClientMessage, ProcessId};
+    use vmux_process::ProcessService;
+    use vmux_transport::service::{ServiceCodec, ServiceProtocolDriver};
 
     struct ProcessAppThread {
         stop: Option<std::sync::mpsc::Sender<()>>,
@@ -993,38 +209,20 @@ mod tests {
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<()>) {
         let (_process_app, processes) = ProcessAppThread::start(wake.clone());
-        let (acp_sessions, acp_runtime) =
-            vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), wake.clone());
-        drop(acp_runtime);
-        let (agent_tx, _) = broadcast::channel(8);
-        let broker = AgentBroker::new(
-            agent_tx.clone(),
-            Default::default(),
-            Default::default(),
-            Default::default(),
-        );
         let (connections, mut connection_inbox) = mpsc::unbounded_channel();
         let (shutdown, shutdown_inbox) = mpsc::channel(1);
         let (exit, mut exit_inbox) = mpsc::channel(1);
-        let started_at = ServiceStartedAt(Instant::now());
-        let runtime = ServiceClientRuntime {
-            runtime: tokio::runtime::Handle::current(),
-            processes,
-            agent_tx,
-            broker,
-            acp_sessions,
-            shutdown,
-            wake: wake.clone(),
-            started_at,
-        };
+        let process: Arc<dyn ServiceProtocolDriver> =
+            Arc::new(ProcessService::new(processes.clone()));
+        let runtime = ConnectionRuntime::new(processes, vec![process], shutdown, Instant::now());
         let listener = tokio::spawn(
-            ServiceListener::new(listener, connections, wake, shutdown_inbox, exit).run(),
+            ListenerDriver::new(listener, connections, wake, shutdown_inbox, exit).run(),
         );
         let mut clients = tokio::task::JoinSet::new();
         loop {
             tokio::select! {
                 Some(stream) = connection_inbox.recv() => {
-                    clients.spawn(ServiceConnection::new(stream, runtime.clone()).run());
+                    clients.spawn(Connection::new(stream, runtime.clone()).run());
                 }
                 _ = exit_inbox.recv() => break,
             }

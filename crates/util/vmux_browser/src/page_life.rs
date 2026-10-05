@@ -97,9 +97,9 @@ fn apply_fallback_page_icons(mut metas: Query<&mut PageMetadata, Changed<PageMet
             continue;
         }
         if meta.url.starts_with("file:") {
-            meta.icon = vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Files);
+            meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Files);
         } else if meta.url.starts_with("chrome-extension://") {
-            meta.icon = vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Puzzle);
+            meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Puzzle);
         }
     }
 }
@@ -107,7 +107,8 @@ fn apply_fallback_page_icons(mut metas: Query<&mut PageMetadata, Changed<PageMet
 #[cfg(test)]
 mod apply_fallback_page_icons_tests {
     use super::*;
-    use vmux_ecs::{BuiltinIcon, PageIcon, PageMetadata};
+    use vmux_api::{BuiltinIcon, PageIcon};
+    use vmux_ecs::PageMetadata;
 
     fn resolve(url: &str, seed: PageIcon) -> PageIcon {
         let mut app = App::new();

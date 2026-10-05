@@ -107,6 +107,16 @@
         (
             url: "vmux://terminal/",
             title: "Terminal",
+            owns_subtree: true,
+            placement: Some((
+                group: "terminal",
+                refresh: true,
+                split: Some((
+                    anchor_group: "browser",
+                    allowed_groups: ["assistant", "browser"],
+                    axis: Column,
+                )),
+            )),
             title_message_id: "command-terminal",
             keywords: ["shell", "console"],
             icon: "Terminal",
@@ -144,6 +154,7 @@
                 "ProcessNavigateEvent",
                 "ProcessKillEvent",
                 "ProcessKillAllEvent",
+                "ProcessSearchRequest",
             ],
         ),
     ],

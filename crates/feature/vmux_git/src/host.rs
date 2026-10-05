@@ -1,4 +1,8 @@
-use crate::event::{GitConfigEditRequest, GitUpdateCheckRequest};
+use crate::event::{
+    GitBranchDraftRequest, GitBranchPromptCloseRequest, GitBranchPromptOpenRequest,
+    GitBranchSubmitRequest, GitCommitDraftRequest, GitCommitSubmitRequest, GitConfigEditRequest,
+    GitUpdateCheckRequest,
+};
 use crate::host::changes::ChangesPlugin;
 use crate::host::controller::ControllerPlugin;
 use crate::host::diff::DiffPlugin;
@@ -14,8 +18,8 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 pub use diff::GitDiffSource;
 pub use repository::{GitError, GitRepository};
 pub use status::FileGit;
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::page::NativelyHosted;
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::page::HostedPage;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 pub use watch::RepoInfoCache;
 
@@ -35,7 +39,7 @@ mod parse;
 mod repository;
 pub mod worktree;
 
-#[vmux_native::page]
+#[vmux_page::page]
 pub struct GitPlugin;
 
 impl Plugin for GitPlugin {
@@ -44,7 +48,16 @@ impl Plugin for GitPlugin {
         #[cfg(ui)]
         app.add_plugins((GitPage::plugin(), LegacyGitPage::plugin()));
         app.add_message::<GitCheckForUpdatesRequest>()
-            .add_plugins(UiEventPlugin::<(GitConfigEditRequest, GitUpdateCheckRequest)>::default())
+            .add_plugins(UiEventPlugin::<(
+                GitConfigEditRequest,
+                GitUpdateCheckRequest,
+                GitBranchPromptOpenRequest,
+                GitBranchPromptCloseRequest,
+                GitBranchDraftRequest,
+                GitBranchSubmitRequest,
+                GitCommitDraftRequest,
+                GitCommitSubmitRequest,
+            )>::default())
             .add_observer(config_edit_request)
             .add_observer(update_check_request)
             .configure_sets(
@@ -71,8 +84,8 @@ impl Plugin for GitPlugin {
             .add_plugins(
                 Self::MANIFEST
                     .plugin()
-                    .hosted(NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"))
-                    .alias(NativelyHosted::page(Self::MANIFEST.url, "Git")),
+                    .hosted(HostedPage::subtree(crate::GIT_PAGE_URL, "Git"))
+                    .alias(HostedPage::page(Self::MANIFEST.url, "Git")),
             );
     }
 }

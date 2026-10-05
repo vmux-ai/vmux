@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet};
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_tool::{ToolCommand, ToolDispatchSet};
 
 use super::session::{AgentRequestUserChoice, AgentSetConversationTitle};
 
@@ -12,8 +12,6 @@ pub struct ChatToolPlugin;
 impl Plugin for ChatToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<RequestUserChoiceArgs>()
-            .bind_tool::<SetConversationTitleArgs>()
             .add_systems(
                 Update,
                 (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
@@ -24,7 +22,7 @@ impl Plugin for ChatToolPlugin {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RequestUserChoiceArgs {
+struct RequestUserChoiceTool {
     question: String,
     options: Vec<String>,
 }
@@ -32,7 +30,7 @@ struct RequestUserChoiceArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SetConversationTitleArgs {
+struct SetConversationTitleTool {
     title: String,
 }
 
@@ -43,9 +41,9 @@ fn request_user_choice(
             Entity,
             &Name,
             Option<&ProcessAnchor>,
-            &RequestUserChoiceArgs,
+            &RequestUserChoiceTool,
         ),
-        Added<RequestUserChoiceArgs>,
+        Added<RequestUserChoiceTool>,
     >,
 ) {
     for (entity, name, anchor, args) in &requests {
@@ -79,9 +77,9 @@ fn set_conversation_title(
             Entity,
             &Name,
             Option<&ProcessAnchor>,
-            &SetConversationTitleArgs,
+            &SetConversationTitleTool,
         ),
-        Added<SetConversationTitleArgs>,
+        Added<SetConversationTitleTool>,
     >,
 ) {
     for (entity, name, anchor, args) in &requests {

@@ -179,7 +179,7 @@ fn respond_process_stack_spawn(
         commands.entity(stack).insert(PageMetadata {
             url: crate::TerminalPlugin::URL.to_string(),
             title,
-            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            bg_color: None,
             ..default()
         });
         let launch = crate::launch::TerminalLaunch {

@@ -5,7 +5,7 @@ pub use host::{ShortcutCaptureSet, ShortcutPlugin};
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -105,7 +105,7 @@ pub struct ShortcutUiState {
 }
 
 #[cfg(host)]
-pub type ShortcutUiStateUpdates = vmux_ecs::host::UiState<ShortcutUiState>;
+pub type ShortcutUiStateUpdates = vmux_ecs::UiState<ShortcutUiState>;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ShortcutGroup {

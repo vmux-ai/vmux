@@ -5,7 +5,7 @@ use vmux_api::error::ErrorPageData;
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
 
-#[vmux_native::page(
+#[vmux_page::page(
     page = "error",
     component = Page,
     takes = vmux_api::error::ErrorPageData

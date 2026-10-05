@@ -22,15 +22,14 @@ use vmux_api::command_bar::{
     CommandBarUiState, DismissRequest as CommandBarDismissRequest,
     ExRequest as CommandBarExRequest, InvokeRequest as CommandBarInvokeRequest,
     OpenRequest as CommandBarOpenRequest, PickRequest as CommandBarPickRequest,
-    PromptRequest as CommandBarPromptRequest, SwitchSpaceRequest, SwitchTabRequest,
-    TerminalRequest as CommandBarTerminalRequest,
+    PromptRequest as CommandBarPromptRequest, SwitchTabRequest,
 };
 use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
 use vmux_api::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
-use vmux_api::team::TeamEvent;
+use vmux_api::team::TeamUiState;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::Platform;
@@ -170,9 +169,7 @@ impl PageHost for MobileHost {
             SwitchTabRequest::ID => self.switch_tab(Self::decode(bytes)?),
             CommandBarDismissRequest::ID => Ok(()),
             CommandBarOpenRequest::ID
-            | CommandBarTerminalRequest::ID
             | CommandBarInvokeRequest::ID
-            | SwitchSpaceRequest::ID
             | CommandBarExRequest::ID
             | CommandBarPickRequest::ID => Err(EventListenerError::Unsupported),
             _ => Err(EventListenerError::Unsupported),
@@ -191,9 +188,10 @@ impl PageHost for MobileHost {
                 self.runtime
                     .listen(CommandBarUiState::ID, on_bytes, RepublishLauncher);
             }
-            TeamEvent::ID => {
+            TeamUiState::ID => {
                 self.poll_team();
-                self.runtime.listen(TeamEvent::ID, on_bytes, RepublishTeam);
+                self.runtime
+                    .listen(TeamUiState::ID, on_bytes, RepublishTeam);
             }
             _ => return Err(EventListenerError::Unsupported),
         }

@@ -14,37 +14,37 @@ pub struct AgentToolCallRequest {
 }
 
 #[vmux_api::service_message(SharedEvent::AgentDelta)]
-pub struct UiAgentDelta {
+pub struct AgentDelta {
     pub sid: String,
     pub text: String,
 }
 
 #[vmux_api::service_message(SharedEvent::AgentRunStatusChanged)]
-pub struct UiAgentRunStatus {
+pub struct AgentRunStatusChanged {
     pub sid: String,
     pub status: AgentRunStatus,
 }
 
 #[vmux_api::service_message(SharedEvent::AgentApprovalResolved)]
-pub struct UiAgentApprovalResolved {
+pub struct AgentApprovalResolved {
     pub sid: String,
     pub call_id: String,
 }
 
 #[vmux_api::service_message(SharedEvent::AgentMessagesSnapshot)]
-pub struct UiAgentSnapshot {
+pub struct AgentMessagesSnapshot {
     pub sid: String,
     pub messages: Vec<vmux_api::room::Message>,
 }
 
 #[vmux_api::service_message(SharedEvent::AcpAgentInfo)]
-pub struct UiAgentInfo {
+pub struct AcpAgentInfo {
     pub sid: String,
     pub name: String,
 }
 
 #[vmux_api::service_message(SharedEvent::AcpWorkspaceChanged)]
-pub struct UiAgentWorkspaceChanged {
+pub struct AcpWorkspaceChanged {
     pub sid: String,
     pub branch: String,
     pub cwd: String,
@@ -52,13 +52,13 @@ pub struct UiAgentWorkspaceChanged {
 }
 
 #[vmux_api::service_message(AcpSessionConfigState)]
-pub struct UiAgentSessionConfigState {
+pub struct AcpSessionConfigSnapshot {
     pub sid: String,
     pub configs: Vec<AcpSessionConfig>,
 }
 
 #[vmux_api::service_message(AcpSessionConfigSelectionResult)]
-pub struct UiAgentSessionConfigSelectionResult {
+pub struct AcpSessionConfigSelectionResult {
     pub sid: String,
     pub request_id: u64,
     pub config_id: Option<String>,
@@ -67,13 +67,13 @@ pub struct UiAgentSessionConfigSelectionResult {
 }
 
 #[vmux_api::service_message(AcpSessionCreated)]
-pub struct UiAgentSessionCreated {
+pub struct AcpSessionCreated {
     pub sid: String,
     pub acp_session_id: String,
 }
 
 #[vmux_api::service_message(AcpTerminalCreated)]
-pub struct UiAgentAcpTerminalCreated {
+pub struct AcpTerminalCreated {
     pub sid: String,
     pub process_id: ProcessId,
 }

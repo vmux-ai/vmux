@@ -22,13 +22,13 @@ use vmux_command::{
     WriteCommandRequests,
 };
 #[cfg(target_os = "macos")]
-use vmux_ecs::host::page::BindsEditingChords;
+use vmux_ecs::page::BindsEditingChords;
 use vmux_ecs::team::User;
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
 #[cfg(target_os = "macos")]
-use vmux_native::menu::{OsContextMenu, OsMenuSeparator};
-use vmux_native::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet, TransientOsMenuEntry};
+use vmux_page::menu::{OsContextMenu, OsMenuSeparator};
+use vmux_page::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet, TransientOsMenuEntry};
 use vmux_setting::{AppSettings, SettingsLoadSet};
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
@@ -93,7 +93,7 @@ struct OsMenuState {
     last_menu_command_at: Option<std::time::Instant>,
     last_stack_close_at: Option<std::time::Instant>,
     last_tab_close_at: Option<std::time::Instant>,
-    last_native_page_open_at: Option<std::time::Instant>,
+    last_hosted_page_open_at: Option<std::time::Instant>,
     close_item_enabled: bool,
 }
 
@@ -103,7 +103,7 @@ impl Default for OsMenuState {
             last_menu_command_at: None,
             last_stack_close_at: None,
             last_tab_close_at: None,
-            last_native_page_open_at: None,
+            last_hosted_page_open_at: None,
             close_item_enabled: true,
         }
     }
@@ -116,7 +116,7 @@ struct HideWindowsMenuEntry;
 struct OsMenuInbox(Receiver<String>);
 
 const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
-const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
+const HOSTED_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1500);
 
 struct OsMenuResource {
@@ -424,7 +424,7 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
 fn edit_menu_items_enabled(intent: HostFocusIntent, binds_chords: bool) -> bool {
     match intent {
         HostFocusIntent::WinitHost => false,
-        HostFocusIntent::NativePane(_) => !binds_chords,
+        HostFocusIntent::HostedPane(_) => !binds_chords,
         HostFocusIntent::Windowed(_) | HostFocusIntent::LayoutView => true,
     }
 }
@@ -445,7 +445,7 @@ fn sync_edit_menu_items(
         return;
     };
     let binds_chords = match *intent {
-        HostFocusIntent::NativePane(pane) => chord_panes.contains(pane),
+        HostFocusIntent::HostedPane(pane) => chord_panes.contains(pane),
         _ => false,
     };
     let enabled = edit_menu_items_enabled(*intent, binds_chords);
@@ -571,7 +571,7 @@ fn remember_page_open(mut reader: MessageReader<OpenRequest>, mut state: Single<
             .as_deref()
             .is_some_and(|url| url.starts_with("vmux://"))
         {
-            state.last_native_page_open_at = Some(std::time::Instant::now());
+            state.last_hosted_page_open_at = Some(std::time::Instant::now());
         }
     }
 }
@@ -591,19 +591,19 @@ fn hide_window_on_close_request(
     let from_stack_close = state
         .last_stack_close_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
-    let from_native_page_open = state
-        .last_native_page_open_at
-        .is_some_and(|t| t.elapsed() < NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW);
+    let from_hosted_page_open = state
+        .last_hosted_page_open_at
+        .is_some_and(|t| t.elapsed() < HOSTED_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW);
     let window_count = windows.iter().count();
     for event in closed.read() {
-        if from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open {
+        if from_menu_key_equivalent || from_stack_close || from_tab_close || from_hosted_page_open {
             info!(
                 target: "vmux_desktop::window_close",
                 window = ?event.window,
                 from_menu_key_equivalent,
                 from_stack_close,
                 from_tab_close,
-                from_native_page_open,
+                from_hosted_page_open,
                 "suppressed WindowCloseRequested"
             );
             continue;
@@ -632,7 +632,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn only_a_pane_that_binds_the_chords_takes_the_menu_away_from_the_platform() {
-        let pane = HostFocusIntent::NativePane(Entity::PLACEHOLDER);
+        let pane = HostFocusIntent::HostedPane(Entity::PLACEHOLDER);
         let cases = [
             (pane, true, false),
             (pane, false, true),
@@ -805,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn window_close_request_after_native_page_open_is_suppressed() {
+    fn window_close_request_after_hosted_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
             .add_message::<CloseRequest>()
@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn delayed_window_close_request_after_native_page_open_is_suppressed() {
+    fn delayed_window_close_request_after_hosted_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
             .add_message::<CloseRequest>()
@@ -839,7 +839,7 @@ mod tests {
         {
             let world = app.world_mut();
             let mut state = world.query::<&mut OsMenuState>();
-            state.single_mut(world).unwrap().last_native_page_open_at =
+            state.single_mut(world).unwrap().last_hosted_page_open_at =
                 Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
         }
         app.world_mut()

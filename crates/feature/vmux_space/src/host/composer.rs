@@ -142,7 +142,7 @@ fn push_context_to_page(
         }
         if changed || ready.is_changed() {
             commands.trigger(
-                vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                     webview, &context,
                 ),
             );
@@ -217,13 +217,10 @@ fn chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-            webview,
-            &projection.0,
-        ),
+        vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(webview, &projection.0),
     );
     let root = std::path::PathBuf::from(&project);
-    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
     let task = bevy::tasks::IoTaskPool::get().spawn(async move {
         let _wake = wake;
         let Ok(checkout) = vmux_git::worktree::CheckoutInfo::try_from(root.as_path()) else {
@@ -275,7 +272,7 @@ fn drain_branch_reads(
             continue;
         }
         commands.trigger(
-            vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 read.webview,
                 &projection.0,
             ),

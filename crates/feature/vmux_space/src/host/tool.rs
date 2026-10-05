@@ -4,33 +4,25 @@ use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentSpace, ClientMessage};
-use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::window::{FocusedWindow, WindowHierarchy};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
+    ToolQueryRouteSet,
 };
 
 use super::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentListSpaces,
     AgentPrepareWorktree, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
-use crate::model::SpaceRecord;
-
 pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .bind_tool::<ListSpacesArgs>()
-            .bind_tool::<CreateSpaceArgs>()
-            .bind_tool::<RenameSpaceArgs>()
-            .bind_tool::<DeleteSpaceArgs>()
-            .bind_tool::<SelectProjectArgs>()
-            .bind_tool::<CreateWorktreeArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
@@ -58,6 +50,7 @@ impl Plugin for SpaceToolPlugin {
 fn answer_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
+    profile: vmux_ecs::profile::CurrentProfile,
     focused_window: FocusedWindow,
     hierarchy: WindowHierarchy,
     mut handled: MessageWriter<ToolQueryHandled>,
@@ -74,6 +67,7 @@ fn answer_queries(
             )));
             continue;
         }
+        let profile = profile.label().unwrap_or("Personal");
         let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
         for (entity, id, name, is_active, order) in &spaces {
             let local = focused_window
@@ -94,7 +88,7 @@ fn answer_queries(
                 AgentSpace {
                     id: id.0.clone(),
                     name: name.to_string(),
-                    profile: SpaceRecord::current_profile_name(),
+                    profile: profile.to_string(),
                     is_active: local && is_active,
                 },
             ));
@@ -111,19 +105,19 @@ fn answer_queries(
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ListSpacesArgs {}
+struct ListSpacesTool {}
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CreateSpaceArgs {
+struct CreateSpaceTool {
     name: Option<String>,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RenameSpaceArgs {
+struct RenameSpaceTool {
     space_id: String,
     name: String,
 }
@@ -131,21 +125,21 @@ struct RenameSpaceArgs {
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct DeleteSpaceArgs {
+struct DeleteSpaceTool {
     space_id: String,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SelectProjectArgs {
+struct SelectProjectTool {
     path: Option<String>,
 }
 
 #[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CreateWorktreeArgs {
+struct CreateWorktreeTool {
     branch: Option<String>,
     path: Option<String>,
     task: Option<String>,
@@ -153,7 +147,7 @@ struct CreateWorktreeArgs {
     create: bool,
 }
 
-fn list_spaces(mut commands: Commands, calls: Query<Entity, AddedTool<ListSpacesArgs>>) {
+fn list_spaces(mut commands: Commands, calls: Query<Entity, AddedTool<ListSpacesTool>>) {
     for request in &calls {
         commands
             .entity(request)
@@ -163,7 +157,7 @@ fn list_spaces(mut commands: Commands, calls: Query<Entity, AddedTool<ListSpaces
 
 fn create(
     mut commands: Commands,
-    requests: Query<(Entity, &CreateSpaceArgs), AddedTool<CreateSpaceArgs>>,
+    requests: Query<(Entity, &CreateSpaceTool), AddedTool<CreateSpaceTool>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -176,7 +170,7 @@ fn create(
 
 fn rename(
     mut commands: Commands,
-    requests: Query<(Entity, &RenameSpaceArgs), AddedTool<RenameSpaceArgs>>,
+    requests: Query<(Entity, &RenameSpaceTool), AddedTool<RenameSpaceTool>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.space_id.trim().is_empty() {
@@ -195,7 +189,7 @@ fn rename(
 
 fn delete(
     mut commands: Commands,
-    requests: Query<(Entity, &DeleteSpaceArgs), AddedTool<DeleteSpaceArgs>>,
+    requests: Query<(Entity, &DeleteSpaceTool), AddedTool<DeleteSpaceTool>>,
 ) {
     for (entity, args) in &requests {
         let space_id = &args.space_id;
@@ -213,8 +207,8 @@ fn delete(
 fn select_project(
     mut commands: Commands,
     requests: Query<
-        (Entity, &Name, Option<&ProcessAnchor>, &SelectProjectArgs),
-        Added<SelectProjectArgs>,
+        (Entity, &Name, Option<&ProcessAnchor>, &SelectProjectTool),
+        Added<SelectProjectTool>,
     >,
 ) {
     for (entity, name, anchor, args) in &requests {
@@ -233,8 +227,8 @@ fn select_project(
 fn create_worktree(
     mut commands: Commands,
     requests: Query<
-        (Entity, &Name, Option<&ProcessAnchor>, &CreateWorktreeArgs),
-        Added<CreateWorktreeArgs>,
+        (Entity, &Name, Option<&ProcessAnchor>, &CreateWorktreeTool),
+        Added<CreateWorktreeTool>,
     >,
 ) {
     for (entity, name, anchor, args) in &requests {

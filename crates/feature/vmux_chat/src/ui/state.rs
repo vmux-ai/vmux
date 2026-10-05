@@ -12,18 +12,29 @@ use crate::event::{ChatDismissSelectorRequest, ChatResumeState};
 use crate::state::ChatUiState;
 use crate::tab::Accent;
 use dioxus::prelude::*;
-use vmux_api::prompt_media::{PromptComposerAttachment, PromptMediaOption};
+use vmux_api::mcp::McpServersUiState;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
-use vmux_ui::components::composer_bar::{
-    ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
-};
-use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
-use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{UiStateBinding, UiStateValue, send, use_selector, use_theme, use_ui_state};
+use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
+use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+
+#[derive(PartialEq)]
+pub struct ChatValue<T: 'static> {
+    pub value: Memo<T>,
+    pub ready: Memo<bool>,
+}
+
+impl<T> Clone for ChatValue<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for ChatValue<T> {}
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Chat {
+    root: Signal<ChatUiState>,
     pub transcript: Transcript,
     pub run: RunState,
     pub identity: AgentIdentity,
@@ -32,39 +43,73 @@ pub struct Chat {
     pub composer: ComposerDraft,
     pub queue: PromptQueue,
     pub media: MediaPicker,
-    pub mcp: McpConnections,
+    pub mcp: ChatValue<McpServersUiState>,
     pub models: ModelPicker,
     pub effort: EffortPicker,
     pub permissions: PermissionPicker,
     pub projects: ProjectPicker,
     pub slash: SlashCommands,
     pub resume: Resume,
-    pub selector: UiStateValue<ChatSelectorState>,
-    pub menu: ComposerMenu,
+    pub selector: ChatValue<ChatSelectorState>,
+    selection: Memo<Option<ChatListSelectionState>>,
+    pub menu: ChatMenu,
 }
 
 pub fn use_chat() -> Chat {
     use_theme();
-    let ui = use_ui_state::<ChatUiState>();
-    let snapshot = ui.use_value::<ChatSnapshot>();
-    let composer_context = ui.use_value::<ComposerContext>();
-    let mode = ui.use_value::<crate::event::ModeState>();
-    let model = ui.use_value::<crate::event::ModelState>();
-    let attachments = ui.use_value::<ChatAttachments>();
-    let media = ui.use_value::<ChatMediaState>();
-    let branches = ui.use_value::<ChatBranchesState>();
-    let resume = ui.use_value::<ChatResumeState>();
-    let selector = ui.use_value::<ChatSelectorState>();
+    let root = use_ui_state::<ChatUiState>().state;
+    let always_ready = use_memo(|| true);
+    let snapshot = ChatValue {
+        value: use_memo(move || root.read().snapshot.clone()),
+        ready: use_memo(move || root.read().snapshot_ready),
+    };
+    let composer_context = ChatValue {
+        value: use_memo(move || root.read().composer.clone()),
+        ready: use_memo(move || root.read().composer_ready),
+    };
+    let mode = ChatValue {
+        value: use_memo(move || root.read().mode.clone()),
+        ready: always_ready,
+    };
+    let model = ChatValue {
+        value: use_memo(move || root.read().model.clone()),
+        ready: use_memo(move || root.read().model_ready),
+    };
+    let attachments = ChatValue {
+        value: use_memo(move || root.read().attachments.clone()),
+        ready: always_ready,
+    };
+    let media = ChatValue {
+        value: use_memo(move || root.read().media.clone()),
+        ready: always_ready,
+    };
+    let branches = ChatValue {
+        value: use_memo(move || root.read().branches.clone()),
+        ready: always_ready,
+    };
+    let resume = ChatValue {
+        value: use_memo(move || root.read().resume.clone()),
+        ready: always_ready,
+    };
+    let selector = ChatValue {
+        value: use_memo(move || root.read().selector.clone()),
+        ready: always_ready,
+    };
+    let mcp = ChatValue {
+        value: use_memo(move || root.read().mcp.clone()),
+        ready: always_ready,
+    };
     let chat = Chat {
-        transcript: use_transcript(ui),
-        run: use_run_state(snapshot),
+        root,
+        transcript: use_transcript(root),
+        run: RunState { snapshot },
         identity: AgentIdentity { snapshot },
-        user: use_user_identity(snapshot),
+        user: UserIdentity { snapshot },
         handoff: Handoff { snapshot },
         composer: use_composer_draft(attachments),
         queue: PromptQueue { snapshot },
         media: MediaPicker { state: media },
-        mcp: use_mcp_connections(),
+        mcp,
         models: ModelPicker { state: model },
         effort: EffortPicker { state: model },
         permissions: PermissionPicker { state: mode },
@@ -72,63 +117,32 @@ pub fn use_chat() -> Chat {
             context: composer_context,
             branches,
         },
-        slash: use_slash_commands(composer_context),
+        slash: SlashCommands {
+            context: composer_context,
+        },
         resume: Resume { state: resume },
         selector,
-        menu: use_composer_menu(),
+        selection: use_memo(move || root.read().list_selection),
+        menu: ChatMenu {
+            state: use_memo(move || root.read().composer_menu.clone()),
+        },
     };
-    chat.listen(ui);
+    chat.listen(root);
     chat.watch();
     chat
 }
 
 impl Chat {
-    fn listen(&self, ui: UiStateBinding<ChatUiState>) {
+    fn listen(&self, root: Signal<ChatUiState>) {
         let chat = *self;
-        let mut previous_snapshot = use_signal(ChatSnapshot::default);
-        ui.use_updates::<ChatSnapshot>(move |snapshot| {
-            let previous = previous_snapshot.peek();
-            let choices_changed = previous.choice_options != snapshot.choice_options;
-            let approval_changed = {
-                let previous_approval = if previous.status == "awaiting" {
-                    previous.approval.as_ref()
-                } else {
-                    None
-                };
-                let next_approval = if snapshot.status == "awaiting" {
-                    snapshot.approval.as_ref()
-                } else {
-                    None
-                };
-                previous_approval != next_approval
+        use_effect(move || {
+            chat.apply_composer_effect(&root.read().composer_effect);
+        });
+        let chat = *self;
+        use_effect(move || {
+            let Some(effect) = root.read().prompt_focus else {
+                return;
             };
-            drop(previous);
-            if choices_changed {
-                set_if_changed(chat.slash.menu_sel, 0);
-            }
-            if approval_changed {
-                set_if_changed(chat.run.approval_sel, 0);
-            }
-            previous_snapshot.set(snapshot);
-        });
-        let chat = *self;
-        ui.use_updates::<crate::event::ModelState>(move |_| {
-            set_if_changed(chat.slash.menu_sel, 0);
-        });
-        let chat = *self;
-        ui.use_updates::<ChatMediaState>(move |_| {
-            set_if_changed(chat.slash.menu_sel, 0);
-        });
-        let chat = *self;
-        ui.use_updates::<ChatResumeState>(move |_| {
-            set_if_changed(chat.slash.menu_sel, 0);
-        });
-        let chat = *self;
-        ui.use_updates::<ChatComposerEffect>(move |effect| {
-            chat.apply_composer_effect(&effect);
-        });
-        let chat = *self;
-        ui.use_updates::<crate::event::ChatPromptFocusEffect>(move |effect| {
             if effect.revision <= *chat.composer.focus_revision.peek() {
                 return;
             }
@@ -136,45 +150,6 @@ impl Chat {
             focus_revision.set(effect.revision);
             PromptFocus::end(PROMPT_INPUT_ID);
         });
-        let chat = *self;
-        ui.use_updates::<ChatListSelectionState>(move |selection| {
-            chat.apply_list_selection(selection);
-        });
-        let chat = *self;
-        ui.use_updates::<ChatComposerMenuState>(move |menu| {
-            chat.apply_composer_menu(&menu);
-        });
-    }
-
-    fn apply_list_selection(&self, selection: ChatListSelectionState) {
-        match selection.kind {
-            ChatListKind::Approval => {
-                set_if_changed(self.run.approval_sel, selection.index as usize);
-            }
-            ChatListKind::Composer => self.menu.point_at(selection.index as usize),
-            ChatListKind::Choice
-            | ChatListKind::Media
-            | ChatListKind::Mcp
-            | ChatListKind::Session
-            | ChatListKind::Model
-            | ChatListKind::Command => {
-                set_if_changed(self.slash.menu_sel, selection.index as usize);
-            }
-        }
-    }
-
-    fn apply_composer_menu(&self, state: &ChatComposerMenuState) {
-        let Some(kind) = state.menu else {
-            self.menu.close();
-            return;
-        };
-        let kind = match kind {
-            ChatComposerMenuKind::Effort => ComposerMenuKind::Effort,
-            ChatComposerMenuKind::Permission => ComposerMenuKind::Permission,
-            ChatComposerMenuKind::Project => ComposerMenuKind::Project,
-            ChatComposerMenuKind::Branch => ComposerMenuKind::Branch,
-        };
-        self.menu.show_at(kind, state.index as usize);
     }
 
     fn apply_composer_effect(&self, effect: &ChatComposerEffect) {
@@ -182,11 +157,7 @@ impl Chat {
             return;
         }
         let mut revision = self.composer.effect_revision;
-        let mut draft = self.composer.draft;
-        let mut menu_sel = self.slash.menu_sel;
         revision.set(effect.revision);
-        draft.set(effect.draft.clone());
-        menu_sel.set(0);
         if effect.focus {
             PromptFocus::end(PROMPT_INPUT_ID);
         }
@@ -196,29 +167,78 @@ impl Chat {
         let chat = *self;
         use_effect(move || PromptFocus::end(PROMPT_INPUT_ID));
         use_effect(move || {
-            let _ = chat.transcript.state.read().items.len();
+            let _ = chat.transcript.current().items.len();
             let _ = chat.run.status();
             if !*chat.transcript.at_bottom.peek() {
                 return;
             }
             scroll::to_bottom(chat.transcript.scroll_container);
         });
-        use_selector(chat.slash.menu_sel, move |selected| {
-            let selector = chat.selector.value.read().active;
-            let _ = chat.resume.state.value.read().sessions.len();
-            let _ = chat.media.state.value.read().entries.len();
-            if !chat.run.choice_options().is_empty() {
-                format!("agent-choice-item-{selected}")
-            } else if selector == Some(ChatListKind::Media) {
-                format!("prompt-media-item-{selected}")
-            } else {
-                format!("agent-selector-item-{selected}")
-            }
-        });
+        use_selector(
+            move || chat.list_selection(),
+            move |selected| {
+                let selector = chat.selector.value.read().active;
+                let _ = chat.resume.state.value.read().sessions.len();
+                let _ = chat.media.state.value.read().entries.len();
+                if !chat.run.choice_options().is_empty() {
+                    format!("agent-choice-item-{selected}")
+                } else if selector == Some(ChatListKind::Media) {
+                    format!("prompt-media-item-{selected}")
+                } else {
+                    format!("agent-selector-item-{selected}")
+                }
+            },
+        );
     }
 
     pub fn request_history(&self) {
         let _ = send(&ChatHistoryMoreRequest);
+    }
+
+    pub fn list_selection(&self) -> usize {
+        let Some(selection) = *self.selection.read() else {
+            return 0;
+        };
+        match selection.kind {
+            ChatListKind::Choice
+            | ChatListKind::Media
+            | ChatListKind::Mcp
+            | ChatListKind::Session
+            | ChatListKind::Model
+            | ChatListKind::Command => selection.index as usize,
+            ChatListKind::Approval | ChatListKind::Composer => 0,
+        }
+    }
+
+    pub fn approval_selection(&self) -> usize {
+        let Some(selection) = *self.selection.read() else {
+            return 0;
+        };
+        if selection.kind == ChatListKind::Approval {
+            return selection.index as usize;
+        }
+        0
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct ChatMenu {
+    state: Memo<ChatComposerMenuState>,
+}
+
+impl ChatMenu {
+    pub fn opened(self) -> Option<ComposerMenuKind> {
+        match self.state.read().menu {
+            Some(ChatComposerMenuKind::Effort) => Some(ComposerMenuKind::Effort),
+            Some(ChatComposerMenuKind::Permission) => Some(ComposerMenuKind::Permission),
+            Some(ChatComposerMenuKind::Project) => Some(ComposerMenuKind::Project),
+            Some(ChatComposerMenuKind::Branch) => Some(ComposerMenuKind::Branch),
+            None => None,
+        }
+    }
+
+    pub fn cursor(self) -> usize {
+        self.state.read().index as usize
     }
 }
 
@@ -265,7 +285,7 @@ impl Chat {
     }
 
     pub fn draft(&self) -> String {
-        (self.composer.draft)()
+        self.root.read().composer_draft.clone()
     }
 
     pub fn filtered_commands(&self) -> Vec<SlashCommandEntry> {
@@ -321,34 +341,12 @@ impl Chat {
         self.selector.value.read().active == Some(ChatListKind::Media)
     }
 
-    pub fn media_options(&self) -> Vec<PromptMediaOption> {
-        let mut options = Vec::new();
-        for entry in &self.media.state.value.read().entries {
-            options.push(PromptMediaOption {
-                key: format!("media-{}", entry.path),
-                name: entry.name.clone(),
-                display_path: entry.display_path(),
-                preview_data_url: entry.preview_data_url.clone(),
-                label: FilePath(&entry.name).extension_label(),
-                is_dir: entry.is_dir,
-            });
-        }
-        options
+    pub fn media_options(&self) -> Vec<vmux_api::prompt_media::PromptMediaOption> {
+        self.root.read().composer_media.options.clone()
     }
 
-    pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
-        let attachments = self.composer.attachments.value.read();
-        let mut rendered = Vec::with_capacity(attachments.attachments.len());
-        for (index, attachment) in attachments.attachments.iter().enumerate() {
-            rendered.push(PromptComposerAttachment {
-                key: format!("attachment-{}", attachment.path),
-                name: attachment.name.clone(),
-                label: FilePath(&attachment.name).extension_label(),
-                preview_data_url: attachment.preview_data_url.clone(),
-                remove_index: Some(index as u32),
-            });
-        }
-        rendered
+    pub fn composer_attachments(&self) -> Vec<vmux_api::prompt_media::PromptComposerAttachment> {
+        self.root.read().composer_media.attachments.clone()
     }
 
     pub fn streaming(&self) -> bool {
@@ -541,7 +539,7 @@ impl Chat {
 impl Chat {
     pub fn submit(&self) {
         let mut at_bottom = self.transcript.at_bottom;
-        let text = self.composer.draft.peek().trim().to_string();
+        let text = self.draft().trim().to_string();
         let selected = self.composer.attachments.value.peek().attachments.clone();
         if text.is_empty() && selected.is_empty() {
             return;
@@ -615,21 +613,17 @@ impl Chat {
     }
 
     pub fn edit_draft(&self, value: String) {
-        let mut menu_sel = self.slash.menu_sel;
         let _ = send(&ChatComposerMenuRequest {
             menu: None,
             index: 0,
         });
         self.set_draft(value);
-        menu_sel.set(0);
     }
 
     pub(crate) fn set_draft(&self, value: String) {
-        let mut draft = self.composer.draft;
-        if draft.peek().as_str() == value.as_str() {
+        if self.root.peek().composer_draft == value {
             return;
         }
-        draft.set(value.clone());
         let _ = send(&ChatDraftChanged { text: value });
     }
 
@@ -646,58 +640,30 @@ impl Chat {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Transcript {
-    pub state: Signal<ChatTranscriptState>,
+    root: Signal<ChatUiState>,
     pub at_bottom: Signal<bool>,
     pub last_top: Signal<i32>,
     pub scroll_container: scroll::Container,
 }
 
-pub fn use_transcript(ui: UiStateBinding<ChatUiState>) -> Transcript {
-    let transcript = Transcript {
-        state: use_signal(ChatTranscriptState::default),
+pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
+    Transcript {
+        root,
         at_bottom: use_signal(|| true),
         last_top: use_signal(|| 0),
         scroll_container: use_signal(|| None),
-    };
-    let current = transcript;
-    ui.use_updates::<ChatTranscriptState>(move |state| current.apply(state));
-    transcript
+    }
 }
 
 impl Transcript {
-    fn apply(self, state: ChatTranscriptState) {
-        let previous = self.state.peek();
-        let preserve_scroll = previous.generation == state.generation
-            && previous.prepend_revision != state.prepend_revision;
-        let metrics = if preserve_scroll {
-            scroll::metrics(self.scroll_container)
-        } else {
-            None
-        };
-        drop(previous);
-        let mut current = self.state;
-        current.set(state);
-        if let Some((height, top)) = metrics {
-            scroll::restore(self.scroll_container, height, top);
-        }
-    }
-
     pub fn current(self) -> ChatTranscriptState {
-        self.state.read().clone()
+        self.root.read().transcript.clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct RunState {
-    snapshot: UiStateValue<ChatSnapshot>,
-    pub approval_sel: Signal<usize>,
-}
-
-pub fn use_run_state(snapshot: UiStateValue<ChatSnapshot>) -> RunState {
-    RunState {
-        snapshot,
-        approval_sel: use_signal(|| 0),
-    }
+    snapshot: ChatValue<ChatSnapshot>,
 }
 
 impl RunState {
@@ -731,7 +697,7 @@ impl RunState {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct AgentIdentity {
-    snapshot: UiStateValue<ChatSnapshot>,
+    snapshot: ChatValue<ChatSnapshot>,
 }
 
 impl AgentIdentity {
@@ -750,11 +716,7 @@ impl AgentIdentity {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct UserIdentity {
-    snapshot: UiStateValue<ChatSnapshot>,
-}
-
-pub fn use_user_identity(snapshot: UiStateValue<ChatSnapshot>) -> UserIdentity {
-    UserIdentity { snapshot }
+    snapshot: ChatValue<ChatSnapshot>,
 }
 
 impl UserIdentity {
@@ -779,7 +741,7 @@ impl UserIdentity {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Handoff {
-    snapshot: UiStateValue<ChatSnapshot>,
+    snapshot: ChatValue<ChatSnapshot>,
 }
 
 impl Handoff {
@@ -799,15 +761,13 @@ impl Handoff {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ComposerDraft {
-    pub draft: Signal<String>,
     pub effect_revision: Signal<u64>,
     pub focus_revision: Signal<u64>,
-    pub attachments: UiStateValue<ChatAttachments>,
+    pub attachments: ChatValue<ChatAttachments>,
 }
 
-pub fn use_composer_draft(attachments: UiStateValue<ChatAttachments>) -> ComposerDraft {
+pub fn use_composer_draft(attachments: ChatValue<ChatAttachments>) -> ComposerDraft {
     ComposerDraft {
-        draft: use_signal(String::new),
         effect_revision: use_signal(|| 0),
         focus_revision: use_signal(|| 0),
         attachments,
@@ -816,7 +776,7 @@ pub fn use_composer_draft(attachments: UiStateValue<ChatAttachments>) -> Compose
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct PromptQueue {
-    snapshot: UiStateValue<ChatSnapshot>,
+    snapshot: ChatValue<ChatSnapshot>,
 }
 
 impl PromptQueue {
@@ -831,7 +791,7 @@ impl PromptQueue {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct MediaPicker {
-    state: UiStateValue<ChatMediaState>,
+    state: ChatValue<ChatMediaState>,
 }
 
 impl MediaPicker {
@@ -842,7 +802,7 @@ impl MediaPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ModelPicker {
-    state: UiStateValue<crate::event::ModelState>,
+    state: ChatValue<crate::event::ModelState>,
 }
 
 impl ModelPicker {
@@ -853,8 +813,8 @@ impl ModelPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ProjectPicker {
-    context: UiStateValue<ComposerContext>,
-    branches: UiStateValue<ChatBranchesState>,
+    context: ChatValue<ComposerContext>,
+    branches: ChatValue<ChatBranchesState>,
 }
 
 impl ProjectPicker {
@@ -869,7 +829,7 @@ impl ProjectPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct EffortPicker {
-    state: UiStateValue<crate::event::ModelState>,
+    state: ChatValue<crate::event::ModelState>,
 }
 
 impl EffortPicker {
@@ -880,7 +840,7 @@ impl EffortPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct PermissionPicker {
-    state: UiStateValue<crate::event::ModeState>,
+    state: ChatValue<crate::event::ModeState>,
 }
 
 impl PermissionPicker {
@@ -891,15 +851,7 @@ impl PermissionPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct SlashCommands {
-    pub menu_sel: Signal<usize>,
-    context: UiStateValue<ComposerContext>,
-}
-
-pub fn use_slash_commands(context: UiStateValue<ComposerContext>) -> SlashCommands {
-    SlashCommands {
-        menu_sel: use_signal(|| 0),
-        context,
-    }
+    context: ChatValue<ComposerContext>,
 }
 
 impl SlashCommands {
@@ -910,17 +862,11 @@ impl SlashCommands {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Resume {
-    state: UiStateValue<ChatResumeState>,
+    state: ChatValue<ChatResumeState>,
 }
 
 impl Resume {
     pub fn current(self) -> ChatResumeState {
         self.state.value.read().clone()
-    }
-}
-
-fn set_if_changed<T: PartialEq + 'static>(mut signal: Signal<T>, value: T) {
-    if signal.peek().ne(&value) {
-        signal.set(value);
     }
 }

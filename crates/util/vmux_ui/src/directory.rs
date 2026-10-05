@@ -4,11 +4,11 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::prelude::*;
 use vmux_ecs::event::FileDirEntry;
 
+use crate::cn::cn;
 use crate::file_icon::TypeIcon;
 use crate::focus::FocusClaim;
 use crate::platform::Platform;
 use crate::scroll::ScrollIntoView;
-use crate::util::cn;
 
 #[component]
 pub fn DirectoryNavigator(
