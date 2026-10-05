@@ -1,3 +1,5 @@
+pub use platform::{NativeSheet, install};
+
 #[cfg(target_os = "ios")]
 mod platform {
     use std::cell::RefCell;
@@ -133,7 +135,7 @@ mod platform {
     }
 
     async fn wait_for_paint() {
-        vmux_ui::platform::sleep_ms(48).await;
+        vmux_ui::platform::Platform::sleep(48).await;
     }
 }
 
@@ -156,5 +158,3 @@ mod platform {
         pub fn finish(self) {}
     }
 }
-
-pub use platform::{NativeSheet, install};

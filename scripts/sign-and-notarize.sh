@@ -130,21 +130,47 @@ ditto -c -k --keepParent "$APP_BUNDLE" "$NOTARIZE_ZIP"
 ls -lh "$NOTARIZE_ZIP"
 
 echo "==> Submitting for notarization (this may take several minutes)"
-SUBMIT_OUTPUT="$(xcrun notarytool submit "$NOTARIZE_ZIP" \
-    --apple-id "$APPLE_ID" \
-    --password "$APPLE_APP_PASSWORD" \
-    --team-id "$APPLE_TEAM_ID" \
-    --wait 2>&1)"
-echo "$SUBMIT_OUTPUT"
-SUBMIT_ID="$(echo "$SUBMIT_OUTPUT" | awk '/^  id:/ {print $2; exit}')"
-if echo "$SUBMIT_OUTPUT" | grep -q "status: Invalid\|status: Rejected"; then
-    echo "==> Notarization failed; fetching log for $SUBMIT_ID"
-    xcrun notarytool log "$SUBMIT_ID" \
+SUBMIT_OUTPUT=""
+SUBMIT_STATUS=1
+SUBMIT_ID=""
+for attempt in 1 2 3; do
+    set +e
+    SUBMIT_OUTPUT="$(xcrun notarytool submit "$NOTARIZE_ZIP" \
         --apple-id "$APPLE_ID" \
         --password "$APPLE_APP_PASSWORD" \
-        --team-id "$APPLE_TEAM_ID" || true
-    exit 1
-fi
+        --team-id "$APPLE_TEAM_ID" \
+        --wait 2>&1)"
+    SUBMIT_STATUS=$?
+    set -e
+    echo "$SUBMIT_OUTPUT"
+    SUBMIT_ID="$(echo "$SUBMIT_OUTPUT" | awk '/^  id:/ {print $2; exit}')"
+    if echo "$SUBMIT_OUTPUT" | grep -q "status: Invalid\|status: Rejected"; then
+        echo "==> Notarization failed; fetching log for $SUBMIT_ID"
+        xcrun notarytool log "$SUBMIT_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" || true
+        exit 1
+    fi
+    if echo "$SUBMIT_OUTPUT" | grep -qi "required agreement"; then
+        exit "$SUBMIT_STATUS"
+    fi
+    if [ "$SUBMIT_STATUS" -eq 0 ]; then
+        break
+    fi
+    if [ -n "$SUBMIT_ID" ] || [ "$attempt" -eq 3 ]; then
+        if [ -n "$SUBMIT_ID" ]; then
+            echo "==> Notarization command failed; fetching log for $SUBMIT_ID"
+            xcrun notarytool log "$SUBMIT_ID" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_APP_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" || true
+        fi
+        exit "$SUBMIT_STATUS"
+    fi
+    echo "==> Notarization submission failed before receiving an ID; retrying ($attempt/3)"
+    sleep $((attempt * 15))
+done
 
 echo "==> Stapling notarization ticket"
 xcrun stapler staple "$APP_BUNDLE"

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${TAILWINDCSS_VERSION:-4.2.4}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../tool-versions.env"
+VERSION="$TAILWINDCSS_VERSION"
 INSTALL_DIR="${TAILWINDCSS_INSTALL_DIR:-/usr/local/bin}"
 
 if command -v tailwindcss >/dev/null 2>&1; then

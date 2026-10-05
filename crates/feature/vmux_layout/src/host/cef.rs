@@ -1,0 +1,505 @@
+use bevy::prelude::*;
+use bevy_cef::prelude::*;
+use vmux_api::PageIcon;
+use vmux_api::VmuxRoute;
+use vmux_ecs::launcher::RendersLauncherPanel;
+use vmux_ecs::page::{HostsPage, PagePlacementCatalog};
+use vmux_ecs::{PageMetadata, Url};
+use vmux_flex::prelude::*;
+
+#[derive(Component)]
+pub struct Browser;
+
+#[derive(Component)]
+#[require(crate::LayoutUiStateUpdates, ReloadRevision)]
+pub struct LayoutCef;
+
+impl LayoutCef {
+    pub fn bundle(host_window: Entity) -> impl Bundle {
+        (
+            Self,
+            HostsPage,
+            RendersLauncherPanel,
+            HostWindow(host_window),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                ..default()
+            },
+            Transform::default(),
+            Visibility::Visible,
+        )
+    }
+}
+
+#[derive(Component, Default)]
+pub struct ReloadRevision(u64);
+
+impl ReloadRevision {
+    pub fn next_effect(&mut self) -> crate::event::ReloadEffect {
+        self.0 = self.0.wrapping_add(1).max(1);
+        crate::event::ReloadEffect { revision: self.0 }
+    }
+}
+
+#[derive(Component)]
+pub struct Loading;
+
+#[derive(Component, Clone, Debug, Reflect, Default)]
+#[reflect(Component)]
+pub struct NavigationState {
+    pub can_go_back: bool,
+    pub can_go_forward: bool,
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LayoutCefStateSet {
+    Apply,
+    Mirror,
+}
+
+pub struct LayoutCefPlugin;
+
+impl Plugin for LayoutCefPlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(
+            Update,
+            (LayoutCefStateSet::Apply, LayoutCefStateSet::Mirror).chain(),
+        )
+        .add_systems(
+            Update,
+            apply_state_from_webview.in_set(LayoutCefStateSet::Apply),
+        )
+        .add_systems(
+            Update,
+            mirror_metadata_to_url.in_set(LayoutCefStateSet::Mirror),
+        );
+    }
+}
+
+fn mirror_metadata_to_url(
+    cef_q: Query<&PageMetadata, (Without<Url>, Changed<PageMetadata>)>,
+    mut urls: Query<&mut PageMetadata, With<Url>>,
+) {
+    for tab_meta in cef_q.iter() {
+        if tab_meta.url.is_empty() {
+            continue;
+        }
+        for mut url_meta in urls.iter_mut() {
+            if url_meta.url == tab_meta.url {
+                if !tab_meta.title.is_empty() {
+                    url_meta.title.clone_from(&tab_meta.title);
+                }
+                if !tab_meta.icon.is_none() {
+                    url_meta.icon.clone_from(&tab_meta.icon);
+                }
+                if tab_meta.bg_color.is_some() {
+                    url_meta.bg_color.clone_from(&tab_meta.bg_color);
+                }
+                break;
+            }
+        }
+    }
+}
+
+fn apply_state_from_webview(
+    cef_rx: Res<WebviewCefStateReceiver>,
+    mut browser_meta: Query<&mut PageMetadata>,
+    pages: PagePlacementCatalog,
+) {
+    while let Ok(ev) = cef_rx.0.try_recv() {
+        let Ok(mut meta) = browser_meta.get_mut(ev.webview) else {
+            continue;
+        };
+        let reports_title = pages.reports_title(&meta.url);
+        apply_cef_state_to_meta(&mut meta, ev, reports_title);
+    }
+}
+
+fn apply_cef_state_to_meta(
+    meta: &mut PageMetadata,
+    ev: bevy_cef_core::prelude::WebviewCefStateEvent,
+    reports_title: bool,
+) {
+    let route = VmuxRoute::parse(&meta.url);
+    let on_native_view = route.is_some();
+    let navigating_away = ev
+        .url
+        .as_deref()
+        .is_some_and(|url| VmuxRoute::parse(url).is_none());
+    if on_native_view && !navigating_away {
+        if reports_title && let Some(title) = ev.title {
+            meta.title = title;
+        }
+        return;
+    }
+    if let Some(url) = ev.url {
+        meta.url = url;
+        meta.icon = PageIcon::None;
+    }
+    if let Some(title) = ev.title {
+        meta.title = title;
+    }
+    if let Some(favicon) = ev.favicon_url {
+        meta.icon = PageIcon::favicon(favicon);
+    }
+}
+
+impl Browser {
+    pub fn new(url: &str) -> impl Bundle {
+        (
+            Self,
+            WebviewWindowed,
+            WebviewWindowedNativeFocus,
+            WebviewOpaqueWindowedBackground,
+            PageMetadata {
+                title: url.to_string(),
+                url: url.to_string(),
+                icon: PageIcon::None,
+                bg_color: None,
+            },
+            WebviewSource::new(url),
+            ResolvedWebviewUri(url.to_string()),
+            WebviewSize(Vec2::new(1280.0, 720.0)),
+            Transform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            Visibility::Visible,
+        )
+    }
+
+    pub fn new_with_title(url: &str, title: &str) -> impl Bundle {
+        (
+            Self,
+            WebviewWindowed,
+            WebviewWindowedNativeFocus,
+            WebviewOpaqueWindowedBackground,
+            PageMetadata {
+                title: title.to_string(),
+                url: url.to_string(),
+                icon: PageIcon::None,
+                bg_color: None,
+            },
+            WebviewSource::new(url),
+            ResolvedWebviewUri(url.to_string()),
+            WebviewSize(Vec2::new(1280.0, 720.0)),
+            Transform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            Visibility::Visible,
+        )
+    }
+
+    pub fn hosted_page(url: &str, title: &str) -> impl Bundle {
+        Self::hosted_page_with_icon(url, title, PageIcon::None)
+    }
+
+    pub fn hosted_page_with_icon(url: &str, title: &str, icon: PageIcon) -> impl Bundle {
+        (
+            Self,
+            WebviewWindowed,
+            HostsPage,
+            PageMetadata {
+                title: title.to_string(),
+                url: url.to_string(),
+                icon,
+                bg_color: None,
+            },
+            WebviewSize(Vec2::new(1280.0, 720.0)),
+            Transform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            Visibility::Visible,
+        )
+    }
+}
+
+#[cfg(test)]
+mod apply_cef_state_tests {
+    use super::*;
+    use bevy_cef_core::prelude::WebviewCefStateEvent;
+    use vmux_ecs::PageMetadata;
+
+    fn vmux_meta() -> PageMetadata {
+        PageMetadata {
+            url: "vmux://history/".into(),
+            title: "History".into(),
+            icon: vmux_api::PageIcon::None,
+            bg_color: None,
+        }
+    }
+
+    fn external_meta() -> PageMetadata {
+        PageMetadata {
+            url: "https://example.com".into(),
+            title: "old".into(),
+            icon: vmux_api::PageIcon::None,
+            bg_color: None,
+        }
+    }
+
+    fn ev(title: Option<&str>, favicon: Option<&str>, url: Option<&str>) -> WebviewCefStateEvent {
+        WebviewCefStateEvent {
+            webview: Entity::PLACEHOLDER,
+            url: url.map(str::to_string),
+            title: title.map(str::to_string),
+            favicon_url: favicon.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn vmux_url_preserves_title_against_cef_update() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(Some("vmux history POC"), None, None), false);
+        assert_eq!(meta.title, "History");
+    }
+
+    #[test]
+    fn vmux_agent_url_accepts_dynamic_title_only() {
+        for url in ["vmux://sessions/codex", "vmux://agent/codex"] {
+            let mut meta = PageMetadata {
+                url: url.into(),
+                title: "Codex".into(),
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
+                bg_color: None,
+            };
+            apply_cef_state_to_meta(
+                &mut meta,
+                ev(
+                    Some("● Codex"),
+                    Some("https://example.com/favicon.ico"),
+                    None,
+                ),
+                true,
+            );
+            assert_eq!(meta.title, "● Codex", "{url}");
+            assert_eq!(meta.url, url);
+            assert_eq!(
+                meta.icon,
+                vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Sparkles),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn vmux_url_preserves_favicon_against_cef_update() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None), false);
+        assert_eq!(meta.icon, vmux_api::PageIcon::None);
+    }
+
+    #[test]
+    fn vmux_url_preserves_url_when_cef_reports_same_vmux_url() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("vmux://history/")), false);
+        assert_eq!(meta.url, "vmux://history/");
+        assert_eq!(meta.title, "History");
+    }
+
+    #[test]
+    fn vmux_url_updates_when_cef_navigates_to_external_url() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(
+            &mut meta,
+            ev(None, None, Some("https://anthropic.com")),
+            false,
+        );
+        assert_eq!(meta.url, "https://anthropic.com");
+    }
+
+    #[test]
+    fn after_navigation_away_subsequent_title_updates_apply() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(
+            &mut meta,
+            ev(None, None, Some("https://anthropic.com")),
+            false,
+        );
+        apply_cef_state_to_meta(&mut meta, ev(Some("Frontier AI"), None, None), false);
+        assert_eq!(meta.title, "Frontier AI");
+    }
+
+    #[test]
+    fn external_url_accepts_title_update() {
+        let mut meta = external_meta();
+        apply_cef_state_to_meta(&mut meta, ev(Some("New Title"), None, None), false);
+        assert_eq!(meta.title, "New Title");
+    }
+
+    #[test]
+    fn external_url_accepts_favicon_update() {
+        let mut meta = external_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None), false);
+        assert_eq!(
+            meta.icon,
+            vmux_api::PageIcon::Favicon("https://x/fav.ico".into())
+        );
+    }
+
+    #[test]
+    fn external_url_url_change_clears_favicon() {
+        let mut meta = PageMetadata {
+            url: "https://example.com".into(),
+            title: "Old".into(),
+            icon: vmux_api::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            bg_color: None,
+        };
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")), false);
+        assert_eq!(meta.url, "https://other.com");
+        assert_eq!(meta.icon, vmux_api::PageIcon::None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_test_page(mut commands: Commands) {
+        commands.spawn(Browser::new("https://example.com"));
+    }
+
+    #[test]
+    fn page_cef_uses_opaque_dark_initial_background() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Startup, build_test_page);
+        app.update();
+
+        let page = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Browser>, Without<LayoutCef>)>()
+            .single(app.world())
+            .expect("page CEF");
+
+        assert!(
+            app.world()
+                .get::<WebviewOpaqueWindowedBackground>(page)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn page_cef_allows_native_first_responder() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Startup, build_test_page);
+        app.update();
+
+        let page = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Browser>, Without<LayoutCef>)>()
+            .single(app.world())
+            .expect("page CEF");
+
+        assert!(
+            app.world()
+                .get::<WebviewWindowedNativeFocus>(page)
+                .is_some(),
+            "windowed web pages must allow native first-responder so they are typeable without a click"
+        );
+    }
+}
+
+#[cfg(test)]
+mod url_mirror_tests {
+    use super::*;
+    use vmux_ecs::{CreatedAt, LastVisitedAt, PageMetadata, PrimitivesPlugin, Url, VisitCount};
+
+    #[test]
+    fn updates_matching_url_meta() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(PrimitivesPlugin)
+            .add_systems(Update, mirror_metadata_to_url);
+
+        app.world_mut().spawn((
+            Url,
+            PageMetadata {
+                url: "https://example.com".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(0),
+            CreatedAt(0),
+        ));
+
+        app.world_mut().spawn(PageMetadata {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            icon: vmux_api::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            bg_color: None,
+        });
+
+        app.update();
+
+        let url_meta = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Url>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        assert_eq!(url_meta.title, "Example");
+        assert_eq!(
+            url_meta.icon,
+            vmux_api::PageIcon::Favicon("https://example.com/fav.ico".into())
+        );
+    }
+
+    #[test]
+    fn skips_empty_tab_url() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(PrimitivesPlugin)
+            .add_systems(Update, mirror_metadata_to_url);
+
+        app.world_mut().spawn((
+            Url,
+            PageMetadata {
+                url: "https://example.com".into(),
+                title: "old".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(0),
+            CreatedAt(0),
+        ));
+
+        app.world_mut().spawn(PageMetadata {
+            url: "".into(),
+            title: "new".into(),
+            ..default()
+        });
+
+        app.update();
+
+        let url_meta = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Url>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        assert_eq!(url_meta.title, "old");
+    }
+}

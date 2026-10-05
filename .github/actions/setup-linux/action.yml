@@ -1,0 +1,68 @@
+name: Setup Linux
+description: Prepare a Linux runner for Rust checks that link the desktop stack
+inputs:
+  cache-key:
+    description: Rust cache partition
+    required: true
+  cef-version:
+    description: CEF crate version
+    required: true
+  components:
+    description: Comma-separated rustup components
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      shell: bash
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+          /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
+          /usr/local/share/chromium /usr/local/share/edge
+        sudo docker image prune --all --force || true
+        df -h /
+
+    - name: Install Linux dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config \
+          libssl-dev \
+          libasound2-dev \
+          libudev-dev \
+          libx11-dev \
+          libxi-dev \
+          libxcursor-dev \
+          libxrandr-dev \
+          libxinerama-dev \
+          libxkbcommon-dev \
+          libwayland-dev \
+          libgtk-3-dev \
+          libxdo-dev \
+          libvulkan-dev
+
+    - uses: ./.github/actions/setup-rust
+      with:
+        components: ${{ inputs.components }}
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+
+    - name: Cache cargo binaries
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/bin
+        key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ inputs.cef-version }}-v3
+
+    - name: Cache CEF framework
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/share/Chromium Embedded Framework.framework
+        key: cef-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-${{ hashFiles('cef/manifest.toml') }}
+
+    - name: Install CEF framework
+      shell: bash
+      run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh

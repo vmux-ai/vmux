@@ -1,11 +1,28 @@
 #![allow(non_snake_case)]
 
+use crate::logs::Logs;
+use crate::pairing::{
+    AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest, PairingFailure,
+};
+use crate::runtime::RuntimeHandle;
+use crate::session::{LeaveSession, RestartSession, use_session};
+use bevy_app::{App as BevyApp, AppExit, Plugin};
+use dioxus::prelude::*;
+use vmux_chat::host::Agents;
+use vmux_start::roster::Roster;
+use vmux_ui::back::PageBack;
+use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
+use vmux_ui::i18n::translate;
+
+use dioxus::mobile::tao::event::Event;
+#[cfg(target_os = "ios")]
+use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
+
 mod credentials;
+mod host;
 mod lifecycle;
 mod logs;
-mod page_host;
 mod pairing;
-mod plugins;
 mod qr_scanner;
 mod quic;
 mod remote;
@@ -13,36 +30,14 @@ mod runtime;
 mod session;
 mod transition;
 
-use crate::logs::Logs;
-use crate::pairing::{Credentials, PairCard};
-use crate::plugins::PagePlugins;
-use crate::remote::{Api, ApiError};
-use crate::runtime::World;
-use crate::session::{AuthState, use_session};
-use vmux_chat::room::Agents;
-use vmux_start::roster::Roster;
-
-use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
-
-use dioxus::prelude::*;
-use vmux_ui::back::PageBack;
-use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
-use vmux_ui::i18n::translate;
-use vmux_wire::room::{RemoteAgent, RemoteSession};
-
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
-static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-
-static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
+#[cfg(target_os = "ios")]
 const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
 #[cfg(target_os = "ios")]
 fn webview_background() -> (u8, u8, u8, u8) {
-    use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
-
     let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };
     if style == UIUserInterfaceStyle::Dark {
         DARK_BACKGROUND
@@ -58,44 +53,57 @@ fn webview_background() -> (u8, u8, u8, u8) {
 
 fn main() {
     Logs::start();
-
-    World::new(|app| {
-        app.add_plugins(PagePlugins);
-    })
-    .install();
-    lifecycle::install();
-
-    let config = dioxus::mobile::Config::new()
-        .with_background_color(webview_background())
-        .with_custom_event_handler(|event, _| {
-            use dioxus::mobile::tao::event::Event;
-            match event {
-                Event::Opened { urls } => {
-                    let mut opened = OPENED_URLS
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    opened.extend(
-                        urls.iter()
-                            .filter(|url| url.scheme() == "vmux" && url.host_str() == Some("pair"))
-                            .map(ToString::to_string),
-                    );
-                }
-                Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
-                Event::MainEventsCleared => {
-                    World::with(World::tick);
-                }
-                _ => {}
-            }
-        });
-    dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
+    BevyApp::new()
+        .add_plugins((
+            vmux_app::VmuxPlugin::builder().mobile().build(),
+            MobilePlugin,
+        ))
+        .run();
 }
 
-pub(crate) fn take_resumed() -> bool {
-    RESUMED.swap(false, std::sync::atomic::Ordering::AcqRel)
+struct MobilePlugin;
+
+impl Plugin for MobilePlugin {
+    fn build(&self, app: &mut BevyApp) {
+        app.add_plugins((runtime::Plugin, pairing::Plugin, session::Plugin))
+            .set_runner(MobileRunner::run);
+    }
+}
+
+struct MobileRunner;
+
+impl MobileRunner {
+    fn run(app: BevyApp) -> AppExit {
+        let runtime = RuntimeHandle::from_app(app);
+        lifecycle::install(runtime.clone());
+
+        let event_runtime = runtime.clone();
+        let config = dioxus::mobile::Config::new()
+            .with_background_color(webview_background())
+            .with_custom_event_handler(move |event, _| match event {
+                Event::Opened { urls } => {
+                    for url in urls {
+                        if url.scheme() == "vmux" && url.host_str() == Some("pair") {
+                            event_runtime.send(PairRequest(url.to_string()));
+                        }
+                    }
+                }
+                Event::Resumed => {
+                    event_runtime.send(RestartSession);
+                }
+                Event::MainEventsCleared => event_runtime.update(),
+                _ => {}
+            });
+        dioxus::LaunchBuilder::mobile()
+            .with_cfg(config)
+            .launch(MobileApp);
+        AppExit::Success
+    }
 }
 
 #[component]
-fn App() -> Element {
+fn MobileApp() -> Element {
+    use_context_provider(RuntimeHandle::ui);
     rsx! {
         AppHead {}
         AppBody {}
@@ -104,227 +112,49 @@ fn App() -> Element {
 
 #[component]
 fn AppBody() -> Element {
+    let runtime = use_context::<RuntimeHandle>();
     transition::install(&dioxus::mobile::window());
-    qr_scanner::install(&dioxus::mobile::window());
-    let mut auth = use_signal(|| AuthState::Loading);
-    let mut pair_url = use_signal(String::new);
-    let mut error = use_signal(String::new);
-    let mut api = use_signal(|| None::<Api>);
-    let mut sessions = use_signal(Vec::<RemoteSession>::new);
-    let mut agents = use_signal(Vec::<RemoteAgent>::new);
-    let session = use_session();
-    let composer = page_host::use_composer_exchange();
-    let mut reachable = use_signal(|| false);
-    let mut pending_pair_url = use_signal(|| None::<String>);
-    let mut deep_link_received = use_signal(|| false);
-    let mut pairing = use_signal(|| false);
+    qr_scanner::install(&dioxus::mobile::window(), runtime.clone());
+    let connection = pairing::use_connection(runtime.clone());
+    let api = connection.api;
+    let sessions = connection.sessions;
+    let agents = connection.agents;
+    let session = use_session(runtime.clone());
+    let composer = host::use_composer_exchange();
     let mut team_open = use_signal(|| false);
 
+    let page_back_runtime = runtime.clone();
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
             team_open.set(false);
-            session.leave();
+            page_back_runtime.send(LeaveSession);
         }))
     });
 
+    let host_runtime = runtime.clone();
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(client, sessions, session, composer);
+            host::install(host_runtime.clone(), client, sessions, session, composer);
         }
     });
 
+    let roster_runtime = runtime.clone();
     use_effect(move || {
         let roster = Roster {
             sessions: sessions(),
             agents: agents(),
         };
-        World::with(|world| world.insert(roster));
+        roster_runtime.send(roster);
     });
 
+    let agents_runtime = runtime.clone();
     use_effect(move || {
-        World::with(|world| world.insert(Agents(agents())));
+        agents_runtime.send(Agents(agents()));
     });
 
-    let _room = use_resource(move || {
-        let client = api();
-        let sid = session.sid();
-        let generation = (session.generation)();
-        async move {
-            let Some(client) = client else {
-                return;
-            };
-            if sid.is_empty() {
-                return;
-            }
-            session.stream(client, sid, generation).await;
-        }
-    });
+    let view = (connection.view)();
 
-    use_future(move || async move {
-        if let Some(opened) = take_opened_url() {
-            deep_link_received.set(true);
-            pair_url.set(opened.clone());
-            pending_pair_url.set(Some(opened));
-            auth.set(AuthState::Unpaired);
-            return;
-        }
-        let Some(credentials) = credentials::StoredCredentials::load() else {
-            if deep_link_received() {
-                return;
-            }
-            auth.set(AuthState::Unpaired);
-            return;
-        };
-        if deep_link_received() {
-            return;
-        }
-        pair_url.set(credentials.pairing_url());
-        let client = match Api::new(credentials) {
-            Ok(client) => client,
-            Err(reason) => {
-                credentials::StoredCredentials::clear();
-                error.set(reason.to_string());
-                auth.set(AuthState::Unpaired);
-                return;
-            }
-        };
-        let displaced = api.peek().clone();
-        api.set(Some(client.clone()));
-        if let Some(displaced) = displaced {
-            displaced.close();
-        }
-        auth.set(AuthState::Paired);
-        match client.sessions().await {
-            Ok(next) => {
-                sessions.set(next);
-                agents.set(client.agents().await.unwrap_or_default());
-                reachable.set(true);
-            }
-            Err(ApiError::Unauthorized) => {
-                credentials::StoredCredentials::clear();
-                error.set(translate("mobile-error-pairing-expired"));
-                auth.set(AuthState::Unpaired);
-            }
-            Err(other) => error.set(other.to_string()),
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            if let Some(opened) = take_opened_url() {
-                deep_link_received.set(true);
-                pair_url.set(opened.clone());
-                pending_pair_url.set(Some(opened));
-                error.set(String::new());
-                auth.set(AuthState::Unpaired);
-            }
-            tokio::time::sleep(Duration::from_millis(150)).await;
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            if let Some(result) = qr_scanner::take_result() {
-                match result {
-                    Ok(scanned) => {
-                        pair_url.set(scanned.clone());
-                        error.set(String::new());
-                        pending_pair_url.set(Some(scanned));
-                    }
-                    Err(message) => error.set(message),
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let pending = pending_pair_url.write().take();
-            let Some(input) = pending else {
-                continue;
-            };
-            let credentials = match Credentials::parse(&input) {
-                Ok(credentials) => credentials,
-                Err(message) => {
-                    pairing.set(false);
-                    error.set(message);
-                    auth.set(AuthState::Unpaired);
-                    continue;
-                }
-            };
-            pairing.set(true);
-            error.set(String::new());
-            let client = match Api::new(credentials.clone()) {
-                Ok(client) => client,
-                Err(reason) => {
-                    pairing.set(false);
-                    error.set(reason.to_string());
-                    auth.set(AuthState::Unpaired);
-                    continue;
-                }
-            };
-            match client.sessions().await {
-                Ok(next) => {
-                    credentials::StoredCredentials::save(&credentials);
-                    pair_url.set(credentials.pairing_url());
-                    let displaced = api.peek().clone();
-                    api.set(Some(client.clone()));
-                    if let Some(displaced) = displaced {
-                        displaced.close();
-                    }
-                    sessions.set(next);
-                    auth.set(AuthState::Paired);
-                }
-                Err(ApiError::Unauthorized) => {
-                    error.set(translate("mobile-error-token-rejected"));
-                    auth.set(AuthState::Unpaired);
-                }
-                Err(other) => {
-                    error.set(other.to_string());
-                    auth.set(AuthState::Unpaired);
-                }
-            }
-            pairing.set(false);
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            if auth() != AuthState::Paired {
-                continue;
-            }
-            let Some(client) = api() else {
-                continue;
-            };
-            match client.sessions().await {
-                Ok(next) => {
-                    sessions.set(next);
-                    reachable.set(true);
-                    error.set(String::new());
-                }
-                Err(ApiError::Unauthorized) => {
-                    reachable.set(false);
-                    credentials::StoredCredentials::clear();
-                    let displaced = api.peek().clone();
-                    api.set(None);
-                    if let Some(displaced) = displaced {
-                        displaced.close();
-                    }
-                    error.set(translate("mobile-error-pairing-expired"));
-                    auth.set(AuthState::Unpaired);
-                }
-                Err(other) => {
-                    reachable.set(false);
-                    error.set(other.to_string());
-                }
-            }
-        }
-    });
-
-    if auth() == AuthState::Loading {
+    if view.auth == AuthState::Loading {
         return rsx! {
             div { class: "flex h-dvh items-center justify-center bg-background text-foreground",
                 div { class: "h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" }
@@ -332,18 +162,25 @@ fn AppBody() -> Element {
         };
     }
 
-    if auth() == AuthState::Unpaired {
+    if view.auth == AuthState::Unpaired {
+        let value_runtime = runtime.clone();
+        let pair_runtime = runtime.clone();
+        let scan_runtime = runtime.clone();
+        let pair_url = view.pair_url.clone();
         return rsx! {
             PairScreen {
-                value: pair_url(),
-                error: error(),
-                pairing: pairing(),
-                on_value: move |value| pair_url.set(value),
-                on_pair: move |_| pending_pair_url.set(Some(pair_url())),
+                value: view.pair_url,
+                error: view.error,
+                pairing: view.pairing,
+                on_value: move |value| {
+                    value_runtime.send(PairLinkChanged(value));
+                },
+                on_pair: move |_| {
+                    pair_runtime.send(PairRequest(pair_url.clone()));
+                },
                 on_scan: move |_| {
-                    error.set(String::new());
                     if let Err(message) = qr_scanner::open() {
-                        error.set(message);
+                        scan_runtime.send(PairingFailure(message));
                     }
                 },
             }
@@ -361,36 +198,27 @@ fn AppBody() -> Element {
                         {translate("mobile-chat-back")}
                     }
                 }
-                div { class: "min-h-0 flex-1", vmux_team::page::Page {} }
+                div { class: "min-h-0 flex-1", vmux_team::ui::Page {} }
             }
         };
     }
 
     if session.is_open() {
         return rsx! {
-            vmux_chat::page::Page {}
+            vmux_chat::ui::Page {}
         };
     }
 
     rsx! {
         div { class: "relative h-dvh bg-background",
             div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
-                vmux_start::page::Page {}
+                vmux_start::ui::Page {}
             }
             LinkStatus {
-                reachable: reachable(),
+                reachable: view.reachable,
                 on_team: move |_| team_open.set(true),
                 on_disconnect: move |_| {
-                    credentials::StoredCredentials::clear();
-                    session.leave();
-                    let displaced = api.peek().clone();
-                    api.set(None);
-                    if let Some(displaced) = displaced {
-                        displaced.close();
-                    }
-                    sessions.set(Vec::new());
-                    agents.set(Vec::new());
-                    auth.set(AuthState::Unpaired);
+                    runtime.send(DisconnectRequest);
                 },
             }
         }
@@ -472,11 +300,4 @@ fn AppHead() -> Element {
         document::Meta { name: "color-scheme", content: "light dark" }
         document::Stylesheet { href: TAILWIND_CSS }
     }
-}
-
-fn take_opened_url() -> Option<String> {
-    OPENED_URLS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .pop()
 }

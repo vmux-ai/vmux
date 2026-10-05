@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "${ROOT}/tool-versions.env"
 CARGO_BIN="${CARGO_BIN:-$(command -v cargo 2>/dev/null || echo "${HOME}/.cargo/bin/cargo")}"
 RUSTUP_BIN="${RUSTUP_BIN:-$(command -v rustup 2>/dev/null || echo "${HOME}/.cargo/bin/rustup")}"
 DX_BIN="${DX_BIN:-$(command -v dx 2>/dev/null || echo "${HOME}/.cargo/bin/dx")}"
@@ -128,7 +129,7 @@ if [[ -x "${DX_BIN}" ]]; then
 	ok_line "dx (dioxus-cli) — ${DX_BIN}"
 else
 	bad_line "dx not found"
-	tip "Run: ${BOLD}\"${CARGO_BIN}\" install dioxus-cli --locked --version 0.7.9${RESET}"
+	tip "Run: ${BOLD}\"${CARGO_BIN}\" install dioxus-cli --locked --version ${DIOXUS_CLI_VERSION}${RESET}"
 	tip "Dioxus UIs build via ${BOLD}dx build${RESET} (Tailwind + wasm-bindgen are bundled; Node.js not required)"
 fi
 
@@ -137,7 +138,7 @@ if [[ -x "${CARGO_PACKAGER_BIN}" ]]; then
 	ok_line "cargo-packager — ${CARGO_PACKAGER_BIN}"
 else
 	bad_line "cargo-packager not found"
-	tip "Run: ${BOLD}\"${CARGO_BIN}\" install cargo-packager --locked${RESET}"
+	tip "Expected patched cargo-packager ${CARGO_PACKAGER_VERSION}${RESET}"
 fi
 
 if [[ -x "${BEVY_CEF_BUNDLE_APP_BIN}" ]]; then

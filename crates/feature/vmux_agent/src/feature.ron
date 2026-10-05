@@ -1,0 +1,66 @@
+(
+    tool_providers: [
+        (id: "acp", title: "Agents", title_message_id: "tools-provider-acp-agents", route_title: "Agents", route_title_message_id: "tools-provider-acp-agents", short_label: "acp", route: "acp", rank: 0, thumbnails: true),
+    ],
+    settings: Some((
+        defaults: (
+            agent: Some((
+                allow_run_placement_override: false,
+                follow_files: true,
+                tidy_files: true,
+                tidy_files_max: 5,
+                acp: [
+                    (id: "claude", name: "Claude Code", command: "npx", args: ["-y", "@zed-industries/claude-code-acp@latest"]),
+                    (id: "codex", name: "Codex", command: "npx", args: ["-y", "@zed-industries/codex-acp@latest"]),
+                    (id: "gemini", name: "Gemini CLI", command: "npx", args: ["-y", "--", "@google/gemini-cli@latest", "--experimental-acp"]),
+                ],
+            )),
+        ),
+        sections: [(
+            id: "agent",
+            title: "schema-agent",
+            description: Some("schema-agent-detail"),
+            root_path: "agent",
+            order: 30,
+        )],
+        fields: [
+            (
+                path: "agent",
+                order: [
+                    "allow_run_placement_override",
+                    "follow_files",
+                    "tidy_files",
+                    "tidy_files_max",
+                    "tidy_files_auto",
+                    "acp",
+                ],
+            ),
+            (
+                path: "agent.allow_run_placement_override",
+                label: Some("schema-run-placement"),
+                hint: Some("schema-run-placement-detail"),
+            ),
+            (path: "agent.follow_files", label: Some("schema-follow-files")),
+            (path: "agent.tidy_files", label: Some("schema-tidy-files")),
+            (path: "agent.tidy_files_max", label: Some("schema-tidy-files-max")),
+            (path: "agent.tidy_files_auto", label: Some("schema-tidy-files-auto")),
+            (path: "agent.acp", label: Some("schema-acp")),
+            (path: "agent.acp[].id", label: Some("schema-id")),
+            (path: "agent.acp[].name", label: Some("schema-name")),
+            (path: "agent.acp[].command", label: Some("schema-command")),
+            (path: "agent.acp[].args", label: Some("schema-arguments")),
+            (path: "agent.acp[].env", label: Some("schema-environment")),
+            (path: "agent.acp[].cwd", label: Some("schema-working-directory")),
+        ],
+    )),
+    policies: Some((
+        acp_registry: (
+            url: "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+        ),
+        acp_workspace: (
+            unbound: "VMUX HOST POLICY (mandatory): This tab starts in ~/.vmux/projects and has no selected project. Before accessing project files or running project commands, call select_project with the known project path or without a path to open the picker. Paths inside ~/.vmux/projects are selected immediately; paths outside it require explicit user approval in the native picker. For a new project, do not ask the user to invent a folder location. First call request_user_choice with two concrete options: create the project at a suggested path under ~/.vmux/projects, or choose an existing project. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. If the user chooses creation, use run only to create the empty directory, then call select_project with that path. vmux will offer Git initialization and use the new project root directly; never call create_worktree for that new project. Do not search the user's home directory. General questions and self-contained terminal demonstrations may use the current directory without selecting a project.",
+            pending_worktree: "VMUX HOST POLICY (mandatory): Project activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected project before inspecting, editing, testing, or running it.",
+            repository_needs_worktree: "VMUX HOST POLICY (mandatory): The selected project is a Git repository, but this tab is not isolated. Reading and inspection are allowed without a worktree. Never call create_worktree for requests that only read, show, search, or explain existing files. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.",
+        ),
+    )),
+)

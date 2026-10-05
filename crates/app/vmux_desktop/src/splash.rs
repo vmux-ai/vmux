@@ -2,62 +2,59 @@ use std::time::Duration;
 use std::time::Instant;
 
 use bevy::prelude::*;
-use objc2::rc::Retained;
-use objc2_app_kit::NSPanel;
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
+use objc2_app_kit::{
+    NSAnimatablePropertyContainer, NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSFont,
+    NSGlassEffectView, NSGlassEffectViewStyle, NSPanel, NSProgressIndicator,
+    NSProgressIndicatorStyle, NSScreen, NSTextAlignment, NSTextField, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
+    NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 pub(crate) struct SplashPlugin;
 
 impl Plugin for SplashPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<SplashState>()
-            .add_systems(Startup, show_splash)
-            .add_systems(Last, (update_splash_text, dismiss_splash).chain());
+            .add_systems(Startup, show)
+            .add_systems(Last, (update_text, dismiss).chain());
     }
 }
 
 const SPLASH_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SplashAction {
+enum SplashDismissDecision {
     None,
     Fade,
     Force,
 }
 
-fn splash_decision(visible: bool, dismissed: bool, elapsed: Duration) -> SplashAction {
+fn splash_decision(visible: bool, dismissed: bool, elapsed: Duration) -> SplashDismissDecision {
     if dismissed {
-        return SplashAction::None;
+        return SplashDismissDecision::None;
     }
     if visible {
-        return SplashAction::Fade;
+        return SplashDismissDecision::Fade;
     }
     if elapsed >= SPLASH_TIMEOUT {
-        return SplashAction::Force;
+        return SplashDismissDecision::Force;
     }
-    SplashAction::None
+    SplashDismissDecision::None
 }
 
 #[derive(Default)]
 struct SplashState {
     window: Option<Retained<NSPanel>>,
-    status_label: Option<Retained<objc2_app_kit::NSTextField>>,
+    status_label: Option<Retained<NSTextField>>,
     shown: bool,
     dismissed: bool,
     created_at: Option<Instant>,
     fade_started: Option<Instant>,
 }
 
-fn show_splash(mut state: NonSendMut<SplashState>) {
-    use objc2::{ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
-    use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSFont, NSGlassEffectView,
-        NSGlassEffectViewStyle, NSProgressIndicator, NSProgressIndicatorStyle, NSScreen,
-        NSTextAlignment, NSTextField, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-        NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior,
-        NSWindowStyleMask,
-    };
-    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
-
+fn show(mut state: NonSendMut<SplashState>) {
     if state.shown {
         return;
     }
@@ -171,32 +168,29 @@ fn show_splash(mut state: NonSendMut<SplashState>) {
     state.created_at = Some(Instant::now());
 }
 
-fn dismiss_splash(
+fn dismiss(
     mut state: NonSendMut<SplashState>,
     window_q: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
-    use objc2::ClassType;
-    use objc2_app_kit::{NSAnimatablePropertyContainer, NSWindow};
-
     if state.window.is_none() {
         return;
     }
     let visible = window_q.single().map(|w| w.visible).unwrap_or(false);
     let elapsed = state.created_at.map(|t| t.elapsed()).unwrap_or_default();
-    let action = splash_decision(visible, state.dismissed, elapsed);
+    let decision = splash_decision(visible, state.dismissed, elapsed);
 
-    match action {
-        SplashAction::None => {
+    match decision {
+        SplashDismissDecision::None => {
             let close = state
                 .fade_started
-                .is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(280));
+                .is_some_and(|t| t.elapsed() >= Duration::from_millis(280));
             if close && let Some(panel) = state.window.take() {
                 let window: &NSWindow = panel.as_super();
                 window.close();
             }
         }
-        SplashAction::Fade | SplashAction::Force => {
-            if action == SplashAction::Force {
+        SplashDismissDecision::Fade | SplashDismissDecision::Force => {
+            if decision == SplashDismissDecision::Force {
                 warn!("splash: window did not reveal within timeout; dismissing splash");
             }
             if let Some(panel) = state.window.as_ref() {
@@ -209,8 +203,7 @@ fn dismiss_splash(
     }
 }
 
-fn update_splash_text(state: NonSend<SplashState>, status: Res<crate::boot_status::SplashStatus>) {
-    use objc2_foundation::NSString;
+fn update_text(state: NonSend<SplashState>, status: Single<&crate::boot_status::SplashStatus>) {
     if let Some(label) = &state.status_label {
         label.setStringValue(&NSString::from_str(&status.phase.display()));
     }
@@ -224,7 +217,7 @@ mod tests {
     fn hidden_within_timeout_does_nothing() {
         assert_eq!(
             splash_decision(false, false, Duration::from_secs(1)),
-            SplashAction::None
+            SplashDismissDecision::None
         );
     }
 
@@ -232,7 +225,7 @@ mod tests {
     fn visible_triggers_fade() {
         assert_eq!(
             splash_decision(true, false, Duration::from_secs(1)),
-            SplashAction::Fade
+            SplashDismissDecision::Fade
         );
     }
 
@@ -240,7 +233,7 @@ mod tests {
     fn hidden_past_timeout_forces_dismiss() {
         assert_eq!(
             splash_decision(false, false, Duration::from_secs(20)),
-            SplashAction::Force
+            SplashDismissDecision::Force
         );
     }
 
@@ -248,53 +241,11 @@ mod tests {
     fn dismissed_is_idempotent() {
         assert_eq!(
             splash_decision(true, true, Duration::from_secs(1)),
-            SplashAction::None
+            SplashDismissDecision::None
         );
         assert_eq!(
             splash_decision(false, true, Duration::from_secs(99)),
-            SplashAction::None
+            SplashDismissDecision::None
         );
-    }
-
-    #[test]
-    fn splash_plugin_registered_by_native_window_plugin() {
-        let mut app = App::new();
-        app.add_plugins(crate::plugins::NativeWindowPlugin);
-
-        assert!(app.is_plugin_added::<SplashPlugin>());
-    }
-
-    #[test]
-    fn splash_uses_spinner_and_version_detected_material() {
-        let source = include_str!("splash.rs");
-        assert!(source.contains("NSProgressIndicator"));
-        assert!(source.contains("AnyClass::get(c\"NSGlassEffectView\")"));
-        assert!(source.contains("NSVisualEffectView"));
-    }
-
-    #[test]
-    fn splash_shows_title_and_status_label() {
-        let source = include_str!("splash.rs");
-        assert!(source.contains("NSTextField"));
-        assert!(source.contains("\"Vmux\""));
-        assert!(source.contains("SplashStatus"));
-        assert!(source.contains("update_splash_text"));
-    }
-
-    #[test]
-    fn splash_panel_is_fullscreen_auxiliary() {
-        let source = include_str!("splash.rs");
-        assert!(source.contains("setCollectionBehavior"));
-        assert!(source.contains("FullScreenAuxiliary"));
-        assert!(source.contains("CanJoinAllSpaces"));
-    }
-
-    #[test]
-    fn desktop_enables_splash_appkit_features() {
-        let manifest = include_str!("../Cargo.toml");
-        assert!(manifest.contains("\"objc2-app-kit/NSProgressIndicator\""));
-        assert!(manifest.contains("\"objc2-app-kit/NSVisualEffectView\""));
-        assert!(manifest.contains("\"objc2-app-kit/NSTextField\""));
-        assert!(manifest.contains("\"objc2-app-kit/NSFont\""));
     }
 }

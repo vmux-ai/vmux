@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/app/*", "crates/host/*", "crates/page/*", "crates/vmux_*", "patches/*"]
-exclude = ["patches/cargo-packager-0.11.8", "website"]
+members = ["crates/app/*", "crates/feature/*", "crates/util/*", "patches/*"]
+exclude = ["patches/cargo-packager", "website"]
 default-members = ["crates/app/vmux_desktop"]
 resolver = "3"
 
@@ -31,6 +31,7 @@ bevy = { version = "0.19.0", default-features = false, features = [
     "wayland",
 ] }
 bevy_ecs = { version = "0.19.0", default-features = true }
+bevy_tasks = "0.19.0"
 bevy_reflect = { version = "0.19.0", default-features = true }
 bevy_app = { version = "0.19.0", default-features = false, features = ["bevy_reflect", "std"] }
 bevy_window = { version = "0.19.0", default-features = false, features = ["std"] }
@@ -53,7 +54,7 @@ tokio = { version = "1", features = [
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ron = "0.8"
+ron = "0.12"
 toml = "0.8"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",

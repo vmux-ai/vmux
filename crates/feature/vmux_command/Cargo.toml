@@ -1,0 +1,45 @@
+[package]
+name = "vmux_command"
+description = "The vmux://command-bar/ page, the command vocabulary, and the launcher wire events"
+version.workspace = true
+edition.workspace = true
+publish = false
+build = "../../build_cfg_git.rs"
+
+[features]
+default = []
+debug = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+inventory = "0.3"
+rkyv = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_api = { path = "../../util/vmux_api" }
+vmux_macro = { path = "../../util/vmux_macro" }
+vmux_path = { path = "../../util/vmux_path" }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+ignore = "0.4"
+muda = "0.19"
+vmux_flex = { path = "../../util/vmux_flex" }
+vmux_tool = { path = "../vmux_tool" }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+dioxus = { workspace = true }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

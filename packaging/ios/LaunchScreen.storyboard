@@ -5,7 +5,7 @@
 
 	Deliberately empty: a launch screen stands in for the first frame, so anything drawn here
 	would flash and be replaced. LaunchBackground carries the app's own background in both
-	appearances (crates/vmux_ui/assets/theme.css), so the handoff is invisible.
+	appearances (crates/util/vmux_ui/assets/theme.css), so the handoff is invisible.
 -->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="22505" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
     <dependencies>

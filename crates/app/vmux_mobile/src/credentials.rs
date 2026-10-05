@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::Credentials;
+use crate::pairing::Credentials;
+
+use std::os::unix::fs::PermissionsExt;
 
 pub struct StoredCredentials;
 
@@ -19,7 +21,13 @@ impl StoredCredentials {
         {
             return;
         }
-        let _ = write_private(&path, &body);
+        if vmux_path::AtomicFile::write(&path, body.as_bytes()).is_err() {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
     }
 
     pub fn clear() {
@@ -37,23 +45,4 @@ impl StoredCredentials {
                 .join("pairing.json"),
         )
     }
-}
-
-fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    let _ = std::fs::remove_file(path);
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(contents.as_bytes())
-    }
-    #[cfg(not(unix))]
-    std::fs::write(path, contents)
 }

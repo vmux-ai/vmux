@@ -1,0 +1,67 @@
+pub use language_icon::LanguageIconPath;
+
+pub mod agent_accent;
+
+pub mod dom;
+
+pub mod cn;
+
+pub mod clipboard;
+
+#[cfg(ui)]
+pub mod directory;
+
+pub mod diff;
+
+pub mod favicon;
+
+pub mod file_icon;
+
+pub mod focus;
+
+pub mod icon;
+
+mod i18n_catalogs {
+    include!(concat!(env!("OUT_DIR"), "/i18n_catalogs.rs"));
+}
+
+pub mod i18n;
+pub mod ime;
+pub mod matrix_rain;
+
+pub mod prompt_ghost;
+pub mod prompt_recall;
+
+pub mod theme;
+
+mod listener_guard;
+
+pub mod transport;
+
+#[cfg(ui)]
+pub mod key_stroke;
+
+pub mod language_icon;
+
+pub mod hooks;
+
+pub mod back;
+
+pub mod components;
+
+pub mod platform;
+
+#[cfg(ui)]
+pub mod media;
+
+pub mod scroll;
+
+pub mod script;
+
+#[cfg(ui)]
+pub mod text_run;
+
+pub mod dioxus_ext {
+    pub use dioxus_primitives::dioxus_attributes::attributes;
+    pub use dioxus_primitives::merge_attributes;
+}

@@ -1,0 +1,56 @@
+[package]
+name = "vmux_terminal"
+build = "../../build_cfg.rs"
+description = "Bevy + Dioxus terminal"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dioxus = { workspace = true }
+serde = { workspace = true }
+rkyv = { workspace = true }
+serde_json = { workspace = true }
+unicode-width = "0.2"
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_api = { path = "../../util/vmux_api" }
+vmux_page = { path = "../../util/vmux_page" }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+vmux_clipboard = { path = "../../util/vmux_clipboard" }
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+portable-pty = { workspace = true }
+sysinfo = "0.38"
+tokio = { workspace = true }
+tracing = "0.1"
+url = { workspace = true }
+vmux_command = { path = "../vmux_command" }
+vmux_flex = { path = "../../util/vmux_flex" }
+vmux_history = { path = "../vmux_history" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_mcp = { path = "../../util/vmux_mcp" }
+vmux_path = { path = "../../util/vmux_path" }
+vmux_process = { path = "../../util/vmux_process" }
+vmux_tool = { path = "../vmux_tool" }
+vmux_transport = { path = "../../util/vmux_transport" }
+vmux_setting = { path = "../vmux_setting" }
+vmux_session = { path = "../vmux_session" }
+vmux_space = { path = "../vmux_space" }
+
+[target.'cfg(not(target_os = "ios"))'.dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

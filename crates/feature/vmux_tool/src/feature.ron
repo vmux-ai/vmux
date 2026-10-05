@@ -1,0 +1,123 @@
+(
+    tool_providers: [
+        (id: "homebrew-formula", title: "Homebrew Formulae", title_message_id: "tools-provider-homebrew-formulae", route_title: "Homebrew", route_title_message_id: "tools-homebrew", short_label: "brew", route: "homebrew", rank: 20, brewfile: true),
+        (id: "homebrew-cask", title: "Homebrew Casks", title_message_id: "tools-provider-homebrew-casks", route_title: "Homebrew", route_title_message_id: "tools-homebrew", short_label: "brew", route: "homebrew", rank: 21, brewfile: true),
+        (id: "npm", title: "NPM Globals", title_message_id: "tools-provider-npm", route_title: "NPM", route_title_message_id: "tools-provider-npm", short_label: "NPM", route: "npm", rank: 30),
+        (id: "mcp", title: "MCP Servers", title_message_id: "tools-provider-mcp-servers", route_title: "MCP", route_title_message_id: "tools-provider-mcp-servers", short_label: "mcp", route: "mcp", rank: 40),
+        (id: "dotfiles", title: "Dotfiles", title_message_id: "tools-provider-dotfiles", route_title: "Dotfiles", route_title_message_id: "tools-provider-dotfiles", short_label: "dotfiles", route: "dotfiles", rank: 50, apply: true),
+    ],
+    pages: [
+        (
+            url: "vmux://tools/",
+            title: "Tools",
+            bookmark: Some(50),
+            title_message_id: "tools-title",
+            keywords: [
+                "packages",
+                "tools",
+                "dotfiles",
+                "homebrew",
+                "npm",
+                "mcp",
+                "import",
+            ],
+            icon: "Hammer",
+            command_bar: true,
+            manifest: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "AgentToast",
+                "AgentInstallRunRequest",
+                "AgentSetupPrereqRequest",
+                "AgentSetupUiState",
+                "ToolsUiState",
+                "ToolsRefreshRequest",
+                "ToolsFilterRequest",
+                "ToolOpenRequest",
+                "ToolsNavigateRequest",
+                "ToolInstallRequest",
+                "ToolUpdateRequest",
+                "ToolUninstallRequest",
+                "ToolForgetRequest",
+                "ToolAdoptRequest",
+                "ToolLinkRequest",
+                "ToolUnlinkRequest",
+                "ToolApplyRequest",
+                "ToolImportRequest",
+            ],
+        ),
+    ],
+    cli: Some((
+        commands: [
+            (
+                id: "tool",
+                name: "tools",
+                about: Some("Manage vmux tools and dotfiles"),
+                subcommand_required: true,
+                commands: [
+                    (id: "tool.status", name: "status"),
+                    (id: "tool.apply", name: "apply"),
+                    (
+                        id: "tool.import",
+                        name: "import",
+                        subcommand_required: true,
+                        commands: [
+                            (
+                                id: "tool.import.homebrew",
+                                name: "homebrew",
+                                arguments: [
+                                    (id: "path", index: Some(1), required: true, value_name: Some("BREWFILE")),
+                                ],
+                            ),
+                            (
+                                id: "tool.import.npm",
+                                name: "npm",
+                                arguments: [
+                                    (id: "path", index: Some(1), required: true, value_name: Some("PACKAGE_JSON")),
+                                ],
+                            ),
+                            (
+                                id: "tool.import.mcp",
+                                name: "mcp",
+                                arguments: [
+                                    (id: "path", index: Some(1), value_name: Some("CONFIG")),
+                                ],
+                            ),
+                            (
+                                id: "tool.import.dotfiles",
+                                name: "dotfiles",
+                                arguments: [
+                                    (id: "path", index: Some(1), value_name: Some("DIRECTORY")),
+                                ],
+                            ),
+                        ],
+                    ),
+                    (
+                        id: "tool.adopt",
+                        name: "adopt",
+                        arguments: [
+                            (id: "path", index: Some(1), required: true, value_name: Some("PATH")),
+                            (id: "package", long: Some("package"), required: true, value_name: Some("PACKAGE")),
+                        ],
+                    ),
+                    (
+                        id: "tool.unlink",
+                        name: "unlink",
+                        arguments: [
+                            (id: "package", index: Some(1), required: true, value_name: Some("PACKAGE")),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )),
+    mcp_servers: [
+        (
+            id: "linear",
+            name: "Linear",
+            url: "https://mcp.linear.app/mcp",
+            scopes: ["read", "write"],
+        ),
+    ],
+)

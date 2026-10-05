@@ -1,0 +1,229 @@
+use bevy::prelude::*;
+use moonshine_save::prelude::*;
+use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UnixMillis(pub i64);
+
+impl UnixMillis {
+    pub fn now() -> Self {
+        Self(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        )
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyboardOwner;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowFullscreen(pub bool);
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WindowFullscreenSet;
+
+#[derive(Component, Clone, Debug)]
+pub struct AgentWorkingDir(pub PathBuf);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct JsonArguments(pub serde_json::Value);
+
+impl JsonArguments {
+    pub fn parse<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<T, String> {
+        serde_json::from_value(self.0.clone())
+            .map_err(|error| format!("{name}: invalid arguments: {error}"))
+    }
+}
+
+impl TryFrom<&vmux_api::json::JsonValue> for JsonArguments {
+    type Error = String;
+
+    fn try_from(input: &vmux_api::json::JsonValue) -> Result<Self, Self::Error> {
+        let value = serde_json::Value::try_from(input)
+            .map_err(|error| format!("invalid JSON arguments: {error}"))?;
+        if !value.is_object() {
+            return Err("command arguments must be a JSON object".to_string());
+        }
+        Ok(Self(value))
+    }
+}
+
+#[derive(Component, Debug, PartialEq, Eq)]
+pub struct EntityTarget<T: Send + Sync + 'static> {
+    entity: Entity,
+    marker: std::marker::PhantomData<fn() -> T>,
+}
+
+impl<T: Send + Sync + 'static> EntityTarget<T> {
+    pub fn new(entity: Entity) -> Self {
+        Self {
+            entity,
+            marker: std::marker::PhantomData,
+        }
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
+impl<T: Send + Sync + 'static> Clone for EntityTarget<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: Send + Sync + 'static> Copy for EntityTarget<T> {}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessAnchor(pub crate::ProcessId);
+
+impl ProcessAnchor {
+    pub fn required(value: Option<&Self>, name: &str) -> Result<crate::ProcessId, String> {
+        value.map(|anchor| anchor.0).ok_or_else(|| {
+            format!("{name} requires an agent anchor (not available to this client)")
+        })
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostShell(pub String);
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RegistrationOrder(pub u32);
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub struct CreatedAt(pub i64);
+
+impl CreatedAt {
+    pub fn now() -> Self {
+        Self(UnixMillis::now().0)
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub struct LastActivatedAt(pub i64);
+
+impl LastActivatedAt {
+    pub fn now() -> Self {
+        Self(UnixMillis::now().0)
+    }
+
+    pub fn latest(entities: impl Iterator<Item = (Entity, Self)>) -> Option<Entity> {
+        entities
+            .max_by_key(|(_, activated_at)| activated_at.0)
+            .map(|(entity, _)| entity)
+    }
+}
+
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub struct ActivateRequest {
+    #[event_target]
+    pub entity: Entity,
+}
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub struct Visit;
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct Ready;
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub struct Url;
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub struct VisitCount(pub u32);
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub struct LastVisitedAt(pub i64);
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+pub struct Order(pub u32);
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Active;
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct BookmarkOrder(pub u32);
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Pin;
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Bookmark;
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Folder;
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Collapsed;
+
+#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Uuid(pub String);
+
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub struct VisitedUrl(pub Entity);
+
+impl Default for VisitedUrl {
+    fn default() -> Self {
+        Self(Entity::PLACEHOLDER)
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_history"]
+pub enum TransitionType {
+    #[default]
+    Link,
+    Typed,
+    Reload,
+    BackForward,
+    Redirect,
+    Other,
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct EffectiveStartupUrl(pub String);

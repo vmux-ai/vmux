@@ -1,8 +1,10 @@
+pub use platform::*;
+
 #[cfg(target_os = "ios")]
 mod platform {
     use objc2::rc::Retained;
     use objc2::runtime::NSObjectProtocol;
-    use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+    use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_foundation::{NSNotification, NSNotificationCenter, NSObject};
     use objc2_ui_kit::{
         UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification,
@@ -11,14 +13,14 @@ mod platform {
 
     use bevy_window::AppLifecycle;
 
-    use crate::runtime::World;
+    use crate::runtime::RuntimeHandle;
 
-    pub fn install() {
+    pub fn install(runtime: RuntimeHandle) {
         let Some(mtm) = MainThreadMarker::new() else {
-            tracing::error!("world: the lifecycle observer must be installed on the main thread");
+            tracing::error!("runtime: the lifecycle observer must be installed on the main thread");
             return;
         };
-        let observer = LifecycleObserver::new(mtm);
+        let observer = LifecycleObserver::new(mtm, runtime);
         let center = NSNotificationCenter::defaultCenter();
         unsafe {
             center.addObserver_selector_name_object(
@@ -41,30 +43,30 @@ mod platform {
             );
         }
         std::mem::forget(observer);
-        tracing::info!("world: lifecycle observer installed");
+        tracing::info!("runtime: lifecycle observer installed");
     }
 
     define_class!(
         #[unsafe(super(NSObject))]
         #[thread_kind = MainThreadOnly]
-        #[name = "VmuxWorldLifecycleObserver"]
-        #[ivars = ()]
+        #[name = "VmuxLifecycleObserver"]
+        #[ivars = RuntimeHandle]
         struct LifecycleObserver;
 
         impl LifecycleObserver {
             #[unsafe(method(didEnterBackground:))]
             fn did_enter_background(&self, _notification: &NSNotification) {
-                World::report(AppLifecycle::WillSuspend);
+                self.ivars().report_lifecycle(AppLifecycle::WillSuspend);
             }
 
             #[unsafe(method(willEnterForeground:))]
             fn will_enter_foreground(&self, _notification: &NSNotification) {
-                World::report(AppLifecycle::WillResume);
+                self.ivars().report_lifecycle(AppLifecycle::WillResume);
             }
 
             #[unsafe(method(didBecomeActive:))]
             fn did_become_active(&self, _notification: &NSNotification) {
-                World::report(AppLifecycle::Running);
+                self.ivars().report_lifecycle(AppLifecycle::Running);
             }
         }
 
@@ -72,8 +74,8 @@ mod platform {
     );
 
     impl LifecycleObserver {
-        fn new(mtm: MainThreadMarker) -> Retained<Self> {
-            let this = Self::alloc(mtm).set_ivars(());
+        fn new(mtm: MainThreadMarker, runtime: RuntimeHandle) -> Retained<Self> {
+            let this = Self::alloc(mtm).set_ivars(runtime);
             unsafe { msg_send![super(this), init] }
         }
     }
@@ -83,11 +85,9 @@ mod platform {
 mod platform {
     use bevy_window::AppLifecycle;
 
-    use crate::runtime::World;
+    use crate::runtime::RuntimeHandle;
 
-    pub fn install() {
-        World::report(AppLifecycle::Running);
+    pub fn install(runtime: RuntimeHandle) {
+        runtime.report_lifecycle(AppLifecycle::Running);
     }
 }
-
-pub use platform::*;

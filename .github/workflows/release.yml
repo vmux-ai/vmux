@@ -83,16 +83,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: ./.github/actions/setup-ios
         with:
-          targets: aarch64-apple-ios
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ios-release
-
-      - name: Install dioxus CLI
-        run: ./scripts/install-dioxus-cli.sh
+          cache-key: ios-release
+          dioxus: "true"
 
       - name: Build, sign and conditionally upload
         env:

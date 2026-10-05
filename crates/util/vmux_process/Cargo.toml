@@ -1,0 +1,29 @@
+[package]
+name = "vmux_process"
+description = "Shared terminal process runtime"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+test-support = []
+
+[dependencies]
+alacritty_terminal = { workspace = true }
+bevy = { workspace = true }
+portable-pty = { workspace = true }
+rkyv = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+vmux_api = { path = "../vmux_api" }
+vmux_ecs = { path = "../vmux_ecs" }
+vmux_profile = { path = "../vmux_profile" }
+vmux_transport = { path = "../vmux_transport" }
+vte = "0.15"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

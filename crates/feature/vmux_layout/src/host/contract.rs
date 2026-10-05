@@ -1,0 +1,61 @@
+use bevy::prelude::*;
+
+use crate::active_pane::ActivatePane;
+use crate::apply::{
+    LayoutApplyRequest, LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse,
+};
+use crate::bookmark::{
+    AddRequest, CreateFolderRequest, MoveFolderRequest, MovePinRequest, MoveRequest, PinRequest,
+    PinUrlRequest, RemoveFolderRequest, RemoveRequest, RenameFolderRequest, RenameRequest,
+    ReorderPinRequest, ShowBookmarkMenuRequest, ToggleFolderRequest, ToggleForUrlRequest,
+    UnpinRequest,
+};
+use crate::pane::OpenBesideRequest;
+use crate::stack::CloseStackRequest;
+use crate::worktree::TabDirectoryObserved;
+use crate::{
+    BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest,
+    ContributedCommandChosen, LauncherDismissRequest, NewTabRequest, OpenInNewStackRequest,
+};
+
+pub struct LayoutContractPlugin;
+
+impl Plugin for LayoutContractPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<LauncherDismissRequest>()
+            .add_message::<ActivatePane>()
+            .add_message::<AddRequest>()
+            .add_message::<BrowserGoBackRequest>()
+            .add_message::<BrowserGoForwardRequest>()
+            .add_message::<BrowserNavigateRequest>()
+            .add_message::<CloseStackRequest>()
+            .add_message::<ContributedCommandChosen>()
+            .add_message::<LayoutApplyRequest>()
+            .add_message::<LayoutApplyResponse>()
+            .add_message::<LayoutSnapshotRequest>()
+            .add_message::<LayoutSnapshotResponse>()
+            .add_message::<NewTabRequest>()
+            .add_message::<OpenBesideRequest>()
+            .add_message::<OpenInNewStackRequest>()
+            .add_message::<CreateFolderRequest>()
+            .add_message::<MoveFolderRequest>()
+            .add_message::<MovePinRequest>()
+            .add_message::<MoveRequest>()
+            .add_message::<PinRequest>()
+            .add_message::<PinUrlRequest>()
+            .add_message::<RemoveFolderRequest>()
+            .add_message::<RemoveRequest>()
+            .add_message::<RenameFolderRequest>()
+            .add_message::<RenameRequest>()
+            .add_message::<ReorderPinRequest>()
+            .add_message::<ShowBookmarkMenuRequest>()
+            .add_message::<ToggleFolderRequest>()
+            .add_message::<ToggleForUrlRequest>()
+            .add_message::<TabDirectoryObserved>()
+            .add_message::<UnpinRequest>();
+    }
+
+    fn is_unique(&self) -> bool {
+        false
+    }
+}

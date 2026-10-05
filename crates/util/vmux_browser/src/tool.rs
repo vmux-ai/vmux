@@ -1,0 +1,262 @@
+use bevy::prelude::*;
+use serde::Deserialize;
+use vmux_api::protocol::AgentRequest;
+use vmux_ecs::ProcessAnchor;
+use vmux_ecs::manifest::FeaturePlugin;
+
+use crate::host::{
+    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
+    AgentBrowserScroll, AgentBrowserSnapshot,
+};
+
+use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet, ToolQuery};
+
+pub struct BrowserToolPlugin;
+
+impl Plugin for BrowserToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+            .add_systems(Startup, register_agent_policy)
+            .add_systems(
+                Update,
+                (
+                    navigate,
+                    go_back,
+                    go_forward,
+                    history_search,
+                    snapshot,
+                    scroll,
+                )
+                    .in_set(ToolDispatchSet),
+            );
+    }
+}
+
+fn register_agent_policy(mut commands: Commands) {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/"));
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    commands.spawn((
+        Name::new("Browser agent policy"),
+        vmux_ecs::agent::AgentPromptContribution(
+            "Use the available vmux browser tools for web access and follow their descriptions. Do not look for a built-in web search or connector discovery. For website visuals, use code-native design or available project assets when no image tool is available."
+                .to_string(),
+        ),
+        vmux_ecs::agent::AgentDisabledSkillRoot(
+            codex_home.join("plugins/cache/openai-bundled/browser"),
+        ),
+    ));
+}
+
+#[vmux_tool::input]
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NavigateTool {
+    url: String,
+    pane: Option<String>,
+}
+
+#[vmux_tool::input]
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GoBackTool {
+    pane: Option<String>,
+}
+
+#[vmux_tool::input]
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GoForwardTool {
+    pane: Option<String>,
+}
+
+#[vmux_tool::input]
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistorySearchTool {
+    query: String,
+    limit: Option<u32>,
+}
+
+#[vmux_tool::input]
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotTool {
+    target: Option<String>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ScrollTarget {
+    Top,
+    Bottom,
+}
+
+impl From<ScrollTarget> for String {
+    fn from(target: ScrollTarget) -> Self {
+        match target {
+            ScrollTarget::Top => "top".to_string(),
+            ScrollTarget::Bottom => "bottom".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScrollPosition {
+    to: ScrollTarget,
+    target: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScrollDelta {
+    delta: i32,
+    target: Option<String>,
+}
+
+#[vmux_tool::input]
+#[derive(Component, Deserialize)]
+#[serde(untagged)]
+enum ScrollTool {
+    Position(ScrollPosition),
+    Delta(ScrollDelta),
+}
+
+struct BrowserPane(Option<String>);
+
+impl From<Option<String>> for BrowserPane {
+    fn from(value: Option<String>) -> Self {
+        let value = value.and_then(|value| {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        });
+        Self(value)
+    }
+}
+
+impl From<BrowserPane> for Option<String> {
+    fn from(pane: BrowserPane) -> Self {
+        pane.0
+    }
+}
+
+fn navigate(
+    mut commands: Commands,
+    requests: Query<(Entity, &NavigateTool), AddedTool<NavigateTool>>,
+) {
+    for (entity, args) in &requests {
+        let command = if args.url.trim().is_empty() {
+            Err("browser_navigate.url is empty".to_string())
+        } else {
+            AgentRequest::encode(&AgentBrowserNavigate {
+                url: args.url.clone(),
+                pane: args.pane.clone(),
+            })
+        };
+        commands.entity(entity).insert(ToolCommand(command));
+    }
+}
+
+fn go_back(mut commands: Commands, requests: Query<(Entity, &GoBackTool), AddedTool<GoBackTool>>) {
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolCommand(AgentRequest::encode(&AgentBrowserGoBack {
+                pane: args.pane.clone(),
+            })));
+    }
+}
+
+fn go_forward(
+    mut commands: Commands,
+    requests: Query<(Entity, &GoForwardTool), AddedTool<GoForwardTool>>,
+) {
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolCommand(AgentRequest::encode(&AgentBrowserGoForward {
+                pane: args.pane.clone(),
+            })));
+    }
+}
+
+fn history_search(
+    mut commands: Commands,
+    requests: Query<(Entity, &HistorySearchTool), AddedTool<HistorySearchTool>>,
+) {
+    for (entity, args) in &requests {
+        let command = if args.query.trim().is_empty() {
+            Err("browser_history_search.query is empty".to_string())
+        } else {
+            AgentRequest::encode(&AgentBrowserHistorySearch {
+                query: args.query.clone(),
+                limit: args.limit.unwrap_or(20).min(100),
+            })
+        };
+        commands.entity(entity).insert(ToolCommand(command));
+    }
+}
+
+fn snapshot(
+    mut commands: Commands,
+    requests: Query<(Entity, Option<&ProcessAnchor>, &SnapshotTool), Added<SnapshotTool>>,
+) {
+    for (entity, anchor, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolQuery(AgentRequest::encode(&AgentBrowserSnapshot {
+                pane: BrowserPane::from(args.target.clone()).into(),
+                anchor: anchor.map(|anchor| anchor.0),
+            })));
+    }
+}
+
+fn scroll(
+    mut commands: Commands,
+    requests: Query<(Entity, Option<&ProcessAnchor>, &ScrollTool), Added<ScrollTool>>,
+) {
+    for (entity, anchor, args) in &requests {
+        let (to, delta, target) = match args {
+            ScrollTool::Position(args) => (Some(args.to.into()), None, args.target.clone()),
+            ScrollTool::Delta(args) => (None, Some(args.delta), args.target.clone()),
+        };
+        commands
+            .entity(entity)
+            .insert(ToolQuery(AgentRequest::encode(&AgentBrowserScroll {
+                pane: BrowserPane::from(target).into(),
+                to,
+                delta,
+                anchor: anchor.map(|anchor| anchor.0),
+            })));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_registers_its_agent_policy() {
+        let mut app = App::new();
+        app.add_plugins(BrowserToolPlugin);
+        app.update();
+
+        let mut policies = app.world_mut().query::<(
+            &vmux_ecs::agent::AgentPromptContribution,
+            &vmux_ecs::agent::AgentDisabledSkillRoot,
+        )>();
+        let policies = policies.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(policies.len(), 1);
+        assert!(policies[0].0.0.contains("vmux browser tools"));
+        assert!(
+            policies[0]
+                .1
+                .0
+                .ends_with("plugins/cache/openai-bundled/browser")
+        );
+    }
+}

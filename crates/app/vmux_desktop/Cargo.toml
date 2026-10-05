@@ -8,7 +8,7 @@ publish = false
 
 [features]
 default = ["full"]
-conformance = ["bevy_cef/debug", "vmux_browser/conformance"]
+conformance = ["bevy_cef/debug", "vmux_app/conformance"]
 dev = ["bevy_cef/debug", "bevy/dynamic_linking"]
 full = [
     "bevy_cef_core/native-video-overlay",
@@ -72,18 +72,13 @@ path = "src/main.rs"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
-bevy_world_serialization = { workspace = true }
 cargo-packager-updater = { version = "0.2", optional = true }
 chrono = { workspace = true }
 crossbeam-channel = { workspace = true }
 libc = "0.2"
-moonshine-save = { workspace = true }
 muda = "0.19"
 notify = { workspace = true }
-parking_lot = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rfd = { workspace = true }
-ring = { workspace = true }
 ron = { workspace = true }
 semver = { version = "1", optional = true }
 serde = { workspace = true }
@@ -93,28 +88,29 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tray-icon = { version = "0.24", optional = true }
 url = { workspace = true }
-uuid = { workspace = true }
-vmux_agent = { path = "../../page/vmux_agent" }
-vmux_browser = { path = "../../vmux_browser" }
-vmux_shortcut = { path = "../../page/vmux_shortcut" }
-vmux_clipboard = { path = "../../vmux_clipboard" }
-vmux_command = { path = "../../page/vmux_command" }
-vmux_core = { path = "../../vmux_core" }
-vmux_editor = { path = "../../page/vmux_editor" }
-vmux_flex = { path = "../../vmux_flex" }
-vmux_git = { path = "../../vmux_git" }
-vmux_history = { path = "../../page/vmux_history" }
-vmux_knowledge = { path = "../../page/vmux_knowledge" }
-vmux_layout = { path = "../../page/vmux_layout" }
-vmux_service = { path = "../../host/vmux_service" }
-vmux_setting = { path = "../../page/vmux_setting" }
-vmux_start = { path = "../../page/vmux_start" }
-vmux_space = { path = "../../page/vmux_space" }
-vmux_simulator = { path = "../../page/vmux_simulator" }
-vmux_team = { path = "../../page/vmux_team" }
-vmux_terminal = { path = "../../page/vmux_terminal" }
-vmux_ui = { path = "../../vmux_ui", default-features = false }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_agent = { path = "../../feature/vmux_agent" }
+vmux_app = { path = "../../util/vmux_app", features = ["desktop"] }
+vmux_browser = { path = "../../util/vmux_browser" }
+vmux_command = { path = "../../feature/vmux_command" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_editor = { path = "../../feature/vmux_editor" }
+vmux_flex = { path = "../../util/vmux_flex" }
+vmux_git = { path = "../../feature/vmux_git" }
+vmux_history = { path = "../../feature/vmux_history" }
+vmux_input = { path = "../../feature/vmux_input" }
+vmux_knowledge = { path = "../../feature/vmux_knowledge" }
+vmux_layout = { path = "../../feature/vmux_layout" }
+vmux_page = { path = "../../util/vmux_page" }
+vmux_profile = { path = "../../util/vmux_profile" }
+vmux_setting = { path = "../../feature/vmux_setting" }
+vmux_start = { path = "../../feature/vmux_start" }
+vmux_space = { path = "../../feature/vmux_space" }
+vmux_simulator = { path = "../../feature/vmux_simulator" }
+vmux_team = { path = "../../feature/vmux_team" }
+vmux_terminal = { path = "../../feature/vmux_terminal" }
+vmux_tool = { path = "../../feature/vmux_tool" }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+vmux_api = { path = "../../util/vmux_api" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 color_quant = { version = "2", optional = true }

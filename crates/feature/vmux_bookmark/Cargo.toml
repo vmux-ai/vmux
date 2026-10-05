@@ -1,0 +1,33 @@
+[package]
+name = "vmux_bookmark"
+description = "Bookmark feature runtime"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { workspace = true }
+bevy_world_serialization = { workspace = true }
+moonshine-save = { workspace = true }
+raw-window-handle = "0.6"
+rkyv = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+vmux_api = { path = "../../util/vmux_api" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_page = { path = "../../util/vmux_page" }
+vmux_setting = { path = "../vmux_setting" }
+vmux_shortcut = { path = "../vmux_shortcut" }
+vmux_tool = { path = "../vmux_tool" }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

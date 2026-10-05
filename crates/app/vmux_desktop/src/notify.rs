@@ -1,5 +1,28 @@
 use bevy::prelude::*;
-use vmux_core::notify::OsNotify;
+use vmux_ecs::notify::OsNotify;
+
+#[cfg(target_os = "macos")]
+use block2::RcBlock;
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2::runtime::Bool;
+#[cfg(target_os = "macos")]
+use objc2_foundation::NSBundle;
+#[cfg(target_os = "macos")]
+use objc2_foundation::NSError;
+#[cfg(target_os = "macos")]
+use objc2_foundation::NSString;
+#[cfg(target_os = "macos")]
+use objc2_user_notifications::UNAuthorizationOptions;
+#[cfg(target_os = "macos")]
+use objc2_user_notifications::UNUserNotificationCenter;
+#[cfg(target_os = "macos")]
+use objc2_user_notifications::{
+    UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
+};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) struct NotificationPlugin;
 
@@ -12,11 +35,6 @@ impl Plugin for NotificationPlugin {
 
 #[cfg(target_os = "macos")]
 fn request_notification_auth() {
-    use block2::RcBlock;
-    use objc2::runtime::Bool;
-    use objc2_foundation::NSError;
-    use objc2_user_notifications::UNAuthorizationOptions;
-
     let Some(center) = current_center() else {
         return;
     };
@@ -28,11 +46,7 @@ fn request_notification_auth() {
 }
 
 #[cfg(target_os = "macos")]
-fn current_center()
--> Option<objc2::rc::Retained<objc2_user_notifications::UNUserNotificationCenter>> {
-    use objc2_foundation::NSBundle;
-    use objc2_user_notifications::UNUserNotificationCenter;
-
+fn current_center() -> Option<Retained<UNUserNotificationCenter>> {
     NSBundle::mainBundle().bundleIdentifier()?;
     Some(UNUserNotificationCenter::currentNotificationCenter())
 }
@@ -54,13 +68,7 @@ fn post_os_notifications(mut reader: MessageReader<OsNotify>) {
 }
 
 #[cfg(target_os = "macos")]
-fn post_native(center: &objc2_user_notifications::UNUserNotificationCenter, events: &[OsNotify]) {
-    use objc2_foundation::NSString;
-    use objc2_user_notifications::{
-        UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
-    };
-    use std::sync::atomic::{AtomicU64, Ordering};
-
+fn post_native(center: &UNUserNotificationCenter, events: &[OsNotify]) {
     static NOTIF_SEQ: AtomicU64 = AtomicU64::new(0);
     for ev in events {
         let content = UNMutableNotificationContent::new();
@@ -79,16 +87,7 @@ fn post_native(center: &objc2_user_notifications::UNUserNotificationCenter, even
 
 #[cfg(target_os = "macos")]
 fn osascript_notify(title: &str, body: &str) {
-    fn esc(s: &str) -> String {
-        s.replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', " ")
-    }
-    let script = format!(
-        "display notification \"{}\" with title \"{}\" sound name \"default\"",
-        esc(body),
-        esc(title)
-    );
+    let script = NotificationScript::new(title, body).0;
     if let Ok(mut child) = std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
@@ -97,6 +96,27 @@ fn osascript_notify(title: &str, body: &str) {
         std::thread::spawn(move || {
             let _ = child.wait();
         });
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct NotificationScript(String);
+
+#[cfg(target_os = "macos")]
+impl NotificationScript {
+    fn new(title: &str, body: &str) -> Self {
+        Self(format!(
+            "display notification \"{}\" with title \"{}\" sound name \"default\"",
+            Self::escape(body),
+            Self::escape(title)
+        ))
+    }
+
+    fn escape(value: &str) -> String {
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', " ")
     }
 }
 

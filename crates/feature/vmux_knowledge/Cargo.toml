@@ -1,0 +1,36 @@
+[package]
+name = "vmux_knowledge"
+build = "../../build_cfg.rs"
+description = "Local-first Markdown knowledge base"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rkyv = { workspace = true }
+serde = { workspace = true }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_api = { path = "../../util/vmux_api" }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+bevy = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+moonshine-save = { workspace = true }
+notify = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+vmux_git = { path = "../vmux_git" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_page = { path = "../../util/vmux_page" }
+vmux_path = { path = "../../util/vmux_path" }
+vmux_tool = { path = "../vmux_tool" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

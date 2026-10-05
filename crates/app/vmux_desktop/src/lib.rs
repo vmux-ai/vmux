@@ -4,9 +4,14 @@
     clippy::new_ret_no_self
 )]
 
-mod appearance;
-mod bookmark_menu;
-mod bookmark_persistence;
+use bevy::prelude::*;
+use bevy::window::{
+    CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,
+    WindowPosition, WindowResolution,
+};
+
+use crate::plugin::DesktopPluginGroup;
+
 mod boot_status;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;
@@ -16,121 +21,100 @@ mod capture_output;
     not(feature = "updater")
 ))]
 mod disabled_features;
-mod display;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
-mod key_claim;
 mod log_forward;
-mod mcp_connection;
 #[cfg(target_os = "macos")]
-mod native_keyboard;
+mod macos;
 #[cfg(feature = "native-notifications")]
 mod notify;
 mod os_menu;
 pub mod panic_hook;
 mod permission;
-mod persistence;
-pub mod plugins;
+mod plugin;
 #[cfg(feature = "recording")]
 mod recording;
 mod relaunch;
-mod remote;
 mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
-mod tools;
-
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
 
-pub(crate) mod shortcut;
 #[cfg(feature = "tray")]
 mod tray;
 #[cfg(feature = "updater")]
 pub mod updater;
-mod window_manager;
-mod window_state;
-use bevy::prelude::*;
-use bevy::window::{
-    CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,
-    WindowPosition, WindowResolution,
-};
-
-use crate::plugins::{DesktopPlugins, FeaturePlugins, VmuxCorePlugins};
-use {vmux_browser::BrowserPlugin, vmux_layout::LayoutPlugin};
+mod window;
+#[cfg(any(target_os = "macos", test))]
+mod window_interaction;
 
 pub struct VmuxPlugin;
 
 impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
-        let primary_window = window_config(false);
-        let window_plugin = WindowPlugin {
-            primary_window: Some(primary_window),
+        let winit_settings = runtime::WakePolicy::foreground(false, false);
+        app.insert_resource(winit_settings).add_plugins((
+            DefaultPlugins
+                .set(Self::window())
+                .set(bevy::log::LogPlugin {
+                    filter: "bevy_camera_controller=warn".into(),
+                    custom_layer: crate::log_forward::file_log_layer,
+                    ..default()
+                }),
+            vmux_app::VmuxPlugin::builder().desktop().build(),
+            DesktopPluginGroup,
+        ));
+    }
+}
+
+impl VmuxPlugin {
+    fn window() -> WindowPlugin {
+        WindowPlugin {
+            primary_window: Some(Self::window_config(false)),
             close_when_requested: false,
             exit_condition: ExitCondition::DontExit,
             ..default()
-        };
+        }
+    }
 
-        let winit_settings = runtime::foreground_winit_settings(false, false);
-        app.insert_resource(winit_settings).add_plugins((
-            VmuxCorePlugins,
-            DefaultPlugins.set(window_plugin).set(bevy::log::LogPlugin {
-                filter: "bevy_camera_controller=warn".into(),
-                custom_layer: crate::log_forward::file_log_layer,
-                ..default()
-            }),
-            LayoutPlugin,
-            FeaturePlugins,
-            BrowserPlugin,
-            DesktopPlugins,
-        ));
+    pub(crate) fn window_config(secondary: bool) -> NativeWindow {
+        NativeWindow {
+            title: Self::window_title(),
+            transparent: true,
+            composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
+            decorations: true,
+            titlebar_shown: true,
+            titlebar_transparent: true,
+            titlebar_show_title: false,
+            titlebar_show_buttons: false,
+            movable_by_window_background: false,
+            fullsize_content_view: true,
+            resizable: true,
+            ime_enabled: true,
+            visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
+            position: if secondary {
+                WindowPosition::Automatic
+            } else {
+                WindowPosition::Centered(MonitorSelection::Primary)
+            },
+            resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
+            ..default()
+        }
+    }
 
-        #[cfg(target_os = "macos")]
-        app.add_plugins(vmux_browser::native_page::NativePagePlugin::in_pane(
-            &vmux_git::page::NATIVE_PAGE,
-        ))
-        .add_plugins(vmux_browser::native_page::NativePagePlugin::in_pane(
-            &vmux_git::page::LEGACY_NATIVE_PAGE,
-        ));
+    fn window_title() -> String {
+        match env!("VMUX_BUILD_PROFILE") {
+            "release" => "Vmux".to_string(),
+            "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
+            "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
+            other => format!("Vmux ({})", other),
+        }
     }
 }
 
 const DEFAULT_WINDOW_WIDTH: u32 = 1280;
 const DEFAULT_WINDOW_HEIGHT: u32 = 800;
-
-pub(crate) fn window_config(secondary: bool) -> NativeWindow {
-    NativeWindow {
-        title: window_title(),
-        transparent: true,
-        composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
-        decorations: true,
-        titlebar_shown: true,
-        titlebar_transparent: true,
-        titlebar_show_title: false,
-        titlebar_show_buttons: false,
-        movable_by_window_background: false,
-        fullsize_content_view: true,
-        resizable: true,
-        ime_enabled: true,
-        visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
-        position: if secondary {
-            WindowPosition::Automatic
-        } else {
-            WindowPosition::Centered(MonitorSelection::Primary)
-        },
-        resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
-        ..default()
-    }
-}
-
-fn window_title() -> String {
-    match env!("VMUX_BUILD_PROFILE") {
-        "release" => "Vmux".to_string(),
-        "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
-        "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
-        other => format!("Vmux ({})", other),
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -138,14 +122,14 @@ mod tests {
 
     #[test]
     fn primary_window_enables_ime_input() {
-        let window = window_config(false);
+        let window = VmuxPlugin::window_config(false);
 
         assert!(window.ime_enabled);
     }
 
     #[test]
     fn primary_window_starts_hidden_when_native_glass_needs_backdrop_setup() {
-        let window = window_config(false);
+        let window = VmuxPlugin::window_config(false);
 
         assert_eq!(
             window.visible,
@@ -155,7 +139,7 @@ mod tests {
 
     #[test]
     fn primary_window_defaults_to_centered_default_size() {
-        let window = window_config(false);
+        let window = VmuxPlugin::window_config(false);
 
         assert!(matches!(
             window.position,
@@ -167,32 +151,17 @@ mod tests {
 
     #[test]
     fn secondary_window_uses_system_positioning() {
-        assert_eq!(window_config(true).position, WindowPosition::Automatic);
-    }
-
-    #[test]
-    fn window_plugin_keeps_app_alive_after_last_window_closes() {
-        let source = include_str!("lib.rs");
-        assert!(
-            source.contains("ExitCondition::DontExit"),
-            "WindowPlugin must opt out of automatic exit so Vmux.app survives last-window-close"
+        assert_eq!(
+            VmuxPlugin::window_config(true).position,
+            WindowPosition::Automatic
         );
     }
 
     #[test]
-    fn desktop_uses_single_layout_crate_for_cef_and_layout() {
-        let source = include_str!("lib.rs");
+    fn window_plugin_keeps_app_alive_after_last_window_closes() {
+        let plugin = VmuxPlugin::window();
 
-        assert!(source.contains("vmux_layout::"));
-        assert!(!source.contains(&["vmux_layout", "::footer"].concat()));
-        assert!(!source.contains(&["vmux_", "header::HeaderPlugin"].concat()));
-        assert!(!source.contains(&["vmux_", "side_sheet::SideSheetPlugin"].concat()));
-    }
-
-    #[test]
-    fn dev_build_has_no_tick_logger() {
-        let source = include_str!("lib.rs");
-
-        assert!(!source.contains(&["app", ".update", "():"].concat()));
+        assert!(matches!(plugin.exit_condition, ExitCondition::DontExit));
+        assert!(!plugin.close_when_requested);
     }
 }

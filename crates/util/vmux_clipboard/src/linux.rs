@@ -1,0 +1,60 @@
+use tracing::warn;
+
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+impl super::Clipboard {
+    pub(super) fn write_blocking(text: &str) {
+        let candidates: &[(&str, &[&str])] = &[
+            ("/usr/bin/wl-copy", &[]),
+            ("/usr/bin/xclip", &["-selection", "clipboard"]),
+        ];
+        for (bin, args) in candidates {
+            if std::path::Path::new(bin).exists() {
+                match Command::new(bin).args(*args).stdin(Stdio::piped()).spawn() {
+                    Ok(mut child) => {
+                        if let Some(stdin) = child.stdin.as_mut() {
+                            let _ = stdin.write_all(text.as_bytes());
+                        }
+                        let _ = child.wait();
+                        return;
+                    }
+                    Err(e) => warn!("{bin} failed: {e}"),
+                }
+            }
+        }
+        warn!("no clipboard helper found (need wl-copy or xclip)");
+    }
+
+    pub fn read_text() -> Option<String> {
+        let candidates: &[(&str, &[&str])] = &[
+            ("/usr/bin/wl-paste", &[]),
+            ("/usr/bin/xclip", &["-selection", "clipboard", "-o"]),
+        ];
+        for (bin, args) in candidates {
+            if std::path::Path::new(bin).exists()
+                && let Ok(output) = Command::new(bin).args(*args).output()
+                && output.status.success()
+            {
+                return Some(String::from_utf8_lossy(&output.stdout).into_owned());
+            }
+        }
+        None
+    }
+
+    pub fn has_image() -> bool {
+        false
+    }
+
+    pub fn read_image_png() -> Option<Vec<u8>> {
+        None
+    }
+
+    pub fn read_image_tiff() -> Option<Vec<u8>> {
+        None
+    }
+
+    pub fn image_file_path() -> Option<String> {
+        None
+    }
+}

@@ -1,0 +1,57 @@
+(
+    settings: Some((
+        defaults: (
+            shortcuts: Some((
+                leader: (key: "b", ctrl: true),
+                chord_timeout_ms: 1000,
+            )),
+        ),
+        sections: [(
+            id: "shortcuts",
+            title: "schema-shortcuts",
+            description: Some("schema-shortcuts-detail"),
+            root_path: "shortcuts",
+            order: 40,
+        )],
+        fields: [
+            (
+                path: "shortcuts",
+                order: ["chord_timeout_ms", "leader", "bindings"],
+            ),
+            (
+                path: "shortcuts.leader",
+                label: Some("schema-leader"),
+                hint: Some("schema-leader-detail"),
+                widget: Some(LeaderKbd),
+            ),
+            (
+                path: "shortcuts.chord_timeout_ms",
+                label: Some("schema-chord-timeout"),
+                hint: Some("schema-chord-timeout-detail"),
+            ),
+            (
+                path: "shortcuts.bindings",
+                label: Some("schema-bindings"),
+                widget: Some(BindingsList),
+            ),
+        ],
+    )),
+    pages: [
+        (
+            url: "vmux://shortcuts/",
+            title: "Keyboard Shortcuts",
+            title_message_id: "shortcuts-title",
+            keywords: ["keyboard", "shortcut", "keymap", "cheatsheet"],
+            icon: "Keyboard",
+            command_bar: true,
+            bookmark: Some(120),
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "ShortcutUiState",
+                "ShortcutProbePressRequest",
+                "ShortcutProbeClearRequest",
+            ],
+        ),
+    ],
+)

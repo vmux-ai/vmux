@@ -1,0 +1,384 @@
+use bevy::prelude::*;
+use vmux_api::command_bar::{
+    CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine,
+};
+use vmux_ecs::CommandBarContribution;
+use vmux_ecs::launcher::RendersLauncherPanel;
+use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::page::PageManifest;
+
+pub type CommandBarState = vmux_ecs::UiState<vmux_api::command_bar::CommandBarUiState>;
+
+pub(super) struct UiStatePlugin;
+
+impl Plugin for UiStatePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, (spawn, ApplyDeferred, update, contribute).chain())
+            .add_plugins(vmux_ecs::UiStatePlugin::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::default())
+            .add_systems(PreUpdate, attach);
+    }
+}
+
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Command bar pages"),
+        CommandBarPagesSnapshot::default(),
+    ));
+}
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct WriteCommandBarSnapshots;
+
+#[derive(Component, Default, Clone, Debug, PartialEq)]
+pub struct CommandBarWorkspaceSnapshot {
+    pub stack: Option<Entity>,
+    pub pane: Option<Entity>,
+    pub tabs: Vec<vmux_api::command_bar::CommandBarTab>,
+    pub stack_count: usize,
+    pub project_root: Option<String>,
+}
+
+#[derive(Component, Default, Clone, Debug, PartialEq)]
+pub struct CommandBarProjectRoots {
+    pub roots: Vec<String>,
+    pub active: Option<String>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ContributedPages<'w, 's> {
+    pages: Query<'w, 's, &'static ContributedPage>,
+}
+
+impl ContributedPages<'_, '_> {
+    pub fn sorted(&self) -> Vec<ContributedPage> {
+        let mut pages: Vec<ContributedPage> = self.pages.iter().cloned().collect();
+        pages.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.id.cmp(&b.id)));
+        pages
+    }
+
+    pub fn prompt_url(&self, requested: Option<&str>) -> Option<String> {
+        if let Some(requested) = requested
+            && self.pages.iter().any(|entry| entry.page.url == requested)
+        {
+            return Some(requested.to_string());
+        }
+        let pages = self.sorted();
+        let first = pages.first()?;
+        Some(first.page.url.clone())
+    }
+
+    pub fn page_url(&self, id: &str) -> Option<String> {
+        let entry = self.pages.iter().find(|entry| entry.id == id)?;
+        Some(entry.page.url.clone())
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ClaimedUrls<'w, 's> {
+    urls: Query<'w, 's, &'static ClaimedUrl>,
+}
+
+impl ClaimedUrls<'_, '_> {
+    pub fn contains(&self, url: &str) -> bool {
+        self.urls.iter().any(|claimed| claimed.matches(url))
+    }
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ContributedPage {
+    pub id: String,
+    pub page: CommandBarPage,
+    pub rank: usize,
+}
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ContributedAgentModels(pub vmux_api::command_bar::AgentModels);
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ContributedAgentModes(pub vmux_api::command_bar::AgentModes);
+
+#[derive(Component, Clone, Debug)]
+pub struct ContributedCommand {
+    pub id: String,
+    pub message_id: String,
+    pub args: Vec<(String, String)>,
+}
+
+fn contribute(features: Query<&FeatureManifest>, mut commands: Commands) {
+    let mut entries = Vec::new();
+    for feature in &features {
+        entries.extend(feature.command_bar.iter().cloned());
+    }
+    entries.sort_by(|left, right| {
+        left.rank
+            .cmp(&right.rank)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    entries.dedup_by(|left, right| left.id == right.id);
+    for entry in entries {
+        commands.spawn((
+            Name::new(entry.title.clone()),
+            CommandBarContribution {
+                row: vmux_api::command_bar::CommandBarResultItem {
+                    key: entry.id,
+                    leading: entry.leading,
+                    title: entry.title,
+                    subtitle: entry.subtitle,
+                    detail: entry.detail,
+                    trailing: entry.trailing,
+                    badge: entry.badge,
+                    url: entry.url,
+                    ..Default::default()
+                },
+                title_message_id: entry.title_message_id,
+                subtitle_message_id: entry.subtitle_message_id,
+                query_prefix: entry.query_prefix,
+                value: entry.value,
+                keywords: entry.keywords,
+                rank: entry.rank,
+                close: entry.close,
+                ..Default::default()
+            },
+        ));
+    }
+}
+
+#[derive(Component, Clone, Debug)]
+pub struct ClaimedUrl(pub String);
+
+#[derive(Component, Default, Clone, Debug, PartialEq)]
+pub struct CommandBarContextSnapshot {
+    pub label: String,
+}
+
+#[derive(Component, Default, Clone, Debug)]
+pub struct CommandBarPagesSnapshot {
+    pub pages: Vec<RegisteredPage>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RegisteredPage {
+    pub page: CommandBarPage,
+    pub title_message_id: Option<String>,
+    pub replaces_command: Option<String>,
+}
+
+#[derive(Component, Default, Clone, Debug)]
+pub struct CommandBarWorkSnapshot {
+    pub work_dirs: Vec<CommandBarWorkDir>,
+    pub recent_files: Vec<CommandBarRecentFile>,
+    pub search_engines: Vec<SearchEngine>,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct CommandBarWorkDirectory(pub String);
+
+fn update(manifests: Query<&PageManifest>, mut snapshot: Single<&mut CommandBarPagesSnapshot>) {
+    if !snapshot.pages.is_empty() {
+        return;
+    }
+    let mut pages = Vec::new();
+    for manifest in &manifests {
+        if !manifest.command_bar {
+            continue;
+        }
+        pages.push(RegisteredPage {
+            page: CommandBarPage {
+                url: manifest.url(),
+                title: manifest.title.to_string(),
+                keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
+                icon: manifest
+                    .icon
+                    .map(vmux_api::PageIcon::Builtin)
+                    .unwrap_or_default(),
+                shortcut: String::new(),
+                prompt_target: false,
+                startup: manifest.startup,
+            },
+            title_message_id: manifest.title_message_id.map(str::to_string),
+            replaces_command: manifest.replaces_command.map(str::to_string),
+        });
+    }
+    pages.sort_by(|a, b| a.page.url.cmp(&b.page.url));
+    snapshot.pages = pages;
+}
+
+fn attach(
+    pages: Query<Entity, (With<RendersLauncherPanel>, Without<CommandBarState>)>,
+    mut commands: Commands,
+) {
+    for page in &pages {
+        commands.entity(page).insert(CommandBarState::default());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    impl ContributedPage {
+        fn ranked(url: &str, rank: usize) -> Self {
+            Self {
+                id: url.to_string(),
+                rank,
+                page: CommandBarPage {
+                    url: url.to_string(),
+                    prompt_target: true,
+                    ..Default::default()
+                },
+            }
+        }
+
+        fn prompt_url_among(pages: Vec<Self>, requested: Option<&str>) -> Option<String> {
+            let mut world = World::new();
+            for page in pages {
+                world.spawn(page);
+            }
+            let requested = requested.map(str::to_string);
+            world
+                .run_system_once(move |pages: ContributedPages| {
+                    pages.prompt_url(requested.as_deref())
+                })
+                .expect("prompt_url system runs")
+        }
+    }
+
+    #[test]
+    fn prompt_goes_to_the_lowest_ranked_page() {
+        let pages = vec![
+            ContributedPage::ranked("vmux://sessions/claude", 1),
+            ContributedPage::ranked("vmux://sessions/codex/cli", 0),
+        ];
+
+        assert_eq!(
+            ContributedPage::prompt_url_among(pages, None).as_deref(),
+            Some("vmux://sessions/codex/cli")
+        );
+    }
+
+    #[test]
+    fn prompt_honours_a_listed_request_and_ignores_a_stale_one() {
+        let pages = || {
+            vec![
+                ContributedPage::ranked("vmux://sessions/codex/cli", 0),
+                ContributedPage::ranked("vmux://sessions/claude", 1),
+            ]
+        };
+
+        assert_eq!(
+            ContributedPage::prompt_url_among(pages(), Some("vmux://sessions/claude")).as_deref(),
+            Some("vmux://sessions/claude")
+        );
+        assert_eq!(
+            ContributedPage::prompt_url_among(pages(), Some("vmux://sessions/uninstalled"))
+                .as_deref(),
+            Some("vmux://sessions/codex/cli")
+        );
+    }
+
+    #[test]
+    fn prompt_refuses_when_no_page_accepts_one() {
+        assert_eq!(ContributedPage::prompt_url_among(Vec::new(), None), None);
+    }
+
+    #[derive(Component)]
+    struct FirstContributor;
+
+    #[derive(Component)]
+    struct SecondContributor;
+
+    impl ContributedCommand {
+        fn named(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                message_id: "command-test-row".to_string(),
+                args: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn one_contributor_rebuilding_leaves_the_others_rows() {
+        let mut world = World::new();
+        world.spawn((FirstContributor, ContributedCommand::named("first")));
+        world.spawn((SecondContributor, ContributedCommand::named("second")));
+
+        world
+            .run_system_once(
+                |mine: Query<Entity, With<FirstContributor>>, mut commands: Commands| {
+                    for entity in mine.iter() {
+                        commands.entity(entity).despawn();
+                    }
+                    commands.spawn((FirstContributor, ContributedCommand::named("first-again")));
+                },
+            )
+            .expect("republish runs");
+
+        let ids = world
+            .run_system_once(|commands: Query<&ContributedCommand>| {
+                let mut ids: Vec<String> = commands.iter().map(|row| row.id.clone()).collect();
+                ids.sort();
+                ids
+            })
+            .expect("read runs");
+        assert_eq!(ids, ["first-again", "second"]);
+    }
+
+    #[test]
+    fn pages_snapshot_collects_only_command_bar_pages() {
+        let mut app = App::new();
+        app.add_systems(Update, update);
+        app.world_mut().spawn(CommandBarPagesSnapshot::default());
+        app.world_mut().spawn(PageManifest {
+            route: "vmux://services/",
+            url: "vmux://services/",
+            asset_host: "services",
+            owns_subtree: false,
+            title: "Services",
+            title_message_id: Some("services-title"),
+            replaces_command: Some("service_open"),
+            keywords: &["daemon"],
+            icon: Some(vmux_api::BuiltinIcon::Settings),
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement::DEFAULT,
+        });
+        app.world_mut().spawn(PageManifest {
+            route: "vmux://layout/",
+            url: "vmux://layout/",
+            asset_host: "layout",
+            owns_subtree: false,
+            title: "Layout",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: None,
+            command_bar: false,
+            startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement::DEFAULT,
+        });
+
+        app.update();
+
+        let snapshot = app
+            .world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<CommandBarPagesSnapshot>())
+            .unwrap();
+        assert_eq!(snapshot.pages.len(), 1);
+        assert_eq!(snapshot.pages[0].page.url, "vmux://services/");
+        assert_eq!(
+            snapshot.pages[0].title_message_id.as_deref(),
+            Some("services-title")
+        );
+        assert_eq!(
+            snapshot.pages[0].replaces_command.as_deref(),
+            Some("service_open")
+        );
+    }
+}

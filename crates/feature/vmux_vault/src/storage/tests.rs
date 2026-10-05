@@ -1,0 +1,1018 @@
+use super::connect::*;
+use super::keys::KeyStore;
+use super::recovery::*;
+use super::repository::*;
+use super::snapshot::*;
+use super::status::*;
+use super::sync::*;
+use super::*;
+use std::process::Command;
+use std::sync::Mutex;
+use std::time::Duration;
+use zeroize::Zeroizing;
+
+#[test]
+fn agent_status_reports_provider_and_pending_sync() {
+    let status = VaultStatus {
+        root: "/Users/test/.vmux".into(),
+        initialized: true,
+        encrypted: true,
+        unlocked: true,
+        recovery_enabled: true,
+        remote: "https://github.com/vmux-ai/vault.git".into(),
+        branch: "main".into(),
+        dirty: 2,
+        ahead: 1,
+        behind: 0,
+        ..Default::default()
+    };
+    let status = status.snapshot();
+
+    assert!(status.connected);
+    assert!(status.encrypted);
+    assert!(status.unlocked);
+    assert!(status.recovery_key);
+    assert!(status.automatic_backup);
+    assert_eq!(
+        status.provider,
+        Some(vmux_api::vault::VaultProvider::Github)
+    );
+    assert_eq!(
+        status.remote.as_deref(),
+        Some("https://github.com/vmux-ai/vault.git")
+    );
+    assert_eq!(status.local_changes, 2);
+    assert_eq!(status.ahead, 1);
+    assert!(status.sync_needed);
+}
+
+#[test]
+fn agent_status_matches_github_hosts_exactly() {
+    for (remote, provider) in [
+        (
+            "git@github.com:vmux-ai/vault.git",
+            vmux_api::vault::VaultProvider::Github,
+        ),
+        (
+            "https://notgithub.com/vmux-ai/vault.git",
+            vmux_api::vault::VaultProvider::Git,
+        ),
+        (
+            "/Volumes/github.com/vault.git",
+            vmux_api::vault::VaultProvider::CloudFolder,
+        ),
+    ] {
+        let status = VaultStatus {
+            initialized: true,
+            remote: remote.to_string(),
+            ..VaultStatus::default()
+        };
+        assert_eq!(status.snapshot().provider, Some(provider));
+    }
+}
+
+#[test]
+fn agent_status_removes_remote_url_credentials() {
+    let status = VaultStatus {
+        initialized: true,
+        remote: "https://user:secret@github.com/vmux-ai/vault.git".to_string(),
+        ..VaultStatus::default()
+    };
+    let status = status.snapshot();
+
+    assert_eq!(
+        status.provider,
+        Some(vmux_api::vault::VaultProvider::Github)
+    );
+    assert_eq!(
+        status.remote.as_deref(),
+        Some("https://github.com/vmux-ai/vault.git")
+    );
+    assert!(!serde_json::to_string(&status).unwrap().contains("secret"));
+}
+
+#[test]
+fn agent_status_omits_an_unparseable_remote_url() {
+    let status = VaultStatus {
+        initialized: true,
+        remote: "https://user:secret@[".to_string(),
+        ..VaultStatus::default()
+    };
+    let status = status.snapshot();
+
+    assert!(!status.connected);
+    assert!(status.remote.is_none());
+    assert!(!serde_json::to_string(&status).unwrap().contains("secret"));
+}
+
+#[test]
+fn generated_recovery_keys_are_independent_and_parseable() {
+    let key = GeneratedRecoveryKey::generate().unwrap();
+    let displayed = key.display();
+    assert!(
+        GeneratedRecoveryKey::parse(&displayed).is_ok(),
+        "the displayed form has to be the one the unlock path parses back"
+    );
+
+    let again = GeneratedRecoveryKey::generate().unwrap();
+    assert_ne!(
+        *displayed,
+        *again.display(),
+        "each draw must be independent"
+    );
+}
+
+struct FixedKeyStore {
+    key: Vec<u8>,
+}
+
+impl FixedKeyStore {
+    fn new(byte: u8) -> Self {
+        Self {
+            key: vec![byte; KEY_LEN],
+        }
+    }
+}
+
+impl KeyStore for FixedKeyStore {
+    fn load(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        Ok(Zeroizing::new(self.key.clone()))
+    }
+
+    fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        Ok(Zeroizing::new(self.key.clone()))
+    }
+
+    fn store(&self, _vault_id: &str, key: &[u8]) -> Result<(), String> {
+        if key == self.key {
+            Ok(())
+        } else {
+            Err("unexpected key".to_string())
+        }
+    }
+}
+
+#[derive(Default)]
+struct MemoryKeyStore {
+    key: Mutex<Option<Vec<u8>>>,
+}
+
+impl KeyStore for MemoryKeyStore {
+    fn load(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        self.key
+            .lock()
+            .unwrap()
+            .clone()
+            .map(Zeroizing::new)
+            .ok_or_else(|| "key unavailable".to_string())
+    }
+
+    fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        Err("unexpected create".to_string())
+    }
+
+    fn store(&self, _vault_id: &str, key: &[u8]) -> Result<(), String> {
+        *self.key.lock().unwrap() = Some(key.to_vec());
+        Ok(())
+    }
+}
+
+#[test]
+fn missing_vault_key_distinguishes_registered_recovery_methods() {
+    let repository = tempfile::tempdir().unwrap();
+    let keys = MemoryKeyStore::default();
+
+    assert_eq!(
+        RepositoryKey::new(repository.path(), &keys)
+            .load("vault")
+            .unwrap_err(),
+        "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key."
+    );
+
+    let envelope = RecoveryEnvelope {
+        version: FORMAT_VERSION,
+        wrapped_key: vec![1, 2, 3],
+    };
+    let directory = repository.path().join(RECOVERY_DIR);
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join(RECOVERY_FILE),
+        ron::to_string(&envelope).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        RepositoryKey::new(repository.path(), &keys)
+            .load("vault")
+            .unwrap_err(),
+        "key unavailable",
+        "with a recovery method on record the real error surfaces, not the no-method advice"
+    );
+}
+
+#[test]
+fn vault_status_requires_an_accessible_encryption_key() {
+    let root = tempfile::tempdir().unwrap();
+    let repository = prepare_repository(root.path());
+    let keys = FixedKeyStore::new(47);
+    VaultSync::initialize(root.path(), &repository, &keys).unwrap();
+    VaultLocalState::write(root.path(), &repository).unwrap();
+
+    assert!(VaultStatus::at(root.path(), &repository, &keys).unlocked);
+    assert!(!VaultStatus::at(root.path(), &repository, &MemoryKeyStore::default()).unlocked);
+}
+
+fn repository(root: &Path) -> PathBuf {
+    root.join(".vmux-vault")
+}
+
+fn configure_identity(root: &Path) {
+    let git = GitRepository::at(root);
+    git.run(&["config", "user.name", "Vmux Test"]).unwrap();
+    git.run(&["config", "user.email", "vmux@example.com"])
+        .unwrap();
+    git.run(&["config", "commit.gpgSign", "false"]).unwrap();
+}
+
+fn prepare_repository(root: &Path) -> PathBuf {
+    let repository = repository(root);
+    VaultRepositoryPath::at(&repository).ensure().unwrap();
+    configure_identity(&repository);
+    repository
+}
+
+fn create_bare_remote(path: &Path) {
+    Command::new("git")
+        .args(["init", "--bare", path.to_string_lossy().as_ref()])
+        .output()
+        .unwrap()
+        .success_text()
+        .unwrap();
+}
+
+#[test]
+fn invalid_saved_github_account_uses_reauthentication_flow() {
+    let source = r#"{
+            "hosts": {
+                "github.com": [{
+                    "state": "error",
+                    "active": true,
+                    "host": "github.com",
+                    "login": "octocat"
+                }]
+            }
+        }"#;
+
+    assert!(GitHubAuthorization::saved_account(source).unwrap());
+    assert!(!GitHubAuthorization::saved_account(r#"{"hosts":{}}"#).unwrap());
+}
+
+#[test]
+fn github_owner_picker_only_includes_organizations_that_can_create_repositories() {
+    let source = r#"{
+            "data": {
+                "viewer": {
+                    "login": "octocat",
+                    "organizations": {
+                        "nodes": [
+                            {"login": "stale-org", "viewerCanCreateRepositories": false},
+                            {"login": "writable-org", "viewerCanCreateRepositories": true}
+                        ]
+                    }
+                }
+            }
+        }"#;
+
+    assert_eq!(
+        GitHubAuthorization::owners_from_graphql(source).unwrap(),
+        (
+            "octocat".to_string(),
+            vec!["octocat".to_string(), "writable-org".to_string()]
+        )
+    );
+}
+
+#[test]
+fn github_device_code_is_extracted_from_cli_progress() {
+    assert_eq!(
+        GitHubAuthorization::device_code("! First, copy your one-time code: ABCD-1234"),
+        Some("ABCD-1234".to_string())
+    );
+    assert_eq!(
+        GitHubAuthorization::device_code("One-time code (WXYZ-9876) copied to clipboard"),
+        Some("WXYZ-9876".to_string())
+    );
+    assert_eq!(
+        GitHubAuthorization::device_code("authentication pending"),
+        None
+    );
+}
+
+#[test]
+fn github_auth_streams_the_device_code() {
+    let mut command = Command::new("sh");
+    command.args([
+        "-c",
+        "printf 'One-time code (ABCD-1234) copied to clipboard\\n' >&2",
+    ]);
+    let mut codes = Vec::new();
+
+    GitHubAuthorization::run(&mut command, &mut |code| codes.push(code), &|| false).unwrap();
+
+    assert_eq!(codes, vec!["ABCD-1234"]);
+}
+
+#[test]
+fn github_auth_can_be_canceled() {
+    let mut command = Command::new("sh");
+    command.args([
+        "-c",
+        "printf 'One-time code (ABCD-1234) copied to clipboard\\n' >&2; exec sleep 10",
+    ]);
+    let canceled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cancel = canceled.clone();
+    let canceler = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    let result = GitHubAuthorization::run(&mut command, &mut |_| {}, &|| {
+        canceled.load(std::sync::atomic::Ordering::Relaxed)
+    });
+    canceler.join().unwrap();
+
+    assert_eq!(result, Err("GitHub authorization canceled".to_string()));
+}
+
+#[test]
+fn encrypted_data_rejects_wrong_keys_and_tampering() {
+    let key = vec![7; KEY_LEN];
+    let wrong_key = vec![8; KEY_LEN];
+    let encrypted = VaultCrypto::new(&key)
+        .unwrap()
+        .encrypt(b"path", b"secret")
+        .unwrap();
+
+    assert_eq!(
+        VaultCrypto::new(&key)
+            .unwrap()
+            .decrypt(b"path", &encrypted)
+            .unwrap(),
+        b"secret"
+    );
+    assert!(
+        VaultCrypto::new(&wrong_key)
+            .unwrap()
+            .decrypt(b"path", &encrypted)
+            .is_err()
+    );
+    let mut tampered = encrypted;
+    *tampered.last_mut().unwrap() ^= 1;
+    assert!(
+        VaultCrypto::new(&key)
+            .unwrap()
+            .decrypt(b"path", &tampered)
+            .is_err()
+    );
+}
+
+#[test]
+fn recovery_key_unlocks_knowledge_and_tools_on_a_new_device() {
+    let first = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(first.path().join("knowledge")).unwrap();
+    std::fs::create_dir_all(first.path().join("tools")).unwrap();
+    std::fs::write(first.path().join("knowledge/private.md"), "# Private\n").unwrap();
+    std::fs::write(
+        first.path().join("tools/tools.toml"),
+        "version = 1\n[homebrew]\npackages = [\"ripgrep\"]\n",
+    )
+    .unwrap();
+    std::fs::write(first.path().join("tools/Brewfile"), "brew \"ripgrep\"\n").unwrap();
+    let first_repository = prepare_repository(first.path());
+    let original_keys = FixedKeyStore::new(43);
+    VaultSync::initialize(first.path(), &first_repository, &original_keys).unwrap();
+    let recovery_key_bytes = [45; KEY_LEN];
+    let recovery_key = GeneratedRecoveryKey::format(&recovery_key_bytes);
+    let recovery = VaultRecovery::at(first.path(), &first_repository);
+    let creation = recovery
+        .create_with(&original_keys, &recovery_key_bytes)
+        .unwrap();
+    assert!(!creation.pending_upload);
+    assert_eq!(
+        GeneratedRecoveryKey::parse(&recovery_key).unwrap().len(),
+        KEY_LEN
+    );
+    assert!(RecoveryEnvelope::read(&first_repository).unwrap().is_some());
+
+    let remote = tempfile::tempdir().unwrap();
+    let remote_path = remote.path().join("vault.git");
+    create_bare_remote(&remote_path);
+    let git = GitRepository::at(&first_repository);
+    git.run(&["remote", "add", "origin", remote_path.to_str().unwrap()])
+        .unwrap();
+    git.run(&["push", "-u", "origin", "main"]).unwrap();
+
+    let second = tempfile::tempdir().unwrap();
+    let second_repository = prepare_repository(second.path());
+    let second_keys = MemoryKeyStore::default();
+    VaultConnection::remote(
+        second.path(),
+        &second_repository,
+        remote_path.to_str().unwrap(),
+        &second_keys,
+    )
+    .unwrap();
+    assert!(!second.path().join("knowledge/private.md").exists());
+
+    let recovery = VaultRecovery::at(second.path(), &second_repository);
+    recovery.unlock_with(&second_keys, &recovery_key).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(second.path().join("knowledge/private.md")).unwrap(),
+        "# Private\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(second.path().join("tools/Brewfile")).unwrap(),
+        "brew \"ripgrep\"\n"
+    );
+    assert_eq!(
+        second_keys.load("ignored").unwrap().as_slice(),
+        &[43; KEY_LEN]
+    );
+    assert!(
+        recovery.unlock_with(
+            &MemoryKeyStore::default(),
+            "vmux-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000",
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn recovery_key_format_round_trips_and_rejects_invalid_input() {
+    let key = [0xab; KEY_LEN];
+    let encoded = GeneratedRecoveryKey::format(&key);
+
+    assert!(encoded.starts_with("vmux-abab-"));
+    assert_eq!(
+        GeneratedRecoveryKey::parse(&encoded).unwrap().as_slice(),
+        &key
+    );
+    assert!(GeneratedRecoveryKey::parse("vmux-not-a-key").is_err());
+}
+
+#[test]
+fn recovery_key_creation_survives_remote_upload_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let repository = prepare_repository(root.path());
+    let keys = FixedKeyStore::new(44);
+    VaultSync::initialize(root.path(), &repository, &keys).unwrap();
+    let unavailable = root.path().join("missing-remote.git");
+    GitRepository::at(&repository)
+        .run(&["remote", "add", "origin", unavailable.to_str().unwrap()])
+        .unwrap();
+
+    let recovery_key_bytes = [46; KEY_LEN];
+    let recovery_key = GeneratedRecoveryKey::format(&recovery_key_bytes);
+    let recovery = VaultRecovery::at(root.path(), &repository)
+        .create_with(&keys, &recovery_key_bytes)
+        .unwrap();
+
+    assert!(recovery.pending_upload);
+    assert_eq!(
+        GeneratedRecoveryKey::parse(&recovery_key).unwrap().len(),
+        KEY_LEN
+    );
+    assert!(RecoveryEnvelope::read(&repository).unwrap().is_some());
+}
+
+#[test]
+fn initialization_commits_only_encrypted_paths_and_content() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("knowledge")).unwrap();
+    std::fs::create_dir_all(root.path().join("workspace/project")).unwrap();
+    std::fs::write(root.path().join("settings.ron"), "(secret: true)\n").unwrap();
+    std::fs::write(root.path().join("knowledge/private.md"), "# Private\n").unwrap();
+    std::fs::write(
+        root.path().join("workspace/project/secret.txt"),
+        "ignored\n",
+    )
+    .unwrap();
+    let repository = prepare_repository(root.path());
+    let keys = FixedKeyStore::new(3);
+
+    VaultSync::initialize(root.path(), &repository, &keys).unwrap();
+
+    let tree = GitRepository::at(&repository)
+        .run(&["ls-tree", "-r", "--name-only", "HEAD"])
+        .unwrap();
+    assert!(tree.lines().any(|path| path == MANIFEST_FILE));
+    assert!(tree.lines().any(|path| path == INDEX_FILE));
+    assert!(tree.lines().any(|path| path.starts_with("objects/")));
+    assert!(!tree.contains("settings.ron"));
+    assert!(!tree.contains("private.md"));
+    let repository_bytes = std::fs::read(repository.join(INDEX_FILE)).unwrap();
+    assert!(
+        !repository_bytes
+            .windows(7)
+            .any(|window| window == b"Private")
+    );
+    let vault = VaultRepositoryPath::at(&repository);
+    let manifest = vault.manifest().unwrap();
+    let key = keys.load(&manifest.vault_id).unwrap();
+    let (_, files) = vault.load_encrypted_snapshot(&key).unwrap();
+    assert_eq!(files["settings.ron"].data, b"(secret: true)\n");
+    assert_eq!(files["knowledge/private.md"].data, b"# Private\n");
+    assert!(!files.contains_key("workspace/project/secret.txt"));
+}
+
+#[test]
+fn managed_path_filter_includes_authored_vault_content_only() {
+    let storage = VaultStorage::current();
+    let root = storage.root();
+
+    assert!(storage.manages(&root.join("settings.ron")));
+    assert!(storage.manages(&root.join("knowledge/note.md")));
+    assert!(storage.manages(&root.join("tools/Brewfile")));
+    assert!(!storage.manages(&root.join("workspace/repo/file.rs")));
+    assert!(!storage.manages(&root.join("profiles/personal/store.ron")));
+    assert!(!storage.manages(&root.join("knowledge/.DS_Store")));
+}
+
+#[test]
+fn initialization_rejects_unencrypted_staging_files() {
+    let root = tempfile::tempdir().unwrap();
+    let repository = prepare_repository(root.path());
+    std::fs::write(repository.join("plaintext.txt"), "secret\n").unwrap();
+
+    let error =
+        VaultSync::initialize(root.path(), &repository, &FixedKeyStore::new(11)).unwrap_err();
+
+    assert!(error.contains("unencrypted"));
+    assert!(
+        GitRepository::at(&repository)
+            .run(&["rev-parse", "--verify", "HEAD"])
+            .is_err()
+    );
+}
+
+#[test]
+fn empty_remote_receives_encrypted_initial_and_followup_syncs() {
+    let root = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    std::fs::write(root.path().join("settings.ron"), "()\n").unwrap();
+    let repository = prepare_repository(root.path());
+    let keys = FixedKeyStore::new(4);
+
+    VaultConnection::remote(
+        root.path(),
+        &repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::write(root.path().join("settings.ron"), "(changed: true)\n").unwrap();
+    VaultSync::run(root.path(), &repository, &keys).unwrap();
+
+    assert_eq!(
+        GitRepository::at(&repository)
+            .run(&["rev-list", "--count", "origin/main"])
+            .unwrap(),
+        "2"
+    );
+    assert_eq!(
+        VaultLocalState::change_count(root.path(), &repository).unwrap(),
+        0
+    );
+    let tree = GitRepository::at(&repository)
+        .run(&["ls-tree", "-r", "--name-only", "origin/main"])
+        .unwrap();
+    assert!(!tree.contains("settings.ron"));
+}
+
+#[test]
+fn stale_encrypted_commit_is_discarded_and_regenerated_from_plaintext() {
+    let root = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let path = root.path().join("settings.ron");
+    std::fs::write(&path, "(value: 1)\n").unwrap();
+    let repository = prepare_repository(root.path());
+    let keys = FixedKeyStore::new(15);
+    VaultConnection::remote(
+        root.path(),
+        &repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::write(&path, "(value: 2)\n").unwrap();
+    std::fs::write(repository.join(INDEX_FILE), b"stale encrypted commit").unwrap();
+    let git = GitRepository::at(&repository);
+    git.run(&["add", INDEX_FILE]).unwrap();
+    git.run(&["commit", "-m", "Stale local snapshot"]).unwrap();
+
+    VaultSync::run(root.path(), &repository, &keys).unwrap();
+
+    let vault = VaultRepositoryPath::at(&repository);
+    let manifest = vault.manifest().unwrap();
+    let key = keys.load(&manifest.vault_id).unwrap();
+    let (_, files) = vault.load_encrypted_snapshot(&key).unwrap();
+    assert_eq!(files["settings.ron"].data, b"(value: 2)\n");
+    assert_eq!(git.run(&["status", "--short"]).unwrap(), "");
+}
+
+#[test]
+fn existing_encrypted_vault_merges_non_conflicting_local_files() {
+    let seed = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let keys = FixedKeyStore::new(5);
+    std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
+    let seed_repository = prepare_repository(seed.path());
+    VaultConnection::remote(
+        seed.path(),
+        &seed_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.path().join("knowledge")).unwrap();
+    std::fs::write(root.path().join("knowledge/local.md"), "# Local\n").unwrap();
+    let repository = prepare_repository(root.path());
+
+    VaultConnection::remote(
+        root.path(),
+        &repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("settings.ron")).unwrap(),
+        "(remote: true)\n"
+    );
+    let vault = VaultRepositoryPath::at(&repository);
+    let manifest = vault.manifest().unwrap();
+    let key = keys.load(&manifest.vault_id).unwrap();
+    let (_, files) = vault.load_encrypted_snapshot(&key).unwrap();
+    assert!(files.contains_key("settings.ron"));
+    assert!(files.contains_key("knowledge/local.md"));
+}
+
+#[test]
+fn existing_encrypted_vault_merges_structured_files_by_key() {
+    let seed = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let keys = FixedKeyStore::new(6);
+    std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
+    let seed_repository = prepare_repository(seed.path());
+    VaultConnection::remote(
+        seed.path(),
+        &seed_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::write(root.path().join("settings.ron"), "(local: true)\n").unwrap();
+    let repository = prepare_repository(root.path());
+
+    VaultConnection::remote(
+        root.path(),
+        &repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+
+    let source = std::fs::read_to_string(root.path().join("settings.ron")).unwrap();
+    let ron::Value::Map(settings) = ron::from_str::<ron::Value>(&source).unwrap() else {
+        panic!("settings must remain a RON map");
+    };
+    assert_eq!(
+        RonMap(&settings).get(&ron::Value::String("local".to_string())),
+        Some(&ron::Value::Bool(true))
+    );
+    assert_eq!(
+        RonMap(&settings).get(&ron::Value::String("remote".to_string())),
+        Some(&ron::Value::Bool(true))
+    );
+}
+
+#[test]
+fn same_structured_key_prefers_the_local_value() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let keys = FixedKeyStore::new(10);
+    std::fs::write(first.path().join("settings.ron"), "(value: 1)\n").unwrap();
+    let first_repository = prepare_repository(first.path());
+    VaultConnection::remote(
+        first.path(),
+        &first_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    let second_repository = prepare_repository(second.path());
+    VaultConnection::remote(
+        second.path(),
+        &second_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::write(first.path().join("settings.ron"), "(value: 2)\n").unwrap();
+    VaultSync::run(first.path(), &first_repository, &keys).unwrap();
+    std::fs::write(second.path().join("settings.ron"), "(value: 3)\n").unwrap();
+
+    let result = VaultSync::run(second.path(), &second_repository, &keys).unwrap();
+    VaultSync::run(second.path(), &second_repository, &keys).unwrap();
+
+    assert!(result.contains("automatic merge"));
+    let source = std::fs::read_to_string(second.path().join("settings.ron")).unwrap();
+    let ron::Value::Map(settings) = ron::from_str::<ron::Value>(&source).unwrap() else {
+        panic!("settings must remain a RON map");
+    };
+    let value = RonMap(&settings)
+        .get(&ron::Value::String("value".to_string()))
+        .cloned()
+        .unwrap()
+        .into_rust::<i64>()
+        .unwrap();
+    assert_eq!(value, 3);
+}
+
+#[test]
+fn markdown_changes_from_two_devices_merge_automatically() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let keys = FixedKeyStore::new(12);
+    std::fs::create_dir_all(first.path().join("knowledge")).unwrap();
+    std::fs::write(
+        first.path().join("knowledge/note.md"),
+        "# Note\n\nAlpha\n\nOmega\n",
+    )
+    .unwrap();
+    let first_repository = prepare_repository(first.path());
+    VaultConnection::remote(
+        first.path(),
+        &first_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    let second_repository = prepare_repository(second.path());
+    VaultConnection::remote(
+        second.path(),
+        &second_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::write(
+        first.path().join("knowledge/note.md"),
+        "# Note\n\nAlpha from first\n\nOmega\n",
+    )
+    .unwrap();
+    VaultSync::run(first.path(), &first_repository, &keys).unwrap();
+    std::fs::write(
+        second.path().join("knowledge/note.md"),
+        "# Note\n\nAlpha\n\nOmega from second\n",
+    )
+    .unwrap();
+
+    let result = VaultSync::run(second.path(), &second_repository, &keys).unwrap();
+
+    assert!(result.contains("automatic merge"));
+    assert_eq!(
+        std::fs::read_to_string(second.path().join("knowledge/note.md")).unwrap(),
+        "# Note\n\nAlpha from first\n\nOmega from second\n"
+    );
+}
+
+#[test]
+fn toml_changes_from_two_devices_merge_by_key() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let keys = FixedKeyStore::new(13);
+    std::fs::create_dir_all(first.path().join("tools")).unwrap();
+    std::fs::write(
+        first.path().join("tools/tools.toml"),
+        "[values]\nfirst = 1\nsecond = 1\n",
+    )
+    .unwrap();
+    let first_repository = prepare_repository(first.path());
+    VaultConnection::remote(
+        first.path(),
+        &first_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    let second_repository = prepare_repository(second.path());
+    VaultConnection::remote(
+        second.path(),
+        &second_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::write(
+        first.path().join("tools/tools.toml"),
+        "[values]\nfirst = 2\nsecond = 1\n",
+    )
+    .unwrap();
+    VaultSync::run(first.path(), &first_repository, &keys).unwrap();
+    std::fs::write(
+        second.path().join("tools/tools.toml"),
+        "[values]\nfirst = 1\nsecond = 2\n",
+    )
+    .unwrap();
+
+    VaultSync::run(second.path(), &second_repository, &keys).unwrap();
+
+    let merged = toml::from_str::<toml::Value>(
+        &std::fs::read_to_string(second.path().join("tools/tools.toml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(merged["values"]["first"].as_integer(), Some(2));
+    assert_eq!(merged["values"]["second"].as_integer(), Some(2));
+}
+
+#[test]
+fn opaque_conflicts_keep_remote_and_create_one_local_copy() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let keys = FixedKeyStore::new(14);
+    std::fs::create_dir_all(first.path().join("knowledge")).unwrap();
+    std::fs::write(first.path().join("knowledge/data.bin"), b"baseline").unwrap();
+    let first_repository = prepare_repository(first.path());
+    VaultConnection::remote(
+        first.path(),
+        &first_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    let second_repository = prepare_repository(second.path());
+    VaultConnection::remote(
+        second.path(),
+        &second_repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+    std::fs::write(first.path().join("knowledge/data.bin"), b"remote").unwrap();
+    VaultSync::run(first.path(), &first_repository, &keys).unwrap();
+    std::fs::write(second.path().join("knowledge/data.bin"), b"local").unwrap();
+
+    let result = VaultSync::run(second.path(), &second_repository, &keys).unwrap();
+    VaultSync::run(second.path(), &second_repository, &keys).unwrap();
+
+    assert!(result.contains("1 conflicted copy"));
+    assert_eq!(
+        std::fs::read(second.path().join("knowledge/data.bin")).unwrap(),
+        b"remote"
+    );
+    let copies = std::fs::read_dir(second.path().join("knowledge"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.starts_with("data (Conflicted copy ") && name.ends_with(".bin")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(copies.len(), 1);
+    assert_eq!(std::fs::read(copies[0].path()).unwrap(), b"local");
+}
+
+#[test]
+fn plaintext_remote_history_is_rejected() {
+    let root = tempfile::tempdir().unwrap();
+    let seed = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let git = GitRepository::at(seed.path());
+    git.run(&["init", "-b", "main"]).unwrap();
+    configure_identity(seed.path());
+    std::fs::write(seed.path().join("settings.ron"), "()\n").unwrap();
+    git.run(&["add", "--all"]).unwrap();
+    git.run(&["commit", "-m", "Plaintext"]).unwrap();
+    git.run(&["remote", "add", "origin", remote.to_string_lossy().as_ref()])
+        .unwrap();
+    git.run(&["push", "-u", "origin", "main"]).unwrap();
+    let repository = prepare_repository(root.path());
+
+    let error = VaultConnection::remote(
+        root.path(),
+        &repository,
+        remote.to_string_lossy().as_ref(),
+        &FixedKeyStore::new(7),
+    )
+    .unwrap_err();
+
+    assert!(error.contains("plaintext"));
+}
+
+#[test]
+fn existing_vault_uses_the_remote_default_branch() {
+    let seed = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let remote_parent = tempfile::tempdir().unwrap();
+    let remote = remote_parent.path().join("vault.git");
+    create_bare_remote(&remote);
+    let keys = FixedKeyStore::new(8);
+    std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
+    let seed_repository = prepare_repository(seed.path());
+    VaultSync::initialize(seed.path(), &seed_repository, &keys).unwrap();
+    let git = GitRepository::at(&seed_repository);
+    git.run(&["branch", "--move", "trunk"]).unwrap();
+    git.run(&["remote", "add", "origin", remote.to_string_lossy().as_ref()])
+        .unwrap();
+    git.run(&["push", "-u", "origin", "trunk"]).unwrap();
+    Command::new("git")
+        .args([
+            "--git-dir",
+            remote.to_string_lossy().as_ref(),
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/trunk",
+        ])
+        .output()
+        .unwrap()
+        .success_text()
+        .unwrap();
+    let repository = prepare_repository(root.path());
+
+    VaultConnection::remote(
+        root.path(),
+        &repository,
+        remote.to_string_lossy().as_ref(),
+        &keys,
+    )
+    .unwrap();
+
+    let git = GitRepository::at(&repository);
+    assert_eq!(git.current_branch().unwrap(), "trunk");
+    assert_eq!(
+        git.run(&["rev-list", "--count", "origin/trunk"]).unwrap(),
+        "1"
+    );
+}
+
+#[test]
+fn cloud_folder_creates_an_encrypted_bare_vault_repository() {
+    let root = tempfile::tempdir().unwrap();
+    let cloud = tempfile::tempdir().unwrap();
+    let repository = prepare_repository(root.path());
+    std::fs::write(root.path().join("settings.ron"), "()\n").unwrap();
+
+    let remote = VaultConnection::folder(
+        root.path(),
+        &repository,
+        cloud.path(),
+        &FixedKeyStore::new(9),
+    )
+    .unwrap();
+
+    assert_eq!(
+        GitRepository::at(&repository)
+            .run(&["remote", "get-url", "origin"])
+            .unwrap(),
+        remote
+    );
+    assert_eq!(
+        Command::new("git")
+            .args(["--git-dir", &remote, "rev-parse", "--is-bare-repository"])
+            .output()
+            .unwrap()
+            .success_text()
+            .unwrap(),
+        "true"
+    );
+    let tree = GitRepository::at(&repository)
+        .run(&["ls-tree", "-r", "--name-only", "origin/main"])
+        .unwrap();
+    assert!(!tree.contains("settings.ron"));
+}

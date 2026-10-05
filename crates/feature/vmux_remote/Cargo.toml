@@ -1,0 +1,21 @@
+[package]
+name = "vmux_remote"
+description = "Remote access feature runtime"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+uuid = { workspace = true }
+vmux_clipboard = { path = "../../util/vmux_clipboard" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_service = { path = "../vmux_service" }
+
+[lints]
+workspace = true

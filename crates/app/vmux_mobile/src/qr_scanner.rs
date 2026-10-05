@@ -1,9 +1,9 @@
+pub use platform::*;
+
 #[cfg(target_os = "ios")]
 mod platform {
-    use std::cell::Cell;
-    use std::collections::VecDeque;
+    use std::cell::{Cell, RefCell};
     use std::ptr;
-    use std::sync::{LazyLock, Mutex};
 
     use block2::RcBlock;
     use dioxus::mobile::tao::platform::ios::WindowExtIOS;
@@ -29,14 +29,15 @@ mod platform {
     };
     use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
+    use crate::pairing::{PairRequest, PairingFailure};
+    use crate::runtime::RuntimeHandle;
+
     thread_local! {
         static ROOT_CONTROLLER: Cell<*mut UIViewController> = const { Cell::new(ptr::null_mut()) };
         static ACTIVE: Cell<bool> = const { Cell::new(false) };
         static REQUESTING: Cell<bool> = const { Cell::new(false) };
+        static RUNTIME: RefCell<Option<RuntimeHandle>> = const { RefCell::new(None) };
     }
-
-    static RESULTS: LazyLock<Mutex<VecDeque<Result<String, String>>>> =
-        LazyLock::new(|| Mutex::new(VecDeque::new()));
 
     struct ScannerIvars {
         capture: Option<Capture>,
@@ -239,40 +240,39 @@ mod platform {
                 }
             }
             if let Some(result) = result {
-                RESULTS
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .push_back(result);
+                report(result);
             }
             self.dismissViewControllerAnimated_completion(true, None);
         }
     }
 
-    pub fn install(window: &dioxus::mobile::DesktopContext) {
+    pub fn install(window: &dioxus::mobile::DesktopContext, runtime: RuntimeHandle) {
         ROOT_CONTROLLER.set(window.window.ui_view_controller().cast());
+        RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime));
     }
 
-    pub enum ScannerSupport {
-        Available,
-        Unavailable(String),
-    }
+    pub struct ScannerSupport(Option<String>);
 
     impl ScannerSupport {
         pub fn detect() -> Self {
             let Some(media_type) = (unsafe { AVMediaTypeVideo }) else {
-                return Self::Unavailable(translate("mobile-qr-camera-unavailable"));
+                return Self(Some(translate("mobile-qr-camera-unavailable")));
             };
             let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
             if matches!(
                 status,
                 AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted
             ) {
-                return Self::Available;
+                return Self(None);
             }
             match unsafe { AVCaptureDevice::defaultDeviceWithMediaType(media_type) } {
-                Some(_) => Self::Available,
-                None => Self::Unavailable(translate("mobile-qr-camera-unavailable")),
+                Some(_) => Self(None),
+                None => Self(Some(translate("mobile-qr-camera-unavailable"))),
             }
+        }
+
+        pub fn unavailable(self) -> Option<String> {
+            self.0
         }
     }
 
@@ -304,10 +304,7 @@ mod platform {
                             present_denied(marker)
                         };
                         if let Err(message) = outcome {
-                            RESULTS
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner())
-                                .push_back(Err(message));
+                            report(Err(message));
                         }
                     });
                 });
@@ -393,11 +390,16 @@ mod platform {
         Ok(())
     }
 
-    pub fn take_result() -> Option<Result<String, String>> {
-        RESULTS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .pop_front()
+    fn report(result: Result<String, String>) {
+        RUNTIME.with_borrow(|installed| {
+            let Some(runtime) = installed else {
+                return;
+            };
+            match result {
+                Ok(value) => runtime.send(PairRequest(value)),
+                Err(message) => runtime.send(PairingFailure(message)),
+            }
+        });
     }
 }
 
@@ -405,26 +407,23 @@ mod platform {
 mod platform {
     use vmux_ui::i18n::translate;
 
-    pub fn install(_: &dioxus::mobile::DesktopContext) {}
+    use crate::runtime::RuntimeHandle;
 
-    pub enum ScannerSupport {
-        Available,
-        Unavailable(String),
-    }
+    pub fn install(_: &dioxus::mobile::DesktopContext, _: RuntimeHandle) {}
+
+    pub struct ScannerSupport(Option<String>);
 
     impl ScannerSupport {
         pub fn detect() -> Self {
-            Self::Unavailable(translate("mobile-qr-unsupported-platform"))
+            Self(Some(translate("mobile-qr-unsupported-platform")))
+        }
+
+        pub fn unavailable(self) -> Option<String> {
+            self.0
         }
     }
 
     pub fn open() -> Result<(), String> {
         Err(translate("mobile-qr-unsupported-platform"))
     }
-
-    pub fn take_result() -> Option<Result<String, String>> {
-        None
-    }
 }
-
-pub use platform::*;

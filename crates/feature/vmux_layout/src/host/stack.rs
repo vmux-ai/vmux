@@ -1,0 +1,1722 @@
+use crate::{
+    active_pane::{ActiveStack, ProfileId},
+    host::swap::SiblingOrder,
+    pane::{Pane, PaneHierarchy, PaneSplit, PaneStacks, PendingCursorWarp},
+    tab::{CloseTabRequest, Tab},
+};
+use bevy::{
+    ecs::{relationship::Relationship, system::SystemParam},
+    prelude::*,
+    window::{ClosingWindow, PrimaryWindow},
+};
+use moonshine_save::prelude::*;
+#[cfg(test)]
+use vmux_command::CommandDefinition;
+use vmux_command::CommandInvocation;
+#[cfg(test)]
+use vmux_command::CommandManifest;
+#[cfg(test)]
+use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::persistence::PersistenceAppExt;
+pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_flex::prelude::*;
+use vmux_history::LastActivatedAt;
+
+use super::{command::LayoutRequestSet, target::SiblingDirection};
+
+pub use crate::active_pane::FocusedStack;
+
+pub struct StackPlugin;
+
+impl Plugin for StackPlugin {
+    fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<OpenRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<FocusRequest>()
+            .add_message::<MoveRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(
+                Startup,
+                open_startup_url_if_no_stacks
+                    .in_set(crate::LayoutStartupSet::Post)
+                    .in_set(OpenStartupPageSet),
+            )
+            .register_persisted::<Stack>()
+            .add_message::<CloseStackRequest>()
+            .add_systems(
+                Update,
+                (open, close, focus, shift)
+                    .chain()
+                    .in_set(StackCommandSet)
+                    .in_set(LayoutRequestSet::Handle),
+            )
+            .add_systems(
+                Update,
+                close_pending
+                    .in_set(CloseStackSet)
+                    .in_set(LayoutRequestSet::Handle),
+            )
+            .add_systems(
+                Update,
+                compute_focused
+                    .in_set(ComputeFocusSet)
+                    .after(LayoutRequestSet::Handle)
+                    .after(crate::window::TabLayoutSpawnSet)
+                    .after(crate::active::ActiveSystemSet::Descendants),
+            )
+            .add_systems(
+                Update,
+                open_startup_url_if_no_stacks
+                    .in_set(OpenStartupPageSet)
+                    .after(crate::window::WindowShellSet)
+                    .before(vmux_ecs::PageOpenSet::ResolveTarget),
+            );
+    }
+}
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CloseStackSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct OpenStartupPageSet;
+
+#[vmux_command::command(message)]
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
+    pub url: Option<String>,
+}
+
+impl TryFrom<&CommandInvocation> for OpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "open_in_new_stack" => Ok(Self {
+                url: invocation.argument("url"),
+            }),
+            _ => Err(()),
+        }
+    }
+}
+
+#[vmux_command::command(message)]
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CloseRequest;
+
+impl TryFrom<&CommandInvocation> for CloseRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "stack_close").then_some(Self).ok_or(())
+    }
+}
+
+#[vmux_command::command(message)]
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusRequest(pub SiblingDirection);
+
+impl TryFrom<&CommandInvocation> for FocusRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "stack_next" => Ok(Self(SiblingDirection::Next)),
+            "stack_previous" => Ok(Self(SiblingDirection::Previous)),
+            _ => Err(()),
+        }
+    }
+}
+
+#[vmux_command::command(message)]
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MoveRequest(pub SiblingDirection);
+
+impl TryFrom<&CommandInvocation> for MoveRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "stack_swap_prev" => Ok(Self(SiblingDirection::Previous)),
+            "stack_swap_next" => Ok(Self(SiblingDirection::Next)),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct PendingStackClose;
+
+#[derive(Component)]
+pub struct CloseConfirmed;
+
+#[derive(Message, Clone, Copy)]
+pub struct CloseStackRequest {
+    pub stack: Entity,
+    pub reason: CloseStackReason,
+}
+
+impl CloseStackRequest {
+    pub fn by_user(stack: Entity) -> Self {
+        Self {
+            stack,
+            reason: CloseStackReason::ByUser,
+        }
+    }
+
+    pub fn tidying(stack: Entity) -> Self {
+        Self {
+            stack,
+            reason: CloseStackReason::Tidying,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloseStackReason {
+    ByUser,
+    Tidying,
+}
+
+fn close_pending(
+    mut reader: MessageReader<CloseStackRequest>,
+    mut closer: StackCloser,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        close_stack(*request, &mut closer, &mut commands);
+    }
+}
+
+#[derive(SystemParam)]
+struct StackCloser<'w, 's> {
+    active_tab: ActiveTabParam<'w, 's>,
+    all_children: Query<'w, 's, &'static Children>,
+    panes: PaneHierarchy<'w, 's>,
+    pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
+    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    stacks: Query<'w, 's, Entity, With<Stack>>,
+    pane_stacks: PaneStacks<'w, 's>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    splits: Query<'w, 's, &'static PaneSplit>,
+    focused_space: crate::space::FocusedSpace<'w, 's>,
+    close_tab_requests: MessageWriter<'w, CloseTabRequest>,
+    page_open_requests: MessageWriter<'w, PageOpenRequest>,
+}
+
+impl StackCloser<'_, '_> {
+    fn active_stack(&self, pane: Entity) -> Option<Entity> {
+        self.panes.children.get(pane).ok().and_then(|children| {
+            LastActivatedAt::latest(
+                children
+                    .iter()
+                    .filter_map(|entity| self.stack_ts.get(entity).ok())
+                    .map(|(entity, activated_at)| (entity, *activated_at)),
+            )
+        })
+    }
+}
+
+fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &mut Commands) {
+    let Ok(pane) = closer.child_of.get(request.stack).map(Relationship::get) else {
+        return;
+    };
+    let Ok(children) = closer.panes.children.get(pane) else {
+        return;
+    };
+    let stacks_in_pane: Vec<Entity> = children
+        .iter()
+        .filter(|&entity| closer.stacks.contains(entity))
+        .collect();
+
+    if stacks_in_pane.len() <= 1 {
+        if request.reason == CloseStackReason::Tidying {
+            return;
+        }
+        close_last_stack_in_pane(pane, request.stack, closer, commands);
+        return;
+    }
+
+    let was_active = closer.active_stack(pane) == Some(request.stack);
+    commands.entity(request.stack).despawn();
+    if !was_active {
+        return;
+    }
+    let successor = LastActivatedAt::latest(
+        stacks_in_pane
+            .iter()
+            .filter(|&&entity| entity != request.stack)
+            .filter_map(|&entity| closer.stack_ts.get(entity).ok())
+            .map(|(entity, activated_at)| (entity, *activated_at)),
+    );
+    if let Some(successor) = successor {
+        commands.entity(successor).insert(LastActivatedAt::now());
+    }
+}
+
+fn close_last_stack_in_pane(
+    pane: Entity,
+    stack: Entity,
+    closer: &mut StackCloser,
+    commands: &mut Commands,
+) {
+    if let Some(tab) = closer.active_tab.get()
+        && closes_tab(tab, stack, closer)
+    {
+        return;
+    }
+
+    let split_parent = match closer.child_of.get(pane).map(Relationship::get) {
+        Ok(parent) if closer.splits.contains(parent) => Some(parent),
+        _ => None,
+    };
+    let Some(parent) = split_parent else {
+        commands.entity(stack).despawn();
+        let replacement = commands
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+        closer.page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(replacement),
+            url: closer.focused_space.resolved_startup_url(),
+            request_id: None,
+        });
+        return;
+    };
+
+    commands.entity(stack).despawn();
+    let Ok(siblings) = closer.panes.children.get(parent) else {
+        return;
+    };
+    let pane_siblings: Vec<Entity> = siblings
+        .iter()
+        .filter(|&entity| {
+            entity != pane
+                && (closer.panes.leaves.contains(entity) || closer.splits.contains(entity))
+        })
+        .collect();
+
+    if pane_siblings.len() >= 2 {
+        commands.entity(pane).despawn();
+        let new_active_pane = pane_siblings
+            .iter()
+            .copied()
+            .max_by_key(|&entity| {
+                closer
+                    .pane_ts
+                    .get(entity)
+                    .map(|(_, time)| time.0)
+                    .unwrap_or(0)
+            })
+            .unwrap_or(pane_siblings[0]);
+        let focus_leaf = closer.panes.first_leaf(new_active_pane);
+        commands.entity(focus_leaf).insert(LastActivatedAt::now());
+        if let Some(next) = first_stack_to_activate(focus_leaf, closer) {
+            commands.entity(next).insert(LastActivatedAt::now());
+        }
+        return;
+    }
+
+    let Some(sibling) = pane_siblings.into_iter().next() else {
+        return;
+    };
+    let sibling_children: Vec<Entity> = closer
+        .panes
+        .children
+        .get(sibling)
+        .map(|children| children.iter().collect())
+        .unwrap_or_default();
+
+    for &child in &sibling_children {
+        commands.entity(child).insert(ChildOf(parent));
+    }
+
+    let new_active_pane;
+    if closer.splits.contains(sibling) {
+        let sibling_direction = closer
+            .splits
+            .get(sibling)
+            .map(|split| split.direction)
+            .unwrap_or_default();
+        new_active_pane = closer.panes.first_leaf(sibling);
+        commands.entity(sibling).remove::<ChildOf>();
+        commands.entity(sibling).despawn();
+        commands.entity(parent).insert(PaneSplit {
+            direction: sibling_direction,
+        });
+    } else {
+        new_active_pane = parent;
+        commands.entity(parent).remove::<PaneSplit>();
+        commands.entity(parent).insert(Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            align_items: AlignItems::Stretch,
+            justify_content: JustifyContent::Stretch,
+            ..default()
+        });
+        commands.entity(sibling).despawn();
+    }
+
+    commands.entity(pane).despawn();
+    commands
+        .entity(new_active_pane)
+        .insert(LastActivatedAt::now());
+    let next = first_stack_to_activate(new_active_pane, closer).or_else(|| {
+        sibling_children
+            .iter()
+            .copied()
+            .find(|&entity| closer.stacks.contains(entity))
+    });
+    if let Some(next) = next {
+        commands.entity(next).insert(LastActivatedAt::now());
+    }
+}
+
+fn first_stack_to_activate(pane: Entity, closer: &StackCloser) -> Option<Entity> {
+    closer
+        .active_stack(pane)
+        .or_else(|| closer.pane_stacks.first(pane))
+}
+
+fn closes_tab(tab: Entity, stack: Entity, closer: &mut StackCloser) -> bool {
+    if entity_tree_contains_stack_other_than(tab, stack, &closer.all_children, &closer.stacks) {
+        return false;
+    }
+    closer.close_tab_requests.write(CloseTabRequest { tab });
+    true
+}
+
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::stack"]
+#[require(Save, LastActivatedAt)]
+pub struct Stack {
+    pub scroll_x: f32,
+    pub scroll_y: f32,
+}
+
+impl Stack {
+    pub fn bundle() -> impl Bundle {
+        (
+            Self::default(),
+            vmux_ecs::PageMetadata::default(),
+            Transform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+        )
+    }
+}
+
+#[derive(SystemParam)]
+pub struct ActiveTabParam<'w, 's> {
+    tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
+    active_tabs: Query<'w, 's, Entity, (With<Tab>, With<vmux_ecs::Active>)>,
+    current_space: Query<'w, 's, Entity, With<crate::space::CurrentSpace>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+}
+
+impl ActiveTabParam<'_, '_> {
+    pub fn get(&self) -> Option<Entity> {
+        let scoped = self.current_space.iter().next().and_then(|active_space| {
+            self.active_tabs.iter().find(|&tab| {
+                self.child_of
+                    .get(tab)
+                    .is_ok_and(|parent| parent.parent() == active_space)
+            })
+        });
+        if scoped.is_some() {
+            return scoped;
+        }
+        LastActivatedAt::latest(
+            self.tabs
+                .iter()
+                .map(|(entity, activated_at)| (entity, *activated_at)),
+        )
+    }
+}
+
+#[derive(SystemParam)]
+pub struct LayoutFocus<'w, 's> {
+    all_children: Query<'w, 's, &'static Children>,
+    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    tabs: Query<'w, 's, (), With<Tab>>,
+}
+
+impl LayoutFocus<'_, '_> {
+    fn collect_leaf_panes(&self, root: Entity, result: &mut Vec<Entity>) {
+        if self.leaf_panes.contains(root) {
+            result.push(root);
+        }
+        if let Ok(children) = self.all_children.get(root) {
+            for child in children.iter() {
+                self.collect_leaf_panes(child, result);
+            }
+        }
+    }
+
+    pub fn is_leaf(&self, entity: Entity) -> bool {
+        self.leaf_panes.contains(entity)
+    }
+
+    pub fn leaf_count(&self) -> usize {
+        self.leaf_panes.iter().count()
+    }
+
+    pub fn leaves(&self, root: Entity) -> Vec<Entity> {
+        let mut panes = Vec::new();
+        self.collect_leaf_panes(root, &mut panes);
+        panes
+    }
+
+    pub fn pane(&self, tab: Entity) -> Option<Entity> {
+        let mut panes = Vec::new();
+        self.collect_leaf_panes(tab, &mut panes);
+        LastActivatedAt::latest(
+            panes
+                .iter()
+                .filter_map(|&entity| self.pane_activity.get(entity).ok())
+                .map(|(entity, activated_at)| (entity, *activated_at)),
+        )
+    }
+
+    pub fn stack(&self, pane: Entity) -> Option<Entity> {
+        self.pane_children.get(pane).ok().and_then(|children| {
+            LastActivatedAt::latest(
+                children
+                    .iter()
+                    .filter_map(|entity| self.stack_activity.get(entity).ok())
+                    .map(|(entity, activated_at)| (entity, *activated_at)),
+            )
+        })
+    }
+
+    pub fn resolve(
+        &self,
+        active_tab: Option<Entity>,
+    ) -> (Option<Entity>, Option<Entity>, Option<Entity>) {
+        let pane = active_tab.and_then(|tab| self.pane(tab));
+        let stack = pane.and_then(|pane| self.stack(pane));
+        (active_tab, pane, stack)
+    }
+
+    pub fn tab_of(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        for _ in 0..32 {
+            if self.tabs.contains(current) {
+                return Some(current);
+            }
+            current = self.parents.get(current).ok()?.parent();
+        }
+        None
+    }
+}
+
+fn compute_focused(
+    mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
+    active_tab_param: ActiveTabParam,
+    focus: LayoutFocus,
+    mut commands: Commands,
+) {
+    let tab = active_tab_param.get();
+    let (_, pane, stack) = focus.resolve(tab);
+    let next = ActiveStack { tab, pane, stack };
+    for (profile, mut active) in &mut profiles {
+        if *profile == ProfileId::Local {
+            if *active != next {
+                *active = next;
+            }
+            return;
+        }
+    }
+    commands.spawn(next.local_bundle());
+}
+
+fn open(
+    mut reader: MessageReader<OpenRequest>,
+    active_tab_param: ActiveTabParam,
+    focus: LayoutFocus,
+    focused_space: crate::space::FocusedSpace,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let (_, active_pane, _) = focus.resolve(active_tab_param.get());
+        let Some(pane) = active_pane else {
+            continue;
+        };
+        let url = request
+            .url
+            .clone()
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| focused_space.resolved_startup_url());
+        let stack = commands
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
+    }
+}
+
+fn close(
+    mut reader: MessageReader<CloseRequest>,
+    active_tab_param: ActiveTabParam,
+    focus: LayoutFocus,
+    mut requests: MessageWriter<CloseStackRequest>,
+) {
+    for _ in reader.read() {
+        let (_, _, active_stack) = focus.resolve(active_tab_param.get());
+        let Some(active_stack) = active_stack else {
+            continue;
+        };
+        requests.write(CloseStackRequest::by_user(active_stack));
+    }
+}
+
+fn focus(
+    mut reader: MessageReader<FocusRequest>,
+    active_tab_param: ActiveTabParam,
+    focus: LayoutFocus,
+    stack_q: Query<Entity, With<Stack>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let (active_tab, active_pane, active_stack) = focus.resolve(active_tab_param.get());
+        let Some(active_tab) = active_tab else {
+            continue;
+        };
+        let tab_panes = focus.leaves(active_tab);
+        let mut stacks = Vec::new();
+        for &pane in &tab_panes {
+            if let Ok(children) = focus.pane_children.get(pane) {
+                for child in children.iter() {
+                    if stack_q.contains(child) {
+                        stacks.push((pane, child));
+                    }
+                }
+            }
+        }
+        if stacks.len() < 2 {
+            continue;
+        }
+        let Some(current) = stacks
+            .iter()
+            .position(|&(_, stack)| Some(stack) == active_stack)
+        else {
+            continue;
+        };
+        let delta = if request.0 == SiblingDirection::Next {
+            1
+        } else {
+            -1
+        };
+        let index = (current as i32 + delta).rem_euclid(stacks.len() as i32) as usize;
+        let (target_pane, target_stack) = stacks[index];
+        commands.entity(target_stack).insert(LastActivatedAt::now());
+        if active_pane != Some(target_pane) {
+            commands
+                .entity(target_pane)
+                .insert((LastActivatedAt::now(), PendingCursorWarp));
+        }
+    }
+}
+
+fn shift(
+    mut reader: MessageReader<MoveRequest>,
+    active_tab_param: ActiveTabParam,
+    focus: LayoutFocus,
+    stack_q: Query<Entity, With<Stack>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let (_, active_pane, active_stack) = focus.resolve(active_tab_param.get());
+        let Some(pane) = active_pane else {
+            continue;
+        };
+        let Some(stack) = active_stack else {
+            continue;
+        };
+        let Ok(children) = focus.pane_children.get(pane) else {
+            continue;
+        };
+        let kind_positions: Vec<usize> = children
+            .iter()
+            .enumerate()
+            .filter(|(_, entity)| stack_q.contains(*entity))
+            .map(|(index, _)| index)
+            .collect();
+        let Some(active_index) = SiblingOrder::index(stack, children, &kind_positions) else {
+            continue;
+        };
+        let pair = if request.0 == SiblingDirection::Previous {
+            SiblingOrder::previous(active_index)
+        } else {
+            SiblingOrder::next(active_index, kind_positions.len())
+        };
+        if let Some((left, right)) = pair
+            && let Some(order) = SiblingOrder::swapped(pane, children, &kind_positions, left, right)
+        {
+            commands.queue(order);
+        }
+    }
+}
+
+fn entity_tree_contains_stack_other_than(
+    entity: Entity,
+    ignored_stack: Entity,
+    all_children: &Query<&Children>,
+    stack_q: &Query<Entity, With<Stack>>,
+) -> bool {
+    (stack_q.contains(entity) && entity != ignored_stack)
+        || all_children.get(entity).is_ok_and(|children| {
+            children.iter().any(|child| {
+                entity_tree_contains_stack_other_than(child, ignored_stack, all_children, stack_q)
+            })
+        })
+}
+
+fn open_startup_url_if_no_stacks(
+    active_tab_param: ActiveTabParam,
+    focus: LayoutFocus,
+    stack_q: Query<Entity, With<Stack>>,
+    closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
+    focused_space: crate::space::FocusedSpace,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
+) {
+    if !closing_primary.is_empty() {
+        return;
+    }
+    let (active_tab, active_pane, _) = focus.resolve(active_tab_param.get());
+    if active_tab.is_some_and(|tab| entity_tree_contains_stack(tab, &focus.all_children, &stack_q))
+    {
+        return;
+    }
+    let Some(pane) = active_pane.or_else(|| focus.leaf_panes.iter().next()) else {
+        return;
+    };
+    let stack = commands
+        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .id();
+    page_open_requests.write(PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url: focused_space.resolved_startup_url(),
+        request_id: None,
+    });
+}
+
+fn entity_tree_contains_stack(
+    entity: Entity,
+    all_children: &Query<&Children>,
+    stack_q: &Query<Entity, With<Stack>>,
+) -> bool {
+    stack_q.contains(entity)
+        || all_children.get(entity).is_ok_and(|children| {
+            children
+                .iter()
+                .any(|child| entity_tree_contains_stack(child, all_children, stack_q))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LauncherDismissRequest;
+    use crate::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use bevy::ecs::relationship::Relationship;
+
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn stack_mcp_definitions_are_the_dispatchable_command_set() {
+        let definitions = CommandManifest::for_feature::<crate::Feature>().into_vec();
+        let tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .filter(|tool| {
+                let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &tool.name);
+                OpenRequest::try_from(&invocation).is_ok()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["open_in_new_stack"],
+        );
+        for tool in tools {
+            let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
+            assert!(OpenRequest::try_from(&invocation).is_ok());
+        }
+    }
+
+    fn test_settings() -> LayoutSettings {
+        LayoutSettings {
+            radius: 0.0,
+            window: WindowSettings { padding: 0.0 },
+            pane: PaneSettings { gap: 0.0 },
+            side_sheet: SideSheetSettings::default(),
+            focus_ring: FocusRingSettings::default(),
+        }
+    }
+
+    fn close_request_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CloseStackRequest>()
+            .add_message::<CloseTabRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<LauncherDismissRequest>()
+            .add_systems(Update, close_pending);
+        app
+    }
+
+    fn focused(app: &mut App) -> ActiveStack {
+        let world = app.world_mut();
+        let mut query = world.query::<&ActiveStack>();
+        *query.single(world).unwrap()
+    }
+
+    #[test]
+    fn every_stack_has_an_activation_timestamp() {
+        let mut world = World::new();
+        let stack = world.spawn(Stack::default()).id();
+
+        assert!(world.get::<LastActivatedAt>(stack).is_some());
+    }
+
+    #[test]
+    fn close_stack_request_despawns_target_keeps_siblings() {
+        let mut app = close_request_app();
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let s1 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let s2 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest::tidying(s1));
+        app.update();
+
+        assert!(app.world().get_entity(s1).is_err(), "target despawned");
+        assert!(app.world().get_entity(s2).is_ok(), "sibling kept");
+    }
+
+    #[test]
+    fn tidying_the_last_stack_in_a_pane_leaves_the_pane_alone() {
+        let mut app = close_request_app();
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let only = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest::tidying(only));
+        app.update();
+
+        assert!(app.world().get_entity(only).is_ok(), "never empties a pane");
+        assert!(app.world().get_entity(pane).is_ok(), "the pane survives");
+        assert!(app.world().get_entity(tab).is_ok(), "the tab survives");
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<CloseTabRequest>>()
+                .drain()
+                .next()
+                .is_none(),
+            "an agent tidying its own stack must not close the user's tab"
+        );
+    }
+
+    #[test]
+    fn closing_an_inactive_stack_by_id_leaves_activation_where_it_was() {
+        let mut app = close_request_app();
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let first = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let middle = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+        let active = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest::by_user(middle));
+        app.update();
+
+        assert!(
+            app.world().get_entity(middle).is_err(),
+            "the named stack is the one that dies"
+        );
+        assert!(app.world().get_entity(first).is_ok());
+        assert_eq!(
+            app.world().get::<LastActivatedAt>(active).unwrap().0,
+            3,
+            "closing an inactive stack must not re-stamp the active one"
+        );
+        assert_eq!(app.world().get::<LastActivatedAt>(first).unwrap().0, 1);
+    }
+
+    #[test]
+    fn closing_the_active_stack_by_id_activates_the_most_recent_survivor() {
+        let mut app = close_request_app();
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let oldest = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let runner_up = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+        let active = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest::by_user(active));
+        app.update();
+
+        assert!(app.world().get_entity(active).is_err());
+        let oldest_ts = app.world().get::<LastActivatedAt>(oldest).unwrap().0;
+        let runner_up_ts = app.world().get::<LastActivatedAt>(runner_up).unwrap().0;
+        assert_eq!(oldest_ts, 1, "the oldest stack must not be activated");
+        assert!(
+            runner_up_ts > oldest_ts,
+            "the most recently used survivor takes over"
+        );
+    }
+
+    #[test]
+    fn focused_stack_not_rewritten_when_focus_is_stable() {
+        #[derive(Resource, Default)]
+        struct ChangeLog(Vec<bool>);
+
+        fn probe(focused: FocusedStack, mut log: ResMut<ChangeLog>) {
+            log.0.push(focused.is_changed());
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ChangeLog>()
+            .add_systems(Update, (compute_focused, probe).chain());
+        app.world_mut().spawn(ActiveStack::default().local_bundle());
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+
+        app.update();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            focused(&mut app).stack,
+            Some(stack),
+            "focus should resolve to the only stack"
+        );
+        let log = &app.world().resource::<ChangeLog>().0;
+        assert_eq!(
+            log.last(),
+            Some(&false),
+            "FocusedStack rewritten on a stable frame; log={log:?}"
+        );
+    }
+
+    #[test]
+    fn closing_last_stack_preloads_fresh_tab_without_workspace_state() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            StackPlugin,
+            crate::archive::ArchivePlugin,
+            crate::window::LayoutSpawnPlugin,
+        ))
+        .add_message::<PageOpenRequest>()
+        .add_message::<LauncherDismissRequest>()
+        .insert_resource(test_settings());
+        app.world_mut().spawn(ActiveStack::default().local_bundle());
+
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
+        let space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::SpaceId("s1".to_string()),
+                vmux_ecs::Active,
+            ))
+            .id();
+        let worktree = tempfile::tempdir().unwrap();
+        app.world_mut().entity_mut(space).insert((
+            crate::space::EffectiveStartupDir(Some(worktree.path().to_path_buf())),
+            vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
+        ));
+        let tab_e = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    name: "Worktree".to_string(),
+                    startup_dir: Some(worktree.path().to_string_lossy().into_owned()),
+                },
+                crate::tab::TabWorktree {
+                    repo_root: worktree.path().to_string_lossy().into_owned(),
+                    checkout_dir: worktree.path().to_string_lossy().into_owned(),
+                    branch: "test".to_string(),
+                    base_ref: "main".to_string(),
+                },
+                crate::tab::TabWorkspace {
+                    project_dir: worktree.path().to_string_lossy().into_owned(),
+                },
+                crate::tab::TabDirDecided,
+                crate::tab::TabWorktreeUnavailable {
+                    message: "stale".to_string(),
+                },
+                vmux_ecs::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab_e)))
+            .id();
+        let original_stack = app
+            .world_mut()
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+
+        app.update();
+
+        assert!(app.world().get_entity(tab_e).is_err());
+        assert!(app.world().get_entity(original_stack).is_err());
+        let replacement_tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        assert_ne!(replacement_tab, tab_e);
+        assert_eq!(focused(&mut app).tab, Some(replacement_tab));
+        assert!(
+            app.world()
+                .get::<crate::tab::TabWorkspace>(replacement_tab)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<crate::tab::TabWorktree>(replacement_tab)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<crate::tab::TabDirDecided>(replacement_tab)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<crate::tab::TabWorktreeUnavailable>(replacement_tab)
+                .is_none()
+        );
+        assert_eq!(
+            app.world().get::<Tab>(replacement_tab).unwrap().startup_dir,
+            None
+        );
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let [request] = opened.as_slice() else {
+            panic!("the replacement tab opens exactly one page");
+        };
+        assert_eq!(request.url, "vmux://start/");
+        let PageOpenTarget::Stack(new_stack) = request.target else {
+            panic!("the page is opened into a stack");
+        };
+        let new_pane = app
+            .world()
+            .get::<ChildOf>(new_stack)
+            .map(Relationship::get)
+            .unwrap();
+        let split_root = app
+            .world()
+            .get::<ChildOf>(new_pane)
+            .map(Relationship::get)
+            .unwrap();
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(split_root)
+                .map(Relationship::get),
+            Some(replacement_tab)
+        );
+    }
+
+    #[test]
+    fn closing_last_stack_in_tab_closes_the_tab_when_another_tab_exists() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StackPlugin, crate::archive::ArchivePlugin))
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<LauncherDismissRequest>()
+            .insert_resource(test_settings());
+
+        app.world_mut().spawn(PrimaryWindow);
+        let root = app.world_mut().spawn_empty().id();
+        let remaining_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+            .id();
+        let remaining_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(remaining_tab)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt(1),
+            ChildOf(remaining_pane),
+        ));
+
+        let closing_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
+            .id();
+        let closing_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(closing_tab)))
+            .id();
+        let closing_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(closing_pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+
+        app.update();
+
+        assert!(app.world().get_entity(closing_tab).is_err());
+        assert!(app.world().get_entity(closing_stack).is_err());
+        assert!(app.world().get_entity(remaining_tab).is_ok());
+        assert!(app.world().get::<LastActivatedAt>(remaining_tab).unwrap().0 > 1);
+    }
+
+    #[test]
+    fn closing_last_stack_in_active_rightmost_tab_activates_left_neighbor_not_first() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StackPlugin, crate::archive::ArchivePlugin))
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<LauncherDismissRequest>()
+            .insert_resource(test_settings());
+
+        app.world_mut().spawn(PrimaryWindow);
+        let root = app.world_mut().spawn_empty().id();
+        let make_tab = |app: &mut App, ts: i64| -> Entity {
+            let tab = app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt(ts), ChildOf(root)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt(ts), ChildOf(tab)))
+                .id();
+            app.world_mut()
+                .spawn((Stack::default(), LastActivatedAt(ts), ChildOf(pane)));
+            tab
+        };
+        let first = make_tab(&mut app, 1);
+        let middle = make_tab(&mut app, 2);
+        let active_rightmost = make_tab(&mut app, 3);
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+
+        app.update();
+
+        assert!(app.world().get_entity(active_rightmost).is_err());
+        let first_ts = app.world().get::<LastActivatedAt>(first).unwrap().0;
+        let middle_ts = app.world().get::<LastActivatedAt>(middle).unwrap().0;
+        assert_eq!(first_ts, 1, "first tab must not be re-activated");
+        assert!(
+            middle_ts > first_ts,
+            "left neighbor (middle) must become most-recently-activated, not the first tab"
+        );
+    }
+
+    #[test]
+    fn closing_only_stack_in_split_pane_closes_pane() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CloseRequest>()
+            .add_message::<CloseStackRequest>()
+            .add_message::<CloseTabRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<LauncherDismissRequest>()
+            .insert_resource(test_settings())
+            .add_systems(Update, (close, close_pending).chain());
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(crate::pane::PaneSplitDirection::Row),
+                ChildOf(tab),
+            ))
+            .id();
+        let active_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(split)))
+            .id();
+        let other_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(split)))
+            .id();
+        let original_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(active_pane)))
+            .id();
+        let other_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(other_pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+
+        app.update();
+
+        assert!(app.world().get_entity(split).is_ok());
+        assert!(app.world().get_entity(active_pane).is_err());
+        assert!(app.world().get_entity(other_pane).is_err());
+        assert!(app.world().get_entity(original_stack).is_err());
+        assert!(app.world().get_entity(other_stack).is_ok());
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(other_stack)
+                .map(Relationship::get),
+            Some(split)
+        );
+        assert!(!app.world().entity(split).contains::<PaneSplit>());
+    }
+
+    #[test]
+    fn closing_stack_in_three_way_split_keeps_split_and_does_not_respawn_startup() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CloseRequest>()
+            .add_message::<CloseStackRequest>()
+            .add_message::<CloseTabRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<LauncherDismissRequest>()
+            .insert_resource(test_settings())
+            .add_systems(Update, (close, close_pending).chain());
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane::split_bundle(crate::pane::PaneSplitDirection::Row),
+                ChildOf(tab),
+            ))
+            .id();
+        let active_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(3), ChildOf(split)))
+            .id();
+        let p2 = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(split)))
+            .id();
+        let p3 = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(split)))
+            .id();
+        let active_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(active_pane)))
+            .id();
+        let s2 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(p2)))
+            .id();
+        let s3 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(p3)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+        app.update();
+
+        assert!(
+            app.world().get_entity(active_pane).is_err(),
+            "closed terminal pane is despawned"
+        );
+        assert!(
+            app.world().get_entity(active_stack).is_err(),
+            "closed terminal stack is despawned"
+        );
+        assert!(
+            app.world().entity(split).contains::<PaneSplit>(),
+            "a 3-way split must stay a split after one terminal closes (tree not corrupted)"
+        );
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(split)
+            .expect("split has children")
+            .iter()
+            .collect();
+        assert_eq!(children, vec![p2, p3], "exactly the two survivors remain");
+        assert!(app.world().get_entity(s2).is_ok() && app.world().get_entity(s3).is_ok());
+        let mut stacks = app.world_mut().query_filtered::<Entity, With<Stack>>();
+        assert_eq!(
+            stacks.iter(app.world()).count(),
+            2,
+            "no replacement startup (Vibe) stack spawned"
+        );
+        let reqs: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert!(
+            reqs.is_empty(),
+            "closing a terminal in an N-ary split must not open the startup URL"
+        );
+    }
+
+    #[test]
+    fn empty_active_pane_opens_the_start_page_even_when_other_tabs_have_stacks() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LauncherDismissRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
+
+        app.world_mut().spawn((
+            crate::space::Space,
+            vmux_ecs::Active,
+            vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
+        ));
+
+        let old_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1)))
+            .id();
+        let old_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(old_tab)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(old_pane)));
+
+        let active_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(2)))
+            .id();
+        let active_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(active_tab)))
+            .id();
+
+        app.update();
+
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let [request] = opened.as_slice() else {
+            panic!("an empty active pane opens exactly one page");
+        };
+        assert_eq!(request.url, "vmux://start/");
+        let PageOpenTarget::Stack(new_stack) = request.target else {
+            panic!("the page is opened into a stack");
+        };
+        assert_eq!(
+            app.world().get::<ChildOf>(new_stack).map(Relationship::get),
+            Some(active_pane)
+        );
+    }
+
+    #[test]
+    fn empty_active_pane_does_not_open_a_page_when_tab_has_stacks() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LauncherDismissRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
+
+        let tab_e = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1)))
+            .id();
+        let pane_with_stack = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(tab_e)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt(1),
+            ChildOf(pane_with_stack),
+        ));
+        app.world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(tab_e)));
+
+        app.update();
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none(),
+            "the tab already shows a page, so an empty sibling pane is not one to fill"
+        );
+    }
+
+    #[test]
+    fn a_pane_that_already_holds_a_stack_is_not_filled_again() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LauncherDismissRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
+
+        let tab_e = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(tab_e)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)));
+
+        app.update();
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[derive(Resource, Default)]
+    struct CollectedSpawns(Vec<PageOpenRequest>);
+
+    fn collect_spawn_requests(
+        mut reader: MessageReader<PageOpenRequest>,
+        mut collected: ResMut<CollectedSpawns>,
+    ) {
+        for req in reader.read() {
+            collected.0.push(req.clone());
+        }
+    }
+
+    fn build_app_with_collector() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<CloseStackRequest>()
+            .add_message::<CloseTabRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<LauncherDismissRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<CollectedSpawns>()
+            .add_systems(
+                Update,
+                (open, close, close_pending, collect_spawn_requests).chain(),
+            );
+        app
+    }
+
+    fn build_hierarchy(app: &mut App, startup_url: &str) -> (Entity, Entity, Entity) {
+        let space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::CurrentSpace,
+                vmux_ecs::Active,
+                vmux_ecs::EffectiveStartupUrl(startup_url.to_string()),
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(space)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let stack =
+            app.world_mut()
+                .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
+        (tab, pane, stack.id())
+    }
+
+    #[test]
+    fn closing_last_stack_requests_tab_replacement() {
+        let mut app = build_app_with_collector();
+        let (tab, pane, original_stack) = build_hierarchy(&mut app, "");
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+
+        app.update();
+
+        assert!(app.world().get_entity(original_stack).is_ok());
+        assert!(app.world().get_entity(tab).is_ok());
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert!(collected.0.is_empty());
+        let close_requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<CloseTabRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(close_requests.len(), 1);
+        assert_eq!(close_requests[0].tab, tab);
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(original_stack)
+                .map(Relationship::get),
+            Some(pane)
+        );
+    }
+
+    #[test]
+    fn open_in_new_stack_with_explicit_url() {
+        let mut app = build_app_with_collector();
+        let (_tab, pane, _stack) = build_hierarchy(&mut app, "");
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("https://example.com".into()),
+            });
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                ..
+            } => {
+                assert_eq!(url, "https://example.com");
+                assert_eq!(
+                    app.world().get::<ChildOf>(*stack).map(Relationship::get),
+                    Some(pane),
+                );
+            }
+            other => panic!("expected PageOpenRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_in_new_stack_none_url_opens_the_start_page() {
+        let mut app = build_app_with_collector();
+        let (_tab, pane, _stack) = build_hierarchy(&mut app, "vmux://start/");
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest { url: None });
+
+        app.update();
+
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let [request] = opened.as_slice() else {
+            panic!("a new stack opens exactly one page");
+        };
+        assert_eq!(request.url, "vmux://start/");
+        let PageOpenTarget::Stack(opened_stack) = request.target else {
+            panic!("a new stack is opened by entity");
+        };
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(opened_stack)
+                .map(Relationship::get),
+            Some(pane),
+        );
+    }
+
+    #[test]
+    fn in_new_stack_with_no_url_uses_startup_url() {
+        let mut app = build_app_with_collector();
+        let (_tab, _pane, _stack) = build_hierarchy(&mut app, "https://startup.test");
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest { url: None });
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        assert_eq!(collected.0[0].url, "https://startup.test");
+    }
+
+    #[test]
+    fn active_tab_param_picks_active_space_tab_not_global_max() {
+        let mut app = App::new();
+        let main = app.world_mut().spawn(crate::window::Main).id();
+        let space_a = app
+            .world_mut()
+            .spawn((crate::space::Space, ChildOf(main)))
+            .id();
+        let _tab_a = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_ecs::Active,
+                LastActivatedAt(100),
+                ChildOf(space_a),
+            ))
+            .id();
+        let space_b = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
+            .id();
+        let tab_b = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_ecs::Active,
+                LastActivatedAt(1),
+                ChildOf(space_b),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(space_b)
+            .insert(crate::space::CurrentSpace);
+
+        let got = app
+            .world_mut()
+            .run_system_once(|param: ActiveTabParam| param.get())
+            .unwrap();
+
+        assert_eq!(got, Some(tab_b));
+    }
+
+    #[test]
+    fn active_tab_param_falls_back_to_global_when_no_scoped_active_tab() {
+        let mut app = App::new();
+        let main = app.world_mut().spawn(crate::window::Main).id();
+        app.world_mut()
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)));
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(5), ChildOf(main)))
+            .id();
+
+        let got = app
+            .world_mut()
+            .run_system_once(|param: ActiveTabParam| param.get())
+            .unwrap();
+
+        assert_eq!(
+            got,
+            Some(tab),
+            "must fall back to the global tab so the layout isn't treated as empty (else startup respawns forever)"
+        );
+    }
+}

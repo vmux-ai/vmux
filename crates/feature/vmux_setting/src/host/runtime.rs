@@ -1,0 +1,2834 @@
+use crate::SearchEngineSetting;
+use crate::schema::{FieldSpec, SectionSpec};
+use crate::state::{EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH};
+use bevy::ecs::message::MessageReader;
+use bevy::prelude::*;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use serde::{Deserialize, Serialize};
+use std::sync::{Mutex, mpsc};
+use std::time::{Duration, Instant};
+use vmux_ecs::manifest::FeatureManifest;
+pub use vmux_layout::settings::LayoutSettings;
+use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
+#[cfg(test)]
+pub use vmux_layout::settings::{
+    FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
+};
+
+use std::hash::{Hash, Hasher};
+use std::str::FromStr;
+use vmux_ecs::event::{ProjectRow, ProjectRowKind};
+
+pub struct SettingsRuntimePlugin;
+
+impl Plugin for SettingsRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<SettingsWriteRequest>()
+            .add_message::<SettingsSaveRequest>()
+            .init_resource::<SettingsDefaults>()
+            .init_resource::<crate::themes::TerminalColorSchemes>()
+            .configure_sets(
+                Startup,
+                SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
+            )
+            .add_systems(PreStartup, register_manifests)
+            .add_systems(Startup, compose_defaults.before(SettingsLoadSet))
+            .add_systems(Startup, spawn_settings_runtime.before(SettingsLoadSet))
+            .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
+            .add_systems(
+                Update,
+                (
+                    request_settings_save,
+                    flush_settings_save,
+                    persist_settings_to_disk,
+                    reload_settings_on_change,
+                )
+                    .chain(),
+            )
+            .add_systems(Update, sync_search_engine);
+    }
+}
+
+fn spawn_settings_runtime(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Settings runtime"),
+        SearchEngineSetting("google".to_string()),
+        LastSelfWriteHash::default(),
+        SettingsSaveDebounce::default(),
+    ));
+}
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SettingsLoadSet;
+
+#[derive(Clone, Debug, Deserialize, Serialize, Resource)]
+pub struct AppSettings {
+    #[serde(default = "default_browser_settings")]
+    pub browser: BrowserSettings,
+    #[serde(default)]
+    pub layout: LayoutSettings,
+    #[serde(default)]
+    pub shortcuts: ShortcutSettings,
+    #[serde(default)]
+    pub terminal: Option<TerminalSettings>,
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
+    #[serde(default)]
+    pub update_channel: UpdateChannel,
+    #[serde(default = "default_agent_settings")]
+    pub agent: AgentSettings,
+    #[serde(default)]
+    pub spaces: std::collections::BTreeMap<String, SpaceOverrides>,
+    #[serde(default)]
+    pub projects: Vec<SpaceProject>,
+    #[serde(default)]
+    pub recording: RecordingSettings,
+    #[serde(default)]
+    pub editor: EditorSettings,
+    #[serde(default)]
+    pub appearance: AppearanceSettings,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            browser: BrowserSettings::default(),
+            layout: LayoutSettings::default(),
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: default_auto_update(),
+            update_channel: UpdateChannel::default(),
+            agent: AgentSettings::default(),
+            spaces: std::collections::BTreeMap::new(),
+            projects: Vec::new(),
+            recording: RecordingSettings::default(),
+            editor: EditorSettings::default(),
+            appearance: AppearanceSettings::default(),
+        }
+    }
+}
+
+#[derive(Resource, Clone, Default)]
+struct SettingsDefaults(AppSettings);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Preview,
+}
+
+impl AppSettings {
+    pub fn space(&self, space_id: &str) -> Option<&SpaceOverrides> {
+        space_override(self, space_id)
+    }
+
+    pub fn startup_url(&self, space_id: &str, default_url: &str) -> String {
+        let per_space = space_override(self, space_id)
+            .and_then(|o| o.startup_url.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let chosen = per_space.unwrap_or_else(|| self.browser.startup_url.trim());
+        if chosen.is_empty()
+            || [
+                "vmux://sessions/",
+                "vmux://sessions",
+                "vmux://agent/",
+                "vmux://agent",
+            ]
+            .contains(&chosen)
+        {
+            default_url.to_string()
+        } else {
+            chosen.to_string()
+        }
+    }
+
+    pub fn startup_dir(&self, space_id: &str) -> Option<std::path::PathBuf> {
+        StartupDir::resolve(self, space_id, None).map(|dir| dir.path)
+    }
+
+    pub fn workspace_dir(
+        &self,
+        space_id: &str,
+        tab_dir: Option<&str>,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        match tab_dir {
+            Some(tab_dir) => StartupDir::from_tab(tab_dir).map(|dir| Some(dir.path)),
+            None => Ok(self.startup_dir(space_id)),
+        }
+    }
+
+    pub fn apply_update(&mut self, path: &str, value: serde_json::Value) -> Result<(), String> {
+        let mut value_json =
+            serde_json::to_value(&*self).map_err(|e| format!("settings to JSON failed: {e}"))?;
+        set_at_path(&mut value_json, path, value)?;
+        let new_settings: AppSettings = serde_json::from_value(value_json)
+            .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
+        *self = new_settings;
+        Ok(())
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    pub fn remember_space_project(&mut self, space_id: &str, project: SpaceProject) -> bool {
+        let known = self.remember_known_project(&project);
+        let key = self
+            .space_key(space_id)
+            .unwrap_or_else(|| space_id.to_string());
+        let overrides = self.spaces.entry(key).or_default();
+        let in_use = project.in_use().to_string();
+        let mut folded = false;
+        if project.checkout.is_some()
+            && let Some(at) = overrides
+                .projects
+                .iter()
+                .position(|held| held.path == in_use)
+        {
+            overrides.projects.remove(at);
+            folded = true;
+        }
+        let listed = match overrides
+            .projects
+            .iter_mut()
+            .find(|held| held.path == project.path)
+        {
+            Some(held) => {
+                let moved = held.checkout != project.checkout;
+                held.checkout = project.checkout.clone();
+                moved
+            }
+            None => {
+                overrides.projects.push(project);
+                true
+            }
+        };
+        let promoted = overrides.active_project.as_deref() != Some(in_use.as_str());
+        if promoted {
+            overrides.active_project = Some(in_use);
+        }
+        known || listed || promoted || folded
+    }
+
+    pub fn activate_space_project(&mut self, space_id: &str, path: &str) -> bool {
+        let Some(key) = self.space_key(space_id) else {
+            return false;
+        };
+        let Some(overrides) = self.spaces.get_mut(&key) else {
+            return false;
+        };
+        if !overrides.projects.iter().any(|p| p.path == path) {
+            return false;
+        }
+        if overrides.active_project.as_deref() == Some(path) {
+            return false;
+        }
+        overrides.active_project = Some(path.to_string());
+        true
+    }
+
+    pub fn forget_space_project(&mut self, space_id: &str, path: &str) -> bool {
+        let Some(key) = self.space_key(space_id) else {
+            return false;
+        };
+        let Some(overrides) = self.spaces.get_mut(&key) else {
+            return false;
+        };
+        let Some(at) = overrides.projects.iter().position(|p| p.path == path) else {
+            return false;
+        };
+        overrides.projects.remove(at);
+        if overrides.active_project.as_deref() == Some(path) {
+            overrides.active_project = overrides.projects.first().map(|p| p.path.clone());
+        }
+        true
+    }
+
+    fn space_key(&self, space_id: &str) -> Option<String> {
+        let target = normalize_space_key(space_id);
+        for existing in self.spaces.keys() {
+            if normalize_space_key(existing) == target {
+                return Some(existing.clone());
+            }
+        }
+        None
+    }
+
+    fn remember_known_project(&mut self, project: &SpaceProject) -> bool {
+        match self.projects.iter().position(|p| p.path == project.path) {
+            Some(0) => false,
+            Some(at) => {
+                let existing = self.projects.remove(at);
+                self.projects.insert(0, existing);
+                true
+            }
+            None => {
+                self.projects.insert(0, project.clone());
+                self.projects.truncate(KNOWN_PROJECT_LIMIT);
+                true
+            }
+        }
+    }
+}
+
+const KNOWN_PROJECT_LIMIT: usize = 50;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorScheme {
+    Light,
+    Dark,
+    #[default]
+    Device,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AppearanceSettings {
+    #[serde(default)]
+    pub mode: ColorScheme,
+    #[serde(default = "default_locale_setting")]
+    pub locale: String,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            mode: ColorScheme::Device,
+            locale: default_locale_setting(),
+        }
+    }
+}
+
+impl AppearanceSettings {
+    pub fn from_disk() -> Self {
+        let path = vmux_ecs::profile::ProfilePaths::current().settings();
+        let Ok(source) = std::fs::read_to_string(path) else {
+            return Self::default();
+        };
+        ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str::<PartialAppSettings>(&source)
+            .ok()
+            .and_then(|settings| settings.appearance)
+            .unwrap_or_default()
+    }
+}
+
+fn default_locale_setting() -> String {
+    "system".to_string()
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct EditorSettings {
+    #[serde(default)]
+    pub keymap: vmux_api::editor::KeymapKind,
+    #[serde(default)]
+    pub word_wrap: vmux_api::editor::WordWrap,
+    #[serde(default = "default_word_wrap_column")]
+    pub word_wrap_column: u16,
+    #[serde(default)]
+    pub lsp: LspSettings,
+    #[serde(default)]
+    pub explorer: ExplorerSettings,
+    #[serde(default = "default_editor_leader")]
+    pub leader: String,
+    #[serde(default)]
+    pub mappings: Vec<vmux_api::editor::KeyMapping>,
+}
+
+fn default_editor_leader() -> String {
+    " ".to_string()
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            keymap: vmux_api::editor::KeymapKind::default(),
+            word_wrap: vmux_api::editor::WordWrap::default(),
+            word_wrap_column: default_word_wrap_column(),
+            lsp: LspSettings::default(),
+            explorer: ExplorerSettings::default(),
+            leader: default_editor_leader(),
+            mappings: Vec::new(),
+        }
+    }
+}
+
+fn default_word_wrap_column() -> u16 {
+    80
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ExplorerSettings {
+    #[serde(default)]
+    pub visible: Option<bool>,
+    #[serde(default)]
+    pub width: Option<u32>,
+}
+
+impl ExplorerSettings {
+    pub fn visible(&self) -> bool {
+        self.visible.unwrap_or(false)
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+            .unwrap_or(EXPLORER_DEFAULT_WIDTH)
+            .clamp(EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct LspSettings {
+    #[serde(default)]
+    pub servers: std::collections::BTreeMap<String, LspServerOverride>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LspServerOverride {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub language_id: String,
+    #[serde(default)]
+    pub root_markers: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct RecordingSettings {
+    #[serde(default)]
+    pub output_dir: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SpaceProject {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
+    #[serde(default, skip_serializing)]
+    parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl SpaceProject {
+    pub fn at(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            checkout: None,
+            parent: None,
+            label: None,
+        }
+    }
+
+    pub fn checked_out(path: impl Into<String>, checkout: impl Into<String>) -> Self {
+        let path = path.into();
+        let checkout = checkout.into();
+        Self {
+            checkout: (checkout != path).then_some(checkout),
+            path,
+            parent: None,
+            label: None,
+        }
+    }
+
+    pub fn in_use(&self) -> &str {
+        self.checkout.as_deref().unwrap_or(self.path.as_str())
+    }
+
+    #[cfg(test)]
+    fn legacy_child(path: impl Into<String>, parent: impl Into<String>) -> Self {
+        Self {
+            parent: Some(parent.into()),
+            ..Self::at(path)
+        }
+    }
+
+    pub fn display_label(&self) -> &str {
+        if let Some(label) = self.label.as_deref() {
+            return label;
+        }
+        let trimmed = self.path.trim_end_matches('/');
+        match trimmed.rsplit('/').next() {
+            Some(name) if !name.is_empty() => name,
+            _ => self.path.as_str(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct SpaceOverrides {
+    #[serde(default)]
+    pub startup_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<SpaceProject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_project: Option<String>,
+}
+
+impl SpaceOverrides {
+    pub fn normalize(&mut self) {
+        if let Some(legacy) = self.startup_dir.take()
+            && !legacy.trim().is_empty()
+            && !self.projects.iter().any(|p| p.path == legacy)
+        {
+            self.projects.push(SpaceProject::at(legacy.clone()));
+            if self.active_project.is_none() {
+                self.active_project = Some(legacy);
+            }
+        }
+        let mut roots = Vec::new();
+        let mut nested = Vec::new();
+        for project in std::mem::take(&mut self.projects) {
+            match project.parent.is_some() {
+                true => nested.push(project),
+                false => roots.push(project),
+            }
+        }
+        for project in nested {
+            let Some(root) = project.parent.clone() else {
+                continue;
+            };
+            match roots.iter_mut().find(|held| held.path == root) {
+                Some(held) => {
+                    if held.checkout.is_none() {
+                        held.checkout = Some(project.path);
+                    }
+                }
+                None => roots.push(SpaceProject::checked_out(root, project.path)),
+            }
+        }
+        self.projects = roots;
+    }
+
+    pub fn project_rows(&self) -> Vec<ProjectRow> {
+        let active = self.active_dir();
+        let mut rows = Vec::with_capacity(self.projects.len());
+        for project in &self.projects {
+            let in_use = project.in_use();
+            rows.push(ProjectRow {
+                path: in_use.to_string(),
+                label: project.display_label().to_string(),
+                display_path: in_use.to_string(),
+                depth: 0,
+                is_active: active == Some(in_use),
+                is_worktree: project.checkout.is_some(),
+                missing: !std::path::Path::new(in_use).is_dir(),
+                branch: String::new(),
+                kind: ProjectRowKind::Project,
+                expanded: false,
+            });
+        }
+        rows
+    }
+
+    pub fn active_dir(&self) -> Option<&str> {
+        if let Some(active) = self.active_project.as_deref()
+            && self.projects.iter().any(|held| held.in_use() == active)
+        {
+            return Some(active);
+        }
+        self.projects
+            .first()
+            .map(SpaceProject::in_use)
+            .or(self.startup_dir.as_deref())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AgentSettings {
+    #[serde(default)]
+    pub allow_run_placement_override: bool,
+    #[serde(default = "default_true")]
+    pub follow_files: bool,
+    #[serde(default = "default_true")]
+    pub tidy_files: bool,
+    #[serde(default = "default_tidy_files_max")]
+    pub tidy_files_max: usize,
+    #[serde(default)]
+    pub tidy_files_auto: bool,
+    #[serde(default = "default_acp_agents")]
+    pub acp: Vec<AcpAgentConfig>,
+    #[serde(default)]
+    pub effort: std::collections::BTreeMap<String, String>,
+}
+
+impl AgentSettings {
+    pub fn effort_for(&self, key: &str) -> Option<&str> {
+        self.effort
+            .get(key)
+            .map(|level| level.trim())
+            .filter(|level| !level.is_empty())
+    }
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        default_agent_settings()
+    }
+}
+
+fn default_agent_settings() -> AgentSettings {
+    AgentSettings {
+        allow_run_placement_override: false,
+        follow_files: true,
+        tidy_files: true,
+        tidy_files_max: 5,
+        tidy_files_auto: false,
+        acp: default_acp_agents(),
+        effort: std::collections::BTreeMap::new(),
+    }
+}
+
+fn default_tidy_files_max() -> usize {
+    5
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AcpAgentConfig {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<(String, String)>,
+    #[serde(default)]
+    pub cwd: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+fn default_acp_agents() -> Vec<AcpAgentConfig> {
+    vec![
+        AcpAgentConfig {
+            id: "claude".to_string(),
+            name: "Claude Code".to_string(),
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@zed-industries/claude-code-acp@latest".to_string(),
+            ],
+            env: vec![],
+            cwd: None,
+            version: None,
+        },
+        AcpAgentConfig {
+            id: "codex".to_string(),
+            name: "Codex".to_string(),
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@zed-industries/codex-acp@latest".to_string(),
+            ],
+            env: vec![],
+            cwd: None,
+            version: None,
+        },
+        AcpAgentConfig {
+            id: "gemini".to_string(),
+            name: "Gemini CLI".to_string(),
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "--".to_string(),
+                "@google/gemini-cli@latest".to_string(),
+                "--experimental-acp".to_string(),
+            ],
+            env: vec![],
+            cwd: None,
+            version: None,
+        },
+    ]
+}
+
+fn normalize_space_key(key: &str) -> String {
+    key.chars()
+        .map(|c| if c == '/' { '-' } else { c })
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn space_override<'a>(settings: &'a AppSettings, space_id: &str) -> Option<&'a SpaceOverrides> {
+    if let Some(overrides) = settings.spaces.get(space_id) {
+        return Some(overrides);
+    }
+    let target = normalize_space_key(space_id);
+    settings
+        .spaces
+        .iter()
+        .find(|(key, _)| normalize_space_key(key) == target)
+        .map(|(_, value)| value)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirSource {
+    Tab,
+    Space,
+    Global,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartupDir {
+    pub path: std::path::PathBuf,
+    pub source: DirSource,
+}
+
+impl StartupDir {
+    pub fn resolve(settings: &AppSettings, space_id: &str, tab_dir: Option<&str>) -> Option<Self> {
+        if let Some(path) = Self::existing(tab_dir) {
+            return Some(Self {
+                path,
+                source: DirSource::Tab,
+            });
+        }
+        let space_dir = space_override(settings, space_id).and_then(SpaceOverrides::active_dir);
+        if let Some(path) = Self::existing(space_dir) {
+            return Some(Self {
+                path,
+                source: DirSource::Space,
+            });
+        }
+        let global_dir = settings
+            .terminal
+            .as_ref()
+            .and_then(|t| t.startup_dir.as_deref());
+        if let Some(path) = Self::existing(global_dir) {
+            return Some(Self {
+                path,
+                source: DirSource::Global,
+            });
+        }
+        None
+    }
+
+    pub fn from_tab(tab_dir: &str) -> Result<Self, String> {
+        let trimmed = tab_dir.trim();
+        if trimmed.is_empty() {
+            return Err("tab workspace directory is empty".to_string());
+        }
+        let path = std::path::PathBuf::from(trimmed);
+        if !path.is_absolute() {
+            return Err(format!(
+                "tab workspace directory is not absolute: {}",
+                path.display()
+            ));
+        }
+        let path = path
+            .canonicalize()
+            .map_err(|error| format!("invalid tab workspace directory: {error}"))?;
+        if !path.is_dir() {
+            return Err(format!(
+                "tab workspace path is not a directory: {}",
+                path.display()
+            ));
+        }
+        Ok(Self {
+            path,
+            source: DirSource::Tab,
+        })
+    }
+
+    fn existing(dir: Option<&str>) -> Option<std::path::PathBuf> {
+        let trimmed = dir.map(str::trim).filter(|s| !s.is_empty())?;
+        let path = std::path::PathBuf::from(trimmed);
+        if path.is_dir() { Some(path) } else { None }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ShortcutSettings {
+    #[serde(default = "default_leader")]
+    pub leader: KeyComboDef,
+    #[serde(default = "default_chord_timeout_ms")]
+    pub chord_timeout_ms: u64,
+    #[serde(default)]
+    pub bindings: Vec<ShortcutEntry>,
+}
+
+impl Default for ShortcutSettings {
+    fn default() -> Self {
+        Self {
+            leader: default_leader(),
+            chord_timeout_ms: default_chord_timeout_ms(),
+            bindings: Vec::new(),
+        }
+    }
+}
+
+fn default_leader() -> KeyComboDef {
+    KeyComboDef {
+        key: "b".to_string(),
+        ctrl: true,
+        shift: false,
+        alt: false,
+        super_key: false,
+    }
+}
+
+fn default_chord_timeout_ms() -> u64 {
+    1000
+}
+
+fn default_auto_update() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ShortcutEntry {
+    pub command: String,
+    pub binding: ShortcutDef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum ShortcutDef {
+    Direct(KeyComboDef),
+    Chord(KeyComboDef, KeyComboDef),
+    Leader(KeyComboDef),
+}
+
+impl ShortcutDef {
+    pub fn to_shortcut(&self) -> Option<vmux_command::Shortcut> {
+        match self {
+            ShortcutDef::Direct(combo) => {
+                Some(vmux_command::Shortcut::Direct(combo.to_key_combo()?))
+            }
+            ShortcutDef::Chord(prefix, second) => Some(vmux_command::Shortcut::Chord(
+                prefix.to_key_combo()?,
+                second.to_key_combo()?,
+            )),
+            ShortcutDef::Leader(_second) => None,
+        }
+    }
+
+    pub fn to_shortcut_with_leader(
+        &self,
+        leader: &vmux_command::KeyCombo,
+    ) -> Option<vmux_command::Shortcut> {
+        match self {
+            ShortcutDef::Direct(combo) => {
+                Some(vmux_command::Shortcut::Direct(combo.to_key_combo()?))
+            }
+            ShortcutDef::Chord(prefix, second) => Some(vmux_command::Shortcut::Chord(
+                prefix.to_key_combo()?,
+                second.to_key_combo()?,
+            )),
+            ShortcutDef::Leader(second) => Some(vmux_command::Shortcut::Chord(
+                leader.clone(),
+                second.to_key_combo()?,
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct KeyComboDef {
+    pub key: String,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub alt: bool,
+    #[serde(default)]
+    pub super_key: bool,
+}
+
+impl KeyComboDef {
+    pub fn to_key_combo(&self) -> Option<vmux_command::KeyCombo> {
+        let resolved = vmux_command::ResolvedKey::parse(&self.key)?;
+        Some(vmux_command::KeyCombo {
+            key: resolved.key,
+            modifiers: vmux_command::Modifiers {
+                ctrl: self.ctrl,
+                shift: self.shift || resolved.implicit_shift,
+                alt: self.alt,
+                super_key: self.super_key,
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BrowserSettings {
+    #[serde(default)]
+    pub startup_url: String,
+    #[serde(default = "default_search_engine")]
+    pub search_engine: String,
+    #[serde(default)]
+    pub bookmarks: Vec<String>,
+    #[serde(default)]
+    pub bookmark_folders: Vec<BookmarkFolderSettings>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BookmarkFolderSettings {
+    pub name: String,
+    #[serde(default)]
+    pub smart: Option<vmux_api::bookmark::SmartBookmarkFolder>,
+}
+
+fn default_browser_settings() -> BrowserSettings {
+    BrowserSettings {
+        startup_url: String::new(),
+        search_engine: default_search_engine(),
+        bookmarks: Vec::new(),
+        bookmark_folders: Vec::new(),
+    }
+}
+
+fn default_search_engine() -> String {
+    "google".to_string()
+}
+
+impl Default for BrowserSettings {
+    fn default() -> Self {
+        default_browser_settings()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TerminalSettings {
+    #[serde(default)]
+    pub shell: Option<String>,
+    #[serde(default)]
+    pub font_family: Option<String>,
+    #[serde(default = "default_theme_name")]
+    pub default_theme: String,
+    #[serde(default)]
+    pub themes: Vec<TerminalTheme>,
+    #[serde(default)]
+    pub custom_themes: Vec<crate::themes::TerminalColorScheme>,
+    #[serde(default = "default_true")]
+    pub confirm_close: bool,
+    #[serde(default)]
+    pub startup_dir: Option<String>,
+}
+
+impl Default for TerminalSettings {
+    fn default() -> Self {
+        Self {
+            shell: None,
+            font_family: None,
+            default_theme: default_theme_name(),
+            themes: Vec::new(),
+            custom_themes: Vec::new(),
+            confirm_close: true,
+            startup_dir: None,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_theme_name() -> String {
+    "default".to_string()
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TerminalTheme {
+    pub name: String,
+    #[serde(default = "default_color_scheme")]
+    pub color_scheme: String,
+    #[serde(default = "default_terminal_font_family")]
+    pub font_family: String,
+    #[serde(default = "default_font_size")]
+    pub font_size: f32,
+    #[serde(default = "default_line_height")]
+    pub line_height: f32,
+    #[serde(default = "default_padding")]
+    pub padding: f32,
+    #[serde(
+        default = "default_cursor_style",
+        deserialize_with = "deserialize_cursor_style",
+        serialize_with = "serialize_cursor_style"
+    )]
+    pub cursor_style: vmux_api::terminal::CursorStyle,
+    #[serde(default = "default_cursor_blink")]
+    pub cursor_blink: bool,
+    #[serde(default = "TerminalTheme::default_shell")]
+    pub shell: String,
+}
+
+fn default_color_scheme() -> String {
+    "github-dark".to_string()
+}
+
+fn default_font_size() -> f32 {
+    14.0
+}
+
+fn default_line_height() -> f32 {
+    1.2
+}
+
+fn default_padding() -> f32 {
+    4.0
+}
+
+fn default_cursor_style() -> vmux_api::terminal::CursorStyle {
+    vmux_api::terminal::CursorStyle::Block
+}
+
+fn deserialize_cursor_style<'de, D>(
+    deserializer: D,
+) -> Result<vmux_api::terminal::CursorStyle, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    vmux_api::terminal::CursorStyle::from_str(&value).map_err(serde::de::Error::custom)
+}
+
+fn serialize_cursor_style<S>(
+    style: &vmux_api::terminal::CursorStyle,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(style.as_str())
+}
+
+fn default_cursor_blink() -> bool {
+    true
+}
+
+fn default_terminal_font_family() -> String {
+    String::new()
+}
+
+impl TerminalTheme {
+    pub fn default_shell() -> String {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    }
+}
+
+impl TerminalSettings {
+    pub fn resolve_theme(&self, name: &str) -> TerminalTheme {
+        if let Some(t) = self.themes.iter().find(|t| t.name == name) {
+            return t.clone();
+        }
+        TerminalTheme {
+            name: name.to_string(),
+            color_scheme: default_color_scheme(),
+            font_family: self
+                .font_family
+                .clone()
+                .unwrap_or_else(default_terminal_font_family),
+            font_size: default_font_size(),
+            line_height: default_line_height(),
+            padding: default_padding(),
+            cursor_style: default_cursor_style(),
+            cursor_blink: default_cursor_blink(),
+            shell: self
+                .shell
+                .clone()
+                .unwrap_or_else(TerminalTheme::default_shell),
+        }
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SettingsManifest {
+    #[serde(default)]
+    pub sections: Vec<SectionSpec>,
+    #[serde(default)]
+    pub fields: Vec<FieldSpec>,
+    #[serde(default)]
+    defaults: PartialAppSettings,
+    #[serde(default)]
+    terminal_color_schemes: Vec<crate::themes::TerminalColorSchemeRon>,
+}
+
+#[derive(Component)]
+struct SettingsWatcher {
+    rx: Mutex<mpsc::Receiver<()>>,
+    path: std::path::PathBuf,
+    _watcher: RecommendedWatcher,
+}
+
+#[derive(Clone, Debug, Deserialize, Default)]
+struct PartialAppSettings {
+    #[serde(default)]
+    browser: Option<BrowserSettings>,
+    #[serde(default)]
+    layout: Option<LayoutSettings>,
+    #[serde(default)]
+    shortcuts: Option<ShortcutSettings>,
+    #[serde(default)]
+    terminal: Option<TerminalSettings>,
+    #[serde(default)]
+    auto_update: Option<bool>,
+    #[serde(default)]
+    update_channel: Option<UpdateChannel>,
+    #[serde(default)]
+    agent: Option<AgentSettings>,
+    #[serde(default)]
+    spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
+    #[serde(default)]
+    projects: Option<Vec<SpaceProject>>,
+    #[serde(default)]
+    recording: Option<RecordingSettings>,
+    #[serde(default)]
+    editor: Option<EditorSettings>,
+    #[serde(default)]
+    appearance: Option<AppearanceSettings>,
+}
+
+impl PartialAppSettings {
+    fn apply_to(&self, settings: &mut AppSettings) {
+        if let Some(browser) = &self.browser {
+            settings.browser.clone_from(browser);
+        }
+        if let Some(layout) = &self.layout {
+            settings.layout.clone_from(layout);
+        }
+        if let Some(shortcuts) = &self.shortcuts {
+            settings.shortcuts.clone_from(shortcuts);
+        }
+        if let Some(terminal) = &self.terminal {
+            settings.terminal = Some(terminal.clone());
+        }
+        if let Some(auto_update) = self.auto_update {
+            settings.auto_update = auto_update;
+        }
+        if let Some(update_channel) = self.update_channel {
+            settings.update_channel = update_channel;
+        }
+        if let Some(agent) = &self.agent {
+            settings.agent.clone_from(agent);
+        }
+        if let Some(spaces) = &self.spaces {
+            settings.spaces.clone_from(spaces);
+        }
+        for overrides in settings.spaces.values_mut() {
+            overrides.normalize();
+        }
+        if let Some(projects) = &self.projects {
+            settings.projects.clone_from(projects);
+        }
+        if let Some(recording) = &self.recording {
+            settings.recording.clone_from(recording);
+        }
+        if let Some(editor) = &self.editor {
+            settings.editor.clone_from(editor);
+        }
+        if let Some(appearance) = &self.appearance {
+            settings.appearance.clone_from(appearance);
+        }
+    }
+}
+
+fn register_manifests(
+    manifests: Query<(Entity, &FeatureManifest), Added<FeatureManifest>>,
+    mut commands: Commands,
+) {
+    for (entity, manifest) in &manifests {
+        match manifest.settings::<SettingsManifest>() {
+            Ok(Some(settings)) => {
+                commands.entity(entity).insert(settings);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                bevy::log::error!("settings: feature manifest is invalid: {error}");
+            }
+        }
+    }
+}
+
+fn compose_defaults(
+    manifests: Query<(Option<&Name>, &FeatureManifest, Option<&SettingsManifest>)>,
+    mut defaults: ResMut<SettingsDefaults>,
+    mut color_schemes: ResMut<crate::themes::TerminalColorSchemes>,
+) {
+    let mut manifests = manifests.iter().collect::<Vec<_>>();
+    manifests.sort_by(|left, right| {
+        left.0
+            .map(Name::as_str)
+            .unwrap_or_default()
+            .cmp(right.0.map(Name::as_str).unwrap_or_default())
+    });
+    let mut settings = AppSettings::default();
+    let mut bookmarks = Vec::new();
+    for (_, feature, manifest) in manifests {
+        if let Some(manifest) = manifest {
+            manifest.defaults.apply_to(&mut settings);
+            color_schemes.extend(manifest.terminal_color_schemes.clone());
+        }
+        for page in &feature.pages {
+            if let Some(order) = page.bookmark {
+                bookmarks.push((order, page.url.clone()));
+            }
+        }
+    }
+    bookmarks.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    settings.browser.bookmarks = bookmarks.into_iter().map(|(_, url)| url).collect();
+    defaults.0 = settings;
+}
+
+fn parse_with_defaults(
+    text: &str,
+    defaults: &AppSettings,
+) -> Result<AppSettings, ron::error::SpannedError> {
+    ron::Options::default()
+        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+        .from_str::<PartialAppSettings>(text)
+        .map(|partial| {
+            let mut settings = defaults.clone();
+            partial.apply_to(&mut settings);
+            settings
+        })
+}
+
+fn read_settings_and_path(
+    defaults: &AppSettings,
+    path: std::path::PathBuf,
+) -> (AppSettings, Option<std::path::PathBuf>) {
+    let parent_ready = path
+        .parent()
+        .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
+    if parent_ready {
+        let settings = match std::fs::read_to_string(&path) {
+            Ok(text) => match parse_with_defaults(&text, defaults) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    bevy::log::warn!(
+                        "Ignoring invalid config {}: {error}; using feature defaults",
+                        path.display()
+                    );
+                    defaults.clone()
+                }
+            },
+            Err(_) => defaults.clone(),
+        };
+        (settings, Some(path))
+    } else {
+        (defaults.clone(), None)
+    }
+}
+
+fn load_settings(
+    defaults: Res<SettingsDefaults>,
+    profile: vmux_ecs::profile::CurrentProfile,
+    mut commands: Commands,
+    runtime: Single<Entity, With<LastSelfWriteHash>>,
+) {
+    let config_path = profile.paths().map(|paths| paths.settings());
+    let (settings, config_path) = match config_path {
+        Some(path) => read_settings_and_path(&defaults.0, path),
+        None => (defaults.0.clone(), None),
+    };
+    vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
+
+    commands.insert_resource(settings.layout.clone());
+    commands.insert_resource(ResolvedLocale(vmux_ui::i18n::Locale::requested(Some(
+        &settings.appearance.locale,
+    ))));
+    commands.insert_resource(ConfirmCloseSettings {
+        enabled: settings
+            .terminal
+            .as_ref()
+            .is_none_or(|terminal| terminal.confirm_close),
+    });
+    commands.insert_resource(settings);
+
+    if let Some(path) = config_path {
+        let (tx, rx) = mpsc::channel();
+        let watch_path = path.clone();
+        match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res
+                && (event.kind.is_modify() || event.kind.is_create())
+            {
+                let _ = tx.send(());
+            }
+        }) {
+            Ok(mut watcher) => {
+                if let Err(e) =
+                    watcher.watch(watch_path.parent().unwrap(), RecursiveMode::NonRecursive)
+                {
+                    bevy::log::warn!("Failed to watch settings dir: {e}");
+                } else {
+                    bevy::log::info!("Watching {} for changes", path.display());
+                    commands.entity(*runtime).insert(SettingsWatcher {
+                        rx: Mutex::new(rx),
+                        path,
+                        _watcher: watcher,
+                    });
+                }
+            }
+            Err(e) => {
+                bevy::log::warn!("Failed to create file watcher: {e}");
+            }
+        }
+    }
+}
+
+fn reload_settings_on_change(
+    watcher: Option<Single<&SettingsWatcher>>,
+    defaults: Res<SettingsDefaults>,
+    mut settings: ResMut<AppSettings>,
+    mut layout_settings: ResMut<LayoutSettings>,
+    mut confirm_close: ResMut<ConfirmCloseSettings>,
+    mut resolved_locale: ResMut<ResolvedLocale>,
+    last_hash: Single<&LastSelfWriteHash>,
+) {
+    let Some(watcher) = watcher else { return };
+
+    let rx = watcher.rx.lock().unwrap();
+    let mut changed = false;
+    while rx.try_recv().is_ok() {
+        changed = true;
+    }
+    drop(rx);
+    if !changed {
+        return;
+    }
+
+    match std::fs::read_to_string(&watcher.path) {
+        Ok(text) => {
+            let current_hash = settings_content_hash(text.as_bytes());
+            if last_hash.0 == Some(current_hash) {
+                bevy::log::debug!("settings: skipping reload (matches last self-write)");
+                return;
+            }
+            match parse_with_defaults(&text, &defaults.0) {
+                Ok(new_settings) => {
+                    bevy::log::info!("Settings reloaded from {}", watcher.path.display());
+                    let locale =
+                        vmux_ui::i18n::Locale::requested(Some(&new_settings.appearance.locale));
+                    locale.make_current();
+                    resolved_locale.0 = locale;
+                    *layout_settings = new_settings.layout.clone();
+                    confirm_close.enabled = new_settings
+                        .terminal
+                        .as_ref()
+                        .is_none_or(|terminal| terminal.confirm_close);
+                    *settings = new_settings;
+                }
+                Err(e) => {
+                    bevy::log::warn!("Settings reload failed (parse error): {e}");
+                }
+            }
+        }
+        Err(e) => {
+            bevy::log::warn!("Settings reload failed (read error): {e}");
+        }
+    }
+}
+
+fn sync_search_engine(
+    settings: Option<Res<AppSettings>>,
+    mut search_engine: Single<&mut SearchEngineSetting>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    if search_engine.0 != settings.browser.search_engine {
+        search_engine.0.clone_from(&settings.browser.search_engine);
+    }
+}
+
+fn section_ron<T: Serialize>(value: &T) -> Result<String, String> {
+    ron::ser::to_string_pretty(value, ron::ser::PrettyConfig::default())
+        .map_err(|e| format!("RON serialize failed: {e}"))
+}
+
+fn sparse_with_defaults(settings: &AppSettings, defaults: &AppSettings) -> Result<String, String> {
+    let cur =
+        serde_json::to_value(settings).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def =
+        serde_json::to_value(defaults).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let differs = |key: &str| cur.get(key) != def.get(key);
+    let mut parts: Vec<String> = Vec::new();
+    if differs("browser") {
+        parts.push(format!("    browser: {},", section_ron(&settings.browser)?));
+    }
+    if differs("layout") {
+        parts.push(format!("    layout: {},", section_ron(&settings.layout)?));
+    }
+    if differs("shortcuts") {
+        parts.push(format!(
+            "    shortcuts: {},",
+            section_ron(&settings.shortcuts)?
+        ));
+    }
+    if differs("terminal") {
+        let terminal_ron = match &settings.terminal {
+            Some(terminal) => sparse_terminal_ron(terminal, defaults.terminal.as_ref())?,
+            None => section_ron(&settings.terminal)?,
+        };
+        parts.push(format!("    terminal: {terminal_ron},"));
+    }
+    if differs("auto_update") {
+        parts.push(format!(
+            "    auto_update: {},",
+            section_ron(&settings.auto_update)?
+        ));
+    }
+    if differs("update_channel") {
+        parts.push(format!(
+            "    update_channel: {},",
+            section_ron(&settings.update_channel)?
+        ));
+    }
+    if differs("agent") {
+        parts.push(format!("    agent: {},", section_ron(&settings.agent)?));
+    }
+    if differs("spaces") {
+        parts.push(format!("    spaces: {},", section_ron(&settings.spaces)?));
+    }
+    if differs("projects") {
+        parts.push(format!(
+            "    projects: {},",
+            section_ron(&settings.projects)?
+        ));
+    }
+    if differs("recording") {
+        parts.push(format!(
+            "    recording: {},",
+            section_ron(&settings.recording)?
+        ));
+    }
+    if differs("editor") {
+        parts.push(format!(
+            "    editor: {},",
+            sparse_editor_ron(&settings.editor, &defaults.editor)?
+        ));
+    }
+    if differs("appearance") {
+        parts.push(format!(
+            "    appearance: {},",
+            section_ron(&settings.appearance)?
+        ));
+    }
+    if parts.is_empty() {
+        return Ok("()\n".to_string());
+    }
+    Ok(format!("(\n{}\n)\n", parts.join("\n")))
+}
+
+fn sparse_editor_ron(cur: &EditorSettings, def: &EditorSettings) -> Result<String, String> {
+    let cur_json =
+        serde_json::to_value(cur).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def_json =
+        serde_json::to_value(def).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let differs = |key: &str| cur_json.get(key) != def_json.get(key);
+    let mut fields = Vec::new();
+    if differs("keymap") {
+        fields.push(format!("keymap: {}", leaf_ron(&cur.keymap)?));
+    }
+    if differs("word_wrap") {
+        fields.push(format!("word_wrap: {}", leaf_ron(&cur.word_wrap)?));
+    }
+    if differs("word_wrap_column") {
+        fields.push(format!(
+            "word_wrap_column: {}",
+            leaf_ron(&cur.word_wrap_column)?
+        ));
+    }
+    if differs("lsp") {
+        fields.push(format!("lsp: {}", leaf_ron(&cur.lsp)?));
+    }
+    if differs("explorer") {
+        fields.push(format!("explorer: {}", leaf_ron(&cur.explorer)?));
+    }
+    Ok(format!("({})", fields.join(", ")))
+}
+
+fn leaf_ron<T: Serialize>(value: &T) -> Result<String, String> {
+    ron::ser::to_string(value).map_err(|e| format!("RON serialize failed: {e}"))
+}
+
+fn sparse_terminal_ron(
+    cur: &TerminalSettings,
+    default: Option<&TerminalSettings>,
+) -> Result<String, String> {
+    let fallback;
+    let def = match default {
+        Some(d) => d,
+        None => {
+            fallback = TerminalSettings::default();
+            &fallback
+        }
+    };
+    let cur_json =
+        serde_json::to_value(cur).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def_json =
+        serde_json::to_value(def).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let differs = |key: &str| cur_json.get(key) != def_json.get(key);
+
+    let mut fields: Vec<String> = Vec::new();
+    if differs("shell") {
+        fields.push(format!("shell: {}", leaf_ron(&cur.shell)?));
+    }
+    if differs("font_family") {
+        fields.push(format!("font_family: {}", leaf_ron(&cur.font_family)?));
+    }
+    if differs("default_theme") {
+        fields.push(format!("default_theme: {}", leaf_ron(&cur.default_theme)?));
+    }
+    if differs("themes") {
+        fields.push(format!(
+            "themes: {}",
+            sparse_themes_ron(&cur.themes, &def.themes)?
+        ));
+    }
+    if differs("custom_themes") {
+        fields.push(format!("custom_themes: {}", leaf_ron(&cur.custom_themes)?));
+    }
+    if differs("confirm_close") {
+        fields.push(format!("confirm_close: {}", leaf_ron(&cur.confirm_close)?));
+    }
+    if differs("startup_dir") {
+        fields.push(format!("startup_dir: {}", leaf_ron(&cur.startup_dir)?));
+    }
+    Ok(format!("({})", fields.join(", ")))
+}
+
+fn sparse_themes_ron(cur: &[TerminalTheme], default: &[TerminalTheme]) -> Result<String, String> {
+    let mut items: Vec<String> = Vec::new();
+    for theme in cur {
+        let base = default.iter().find(|d| d.name == theme.name);
+        items.push(sparse_theme_ron(theme, base)?);
+    }
+    Ok(format!("[{}]", items.join(", ")))
+}
+
+fn sparse_theme_ron(theme: &TerminalTheme, base: Option<&TerminalTheme>) -> Result<String, String> {
+    let mut fields: Vec<String> = vec![format!("name: {}", leaf_ron(&theme.name)?)];
+    if theme.color_scheme
+        != base
+            .map(|b| b.color_scheme.clone())
+            .unwrap_or_else(default_color_scheme)
+    {
+        fields.push(format!("color_scheme: {}", leaf_ron(&theme.color_scheme)?));
+    }
+    if theme.font_family
+        != base
+            .map(|b| b.font_family.clone())
+            .unwrap_or_else(default_terminal_font_family)
+    {
+        fields.push(format!("font_family: {}", leaf_ron(&theme.font_family)?));
+    }
+    if theme.font_size != base.map(|b| b.font_size).unwrap_or_else(default_font_size) {
+        fields.push(format!("font_size: {}", leaf_ron(&theme.font_size)?));
+    }
+    if theme.line_height
+        != base
+            .map(|b| b.line_height)
+            .unwrap_or_else(default_line_height)
+    {
+        fields.push(format!("line_height: {}", leaf_ron(&theme.line_height)?));
+    }
+    if theme.padding != base.map(|b| b.padding).unwrap_or_else(default_padding) {
+        fields.push(format!("padding: {}", leaf_ron(&theme.padding)?));
+    }
+    if theme.cursor_style
+        != base
+            .map(|b| b.cursor_style)
+            .unwrap_or_else(default_cursor_style)
+    {
+        fields.push(format!("cursor_style: {}", leaf_ron(&theme.cursor_style)?));
+    }
+    if theme.cursor_blink
+        != base
+            .map(|b| b.cursor_blink)
+            .unwrap_or_else(default_cursor_blink)
+    {
+        fields.push(format!("cursor_blink: {}", leaf_ron(&theme.cursor_blink)?));
+    }
+    if theme.shell
+        != base
+            .map(|b| b.shell.clone())
+            .unwrap_or_else(TerminalTheme::default_shell)
+    {
+        fields.push(format!("shell: {}", leaf_ron(&theme.shell)?));
+    }
+    Ok(format!("({})", fields.join(", ")))
+}
+
+fn set_at_path(
+    root: &mut serde_json::Value,
+    path: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("empty settings path".to_string());
+    }
+    let segments = parse_path_segments(path)?;
+    let (last, parents) = segments
+        .split_last()
+        .ok_or_else(|| "empty settings path".to_string())?;
+
+    let mut cursor = root;
+    let mut walked = String::new();
+    for segment in parents {
+        append_segment(&mut walked, segment);
+        cursor = descend(cursor, segment, &walked)?;
+    }
+    append_segment(&mut walked, last);
+    set_leaf(cursor, last, &walked, value)
+}
+
+#[derive(Debug)]
+enum PathSegment {
+    Field(String),
+    Index(usize),
+}
+
+fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, String> {
+    let mut out = Vec::new();
+    for raw in path.split('.') {
+        if raw.is_empty() {
+            return Err(format!("empty segment in path: {path}"));
+        }
+        let mut chars = raw.chars();
+        let mut name = String::new();
+        for ch in chars.by_ref() {
+            if ch == '[' {
+                break;
+            }
+            name.push(ch);
+        }
+        if name.is_empty() {
+            return Err(format!("missing field name before '[' in {raw}"));
+        }
+        out.push(PathSegment::Field(name));
+        let mut tail: String = chars.collect();
+        while !tail.is_empty() {
+            let close = tail
+                .find(']')
+                .ok_or_else(|| format!("unclosed '[' in {raw}"))?;
+            let idx_str = &tail[..close];
+            let idx: usize = idx_str
+                .parse()
+                .map_err(|_| format!("non-integer index '[{idx_str}]' in {raw}"))?;
+            out.push(PathSegment::Index(idx));
+            tail = tail[close + 1..].to_string();
+            if !tail.is_empty() && !tail.starts_with('[') {
+                return Err(format!("unexpected text after ']' in {raw}: {tail}"));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn append_segment(walked: &mut String, segment: &PathSegment) {
+    match segment {
+        PathSegment::Field(name) => {
+            if !walked.is_empty() {
+                walked.push('.');
+            }
+            walked.push_str(name);
+        }
+        PathSegment::Index(i) => {
+            walked.push_str(&format!("[{i}]"));
+        }
+    }
+}
+
+fn descend<'a>(
+    cursor: &'a mut serde_json::Value,
+    segment: &PathSegment,
+    walked: &str,
+) -> Result<&'a mut serde_json::Value, String> {
+    match segment {
+        PathSegment::Field(name) => cursor
+            .get_mut(name.as_str())
+            .ok_or_else(|| format!("unknown setting path: {walked}")),
+        PathSegment::Index(i) => cursor
+            .get_mut(*i)
+            .ok_or_else(|| format!("unknown setting path: {walked}")),
+    }
+}
+
+fn set_leaf(
+    cursor: &mut serde_json::Value,
+    segment: &PathSegment,
+    walked: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    match segment {
+        PathSegment::Field(name) => {
+            let map = cursor
+                .as_object_mut()
+                .ok_or_else(|| format!("cannot index field on non-object at {walked}"))?;
+            if !map.contains_key(name) {
+                return Err(format!("unknown setting path: {walked}"));
+            }
+            map.insert(name.clone(), value);
+            Ok(())
+        }
+        PathSegment::Index(i) => {
+            let arr = cursor
+                .as_array_mut()
+                .ok_or_else(|| format!("cannot index by [{i}] on non-array at {walked}"))?;
+            if *i >= arr.len() {
+                return Err(format!("unknown setting path: {walked}"));
+            }
+            arr[*i] = value;
+            Ok(())
+        }
+    }
+}
+
+#[derive(Component, Default, Debug)]
+pub struct LastSelfWriteHash(pub Option<u64>);
+
+#[derive(Message, Debug, Clone)]
+struct SettingsWriteRequest {
+    pub ron_bytes: String,
+}
+
+fn settings_content_hash(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
+
+#[derive(Message, Debug, Clone)]
+pub struct SettingsSaveRequest;
+
+#[derive(Component, Default)]
+struct SettingsSaveDebounce {
+    pub due: Option<Instant>,
+}
+
+fn request_settings_save(
+    mut reader: MessageReader<SettingsSaveRequest>,
+    mut debounce: Single<&mut SettingsSaveDebounce>,
+) {
+    if reader.read().count() > 0 {
+        debounce.due = Some(Instant::now() + SETTINGS_SAVE_DEBOUNCE);
+    }
+}
+
+fn flush_settings_save(
+    mut debounce: Single<&mut SettingsSaveDebounce>,
+    settings: Res<AppSettings>,
+    defaults: Res<SettingsDefaults>,
+    mut writes: MessageWriter<SettingsWriteRequest>,
+) {
+    let Some(due) = debounce.due else {
+        return;
+    };
+    if Instant::now() < due {
+        return;
+    }
+    debounce.due = None;
+    match sparse_with_defaults(&settings, &defaults.0) {
+        Ok(ron_bytes) => {
+            writes.write(SettingsWriteRequest { ron_bytes });
+        }
+        Err(e) => bevy::log::warn!("settings: debounced save serialize failed: {e}"),
+    }
+}
+
+fn persist_settings_to_disk(
+    mut reader: MessageReader<SettingsWriteRequest>,
+    watcher: Option<Single<&SettingsWatcher>>,
+    mut last_hash: Single<&mut LastSelfWriteHash>,
+) {
+    for request in reader.read() {
+        let Some(watcher) = watcher.as_deref() else {
+            bevy::log::warn!("settings: no watcher path; cannot persist");
+            continue;
+        };
+        let bytes = request.ron_bytes.as_bytes();
+        let hash = settings_content_hash(bytes);
+        last_hash.0 = Some(hash);
+        if let Err(e) = vmux_path::AtomicFile::write(&watcher.path, bytes) {
+            bevy::log::warn!(
+                "settings: failed to persist {}: {e}",
+                watcher.path.display()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use bevy::ecs::message::Messages;
+
+    const MANIFESTS: [&str; 9] = [
+        include_str!("../feature.ron"),
+        include_str!("../../../vmux_agent/src/feature.ron"),
+        include_str!("../../../vmux_editor/src/feature.ron"),
+        include_str!("../../../vmux_input/src/feature.ron"),
+        include_str!("../../../vmux_layout/src/feature.ron"),
+        include_str!("../../../vmux_shortcut/src/feature.ron"),
+        include_str!("../../../vmux_space/src/feature.ron"),
+        include_str!("../../../vmux_terminal/src/feature.ron"),
+        include_str!("../../../../util/vmux_browser/src/feature.ron"),
+    ];
+
+    fn load_embedded_settings() -> AppSettings {
+        let mut settings = AppSettings::default();
+        let mut bookmarks = Vec::new();
+        for source in MANIFESTS {
+            let feature = FeatureManifest::parse(source);
+            if let Some(manifest) = feature.settings::<SettingsManifest>().unwrap() {
+                manifest.defaults.apply_to(&mut settings);
+            }
+            for page in feature.pages {
+                if let Some(order) = page.bookmark {
+                    bookmarks.push((order, page.url));
+                }
+            }
+        }
+        bookmarks.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        settings.browser.bookmarks = bookmarks.into_iter().map(|(_, url)| url).collect();
+        settings
+    }
+
+    fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
+        parse_with_defaults(text, &load_embedded_settings())
+    }
+
+    fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
+        sparse_with_defaults(settings, &load_embedded_settings())
+    }
+
+    #[test]
+    fn acp_agent_config_parses() {
+        let cfg: AcpAgentConfig = ron::from_str(
+            r#"(id: "vibe-acp", name: "Vibe", command: "uv", args: ["run", "vibe-acp"])"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.id, "vibe-acp");
+        assert_eq!(cfg.command, "uv");
+        assert!(cfg.env.is_empty());
+        assert_eq!(cfg.cwd, None);
+    }
+
+    #[test]
+    fn agent_settings_default_seeds_acp_agents() {
+        let agent = AgentSettings::default();
+        for id in ["claude", "codex", "gemini"] {
+            assert!(
+                agent.acp.iter().any(|c| c.id == id),
+                "missing acp agent {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_defaults_enable_tidy() {
+        let s = default_agent_settings();
+        assert!(s.tidy_files);
+        assert_eq!(s.tidy_files_max, 5);
+        assert!(!s.tidy_files_auto);
+    }
+
+    #[test]
+    fn agent_defaults_disable_run_placement_override() {
+        assert!(!AgentSettings::default().allow_run_placement_override);
+    }
+
+    #[test]
+    fn legacy_agent_settings_default_run_placement_override_to_disabled() {
+        let settings = parse_settings("(agent: (follow_files: true))").unwrap();
+        assert!(!settings.agent.allow_run_placement_override);
+    }
+
+    #[test]
+    fn apply_update_enables_run_placement_override() {
+        let mut settings = base_settings();
+        settings
+            .apply_update(
+                "agent.allow_run_placement_override",
+                serde_json::json!(true),
+            )
+            .expect("update ok");
+        assert!(settings.agent.allow_run_placement_override);
+        let ron = sparse_settings_ron(&settings).expect("serialize");
+        let reparsed = parse_settings(&ron).expect("RON parses");
+        assert!(reparsed.agent.allow_run_placement_override);
+    }
+
+    #[test]
+    fn apply_update_sets_tidy_auto_without_clobbering_siblings() {
+        let mut s = base_settings();
+        assert!(s.agent.follow_files);
+        s.apply_update("agent.tidy_files_auto", serde_json::json!(true))
+            .expect("update ok");
+        assert!(s.agent.tidy_files_auto);
+        assert!(s.agent.follow_files, "sibling preserved");
+        let ron = sparse_settings_ron(&s).expect("serialize");
+        assert!(ron.contains("tidy_files_auto"));
+    }
+
+    fn base_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: String::new(),
+                search_engine: default_search_engine(),
+                bookmarks: Default::default(),
+                bookmark_folders: Default::default(),
+            },
+            layout: LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings { padding: 0.0 },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+            update_channel: UpdateChannel::Stable,
+            agent: crate::host::runtime::AgentSettings::default(),
+            spaces: Default::default(),
+            projects: Default::default(),
+            recording: Default::default(),
+            editor: Default::default(),
+            appearance: Default::default(),
+        }
+    }
+
+    #[test]
+    fn explorer_settings_default_when_absent() {
+        let s = base_settings();
+        assert!(!s.editor.explorer.visible());
+        assert_eq!(s.editor.explorer.width(), EXPLORER_DEFAULT_WIDTH);
+    }
+
+    #[test]
+    fn editor_wrap_defaults_match_enabled_vscode_settings() {
+        let settings = EditorSettings::default();
+
+        assert_eq!(settings.word_wrap, vmux_api::editor::WordWrap::On);
+        assert_eq!(settings.word_wrap_column, 80);
+    }
+
+    #[test]
+    fn editor_wrap_uses_vscode_setting_values() {
+        let settings =
+            parse_settings("(editor: (word_wrap: wordWrapColumn, word_wrap_column: 100))").unwrap();
+
+        assert_eq!(
+            settings.editor.word_wrap,
+            vmux_api::editor::WordWrap::WordWrapColumn
+        );
+        assert_eq!(settings.editor.word_wrap_column, 100);
+    }
+
+    #[test]
+    fn explorer_settings_present_overrides() {
+        let e = ExplorerSettings {
+            visible: Some(false),
+            width: Some(320),
+        };
+        assert!(!e.visible());
+        assert_eq!(e.width(), 320);
+    }
+
+    #[test]
+    fn explorer_width_clamps_out_of_range() {
+        let huge = ExplorerSettings {
+            visible: None,
+            width: Some(9000),
+        };
+        assert_eq!(huge.width(), EXPLORER_MAX_WIDTH);
+        let tiny = ExplorerSettings {
+            visible: None,
+            width: Some(1),
+        };
+        assert_eq!(tiny.width(), EXPLORER_MIN_WIDTH);
+    }
+
+    #[test]
+    fn resolve_startup_url_returns_browser_override() {
+        let mut s = base_settings();
+        s.browser.startup_url = "vmux://services/".into();
+        assert_eq!(
+            s.startup_url("space-1", "vmux://start/"),
+            "vmux://services/"
+        );
+    }
+
+    #[test]
+    fn resolve_startup_url_defaults_to_start() {
+        let s = base_settings();
+        assert_eq!(s.startup_url("space-1", "vmux://start/"), "vmux://start/");
+    }
+
+    #[test]
+    fn resolve_startup_url_uses_start_for_empty_browser_url() {
+        let mut s = base_settings();
+        s.browser.startup_url.clear();
+        assert_eq!(s.startup_url("space-1", "vmux://start/"), "vmux://start/");
+    }
+
+    #[test]
+    fn resolve_startup_url_treats_agent_roots_as_start() {
+        for url in [
+            "vmux://sessions/",
+            "vmux://sessions",
+            "vmux://agent/",
+            "vmux://agent",
+        ] {
+            let mut s = base_settings();
+            s.browser.startup_url = url.into();
+            assert_eq!(
+                s.startup_url("space-1", "vmux://start/"),
+                "vmux://start/",
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_startup_dir_matches_slug_variant_key() {
+        let dir = std::env::temp_dir();
+        let mut s = base_settings();
+        s.spaces.insert(
+            "mistralai-dashboard".to_string(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(dir.to_string_lossy().to_string()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(s.startup_dir("mistralai/dashboard"), Some(dir));
+    }
+
+    #[test]
+    fn embedded_settings_default_to_start() {
+        let s = load_embedded_settings();
+        assert_eq!(s.startup_url("space-1", "vmux://start/"), "vmux://start/");
+    }
+
+    #[test]
+    fn embedded_settings_use_page_pins_instead_of_starter_folders() {
+        let settings = load_embedded_settings();
+
+        assert!(settings.browser.bookmark_folders.is_empty());
+    }
+
+    #[test]
+    fn resolve_startup_url_prefers_per_space_override() {
+        let mut s = base_settings();
+        s.browser.startup_url = "https://global.example".into();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("https://work.example".into()),
+                startup_dir: None,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            s.startup_url("work", "vmux://start/"),
+            "https://work.example"
+        );
+        assert_eq!(
+            s.startup_url("other", "vmux://start/"),
+            "https://global.example"
+        );
+    }
+
+    #[test]
+    fn resolve_startup_url_blank_per_space_falls_to_global() {
+        let mut s = base_settings();
+        s.browser.startup_url = "https://global.example".into();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("   ".into()),
+                startup_dir: None,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            s.startup_url("work", "vmux://start/"),
+            "https://global.example"
+        );
+    }
+
+    #[test]
+    fn app_settings_roundtrips_through_json() {
+        let original = base_settings();
+        let value = serde_json::to_value(&original).expect("serialize");
+        let recovered: AppSettings = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(
+            recovered.layout.window.padding,
+            original.layout.window.padding
+        );
+        assert_eq!(recovered.layout.pane.gap, original.layout.pane.gap);
+        assert_eq!(
+            recovered.shortcuts.chord_timeout_ms,
+            original.shortcuts.chord_timeout_ms
+        );
+        assert_eq!(recovered.auto_update, original.auto_update);
+        assert_eq!(recovered.update_channel, original.update_channel);
+    }
+
+    #[test]
+    fn set_at_path_replaces_nested_object_value() {
+        let mut root = serde_json::json!({"layout": {"pane": {"gap": 8.0}}});
+        set_at_path(&mut root, "layout.pane.gap", serde_json::json!(12.0)).unwrap();
+        assert_eq!(root["layout"]["pane"]["gap"], serde_json::json!(12.0));
+    }
+
+    #[test]
+    fn set_at_path_replaces_array_element_field() {
+        let mut root = serde_json::json!({
+            "terminal": {"themes": [{"name": "default", "font_size": 14.0}]}
+        });
+        set_at_path(
+            &mut root,
+            "terminal.themes[0].font_size",
+            serde_json::json!(16.0),
+        )
+        .unwrap();
+        assert_eq!(
+            root["terminal"]["themes"][0]["font_size"],
+            serde_json::json!(16.0)
+        );
+    }
+
+    #[test]
+    fn set_at_path_top_level_leaf() {
+        let mut root = serde_json::json!({"auto_update": true});
+        set_at_path(&mut root, "auto_update", serde_json::json!(false)).unwrap();
+        assert_eq!(root["auto_update"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn set_at_path_unknown_key_errors() {
+        let mut root = serde_json::json!({"layout": {}});
+        let err = set_at_path(&mut root, "layout.nope", serde_json::json!(1)).unwrap_err();
+        assert!(
+            err.contains("layout.nope"),
+            "error must mention path: {err}"
+        );
+    }
+
+    #[test]
+    fn set_at_path_array_out_of_bounds_errors() {
+        let mut root = serde_json::json!({"themes": [{"font_size": 14.0}]});
+        let err =
+            set_at_path(&mut root, "themes[5].font_size", serde_json::json!(16.0)).unwrap_err();
+        assert!(err.contains("themes[5]"), "error must mention path: {err}");
+    }
+
+    #[test]
+    fn set_at_path_empty_path_errors() {
+        let mut root = serde_json::json!({});
+        assert!(set_at_path(&mut root, "", serde_json::json!(1)).is_err());
+    }
+
+    #[test]
+    fn apply_settings_update_changes_pane_gap() {
+        let mut settings = base_settings();
+        settings
+            .apply_update("layout.pane.gap", serde_json::json!(16.0))
+            .expect("apply ok");
+        assert_eq!(settings.layout.pane.gap, 16.0);
+        let ron_bytes = sparse_settings_ron(&settings).expect("serialize");
+        assert!(ron_bytes.contains("gap"));
+        assert!(ron_bytes.contains("16"));
+        let reparsed = parse_settings(&ron_bytes).expect("RON parses");
+        assert_eq!(reparsed.layout.pane.gap, 16.0);
+    }
+
+    #[test]
+    fn apply_settings_update_changes_top_level_bool() {
+        let mut settings = base_settings();
+        settings
+            .apply_update("auto_update", serde_json::json!(true))
+            .unwrap();
+        assert!(settings.auto_update);
+    }
+
+    #[test]
+    fn apply_settings_update_changes_release_channel() {
+        let mut settings = base_settings();
+        settings
+            .apply_update("update_channel", serde_json::json!("preview"))
+            .expect("apply ok");
+
+        assert_eq!(settings.update_channel, UpdateChannel::Preview);
+        let ron = sparse_settings_ron(&settings).expect("serialize");
+        let reparsed = parse_settings(&ron).expect("RON parses");
+        assert_eq!(reparsed.update_channel, UpdateChannel::Preview);
+    }
+
+    #[test]
+    fn settings_without_release_channel_default_to_stable() {
+        let settings = parse_settings("(auto_update: false)").expect("settings parse");
+
+        assert_eq!(settings.update_channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn apply_settings_update_unknown_path_errors_without_mutating() {
+        let mut settings = base_settings();
+        let original_gap = settings.layout.pane.gap;
+        let err = settings
+            .apply_update("layout.nope", serde_json::json!(1))
+            .unwrap_err();
+        assert!(err.contains("layout.nope"));
+        assert_eq!(settings.layout.pane.gap, original_gap);
+    }
+
+    #[test]
+    fn apply_settings_update_type_mismatch_errors_without_mutating() {
+        let mut settings = base_settings();
+        let original_auto = settings.auto_update;
+        let err = settings
+            .apply_update("auto_update", serde_json::json!("yes"))
+            .unwrap_err();
+        assert!(!err.is_empty());
+        assert_eq!(settings.auto_update, original_auto);
+    }
+
+    #[test]
+    fn acp_agent_config_allows_version_only_entry() {
+        let cfg: AcpAgentConfig = serde_json::from_value(serde_json::json!({
+            "id": "claude",
+            "name": "Claude Code",
+            "version": "0.11.0",
+        }))
+        .expect("a version-only acp entry (no command) must parse");
+        assert_eq!(cfg.command, "");
+        assert_eq!(cfg.version.as_deref(), Some("0.11.0"));
+        assert!(cfg.args.is_empty());
+    }
+
+    #[test]
+    fn content_hash_is_deterministic() {
+        let h1 = settings_content_hash(b"hello");
+        let h2 = settings_content_hash(b"hello");
+        let h3 = settings_content_hash(b"world");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn app_settings_spaces_roundtrip_through_ron() {
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("https://work.example".into()),
+                startup_dir: Some("/tmp/work".into()),
+                ..Default::default()
+            },
+        );
+        let ron = ron::ser::to_string_pretty(&s, ron::ser::PrettyConfig::default()).unwrap();
+        let back: AppSettings = ron::de::from_str(&ron).unwrap();
+        assert_eq!(
+            back.spaces["work"].startup_url.as_deref(),
+            Some("https://work.example")
+        );
+        assert_eq!(
+            back.spaces["work"].startup_dir.as_deref(),
+            Some("/tmp/work")
+        );
+    }
+
+    #[test]
+    fn embedded_settings_have_empty_spaces_and_no_global_startup_dir() {
+        let s = load_embedded_settings();
+        assert!(s.spaces.is_empty());
+        assert!(
+            s.terminal
+                .as_ref()
+                .and_then(|t| t.startup_dir.as_ref())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn embedded_default_theme_shell_is_portable() {
+        let s = load_embedded_settings();
+        let terminal = s.terminal.expect("embedded settings define terminal");
+        let shell = terminal.resolve_theme(&terminal.default_theme).shell;
+        assert_eq!(shell, TerminalTheme::default_shell());
+    }
+
+    #[test]
+    fn resolve_startup_dir_prefers_per_space_then_global() {
+        let per = tempfile::tempdir().unwrap();
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(s.startup_dir("work").as_deref(), Some(per.path()));
+        assert_eq!(s.startup_dir("other").as_deref(), Some(glob.path()));
+        s.terminal = None;
+        assert_eq!(s.startup_dir("space-1"), None);
+    }
+
+    #[test]
+    fn resolve_startup_dir_invalid_per_space_cascades_to_valid_global() {
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(s.startup_dir("work").as_deref(), Some(glob.path()));
+    }
+
+    #[test]
+    fn resolve_startup_dir_all_invalid_returns_none() {
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some("/no/such/global/xyz-vmux".into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(s.startup_dir("work"), None);
+    }
+
+    #[test]
+    fn resolve_startup_dir_for_tab_prefers_tab_then_space() {
+        let tab = tempfile::tempdir().unwrap();
+        let per = tempfile::tempdir().unwrap();
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
+            },
+        );
+        let tab_dir = tab.path().to_string_lossy().into_owned();
+        assert_eq!(
+            StartupDir::resolve(&s, "work", Some(&tab_dir)).map(|dir| dir.path),
+            Some(tab.path().to_path_buf())
+        );
+        assert_eq!(
+            StartupDir::resolve(&s, "work", None).map(|dir| dir.path),
+            Some(per.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn resolve_startup_dir_for_tab_invalid_tab_cascades_to_space() {
+        let per = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            StartupDir::resolve(&s, "work", Some("/no/such/tab/xyz-vmux")).map(|dir| dir.path),
+            Some(per.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn resolve_tab_workspace_dir_rejects_invalid_stored_path_without_fallback() {
+        let per = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            s.workspace_dir("work", Some("/no/such/tab/xyz-vmux"))
+                .is_err()
+        );
+        assert_eq!(
+            s.workspace_dir("work", None).unwrap(),
+            Some(per.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn validate_tab_workspace_dir_rejects_relative_path() {
+        assert!(StartupDir::from_tab(".").is_err());
+    }
+
+    #[test]
+    fn resolve_startup_dir_for_tab_with_source_reports_level() {
+        let tab = tempfile::tempdir().unwrap();
+        let per = tempfile::tempdir().unwrap();
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+                ..Default::default()
+            },
+        );
+        let tab_dir = tab.path().to_string_lossy().into_owned();
+        assert_eq!(
+            StartupDir::resolve(&s, "work", Some(&tab_dir))
+                .unwrap()
+                .source,
+            DirSource::Tab
+        );
+        assert_eq!(
+            StartupDir::resolve(&s, "work", None).unwrap().source,
+            DirSource::Space
+        );
+        assert_eq!(
+            StartupDir::resolve(&s, "other", None).unwrap().source,
+            DirSource::Global
+        );
+        s.terminal = None;
+        assert_eq!(StartupDir::resolve(&s, "nospace", None), None);
+    }
+
+    #[test]
+    fn a_legacy_startup_dir_becomes_the_first_project() {
+        let settings =
+            parse_settings(r#"(spaces: {"work": (startup_dir: "/tmp/alpha")})"#).unwrap();
+        let space = settings.spaces.get("work").expect("space");
+
+        assert_eq!(
+            space.projects,
+            vec![SpaceProject::at("/tmp/alpha")],
+            "the one directory a space remembered has to survive as its first project"
+        );
+        assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
+        assert_eq!(
+            space.startup_dir, None,
+            "the legacy field is consumed, not left to disagree with the list"
+        );
+    }
+
+    #[test]
+    fn a_migrated_space_survives_a_write_and_reload() {
+        let settings =
+            parse_settings(r#"(spaces: {"work": (startup_dir: "/tmp/alpha")})"#).expect("legacy");
+        let written = sparse_settings_ron(&settings).expect("serialize");
+
+        let space = parse_settings(&written)
+            .expect("reload")
+            .spaces
+            .remove("work")
+            .expect("space");
+
+        assert_eq!(space.projects, vec![SpaceProject::at("/tmp/alpha")]);
+        assert_eq!(space.active_project.as_deref(), Some("/tmp/alpha"));
+    }
+
+    #[test]
+    fn a_legacy_space_still_resolves_through_the_space_rung() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut overrides = SpaceOverrides {
+            startup_dir: Some(dir.path().to_string_lossy().to_string()),
+            ..Default::default()
+        };
+        overrides.normalize();
+        let mut settings = base_settings();
+        settings.spaces.insert("work".to_string(), overrides);
+
+        assert_eq!(
+            StartupDir::resolve(&settings, "work", None),
+            Some(StartupDir {
+                path: dir.path().to_path_buf(),
+                source: DirSource::Space,
+            })
+        );
+    }
+
+    #[test]
+    fn choosing_a_worktree_moves_the_repository_row_instead_of_adding_one() {
+        let mut settings = base_settings();
+        settings.spaces.insert(
+            "work".to_string(),
+            SpaceOverrides {
+                projects: vec![SpaceProject::at("/repo/vmux-cloud")],
+                active_project: Some("/repo/vmux-cloud".to_string()),
+                ..Default::default()
+            },
+        );
+
+        settings.remember_space_project(
+            "work",
+            SpaceProject::checked_out("/repo/vmux-cloud", "/repo/vmux-cloud/.worktrees/vmx-198"),
+        );
+
+        let space = settings.spaces.get("work").expect("space");
+        let rows: Vec<(String, String, bool)> = space
+            .project_rows()
+            .into_iter()
+            .map(|row| (row.label, row.path, row.is_active))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![(
+                "vmux-cloud".to_string(),
+                "/repo/vmux-cloud/.worktrees/vmx-198".to_string(),
+                true
+            )],
+            "the worktree replaces the repository's checkout; it never becomes a second row"
+        );
+    }
+
+    #[test]
+    fn a_worktree_left_over_as_its_own_project_folds_into_its_repository() {
+        let mut space = SpaceOverrides {
+            projects: vec![
+                SpaceProject::at("/repo/dashboard"),
+                SpaceProject::legacy_child("/worktrees/a1b2", "/repo/dashboard"),
+            ],
+            active_project: Some("/worktrees/a1b2".to_string()),
+            ..Default::default()
+        };
+
+        space.normalize();
+
+        assert_eq!(space.projects.len(), 1, "{:?}", space.projects);
+        assert_eq!(space.projects[0].path, "/repo/dashboard");
+        assert_eq!(space.projects[0].in_use(), "/worktrees/a1b2");
+        assert_eq!(space.active_dir(), Some("/worktrees/a1b2"));
+    }
+
+    #[test]
+    fn a_worktree_whose_repository_is_not_listed_still_shows_up() {
+        let space = SpaceOverrides {
+            projects: vec![SpaceProject::checked_out("/repo/gone", "/worktrees/a1b2")],
+            ..Default::default()
+        };
+
+        let rows = space.project_rows();
+
+        assert_eq!(
+            rows.len(),
+            1,
+            "an unlisted repository must not swallow the row"
+        );
+        assert_eq!(rows[0].path, "/worktrees/a1b2");
+        assert_eq!(rows[0].label, "gone");
+    }
+
+    #[test]
+    fn the_space_rung_follows_the_active_project() {
+        let first = tempfile::tempdir().expect("tempdir");
+        let second = tempfile::tempdir().expect("tempdir");
+        let mut settings = base_settings();
+        settings.spaces.insert(
+            "work".to_string(),
+            SpaceOverrides {
+                projects: vec![
+                    SpaceProject::at(first.path().to_string_lossy().to_string()),
+                    SpaceProject::at(second.path().to_string_lossy().to_string()),
+                ],
+                active_project: Some(second.path().to_string_lossy().to_string()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            StartupDir::resolve(&settings, "work", None).map(|dir| dir.path),
+            Some(second.path().to_path_buf()),
+            "the space rung follows the active project, not merely the first one"
+        );
+    }
+
+    #[test]
+    fn parse_settings_merges_sparse_over_embedded() {
+        let s = parse_settings(r#"(browser: (startup_url: "https://x.example"))"#).unwrap();
+        assert_eq!(s.browser.startup_url, "https://x.example");
+        assert_eq!(s.shortcuts.leader.key, "b");
+        assert_eq!(s.layout.radius, 8.0);
+    }
+
+    #[test]
+    fn parse_settings_empty_uses_embedded_defaults() {
+        let s = parse_settings("()").unwrap();
+        assert_eq!(s.shortcuts.leader.key, "b");
+        assert!(s.browser.startup_url.is_empty());
+        assert_eq!(s.browser.search_engine, "google");
+    }
+
+    #[test]
+    fn parse_settings_selects_search_engine() {
+        let s = parse_settings(r#"(browser: (search_engine: "duckduckgo"))"#).unwrap();
+        assert_eq!(s.browser.search_engine, "duckduckgo");
+    }
+
+    #[test]
+    fn apply_settings_update_writes_only_changed_section() {
+        let mut settings = parse_settings("()").unwrap();
+        settings
+            .apply_update(
+                "browser.startup_url",
+                serde_json::json!("https://x.example"),
+            )
+            .unwrap();
+        let ron = sparse_settings_ron(&settings).unwrap();
+        let sparse: PartialAppSettings = ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str(&ron)
+            .unwrap();
+        assert_eq!(sparse.browser.unwrap().startup_url, "https://x.example");
+        assert!(sparse.shortcuts.is_none());
+        assert!(sparse.terminal.is_none());
+        let reloaded = parse_settings(&ron).unwrap();
+        assert_eq!(reloaded.browser.startup_url, "https://x.example");
+        assert_eq!(reloaded.shortcuts.leader.key, "b");
+    }
+
+    #[test]
+    fn request_settings_save_sets_due() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SettingsSaveRequest>()
+            .add_systems(Update, request_settings_save);
+        app.world_mut().spawn(SettingsSaveDebounce::default());
+        app.world_mut()
+            .resource_mut::<Messages<SettingsSaveRequest>>()
+            .write(SettingsSaveRequest);
+        app.update();
+        let due = app
+            .world_mut()
+            .query::<&SettingsSaveDebounce>()
+            .single(app.world())
+            .unwrap()
+            .due;
+        assert!(due.is_some());
+    }
+
+    #[test]
+    fn flush_writes_after_due_elapses() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(base_settings())
+            .init_resource::<SettingsDefaults>()
+            .add_message::<SettingsWriteRequest>()
+            .add_systems(Update, flush_settings_save);
+        app.world_mut().spawn(SettingsSaveDebounce {
+            due: Some(Instant::now() - Duration::from_secs(1)),
+        });
+        app.update();
+        let writes = app
+            .world_mut()
+            .resource_mut::<Messages<SettingsWriteRequest>>()
+            .drain()
+            .count();
+        assert_eq!(writes, 1);
+        let due = app
+            .world_mut()
+            .query::<&SettingsSaveDebounce>()
+            .single(app.world())
+            .unwrap()
+            .due;
+        assert!(due.is_none());
+    }
+
+    #[test]
+    fn flush_skips_before_due() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(base_settings())
+            .init_resource::<SettingsDefaults>()
+            .add_message::<SettingsWriteRequest>()
+            .add_systems(Update, flush_settings_save);
+        app.world_mut().spawn(SettingsSaveDebounce {
+            due: Some(Instant::now() + Duration::from_secs(60)),
+        });
+        app.update();
+        let writes = app
+            .world_mut()
+            .resource_mut::<Messages<SettingsWriteRequest>>()
+            .drain()
+            .count();
+        assert_eq!(writes, 0);
+        let due = app
+            .world_mut()
+            .query::<&SettingsSaveDebounce>()
+            .single(app.world())
+            .unwrap()
+            .due;
+        assert!(due.is_some());
+    }
+
+    #[test]
+    fn sparse_save_omits_terminal_when_unchanged() {
+        let s = load_embedded_settings();
+        let ron = sparse_settings_ron(&s).unwrap();
+        assert!(
+            !ron.contains("terminal"),
+            "unchanged terminal must be omitted: {ron}"
+        );
+    }
+
+    #[test]
+    fn sparse_save_persists_vim_keymap() {
+        let mut settings = load_embedded_settings();
+        settings.editor.keymap = vmux_api::editor::KeymapKind::Vim;
+
+        let ron = sparse_settings_ron(&settings).unwrap();
+        assert!(ron.contains("editor: (keymap: vim)"), "{ron}");
+        assert!(!ron.contains("word_wrap"), "{ron}");
+        assert_eq!(
+            parse_settings(&ron).unwrap().editor.keymap,
+            vmux_api::editor::KeymapKind::Vim
+        );
+    }
+
+    #[test]
+    fn sparse_save_omits_default_equal_theme_fields() {
+        let mut s = load_embedded_settings();
+        s.terminal
+            .as_mut()
+            .unwrap()
+            .themes
+            .iter_mut()
+            .find(|t| t.name == "default")
+            .unwrap()
+            .font_size = 12.0;
+
+        let ron = sparse_settings_ron(&s).unwrap();
+        assert!(ron.contains("font_size"), "changed field persisted: {ron}");
+        assert!(ron.contains("12"), "changed value persisted: {ron}");
+        assert!(
+            !ron.contains("font_family"),
+            "default-equal font_family must be omitted: {ron}"
+        );
+        assert!(
+            !ron.contains("color_scheme"),
+            "default-equal color_scheme must be omitted: {ron}"
+        );
+        assert!(
+            !ron.contains("cursor_style"),
+            "default-equal cursor_style must be omitted: {ron}"
+        );
+
+        let reloaded = parse_settings(&ron).unwrap();
+        let theme = reloaded.terminal.unwrap().resolve_theme("default");
+        assert_eq!(theme.font_size, 12.0);
+        assert_eq!(theme.font_family, default_terminal_font_family());
+    }
+
+    #[test]
+    fn sparse_save_keeps_genuinely_overridden_field() {
+        let mut s = load_embedded_settings();
+        s.terminal
+            .as_mut()
+            .unwrap()
+            .themes
+            .iter_mut()
+            .find(|t| t.name == "default")
+            .unwrap()
+            .font_family = "Menlo".to_string();
+
+        let ron = sparse_settings_ron(&s).unwrap();
+        assert!(
+            ron.contains("Menlo"),
+            "explicit override must be persisted: {ron}"
+        );
+        let reloaded = parse_settings(&ron).unwrap();
+        assert_eq!(
+            reloaded
+                .terminal
+                .unwrap()
+                .resolve_theme("default")
+                .font_family,
+            "Menlo"
+        );
+    }
+
+    #[test]
+    fn color_scheme_defaults_to_device() {
+        assert_eq!(ColorScheme::default(), ColorScheme::Device);
+    }
+
+    #[test]
+    fn appearance_absent_falls_back_to_device() {
+        let s = parse_settings("()").expect("parse empty");
+        assert_eq!(s.appearance.mode, ColorScheme::Device);
+        assert_eq!(s.appearance.locale, "system");
+    }
+
+    #[test]
+    fn appearance_round_trips_through_ron() {
+        let s = parse_settings("(appearance: (mode: light))").expect("parse light");
+        assert_eq!(s.appearance.mode, ColorScheme::Light);
+        let s = parse_settings("(appearance: (mode: dark, locale: \"ja\"))").expect("parse dark");
+        assert_eq!(s.appearance.mode, ColorScheme::Dark);
+        assert_eq!(s.appearance.locale, "ja");
+    }
+
+    #[test]
+    fn sparse_omits_default_appearance_and_emits_changed() {
+        let s = load_embedded_settings();
+        assert!(!sparse_settings_ron(&s).unwrap().contains("appearance"));
+        let mut s = s;
+        s.appearance.mode = ColorScheme::Dark;
+        s.appearance.locale = "ja".to_string();
+        let out = sparse_settings_ron(&s).unwrap();
+        assert!(
+            out.contains("appearance"),
+            "changed appearance persisted: {out}"
+        );
+        assert!(out.contains("dark"), "mode value persisted: {out}");
+        assert!(out.contains("ja"), "locale value persisted: {out}");
+        assert_eq!(
+            parse_settings(&out).unwrap().appearance.mode,
+            ColorScheme::Dark
+        );
+        assert_eq!(parse_settings(&out).unwrap().appearance.locale, "ja");
+    }
+}

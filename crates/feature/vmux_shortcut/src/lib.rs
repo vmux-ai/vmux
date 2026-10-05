@@ -1,0 +1,231 @@
+#[cfg(host)]
+pub use host::{ShortcutCaptureSet, ShortcutPlugin};
+
+#[cfg(host)]
+pub(crate) struct Feature;
+
+#[cfg(host)]
+impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
+
+#[cfg(host)]
+pub struct ShortcutUrl;
+
+#[cfg(host)]
+impl ShortcutUrl {
+    pub fn canonical(url: &str) -> Option<&'static str> {
+        let url = url.trim().trim_end_matches('/');
+        (url == ShortcutPlugin::URL.trim_end_matches('/')
+            || matches!(url, "vmux://cheatsheet" | "vmux://cheetsheet"))
+        .then_some(ShortcutPlugin::URL)
+    }
+}
+
+#[cfg(host)]
+#[derive(bevy::prelude::EntityEvent, Clone, Debug)]
+pub struct ShortcutProbePress {
+    #[event_target]
+    target: bevy::prelude::Entity,
+    stroke: ShortcutStroke,
+    pressed_at_ms: i64,
+}
+
+#[cfg(host)]
+impl ShortcutProbePress {
+    pub fn new(target: bevy::prelude::Entity, stroke: ShortcutStroke, pressed_at_ms: i64) -> Self {
+        Self {
+            target,
+            stroke,
+            pressed_at_ms,
+        }
+    }
+
+    pub fn stroke(&self) -> &ShortcutStroke {
+        &self.stroke
+    }
+
+    pub fn pressed_at_ms(&self) -> i64 {
+        self.pressed_at_ms
+    }
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ShortcutProbePressRequest {
+    pub stroke: ShortcutStroke,
+}
+
+#[vmux_api::ui_event]
+pub struct ShortcutProbeClearRequest;
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutCatalog {
+    pub groups: Vec<ShortcutGroup>,
+    pub chord_timeout_ms: u64,
+}
+
+impl ShortcutCatalog {
+    pub fn bindings(&self) -> impl Iterator<Item = (&ShortcutEntry, &ShortcutBinding)> {
+        self.groups.iter().flat_map(|group| {
+            group.entries.iter().flat_map(|entry| {
+                entry
+                    .shortcuts
+                    .iter()
+                    .map(move |shortcut| (entry, shortcut))
+            })
+        })
+    }
+
+    pub fn resolutions(&self) -> impl Iterator<Item = (&ShortcutEntry, &ShortcutBinding)> {
+        self.bindings().filter(|(_, shortcut)| shortcut.resolves)
+    }
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutProbeView {
+    pub sequence: Vec<ShortcutStroke>,
+    pub status: ShortcutProbeStatus,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub enum ShortcutProbeStatus {
+    #[default]
+    Idle,
+    Pending,
+    Match(Vec<String>),
+    Contextual(Vec<String>),
+    Miss,
+}
+
+#[vmux_api::ui_state(Default)]
+pub struct ShortcutUiState {
+    pub groups: Vec<ShortcutGroup>,
+    pub probe: ShortcutProbeView,
+    pub shortcut_count: u32,
+}
+
+#[cfg(host)]
+pub type ShortcutUiStateUpdates = vmux_ecs::UiState<ShortcutUiState>;
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutGroup {
+    pub name: String,
+    pub entries: Vec<ShortcutEntry>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutEntry {
+    pub id: String,
+    pub name: String,
+    pub shortcuts: Vec<ShortcutBinding>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutBinding {
+    pub label: String,
+    pub strokes: Vec<ShortcutStroke>,
+    pub resolves: bool,
+    pub contexts: Vec<String>,
+    #[serde(default)]
+    pub emphasized: bool,
+}
+
+impl ShortcutBinding {
+    pub fn starts_with(&self, sequence: &[ShortcutStroke]) -> bool {
+        sequence.len() <= self.strokes.len()
+            && self
+                .strokes
+                .iter()
+                .zip(sequence)
+                .all(|(expected, actual)| expected.same_press(actual))
+    }
+
+    pub fn matches(&self, sequence: &[ShortcutStroke]) -> bool {
+        self.strokes.len() == sequence.len() && self.starts_with(sequence)
+    }
+}
+
+#[vmux_api::contract(Default, Eq, Hash)]
+pub struct ShortcutStroke {
+    pub code: String,
+    pub label: String,
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub super_key: bool,
+}
+
+impl ShortcutStroke {
+    pub fn keycaps(&self) -> Vec<String> {
+        let mut keycaps = Vec::new();
+        if self.ctrl {
+            keycaps.push("⌃".to_string());
+        }
+        if self.alt {
+            keycaps.push("⌥".to_string());
+        }
+        if self.shift {
+            keycaps.push("⇧".to_string());
+        }
+        if self.super_key {
+            keycaps.push("⌘".to_string());
+        }
+        keycaps.push(self.label.clone());
+        keycaps
+    }
+
+    pub fn same_press(&self, other: &Self) -> bool {
+        self.code == other.code
+            && self.ctrl == other.ctrl
+            && self.shift == other.shift
+            && self.alt == other.alt
+            && self.super_key == other.super_key
+    }
+
+    pub fn after(&self, prefix: &Self) -> Self {
+        let mut stroke = self.clone();
+        stroke.ctrl &= !prefix.ctrl;
+        stroke.alt &= !prefix.alt;
+        stroke.super_key &= !prefix.super_key;
+        stroke
+    }
+}
+
+#[cfg(host)]
+mod claim;
+#[cfg(host)]
+mod host;
+#[cfg(host)]
+mod input;
+
+#[cfg(ui)]
+pub mod ui;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_state_round_trips_projected_shortcuts() {
+        let state = ShortcutUiState {
+            probe: ShortcutProbeView {
+                sequence: vec![ShortcutStroke {
+                    code: "KeyK".to_string(),
+                    label: "K".to_string(),
+                    ctrl: true,
+                    ..Default::default()
+                }],
+                status: ShortcutProbeStatus::Pending,
+            },
+            shortcut_count: 3,
+            ..Default::default()
+        };
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
+        let decoded = rkyv::from_bytes::<ShortcutUiState, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(decoded.shortcut_count, 3);
+        assert_eq!(decoded.probe.sequence[0].code, "KeyK");
+        assert_eq!(decoded.probe.status, ShortcutProbeStatus::Pending);
+    }
+}

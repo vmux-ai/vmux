@@ -1,0 +1,246 @@
+use crate::pane::{Pane, PaneSplit};
+use crate::stack::ComputeFocusSet;
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use std::ops::Deref;
+
+pub struct ActivePanePlugin;
+
+impl Plugin for ActivePanePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ActivatePane>()
+            .add_systems(Startup, spawn_local)
+            .add_systems(
+                Update,
+                (apply_requests, prune_entities)
+                    .chain()
+                    .after(ComputeFocusSet),
+            );
+    }
+}
+
+#[derive(Component, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ProfileId {
+    Local,
+    Agent(String),
+}
+
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct ActiveStack {
+    pub tab: Option<Entity>,
+    pub pane: Option<Entity>,
+    pub stack: Option<Entity>,
+}
+
+impl ActiveStack {
+    pub fn local_bundle(self) -> impl Bundle {
+        (Name::new("Local active pane"), ProfileId::Local, self)
+    }
+}
+
+const EMPTY_ACTIVE_STACK: ActiveStack = ActiveStack {
+    tab: None,
+    pane: None,
+    stack: None,
+};
+
+#[derive(SystemParam)]
+pub struct FocusedStack<'w, 's> {
+    profiles: Query<'w, 's, (&'static ProfileId, Ref<'static, ActiveStack>)>,
+}
+
+impl FocusedStack<'_, '_> {
+    pub fn as_ref(&self) -> Option<&ActiveStack> {
+        self.profiles.iter().find_map(|(profile, active)| {
+            (*profile == ProfileId::Local).then_some(active.into_inner())
+        })
+    }
+
+    pub fn as_deref(&self) -> Option<&ActiveStack> {
+        self.as_ref()
+    }
+
+    pub fn is_changed(&self) -> bool {
+        self.profiles
+            .iter()
+            .find_map(|(profile, active)| {
+                (*profile == ProfileId::Local).then_some(active.is_changed())
+            })
+            .unwrap_or(false)
+    }
+}
+
+impl Deref for FocusedStack<'_, '_> {
+    type Target = ActiveStack;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_ref().unwrap_or(&EMPTY_ACTIVE_STACK)
+    }
+}
+
+#[derive(SystemParam)]
+pub struct ActivePaneQuery<'w, 's> {
+    profiles: Query<'w, 's, (&'static ProfileId, &'static ActiveStack)>,
+}
+
+impl ActivePaneQuery<'_, '_> {
+    pub fn get(&self, profile: &ProfileId) -> Option<ActiveStack> {
+        self.profiles
+            .iter()
+            .find_map(|(candidate, active)| (candidate == profile).then_some(*active))
+    }
+
+    pub fn local(&self) -> ActiveStack {
+        self.get(&ProfileId::Local).unwrap_or_default()
+    }
+
+    pub fn agent_in_pane(&self, pane: Entity) -> Option<(&str, ActiveStack)> {
+        self.profiles.iter().find_map(|(profile, active)| {
+            let ProfileId::Agent(id) = profile else {
+                return None;
+            };
+            (active.pane == Some(pane)).then_some((id.as_str(), *active))
+        })
+    }
+}
+
+#[derive(Message, Clone)]
+pub struct ActivatePane {
+    pub profile: ProfileId,
+    pub active: ActiveStack,
+}
+
+fn spawn_local(mut commands: Commands) {
+    commands.spawn(ActiveStack::default().local_bundle());
+}
+
+fn apply_requests(
+    mut reader: MessageReader<ActivatePane>,
+    mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
+    mut commands: Commands,
+) {
+    let mut pending = Vec::<(ProfileId, ActiveStack)>::new();
+    for request in reader.read() {
+        let mut applied = false;
+        for (profile, mut active) in &mut profiles {
+            if *profile != request.profile {
+                continue;
+            }
+            *active = request.active;
+            applied = true;
+            break;
+        }
+        if applied {
+            continue;
+        }
+        for (profile, active) in &mut pending {
+            if *profile != request.profile {
+                continue;
+            }
+            *active = request.active;
+            applied = true;
+            break;
+        }
+        if !applied {
+            pending.push((request.profile.clone(), request.active));
+        }
+    }
+    for (profile, active) in pending {
+        let name = match &profile {
+            ProfileId::Local => "Local active pane".to_string(),
+            ProfileId::Agent(id) => format!("Agent active pane: {id}"),
+        };
+        commands.spawn((Name::new(name), profile, active));
+    }
+}
+
+fn prune_entities(
+    profiles: Query<(Entity, &ProfileId, &ActiveStack)>,
+    panes: Query<(), (With<Pane>, Without<PaneSplit>)>,
+    mut commands: Commands,
+) {
+    for (entity, profile, active) in &profiles {
+        if *profile != ProfileId::Local && !active.pane.is_some_and(|pane| panes.contains(pane)) {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_sets_per_profile_without_cross_contamination() {
+        let mut app = App::new();
+        app.add_plugins(ActivePanePlugin);
+
+        let (user_pane, agent_pane) = {
+            let world = app.world_mut();
+            (world.spawn(Pane).id(), world.spawn(Pane).id())
+        };
+        app.world_mut().write_message(ActivatePane {
+            profile: ProfileId::Local,
+            active: ActiveStack {
+                tab: None,
+                pane: Some(user_pane),
+                stack: None,
+            },
+        });
+        app.world_mut().write_message(ActivatePane {
+            profile: ProfileId::Agent("a1".to_string()),
+            active: ActiveStack {
+                tab: None,
+                pane: Some(agent_pane),
+                stack: None,
+            },
+        });
+        app.update();
+
+        let mut profiles = app.world_mut().query::<(&ProfileId, &ActiveStack)>();
+        let local = profiles
+            .iter(app.world())
+            .find_map(|(profile, active)| (*profile == ProfileId::Local).then_some(*active))
+            .unwrap();
+        let agent = profiles
+            .iter(app.world())
+            .find_map(|(profile, active)| {
+                (*profile == ProfileId::Agent("a1".to_string())).then_some(*active)
+            })
+            .unwrap();
+        assert_eq!(local.pane, Some(user_pane));
+        assert_eq!(agent.pane, Some(agent_pane));
+    }
+
+    #[test]
+    fn agent_activation_does_not_touch_local() {
+        let mut app = App::new();
+        app.add_plugins(ActivePanePlugin);
+        app.update();
+
+        let agent_pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().write_message(ActivatePane {
+            profile: ProfileId::Agent("a1".to_string()),
+            active: ActiveStack {
+                tab: None,
+                pane: Some(agent_pane),
+                stack: None,
+            },
+        });
+        app.update();
+
+        let mut profiles = app.world_mut().query::<(&ProfileId, &ActiveStack)>();
+        let local = profiles
+            .iter(app.world())
+            .find_map(|(profile, active)| (*profile == ProfileId::Local).then_some(*active))
+            .unwrap();
+        let agent = profiles
+            .iter(app.world())
+            .find_map(|(profile, active)| {
+                (*profile == ProfileId::Agent("a1".to_string())).then_some(*active)
+            })
+            .unwrap();
+        assert_eq!(local.pane, None);
+        assert_eq!(agent.pane, Some(agent_pane));
+    }
+}
