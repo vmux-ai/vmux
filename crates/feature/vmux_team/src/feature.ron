@@ -10,7 +10,7 @@
             command_bar: true,
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "TeamEvent",
                 "TeamOpenRequest",
                 "TeamMemberFocusRequest",

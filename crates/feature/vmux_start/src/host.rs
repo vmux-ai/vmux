@@ -700,7 +700,10 @@ fn begin_inline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_api::BinEvent;
+    use vmux_api::UiEventPermissions;
     use vmux_api::command_bar::CommandBarUiState;
+    use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::page::PageManifest;
 
@@ -743,6 +746,25 @@ mod tests {
         app.world_mut().run_schedule(PreStartup);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+    }
+
+    #[test]
+    fn start_page_allows_keyboard_routing() {
+        let mut app = App::new();
+        app.add_plugins(StartPlugin);
+        app.world_mut().run_schedule(PreStartup);
+        let mut permissions = app.world_mut().query::<&UiEventPermissions>();
+
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyContextRequest::PERMISSION,
+        ));
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyClaimsUiState::PERMISSION,
+        ));
     }
 
     #[test]

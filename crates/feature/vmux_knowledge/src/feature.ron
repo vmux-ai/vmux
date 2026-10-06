@@ -11,10 +11,10 @@
             command_bar: true,
             permissions: [
                 "PageReady",
-                "ThemeEvent",
-                "UiKeyContext",
+                "ThemeUiState",
+                "KeyContextRequest",
                 "KeyStroke",
-                "KeyClaims",
+                "KeyClaimsUiState",
             ],
         ),
     ],
