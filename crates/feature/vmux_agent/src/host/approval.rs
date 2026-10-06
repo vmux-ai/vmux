@@ -50,7 +50,10 @@ fn spawn(mut commands: Commands) {
 
 fn policy(
     store: Single<&ApprovalDriver>,
-    mut sessions: Query<(&AcpSession, &mut AgentApprovalPolicy), Changed<AcpSession>>,
+    mut sessions: Query<
+        (&AgentId, &Cwd, &mut ApprovalPolicy),
+        (With<Session>, Or<(Changed<AgentId>, Changed<Cwd>)>),
+    >,
 ) {
     for (agent_id, cwd, mut policy) in &mut sessions {
         *policy = store.policy_for(&agent_id.0, &cwd.0);

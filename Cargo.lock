@@ -10486,6 +10486,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "toml",
  "url",
@@ -10716,6 +10717,7 @@ dependencies = [
  "vmux_history",
  "vmux_input",
  "vmux_page",
+ "vmux_session",
  "vmux_tool",
  "vmux_ui",
 ]

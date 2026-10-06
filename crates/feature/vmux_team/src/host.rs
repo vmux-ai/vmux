@@ -21,7 +21,7 @@ use vmux_ecs::profile::{
     ProfileRecord, SessionEnvironment,
 };
 use vmux_ecs::team::{Agent, Profile, Tester, User};
-use vmux_ecs::{ActivateRequest, Active, PageMetadata};
+use vmux_ecs::{ActivateRequest, Active, EntityTarget, PageMetadata};
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::hosted_page::HostedUiPlugin;

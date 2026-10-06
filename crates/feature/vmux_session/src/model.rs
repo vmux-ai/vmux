@@ -241,7 +241,7 @@ fn spawn_stages(mut commands: Commands, configuration: Res<Configuration>) {
             Order(stage.order),
         ));
         if stage.terminal {
-            entity.insert(vmux_ecs::component::Terminal);
+            entity.insert(vmux_ecs::Terminal);
         }
     }
 }

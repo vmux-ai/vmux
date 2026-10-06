@@ -5,6 +5,7 @@ use crate::event::{
     ModeState, ModelState,
 };
 use vmux_api::mcp::McpServersUiState;
+use vmux_session::CatalogSnapshot;
 
 #[vmux_api::ui_state_patch(Default)]
 pub struct ChatUiStatePatch {
@@ -30,6 +31,7 @@ pub struct ChatUiStatePatch {
 
 #[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 2)]
 pub struct ChatUiState {
+    pub sessions: CatalogSnapshot,
     pub snapshot: ChatSnapshot,
     pub snapshot_ready: bool,
     pub composer: ComposerContext,
@@ -55,6 +57,9 @@ pub struct ChatUiState {
 
 impl vmux_api::UiStateProjection<ChatUiStatePatch> for ChatUiState {
     fn apply(&mut self, patch: ChatUiStatePatch) {
+        if let Some(sessions) = patch.sessions {
+            self.sessions = *sessions;
+        }
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;
             self.snapshot_ready = true;

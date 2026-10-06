@@ -7,7 +7,6 @@ use vmux_api::protocol::ClientMessage;
 use vmux_chat::event::ChatChoiceSelected;
 use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_command::{ResolvedLocale, WriteCommandRequests};
-use vmux_ecs::AgentWorkingDir;
 use vmux_ecs::agent::{AgentContinuationRequest, AgentSessionRoot};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::{Cwd, EntityTarget};
@@ -16,7 +15,7 @@ use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktre
 use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
 };
-use vmux_session::AcpSession;
+use vmux_session::{Session, SessionId};
 use vmux_ui::i18n::Locale;
 
 use super::agent_workspace::AgentWorkspaceRequestSet;

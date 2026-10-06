@@ -1,10 +1,13 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
-use vmux_ecs::agent::SessionId;
-use vmux_ecs::{AgentWorkingDir, EntityTarget, PageMetadata};
+use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor};
+use vmux_session::{PromptQueue, SessionId};
 
 pub(super) use super::attach_driver::AcpAgentAttachment;
-use super::attach_driver::{AcpAgentId, AcpAttachmentIcon, AcpResume, PendingAcpAgentAttachment};
+use super::attach_driver::{
+    AcpAttachmentIcon, AcpId, AcpResume, AgentName, PendingAcpAgentAttachment, SessionName,
+    SessionTarget, StackTarget, WorkingDirectory,
+};
 
 pub(super) fn add(app: &mut App) {
     app.add_systems(Update, attach);
@@ -45,26 +48,14 @@ fn attach(
     ) in &attachments
     {
         let agent_id = agent_id.as_str();
-        let name = name.as_str();
-        let url = match resume.as_deref() {
-            Some(acp_sid) => format!("{}{agent_id}/{acp_sid}", vmux_api::VmuxRoute::SESSIONS_ROOT),
-            None => format!("{}{agent_id}", vmux_api::VmuxRoute::SESSIONS_ROOT),
-        };
-        commands.entity(entity).insert(PageMetadata {
-            url: url.clone(),
-            title: name.to_string(),
-            bg_color: None,
-            icon: icon.clone(),
-        });
-        let anchor = ProcessId::new();
-        commands.entity(entity).insert((
-            vmux_ecs::agent::AgentSessionRoot,
-            vmux_session::AcpSession {
-                agent_id: agent_id.to_string(),
-                sid: sid.clone(),
-                cwd: cwd.clone(),
-                anchor,
-                resume: resume.clone(),
+        let url = vmux_session::Route::Session(SessionId(sid.clone())).url();
+        commands.entity(*stack).insert((
+            EntityTarget::<vmux_session::Session>::new(*session_entity),
+            PageMetadata {
+                url: url.clone(),
+                title: session_name.clone(),
+                bg_color: None,
+                icon: icon.clone(),
             },
         ));
         let anchor = ProcessId::new();
@@ -97,7 +88,7 @@ fn attach(
         } else {
             commands
                 .spawn((
-                    vmux_layout::Browser::hosted_page_with_icon(&url, name, icon.clone()),
+                    vmux_layout::Browser::hosted_page_with_icon(&url, session_name, icon.clone()),
                     vmux_chat::host::ChatView,
                     ChildOf(*stack),
                     anchor,
@@ -105,7 +96,6 @@ fn attach(
                 .id()
         };
         commands.entity(view).insert((
-            ChildOf(entity),
             PageMetadata {
                 url,
                 title: session_name.clone(),
@@ -138,6 +128,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         add(&mut app);
+        let session = app.world_mut().spawn_empty().id();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(AcpAgentAttachment::new(
             session,
@@ -174,7 +165,8 @@ mod tests {
     #[test]
     fn acp_attach_preserves_queued_prompts() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AttachPlugin));
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
         let mut queue = PromptQueue::default();
         queue.enqueue("first".into());
         let session = app.world_mut().spawn(queue).id();

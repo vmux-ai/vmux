@@ -7,8 +7,8 @@ use agent_client_protocol::schema::v1::{
     ToolKind,
 };
 use bevy::prelude::Component;
+use vmux_api::conversation::{AssistantBlock, Message, PlanStep};
 use vmux_api::protocol::{AcpSessionConfig, AcpSessionConfigValue, AgentAttachment, FileTouchKind};
-use vmux_api::room::{AssistantBlock, Message, PlanStep};
 
 use super::AcpSessionConfigs;
 use super::workspace_driver::WorkspaceLocation;

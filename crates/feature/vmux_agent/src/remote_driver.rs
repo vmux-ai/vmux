@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine;
+use vmux_api::conversation::{ClientOpId, Message, RemoteMediaEntry, RemoteSession};
 use vmux_api::protocol::{
     AgentAttachment, AgentCommandResult, AgentListAgents, AgentListModels, AgentListTeam,
     AgentNewChat, AgentRequest, AgentRequestId, AgentSelectModel, AgentSetEffort, ServiceMessage,
     SharedEvent, SharedFailure, SharedMessage, SharedResponse,
 };
-use vmux_api::room::{ClientOpId, Message, RemoteMediaEntry, RemoteSession};
 use vmux_transport::service::{RemoteDriver, RemoteFuture, RemoteOperationStore};
 
 use crate::acp::{AcpInput, AcpSessions};
@@ -131,7 +131,7 @@ impl AgentRemoteDriver {
     async fn sessions(&self) -> Vec<RemoteSession> {
         let mut sessions = self.sessions.remote_sessions().await;
         for session in &mut sessions {
-            if let Some(messages) = self.messages(&session.sid).await {
+            if let Some(messages) = self.messages(&session.id.0).await {
                 session.title =
                     vmux_session::ConversationTitle::from_messages(&messages, &session.name);
             }

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_chat::host::{ChatView, ImportedConversation};
 use vmux_ecs::agent::SwapStackSession;
@@ -7,13 +8,13 @@ use vmux_ecs::persistence::PageRestore;
 use vmux_ecs::profile::Projects;
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
-    Cwd, EntityTarget, PageIcon, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
-    PageOpenSet, PageOpenTask, PendingPrompt, PendingPromptAttachments,
+    Cwd, EntityTarget, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet,
+    PageOpenTask, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
-use vmux_session::AcpSession;
+use vmux_session::{AcpSessionId, AgentId, Cleanup, PromptQueue, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 use vmux_ui::i18n::translate;
@@ -27,12 +28,14 @@ use vmux_terminal::AgentCwd;
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
 pub(super) fn add(app: &mut App) {
-    app.add_systems(Update, swap).add_systems(
-        Update,
-        (release_transition, prepare, open)
-            .chain()
-            .in_set(PageOpenSet::HandleKnownPages),
-    );
+    app.add_observer(cleanup)
+        .add_systems(Update, swap)
+        .add_systems(
+            Update,
+            (release_transition, prepare, open)
+                .chain()
+                .in_set(PageOpenSet::HandleKnownPages),
+        );
 }
 
 #[derive(Component)]
@@ -40,6 +43,28 @@ struct PreparingAgentChatView;
 
 #[derive(Component)]
 struct AwaitingAgentTransitionPaint;
+
+struct AgentChatTarget {
+    url: String,
+    title: String,
+}
+
+impl AgentChatTarget {
+    fn parse(url: &str) -> Option<Self> {
+        match Route::parse(url)? {
+            Route::Manager => Some(Self {
+                url: Route::requested_agent(url)
+                    .map(|agent| Route::manager_for_agent(&agent))
+                    .unwrap_or_else(|| Route::Manager.url()),
+                title: translate("sessions-title"),
+            }),
+            Route::Session(id) => Some(Self {
+                url: Route::Session(id.clone()).url(),
+                title: id.0,
+            }),
+        }
+    }
+}
 
 fn ancestor_tab_entity(
     entity: Entity,
@@ -94,30 +119,15 @@ fn prepare(
         };
         if !preparing_by_stack.contains_key(&task.stack)
             && let Ok(transition) = transitions.get(task.stack)
-            && let Some(target) = AcpRoute::parse(&task.url)
+            && let Some(target) = AgentChatTarget::parse(&task.url)
         {
-            let (url, title) = match target {
-                AcpRoute::AcpDefault => (
-                    vmux_api::VmuxRoute::SESSIONS_ROOT.to_string(),
-                    "Agent".to_string(),
-                ),
-                AcpRoute::Acp { id, sid } => {
-                    let url = match sid {
-                        Some(sid) => {
-                            format!("{}{id}/{sid}", vmux_api::VmuxRoute::SESSIONS_ROOT)
-                        }
-                        None => format!("{}{id}", vmux_api::VmuxRoute::SESSIONS_ROOT),
-                    };
-                    (url, id.to_string())
-                }
-            };
             let view = transition.webview;
             commands
                 .entity(view)
                 .insert((
                     PageMetadata {
-                        url,
-                        title,
+                        url: target.url,
+                        title: target.title,
                         bg_color: None,
                         ..default()
                     },
@@ -278,19 +288,32 @@ fn open(
         let default_cwd = if matches!(route, Route::Manager) {
             PathBuf::new()
         } else {
-            match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
-                Ok(Some(path)) => path,
-                Ok(None) => match space_startup_dir {
-                    Some(dir) => dir.path,
-                    None => match projects.path() {
-                        Ok(path) => path.to_path_buf(),
-                        Err(message) => {
-                            opener
-                                .commands
-                                .entity(entity)
-                                .insert(PageOpenError { message });
-                            continue;
-                        }
+            let tab = workspace.tab(task.stack);
+            let tab_dir = tab
+                .as_ref()
+                .and_then(|(_, startup_dir)| startup_dir.clone());
+            let space_startup_dir = workspace.startup_dir(task.stack, &opener.settings);
+            let restored_cwd = restoring
+                .then(|| launches.get(task.stack).ok())
+                .flatten()
+                .map(|launch| PathBuf::from(&launch.cwd));
+            if let Some(cwd) = restored_cwd {
+                cwd
+            } else {
+                match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
+                    Ok(Some(path)) => path,
+                    Ok(None) => match space_startup_dir {
+                        Some(dir) => dir.path,
+                        None => match projects.path() {
+                            Ok(path) => path.to_path_buf(),
+                            Err(message) => {
+                                opener
+                                    .commands
+                                    .entity(entity)
+                                    .insert(PageOpenError { message });
+                                continue;
+                            }
+                        },
                     },
                     Err(message) => {
                         opener
@@ -425,6 +448,55 @@ fn swap(
     }
 }
 
+#[derive(SystemParam)]
+struct SessionRuntime<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl SessionRuntime<'_, '_> {
+    fn detach(&mut self, session: Entity) {
+        self.commands.entity(session).remove::<(
+            AcpSessionId,
+            vmux_ecs::ProcessAnchor,
+            crate::host::acp::AcpLaunchStarted,
+            crate::host::runtime::AcpSessionConfigState,
+            crate::host::toast::ErrorSurfaced,
+            vmux_session::ApprovalPolicy,
+            vmux_session::RunState,
+            vmux_session::AgentTurnMeta,
+            ImportedConversation,
+            super::handoff::PendingHandoff,
+            vmux_ecs::agent::AgentSessionRoot,
+            vmux_ecs::team::Agent,
+            vmux_ecs::team::Profile,
+        )>();
+    }
+
+    fn cleanup(&mut self, session: Entity) {
+        self.detach(session);
+        self.commands.entity(session).remove::<PromptQueue>();
+    }
+}
+
+fn cleanup(
+    trigger: On<Cleanup>,
+    stacks: Query<(Entity, &EntityTarget<Session>)>,
+    mut opens: MessageWriter<vmux_ecs::PageOpenRequest>,
+    mut runtime: SessionRuntime,
+) {
+    let session = trigger.event_target();
+    runtime.cleanup(session);
+    for (stack, target) in &stacks {
+        if target.entity() == session {
+            opens.write(vmux_ecs::PageOpenRequest {
+                target: vmux_ecs::PageOpenTarget::Stack(stack),
+                url: Route::Manager.url(),
+                request_id: None,
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bevy::ecs::system::RunSystemOnce;
@@ -523,7 +595,7 @@ mod tests {
                 vmux_session::AgentTurnMeta::default(),
                 PromptQueue::default(),
                 crate::host::runtime::AcpSessionConfigState::default(),
-                crate::host::run_state_kind::LastRunStateKind::default(),
+                crate::host::toast::ErrorSurfaced,
                 ImportedConversation {
                     source_agent: "codex".into(),
                     source_sid: "source".into(),
@@ -566,7 +638,7 @@ mod tests {
         );
         assert!(
             world
-                .get::<crate::host::run_state_kind::LastRunStateKind>(session)
+                .get::<crate::host::toast::ErrorSurfaced>(session)
                 .is_none()
         );
         assert!(world.get::<ImportedConversation>(session).is_none());

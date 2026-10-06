@@ -5,18 +5,19 @@ use std::path::{Path, PathBuf};
 use vmux_api::protocol::ClientMessage;
 use vmux_ecs::event::InstallPhase;
 use vmux_ecs::profile::McpCredentials;
+use vmux_ecs::{Cwd, ProcessAnchor};
 use vmux_editor::lsp::archive::ArchiveKind;
 use vmux_editor::lsp::download::{self, RemoteArtifact};
 use vmux_editor::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
 use vmux_editor::lsp::store::{PackageStore, Receipt};
-use vmux_session::{AcpSession, AgentRunState};
+use vmux_session::{AcpSessionId, AgentId, SessionId};
 use vmux_setting::AppSettings;
 
 use super::environment_driver::AcpEnvironment;
 use super::registry::{BinaryTarget, PackageDist, Registry, RegistryAgent, Runtime};
 use super::{
-    AcpInstallJob, AcpInstallKey, AcpInstallOutcome, AcpInstallProgress, AcpInstallProgressSink,
-    AcpInstallRequest, AcpInstallWaiter, AcpLaunch, AcpLaunchStarted,
+    AcpInstallJob, AcpInstallKey, AcpInstallOutcome, AcpInstallProgressSink, AcpInstallRequest,
+    AcpInstallWaiter, AcpLaunch, InstallState,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,18 +75,8 @@ impl AgentInstaller {
     }
 }
 
-impl AcpLaunchStarted {
-    pub(super) fn ready_message(resume: Option<&str>) -> &'static str {
-        if resume.is_some() {
-            "Loading session history…"
-        } else {
-            "Starting agent…"
-        }
-    }
-}
-
 impl AcpInstallJob {
-    pub(super) fn take_progress(&self) -> Option<AcpInstallProgress> {
+    pub(super) fn take_progress(&self) -> Option<InstallState> {
         self.progress.try_iter().last()
     }
 }
@@ -130,7 +121,7 @@ fn resolve_acp_install(
         .as_ref()
         .and_then(|config| config.version.as_deref());
     let resolved = installer.resolve(&request.agent_id, pinned_version, |phase, pct, message| {
-        progress.publish(AcpInstallProgress::from_phase(phase, pct, message));
+        progress.publish(InstallState::from_phase(phase, pct, message));
     });
     let package_added = resolved
         .as_ref()
@@ -193,21 +184,25 @@ impl AcpInstallRequest {
 }
 
 impl AcpInstallWaiter {
-    pub(super) fn matches(&self, session: &AcpSession) -> bool {
-        self.sid == session.sid && self.agent_id == session.agent_id
+    pub(super) fn matches(&self, session_id: &SessionId, agent_id: &AgentId) -> bool {
+        self.sid == session_id.0 && self.agent_id == agent_id.0
     }
 }
 
 impl AcpLaunch {
     pub(super) fn message_for(
         &self,
-        session: &AcpSession,
+        session_id: &SessionId,
+        agent_id: &AgentId,
+        cwd: &Cwd,
+        anchor: &ProcessAnchor,
+        resume: Option<&AcpSessionId>,
         settings: Option<&AppSettings>,
     ) -> ClientMessage {
         let shell = settings
             .map(|settings| vmux_terminal::AgentTerminalShell::configured(settings).into_string())
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
-        let mcp = crate::mcp_driver::McpLaunchSpec::acp(&session.cwd, session.anchor, &shell)
+        let mcp = crate::mcp_driver::McpLaunchSpec::acp(&cwd.0, anchor.0, &shell)
             .resolve()
             .inspect_err(|error| {
                 bevy::log::warn!(
@@ -216,23 +211,23 @@ impl AcpLaunch {
             })
             .ok();
         ClientMessage::SpawnAcpAgent {
-            sid: session.sid.clone(),
-            agent_id: session.agent_id.clone(),
+            sid: session_id.0.clone(),
+            agent_id: agent_id.0.clone(),
             command: self.command.clone(),
             args: self.args.clone(),
             env: self.env.clone(),
-            cwd: session.cwd.to_string_lossy().into_owned(),
-            anchor: session.anchor,
+            cwd: cwd.0.to_string_lossy().into_owned(),
+            anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
             mcp_args: mcp.map(|mcp| mcp.args).unwrap_or_default(),
-            resume_acp_session_id: session.resume.clone(),
+            resume_acp_session_id: resume.map(|resume| resume.0.clone()),
             managed_mcp_servers: self.managed_mcp_servers.clone(),
         }
     }
 }
 
 impl AcpInstallProgressSink {
-    fn publish(&self, progress: AcpInstallProgress) {
+    fn publish(&self, progress: InstallState) {
         let _ = self.pending.send(progress);
         self.notify();
     }
@@ -244,28 +239,18 @@ impl AcpInstallProgressSink {
     }
 }
 
-impl AcpInstallProgress {
+impl InstallState {
     pub(super) fn from_phase(phase: InstallPhase, pct: Option<u8>, message: &str) -> Self {
         if matches!(phase, InstallPhase::Done) {
             Self {
                 pct: None,
                 message: "Starting agent…".to_string(),
-                errored: false,
             }
         } else {
             Self {
                 pct,
                 message: message.to_string(),
-                errored: false,
             }
-        }
-    }
-
-    pub(super) fn ready(resume: Option<&str>) -> Self {
-        Self {
-            pct: None,
-            message: AcpLaunchStarted::ready_message(resume).to_string(),
-            errored: false,
         }
     }
 
@@ -273,35 +258,7 @@ impl AcpInstallProgress {
         Self {
             pct: None,
             message: "Preparing agent…".to_string(),
-            errored: false,
         }
-    }
-
-    pub(super) fn error(message: impl Into<String>) -> Self {
-        Self {
-            pct: None,
-            message: message.into(),
-            errored: true,
-        }
-    }
-}
-
-impl From<AcpInstallProgress> for AgentRunState {
-    fn from(progress: AcpInstallProgress) -> Self {
-        if progress.errored {
-            Self::Errored(progress.message)
-        } else {
-            Self::Installing {
-                pct: progress.pct,
-                message: progress.message,
-            }
-        }
-    }
-}
-
-impl From<&AcpInstallProgress> for AgentRunState {
-    fn from(progress: &AcpInstallProgress) -> Self {
-        progress.clone().into()
     }
 }
 

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use bevy::prelude::Bundle;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
+use vmux_api::conversation::{Message, RemoteSession};
 use vmux_api::protocol::{ManagedMcpServer, ServiceMessage};
-use vmux_api::room::{Message, RemoteSession};
 use vmux_ecs::ProcessId;
 use vmux_process::ProcessRuntime;
 

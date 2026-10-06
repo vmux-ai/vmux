@@ -16,7 +16,6 @@ use crate::host::{
     ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,
     TranscriptTail,
 };
-use vmux_ecs::PageMetadata;
 use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Profile, User};
 use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};

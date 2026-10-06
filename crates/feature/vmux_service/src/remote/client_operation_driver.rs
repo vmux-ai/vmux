@@ -1,6 +1,6 @@
 use bevy::prelude::{Bundle, Component};
 use tokio::sync::{mpsc, oneshot};
-use vmux_api::room::ClientOpId;
+use vmux_api::conversation::ClientOpId;
 use vmux_transport::service::{RemoteFuture, RemoteOperationStore};
 
 #[derive(Clone)]

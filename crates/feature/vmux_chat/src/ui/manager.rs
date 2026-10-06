@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use vmux_session::{CatalogSnapshot, Route, SessionSummary, StageSummary};
+use vmux_session::{Route, SessionSummary, StageSummary};
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
-    ManagerPage, ManagerRow, ManagerSelect, ManagerSelectItem, ManagerSelectItemKind,
+    ManagerPage, ManagerRow, ManagerSelect, ManagerSelectItem,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
@@ -17,13 +17,12 @@ use crate::state::ChatUiState;
 pub fn SessionsManager() -> Element {
     use_theme();
     let ui = use_ui_state::<ChatUiState>();
-    let catalog = ui.use_value::<CatalogSnapshot>().value;
     let mut query = use_signal(String::new);
     let mut editing = use_signal(|| None::<String>);
     let mut name = use_signal(String::new);
     let mut description = use_signal(String::new);
     let mut editor_open = use_signal(|| false);
-    let snapshot = catalog();
+    let snapshot = ui.state.read().sessions.clone();
     let search = query().trim().to_ascii_lowercase();
     let visible_count = snapshot
         .sessions
@@ -218,7 +217,6 @@ fn SessionRowView(
         .map(|stage| ManagerSelectItem {
             value: stage.id.clone(),
             label: translate(&stage.name),
-            kind: ManagerSelectItemKind::Default,
         })
         .collect();
     let subtitle = if session.description.is_empty() {

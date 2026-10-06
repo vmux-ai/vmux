@@ -5,10 +5,10 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::FileUiStateWrite;
-use vmux_ecs::ProcessId;
 use vmux_ecs::event::{FileTidyRequest, FileTidyState, TidyChoice};
 use vmux_ecs::notify::AgentAttention;
 use vmux_ecs::team::Agent;
+use vmux_ecs::{ProcessAnchor, ProcessId};
 use vmux_layout::CloseStackRequest;
 use vmux_layout::stack::ComputeFocusSet;
 #[cfg(test)]
@@ -122,7 +122,7 @@ fn idle(
         if !matches!(state, RunState::Idle) {
             continue;
         }
-        let Some(agent_pane) = tidy.agent_pane(session.anchor) else {
+        let Some(agent_pane) = tidy.agent_pane(anchor.0) else {
             continue;
         };
         tidy.run(agent_pane, &settings);

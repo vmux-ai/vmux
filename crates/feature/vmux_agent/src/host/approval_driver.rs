@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_session::AgentApprovalPolicy;
+use vmux_session::ApprovalPolicy;
 
 #[derive(Default, Deserialize, Serialize)]
 struct SavedApprovalGrants {
@@ -33,7 +33,7 @@ impl ApprovalDriver {
         Self { path, grants }
     }
 
-    pub(super) fn policy_for(&self, agent: &str, cwd: &Path) -> AgentApprovalPolicy {
+    pub(super) fn policy_for(&self, agent: &str, cwd: &Path) -> ApprovalPolicy {
         let agent = Self::agent_id(agent);
         let auto = Self::scope(cwd)
             .and_then(|repository| {
@@ -46,7 +46,7 @@ impl ApprovalDriver {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        AgentApprovalPolicy { auto }
+        ApprovalPolicy { auto }
     }
 
     pub(super) fn remember(&mut self, agent: &str, cwd: &Path, tool: &str) {
@@ -60,7 +60,7 @@ impl ApprovalDriver {
             .or_default()
             .entry(scope)
             .or_default()
-            .insert(AgentApprovalPolicy::tool_key(tool));
+            .insert(ApprovalPolicy::tool_key(tool));
         if inserted && let Err(error) = self.save() {
             warn!("failed to save agent approvals: {error}");
         }

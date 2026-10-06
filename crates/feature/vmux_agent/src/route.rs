@@ -1,5 +1,1 @@
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AcpRoute {
-    Acp { id: String, sid: Option<String> },
-    AcpDefault,
-}
+pub(crate) use vmux_session::Route as SessionRoute;

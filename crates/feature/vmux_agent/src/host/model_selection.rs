@@ -86,8 +86,8 @@ fn load_model_selections(profile: CurrentProfile, mut models: Single<&mut AgentM
         return;
     };
     for (agent, mut memory) in saved {
-        if !memory.url.is_empty() {
-            memory.url = AcpRoute::agent(&agent).url();
+        if !memory.url.is_empty() && SessionRoute::parse(&memory.url).is_none() {
+            memory.url = SessionRoute::manager_for_agent(&vmux_session::AgentId(agent.clone()));
         }
         models.by_agent.insert(agent, memory);
     }

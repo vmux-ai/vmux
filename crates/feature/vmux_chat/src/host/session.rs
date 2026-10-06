@@ -29,7 +29,8 @@ use vmux_ecs::agent::{
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::team::Profile;
 use vmux_ecs::{
-    PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
+    EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
+    PendingPromptAttachments,
 };
 use vmux_layout::stack::OpenRequest;
 use vmux_session::{

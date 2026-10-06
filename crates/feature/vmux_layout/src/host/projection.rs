@@ -6,6 +6,8 @@ use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
 use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
+use vmux_ecs::{Description, EntityTarget};
+use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
 
 use crate::cef::LayoutCef;
 use crate::event::{

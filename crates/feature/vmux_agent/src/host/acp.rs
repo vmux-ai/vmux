@@ -13,7 +13,7 @@ use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
 use vmux_editor::lsp::store::PackageStore;
-use vmux_session::{AcpSessionId, AgentId, Session, SessionId};
+use vmux_session::{AcpSessionId, AgentId, RunState, Session, SessionId};
 use vmux_setting::{AcpAgentConfig, AppSettings};
 use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_tool::{
@@ -25,7 +25,6 @@ use self::installer_driver::{AgentInstaller, start_acp_install_job};
 use self::registry::Registry;
 pub(super) use config::add as add_config;
 pub(super) use registry::add as add_registry;
-use vmux_session::AgentRunState;
 
 mod config;
 mod config_driver;

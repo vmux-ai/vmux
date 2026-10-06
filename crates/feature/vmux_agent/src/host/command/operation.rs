@@ -11,17 +11,19 @@ use crate::host::acp::registry::RegistryAgent;
 use crate::route::SessionRoute;
 
 pub(super) fn add(app: &mut App) {
-    app.add_systems(
-        Update,
-        (
-            acknowledge_file_touched,
-            acknowledge_file_search,
-            acknowledge_turn_ended,
-            new_chat,
-            list_agents,
-        )
-            .in_set(CommandSet::Commands),
-    );
+    app.init_resource::<PendingNewChats>()
+        .add_observer(open_created_chat)
+        .add_systems(
+            Update,
+            (
+                acknowledge_file_touched,
+                acknowledge_file_search,
+                acknowledge_turn_ended,
+                new_chat,
+                list_agents,
+            )
+                .in_set(CommandSet::Commands),
+        );
 }
 
 #[derive(Resource, Default)]

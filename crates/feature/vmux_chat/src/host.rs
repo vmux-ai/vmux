@@ -23,6 +23,8 @@ pub use state::{ChatRuntime, PublishComposerEffect, RepublishChatUiState};
 pub use tool::ChatToolPlugin;
 
 #[cfg(host)]
+mod catalog;
+#[cfg(host)]
 mod command_bar;
 #[cfg(host)]
 mod composer;
@@ -61,6 +63,7 @@ impl Plugin for ChatPlugin {
         app.add_plugins((
             FeaturePlugin::<crate::Feature>::default(),
             Self::MANIFEST.plugin(),
+            catalog::CatalogPlugin,
             session::ChatHostPlugin,
             command_bar::Plugin,
             transcript::Plugin,

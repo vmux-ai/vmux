@@ -45,7 +45,11 @@ fn load(
 fn persist(
     directory: Single<&HandoffDriver>,
     mut created: MessageReader<crate::host::event::AcpSessionCreated>,
-    sessions: Query<(&vmux_session::AcpSession, &ImportedConversation)>,
+    sessions: Query<(
+        &vmux_session::SessionId,
+        &vmux_session::AgentId,
+        &ImportedConversation,
+    )>,
 ) {
     for event in created.read() {
         for (session_id, agent_id, imported) in &sessions {

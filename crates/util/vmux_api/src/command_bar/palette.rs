@@ -1,5 +1,6 @@
 use super::CommandBarPicker;
 use crate::PageIcon;
+use crate::conversation::ModelOptionEntry;
 use crate::protocol::AcpModeOption;
 use crate::space::ProjectRow;
 

@@ -15,11 +15,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
+use vmux_api::conversation::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_api::protocol::{AcpSessionConfig, AgentRunStatus, ServiceMessage, SharedEvent};
 #[cfg(test)]
 use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport};
-use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
-use vmux_ecs::agent::SessionId;
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
@@ -697,9 +696,8 @@ fn list(
         {
             let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
             result.push(RemoteSession {
-                sid: sid.0.clone(),
+                id: sid.clone(),
                 url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
-                room_id: vmux_api::room::RoomId::for_session(&sid.0),
                 title: vmux_session::ConversationTitle::from_messages(projector.messages(), &name),
                 name,
                 runtime: "acp".to_string(),
@@ -728,9 +726,8 @@ fn list(
             if sid.0 == request.sid {
                 let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
                 result = Some(RemoteSession {
-                    sid: sid.0.clone(),
+                    id: sid.clone(),
                     url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
-                    room_id: vmux_api::room::RoomId::for_session(&sid.0),
                     title: vmux_session::ConversationTitle::from_messages(
                         projector.messages(),
                         &name,

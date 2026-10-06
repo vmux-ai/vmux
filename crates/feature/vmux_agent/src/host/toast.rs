@@ -25,18 +25,15 @@ pub struct AgentToast {
 }
 
 #[derive(Component)]
-struct ErrorSurfaced;
+pub(super) struct ErrorSurfaced;
 
 fn surface_errors(
     mut commands: Commands,
     mut writer: MessageWriter<AgentToast>,
-    sessions: Query<
-        (Entity, &AgentRunState, &AcpSession, Option<&ErrorSurfaced>),
-        Changed<AgentRunState>,
-    >,
+    sessions: Query<(Entity, &RunState, &SessionId, Option<&ErrorSurfaced>), Changed<RunState>>,
 ) {
     for (entity, state, session, surfaced) in &sessions {
-        let AgentRunState::Errored(message) = state else {
+        let RunState::Errored(message) = state else {
             if surfaced.is_some() {
                 commands.entity(entity).remove::<ErrorSurfaced>();
             }
@@ -80,14 +77,9 @@ mod tests {
             .add_message::<AgentToast>()
             .add_systems(Update, surface_errors);
         app.world_mut().spawn((
-            AcpSession {
-                agent_id: "mock".into(),
-                sid: "abc".into(),
-                cwd: std::path::PathBuf::from("/tmp"),
-                anchor: ProcessId::new(),
-                resume: None,
-            },
-            AgentRunState::Errored("boom".into()),
+            Session,
+            SessionId("abc".into()),
+            RunState::Errored("boom".into()),
         ));
         app.update();
         let events = app
@@ -108,14 +100,9 @@ mod tests {
             .add_message::<AgentToast>()
             .add_systems(Update, surface_errors);
         app.world_mut().spawn((
-            AcpSession {
-                agent_id: "mistral-vibe".into(),
-                sid: "acp1".into(),
-                cwd: std::path::PathBuf::from("/tmp"),
-                anchor: vmux_ecs::ProcessId::new(),
-                resume: None,
-            },
-            AgentRunState::Errored("kaboom".into()),
+            Session,
+            SessionId("acp1".into()),
+            RunState::Errored("kaboom".into()),
         ));
         app.update();
         let events = app
@@ -135,15 +122,10 @@ mod tests {
             .add_message::<AgentToast>()
             .add_systems(Update, surface_errors);
         app.world_mut().spawn((
-            AcpSession {
-                agent_id: "mock".into(),
-                sid: "abc".into(),
-                cwd: std::path::PathBuf::from("/tmp"),
-                anchor: ProcessId::new(),
-                resume: None,
-            },
+            Session,
+            SessionId("abc".into()),
             ErrorSurfaced,
-            AgentRunState::Errored("old".into()),
+            RunState::Errored("old".into()),
         ));
         app.update();
         assert!(

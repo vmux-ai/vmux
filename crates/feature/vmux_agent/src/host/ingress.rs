@@ -5,13 +5,13 @@ use crate::host::event::{
     AgentToolCallRequest, CommandOrigin,
 };
 use bevy::prelude::*;
+use vmux_api::conversation::{AssistantBlock, Message};
 use vmux_api::protocol::{AgentRunStatus, ClientMessage, JsonValue};
-use vmux_api::room::{AssistantBlock, Message};
 use vmux_ecs::agent::AgentCommandResponse;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_session::{AcpSession, AgentMessageTimes, AgentMessages, AgentRunState, PromptQueue};
+use vmux_session::{PromptQueue, RunState, Session, SessionId, SnapshotReceived, Transcripts};
 
 #[vmux_api::service_message(AgentRequest)]
 struct InboundAgentRequest {
@@ -45,6 +45,7 @@ pub(super) fn add(app: &mut App) {
         .add_message::<ServiceRequest>()
         .add_message::<AgentCommandResponse>()
         .add_message::<AgentRequestInput>()
+        .add_message::<SnapshotReceived>()
         .add_systems(
             Update,
             (
@@ -53,7 +54,7 @@ pub(super) fn add(app: &mut App) {
                     route_requests,
                     route_approval_requests,
                     project_deltas,
-                    project_snapshots,
+                    route_messages,
                     project_statuses,
                     project_approval_resolutions,
                 )
@@ -65,11 +66,11 @@ pub(super) fn add(app: &mut App) {
 }
 
 fn route_messages(
-    mut inbound: MessageReader<UiAgentMessagesSnapshot>,
-    mut snapshots: MessageWriter<vmux_session::SnapshotReceived>,
+    mut inbound: MessageReader<AgentMessagesSnapshot>,
+    mut snapshots: MessageWriter<SnapshotReceived>,
 ) {
     for inbound in inbound.read() {
-        snapshots.write(vmux_session::SnapshotReceived {
+        snapshots.write(SnapshotReceived {
             session: SessionId(inbound.sid.clone()),
             messages: inbound.messages.clone(),
         });
@@ -116,17 +117,17 @@ fn route_requests(
 
 fn route_approval_requests(
     mut inbound: MessageReader<InboundAgentAwaitingApproval>,
-    mut sessions: Query<(Entity, &AcpSession, &mut AgentRunState)>,
+    mut sessions: Query<(Entity, &SessionId, &mut RunState), With<Session>>,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
         let args = serde_json::Value::try_from(&inbound.args)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-        for (session, acp, mut state) in &mut sessions {
-            if acp.sid != inbound.sid {
+        for (session, session_id, mut state) in &mut sessions {
+            if session_id.0 != inbound.sid {
                 continue;
             }
-            *state = AgentRunState::AwaitingApproval {
+            *state = RunState::AwaitingApproval {
                 call_id: inbound.call_id.clone(),
                 name: inbound.name.clone(),
                 args: args.clone(),
@@ -142,66 +143,59 @@ fn route_approval_requests(
 
 fn project_deltas(
     mut inbound: MessageReader<AgentDelta>,
-    mut sessions: Query<(&AcpSession, &mut AgentMessages, &mut AgentMessageTimes)>,
+    sessions: Query<(Entity, &SessionId), With<Session>>,
+    transcripts: Transcripts,
+    mut snapshots: MessageWriter<SnapshotReceived>,
 ) {
+    let mut pending = std::collections::HashMap::<Entity, (SessionId, Vec<Message>)>::new();
     for inbound in inbound.read() {
-        for (session, mut messages, mut times) in &mut sessions {
-            if session.sid != inbound.sid {
-                continue;
-            }
-            let before = messages.0.clone();
-            match messages.0.last_mut() {
-                Some(Message::Assistant { blocks }) => match blocks.last_mut() {
-                    Some(AssistantBlock::Text(text)) => text.push_str(&inbound.text),
-                    _ => blocks.push(AssistantBlock::Text(inbound.text.clone())),
-                },
-                _ => messages.0.push(Message::Assistant {
-                    blocks: vec![AssistantBlock::Text(inbound.text.clone())],
-                }),
-            }
-            times.reconcile(&before, &messages.0);
+        let Some((session, session_id)) = sessions
+            .iter()
+            .find(|(_, session_id)| session_id.0 == inbound.sid)
+        else {
+            continue;
+        };
+        let (_, messages) = pending
+            .entry(session)
+            .or_insert_with(|| (session_id.clone(), transcripts.get(session).messages));
+        match messages.last_mut() {
+            Some(Message::Assistant { blocks }) => match blocks.last_mut() {
+                Some(AssistantBlock::Text(text)) => text.push_str(&inbound.text),
+                _ => blocks.push(AssistantBlock::Text(inbound.text.clone())),
+            },
+            _ => messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Text(inbound.text.clone())],
+            }),
         }
     }
-}
-
-fn project_snapshots(
-    mut inbound: MessageReader<AgentMessagesSnapshot>,
-    mut sessions: Query<(&AcpSession, &mut AgentMessages, &mut AgentMessageTimes)>,
-) {
-    for inbound in inbound.read() {
-        for (session, mut messages, mut times) in &mut sessions {
-            if session.sid != inbound.sid {
-                continue;
-            }
-            times.reconcile(&messages.0, &inbound.messages);
-            messages.0.clone_from(&inbound.messages);
-        }
+    for (_, (session, messages)) in pending {
+        snapshots.write(SnapshotReceived { session, messages });
     }
 }
 
 fn project_statuses(
     mut inbound: MessageReader<AgentRunStatusChanged>,
-    mut sessions: Query<(&AcpSession, &mut AgentRunState, &mut PromptQueue)>,
+    mut sessions: Query<(&SessionId, &mut RunState, &mut PromptQueue), With<Session>>,
 ) {
     for inbound in inbound.read() {
-        for (session, mut state, mut queue) in &mut sessions {
-            if session.sid != inbound.sid {
+        for (session_id, mut state, mut queue) in &mut sessions {
+            if session_id.0 != inbound.sid {
                 continue;
             }
             match &inbound.status {
-                AgentRunStatus::Idle => *state = AgentRunState::Idle,
-                AgentRunStatus::Streaming => *state = AgentRunState::Streaming,
+                AgentRunStatus::Idle => *state = RunState::Idle,
+                AgentRunStatus::Streaming => *state = RunState::Streaming,
                 AgentRunStatus::Interrupted => {
-                    *state = AgentRunState::Idle;
+                    *state = RunState::Idle;
                     if !queue.flush_pending() {
                         queue.paused = true;
                     }
                 }
                 AgentRunStatus::Errored(message) => {
                     if queue.flush_pending() {
-                        *state = AgentRunState::Idle;
+                        *state = RunState::Idle;
                     } else {
-                        *state = AgentRunState::Errored(message.clone());
+                        *state = RunState::Errored(message.clone());
                     }
                 }
             }
@@ -211,17 +205,17 @@ fn project_statuses(
 
 fn project_approval_resolutions(
     mut inbound: MessageReader<AgentApprovalResolved>,
-    mut sessions: Query<(&AcpSession, &mut AgentRunState)>,
+    mut sessions: Query<(&SessionId, &mut RunState), With<Session>>,
 ) {
     for inbound in inbound.read() {
-        for (session, mut state) in &mut sessions {
-            if session.sid == inbound.sid
+        for (session_id, mut state) in &mut sessions {
+            if session_id.0 == inbound.sid
                 && matches!(
                     &*state,
-                    AgentRunState::AwaitingApproval { call_id, .. } if call_id == &inbound.call_id
+                    RunState::AwaitingApproval { call_id, .. } if call_id == &inbound.call_id
                 )
             {
-                *state = AgentRunState::Streaming;
+                *state = RunState::Streaming;
             }
         }
     }

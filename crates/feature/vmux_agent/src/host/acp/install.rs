@@ -8,7 +8,8 @@ pub(super) fn add(app: &mut App) {
 
 fn start(
     mut commands: Commands,
-    sessions: Query<(Entity, &AcpSession), Without<AcpLaunchStarted>>,
+    sessions: Query<(Entity, &SessionId, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
+    targets: Query<&EntityTarget<Session>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
     credentials: Query<&McpCredentials>,
     profile: CurrentProfile,
@@ -34,18 +35,22 @@ fn start(
         .iter()
         .map(|(entity, key)| (key.clone(), entity))
         .collect();
-    for (entity, session) in &sessions {
-        if focused.stack != Some(entity) {
+    let focused_session = focused
+        .stack
+        .and_then(|stack| targets.get(stack).ok())
+        .map(EntityTarget::entity);
+    for (entity, session_id, agent_id) in &sessions {
+        if focused_session != Some(entity) {
             continue;
         }
         let fallback = settings
             .agent
             .acp
             .iter()
-            .find(|config| config.id == session.agent_id)
+            .find(|config| config.id == agent_id.0)
             .cloned();
         let request = AcpInstallRequest {
-            agent_id: session.agent_id.clone(),
+            agent_id: agent_id.0.clone(),
             fallback,
             shell: shell.clone(),
         };
@@ -62,6 +67,7 @@ fn start(
                     .spawn((
                         name,
                         key.clone(),
+                        InstallState::preparing(),
                         start_acp_install_job(
                             request,
                             wake.clone(),
@@ -78,12 +84,8 @@ fn start(
             AcpLaunchStarted,
             AcpInstallWaiter {
                 job,
-                sid: session.sid.clone(),
-                agent_id: session.agent_id.clone(),
-            },
-            AgentRunState::Installing {
-                pct: None,
-                message: "Preparing agent…".to_string(),
+                sid: session_id.0.clone(),
+                agent_id: agent_id.0.clone(),
             },
         ));
     }
@@ -98,9 +100,23 @@ fn poll(
         Entity,
         &AcpInstallKey,
         &mut AcpInstallJob,
+        &mut InstallState,
         Option<&AcpInstallWaiters>,
     )>,
-    mut waiters: Query<(Entity, &AcpSession, &AcpInstallWaiter, &mut AgentRunState)>,
+    targets: Query<&EntityTarget<Session>>,
+    mut waiters: Query<
+        (
+            Entity,
+            &SessionId,
+            &AgentId,
+            &Cwd,
+            &ProcessAnchor,
+            Option<&AcpSessionId>,
+            &AcpInstallWaiter,
+            &mut RunState,
+        ),
+        With<Session>,
+    >,
     mut package_changes: MessageWriter<AcpPackageChanged>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -108,31 +124,28 @@ fn poll(
     let Ok(credentials) = credentials.single() else {
         return;
     };
-    let swapping: std::collections::HashSet<Entity> =
-        swaps.read().map(|request| request.stack).collect();
+    let swapping: std::collections::HashSet<Entity> = swaps
+        .read()
+        .filter_map(|request| targets.get(request.stack).ok().map(EntityTarget::entity))
+        .collect();
     let mut invalid_waiters = std::collections::HashSet::new();
-    for (entity, session, waiter, _) in &mut waiters {
-        if swapping.contains(&entity) || !waiter.matches(session) || !jobs.contains(waiter.job) {
+    for (entity, session_id, agent_id, _, _, _, waiter, _) in &mut waiters {
+        if swapping.contains(&entity)
+            || !waiter.matches(session_id, agent_id)
+            || !jobs.contains(waiter.job)
+        {
             invalid_waiters.insert(entity);
             commands
                 .entity(entity)
                 .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
         }
     }
-    for (job_entity, key, mut job, related_waiters) in &mut jobs {
+    for (job_entity, key, mut job, mut install_state, related_waiters) in &mut jobs {
         let related_waiters = related_waiters
             .map(|related| related.iter().collect::<Vec<_>>())
             .unwrap_or_default();
         if let Some(progress) = job.take_progress() {
-            for entity in related_waiters.iter().copied() {
-                let Ok((_, session, waiter, mut state)) = waiters.get_mut(entity) else {
-                    continue;
-                };
-                if invalid_waiters.contains(&entity) || !waiter.matches(session) {
-                    continue;
-                }
-                *state = (&progress).into();
-            }
+            *install_state = progress;
         }
         if job.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             let thread = job.thread.take().unwrap();
@@ -155,44 +168,55 @@ fn poll(
             job.package_reported = true;
         }
         let has_waiters = related_waiters.iter().any(|entity| {
-            waiters.get(*entity).is_ok_and(|(_, session, waiter, _)| {
-                !invalid_waiters.contains(entity) && waiter.matches(session)
-            })
+            waiters
+                .get(*entity)
+                .is_ok_and(|(_, session_id, agent_id, _, _, _, waiter, _)| {
+                    !invalid_waiters.contains(entity) && waiter.matches(session_id, agent_id)
+                })
         });
         if has_waiters && launch_ready && connected.is_none() {
             continue;
         }
         let outcome = job.outcome.take().unwrap();
         for entity in related_waiters {
-            let Ok((_, session, waiter, mut state)) = waiters.get_mut(entity) else {
+            let Ok((_, session_id, agent_id, cwd, anchor, resume, waiter, mut state)) =
+                waiters.get_mut(entity)
+            else {
                 continue;
             };
-            if invalid_waiters.contains(&entity) || !waiter.matches(session) {
+            if invalid_waiters.contains(&entity) || !waiter.matches(session_id, agent_id) {
                 continue;
             }
             match &outcome.launch {
                 Ok(launch) => {
-                    let message = launch.message_for(session, settings.as_deref());
+                    let message = launch.message_for(
+                        session_id,
+                        agent_id,
+                        cwd,
+                        anchor,
+                        resume,
+                        settings.as_deref(),
+                    );
                     match credentials.access.with_revision(launch.mcp_revision, || ()) {
                         Ok(Some(())) => {
                             service_requests.write(ServiceRequest(message));
-                            *state = AcpInstallProgress::ready(session.resume.as_deref()).into();
+                            *state = RunState::Idle;
                             commands.entity(entity).remove::<AcpInstallWaiter>();
                         }
                         Ok(None) => {
-                            *state = AcpInstallProgress::preparing().into();
+                            *state = RunState::Idle;
                             commands
                                 .entity(entity)
                                 .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
                         }
                         Err(error) => {
-                            *state = AcpInstallProgress::error(error).into();
+                            *state = RunState::Errored(error);
                             commands.entity(entity).remove::<AcpInstallWaiter>();
                         }
                     }
                 }
                 Err(message) => {
-                    *state = AcpInstallProgress::error(message.clone()).into();
+                    *state = RunState::Errored(message.clone());
                     commands.entity(entity).remove::<AcpInstallWaiter>();
                 }
             }
@@ -201,7 +225,7 @@ fn poll(
     }
 }
 
-fn cancel(trigger: On<Remove, AcpSession>, mut commands: Commands) {
+fn cancel(trigger: On<Remove, ProcessAnchor>, mut commands: Commands) {
     if let Ok(mut entity) = commands.get_entity(trigger.event_target()) {
         entity.remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
     }

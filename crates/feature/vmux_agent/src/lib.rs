@@ -31,8 +31,6 @@ mod policy_driver;
 mod remote_driver;
 #[cfg(all(host, feature = "app"))]
 pub(crate) mod route;
-#[cfg(all(host, feature = "app"))]
-mod route_driver;
 #[cfg(all(host, feature = "service"))]
 mod service;
 #[cfg(all(host, feature = "service"))]

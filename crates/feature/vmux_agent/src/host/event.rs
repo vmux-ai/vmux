@@ -34,7 +34,7 @@ pub struct AgentApprovalResolved {
 #[vmux_api::service_message(SharedEvent::AgentMessagesSnapshot)]
 pub struct AgentMessagesSnapshot {
     pub sid: String,
-    pub messages: Vec<vmux_api::room::Message>,
+    pub messages: Vec<vmux_api::conversation::Message>,
 }
 
 #[vmux_api::service_message(SharedEvent::AcpAgentInfo)]
@@ -49,12 +49,6 @@ pub struct AcpWorkspaceChanged {
     pub branch: String,
     pub cwd: String,
     pub workspace_cwd: String,
-}
-
-#[vmux_api::service_message(SharedEvent::AgentMessagesSnapshot)]
-pub struct UiAgentMessagesSnapshot {
-    pub sid: String,
-    pub messages: Vec<Message>,
 }
 
 #[vmux_api::service_message(AcpSessionConfigState)]

@@ -4,9 +4,9 @@ use bevy_app::{App, Plugin, PostUpdate};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use vmux_ecs::host::{UiState, UiStateWrite};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{UiState, UiStateWrite};
 use vmux_session::{
     AgentId, CatalogSnapshot, CleanupRequest, CreateRequest, Created, DescriptionUpdateRequest,
     RenameRequest, Route, SessionId, StageChangeRequest, StageId,

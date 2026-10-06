@@ -81,7 +81,10 @@ pub(super) struct InitialAcpSessionConfig {
     pub(super) value: String,
 }
 
-fn info(mut reader: MessageReader<AcpAgentInfo>, mut sessions: Query<(&AcpSession, &mut Profile)>) {
+fn info(
+    mut reader: MessageReader<AcpAgentInfo>,
+    mut sessions: Query<(&SessionId, &AgentId, &mut Profile), With<Session>>,
+) {
     for event in reader.read() {
         let name = event.name.trim();
         if name.is_empty() {
@@ -111,7 +114,8 @@ fn ancestor_tab(
 
 fn workspace(
     mut reader: MessageReader<AcpWorkspaceChanged>,
-    mut sessions: Query<(Entity, &mut AcpSession)>,
+    mut sessions: Query<(Entity, &SessionId, &mut Cwd), With<Session>>,
+    session_views: Query<(Entity, &EntityTarget<Session>)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
     mut tabs: Query<&mut Tab>,
@@ -187,7 +191,7 @@ fn workspace(
 
 fn config(
     mut reader: MessageReader<AcpSessionConfigSnapshot>,
-    mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpSessionConfigState>)>,
+    mut sessions: Query<(Entity, &SessionId, Option<&mut AcpSessionConfigState>), With<Session>>,
     mut commands: Commands,
 ) {
     for event in reader.read() {
@@ -245,7 +249,7 @@ fn config(
 
 fn selection(
     mut reader: MessageReader<AcpSessionConfigSelectionResult>,
-    mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
+    mut sessions: Query<(&SessionId, &mut AcpSessionConfigState), With<Session>>,
 ) {
     for event in reader.read() {
         for (session_id, mut state) in &mut sessions {
@@ -296,8 +300,8 @@ fn auto_allow(
 #[allow(clippy::type_complexity)]
 fn session(
     mut reader: MessageReader<AcpSessionCreated>,
-    mut sessions: Query<(Entity, &mut AcpSession, &mut PageMetadata), Without<ChatView>>,
-    children: Query<&Children>,
+    sessions: Query<(Entity, &SessionId), With<Session>>,
+    stacks: Query<(&EntityTarget<Session>, &Children)>,
     mut page_meta: Query<&mut PageMetadata, With<ChatView>>,
     mut commands: Commands,
 ) {
@@ -328,7 +332,8 @@ fn session(
 
 fn terminal(
     mut reader: MessageReader<AcpTerminalCreated>,
-    sessions: Query<(Entity, &AcpSession)>,
+    sessions: Query<(Entity, &SessionId), With<Session>>,
+    stacks: Query<(Entity, &EntityTarget<Session>)>,
     mut ctx: PanePlacement,
     mut commands: Commands,
 ) {
@@ -419,7 +424,7 @@ fn input(
         let context = PromptWorkspace::prompt(&policy, handoff, workspace_state);
         let preferred_mode = modes
             .as_ref()
-            .and_then(|modes| modes.by_agent.get(&session.agent_id))
+            .and_then(|modes| modes.by_agent.get(&agent_id.0))
             .map(|memory| memory.selected.clone())
             .filter(|mode| !mode.is_empty());
         service_requests.write(ServiceRequest(
@@ -733,8 +738,8 @@ mod tests {
             ))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<crate::host::event::UiAgentWorkspaceChanged>>()
-            .write(crate::host::event::UiAgentWorkspaceChanged {
+            .resource_mut::<Messages<crate::host::event::AcpWorkspaceChanged>>()
+            .write(crate::host::event::AcpWorkspaceChanged {
                 sid: "background-sid".into(),
                 branch: "vibe/quiet-amber-wolf".into(),
                 cwd: worktree_dir.to_string_lossy().into_owned(),
@@ -1014,13 +1019,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
         add(&mut app);
-        app.world_mut().spawn(AcpSession {
-            agent_id: "vibe-acp".to_string(),
-            sid: "s1".to_string(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            anchor: ProcessId::new(),
-            resume: None,
-        });
+        app.world_mut()
+            .spawn(TestSession::bundle("vibe-acp", "s1", "/tmp"));
         app.update();
     }
 }
