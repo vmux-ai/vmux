@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::manifest::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
 
 pub(crate) fn add(app: &mut App) {
     app.configure_sets(Startup, PolicyLoaded)
@@ -31,7 +31,13 @@ pub(crate) struct AcpWorkspacePolicy {
 }
 
 fn load(
-    manifests: Query<(Entity, &FeatureManifest), Added<FeatureManifest>>,
+    manifests: Query<
+        (Entity, &FeatureManifest),
+        (
+            Added<FeatureManifest>,
+            With<FeatureManifestOwner<crate::Feature>>,
+        ),
+    >,
     mut commands: Commands,
 ) {
     for (entity, manifest) in &manifests {
@@ -49,10 +55,20 @@ fn load(
 mod tests {
     use super::*;
 
+    struct ForeignFeature;
+
+    impl FeatureManifestSource for ForeignFeature {
+        const SOURCE: &'static str = "(policies: Some((unrelated: true)))";
+    }
+
     #[test]
     fn agent_feature_manifest_attaches_typed_sections_to_one_entity() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, FeaturePlugin::<crate::Feature>::default()));
+        app.add_plugins((
+            MinimalPlugins,
+            FeaturePlugin::<crate::Feature>::default(),
+            FeaturePlugin::<ForeignFeature>::default(),
+        ));
         add(&mut app);
         app.update();
 

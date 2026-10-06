@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_ecs::manifest::FeatureManifest;
+use vmux_ecs::manifest::{FeatureManifest, FeatureManifestOwner};
+#[cfg(test)]
+use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
 #[cfg(test)]
 use vmux_path::Executable;
 
@@ -22,7 +24,13 @@ pub(crate) struct LspRegistry {
 }
 
 fn load(
-    manifests: Query<(Entity, &FeatureManifest), Added<FeatureManifest>>,
+    manifests: Query<
+        (Entity, &FeatureManifest),
+        (
+            Added<FeatureManifest>,
+            With<FeatureManifestOwner<crate::Feature>>,
+        ),
+    >,
     mut commands: Commands,
 ) {
     for (entity, manifest) in &manifests {
@@ -144,12 +152,37 @@ impl LinterSpec {
 mod tests {
     use super::*;
 
+    struct ForeignFeature;
+
+    impl FeatureManifestSource for ForeignFeature {
+        const SOURCE: &'static str = "(policies: Some((unrelated: true)))";
+    }
+
     fn registry() -> LspRegistry {
         FeatureManifest::of::<crate::Feature>()
             .policies::<EditorPolicies>()
             .unwrap()
             .unwrap()
             .lsp
+    }
+
+    #[test]
+    fn load_ignores_other_feature_policies() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            FeaturePlugin::<crate::Feature>::default(),
+            FeaturePlugin::<ForeignFeature>::default(),
+        ));
+        add(&mut app);
+        app.update();
+
+        let registries = app
+            .world_mut()
+            .query::<&LspRegistry>()
+            .iter(app.world())
+            .count();
+        assert_eq!(registries, 1);
     }
 
     #[test]
