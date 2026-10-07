@@ -91,6 +91,7 @@ struct PaletteContext {
 
 #[derive(Component, Default)]
 struct PaletteDraftInput {
+    initialized: bool,
     open_id: OpenId,
     query: String,
     start: bool,
@@ -203,9 +204,10 @@ fn open(
         return;
     };
     current.0.clone_from(opened);
-    if draft.open_id == opened.open_id {
+    if draft.initialized && draft.open_id == opened.open_id {
         return;
     }
+    draft.initialized = true;
     draft.open_id = opened.open_id;
     draft.query.clone_from(&opened.url);
     draft.target_url.clear();
@@ -845,7 +847,7 @@ fn wake(
 mod tests {
     use super::*;
     use crate::CommandInvocation;
-    use vmux_api::command_bar::{CommandBarCommandEntry, InvokeRequest};
+    use vmux_api::command_bar::{CommandBarCommandEntry, CommandBarPage, InvokeRequest};
 
     #[derive(Component, Default)]
     struct CapturedInvocations(Vec<InvokeRequest>);
@@ -878,6 +880,41 @@ mod tests {
 
         assert!(!generation.matches(first));
         assert!(generation.matches(second));
+    }
+
+    #[test]
+    fn start_surface_initializes_with_the_none_open_id() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin);
+        let page = app.world_mut().spawn(HostsLauncher).id();
+        app.update();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                page,
+                &CommandBarOpenEvent {
+                    pages: vec![CommandBarPage {
+                        url: "vmux://sessions/?agent=codex-acp".into(),
+                        title: "Codex".into(),
+                        prompt_target: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
+        let draft = app.world().get::<PaletteDraftInput>(page).unwrap();
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert!(draft.initialized);
+        assert!(draft.start);
+        assert_eq!(snapshot.0.projection.composer.agents.len(), 1);
+        assert_eq!(
+            snapshot.0.projection.composer.agents[0].url,
+            "vmux://sessions/?agent=codex-acp"
+        );
     }
 
     #[test]
