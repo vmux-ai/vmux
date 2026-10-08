@@ -2,29 +2,26 @@
 
 > Flexible by composition. Predictable by design.
 
-Vmux uses ECS composition to gain flexibility and extensibility without making every new
-feature an integration project. Capabilities are added as plugins, entities, components,
-systems, and typed events. Existing features do not need a new central switch, callback layer,
-or parallel data model each time the product grows.
-
-The same constrained vocabulary also makes the architecture predictable to coding agents. A
-new capability has an expected owner, state shape, operation boundary, and UI flow before the
-first line is written. A person or agent should produce a PR that fits the system without
-inventing a surprising second architecture.
+Vmux is a composition architecture for cross-platform applications. Features are typed plugins
+installed into an ECS world, so a browser, IDE, agent harness, service, and mobile client can
+share one model without becoming one tightly coupled program.
 
 This document is a map. Code, tests, typed contracts, and `feature.ron` are the source of
 truth. `AGENTS.md` owns repository workflow and coding rules.
 
-## Why this architecture
+## Why Vmux architecture?
 
-- **Flexible without branching the architecture.** Runtimes select the plugins and adapters
-  they need instead of rebuilding the feature for desktop, mobile, service, CLI, and agents.
-- **Extensible without a central switchboard.** New behavior attaches through components and
-  typed events. Existing features do not need to know every extension.
-- **Predictable for humans and agents.** Crate, Plugin, Entity, Component, System, Event,
-  `UiEvent`, and `UiState` give every change a small set of expected design choices.
+### Rich applications, fragmented architecture
 
-## Plugin and ECS composition
+Products that span browser content, native UI, files, processes, agents, services, and mobile
+clients tend to grow a separate registry, callback layer, state model, and integration path for
+each new capability. Flexibility increases, but so does the number of architectures a developer
+must understand.
+
+Vmux narrows feature design to one composition model and eight building blocks. New behavior
+extends the graph instead of adding another switchboard beside it.
+
+## Applications as plugin graphs
 
 A **plugin** installs one capability: its components, messages, systems, schedule, and any
 pages, commands, tools, persistence, or boundary adapters it owns. The **ECS world** is where
@@ -77,7 +74,36 @@ installed. Platform crates then add only their adapters:
 
 A feature plugin never installs a sibling feature. Shared composition belongs in `vmux_app`.
 
-### Design vocabulary
+### Out of the box
+
+| Property | What it means |
+|---|---|
+| **Runtime composition** | Desktop, mobile, service, CLI, and MCP select plugins and adapters instead of rebuilding features. |
+| **Feature ownership** | One crate owns a user capability from UI and state through persistence and published contracts. |
+| **Typed boundaries** | Events, messages, and shared values replace callback registries and mirror DTOs. |
+| **Observable lifecycle** | Long work has identity and state that systems, UI, tests, and agents can inspect. |
+| **Host-authoritative UI** | ECS owns product decisions; pages render projections and emit typed intent. |
+| **Predictable changes** | The same small vocabulary tells a human or agent where a change belongs. |
+
+### Built for the agent era
+
+When agents write more code, the bottleneck moves from producing a diff to trusting its design.
+Vmux makes ownership, state, operations, UI flow, and runtime composition explicit before the
+first line is written. Humans and agents get the same constraints and should produce PRs that
+fit the system without inventing a surprising second architecture.
+
+## Learning path
+
+Read this document in order once, then use it as a change map.
+
+1. [Understand Plugin + ECS composition](#applications-as-plugin-graphs).
+2. [Learn the eight design primitives](#design-vocabulary).
+3. [Trace the default feature flow](#feature-design-flow).
+4. [Learn runtime and state boundaries](#system-map).
+5. [Apply the durable rules](#invariants).
+6. [Route a concrete change](#change-routing).
+
+## Design vocabulary
 
 These eight building blocks are enough to design most Vmux features.
 
@@ -96,6 +122,8 @@ Treat a system like an internal API endpoint. An event or message is its request
 resources declare its dependencies; component mutations, emitted events, and `UiState` are its
 outputs. The function signature is the interface. Other features call that interface through
 typed data, not by making the system public or invoking it directly.
+
+### Feature design flow
 
 The default feature flow is:
 
