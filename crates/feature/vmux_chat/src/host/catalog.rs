@@ -201,7 +201,7 @@ mod tests {
 
     impl Published {
         fn record(trigger: On<UiStateWrite<ChatUiState>>, mut published: ResMut<Published>) {
-            if trigger.event().patch().sessions.is_some() {
+            if trigger.event().update().sessions.is_some() {
                 published.0.push(trigger.event().webview());
             }
         }
