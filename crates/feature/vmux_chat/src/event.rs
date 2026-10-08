@@ -22,6 +22,12 @@ pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
 pub struct SessionsCreate {
     pub name: String,
     pub description: String,
+    pub cwd: String,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct SessionsChooseDirectory {
+    pub current_dir: String,
 }
 
 #[vmux_api::ui_event(Default)]
@@ -45,6 +51,35 @@ pub struct SessionsStageChange {
 #[vmux_api::ui_event(Default)]
 pub struct SessionsCleanup {
     pub id: String,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct SessionDirectorySelection {
+    pub revision: u64,
+    pub path: String,
+}
+
+#[vmux_api::contract(Default, Eq)]
+#[derive(bevy_ecs::prelude::Resource)]
+pub struct SessionRepositories {
+    pub sessions: Vec<SessionRepository>,
+}
+
+impl SessionRepositories {
+    pub fn get(&self, id: &str) -> Option<SessionRepository> {
+        self.sessions
+            .iter()
+            .find(|repository| repository.id == id)
+            .cloned()
+    }
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct SessionRepository {
+    pub id: String,
+    pub project: String,
+    pub branch: String,
+    pub url: String,
 }
 
 #[vmux_api::contract(Default, Eq)]

@@ -44,6 +44,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 rfd = { workspace = true }
 uuid = { workspace = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard" }
+vmux_git = { path = "../vmux_git" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_tool = { path = "../vmux_tool" }
 

@@ -42,6 +42,7 @@
                 "SetAgentEffort",
                 "ChatOpenPage",
                 "SessionsCreate",
+                "SessionsChooseDirectory",
                 "SessionsRename",
                 "SessionsDescriptionUpdate",
                 "SessionsStageChange",

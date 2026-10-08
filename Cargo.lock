@@ -10342,6 +10342,7 @@ dependencies = [
  "vmux_clipboard",
  "vmux_command",
  "vmux_ecs",
+ "vmux_git",
  "vmux_layout",
  "vmux_page",
  "vmux_session",

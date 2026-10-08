@@ -2,7 +2,7 @@ use crate::event::{
     ChatAttachments, ChatBranchesState, ChatComposerDraft, ChatComposerEffect, ChatComposerMedia,
     ChatComposerMenuState, ChatListSelectionState, ChatMediaState, ChatPromptFocusEffect,
     ChatResumeState, ChatSelectorState, ChatSnapshot, ChatTranscriptState, ComposerContext,
-    ModeState, ModelState,
+    ModeState, ModelState, SessionDirectorySelection, SessionRepositories,
 };
 use vmux_api::mcp::McpServersUiState;
 use vmux_session::CatalogSnapshot;
@@ -10,6 +10,8 @@ use vmux_session::CatalogSnapshot;
 #[vmux_api::ui_state_patch(Default)]
 pub struct ChatUiStatePatch {
     pub sessions: Option<Box<CatalogSnapshot>>,
+    pub session_repositories: Option<Box<SessionRepositories>>,
+    pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: Option<Box<ChatSnapshot>>,
     pub composer: Option<ComposerContext>,
     pub composer_draft: Option<ChatComposerDraft>,
@@ -29,9 +31,11 @@ pub struct ChatUiStatePatch {
     pub mcp: Option<Box<McpServersUiState>>,
 }
 
-#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 2)]
+#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 3)]
 pub struct ChatUiState {
     pub sessions: CatalogSnapshot,
+    pub session_repositories: SessionRepositories,
+    pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: ChatSnapshot,
     pub snapshot_ready: bool,
     pub composer: ComposerContext,
@@ -59,6 +63,12 @@ impl vmux_api::UiStateProjection<ChatUiStatePatch> for ChatUiState {
     fn apply(&mut self, patch: ChatUiStatePatch) {
         if let Some(sessions) = patch.sessions {
             self.sessions = *sessions;
+        }
+        if let Some(session_repositories) = patch.session_repositories {
+            self.session_repositories = *session_repositories;
+        }
+        if let Some(session_directory) = patch.session_directory {
+            self.session_directory = Some(session_directory);
         }
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;
