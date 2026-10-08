@@ -95,6 +95,22 @@ Combinators are fine where they stay small and local — `map_err` to convert an
 - **Anything that returns `Element` is a component: `#[component]`, PascalCase, rendered as `Foo { .. }`.** Never write a plain `fn thing(..) -> Element` and call it as `{thing(..)}`. A helper is inlined into its caller's scope, so it re-runs whenever the caller does and cannot memoize on its inputs; a component owns a scope and skips re-render when its props are unchanged. Take owned props — `String`, `Vec<T>` — rather than borrowing to keep a helper signature. `every_component_is_named_like_an_element` in `vmux_ui` enforces the naming; Rust's own lints cannot, because every page carries `#![allow(non_snake_case)]` to permit the convention at all.
 - **Never use `bevy::winit::UpdateMode::Continuous`.** It causes 100-200% idle CPU. Use `UpdateMode::Reactive` or `UpdateMode::reactive_low_power`. If input/scroll/animation lags, the fix is to route the missing wake source through `EventLoopProxy::send_event(WinitUserEvent::WakeUp)` — not to switch to Continuous. The CEF wake throttler (`MessageLoopWakePolicy` + `cef-wake-throttle` thread) already wakes the loop at display refresh rate when CEF schedules pump work. A `no_continuous_update_mode` test in `vmux_desktop` enforces this.
 
+## Feature Design
+
+A feature issue is not ready when it stops at product behavior, UX, or acceptance criteria. Carry the design through the implementation shape before work starts:
+
+- Name the owning crate and every existing crate whose public boundary changes. State dependency direction and reject cycles or feature ownership leaks.
+- Name the root plugin and meaningful child plugins. Show where each plugin is composed and which target or platform adapter installs it.
+- Define the ECS entities and their components. State which entity owns lifecycle state, relationships, persistent identity, asynchronous tasks, results, and failures. Use resources only for truly global state.
+- List internal messages, agent/tool contracts, and cross-crate requests. State sender, receiver, ordering requirement, and whether completion is represented by a message or a component transition.
+- Name the systems or observers that advance each state transition and the system sets that order them. Keep systems private to the plugin that registers them.
+- When the feature has UI, name every typed `UiState` snapshot or patch and every `#[vmux_api::ui_event]` payload. Define their fields, source entity, projection system, sender, and receiver. Current values travel through UI state; UI events carry user intent; one-shot DOM behavior uses versioned effects.
+- Define persistence, transport, process, filesystem, and platform boundaries. External side effects end at adapters.
+- Include an end-to-end flow from user action to observable result, including failure, cancellation, retry, rollback, and approval gates.
+- Use concrete proposed type and module names instead of placeholders such as "manager", "service", or "handler". Separate settled decisions from open questions and non-goals.
+
+Update the Linear issue when implementation changes the design. Record only architecture that actually lands in `docs/architecture.md`; do not create a second design document in the repository.
+
 ## Linear
 
 When taking a Linear issue (e.g. "take VMX-XX"), immediately move it to **In Progress** before doing anything else — before creating a worktree, before reading code, before drafting a PR.
