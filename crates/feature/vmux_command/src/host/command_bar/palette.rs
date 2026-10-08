@@ -1,6 +1,7 @@
 use super::driver::{PaletteDecision, PaletteDraft, PaletteRows, PaletteState};
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use std::time::{Duration, Instant};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
     CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
@@ -32,6 +33,8 @@ mod prompt_driver;
 mod request_driver;
 mod search;
 mod search_driver;
+
+const START_RESULTS_DEBOUNCE: Duration = Duration::from_millis(120);
 
 pub(super) struct PalettePlugin;
 
@@ -70,7 +73,11 @@ impl Plugin for PalettePlugin {
             .add_observer(dismiss)
             .add_observer(submit)
             .add_systems(PreUpdate, (attach, detach))
-            .add_systems(PostUpdate, (query, rows, project, publish).chain())
+            .add_systems(Update, settle_results)
+            .add_systems(
+                PostUpdate,
+                (query, queue_results, rows, project, publish).chain(),
+            )
             .add_systems(Last, wake);
     }
 }
@@ -102,6 +109,46 @@ struct PaletteDraftInput {
     close_revision: u64,
     history_cursor: Option<usize>,
     history_scratch: String,
+    result_query: String,
+    result_pending: Option<String>,
+    result_due: Option<Instant>,
+}
+
+impl PaletteDraftInput {
+    fn synchronize_results(&mut self, now: Instant) {
+        if !self.start {
+            self.result_query.clone_from(&self.query);
+            self.result_pending = None;
+            self.result_due = None;
+            return;
+        }
+        if self.result_query == self.query {
+            self.result_pending = None;
+            self.result_due = None;
+            return;
+        }
+        if self.result_pending.as_ref() == Some(&self.query) {
+            return;
+        }
+        self.result_pending = Some(self.query.clone());
+        self.result_due = Some(now + START_RESULTS_DEBOUNCE);
+    }
+
+    fn settle_results(&mut self, now: Instant) -> bool {
+        let Some(due) = self.result_due else {
+            return false;
+        };
+        if now < due {
+            return false;
+        }
+        let Some(query) = self.result_pending.take() else {
+            self.result_due = None;
+            return false;
+        };
+        self.result_query = query;
+        self.result_due = None;
+        true
+    }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -210,6 +257,9 @@ fn open(
     draft.initialized = true;
     draft.open_id = opened.open_id;
     draft.query.clone_from(&opened.url);
+    draft.result_query.clone_from(&opened.url);
+    draft.result_pending = None;
+    draft.result_due = None;
     draft.target_url.clear();
     draft.selected = 0;
     draft.navigating = false;
@@ -640,7 +690,7 @@ fn rows(
             continue;
         }
         let draft = PaletteDraft {
-            query: input.query.clone(),
+            query: input.result_query.clone(),
             selected: input.selected,
             nav_mode: input.navigating,
             target_url: input.target_url.clone(),
@@ -713,7 +763,7 @@ fn project(
                         (None, None) => true,
                         _ => false,
                     }
-                    && contribution.matches(&input.query)
+                    && contribution.matches(&input.result_query)
             })
             .collect::<Vec<_>>();
         contributed.sort_by(|(left_entity, left, _), (right_entity, right, _)| {
@@ -829,11 +879,29 @@ fn detach(pages: Query<Entity, DetachedPalette>, mut commands: Commands) {
 #[derive(Component)]
 struct PendingPaletteRequest;
 
+fn queue_results(mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>) {
+    let now = Instant::now();
+    for (opened, mut input) in &mut palettes {
+        if input.open_id != opened.0.open_id {
+            continue;
+        }
+        input.synchronize_results(now);
+    }
+}
+
+fn settle_results(mut palettes: Query<&mut PaletteDraftInput>) {
+    let now = Instant::now();
+    for mut input in &mut palettes {
+        input.settle_results(now);
+    }
+}
+
 fn wake(
     pending: Query<(), With<PendingPaletteRequest>>,
+    inputs: Query<&PaletteDraftInput>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
-    if pending.is_empty() {
+    if pending.is_empty() && !inputs.iter().any(|input| input.result_due.is_some()) {
         return;
     }
     let Some(proxy) = proxy else {
@@ -892,6 +960,43 @@ mod tests {
 
         assert!(!generation.matches(first));
         assert!(generation.matches(second));
+    }
+
+    #[test]
+    fn start_results_wait_for_the_latest_query_to_settle() {
+        let open_id = OpenId(7);
+        let now = Instant::now();
+        let mut input = PaletteDraftInput {
+            open_id,
+            start: true,
+            ..Default::default()
+        };
+
+        input.synchronize_results(now);
+        input.query = "co".to_string();
+        input.synchronize_results(now);
+        input.query = "codex".to_string();
+        input.synchronize_results(now + Duration::from_millis(1));
+
+        assert_eq!(input.result_query, "");
+        assert!(!input.settle_results(now + Duration::from_millis(120)));
+        assert!(input.settle_results(now + Duration::from_millis(121)));
+        assert_eq!(input.result_query, "codex");
+    }
+
+    #[test]
+    fn modal_results_follow_input_without_debounce() {
+        let open_id = OpenId(7);
+        let mut input = PaletteDraftInput {
+            open_id,
+            ..Default::default()
+        };
+
+        input.query = ">close".to_string();
+        input.synchronize_results(Instant::now());
+
+        assert_eq!(input.result_query, ">close");
+        assert!(input.result_pending.is_none());
     }
 
     #[test]
