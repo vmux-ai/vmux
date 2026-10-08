@@ -28,6 +28,7 @@ pub enum PaletteGlyph {
 pub struct CommandPaletteAgent {
     pub url: String,
     pub title: String,
+    pub icon: PageIcon,
 }
 
 #[vmux_api::contract(Default)]

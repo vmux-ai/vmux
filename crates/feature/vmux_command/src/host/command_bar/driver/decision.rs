@@ -156,8 +156,10 @@ impl PaletteState {
         .find(|key| !key.is_empty())
         .map(str::to_string)
         .or_else(|| {
-            VmuxRoute::parse(&composer.agent_url)
-                .and_then(|route| route.agent_id().map(str::to_string))
+            let route = VmuxRoute::parse(&composer.agent_url)?;
+            url::form_urlencoded::parse(route.query()?.as_bytes()).find_map(|(key, value)| {
+                (key == "agent" && !value.is_empty()).then(|| value.into_owned())
+            })
         });
         let row_text = if rows.start_prompt_mode {
             None

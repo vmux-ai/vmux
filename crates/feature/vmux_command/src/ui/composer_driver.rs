@@ -31,10 +31,17 @@ impl ComposerChips {
             };
         }
 
+        let agent_icon = composer
+            .agents
+            .iter()
+            .find(|agent| agent.url == composer.agent_url)
+            .map(|agent| agent.icon.clone())
+            .unwrap_or_default();
         let agent = ComposerChip::ready(
             composer.agent_title.clone(),
             translate("composer-choose-agent"),
         )
+        .with_icon(agent_icon)
         .opens(EventHandler::new(move |()| {
             let _ = send(&CommandPaletteAgentMenuToggleRequest { open_id });
             PromptFocus::end(PROMPT_INPUT_ID);

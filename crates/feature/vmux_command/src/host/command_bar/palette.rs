@@ -1018,10 +1018,12 @@ mod tests {
             vmux_api::command_bar::CommandPaletteAgent {
                 url: "vmux://sessions/vibe/".to_string(),
                 title: "Vibe".to_string(),
+                icon: vmux_api::PageIcon::None,
             },
             vmux_api::command_bar::CommandPaletteAgent {
                 url: "vmux://sessions/codex/".to_string(),
                 title: "Codex".to_string(),
+                icon: vmux_api::PageIcon::None,
             },
         ];
         app.world_mut()

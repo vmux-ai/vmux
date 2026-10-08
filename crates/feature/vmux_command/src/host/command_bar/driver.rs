@@ -329,12 +329,16 @@ impl Composer {
         };
         let mut agents = Vec::new();
         for item in prompt_targets {
-            let CommandBarResultItem::Page { url, title, .. } = item else {
+            let CommandBarResultItem::Page {
+                url, title, icon, ..
+            } = item
+            else {
                 continue;
             };
             agents.push(CommandPaletteAgent {
                 url: url.clone(),
                 title: title.clone(),
+                icon: icon.clone(),
             });
         }
         let models = SelectedAgentModels::find(&state.agent_models, &agent_url);
@@ -503,7 +507,7 @@ mod tests {
                         url: "vmux://sessions/?agent=codex".into(),
                         title: "Codex".into(),
                         keywords: vec!["codex".into()],
-                        icon: vmux_api::PageIcon::None,
+                        icon: vmux_api::PageIcon::Favicon("https://example.com/codex.png".into()),
                         shortcut: String::new(),
                         prompt_target: true,
                         startup: false,
@@ -806,6 +810,16 @@ mod tests {
             Some("vmux://sessions/?agent=codex")
         );
         assert_eq!(chosen.composer.agent_title, "Codex");
+        assert!(matches!(
+            chosen
+                .composer
+                .agents
+                .iter()
+                .find(|agent| agent.url == "vmux://sessions/?agent=codex")
+                .map(|agent| &agent.icon),
+            Some(vmux_api::PageIcon::Favicon(icon))
+                if icon == "https://example.com/codex.png"
+        ));
         assert_eq!(chosen.accent_agent.as_deref(), Some("codex"));
     }
 

@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use vmux_api::PageIcon;
 use vmux_api::conversation::ModelOptionEntry;
 use vmux_api::protocol::AcpModeOption;
 use vmux_api::space::{ProjectBranch, ProjectRow};
@@ -12,6 +13,7 @@ use crate::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker
 use crate::components::prompt_box::PromptPopupPlacement;
 use crate::components::skeleton::Skeleton;
 use crate::i18n::{TranslationValue, translate, translate_with};
+use crate::icon::PageIconView;
 
 const COMPOSER_CHIP: &str = "flex h-7 max-w-44 shrink-0 items-center gap-1 rounded-lg px-1.5 text-[11px] text-muted-foreground";
 const COMPOSER_CHIP_LABEL_TIGHT: &str = "@max-[34rem]:hidden";
@@ -405,10 +407,22 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
     }
     let label_class = kind.label_class();
     let label_class = cn([label_class, COMPOSER_CHIP_LABEL_TIGHT]);
+    let icon = if chip.icon.is_none() {
+        rsx! { ComposerChipIcon { kind } }
+    } else {
+        rsx! {
+            PageIconView {
+                icon: chip.icon.clone(),
+                url: String::new(),
+                img_class: "h-4 w-4 shrink-0 rounded-sm object-contain",
+                icon_class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+            }
+        }
+    };
     let Some(on_open) = chip.on_open else {
         return rsx! {
             span { class: COMPOSER_CHIP, title: "{chip.title}",
-                ComposerChipIcon { kind }
+                {icon}
                 span { class: label_class, "{chip.label}" }
             }
         };
@@ -424,7 +438,7 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
             title: "{chip.title}",
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_open.call(()),
-            ComposerChipIcon { kind }
+            {icon}
             span { class: label_class, "{chip.label}" }
             svg {
                 class: if open { "h-3 w-3 shrink-0 rotate-180 opacity-70 transition-transform duration-200 ease-out" } else { "h-3 w-3 shrink-0 opacity-50 transition-transform duration-200 ease-out" },
@@ -538,6 +552,7 @@ pub fn ComposerChipIcon(kind: ComposerMenuKind) -> Element {
 pub struct ComposerChip {
     pub label: String,
     pub title: String,
+    pub icon: PageIcon,
     pub loading: bool,
     pub on_open: Option<EventHandler<()>>,
 }
@@ -547,6 +562,7 @@ impl ComposerChip {
         Self {
             label: String::new(),
             title: String::new(),
+            icon: PageIcon::None,
             loading: true,
             on_open: None,
         }
@@ -556,6 +572,7 @@ impl ComposerChip {
         Self {
             label: label.into(),
             title: title.into(),
+            icon: PageIcon::None,
             loading: false,
             on_open: None,
         }
@@ -563,6 +580,11 @@ impl ComposerChip {
 
     pub fn opens(mut self, on_open: EventHandler<()>) -> Self {
         self.on_open = Some(on_open);
+        self
+    }
+
+    pub fn with_icon(mut self, icon: PageIcon) -> Self {
+        self.icon = icon;
         self
     }
 }

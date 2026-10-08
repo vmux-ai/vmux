@@ -3,8 +3,8 @@ use vmux_api::command_bar::CommandPaletteAgent;
 
 use crate::cn::cn;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
-use crate::favicon::Favicon;
 use crate::i18n::translate;
+use crate::icon::PageIconView;
 
 #[component]
 pub fn AgentMenu(
@@ -62,11 +62,11 @@ fn AgentMenuRow(
             onmousedown: move |event| event.prevent_default(),
             onmouseenter: move |_| on_hover.call(()),
             onclick: move |_| on_pick.call(url.clone()),
-            Favicon {
-                favicon_url: String::new(),
+            PageIconView {
+                icon: option.icon.clone(),
                 url: option.url.clone(),
-                class: "h-6 w-6 shrink-0 rounded-md object-contain",
-                globe_class: "h-6 w-6 shrink-0 opacity-0",
+                img_class: "h-6 w-6 shrink-0 rounded-md object-contain",
+                icon_class: "h-6 w-6 shrink-0 text-muted-foreground",
             }
             span { class: "min-w-0 flex-1 truncate", "{option.title}" }
             if current {
