@@ -73,6 +73,9 @@ installed. Platform crates then add only their adapters:
 | `vmux_mcp` | JSON-RPC transport and tool publication |
 
 A feature plugin never installs a sibling feature. Shared composition belongs in `vmux_app`.
+Plugin boundaries represent independently configurable, reusable, platform-gated, or
+lifecycle-owned capabilities, not wrappers around a few systems. Platform-specific behavior
+enters through a platform plugin or adapter at the composition edge.
 
 ### Out of the box
 
