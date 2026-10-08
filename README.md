@@ -1,124 +1,50 @@
 <h1 align="center">Vmux</h1>
-<p align="center"><b>One architecture. Every platform. Every process.</b></p>
-<p align="center">The same Rust, ECS, plugins, and types from UI to service to agent.</p>
+<p align="center"><b>One prompt. Anything, done.</b></p>
+<p align="center">The browser that gets sh*t done.</p>
 
 <p align="center">
   <img src="icon.png" alt="Vmux icon" width="256" />
 </p>
 
-Most "cross-platform" products are several applications wearing the same design system: Electron
-on desktop, React Native on mobile, Next.js on the web, another service behind them, and another
-API for agents. They may share TypeScript and domain types, but not state, lifecycle, routing,
-permissions, extension points, or architecture.
+Vmux is an open-source browser, ACP agent harness, and full IDE in one shared workspace.
+Work with your team and any ACP-compatible agent across pages, code, terminals, files, Git,
+commands, and tools.
 
-That is why "add one feature" becomes changing the renderer, preload bridge, IPC handlers,
-main-process services, daemon protocol, CLI, mobile app, and automation API.
+![Vmux agent, editor, and terminal demo](website/public/vmux-demo.jpg)
 
-```text
-Typical cross-platform stack = Shared types + Separate applications
-Vmux                         = Shared application architecture + Platform adapters
+## What you can do
 
-Typical boundary = Domain model → UI DTO → IPC DTO → RPC DTO → tool schema
-Vmux boundary    = One Rust type → UI · ECS · IPC · QUIC · CLI · MCP
-```
+- **Stay in one context** — Browse documentation, inspect the running product, edit code, and
+  use the terminal without moving the task between applications.
+- **Collaborate with agents** — Give any ACP agent a task while you browse, review, and steer
+  the work in the same workspace.
+- **Work in parallel** — Give projects and agents their own Spaces, then return to the same
+  pages, processes, and sessions.
+- **Reconnect remotely** — Pair the iPhone app with your Mac and reach the same workspace
+  through an end-to-end encrypted connection.
 
-```text
-Electron product                  Vmux feature plugin
-├── renderer state + UI           ├── state
-├── preload API                   ├── systems
-├── IPC handlers                  ├── UI
-├── main-process service          ├── commands
-├── daemon protocol               ├── tools
-├── CLI + automation schema       └── wire contracts
-└── mobile implementation
-```
+See Vmux fix software, find a flight, ship a client PoC, and launch a restaurant site in
+[use cases](https://vmux.ai/use-cases).
 
-Vmux gives that feature one home. The feature owns its state, behavior, UI, commands, agent tools,
-and protocol together. Desktop, mobile, the background service, the CLI, and the MCP server compose
-the parts they need instead of rebuilding the feature behind another interface. For each contract,
-one Rust type is the source of truth across every boundary it crosses; transport changes, meaning
-does not.
+## Any stack
 
-**ECS turns integration from dependencies into data.** Attach a component to add behavior. Install
-a plugin to add a capability. Swap an adapter to change platforms. Existing features do not need
-to know who extended them or be rewired around every new surface.
+Vmux IDE and its ACP agent harness work with existing projects. React, Rust, or anything else:
+using Vmux Framework is optional.
 
-> Electron gets you to the first window. Vmux keeps every next surface from becoming another app.
+Choose [Vmux Framework](https://vmux.ai/framework) when you want to build a cross-platform
+application from the same typed feature plugins, contracts, manifests, and platform adapters
+that power Vmux itself.
 
-## Why it is different
+## Status
 
-| | Vmux |
-|---|---|
-| **One model everywhere** | Desktop, mobile, daemon, CLI, and MCP are Bevy apps composed from the same typed feature plugins. |
-| **One feature, every interface** | A feature owns its state, systems, page, commands, tools, and wire contracts together. Each runtime selects what it needs. |
-| **One contract end to end** | The same Rust type can be an ECS message, UI event, process payload, network request, CLI operation, or agent tool contract. |
-| **Composition over integration** | Attach a component to add behavior, install a plugin to add a capability, or swap an adapter to change platforms. Existing features need no rewiring. |
-| **Decoupled by construction** | Features meet in the ECS world through typed data and messages, not inside each other's APIs. |
-| **Predictable for agents** | Before code exists, its owner, state, behavior, messages, and composition point already have a known shape. |
-| **UI-independent** | Long-running work has stable identity, snapshots, subscriptions, and a reconnect protocol. Every UI is disposable. |
-| **Native without losing the web** | Rust is the application. Dioxus, Chromium, terminals, and editors are composable surfaces. |
+Vmux is early-access software built in public.
 
-> Electron is cross-platform UI. Vmux is cross-platform architecture.
+- macOS is the primary host platform.
+- iOS is the remote companion.
+- Linux builds and tests in CI but is not packaged yet.
+- Windows and Android are not supported yet.
 
-## One platform, every runtime
-
-```text
-Application = Plugin Graph
-Target      = Composition Profile
-Boundary    = Rust Type
-```
-
-The same feature is composed differently for each target.
-
-```text
-Feature
-├── Core systems
-├── UI plugin
-├── Service plugin
-├── Persistence plugin
-├── CLI plugin
-├── MCP plugin
-└── Platform adapters
-```
-
-Desktop, mobile, web, daemon, server, CLI, MCP, tools, and games are not separate architectures.
-They are different plugin compositions of the same kind of Bevy application.
-
-The IDE and agent harness are the platform's creation and control plane.
-
-```text
-Vmux platform
-├── Runtime
-├── Plugin framework
-├── Typed contracts
-├── Build and package system
-├── IDE
-└── Agent harness
-```
-
-> A composable application platform for every runtime.
-
-> One architecture, from pixels to servers.
-
-> Every executable is a plugin composition.
-
-> Build the whole product with one application model.
-
-Self-hosting is one proof of the platform, not its definition. The intended customization loop lets
-an agent change Vmux, build a personal distribution, and switch to that build through a custom
-channel. The same environment can bootstrap an entirely new application from the framework.
-
-> Vmux can build itself because Vmux itself is just another composition.
-
-## Product
-
-- **Co-work with agents** — People and agents build side by side in one shared space — from hands-on pairing to full autonomy, you set the balance.
-- **Browser simplicity, tmux power** — Looks like the browser you already know; split, stack, and tile panes like tmux underneath.
-- **IDE power underneath** — Keyboard-driven workflows and deep environment control — and agents drive the whole workspace over MCP.
-- **3D workspace** — Powered by Bevy. Flip your panes into a live, GPU-rendered 3D scene — same workspace, still interactive.
-
-See [the architecture](docs/architecture.md) for the runtime, ECS, plugin, rendering, and
-local/remote model.
+Expect rough edges and fast changes before the first stable release.
 
 ## Install
 
@@ -128,22 +54,37 @@ curl -fsSL https://vmux.ai/install | sh
 
 Requires macOS 13.0 (Ventura) or later.
 
+## Architecture
+
+**Flexible by composition. Predictable by design.** ECS composition lets Vmux add platforms
+and capabilities without multiplying architecture. The same small vocabulary gives people and
+coding agents an expected place for every change, so PRs fit the system without surprise layers.
+
+```text
+feature = state + systems + UI + commands + tools + contracts
+runtime = feature plugins + platform adapters
+```
+
+Desktop, mobile, the background service, CLI, and MCP server compose the same feature-owned
+behavior instead of reimplementing it behind separate APIs. The host ECS owns durable state;
+pages render typed projections and emit typed intent.
+
+Read [the architecture](docs/architecture.md) for boundaries, invariants, and change routing.
+Exact behavior remains defined by code, tests, typed contracts, and `feature.ron`.
+
 ## Development
 
 ```sh
-# Check prerequisites
 make doctor
-
-# Run macOS app
 make
 ```
 
-The first build through `make` in a linked worktree automatically seeds its build cache from the main worktree.
-
-See [Makefile](Makefile) for all targets.
+The first build through `make` in a linked worktree seeds its build cache from the main
+worktree. See [Makefile](Makefile) for all targets and [AGENTS.md](AGENTS.md) for repository
+rules.
 
 ## License
 
-Copyright (c) 2024-2025 Junichi Sugiura
+Copyright (c) 2024-2026 Junichi Sugiura
 
 Licensed under the [GNU General Public License v3.0 or later](LICENSE).
