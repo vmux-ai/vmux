@@ -26,10 +26,10 @@ pub enum VmuxPlugin {
     Terminal(vmux_terminal::TerminalPlugin),
     #[plugin(feature = "editor", desktop, requires(layout))]
     Editor(vmux_editor::EditorPlugin),
-    #[plugin(feature = "browser", desktop, requires(layout))]
-    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "extension", desktop, requires(browser))]
     Extension(vmux_extension::ExtensionPlugin),
+    #[plugin(feature = "browser", desktop, requires(layout))]
+    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "git", desktop, requires(layout))]
     Git(vmux_git::GitPlugin),
     #[plugin(

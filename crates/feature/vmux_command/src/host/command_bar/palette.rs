@@ -446,12 +446,11 @@ fn apply(
         && let Ok(mut input) = inputs.get_mut(target)
     {
         input.close_revision = input.close_revision.wrapping_add(1).max(1);
+        commands.trigger(CommandBarDismiss::new(target, true));
     }
     match decision {
         PaletteDecision::None => {}
-        PaletteDecision::Close => {
-            commands.trigger(CommandBarDismiss::new(target, true));
-        }
+        PaletteDecision::Close => {}
         PaletteDecision::Retype(query) => {
             let Ok(mut input) = inputs.get_mut(target) else {
                 return;
@@ -852,6 +851,9 @@ mod tests {
     #[derive(Component, Default)]
     struct CapturedInvocations(Vec<InvokeRequest>);
 
+    #[derive(Component, Default)]
+    struct CapturedDismissals(u32);
+
     fn capture_invocation(
         trigger: On<UiInput<InvokeRequest>>,
         mut captured: Query<&mut CapturedInvocations>,
@@ -860,6 +862,16 @@ mod tests {
             return;
         };
         captured.0.push(trigger.event().payload.clone());
+    }
+
+    fn capture_dismissal(
+        trigger: On<CommandBarDismiss>,
+        mut captured: Query<&mut CapturedDismissals>,
+    ) {
+        let Ok(mut captured) = captured.get_mut(trigger.event().webview) else {
+            return;
+        };
+        captured.0 += 1;
     }
 
     #[test]
@@ -1097,10 +1109,15 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(PalettePlugin)
-            .add_observer(capture_invocation);
+            .add_observer(capture_invocation)
+            .add_observer(capture_dismissal);
         let page = app
             .world_mut()
-            .spawn((HostsLauncher, CapturedInvocations::default()))
+            .spawn((
+                HostsLauncher,
+                CapturedInvocations::default(),
+                CapturedDismissals::default(),
+            ))
             .id();
         app.update();
 
@@ -1147,5 +1164,6 @@ mod tests {
                 .close_revision,
             1
         );
+        assert_eq!(app.world().get::<CapturedDismissals>(page).unwrap().0, 1);
     }
 }
