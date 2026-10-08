@@ -543,7 +543,10 @@ fn sync_pages(
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
         ),
-        Without<crate::StartInlineTransitionView>,
+        (
+            With<HostsLauncher>,
+            Without<crate::StartInlineTransitionView>,
+        ),
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     browsers: NonSend<Browsers>,
