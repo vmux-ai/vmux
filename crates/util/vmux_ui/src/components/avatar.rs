@@ -2,6 +2,7 @@ use crate::cn::cn;
 use dioxus::prelude::*;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
+const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -87,11 +88,12 @@ pub fn AgentThumbnail(
     #[props(default)] alt: String,
     #[props(default)] class: String,
 ) -> Element {
-    let background = if src.is_some() {
-        "#f4f4f5".to_string()
+    let background = if background.trim().is_empty() {
+        vmux_api::avatar::AvatarSpec::agent_color(&seed)
     } else {
         background
     };
+    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
     }

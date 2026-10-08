@@ -61,12 +61,17 @@ impl AvatarSpec {
     }
 
     fn agent_segment_color(segment: &str) -> Option<&'static str> {
-        match segment {
-            "claude" => Some("#d97757"),
-            "codex" => Some("#10a37f"),
-            "vibe" => Some("#7c3aed"),
-            _ => None,
+        let segment = segment.to_ascii_lowercase();
+        if segment.contains("claude") {
+            return Some("#d97757");
         }
+        if segment.contains("codex") {
+            return Some("#10a37f");
+        }
+        if segment.contains("vibe") {
+            return Some("#7c3aed");
+        }
+        None
     }
 }
 
@@ -79,8 +84,11 @@ mod tests {
     #[test]
     fn built_in_agents_keep_their_brand_colours() {
         assert_eq!(AvatarSpec::agent_color("claude"), "#d97757");
+        assert_eq!(AvatarSpec::agent_color("Claude Agent"), "#d97757");
         assert_eq!(AvatarSpec::agent_color("codex"), "#10a37f");
+        assert_eq!(AvatarSpec::agent_color("codex-acp"), "#10a37f");
         assert_eq!(AvatarSpec::agent_color("vibe"), "#7c3aed");
+        assert_eq!(AvatarSpec::agent_color("Mistral Vibe"), "#7c3aed");
     }
 
     #[test]
