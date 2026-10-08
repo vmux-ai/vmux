@@ -429,7 +429,7 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
                 seed: chip.label.clone(),
                 background: String::new(),
                 alt: chip.label.clone(),
-                class: "h-5 w-5 text-[7px]",
+                class: "h-3.5 w-3.5 text-[5px]",
             }
         }
     };
