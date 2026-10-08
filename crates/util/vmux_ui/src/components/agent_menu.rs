@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use vmux_api::command_bar::CommandPaletteAgent;
 
 use crate::cn::cn;
-use crate::components::avatar::Avatar;
+use crate::components::avatar::AgentThumbnail;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 
@@ -63,7 +63,7 @@ fn AgentMenuRow(
             onmousedown: move |event| event.prevent_default(),
             onmouseenter: move |_| on_hover.call(()),
             onclick: move |_| on_pick.call(url.clone()),
-            Avatar {
+            AgentThumbnail {
                 src: (!icon.is_empty()).then_some(icon),
                 seed: option.title.clone(),
                 background: String::new(),

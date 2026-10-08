@@ -5,7 +5,7 @@ use vmux_api::chat::{
     ChatToolChild, ChatToolChildCall, ChatTurn, ChatTurnRow, WORKING_VERB_IDS,
 };
 use vmux_api::prompt_media::ChatAttachment;
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -57,7 +57,7 @@ pub fn AssistantTurn(
 ) -> Element {
     rsx! {
         div { class: "chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
-            Avatar {
+            AgentThumbnail {
                 src: avatar_src,
                 seed: name.clone(),
                 background: avatar_background,

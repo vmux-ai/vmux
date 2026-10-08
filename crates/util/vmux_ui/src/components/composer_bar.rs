@@ -6,7 +6,7 @@ use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
 use crate::components::agent_menu::AgentMenu;
-use crate::components::avatar::Avatar;
+use crate::components::avatar::AgentThumbnail;
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
 use crate::components::permission_menu::PermissionMenu;
@@ -424,7 +424,7 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
         rsx! { ComposerChipIcon { kind } }
     } else {
         rsx! {
-            Avatar {
+            AgentThumbnail {
                 src: (!icon_url.is_empty()).then_some(icon_url),
                 seed: chip.label.clone(),
                 background: String::new(),

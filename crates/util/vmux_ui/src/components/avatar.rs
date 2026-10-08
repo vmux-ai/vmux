@@ -16,7 +16,7 @@ pub fn Avatar(
 ) -> Element {
     let class = cn([AVATAR, class.as_str()]);
     let avatar_seed = if seed.trim().is_empty() { &alt } else { &seed };
-    let background = if src.is_some() {
+    let background = if src.is_some() && background.trim().is_empty() {
         "transparent".to_string()
     } else if background.trim().is_empty() {
         GeneratedAvatar::profile_color(avatar_seed).to_string()
@@ -76,6 +76,24 @@ pub fn Avatar(
                 }
             }
         }
+    }
+}
+
+#[component]
+pub fn AgentThumbnail(
+    src: Option<String>,
+    seed: String,
+    background: String,
+    #[props(default)] alt: String,
+    #[props(default)] class: String,
+) -> Element {
+    let background = if src.is_some() {
+        "#f4f4f5".to_string()
+    } else {
+        background
+    };
+    rsx! {
+        Avatar { src, seed, background, alt, class }
     }
 }
 

@@ -1,7 +1,7 @@
 use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::back::BackButton;
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::i18n::{TranslationValue, translate_with};
@@ -65,7 +65,7 @@ fn AgentAvatar(chat: Chat, size_class: String) -> Element {
         &accent
     };
     rsx! {
-        Avatar {
+        AgentThumbnail {
             src,
             seed: chat.header_name(),
             background: fallback,

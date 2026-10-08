@@ -6,7 +6,7 @@ use vmux_api::bookmark::{
 };
 use vmux_ecs::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
 use vmux_ui::cn::cn;
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::FaviconSource;
@@ -544,7 +544,7 @@ fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Elem
                                             member_id: id.clone(),
                                         });
                                     },
-                                    Avatar {
+                                    AgentThumbnail {
                                         src,
                                         seed: m.name.clone(),
                                         background: m.color.clone(),

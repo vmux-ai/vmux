@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use vmux_api::PageIcon;
 use vmux_api::bookmark::{BookmarkAddRequest, BookmarkPinUrlRequest};
 use vmux_ecs::PageMetadata;
+use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
@@ -193,6 +194,18 @@ pub(super) fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                 path { d: "M5 12h14" }
                 path { d: "M12 5v14" }
+            }
+        };
+    }
+    let icon_url = icon.favicon_url().to_string();
+    if url.starts_with("vmux://sessions/") && !icon_url.is_empty() {
+        return rsx! {
+            AgentThumbnail {
+                src: Some(icon_url),
+                seed: title.clone(),
+                background: String::new(),
+                alt: title,
+                class: "h-4 w-4 text-[6px]",
             }
         };
     }

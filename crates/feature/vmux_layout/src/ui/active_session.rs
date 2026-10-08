@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_ecs::event::{ProjectRow, ProjectTreeToggle};
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::icon::Icon;
@@ -88,7 +88,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                 }
                 if let Some(agent) = agent {
                     div { class: "flex min-w-0 items-center gap-2 rounded-md bg-foreground/[0.035] px-2 py-1.5",
-                        Avatar {
+                        AgentThumbnail {
                             src: agent.icon.clone(),
                             seed: agent.name.clone(),
                             background: agent.color.clone(),
