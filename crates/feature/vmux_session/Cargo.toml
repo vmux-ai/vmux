@@ -1,5 +1,6 @@
 [package]
 name = "vmux_session"
+build = "../../build_cfg.rs"
 description = "Render-free ECS model of a canonical session"
 version.workspace = true
 edition.workspace = true

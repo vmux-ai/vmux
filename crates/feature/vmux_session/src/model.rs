@@ -1,20 +1,26 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
 
+#[cfg(host)]
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
+#[cfg(host)]
+use std::collections::HashSet;
 use vmux_api::conversation::SessionId;
+#[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
+#[cfg(host)]
 use vmux_ecs::{
     ActivateRequest, CreatedAt, Cwd, Description, EntityTarget, LastActivatedAt, Order,
     PageMetadata,
 };
 
+#[cfg(host)]
 pub(crate) struct EntityPlugin;
 
+#[cfg(host)]
 impl Plugin for EntityPlugin {
     fn build(&self, app: &mut App) {
         app.register_persisted::<Session>()
@@ -29,11 +35,14 @@ impl Plugin for EntityPlugin {
     }
 }
 
+#[cfg(host)]
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MutationSet;
 
+#[cfg(host)]
 pub(crate) struct MetadataPlugin;
 
+#[cfg(host)]
 impl Plugin for MetadataPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<RenameRequest>()
@@ -43,8 +52,10 @@ impl Plugin for MetadataPlugin {
     }
 }
 
+#[cfg(host)]
 pub(crate) struct StagePlugin;
 
+#[cfg(host)]
 impl Plugin for StagePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Configuration::load())
@@ -176,12 +187,14 @@ pub struct Cleanup {
     pub entity: Entity,
 }
 
+#[cfg(host)]
 #[derive(Resource)]
 struct Configuration {
     default_stage: StageId,
     stages: Vec<StageSeed>,
 }
 
+#[cfg(host)]
 impl Configuration {
     fn load() -> Self {
         let file: FeatureFile = ron::from_str(include_str!("feature.ron"))
@@ -194,17 +207,20 @@ impl Configuration {
     }
 }
 
+#[cfg(host)]
 #[derive(Deserialize)]
 struct FeatureFile {
     session: SessionConfiguration,
 }
 
+#[cfg(host)]
 #[derive(Deserialize)]
 struct SessionConfiguration {
     default_stage: String,
     stages: Vec<StageSeed>,
 }
 
+#[cfg(host)]
 impl SessionConfiguration {
     fn validate(&self) {
         let mut ids = HashSet::new();
@@ -224,6 +240,7 @@ impl SessionConfiguration {
     }
 }
 
+#[cfg(host)]
 #[derive(Clone, Deserialize)]
 struct StageSeed {
     id: String,
@@ -232,6 +249,7 @@ struct StageSeed {
     order: u32,
 }
 
+#[cfg(host)]
 fn spawn_stages(mut commands: Commands, configuration: Res<Configuration>) {
     for stage in &configuration.stages {
         let mut entity = commands.spawn((
@@ -246,6 +264,7 @@ fn spawn_stages(mut commands: Commands, configuration: Res<Configuration>) {
     }
 }
 
+#[cfg(host)]
 fn create(
     mut requests: MessageReader<CreateRequest>,
     configuration: Res<Configuration>,
@@ -286,6 +305,7 @@ fn create(
     }
 }
 
+#[cfg(host)]
 fn activate(
     trigger: On<ActivateRequest>,
     parents: Query<&ChildOf>,
@@ -311,6 +331,7 @@ fn activate(
     }
 }
 
+#[cfg(host)]
 fn project_views(
     sessions: Query<(&SessionId, Ref<Name>), With<Session>>,
     views: Query<(Entity, Ref<EntityTarget<Session>>, Option<&Children>)>,
@@ -336,6 +357,7 @@ fn project_views(
     }
 }
 
+#[cfg(host)]
 fn rename(
     mut requests: MessageReader<RenameRequest>,
     mut sessions: Query<(&SessionId, &mut Name), With<Session>>,
@@ -349,6 +371,7 @@ fn rename(
     }
 }
 
+#[cfg(host)]
 fn update_description(
     mut requests: MessageReader<DescriptionUpdateRequest>,
     mut sessions: Query<(&SessionId, &mut Description), With<Session>>,
@@ -362,6 +385,7 @@ fn update_description(
     }
 }
 
+#[cfg(host)]
 fn change_stage(
     mut requests: MessageReader<StageChangeRequest>,
     definitions: Query<&StageId, With<StageDefinition>>,
@@ -380,6 +404,7 @@ fn change_stage(
     }
 }
 
+#[cfg(host)]
 fn cleanup(
     mut requests: MessageReader<CleanupRequest>,
     sessions: Query<(Entity, &SessionId), With<Session>>,
@@ -394,7 +419,7 @@ fn cleanup(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, host))]
 mod tests {
     use super::*;
     use bevy_ecs::reflect::AppTypeRegistry;

@@ -1,8 +1,10 @@
 #![allow(clippy::type_complexity)]
 
+#[cfg(host)]
 use bevy_app::{App, Plugin};
 
 pub use catalog::{CatalogSnapshot, SessionSummary, StageSummary};
+#[cfg(host)]
 pub use conversation::{
     ConversationEvent, Document, DocumentKind, EventIdentity, MaterializedEvent, Member,
     MessageContent, MessageDelivery, OperationCommitted, OperationReceived, SnapshotReceived,
@@ -20,6 +22,7 @@ pub use title::ConversationTitle;
 pub use vmux_api::conversation::SessionId;
 
 mod catalog;
+#[cfg(host)]
 mod conversation;
 mod model;
 mod route;
@@ -27,8 +30,10 @@ pub mod run_state;
 pub mod session;
 mod title;
 
+#[cfg(host)]
 pub struct SessionPlugin;
 
+#[cfg(host)]
 impl Plugin for SessionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((

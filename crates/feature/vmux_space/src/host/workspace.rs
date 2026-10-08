@@ -7,6 +7,8 @@ use vmux_api::protocol::ClientMessage;
 use vmux_chat::event::ChatChoiceSelected;
 use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_command::{ResolvedLocale, WriteCommandRequests};
+#[cfg(test)]
+use vmux_ecs::ProcessAnchor;
 use vmux_ecs::agent::{AgentContinuationRequest, AgentSessionRoot};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::{Cwd, EntityTarget};

@@ -1,8 +1,15 @@
+#[cfg(host)]
 use bevy_app::{App, Plugin, PostUpdate};
+#[cfg(not(host))]
+use bevy_ecs::prelude::Resource;
+#[cfg(host)]
 use bevy_ecs::prelude::*;
+#[cfg(host)]
 use bevy_ecs::system::SystemParam;
+#[cfg(host)]
 use vmux_ecs::{CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 
+#[cfg(host)]
 use crate::{
     AgentId, RunState, Session, SessionId, Stage, StageChangedAt, StageDefinition, StageId,
 };
@@ -36,8 +43,10 @@ pub struct SessionSummary {
     pub runtime: String,
 }
 
+#[cfg(host)]
 pub(crate) struct CatalogPlugin;
 
+#[cfg(host)]
 impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CatalogSnapshot>()
@@ -45,6 +54,7 @@ impl Plugin for CatalogPlugin {
     }
 }
 
+#[cfg(host)]
 type SessionCatalog<'w, 's> = Query<
     'w,
     's,
@@ -63,6 +73,7 @@ type SessionCatalog<'w, 's> = Query<
     With<Session>,
 >;
 
+#[cfg(host)]
 type ChangedSessions<'w, 's> = Query<
     'w,
     's,
@@ -84,6 +95,7 @@ type ChangedSessions<'w, 's> = Query<
     ),
 >;
 
+#[cfg(host)]
 type ChangedStages<'w, 's> = Query<
     'w,
     's,
@@ -99,6 +111,7 @@ type ChangedStages<'w, 's> = Query<
     ),
 >;
 
+#[cfg(host)]
 #[derive(SystemParam)]
 struct CatalogChanges<'w, 's> {
     sessions: ChangedSessions<'w, 's>,
@@ -120,6 +133,7 @@ struct CatalogChanges<'w, 's> {
     removed_states: RemovedComponents<'w, 's, RunState>,
 }
 
+#[cfg(host)]
 impl CatalogChanges<'_, '_> {
     fn any(&mut self) -> bool {
         let mut any = !self.sessions.is_empty() || !self.stages.is_empty();
@@ -142,6 +156,7 @@ impl CatalogChanges<'_, '_> {
     }
 }
 
+#[cfg(host)]
 fn project(
     sessions: SessionCatalog,
     stages: Query<(&StageId, &Name, &Order, Has<Terminal>), With<StageDefinition>>,
@@ -201,7 +216,7 @@ fn project(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, host))]
 mod tests {
     use super::*;
     use crate::{CreateRequest, RenameRequest, SessionPlugin};

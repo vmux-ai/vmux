@@ -1,4 +1,4 @@
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
@@ -10,80 +10,80 @@ pub use component::{
     TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
     WindowFullscreenSet,
 };
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged,
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
     RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
 };
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use overlay::{Overlay, OverlayShownInline, OverlayState, WindowOverlay};
 pub use page_metadata::{PageIdentity, PageMetadata};
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use page_open::{
     CefPageAttachRequest, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId,
     PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PendingPrompt,
     PendingPromptAttachments,
 };
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use primitives::PrimitivesPlugin;
 pub use process_id::ProcessId;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStatePlugin, UiStateWrite};
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
 
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod agent;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod archive;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod browser;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod cli;
 #[cfg(host)]
 mod component;
 pub mod event;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod file_ui_state;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod launcher;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod manifest;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod notify;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod overlay;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod page;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod page_driver;
 pub mod page_metadata;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod page_open;
 #[cfg(host)]
 pub mod persistence;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod primitives;
 pub mod process_id;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod profile;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]
 pub mod service;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod team;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod terminal;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 mod ui_state;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod wake;
-#[cfg(host)]
+#[cfg(all(host, feature = "host"))]
 pub mod workspace;

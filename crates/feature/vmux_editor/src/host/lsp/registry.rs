@@ -23,16 +23,17 @@ pub(crate) struct LspRegistry {
     linters: Vec<LinterSpec>,
 }
 
-fn load(
-    manifests: Query<
-        (Entity, &FeatureManifest),
-        (
-            Added<FeatureManifest>,
-            With<FeatureManifestOwner<crate::Feature>>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+type AddedEditorManifests<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static FeatureManifest),
+    (
+        Added<FeatureManifest>,
+        With<FeatureManifestOwner<crate::Feature>>,
+    ),
+>;
+
+fn load(manifests: AddedEditorManifests, mut commands: Commands) {
     for (entity, manifest) in &manifests {
         let policies = manifest
             .policies::<EditorPolicies>()

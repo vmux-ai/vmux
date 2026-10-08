@@ -904,7 +904,7 @@ mod tests {
                 EntityTarget::<Session>::new(session),
                 PageMetadata {
                     url: "vmux://sessions/session-1".into(),
-                    icon: vmux_ecs::PageIcon::favicon("https://cdn.example/codex.svg"),
+                    icon: vmux_api::PageIcon::favicon("https://cdn.example/codex.svg"),
                     ..default()
                 },
                 ChildOf(space),

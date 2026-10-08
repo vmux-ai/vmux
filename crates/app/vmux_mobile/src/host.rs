@@ -28,6 +28,7 @@ use vmux_api::conversation::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
+use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
 use vmux_api::team::TeamUiState;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
