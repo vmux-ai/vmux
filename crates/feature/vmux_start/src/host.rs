@@ -703,10 +703,11 @@ fn begin_inline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::BinEvent;
-    use vmux_api::UiEventPermissions;
     use vmux_api::command_bar::CommandBarUiState;
+    #[cfg(ui)]
     use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+    #[cfg(ui)]
+    use vmux_api::{BinEvent, UiEventPermissions};
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::page::PageManifest;
 
@@ -752,6 +753,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(ui)]
     fn start_page_allows_keyboard_routing() {
         let mut app = App::new();
         app.add_plugins(StartPlugin);
