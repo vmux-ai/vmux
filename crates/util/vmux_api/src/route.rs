@@ -212,11 +212,15 @@ mod tests {
     }
 
     #[test]
-    fn agent_id_reads_canonical_and_legacy_routes() {
-        for url in ["vmux://sessions/codex/cli", "vmux://agent/codex/cli"] {
-            let route = VmuxRoute::parse(url).unwrap();
-            assert_eq!(route.agent_id(), Some("codex"));
-        }
+    fn agent_id_reads_session_routes_only() {
+        let route = VmuxRoute::parse("vmux://sessions/codex/cli").unwrap();
+        assert_eq!(route.agent_id(), Some("codex"));
+        assert_eq!(
+            VmuxRoute::parse("vmux://agent/codex/cli")
+                .unwrap()
+                .agent_id(),
+            None
+        );
         assert_eq!(
             VmuxRoute::parse("vmux://terminal/").unwrap().agent_id(),
             None
