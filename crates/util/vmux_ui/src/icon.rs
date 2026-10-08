@@ -1,4 +1,4 @@
-pub use wasm::{AgentIconView, BuiltinIconView, GitIconView, LineIconView, PageIconView};
+pub use wasm::{BuiltinIconView, GitIconView, LineIconView, PageIconView};
 
 pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
 
@@ -201,28 +201,6 @@ mod wasm {
     use crate::file_icon::TypeIcon;
     use dioxus::prelude::*;
     use vmux_api::icon::{BuiltinIcon, PageIcon};
-
-    #[component]
-    pub fn AgentIconView(icon: PageIcon, class: String) -> Element {
-        let PageIcon::Favicon(url) = icon else {
-            return rsx! {
-                span { class: "{class} inline-flex items-center justify-center rounded-md bg-foreground/[0.08]",
-                    BuiltinIconView {
-                        icon: BuiltinIcon::Sparkles,
-                        class: "h-[68%] w-[68%]".to_string(),
-                    }
-                }
-            };
-        };
-        let mask = format!(
-            "-webkit-mask-image:url({url:?});-webkit-mask-position:center;-webkit-mask-repeat:no-repeat;-webkit-mask-size:contain;mask-image:url({url:?});mask-position:center;mask-repeat:no-repeat;mask-size:contain;background-color:currentColor;"
-        );
-        rsx! {
-            span { class: "{class} inline-flex items-center justify-center rounded-md bg-foreground/[0.08]",
-                span { class: "h-[68%] w-[68%]", style: mask }
-            }
-        }
-    }
 
     #[component]
     pub fn LineIconView(icon: LineIcon, class: String) -> Element {

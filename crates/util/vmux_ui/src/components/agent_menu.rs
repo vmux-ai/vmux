@@ -2,9 +2,9 @@ use dioxus::prelude::*;
 use vmux_api::command_bar::CommandPaletteAgent;
 
 use crate::cn::cn;
+use crate::components::avatar::Avatar;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
-use crate::icon::AgentIconView;
 
 #[component]
 pub fn AgentMenu(
@@ -51,6 +51,7 @@ fn AgentMenuRow(
     on_pick: EventHandler<String>,
 ) -> Element {
     let url = option.url.clone();
+    let icon = option.icon.favicon_url().to_string();
     let text = match current {
         true => "text-foreground",
         false => "text-foreground/75 hover:text-foreground",
@@ -62,13 +63,12 @@ fn AgentMenuRow(
             onmousedown: move |event| event.prevent_default(),
             onmouseenter: move |_| on_hover.call(()),
             onclick: move |_| on_pick.call(url.clone()),
-            AgentIconView {
-                icon: option.icon.clone(),
-                class: if current {
-                    "h-7 w-7 shrink-0 text-foreground"
-                } else {
-                    "h-7 w-7 shrink-0 text-foreground/70"
-                },
+            Avatar {
+                src: (!icon.is_empty()).then_some(icon),
+                seed: option.title.clone(),
+                background: String::new(),
+                alt: option.title.clone(),
+                class: "h-7 w-7 text-[8px]",
             }
             span { class: "min-w-0 flex-1 truncate", "{option.title}" }
             if current {

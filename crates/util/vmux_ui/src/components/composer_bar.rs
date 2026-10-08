@@ -6,6 +6,7 @@ use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
 use crate::components::agent_menu::AgentMenu;
+use crate::components::avatar::Avatar;
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
 use crate::components::permission_menu::PermissionMenu;
@@ -13,7 +14,6 @@ use crate::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker
 use crate::components::prompt_box::PromptPopupPlacement;
 use crate::components::skeleton::Skeleton;
 use crate::i18n::{TranslationValue, translate, translate_with};
-use crate::icon::AgentIconView;
 
 const COMPOSER_CHIP: &str = "flex h-7 max-w-44 shrink-0 items-center gap-1 rounded-lg px-1.5 text-[11px] text-muted-foreground";
 const COMPOSER_CHIP_LABEL_TIGHT: &str = "@max-[34rem]:hidden";
@@ -407,13 +407,17 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
     }
     let label_class = kind.label_class();
     let label_class = cn([label_class, COMPOSER_CHIP_LABEL_TIGHT]);
+    let icon_url = chip.icon.favicon_url().to_string();
     let icon = if chip.icon.is_none() {
         rsx! { ComposerChipIcon { kind } }
     } else {
         rsx! {
-            AgentIconView {
-                icon: chip.icon.clone(),
-                class: "h-5 w-5 shrink-0 text-foreground/80",
+            Avatar {
+                src: (!icon_url.is_empty()).then_some(icon_url),
+                seed: chip.label.clone(),
+                background: String::new(),
+                alt: chip.label.clone(),
+                class: "h-5 w-5 text-[7px]",
             }
         }
     };
