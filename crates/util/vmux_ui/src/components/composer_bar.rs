@@ -13,7 +13,7 @@ use crate::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker
 use crate::components::prompt_box::PromptPopupPlacement;
 use crate::components::skeleton::Skeleton;
 use crate::i18n::{TranslationValue, translate, translate_with};
-use crate::icon::PageIconView;
+use crate::icon::AgentIconView;
 
 const COMPOSER_CHIP: &str = "flex h-7 max-w-44 shrink-0 items-center gap-1 rounded-lg px-1.5 text-[11px] text-muted-foreground";
 const COMPOSER_CHIP_LABEL_TIGHT: &str = "@max-[34rem]:hidden";
@@ -411,11 +411,9 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
         rsx! { ComposerChipIcon { kind } }
     } else {
         rsx! {
-            PageIconView {
+            AgentIconView {
                 icon: chip.icon.clone(),
-                url: String::new(),
-                img_class: "h-4 w-4 shrink-0 rounded-sm object-contain",
-                icon_class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                class: "h-5 w-5 shrink-0 text-foreground/80",
             }
         }
     };

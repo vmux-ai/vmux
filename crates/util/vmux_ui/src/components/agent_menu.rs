@@ -4,7 +4,7 @@ use vmux_api::command_bar::CommandPaletteAgent;
 use crate::cn::cn;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
-use crate::icon::PageIconView;
+use crate::icon::AgentIconView;
 
 #[component]
 pub fn AgentMenu(
@@ -62,11 +62,13 @@ fn AgentMenuRow(
             onmousedown: move |event| event.prevent_default(),
             onmouseenter: move |_| on_hover.call(()),
             onclick: move |_| on_pick.call(url.clone()),
-            PageIconView {
+            AgentIconView {
                 icon: option.icon.clone(),
-                url: option.url.clone(),
-                img_class: "h-6 w-6 shrink-0 rounded-md object-contain",
-                icon_class: "h-6 w-6 shrink-0 text-muted-foreground",
+                class: if current {
+                    "h-7 w-7 shrink-0 text-foreground"
+                } else {
+                    "h-7 w-7 shrink-0 text-foreground/70"
+                },
             }
             span { class: "min-w-0 flex-1 truncate", "{option.title}" }
             if current {
