@@ -16,7 +16,9 @@ pub fn Avatar(
 ) -> Element {
     let class = cn([AVATAR, class.as_str()]);
     let avatar_seed = if seed.trim().is_empty() { &alt } else { &seed };
-    let background = if background.trim().is_empty() {
+    let background = if src.is_some() {
+        "transparent".to_string()
+    } else if background.trim().is_empty() {
         GeneratedAvatar::profile_color(avatar_seed).to_string()
     } else {
         background
