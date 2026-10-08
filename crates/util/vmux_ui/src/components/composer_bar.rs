@@ -20,7 +20,7 @@ const COMPOSER_CHIP_LABEL_TIGHT: &str = "@max-[34rem]:hidden";
 const COMPOSER_CHIP_INTERACTIVE: &str =
     "transition hover:bg-foreground/[0.08] hover:text-foreground";
 const COMPOSER_CHIP_OPEN: &str = "transition bg-foreground/[0.12] text-foreground";
-const COMPOSER_CHIP_SKELETON: &str = "h-7 shrink-0 rounded-lg bg-foreground/[0.06]";
+const COMPOSER_CHIP_SKELETON: &str = "h-2.5 rounded bg-muted-foreground/15";
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ComposerBarProps {
@@ -401,8 +401,20 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
 fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> Element {
     if chip.loading {
         let width = kind.skeleton_width();
+        let label_class = cn([COMPOSER_CHIP_SKELETON, COMPOSER_CHIP_LABEL_TIGHT, width]);
         return rsx! {
-            Skeleton { class: cn([COMPOSER_CHIP_SKELETON, width]) }
+            span { class: COMPOSER_CHIP,
+                ComposerChipIcon { kind }
+                Skeleton { class: label_class }
+                svg {
+                    class: "h-3 w-3 shrink-0 opacity-50",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    path { d: "m8 10 4 4 4-4" }
+                }
+            }
         };
     }
     let label_class = kind.label_class();
@@ -648,12 +660,12 @@ pub enum ComposerMenuKind {
 impl ComposerMenuKind {
     fn skeleton_width(self) -> &'static str {
         match self {
-            Self::Agent => "w-24",
-            Self::Model => "w-28",
-            Self::Effort => "w-20",
-            Self::Permission => "w-24",
-            Self::Project => "w-24",
-            Self::Branch => "w-20",
+            Self::Agent => "w-12",
+            Self::Model => "w-16",
+            Self::Effort => "w-12",
+            Self::Permission => "w-16",
+            Self::Project => "w-16",
+            Self::Branch => "w-12",
         }
     }
 

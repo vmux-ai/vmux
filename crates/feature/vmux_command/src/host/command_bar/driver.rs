@@ -381,7 +381,7 @@ impl Composer {
         };
 
         CommandPaletteComposer {
-            loading: state.pages.is_empty(),
+            loading: state.pages.is_empty() && state.commands.is_empty(),
             agents,
             agent_title,
             agent_url,
@@ -831,6 +831,23 @@ mod tests {
         assert!(bar.prompt_targets.is_empty());
         assert!(bar.default_target.is_none());
         assert!(!bar.start_prompt_mode);
+        assert_eq!(bar.composer.agent_title, "Agent");
+    }
+
+    #[test]
+    fn a_loaded_palette_without_agents_does_not_stay_loading() {
+        let state = CommandBarOpenEvent {
+            commands: vec![CommandBarCommandEntry {
+                id: "settings".into(),
+                name: "Settings".into(),
+                shortcut: String::new(),
+            }],
+            ..CommandBarOpenEvent::default()
+        };
+
+        let bar = PaletteState::start(&state, PaletteDraft::default());
+
+        assert!(!bar.composer.loading);
         assert_eq!(bar.composer.agent_title, "Agent");
     }
 
