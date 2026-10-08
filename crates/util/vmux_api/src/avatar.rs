@@ -69,7 +69,7 @@ impl AvatarSpec {
             return Some("#10a37f");
         }
         if segment.contains("vibe") {
-            return Some("#7c3aed");
+            return Some("#ff7000");
         }
         None
     }
@@ -87,8 +87,8 @@ mod tests {
         assert_eq!(AvatarSpec::agent_color("Claude Agent"), "#d97757");
         assert_eq!(AvatarSpec::agent_color("codex"), "#10a37f");
         assert_eq!(AvatarSpec::agent_color("codex-acp"), "#10a37f");
-        assert_eq!(AvatarSpec::agent_color("vibe"), "#7c3aed");
-        assert_eq!(AvatarSpec::agent_color("Mistral Vibe"), "#7c3aed");
+        assert_eq!(AvatarSpec::agent_color("vibe"), "#ff7000");
+        assert_eq!(AvatarSpec::agent_color("Mistral Vibe"), "#ff7000");
     }
 
     #[test]
