@@ -3,6 +3,7 @@
         (
             url: "vmux://sessions/",
             title: "Sessions",
+            bookmark: Some(15),
             owns_subtree: true,
             reports_title: true,
             placement: Some((

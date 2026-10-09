@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarResultItem, CommandBarSection};
 use vmux_ui::cn::cn;
+use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::favicon::Favicon;
@@ -90,6 +91,22 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
             }
         };
     }
+    if AgentRow::matches(&item.url) {
+        let icon = if item.favicon_url.is_empty() {
+            item.icon.favicon_url().to_string()
+        } else {
+            item.favicon_url.clone()
+        };
+        return rsx! {
+            AgentThumbnail {
+                src: (!icon.is_empty()).then_some(icon),
+                seed: item.title.clone(),
+                background: String::new(),
+                alt: item.title,
+                class: "mt-0.5 h-4 w-4 text-[5px]",
+            }
+        };
+    }
     if !item.favicon_url.is_empty() {
         return rsx! {
             Favicon {
@@ -115,6 +132,24 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
     }
     rsx! {
         span { class: "mt-0.5 shrink-0 font-mono text-sm text-muted-foreground", "{item.leading}" }
+    }
+}
+
+struct AgentRow;
+
+impl AgentRow {
+    fn matches(url: &str) -> bool {
+        let Some(route) = vmux_api::VmuxRoute::parse(url) else {
+            return false;
+        };
+        if !route.is_agent() {
+            return false;
+        }
+        let Some(query) = route.query() else {
+            return false;
+        };
+        url::form_urlencoded::parse(query.as_bytes())
+            .any(|(key, value)| key == "agent" && !value.is_empty())
     }
 }
 
