@@ -4,15 +4,15 @@ use std::rc::Rc;
 use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
-use vmux_chat::event::{
+use vmux_session::event::{
     ChatApproval, ChatCancel, ChatComposerEffect, ChatDraftChanged, ChatEscape,
     ChatRemoveAttachment, ChatStop, ChatSubmit, SelectModel, SetAgentEffort,
 };
-use vmux_chat::host::{
+use vmux_session::host::{
     Attach, Attachments, Browsed, Conversation, Models, PublishComposerEffect, RemoveAttachment,
     Reported, RepublishChatUiState, Submitted,
 };
-use vmux_chat::state::ChatUiState;
+use vmux_session::state::ChatUiState;
 use vmux_start::roster::RepublishLauncher;
 use vmux_team::roster::{Members, RepublishTeam};
 

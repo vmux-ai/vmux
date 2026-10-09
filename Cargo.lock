@@ -10146,7 +10146,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vmux_agent"
+name = "vmux_acp"
 version = "0.0.35"
 dependencies = [
  "agent-client-protocol",
@@ -10161,6 +10161,7 @@ dependencies = [
  "futures-lite",
  "image",
  "mockito",
+ "moonshine-save",
  "notify",
  "reqwest",
  "rfd 0.15.4",
@@ -10177,7 +10178,6 @@ dependencies = [
  "url",
  "uuid",
  "vmux_api",
- "vmux_chat",
  "vmux_command",
  "vmux_ecs",
  "vmux_editor",
@@ -10221,10 +10221,9 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "vmux_agent",
+ "vmux_acp",
  "vmux_bookmark",
  "vmux_browser",
- "vmux_chat",
  "vmux_command",
  "vmux_ecs",
  "vmux_editor",
@@ -10314,40 +10313,6 @@ dependencies = [
  "vmux_ui",
  "wry",
  "zip",
-]
-
-[[package]]
-name = "vmux_chat"
-version = "0.0.35"
-dependencies = [
- "base64 0.22.1",
- "bevy",
- "bevy_app",
- "bevy_cef",
- "bevy_ecs",
- "chrono",
- "dioxus",
- "dioxus-primitives",
- "futures-lite",
- "image",
- "pulldown-cmark",
- "rfd 0.15.4",
- "rkyv",
- "serde",
- "serde_json",
- "similar",
- "unicode-segmentation",
- "uuid",
- "vmux_api",
- "vmux_clipboard",
- "vmux_command",
- "vmux_ecs",
- "vmux_git",
- "vmux_layout",
- "vmux_page",
- "vmux_session",
- "vmux_tool",
- "vmux_ui",
 ]
 
 [[package]]
@@ -10445,7 +10410,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon 0.24.0",
  "url",
- "vmux_agent",
+ "vmux_acp",
  "vmux_api",
  "vmux_app",
  "vmux_browser",
@@ -10782,7 +10747,6 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_app",
- "vmux_chat",
  "vmux_ecs",
  "vmux_path",
  "vmux_session",
@@ -10909,7 +10873,6 @@ dependencies = [
  "vmux_path",
  "vmux_process",
  "vmux_profile",
- "vmux_session",
  "vmux_transport",
 ]
 
@@ -10917,20 +10880,37 @@ dependencies = [
 name = "vmux_session"
 version = "0.0.35"
 dependencies = [
+ "base64 0.22.1",
+ "bevy",
  "bevy_app",
+ "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",
+ "chrono",
+ "dioxus",
+ "dioxus-primitives",
+ "futures-lite",
+ "image",
  "moonshine-save",
  "percent-encoding",
+ "pulldown-cmark",
+ "rfd 0.15.4",
  "rkyv",
  "ron 0.12.1",
  "serde",
  "serde_json",
+ "similar",
  "unicode-segmentation",
  "url",
  "uuid",
  "vmux_api",
+ "vmux_clipboard",
+ "vmux_command",
  "vmux_ecs",
+ "vmux_git",
+ "vmux_page",
+ "vmux_tool",
+ "vmux_ui",
 ]
 
 [[package]]
@@ -11024,7 +11004,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vmux_api",
- "vmux_chat",
  "vmux_command",
  "vmux_ecs",
  "vmux_flex",

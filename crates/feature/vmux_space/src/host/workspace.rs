@@ -4,8 +4,6 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::UiInput;
 use vmux_api::protocol::ClientMessage;
-use vmux_chat::event::ChatChoiceSelected;
-use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_command::{ResolvedLocale, WriteCommandRequests};
 #[cfg(test)]
 use vmux_ecs::ProcessAnchor;
@@ -17,6 +15,8 @@ use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktre
 use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
 };
+use vmux_session::event::ChatChoiceSelected;
+use vmux_session::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_session::{Session, SessionId};
 use vmux_ui::i18n::Locale;
 

@@ -219,12 +219,12 @@ fn project(
 #[cfg(all(test, host))]
 mod tests {
     use super::*;
-    use crate::{CreateRequest, RenameRequest, SessionPlugin};
+    use crate::{CreateRequest, DomainPlugin, RenameRequest};
 
     #[test]
     fn catalog_tracks_session_metadata() {
         let mut app = App::new();
-        app.add_plugins(SessionPlugin);
+        app.add_plugins(DomainPlugin);
         let request = CreateRequest::new("Task", "Description", "/tmp/project".into(), None);
         let id = request.id().clone();
         app.world_mut()

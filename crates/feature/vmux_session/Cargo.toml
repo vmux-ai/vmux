@@ -1,10 +1,33 @@
 [package]
 name = "vmux_session"
 build = "../../build_cfg.rs"
-description = "Render-free ECS model of a canonical session"
+description = "Canonical session model, lifecycle, and UI"
 version.workspace = true
 edition.workspace = true
 publish = false
+
+[features]
+default = ["app"]
+app = [
+    "dep:base64",
+    "dep:bevy",
+    "dep:bevy_cef",
+    "dep:chrono",
+    "dep:dioxus",
+    "dep:dioxus-primitives",
+    "dep:futures-lite",
+    "dep:image",
+    "dep:pulldown-cmark",
+    "dep:rfd",
+    "dep:similar",
+    "dep:vmux_clipboard",
+    "dep:vmux_command",
+    "dep:vmux_git",
+    "dep:vmux_page",
+    "dep:vmux_tool",
+    "dep:vmux_ui",
+    "vmux_ecs/host",
+]
 
 [lib]
 path = "src/lib.rs"
@@ -13,17 +36,43 @@ path = "src/lib.rs"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
+chrono = { workspace = true, optional = true }
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+], optional = true }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = false, optional = true }
+pulldown-cmark = { version = "0.12", default-features = false, features = [
+    "html",
+], optional = true }
 moonshine-save = { workspace = true }
 percent-encoding = "2"
 ron = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+similar = { version = "2", optional = true }
 unicode-segmentation = "1"
 url = { workspace = true }
 uuid = { workspace = true }
-vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 vmux_ecs = { path = "../../util/vmux_ecs", default-features = false }
+vmux_command = { path = "../vmux_command", optional = true }
+vmux_page = { path = "../../util/vmux_page", optional = true }
+vmux_ui = { path = "../../util/vmux_ui", optional = true }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+base64 = { version = "0.22", optional = true }
+bevy = { workspace = true, optional = true }
+bevy_cef = { workspace = true, optional = true }
+futures-lite = { version = "2", optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff"], optional = true }
+rfd = { workspace = true, optional = true }
+vmux_clipboard = { path = "../../util/vmux_clipboard", optional = true }
+vmux_git = { path = "../vmux_git", optional = true }
+vmux_tool = { path = "../vmux_tool", optional = true }
 
 [lints]
 workspace = true

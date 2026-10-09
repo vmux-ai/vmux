@@ -26,7 +26,6 @@ impl Plugin for EntityPlugin {
         app.register_persisted::<Session>()
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
-            .register_persisted::<AcpSessionId>()
             .register_persisted::<LocalTask>()
             .add_message::<CreateRequest>()
             .add_message::<CleanupRequest>()
@@ -82,14 +81,6 @@ pub struct Session;
 #[require(Save)]
 #[type_path = "vmux_session"]
 pub struct AgentId(pub String);
-
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct AcpSessionId(pub String);
 
 #[derive(
     Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
@@ -547,16 +538,15 @@ mod tests {
     }
 
     #[test]
-    fn session_plugin_registers_its_durable_components() {
+    fn domain_plugin_registers_its_durable_components() {
         let mut app = App::new();
-        app.add_plugins(crate::SessionPlugin);
+        app.add_plugins(crate::DomainPlugin);
         let registry = app.world().resource::<AppTypeRegistry>().read();
         let filter = vmux_ecs::persistence::WorkspacePersisted::filter(&registry);
 
         assert!(filter.is_allowed::<Session>());
         assert!(filter.is_allowed::<SessionId>());
         assert!(filter.is_allowed::<AgentId>());
-        assert!(filter.is_allowed::<AcpSessionId>());
         assert!(filter.is_allowed::<LocalTask>());
         assert!(filter.is_allowed::<Stage>());
         assert!(filter.is_allowed::<StageChangedAt>());

@@ -4,10 +4,6 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use super::project::SpaceProjects;
 use super::{AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch};
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
-use vmux_chat::event::{
-    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
-};
-use vmux_chat::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
 use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 use vmux_ecs::event::ProjectRow;
 use vmux_ecs::page::PageReady;
@@ -15,6 +11,10 @@ use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
 use vmux_git::RepoInfoCache;
 use vmux_git::worktree::RepoInfo;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+use vmux_session::event::{
+    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
+};
+use vmux_session::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
 use vmux_session::{ApprovalPolicy, Session};
 
 use bevy::tasks::futures_lite::future;
@@ -137,7 +137,7 @@ fn push_context_to_page(
         }
         if changed || ready.is_changed() {
             commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
                     webview, &context,
                 ),
             );
@@ -212,7 +212,10 @@ fn chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(webview, &projection.0),
+        vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
     );
     let root = std::path::PathBuf::from(&project);
     let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
@@ -267,7 +270,7 @@ fn drain_branch_reads(
             continue;
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
                 read.webview,
                 &projection.0,
             ),

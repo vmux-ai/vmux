@@ -1,0 +1,127 @@
+[package]
+name = "vmux_acp"
+build = "../../build_cfg.rs"
+description = "Agent Client Protocol runtime integration"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = ["app"]
+service = [
+    "dep:agent-client-protocol",
+    "dep:base64",
+    "dep:bevy",
+    "dep:bevy_ecs",
+    "dep:image",
+    "dep:tempfile",
+    "dep:tokio",
+    "dep:tokio-util",
+    "dep:tracing",
+    "dep:url",
+    "dep:vmux_ecs",
+    "dep:vmux_path",
+    "dep:vmux_process",
+    "dep:vmux_session",
+    "dep:vmux_transport",
+]
+app = [
+    "dep:base64",
+    "dep:bevy",
+    "dep:bevy_cef",
+    "dep:bevy_ecs",
+    "dep:bevy_reflect",
+    "dep:chrono",
+    "dep:crossbeam-channel",
+    "dep:dioxus",
+    "dep:futures-lite",
+    "dep:image",
+    "dep:moonshine-save",
+    "dep:notify",
+    "dep:rfd",
+    "dep:reqwest",
+    "dep:ron",
+    "dep:tempfile",
+    "dep:tokio",
+    "dep:toml",
+    "dep:url",
+    "dep:uuid",
+    "dep:vmux_command",
+    "dep:vmux_ecs",
+    "dep:vmux_editor",
+    "dep:vmux_git",
+    "dep:vmux_layout",
+    "dep:vmux_mcp",
+    "dep:vmux_path",
+    "dep:vmux_session",
+    "dep:vmux_setting",
+    "dep:vmux_space",
+    "dep:vmux_start",
+    "dep:vmux_terminal",
+    "dep:vmux_team",
+    "dep:vmux_tool",
+    "dep:vmux_ui",
+    "vmux_session/app",
+]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rkyv = { workspace = true }
+vmux_api = { path = "../../util/vmux_api" }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = true }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+vmux_command = { path = "../vmux_command", optional = true }
+agent-client-protocol = { version = "1.0.1", optional = true }
+base64 = { version = "0.22", optional = true }
+bevy = { workspace = true, optional = true }
+bevy_cef = { workspace = true, optional = true }
+bevy_ecs = { workspace = true, optional = true }
+bevy_reflect = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+notify = { workspace = true, optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"], optional = true }
+rfd = { workspace = true, optional = true }
+ron = { workspace = true, optional = true }
+crossbeam-channel = { version = "0.5", optional = true }
+futures-lite = { version = "2", optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff"], optional = true }
+moonshine-save = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["io-util", "process", "rt"], optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
+tracing = { version = "0.1", optional = true }
+toml = { workspace = true, optional = true }
+tempfile = { version = "3", optional = true }
+uuid = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
+vmux_editor = { path = "../vmux_editor", optional = true }
+vmux_git = { path = "../vmux_git", optional = true }
+vmux_layout = { path = "../vmux_layout", optional = true }
+vmux_start = { path = "../vmux_start", optional = true }
+vmux_mcp = { path = "../../util/vmux_mcp", optional = true }
+vmux_path = { path = "../../util/vmux_path", optional = true }
+vmux_process = { path = "../../util/vmux_process", optional = true }
+vmux_transport = { path = "../../util/vmux_transport", optional = true }
+vmux_session = { path = "../vmux_session", default-features = false, optional = true }
+vmux_setting = { path = "../vmux_setting", optional = true }
+vmux_space = { path = "../vmux_space", optional = true }
+vmux_terminal = { path = "../vmux_terminal", optional = true }
+vmux_team = { path = "../vmux_team", optional = true }
+vmux_tool = { path = "../vmux_tool", optional = true }
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+dioxus = { workspace = true, optional = true }
+
+[dev-dependencies]
+mockito = "1"
+serial_test = "3"
+tokio = { workspace = true, features = ["rt", "macros"] }
+vmux_process = { path = "../../util/vmux_process", features = ["test-support"] }
+
+[lints]
+workspace = true
