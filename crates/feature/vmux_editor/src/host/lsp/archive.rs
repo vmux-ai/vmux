@@ -16,6 +16,11 @@ struct ArchivePath(PathBuf);
 
 impl ArchivePath {
     fn parse(path: &Path) -> Result<Self, String> {
+        Self::parse_optional(path)?
+            .ok_or_else(|| format!("unsafe archive path: {}", path.display()))
+    }
+
+    fn parse_optional(path: &Path) -> Result<Option<Self>, String> {
         let mut relative = PathBuf::new();
         for component in path.components() {
             match component {
@@ -25,9 +30,9 @@ impl ArchivePath {
             }
         }
         if relative.as_os_str().is_empty() {
-            return Err(format!("unsafe archive path: {}", path.display()));
+            return Ok(None);
         }
-        Ok(Self(relative))
+        Ok(Some(Self(relative)))
     }
 
     fn join(&self, destination: &Path) -> PathBuf {
@@ -122,8 +127,14 @@ impl ArchiveKind {
             }
             let mut entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path().map_err(|error| error.to_string())?;
-            let output = ArchivePath::parse(&path)?.join(destination);
             let kind = entry.header().entry_type();
+            let Some(relative) = ArchivePath::parse_optional(&path)? else {
+                if kind.is_dir() {
+                    continue;
+                }
+                return Err(format!("unsafe archive path: {}", path.display()));
+            };
+            let output = relative.join(destination);
             if kind.is_symlink() || kind.is_hard_link() {
                 continue;
             }
@@ -230,6 +241,43 @@ mod tests {
         let dest = tmp.path().join("out");
         ArchiveKind::Zip.extract(&zip_path, &dest, "_").unwrap();
         assert_eq!(std::fs::read(dest.join("inner.txt")).unwrap(), b"zipped");
+    }
+
+    #[test]
+    fn extracts_tar_gz_with_root_directory_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tar_path = tmp.path().join("agent.tar.gz");
+        {
+            let file = std::fs::File::create(&tar_path).unwrap();
+            let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            let mut builder = tar::Builder::new(encoder);
+
+            let mut root = tar::Header::new_gnu();
+            root.set_entry_type(tar::EntryType::Directory);
+            root.set_mode(0o755);
+            root.set_size(0);
+            root.set_cksum();
+            builder
+                .append_data(&mut root, "./", std::io::empty())
+                .unwrap();
+
+            let payload = b"agent-binary";
+            let mut executable = tar::Header::new_gnu();
+            executable.set_entry_type(tar::EntryType::Regular);
+            executable.set_mode(0o755);
+            executable.set_size(payload.len() as u64);
+            executable.set_cksum();
+            builder
+                .append_data(&mut executable, "./vibe-acp", payload.as_slice())
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let dest = tmp.path().join("out");
+        ArchiveKind::TarGz.extract(&tar_path, &dest, "_").unwrap();
+        assert_eq!(
+            std::fs::read(dest.join("vibe-acp")).unwrap(),
+            b"agent-binary"
+        );
     }
 
     #[test]
