@@ -21,6 +21,7 @@ use crate::route::ToolRoute;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "ToolsUiState"],
     subtree
 )]
 pub struct ToolsPage;

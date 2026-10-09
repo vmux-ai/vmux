@@ -20,6 +20,7 @@ use vmux_ui::script::PageScript;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "SimulatorUiState"],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]

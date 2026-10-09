@@ -11,6 +11,7 @@
             permissions: [
                 "PageReady",
                 "ThemeUiState",
+                "TeamUiState",
                 "TeamEvent",
                 "TeamOpenRequest",
                 "TeamMemberFocusRequest",

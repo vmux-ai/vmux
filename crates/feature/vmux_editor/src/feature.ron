@@ -206,6 +206,7 @@
             permissions: [
                 "PageReady",
                 "ThemeUiState",
+                "FileUiState",
                 "KeyContextRequest",
                 "KeyStroke",
                 "KeyClaimsUiState",

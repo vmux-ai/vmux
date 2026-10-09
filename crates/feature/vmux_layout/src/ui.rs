@@ -24,6 +24,13 @@ mod window_drag;
 
 #[vmux_page::page(
     component = Page,
+    states = [
+        "ThemeUiState",
+        "LayoutUiState",
+        "ExtensionsUiState",
+        "CommandBarUiState",
+        "KeyClaimsUiState",
+    ],
     placement = layout,
     transparent,
     stylesheet = "./assets/index.css",

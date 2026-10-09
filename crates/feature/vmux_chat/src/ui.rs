@@ -14,6 +14,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "ChatUiState", "KeyClaimsUiState"],
     subtree,
     preserve_title,
     no_favicon,

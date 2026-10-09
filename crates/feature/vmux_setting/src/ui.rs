@@ -24,7 +24,8 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "SettingsUiState"]
 )]
 pub(crate) struct SettingsPage;
 

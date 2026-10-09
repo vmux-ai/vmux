@@ -17,7 +17,8 @@ use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "SpacesUiState", "KeyClaimsUiState"]
 )]
 pub(crate) struct SpacesPage;
 

@@ -7,7 +7,8 @@ use vmux_ui::hooks::use_theme;
 use vmux_command::{CommandPalette, CommandPaletteSurface, use_command_bar_ui};
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "CommandBarUiState", "KeyClaimsUiState"]
 )]
 pub(crate) struct StartPage;
 
