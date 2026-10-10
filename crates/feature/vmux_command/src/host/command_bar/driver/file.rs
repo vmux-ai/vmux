@@ -7,18 +7,28 @@ pub(crate) struct CompletionQuery;
 
 impl CompletionQuery {
     pub fn parse(input: &str) -> Option<String> {
-        let trimmed = input.trim();
+        let file_only = Self::only_files(input);
+        let mut trimmed = input.trim();
+        if file_only {
+            trimmed = trimmed[1..].trim_start();
+        }
         if let Some(rest) = trimmed.strip_prefix("file://") {
             return Some(rest.to_string());
         }
         if PaletteQuery::new(trimmed).looks_like_path() {
             return Some(trimmed.to_string());
         }
-        if trimmed.is_empty() || trimmed.contains("://") || PaletteQuery::new(trimmed).is_data_uri()
-        {
+        if trimmed.is_empty() {
+            return file_only.then(String::new);
+        }
+        if trimmed.contains("://") || PaletteQuery::new(trimmed).is_data_uri() {
             return None;
         }
         Some(trimmed.to_string())
+    }
+
+    pub fn only_files(input: &str) -> bool {
+        input.trim_start().starts_with('@')
     }
 
     pub fn names_a_file(value: &str) -> bool {

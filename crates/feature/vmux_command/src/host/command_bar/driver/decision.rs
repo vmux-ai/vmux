@@ -11,7 +11,7 @@ use vmux_ui::i18n::translate;
 use crate::CommandPaletteSurface;
 
 use super::results::{CommandBarResultItem, PageRows, PickerRows};
-use super::{Composer, ExLine, Glyph, PaletteDraft, PaletteQuery, PaletteRows};
+use super::{CompletionQuery, Composer, ExLine, Glyph, PaletteDraft, PaletteQuery, PaletteRows};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) enum PaletteDecision {
@@ -366,6 +366,9 @@ impl PaletteState {
         }
         if let Some(item) = self.row(self.selected) {
             return self.activate(item, attachments);
+        }
+        if CompletionQuery::only_files(&self.query) {
+            return PaletteDecision::default();
         }
         if !self.query.is_empty() {
             return PaletteDecision::open(false, &self.query, self.open_target);

@@ -57,6 +57,9 @@ impl PaletteDraft {
         if mode == &PaletteMode::Slash {
             return SlashRows::for_query(query, state.prompt_context.slash_commands.as_slice());
         }
+        if CompletionQuery::only_files(query) {
+            return self.with_completions(Vec::new());
+        }
         if is_start && query.trim().is_empty() {
             return PageRows::open_sessions(&state.tabs, &state.pages);
         }
@@ -113,6 +116,9 @@ impl PaletteDraft {
     }
 
     fn ghost(&self) -> String {
+        if CompletionQuery::only_files(&self.query) {
+            return String::new();
+        }
         if CompletionQuery::parse(&self.query).is_none() {
             return String::new();
         }
@@ -727,6 +733,33 @@ mod tests {
             None
         );
         assert_eq!(CompletionQuery::parse("file://~/x").as_deref(), Some("~/x"));
+        assert_eq!(
+            CompletionQuery::parse("@main.rs").as_deref(),
+            Some("main.rs")
+        );
+        assert_eq!(CompletionQuery::parse("@").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn at_prefix_offers_only_files() {
+        let files = FileRows::hits(&["src/main.rs"]);
+        let palette = PaletteState::modal(
+            &Launcher::state(),
+            PaletteDraft::typed("@main").completing(files),
+        );
+
+        assert!(
+            palette
+                .rows
+                .iter()
+                .all(|row| matches!(row, CommandBarResultItem::File { .. }))
+        );
+        assert_eq!(palette.rows.len(), 1);
+        assert_eq!(
+            PaletteState::modal(&Launcher::state(), PaletteDraft::typed("@missing"))
+                .submit_modal(&[]),
+            PaletteDecision::None
+        );
     }
 
     #[test]
@@ -1100,6 +1133,10 @@ mod tests {
             PaletteQuery::new("how do i").mode(None, &[]),
             PaletteMode::Search
         );
+        assert_eq!(
+            PaletteQuery::new("@main.rs").mode(None, &[]),
+            PaletteMode::Path
+        );
     }
 
     #[test]
@@ -1162,7 +1199,7 @@ mod tests {
 
     #[test]
     fn a_seeded_prefix_is_typed_past_but_a_seeded_url_is_replaced() {
-        for seed in [":", ">", "/"] {
+        for seed in [":", ">", "/", "@"] {
             assert!(
                 PaletteQuery::new(seed).opens_at_end(None),
                 "`{seed}` opens a mode, so the next keystroke must append to it"

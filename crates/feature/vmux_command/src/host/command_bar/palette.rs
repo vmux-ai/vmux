@@ -1,4 +1,4 @@
-use super::driver::{PaletteDecision, PaletteDraft, PaletteRows, PaletteState};
+use super::driver::{CompletionQuery, PaletteDecision, PaletteDraft, PaletteRows, PaletteState};
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::time::{Duration, Instant};
@@ -763,6 +763,7 @@ fn project(
                         (None, None) => true,
                         _ => false,
                     }
+                    && !CompletionQuery::only_files(&input.result_query)
                     && contribution.matches(&input.result_query)
             })
             .collect::<Vec<_>>();
