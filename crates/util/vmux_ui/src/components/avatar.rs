@@ -88,14 +88,24 @@ pub fn AgentThumbnail(
     #[props(default)] alt: String,
     #[props(default)] class: String,
 ) -> Element {
-    let background = if background.trim().is_empty() {
-        vmux_api::avatar::AvatarSpec::agent_color(&seed)
-    } else {
-        background
-    };
+    let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
     let class = cn([AGENT_THUMBNAIL, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
+    }
+}
+
+struct AgentThumbnailBackground;
+
+impl AgentThumbnailBackground {
+    fn resolve(background: &str, seed: &str, src: Option<&str>) -> String {
+        if !background.trim().is_empty() {
+            return background.to_string();
+        }
+        if let Some(color) = src.and_then(vmux_api::avatar::AvatarSpec::brand_color) {
+            return color.to_string();
+        }
+        vmux_api::avatar::AvatarSpec::agent_color(seed)
     }
 }
 
@@ -223,7 +233,23 @@ impl AvatarRandom {
 
 #[cfg(test)]
 mod tests {
-    use super::GeneratedAvatar;
+    use super::{AgentThumbnailBackground, GeneratedAvatar};
+
+    #[test]
+    fn agent_thumbnail_uses_the_brand_in_its_icon_url_before_the_page_title() {
+        assert_eq!(
+            AgentThumbnailBackground::resolve(
+                "",
+                "hey",
+                Some("https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg")
+            ),
+            "#ff7000"
+        );
+        assert_eq!(
+            AgentThumbnailBackground::resolve("#123456", "hey", Some("mistral-vibe.svg")),
+            "#123456"
+        );
+    }
 
     #[test]
     fn generated_avatar_is_stable_for_a_profile() {

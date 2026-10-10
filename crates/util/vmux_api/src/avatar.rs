@@ -27,10 +27,24 @@ impl AvatarSpec {
     }
 
     pub fn agent_color(segment: &str) -> String {
-        match Self::agent_segment_color(segment) {
+        match Self::brand_color(segment) {
             Some(color) => color.to_string(),
             None => Self::color(segment),
         }
+    }
+
+    pub fn brand_color(segment: &str) -> Option<&'static str> {
+        let segment = segment.to_ascii_lowercase();
+        if segment.contains("claude") {
+            return Some("#d97757");
+        }
+        if segment.contains("codex") {
+            return Some("#10a37f");
+        }
+        if segment.contains("mistral") || segment.contains("vibe") {
+            return Some("#ff7000");
+        }
+        None
     }
 
     pub fn initials(name: &str) -> String {
@@ -59,20 +73,6 @@ impl AvatarSpec {
         }
         PALETTE[(hash % PALETTE.len() as u64) as usize].to_string()
     }
-
-    fn agent_segment_color(segment: &str) -> Option<&'static str> {
-        let segment = segment.to_ascii_lowercase();
-        if segment.contains("claude") {
-            return Some("#d97757");
-        }
-        if segment.contains("codex") {
-            return Some("#10a37f");
-        }
-        if segment.contains("mistral") || segment.contains("vibe") {
-            return Some("#ff7000");
-        }
-        None
-    }
 }
 
 const USER_COLOR: &str = "#3b82f6";
@@ -97,6 +97,6 @@ mod tests {
         let first = AvatarSpec::agent_color("some-acp-agent");
         assert_eq!(first, AvatarSpec::agent_color("some-acp-agent"));
         assert_ne!(first, AvatarSpec::agent_color("another-acp-agent"));
-        assert!(AvatarSpec::agent_segment_color("some-acp-agent").is_none());
+        assert!(AvatarSpec::brand_color("some-acp-agent").is_none());
     }
 }
