@@ -914,7 +914,7 @@ components, validate typed arguments, and produce command or query dispatch.
 Publication and execution query those entities directly; there is no separate runtime registry or
 central function-pointer table. ACP sessions install the same tool plugin into the application's
 world and submit tool-call entities there; they do not maintain a nested or thread-local Bevy app.
-`vmux_agent` carries only the generic ACP and query envelopes. Browser, capture, bookmark, vault,
+`vmux_acp` carries only the ACP and query envelopes. Browser, capture, bookmark, vault,
 simulator, and other feature plugins decode their own query contracts, emit their own ECS requests,
 and map their results back to the service boundary. Feature-specific agent instructions and
 disabled skill roots are components registered by those same plugins. ACP and CLI launch boundaries
@@ -983,8 +983,7 @@ crates/
 │   ├── vmux_desktop
 │   └── vmux_mobile
 ├── feature/                user-facing capability and page ownership
-│   ├── vmux_agent
-│   ├── vmux_chat
+│   ├── vmux_acp
 │   ├── vmux_command
 │   ├── vmux_editor
 │   ├── vmux_extension
@@ -993,6 +992,7 @@ crates/
 │   ├── vmux_knowledge
 │   ├── vmux_layout
 │   ├── vmux_service
+│   ├── vmux_session
 │   ├── vmux_setting
 │   ├── vmux_shortcut
 │   ├── vmux_simulator
@@ -1014,7 +1014,6 @@ crates/
     ├── vmux_native         the VirtualDom driver and its wry webview
     ├── vmux_path           canonical and scoped path identities
     ├── vmux_profile
-    ├── vmux_session
     ├── vmux_transport
     └── vmux_ui
 ```
@@ -1026,23 +1025,34 @@ code and has no directory counterpart.
 
 Agent requests follow the same boundary. `#[vmux_api::agent]` generates only the opaque contract
 for the type declared in a feature crate. That feature owns its manifest, registration, ECS routing,
-handling, and result projection. `vmux_agent`, `vmux_mcp`, and `vmux_tool` transport and dispatch
+handling, and result projection. `vmux_acp`, `vmux_mcp`, and `vmux_tool` transport and dispatch
 opaque requests; they never enumerate browser, simulator, vault, layout, or other feature requests.
 Only the application composition root knows which feature plugins are installed.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
 
-`vmux_agent` owns session, runtime, and orchestration ECS. `vmux_chat` owns reusable chat state
-and Dioxus UI. Shared transcript grouping and projection live in `vmux_ecs`; neither feature
-reaches through the other's internals or through `vmux_service` for reusable chat behavior.
-The service carries serialized agent protocol messages and runs persistent daemon sessions;
-`vmux_agent` owns the client-host Bevy messages produced when those wire messages enter ECS.
+`vmux_session` owns the durable unit of work: one canonical Session entity with its stable ID,
+task metadata, working directory, data-driven stage, conversation-event children, optional agent
+identity, and the derived Session catalog. Session creation generates its ID inside the typed
+request and emits a typed creation event before navigation. Layout Stacks reference the Session
+entity and may close without deleting it. `vmux://sessions/` opens the manager;
+`vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
+identity. Session IDs are encoded as one URL path segment.
+
+`vmux_acp` attaches transient runtime and ACP capability state to Session entities and owns the
+provider-owned `AcpSessionId`, its persistence, and the single runtime detach path used by cleanup
+and agent replacement. `vmux_session` renders the
+Sessions page and Dioxus conversation UI. A dedicated manager-view marker is the authorization and
+publication boundary for Session catalog and mutation UI events; Session detail views receive only
+their bound Session state. The service carries serialized agent protocol messages and runs
+persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
+wire messages enter ECS.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
 `vmux_ecs` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,
 operation sequencing, and built-in Homebrew, NPM, MCP, and dotfile providers. Feature crates
-register their own provider entities, such as ACP in `vmux_agent` and LSP in `vmux_editor`;
+register their own provider entities, such as ACP in `vmux_acp` and LSP in `vmux_editor`;
 application crates only compose plugins. `vmux_path` gives filesystem boundaries one shared
 identity rule and rejects scoped paths that traverse or resolve outside their root.
 

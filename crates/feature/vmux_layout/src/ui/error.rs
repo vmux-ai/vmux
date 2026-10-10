@@ -8,6 +8,7 @@ use vmux_ui::i18n::translate;
 #[vmux_page::page(
     page = "error",
     component = Page,
+    states = ["ThemeUiState"],
     takes = vmux_api::error::ErrorPageData
 )]
 pub struct ErrorPage;

@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_ecs::event::{ProjectRow, ProjectTreeToggle};
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::icon::Icon;
@@ -22,12 +22,18 @@ use crate::event::{
 pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
     let ActiveSession {
         page,
+        task,
         agent,
         project,
         boundary,
         pane_id,
     } = session;
-    let title = if page.title.trim().is_empty() {
+    let title = if task
+        .as_ref()
+        .is_some_and(|task| !task.name.trim().is_empty())
+    {
+        task.as_ref().unwrap().name.clone()
+    } else if page.title.trim().is_empty() {
         page.url.clone()
     } else {
         page.title.clone()
@@ -54,13 +60,35 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                 }
                 div { class: "min-w-0 flex-1",
                     div { class: "truncate text-ui font-semibold text-foreground", title: "{title}", "{title}" }
-                    div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                    if let Some(task) = task.as_ref() {
+                        if !task.description.trim().is_empty() {
+                            div { class: "truncate text-[10px] text-muted-foreground", title: "{task.description}", "{task.description}" }
+                        } else {
+                            div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                        }
+                    } else {
+                        div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                    }
                 }
             }
             div { class: "mt-2 flex flex-col gap-1",
+                if let Some(task) = task {
+                    div { class: "flex items-center gap-1.5",
+                        Badge {
+                            class: "rounded-full bg-foreground/[0.05] px-2 py-1 text-[9px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                            {translate(&task.stage_name)}
+                        }
+                        if task.runtime != "inactive" {
+                            span { class: "flex items-center gap-1.5 text-[10px] text-muted-foreground",
+                                StatusDot { status: task.runtime.clone(), size_class: "size-1.5".to_string() }
+                                {session_runtime_label(&task.runtime)}
+                            }
+                        }
+                    }
+                }
                 if let Some(agent) = agent {
                     div { class: "flex min-w-0 items-center gap-2 rounded-md bg-foreground/[0.035] px-2 py-1.5",
-                        Avatar {
+                        AgentThumbnail {
                             src: agent.icon.clone(),
                             seed: agent.name.clone(),
                             background: agent.color.clone(),
@@ -87,6 +115,17 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
             }
         }
     }
+}
+
+fn session_runtime_label(runtime: &str) -> String {
+    let id = match runtime {
+        "idle" => "session-runtime-idle",
+        "streaming" => "session-runtime-streaming",
+        "awaiting" => "session-runtime-awaiting",
+        "errored" => "session-runtime-errored",
+        _ => "session-runtime-inactive",
+    };
+    translate(id)
 }
 
 #[component]

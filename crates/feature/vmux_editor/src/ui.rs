@@ -26,6 +26,7 @@ mod workspace;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
     dom_group = "editor",
     subtree
 )]
@@ -34,6 +35,7 @@ pub(crate) struct FilePage;
 #[vmux_page::page(
     page = "projects",
     component = Page,
+    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
     dom_group = "editor",
     subtree
 )]
@@ -42,6 +44,7 @@ pub(crate) struct ProjectsPage;
 #[vmux_page::page(
     file = "../vmux_knowledge/src/feature.ron",
     component = Page,
+    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
     dom_group = "editor",
     subtree
 )]

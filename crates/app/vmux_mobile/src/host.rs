@@ -4,15 +4,15 @@ use std::rc::Rc;
 use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
-use vmux_chat::event::{
+use vmux_session::event::{
     ChatApproval, ChatCancel, ChatComposerEffect, ChatDraftChanged, ChatEscape,
     ChatRemoveAttachment, ChatStop, ChatSubmit, SelectModel, SetAgentEffort,
 };
-use vmux_chat::host::{
+use vmux_session::host::{
     Attach, Attachments, Browsed, Conversation, Models, PublishComposerEffect, RemoveAttachment,
     Reported, RepublishChatUiState, Submitted,
 };
-use vmux_chat::state::ChatUiState;
+use vmux_session::state::ChatUiState;
 use vmux_start::roster::RepublishLauncher;
 use vmux_team::roster::{Members, RepublishTeam};
 
@@ -24,11 +24,11 @@ use vmux_api::command_bar::{
     OpenRequest as CommandBarOpenRequest, PickRequest as CommandBarPickRequest,
     PromptRequest as CommandBarPromptRequest, SwitchTabRequest,
 };
-use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
-use vmux_api::room::{
+use vmux_api::conversation::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
+use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
 use vmux_api::team::TeamUiState;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};

@@ -1,12 +1,14 @@
-use super::driver::{PaletteDecision, PaletteDraft, PaletteRows, PaletteState};
+use super::driver::{CompletionQuery, PaletteDecision, PaletteDraft, PaletteRows, PaletteState};
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use std::time::{Duration, Instant};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
     CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
     CommandPaletteRemoveAttachmentRequest, CommandPaletteSubmitRequest, CommandPaletteUiState,
     OpenId,
 };
+use vmux_api::prompt_media::ChatAttachPaths;
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged, HostsLauncher,
@@ -32,6 +34,8 @@ mod prompt_driver;
 mod request_driver;
 mod search;
 mod search_driver;
+
+const START_RESULTS_DEBOUNCE: Duration = Duration::from_millis(120);
 
 pub(super) struct PalettePlugin;
 
@@ -70,7 +74,11 @@ impl Plugin for PalettePlugin {
             .add_observer(dismiss)
             .add_observer(submit)
             .add_systems(PreUpdate, (attach, detach))
-            .add_systems(PostUpdate, (query, rows, project, publish).chain())
+            .add_systems(Update, settle_results)
+            .add_systems(
+                PostUpdate,
+                (query, queue_results, rows, project, publish).chain(),
+            )
             .add_systems(Last, wake);
     }
 }
@@ -91,6 +99,7 @@ struct PaletteContext {
 
 #[derive(Component, Default)]
 struct PaletteDraftInput {
+    initialized: bool,
     open_id: OpenId,
     query: String,
     start: bool,
@@ -101,6 +110,54 @@ struct PaletteDraftInput {
     close_revision: u64,
     history_cursor: Option<usize>,
     history_scratch: String,
+    result_query: String,
+    result_pending: Option<String>,
+    result_due: Option<Instant>,
+}
+
+impl PaletteDraftInput {
+    fn replace_query(&mut self, query: &str) {
+        self.query.clear();
+        self.query.push_str(query);
+        self.selected = 0;
+        self.navigating = false;
+        self.input_revision = self.input_revision.wrapping_add(1).max(1);
+    }
+
+    fn synchronize_results(&mut self, now: Instant) {
+        if !self.start {
+            self.result_query.clone_from(&self.query);
+            self.result_pending = None;
+            self.result_due = None;
+            return;
+        }
+        if self.result_query == self.query {
+            self.result_pending = None;
+            self.result_due = None;
+            return;
+        }
+        if self.result_pending.as_ref() == Some(&self.query) {
+            return;
+        }
+        self.result_pending = Some(self.query.clone());
+        self.result_due = Some(now + START_RESULTS_DEBOUNCE);
+    }
+
+    fn settle_results(&mut self, now: Instant) -> bool {
+        let Some(due) = self.result_due else {
+            return false;
+        };
+        if now < due {
+            return false;
+        }
+        let Some(query) = self.result_pending.take() else {
+            self.result_due = None;
+            return false;
+        };
+        self.result_query = query;
+        self.result_due = None;
+        true
+    }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -203,11 +260,15 @@ fn open(
         return;
     };
     current.0.clone_from(opened);
-    if draft.open_id == opened.open_id {
+    if draft.initialized && draft.open_id == opened.open_id {
         return;
     }
+    draft.initialized = true;
     draft.open_id = opened.open_id;
     draft.query.clone_from(&opened.url);
+    draft.result_query.clone_from(&opened.url);
+    draft.result_pending = None;
+    draft.result_due = None;
     draft.target_url.clear();
     draft.selected = 0;
     draft.navigating = false;
@@ -444,20 +505,28 @@ fn apply(
         && let Ok(mut input) = inputs.get_mut(target)
     {
         input.close_revision = input.close_revision.wrapping_add(1).max(1);
+        commands.trigger(CommandBarDismiss::new(target, true));
     }
     match decision {
         PaletteDecision::None => {}
-        PaletteDecision::Close => {
-            commands.trigger(CommandBarDismiss::new(target, true));
-        }
+        PaletteDecision::Close => {}
         PaletteDecision::Retype(query) => {
             let Ok(mut input) = inputs.get_mut(target) else {
                 return;
             };
-            input.query.clone_from(query);
-            input.selected = 0;
-            input.navigating = false;
-            input.input_revision = input.input_revision.wrapping_add(1).max(1);
+            input.replace_query(query);
+        }
+        PaletteDecision::Attach(path) => {
+            let Ok(mut input) = inputs.get_mut(target) else {
+                return;
+            };
+            input.replace_query("");
+            commands.trigger(UiInput {
+                webview: target,
+                payload: ChatAttachPaths {
+                    paths: vec![path.clone()],
+                },
+            });
         }
         PaletteDecision::Prompt { request, .. } => {
             commands.trigger(UiInput {
@@ -639,7 +708,7 @@ fn rows(
             continue;
         }
         let draft = PaletteDraft {
-            query: input.query.clone(),
+            query: input.result_query.clone(),
             selected: input.selected,
             nav_mode: input.navigating,
             target_url: input.target_url.clone(),
@@ -712,7 +781,8 @@ fn project(
                         (None, None) => true,
                         _ => false,
                     }
-                    && contribution.matches(&input.query)
+                    && !CompletionQuery::only_files(&input.result_query)
+                    && contribution.matches(&input.result_query)
             })
             .collect::<Vec<_>>();
         contributed.sort_by(|(left_entity, left, _), (right_entity, right, _)| {
@@ -828,11 +898,29 @@ fn detach(pages: Query<Entity, DetachedPalette>, mut commands: Commands) {
 #[derive(Component)]
 struct PendingPaletteRequest;
 
+fn queue_results(mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>) {
+    let now = Instant::now();
+    for (opened, mut input) in &mut palettes {
+        if input.open_id != opened.0.open_id {
+            continue;
+        }
+        input.synchronize_results(now);
+    }
+}
+
+fn settle_results(mut palettes: Query<&mut PaletteDraftInput>) {
+    let now = Instant::now();
+    for mut input in &mut palettes {
+        input.settle_results(now);
+    }
+}
+
 fn wake(
     pending: Query<(), With<PendingPaletteRequest>>,
+    inputs: Query<&PaletteDraftInput>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
-    if pending.is_empty() {
+    if pending.is_empty() && !inputs.iter().any(|input| input.result_due.is_some()) {
         return;
     }
     let Some(proxy) = proxy else {
@@ -845,10 +933,16 @@ fn wake(
 mod tests {
     use super::*;
     use crate::CommandInvocation;
-    use vmux_api::command_bar::{CommandBarCommandEntry, InvokeRequest};
+    use vmux_api::command_bar::{CommandBarCommandEntry, CommandBarPage, InvokeRequest};
 
     #[derive(Component, Default)]
     struct CapturedInvocations(Vec<InvokeRequest>);
+
+    #[derive(Component, Default)]
+    struct CapturedDismissals(u32);
+
+    #[derive(Component, Default)]
+    struct CapturedAttachments(Vec<Vec<String>>);
 
     fn capture_invocation(
         trigger: On<UiInput<InvokeRequest>>,
@@ -858,6 +952,26 @@ mod tests {
             return;
         };
         captured.0.push(trigger.event().payload.clone());
+    }
+
+    fn capture_dismissal(
+        trigger: On<CommandBarDismiss>,
+        mut captured: Query<&mut CapturedDismissals>,
+    ) {
+        let Ok(mut captured) = captured.get_mut(trigger.event().webview) else {
+            return;
+        };
+        captured.0 += 1;
+    }
+
+    fn capture_attachment(
+        trigger: On<UiInput<ChatAttachPaths>>,
+        mut captured: Query<&mut CapturedAttachments>,
+    ) {
+        let Ok(mut captured) = captured.get_mut(trigger.event().webview) else {
+            return;
+        };
+        captured.0.push(trigger.event().payload.paths.clone());
     }
 
     #[test]
@@ -878,6 +992,78 @@ mod tests {
 
         assert!(!generation.matches(first));
         assert!(generation.matches(second));
+    }
+
+    #[test]
+    fn start_results_wait_for_the_latest_query_to_settle() {
+        let open_id = OpenId(7);
+        let now = Instant::now();
+        let mut input = PaletteDraftInput {
+            open_id,
+            start: true,
+            ..Default::default()
+        };
+
+        input.synchronize_results(now);
+        input.query = "co".to_string();
+        input.synchronize_results(now);
+        input.query = "codex".to_string();
+        input.synchronize_results(now + Duration::from_millis(1));
+
+        assert_eq!(input.result_query, "");
+        assert!(!input.settle_results(now + Duration::from_millis(120)));
+        assert!(input.settle_results(now + Duration::from_millis(121)));
+        assert_eq!(input.result_query, "codex");
+    }
+
+    #[test]
+    fn modal_results_follow_input_without_debounce() {
+        let open_id = OpenId(7);
+        let mut input = PaletteDraftInput {
+            open_id,
+            ..Default::default()
+        };
+
+        input.query = ">close".to_string();
+        input.synchronize_results(Instant::now());
+
+        assert_eq!(input.result_query, ">close");
+        assert!(input.result_pending.is_none());
+    }
+
+    #[test]
+    fn start_surface_initializes_with_the_none_open_id() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin);
+        let page = app.world_mut().spawn(HostsLauncher).id();
+        app.update();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                page,
+                &CommandBarOpenEvent {
+                    pages: vec![CommandBarPage {
+                        url: "vmux://sessions/?agent=codex-acp".into(),
+                        title: "Codex".into(),
+                        prompt_target: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
+        let draft = app.world().get::<PaletteDraftInput>(page).unwrap();
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert!(draft.initialized);
+        assert!(draft.start);
+        assert_eq!(snapshot.0.projection.composer.agents.len(), 1);
+        assert_eq!(
+            snapshot.0.projection.composer.agents[0].url,
+            "vmux://sessions/?agent=codex-acp"
+        );
     }
 
     #[test]
@@ -981,10 +1167,12 @@ mod tests {
             vmux_api::command_bar::CommandPaletteAgent {
                 url: "vmux://sessions/vibe/".to_string(),
                 title: "Vibe".to_string(),
+                icon: vmux_api::PageIcon::None,
             },
             vmux_api::command_bar::CommandPaletteAgent {
                 url: "vmux://sessions/codex/".to_string(),
                 title: "Codex".to_string(),
+                icon: vmux_api::PageIcon::None,
             },
         ];
         app.world_mut()
@@ -1058,10 +1246,15 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(PalettePlugin)
-            .add_observer(capture_invocation);
+            .add_observer(capture_invocation)
+            .add_observer(capture_dismissal);
         let page = app
             .world_mut()
-            .spawn((HostsLauncher, CapturedInvocations::default()))
+            .spawn((
+                HostsLauncher,
+                CapturedInvocations::default(),
+                CapturedDismissals::default(),
+            ))
             .id();
         app.update();
 
@@ -1107,6 +1300,39 @@ mod tests {
                 .unwrap()
                 .close_revision,
             1
+        );
+        assert_eq!(app.world().get::<CapturedDismissals>(page).unwrap().0, 1);
+    }
+
+    #[test]
+    fn attaching_a_prefixed_file_clears_the_query_without_closing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin)
+            .add_observer(capture_attachment);
+        let page = app
+            .world_mut()
+            .spawn((HostsLauncher, CapturedAttachments::default()))
+            .id();
+        app.update();
+        app.world_mut()
+            .get_mut::<PaletteDraftInput>(page)
+            .unwrap()
+            .query = "@main.rs".to_string();
+
+        app.world_mut().trigger(PaletteDecisionReady {
+            target: page,
+            decision: PaletteDecision::Attach("/repo/src/main.rs".to_string()),
+        });
+        app.update();
+
+        let input = app.world().get::<PaletteDraftInput>(page).unwrap();
+        assert_eq!(input.query, "");
+        assert_eq!(input.close_revision, 0);
+        assert_eq!(
+            app.world().get::<CapturedAttachments>(page).unwrap().0,
+            [vec!["/repo/src/main.rs".to_string()]]
         );
     }
 }

@@ -4,18 +4,18 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use super::project::SpaceProjects;
 use super::{AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch};
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
-use vmux_chat::event::{
-    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
-};
-use vmux_chat::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
 use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 use vmux_ecs::event::ProjectRow;
 use vmux_ecs::page::PageReady;
+use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
 use vmux_git::RepoInfoCache;
 use vmux_git::worktree::RepoInfo;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
-use vmux_session::AcpSession;
-use vmux_session::AgentApprovalPolicy;
+use vmux_session::event::{
+    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
+};
+use vmux_session::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
+use vmux_session::{ApprovalPolicy, Session};
 
 use bevy::tasks::futures_lite::future;
 
@@ -48,14 +48,8 @@ struct ComposerContextInput {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct ComposerProjection<'w, 's> {
-    sessions: Query<
-        'w,
-        's,
-        (
-            Option<&'static AcpSession>,
-            Option<&'static AgentApprovalPolicy>,
-        ),
-    >,
+    sessions: Query<'w, 's, (Option<&'static Cwd>, Option<&'static ApprovalPolicy>), With<Session>>,
+    targets: Query<'w, 's, &'static EntityTarget<Session>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     tabs: Query<
         'w,
@@ -72,8 +66,9 @@ struct ComposerProjection<'w, 's> {
 
 impl ComposerProjection<'_, '_> {
     fn context(&mut self, stack: Entity) -> Option<ComposerContext> {
-        let (acp, policy) = self.sessions.get(stack).ok()?;
-        let mut input = self.input(stack, acp, policy);
+        let session = self.targets.get(stack).ok()?.entity();
+        let (cwd, policy) = self.sessions.get(session).ok()?;
+        let mut input = self.input(stack, cwd, policy);
         input.projects = self.space_projects.rows(stack);
         let info = if input.cwd.as_os_str().is_empty() {
             None
@@ -88,8 +83,8 @@ impl ComposerProjection<'_, '_> {
     fn input(
         &self,
         stack: Entity,
-        acp: Option<&AcpSession>,
-        policy: Option<&AgentApprovalPolicy>,
+        cwd: Option<&Cwd>,
+        policy: Option<&ApprovalPolicy>,
     ) -> ComposerContextInput {
         let mut current = stack;
         let mut tab_dir = None;
@@ -109,11 +104,11 @@ impl ComposerProjection<'_, '_> {
         }
         ComposerContextInput {
             cwd: tab_dir
-                .or_else(|| acp.map(|session| session.cwd.clone()))
+                .or_else(|| cwd.map(|cwd| cwd.0.clone()))
                 .unwrap_or_default(),
             workspace_selected,
             worktree,
-            can_manage_workspace: acp.is_some(),
+            can_manage_workspace: cwd.is_some(),
             auto_allow_count: policy
                 .map(|policy| u32::try_from(policy.auto.len()).unwrap_or(u32::MAX))
                 .unwrap_or_default(),
@@ -142,7 +137,7 @@ fn push_context_to_page(
         }
         if changed || ready.is_changed() {
             commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
                     webview, &context,
                 ),
             );
@@ -217,7 +212,10 @@ fn chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(webview, &projection.0),
+        vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
     );
     let root = std::path::PathBuf::from(&project);
     let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
@@ -272,7 +270,7 @@ fn drain_branch_reads(
             continue;
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
                 read.webview,
                 &projection.0,
             ),
@@ -283,27 +281,31 @@ fn drain_branch_reads(
 fn chat_go_to_branch(
     trigger: On<UiInput<ChatGoToBranch>>,
     child_of: Query<&ChildOf>,
-    sessions: Query<&AcpSession>,
+    targets: Query<&EntityTarget<Session>>,
+    sessions: Query<&ProcessAnchor, With<Session>>,
     mut requests: MessageWriter<AgentRequestInput>,
 ) {
     let evt = &trigger.event().payload;
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
     };
-    let Ok(session) = sessions.get(parent.parent()) else {
+    let Ok(target) = targets.get(parent.parent()) else {
+        return;
+    };
+    let Ok(anchor) = sessions.get(target.entity()) else {
         return;
     };
     let checkout = evt.checkout.trim();
     let request = if checkout.is_empty() {
         let project = evt.project.trim();
         AgentRequest::encode(&AgentCreateWorktreeOnBranch {
-            anchor: session.anchor,
+            anchor: anchor.0,
             branch: evt.branch.clone(),
             project: (!project.is_empty()).then(|| project.to_string()),
         })
     } else {
         AgentRequest::encode(&AgentChooseWorkspaceAtPath {
-            anchor: session.anchor,
+            anchor: anchor.0,
             path: checkout.to_string(),
         })
     };
@@ -320,18 +322,20 @@ fn chat_go_to_branch(
 fn chat_select_workspace(
     trigger: On<UiInput<ChatSelectWorkspace>>,
     child_of: Query<&ChildOf>,
-    sessions: Query<&AcpSession>,
+    targets: Query<&EntityTarget<Session>>,
+    sessions: Query<&ProcessAnchor, With<Session>>,
     mut requests: MessageWriter<AgentRequestInput>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
     };
-    let Ok(session) = sessions.get(parent.parent()) else {
+    let Ok(target) = targets.get(parent.parent()) else {
         return;
     };
-    let Ok(request) = AgentRequest::encode(&AgentChooseWorkspace {
-        anchor: session.anchor,
-    }) else {
+    let Ok(anchor) = sessions.get(target.entity()) else {
+        return;
+    };
+    let Ok(request) = AgentRequest::encode(&AgentChooseWorkspace { anchor: anchor.0 }) else {
         return;
     };
     requests.write(AgentRequestInput {
@@ -362,15 +366,13 @@ mod tests {
         app.add_message::<AgentRequestInput>()
             .add_observer(chat_select_workspace);
         let anchor = vmux_ecs::ProcessId::new();
+        let session = app
+            .world_mut()
+            .spawn((Session, Cwd("/tmp".into()), ProcessAnchor(anchor)))
+            .id();
         let stack = app
             .world_mut()
-            .spawn(AcpSession {
-                agent_id: "claude".into(),
-                sid: "s1".into(),
-                cwd: "/tmp".into(),
-                anchor,
-                resume: None,
-            })
+            .spawn(EntityTarget::<Session>::new(session))
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
@@ -401,15 +403,13 @@ mod tests {
         app.add_message::<AgentRequestInput>()
             .add_observer(chat_go_to_branch);
         let anchor = vmux_ecs::ProcessId::new();
+        let session = app
+            .world_mut()
+            .spawn((Session, Cwd("/tmp/here".into()), ProcessAnchor(anchor)))
+            .id();
         let stack = app
             .world_mut()
-            .spawn(AcpSession {
-                agent_id: "claude".into(),
-                sid: "s1".into(),
-                cwd: "/tmp/here".into(),
-                anchor,
-                resume: None,
-            })
+            .spawn(EntityTarget::<Session>::new(session))
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 

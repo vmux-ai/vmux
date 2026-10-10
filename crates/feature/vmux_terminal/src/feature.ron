@@ -124,15 +124,15 @@
             bookmark: Some(20),
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "TerminalUiState",
                 "TermScrollEvent",
                 "TermMouseEvent",
                 "TermLinkOpenRequest",
                 "TermResizeEvent",
-                "UiKeyContext",
+                "KeyContextRequest",
                 "KeyStroke",
-                "KeyClaims",
+                "KeyClaimsUiState",
             ],
         )
         ,
@@ -149,7 +149,7 @@
             manifest: true,
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "ProcessesUiState",
                 "ProcessNavigateEvent",
                 "ProcessKillEvent",

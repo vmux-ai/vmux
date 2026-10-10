@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
+use vmux_api::PageIcon;
+use vmux_api::conversation::ModelOptionEntry;
 use vmux_api::protocol::AcpModeOption;
-use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
 use crate::components::agent_menu::AgentMenu;
+use crate::components::avatar::AgentThumbnail;
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
 use crate::components::permission_menu::PermissionMenu;
@@ -18,7 +20,7 @@ const COMPOSER_CHIP_LABEL_TIGHT: &str = "@max-[34rem]:hidden";
 const COMPOSER_CHIP_INTERACTIVE: &str =
     "transition hover:bg-foreground/[0.08] hover:text-foreground";
 const COMPOSER_CHIP_OPEN: &str = "transition bg-foreground/[0.12] text-foreground";
-const COMPOSER_CHIP_SKELETON: &str = "h-7 shrink-0 rounded-lg bg-foreground/[0.06]";
+const COMPOSER_CHIP_SKELETON: &str = "h-2.5 rounded bg-muted-foreground/15";
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ComposerBarProps {
@@ -399,16 +401,42 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
 fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> Element {
     if chip.loading {
         let width = kind.skeleton_width();
+        let label_class = cn([COMPOSER_CHIP_SKELETON, COMPOSER_CHIP_LABEL_TIGHT, width]);
         return rsx! {
-            Skeleton { class: cn([COMPOSER_CHIP_SKELETON, width]) }
+            span { class: COMPOSER_CHIP,
+                ComposerChipIcon { kind }
+                Skeleton { class: label_class }
+                svg {
+                    class: "h-3 w-3 shrink-0 opacity-50",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    path { d: "m8 10 4 4 4-4" }
+                }
+            }
         };
     }
     let label_class = kind.label_class();
     let label_class = cn([label_class, COMPOSER_CHIP_LABEL_TIGHT]);
+    let icon_url = chip.icon.favicon_url().to_string();
+    let icon = if chip.icon.is_none() {
+        rsx! { ComposerChipIcon { kind } }
+    } else {
+        rsx! {
+            AgentThumbnail {
+                src: (!icon_url.is_empty()).then_some(icon_url),
+                seed: chip.label.clone(),
+                background: String::new(),
+                alt: chip.label.clone(),
+                class: "h-3.5 w-3.5 text-[5px]",
+            }
+        }
+    };
     let Some(on_open) = chip.on_open else {
         return rsx! {
             span { class: COMPOSER_CHIP, title: "{chip.title}",
-                ComposerChipIcon { kind }
+                {icon}
                 span { class: label_class, "{chip.label}" }
             }
         };
@@ -424,7 +452,7 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
             title: "{chip.title}",
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| on_open.call(()),
-            ComposerChipIcon { kind }
+            {icon}
             span { class: label_class, "{chip.label}" }
             svg {
                 class: if open { "h-3 w-3 shrink-0 rotate-180 opacity-70 transition-transform duration-200 ease-out" } else { "h-3 w-3 shrink-0 opacity-50 transition-transform duration-200 ease-out" },
@@ -538,6 +566,7 @@ pub fn ComposerChipIcon(kind: ComposerMenuKind) -> Element {
 pub struct ComposerChip {
     pub label: String,
     pub title: String,
+    pub icon: PageIcon,
     pub loading: bool,
     pub on_open: Option<EventHandler<()>>,
 }
@@ -547,6 +576,7 @@ impl ComposerChip {
         Self {
             label: String::new(),
             title: String::new(),
+            icon: PageIcon::None,
             loading: true,
             on_open: None,
         }
@@ -556,6 +586,7 @@ impl ComposerChip {
         Self {
             label: label.into(),
             title: title.into(),
+            icon: PageIcon::None,
             loading: false,
             on_open: None,
         }
@@ -563,6 +594,11 @@ impl ComposerChip {
 
     pub fn opens(mut self, on_open: EventHandler<()>) -> Self {
         self.on_open = Some(on_open);
+        self
+    }
+
+    pub fn with_icon(mut self, icon: PageIcon) -> Self {
+        self.icon = icon;
         self
     }
 }
@@ -624,12 +660,12 @@ pub enum ComposerMenuKind {
 impl ComposerMenuKind {
     fn skeleton_width(self) -> &'static str {
         match self {
-            Self::Agent => "w-24",
-            Self::Model => "w-28",
-            Self::Effort => "w-20",
-            Self::Permission => "w-24",
-            Self::Project => "w-24",
-            Self::Branch => "w-20",
+            Self::Agent => "w-12",
+            Self::Model => "w-16",
+            Self::Effort => "w-12",
+            Self::Permission => "w-16",
+            Self::Project => "w-16",
+            Self::Branch => "w-12",
         }
     }
 

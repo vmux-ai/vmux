@@ -174,14 +174,12 @@ jobs:
           fi
           echo "control ok: vmux_desktop links bevy_cef"
 
-          for pkg in vmux_session; do
-            if links_cef "$pkg"; then
-              echo "::error::$pkg links bevy_cef:"
-              cargo tree --locked -p "$pkg" -i bevy_cef
-              exit 1
-            fi
-            echo "ok: $pkg does not link bevy_cef"
-          done
+          if cargo tree --locked -p vmux_session --no-default-features -i bevy_cef >/dev/null 2>&1; then
+            echo "::error::render-free vmux_session links bevy_cef:"
+            cargo tree --locked -p vmux_session --no-default-features -i bevy_cef
+            exit 1
+          fi
+          echo "ok: render-free vmux_session does not link bevy_cef"
 
       - name: The server links no client-only crate
         run: |
@@ -221,8 +219,8 @@ jobs:
             echo "ok: vmux_service does not link $pkg"
           done
 
-      - name: vmux_session builds alone
-        run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets
+      - name: Render-free vmux_session builds alone
+        run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets --no-default-features
 
   ios-build:
     name: Build iOS App
@@ -252,7 +250,7 @@ jobs:
       - name: Check the pages that ship on the phone
         run: |
           cargo check --locked --target aarch64-apple-ios \
-            -p vmux_agent -p vmux_chat -p vmux_command -p vmux_editor -p vmux_history -p vmux_shortcut \
+            -p vmux_acp -p vmux_session -p vmux_command -p vmux_editor -p vmux_history -p vmux_shortcut \
             -p vmux_layout -p vmux_setting -p vmux_space -p vmux_start -p vmux_team \
             -p vmux_terminal -p vmux_ui
 

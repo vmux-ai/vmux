@@ -648,8 +648,16 @@ fn close_panel(trigger: On<CommandBarPanelClose>, mut commands: Commands) {
     ));
 }
 
-fn dismiss(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
-    commands.trigger(CommandBarDismiss::new(trigger.event().webview, true));
+fn dismiss(
+    trigger: On<UiInput<DismissRequest>>,
+    panels: Query<(), With<RendersLauncherPanel>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if panels.contains(webview) {
+        commands.trigger(CommandBarPanelClose { layout: webview });
+    }
+    commands.trigger(CommandBarDismiss::new(webview, true));
 }
 
 fn close(
@@ -1353,6 +1361,31 @@ mod tests {
             "the launcher is drawn by the layout page here, so closing only the overlay window \
              leaves it on screen"
         );
+        assert!(!open_payload(&app).open_id.is_open());
+    }
+
+    #[test]
+    fn page_dismiss_request_closes_the_panel() {
+        let mut app = panel_app();
+        app.add_plugins(UiEventPlugin::<(DismissRequest,)>::default())
+            .add_observer(dismiss);
+        app.world_mut().spawn((
+            CommandBar,
+            Node {
+                display: Display::None,
+                ..default()
+            },
+            Visibility::Hidden,
+        ));
+        let layout = app.world_mut().spawn(RendersLauncherPanel).id();
+
+        app.world_mut().trigger(UiInput::<DismissRequest> {
+            webview: layout,
+            payload: DismissRequest,
+        });
+        app.world_mut().flush();
+
+        assert_eq!(emitted_to_page(&app), vec![layout]);
         assert!(!open_payload(&app).open_id.is_open());
     }
 

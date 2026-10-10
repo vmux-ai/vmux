@@ -3,8 +3,10 @@ use quote::quote;
 use serde::Deserialize;
 use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
 use syn::{
-    Data, DeriveInput, Expr, ExprArray, Fields, Ident, LitStr, Path, Token, Type, parse_quote,
+    Data, DeriveInput, Expr, ExprArray, Fields, Ident, LitStr, Path, Token, Type, bracketed,
+    parse_quote,
 };
 
 #[derive(Deserialize)]
@@ -85,6 +87,38 @@ enum PageSplitAxisFile {
 #[derive(Deserialize)]
 struct FeatureManifestFile {
     pages: Vec<PageManifestFile>,
+}
+
+struct PageStates(Vec<LitStr>);
+
+impl Parse for PageStates {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let content;
+        bracketed!(content in input);
+        let states = Punctuated::<LitStr, Token![,]>::parse_terminated(&content)?;
+        Ok(Self(states.into_iter().collect()))
+    }
+}
+
+impl PageStates {
+    fn validate(&self, permissions: &[LitStr]) -> syn::Result<()> {
+        for state in &self.0 {
+            if permissions
+                .iter()
+                .any(|permission| permission.value() == state.value())
+            {
+                continue;
+            }
+            return Err(syn::Error::new(
+                state.span(),
+                format!(
+                    "page manifest permissions must include subscribed UI state {}",
+                    state.value()
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn default_manifest_file() -> LitStr {
@@ -403,6 +437,7 @@ impl Parse for Args {
         let mut icon = None;
         let mut command_bar = false;
         let mut permissions = Vec::new();
+        let mut states = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -432,6 +467,10 @@ impl Parse for Args {
                 "component" => {
                     input.parse::<Token![=]>()?;
                     component = Some(input.parse()?);
+                }
+                "states" => {
+                    input.parse::<Token![=]>()?;
+                    states = Some(input.parse::<PageStates>()?);
                 }
                 "placement" => {
                     input.parse::<Token![=]>()?;
@@ -555,6 +594,9 @@ impl Parse for Args {
                 .map(|permission| LitStr::new(permission, manifest_file.span()))
                 .collect();
         }
+
+        let states = states.ok_or_else(|| input.error("page requires states = [...]"))?;
+        states.validate(&permissions)?;
 
         Ok(Self {
             file,
@@ -824,6 +866,18 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn page_states_require_matching_manifest_permissions() {
+        let states = syn::parse2::<PageStates>(quote!(["ThemeUiState", "FileUiState"])).unwrap();
+        let permissions = [
+            LitStr::new("ThemeUiState", proc_macro2::Span::call_site()),
+            LitStr::new("FileUiState", proc_macro2::Span::call_site()),
+        ];
+
+        assert!(states.validate(&permissions).is_ok());
+        assert!(states.validate(&permissions[..1]).is_err());
     }
 
     #[test]

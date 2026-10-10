@@ -1,9 +1,9 @@
-use vmux_api::PageIcon;
 use vmux_api::chat::SlashCommandEntry;
 use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
-    CommandBarRecentFile, CommandBarTab, CommandBarWorkDir, HistoryEntry, SearchEngine,
+    CommandBarTab, HistoryEntry, SearchEngine,
 };
+use vmux_api::{BuiltinIcon, PageIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use super::query::PaletteQuery;
@@ -55,14 +55,6 @@ pub(crate) enum CommandBarResultItem {
         favicon_url: String,
         visit_count: u32,
         last_visited_at: i64,
-    },
-    WorkDir {
-        path: String,
-        is_dir: bool,
-    },
-    RecentFile {
-        url: String,
-        title: String,
     },
     Slash {
         name: String,
@@ -132,7 +124,11 @@ impl CommandBarResultItem {
                 };
             }
             Self::Navigate { url, is_url } => {
-                row.leading = "\u{2315}".to_string();
+                row.icon = PageIcon::Builtin(if *is_url {
+                    BuiltinIcon::Globe
+                } else {
+                    BuiltinIcon::Search
+                });
                 row.title = if url.is_empty() {
                     translate("command-search")
                 } else if *is_url {
@@ -154,6 +150,7 @@ impl CommandBarResultItem {
             Self::Search { engine, query } => {
                 row.title = format!("Search with {}", engine.name);
                 row.url = engine.query_url(query);
+                row.icon = PageIcon::Builtin(BuiltinIcon::Globe);
                 row.trailing = "\u{21b5}".to_string();
             }
             Self::File {
@@ -185,26 +182,6 @@ impl CommandBarResultItem {
                 row.subtitle.clone_from(url);
                 row.url.clone_from(url);
                 row.favicon_url.clone_from(favicon_url);
-            }
-            Self::WorkDir { path, is_dir } => {
-                row.title = FileRow::name(path);
-                row.subtitle.clone_from(path);
-                row.file_path.clone_from(path);
-                row.directory = *is_dir;
-                if !is_dir {
-                    row.trailing = "\u{21b5}".to_string();
-                }
-            }
-            Self::RecentFile { url, title } => {
-                let path = url.strip_prefix("file://").unwrap_or(url);
-                row.title = if title.is_empty() {
-                    FileRow::name(path)
-                } else {
-                    title.clone()
-                };
-                row.subtitle = path.to_string();
-                row.file_path = path.to_string();
-                row.trailing = "\u{21b5}".to_string();
             }
             Self::Slash { name, hint } => {
                 row.leading = "/".to_string();
@@ -414,16 +391,39 @@ impl PageRows {
     }
 }
 
-pub(super) struct StartRows;
+pub(super) struct PromptRows;
 
-impl StartRows {
+impl PromptRows {
+    pub fn insert_target(
+        results: &mut Vec<CommandBarResultItem>,
+        selected_target: Option<&CommandBarResultItem>,
+        query: &str,
+    ) {
+        let Some(target) = selected_target else {
+            return;
+        };
+        if PageRows::prompt_target_matches(target, query) {
+            return;
+        }
+        let at = results
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    CommandBarResultItem::Navigate { .. } | CommandBarResultItem::Search { .. }
+                )
+            })
+            .unwrap_or(results.len());
+        results.insert(at, target.clone());
+    }
+
     pub fn prepend_targets(
         results: &mut Vec<CommandBarResultItem>,
         selected_target: Option<&CommandBarResultItem>,
         recent_targets: &[CommandBarResultItem],
         query: &str,
     ) {
-        if !PaletteQuery::new(query).is_start_prompt()
+        if !PaletteQuery::new(query).is_prompt()
             || results
                 .iter()
                 .any(|item| PageRows::prompt_target_url(item).is_some())
@@ -487,11 +487,9 @@ impl PageRows {
     }
 }
 
-impl StartRows {
-    pub fn start(
+impl PromptRows {
+    pub fn for_query(
         pages: &[CommandBarPage],
-        work_dirs: &[CommandBarWorkDir],
-        recent_files: &[CommandBarRecentFile],
         search_engines: &[SearchEngine],
         query: &str,
     ) -> Vec<CommandBarResultItem> {
@@ -503,7 +501,7 @@ impl StartRows {
                 .filter(|item| PageRows::prompt_target_matches(item, query)),
         );
         let trimmed = query.trim();
-        if PaletteQuery::new(trimmed).is_start_prompt() {
+        if PaletteQuery::new(trimmed).is_prompt() {
             results.extend(search_engines.iter().take(3).cloned().map(|engine| {
                 CommandBarResultItem::Search {
                     engine,
@@ -529,46 +527,13 @@ impl StartRows {
                     prompt_hint: false,
                 }),
         );
-        results.extend(Self::work_dir_results(work_dirs, &search_lower));
-        results.extend(Self::recent_file_results(recent_files, &search_lower));
-        if !PaletteQuery::new(trimmed).is_start_prompt() && !trimmed.is_empty() {
+        if !PaletteQuery::new(trimmed).is_prompt() && !trimmed.is_empty() {
             results.push(CommandBarResultItem::Navigate {
                 url: trimmed.to_string(),
                 is_url: PaletteQuery::new(trimmed).looks_like_url(),
             });
         }
         results
-    }
-
-    fn work_dir_results(
-        dirs: &[CommandBarWorkDir],
-        search_lower: &str,
-    ) -> Vec<CommandBarResultItem> {
-        dirs.iter()
-            .filter(|d| search_lower.is_empty() || d.path.to_lowercase().contains(search_lower))
-            .map(|d| CommandBarResultItem::WorkDir {
-                path: d.path.clone(),
-                is_dir: d.is_dir,
-            })
-            .collect()
-    }
-
-    fn recent_file_results(
-        files: &[CommandBarRecentFile],
-        search_lower: &str,
-    ) -> Vec<CommandBarResultItem> {
-        files
-            .iter()
-            .filter(|f| {
-                search_lower.is_empty()
-                    || f.title.to_lowercase().contains(search_lower)
-                    || f.url.to_lowercase().contains(search_lower)
-            })
-            .map(|f| CommandBarResultItem::RecentFile {
-                url: f.url.clone(),
-                title: f.title.clone(),
-            })
-            .collect()
     }
 }
 
@@ -581,8 +546,6 @@ pub(super) struct SearchRowsInput<'a> {
     pub(super) commands: &'a [CommandBarCommandEntry],
     pub(super) pages: &'a [CommandBarPage],
     pub(super) history: &'a [HistoryEntry],
-    pub(super) work_dirs: &'a [CommandBarWorkDir],
-    pub(super) recent_files: &'a [CommandBarRecentFile],
 }
 
 #[cfg(test)]
@@ -614,8 +577,6 @@ impl SearchRows {
             commands,
             pages,
             history,
-            work_dirs,
-            recent_files,
         } = input;
         let q = query.trim();
 
@@ -636,8 +597,6 @@ impl SearchRows {
                 }
             }));
             items.extend(PageRows::page_results(pages, ""));
-            items.extend(StartRows::work_dir_results(work_dirs, ""));
-            items.extend(StartRows::recent_file_results(recent_files, ""));
             items.extend(Self::command_results(commands));
             return items;
         }
@@ -667,8 +626,6 @@ impl SearchRows {
 
         if !starts_with_cmd && !is_path {
             items.extend(PageRows::page_results(pages, &search_lower));
-            items.extend(StartRows::work_dir_results(work_dirs, &search_lower));
-            items.extend(StartRows::recent_file_results(recent_files, &search_lower));
         }
 
         if !starts_with_cmd || !search.is_empty() {
@@ -694,6 +651,9 @@ impl SearchRows {
 
         if !starts_with_cmd {
             for h in history.iter().take(5) {
+                if h.url.starts_with("file://") {
+                    continue;
+                }
                 items.push(CommandBarResultItem::History {
                     url: h.url.clone(),
                     title: h.title.clone(),
@@ -739,6 +699,38 @@ mod tests {
             hosts: vec![format!("{id}.example")],
             query_url: format!("https://{id}.example/?q={{query}}"),
         }
+    }
+
+    #[test]
+    fn web_rows_project_synchronous_builtin_icons() {
+        let search = CommandBarResultItem::Navigate {
+            url: "question".to_string(),
+            is_url: false,
+        }
+        .projection();
+        let url = CommandBarResultItem::Navigate {
+            url: "example.com".to_string(),
+            is_url: true,
+        }
+        .projection();
+        let engine = CommandBarResultItem::Search {
+            engine: search_engine("google"),
+            query: "question".to_string(),
+        }
+        .projection();
+
+        assert_eq!(
+            search.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Search)
+        );
+        assert_eq!(
+            url.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Globe)
+        );
+        assert_eq!(
+            engine.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Globe)
+        );
     }
 
     fn sample_pages() -> Vec<CommandBarPage> {
@@ -944,7 +936,7 @@ mod tests {
 
     #[test]
     fn start_page_does_not_show_unmatched_agents() {
-        let results = StartRows::start(&sample_pages(), &[], &[], &[], "settings");
+        let results = PromptRows::for_query(&sample_pages(), &[], "settings");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -964,7 +956,7 @@ mod tests {
             search_engine("bing"),
             search_engine("duckduckgo"),
         ];
-        let results = StartRows::start(&sample_pages(), &[], &[], &engines, "fix the failing test");
+        let results = PromptRows::for_query(&sample_pages(), &engines, "fix the failing test");
         let actual = results
             .iter()
             .filter_map(|result| match result {
@@ -974,40 +966,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(actual, engines[..3]);
-    }
-
-    #[test]
-    fn start_page_puts_web_search_before_matching_files() {
-        let work_dirs = [CommandBarWorkDir {
-            path: "/work/failing test".into(),
-            is_dir: true,
-        }];
-        let recent_files = [CommandBarRecentFile {
-            url: "file:///work/failing%20test.txt".into(),
-            title: "failing test.txt".into(),
-        }];
-        let results = StartRows::start(
-            &sample_pages(),
-            &work_dirs,
-            &recent_files,
-            &[search_engine("google")],
-            "failing test",
-        );
-        let search = results
-            .iter()
-            .position(|item| matches!(item, CommandBarResultItem::Search { .. }))
-            .unwrap();
-        let work_dir = results
-            .iter()
-            .position(|item| matches!(item, CommandBarResultItem::WorkDir { .. }))
-            .unwrap();
-        let recent_file = results
-            .iter()
-            .position(|item| matches!(item, CommandBarResultItem::RecentFile { .. }))
-            .unwrap();
-
-        assert!(search < work_dir);
-        assert!(search < recent_file);
     }
 
     #[test]
@@ -1035,15 +993,13 @@ mod tests {
         ]);
         let agents = PageRows::prompt_targets(&pages, "");
         let selected = agents[1].clone();
-        let mut results = StartRows::start(
+        let mut results = PromptRows::for_query(
             &pages,
-            &[],
-            &[],
             &[search_engine("google"), search_engine("bing")],
             "show me something fun",
         );
 
-        StartRows::prepend_targets(
+        PromptRows::prepend_targets(
             &mut results,
             Some(&selected),
             &agents,
@@ -1077,35 +1033,11 @@ mod tests {
             prompt_target: false,
             startup: false,
         });
-        let results = StartRows::start(&pages, &[], &[], &[], "terminal");
+        let results = PromptRows::for_query(&pages, &[], "terminal");
         assert!(matches!(
             results.first(),
             Some(CommandBarResultItem::Page { url, .. }) if url == "vmux://terminal/"
         ));
-    }
-
-    #[test]
-    fn start_page_searches_work_dirs_and_recent_files() {
-        let work_dirs = vec![CommandBarWorkDir {
-            path: "/work/vmux".into(),
-            is_dir: true,
-        }];
-        let recent_files = vec![CommandBarRecentFile {
-            url: "file:///work/vmux/README.md".into(),
-            title: "README.md".into(),
-        }];
-        let dir_results = StartRows::start(&sample_pages(), &work_dirs, &recent_files, &[], "vmux");
-        assert!(dir_results.iter().any(|result| matches!(
-            result,
-            CommandBarResultItem::WorkDir { path, .. } if path == "/work/vmux"
-        )));
-        let file_results =
-            StartRows::start(&sample_pages(), &work_dirs, &recent_files, &[], "readme");
-        assert!(file_results.iter().any(|result| matches!(
-            result,
-            CommandBarResultItem::RecentFile { url, .. }
-                if url == "file:///work/vmux/README.md"
-        )));
     }
 
     #[test]
@@ -1207,55 +1139,40 @@ mod tests {
         );
     }
 
-    fn sample_work_dirs() -> Vec<CommandBarWorkDir> {
-        vec![CommandBarWorkDir {
-            path: "/work/proj/main.rs".into(),
-            is_dir: false,
-        }]
-    }
-
-    fn sample_recent_files() -> Vec<CommandBarRecentFile> {
-        vec![CommandBarRecentFile {
-            url: "file:///work/proj/main.rs".into(),
-            title: "main.rs".into(),
-        }]
-    }
-
     #[test]
-    fn empty_query_puts_work_after_pages() {
+    fn file_history_is_hidden_without_at_prefix() {
+        let history = [
+            HistoryEntry {
+                url_entity_bits: 1,
+                url: "file:///work/main.rs".into(),
+                title: "main.rs".into(),
+                favicon_url: String::new(),
+                visit_created_at: 1,
+                visit_count: 1,
+                last_visited_at: 1,
+            },
+            HistoryEntry {
+                url_entity_bits: 2,
+                url: "https://example.com/main".into(),
+                title: "Main".into(),
+                favicon_url: String::new(),
+                visit_created_at: 1,
+                visit_count: 1,
+                last_visited_at: 1,
+            },
+        ];
         let results = SearchRows::filter(SearchRowsInput {
-            work_dirs: &sample_work_dirs(),
-            recent_files: &sample_recent_files(),
-            ..SearchRowsInput::for_pages("", &sample_pages())
+            history: &history,
+            ..SearchRowsInput::for_pages("main", &sample_pages())
         });
-        let last_page = results
-            .iter()
-            .rposition(|r| matches!(r, CommandBarResultItem::Page { .. }))
-            .expect("pages present");
-        let first_work = results
-            .iter()
-            .position(|r| matches!(r, CommandBarResultItem::WorkDir { .. }))
-            .expect("work dir present");
-        let first_recent = results
-            .iter()
-            .position(|r| matches!(r, CommandBarResultItem::RecentFile { .. }))
-            .expect("recent file present");
-        assert!(last_page < first_work, "work dirs come after pages");
-        assert!(first_work < first_recent, "dirs before recent files");
-    }
 
-    #[test]
-    fn work_dir_matched_by_query() {
-        let results = SearchRows::filter(SearchRowsInput {
-            work_dirs: &sample_work_dirs(),
-            recent_files: &sample_recent_files(),
-            ..SearchRowsInput::for_pages("proj", &sample_pages())
-        });
-        assert!(results.iter().any(|r| matches!(
-            r, CommandBarResultItem::WorkDir { path, .. } if path == "/work/proj/main.rs"
+        assert!(results.iter().all(|row| !matches!(
+            row,
+            CommandBarResultItem::History { url, .. } if url.starts_with("file://")
         )));
-        assert!(results.iter().any(|r| matches!(
-            r, CommandBarResultItem::RecentFile { title, .. } if title == "main.rs"
+        assert!(results.iter().any(|row| matches!(
+            row,
+            CommandBarResultItem::History { url, .. } if url == "https://example.com/main"
         )));
     }
 

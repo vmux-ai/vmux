@@ -1,6 +1,6 @@
-pub use vmux_api::room::{
-    ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent,
-    RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent, RoomId,
+pub use vmux_api::conversation::{
+    ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteApproval,
+    RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus, SessionId,
 };
 
 #[cfg(host)]

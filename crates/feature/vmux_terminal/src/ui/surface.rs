@@ -12,7 +12,7 @@ use unicode_width::UnicodeWidthChar;
 use vmux_api::terminal::CursorStyle;
 use vmux_ecs::scroll::{BottomPadding, EDGE_TRIGGER_K, ScrollWindow};
 use vmux_ui::agent_accent::AgentAccent;
-use vmux_ui::favicon::Favicon;
+use vmux_ui::favicon::{Favicon, FaviconSource};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -26,6 +26,7 @@ const MEASURE_ROWS: usize = 8;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "TerminalUiState", "KeyClaimsUiState"],
     claims = crate::Terminal
 )]
 pub(crate) struct TerminalPage;
@@ -383,7 +384,7 @@ pub fn Page() -> Element {
                     } else {
                         label.clone()
                     };
-                    let favicon_url = format!("vmux://sessions/{segment}/cli/");
+                    let favicon_url = FaviconSource::agent(&segment).unwrap_or_default();
                     let words = vec![display_label.to_uppercase()];
                     let (draft_text, draft_skipped) = prompt_draft.read().clone();
                     let composing = !draft_skipped && !draft_text.is_empty();

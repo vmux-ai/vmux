@@ -47,6 +47,10 @@ impl LayoutGeometry {
         }
     }
 
+    pub fn main_cef_center_offset(&self) -> f32 {
+        (self.main_cef_left() - self.window_pad_right) / 2.0
+    }
+
     pub fn header_left(&self) -> f32 {
         self.header_left.unwrap_or_else(|| self.main_cef_left())
     }
@@ -264,6 +268,20 @@ mod tests {
 
         assert_eq!(closed.main_cef_left(), 16.0);
         assert_eq!(open.main_cef_left(), 304.0);
+    }
+
+    #[test]
+    fn main_cef_center_offset_centers_over_the_page_area() {
+        let geometry = LayoutGeometry {
+            side_sheet_open: true,
+            side_sheet_width: 220.0,
+            pane_gap: 4.0,
+            window_pad_left: 8.0,
+            window_pad_right: 8.0,
+            ..Default::default()
+        };
+
+        assert_eq!(geometry.main_cef_center_offset(), 112.0);
     }
 
     #[test]
@@ -711,10 +729,21 @@ pub struct ActiveSessionState {
 #[vmux_api::contract]
 pub struct ActiveSession {
     pub page: StackNode,
+    #[serde(default)]
+    pub task: Option<ActiveTask>,
     pub agent: Option<vmux_ecs::event::team::TeamMemberRow>,
     pub project: Option<ActiveWorkspaceProject>,
     pub boundary: Option<TabBoundary>,
     pub pane_id: u64,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ActiveTask {
+    pub name: String,
+    pub description: String,
+    pub stage: String,
+    pub stage_name: String,
+    pub runtime: String,
 }
 
 #[vmux_api::contract]

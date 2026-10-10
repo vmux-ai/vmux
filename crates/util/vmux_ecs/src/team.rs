@@ -53,6 +53,7 @@ mod tests {
     fn registry_avatar_derives_initials_and_stable_color() {
         let a = AvatarSpec::for_registry("Mistral Vibe", "mistral-vibe");
         assert_eq!(a.initials, "MV");
+        assert_eq!(a.color, "#ff7000");
         assert_eq!(a.color, AvatarSpec::for_registry("X", "mistral-vibe").color);
         assert!(a.color.starts_with('#') && a.color.len() == 7);
     }

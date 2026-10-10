@@ -4,50 +4,6 @@ use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::AgentAttachment;
-use vmux_api::room::Message;
-
-#[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
-#[require(AgentMessageTimes)]
-pub struct AgentMessages(pub Vec<Message>);
-
-#[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
-pub struct AgentMessageTimes(pub Vec<u64>);
-
-impl AgentMessageTimes {
-    pub fn reconcile(&mut self, before: &[Message], after: &[Message]) {
-        let mut stable = before
-            .iter()
-            .zip(after)
-            .take_while(|(left, right)| left == right)
-            .count();
-        if stable < self.0.len()
-            && stable + 1 == before.len()
-            && before
-                .get(stable)
-                .zip(after.get(stable))
-                .is_some_and(|(left, right)| Self::same_in_progress_message(left, right))
-        {
-            stable += 1;
-        }
-        self.0.truncate(stable);
-        let observed_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        self.0.resize(after.len(), observed_at);
-    }
-
-    fn same_in_progress_message(left: &Message, right: &Message) -> bool {
-        match (left, right) {
-            (Message::Assistant { .. }, Message::Assistant { .. }) => true,
-            (
-                Message::ToolResult { call_id: left, .. },
-                Message::ToolResult { call_id: right, .. },
-            ) => left == right,
-            _ => left == right,
-        }
-    }
-}
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentConversationTitle(pub String);
@@ -71,11 +27,11 @@ impl AgentConversationTitle {
 
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]
 #[reflect(Component)]
-pub struct AgentApprovalPolicy {
+pub struct ApprovalPolicy {
     pub auto: HashSet<String>,
 }
 
-impl AgentApprovalPolicy {
+impl ApprovalPolicy {
     pub fn allow(&mut self, tool: &str) {
         self.auto.insert(Self::tool_key(tool));
     }
@@ -197,37 +153,13 @@ mod tests {
 
     #[test]
     fn session_components_default_constructible() {
-        let _ = AgentMessages::default();
-        let _ = AgentApprovalPolicy::default();
+        let _ = ApprovalPolicy::default();
         let _ = PromptQueue::default();
     }
 
     #[test]
-    fn streamed_assistant_message_keeps_its_first_observed_time() {
-        let before = vec![
-            Message::user("question"),
-            Message::Assistant {
-                blocks: vec![vmux_api::room::AssistantBlock::Text("part".into())],
-            },
-        ];
-        let after = vec![
-            Message::user("question"),
-            Message::Assistant {
-                blocks: vec![vmux_api::room::AssistantBlock::Text(
-                    "partial answer".into(),
-                )],
-            },
-        ];
-        let mut times = AgentMessageTimes(vec![10, 20]);
-
-        times.reconcile(&before, &after);
-
-        assert_eq!(times.0, [10, 20]);
-    }
-
-    #[test]
     fn approval_policy_normalizes_agent_tool_identifiers() {
-        let mut policy = AgentApprovalPolicy::default();
+        let mut policy = ApprovalPolicy::default();
         policy.allow("mcp__vmux__run");
 
         assert!(policy.allows("mcp.vmux.run"));

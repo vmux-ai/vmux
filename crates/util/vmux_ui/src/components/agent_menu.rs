@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use vmux_api::command_bar::CommandPaletteAgent;
 
 use crate::cn::cn;
+use crate::components::avatar::AgentThumbnail;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
-use crate::favicon::Favicon;
 use crate::i18n::translate;
 
 #[component]
@@ -51,6 +51,7 @@ fn AgentMenuRow(
     on_pick: EventHandler<String>,
 ) -> Element {
     let url = option.url.clone();
+    let icon = option.icon.favicon_url().to_string();
     let text = match current {
         true => "text-foreground",
         false => "text-foreground/75 hover:text-foreground",
@@ -62,11 +63,12 @@ fn AgentMenuRow(
             onmousedown: move |event| event.prevent_default(),
             onmouseenter: move |_| on_hover.call(()),
             onclick: move |_| on_pick.call(url.clone()),
-            Favicon {
-                favicon_url: String::new(),
-                url: option.url.clone(),
-                class: "h-6 w-6 shrink-0 rounded-md object-contain",
-                globe_class: "h-6 w-6 shrink-0 opacity-0",
+            AgentThumbnail {
+                src: (!icon.is_empty()).then_some(icon),
+                seed: option.title.clone(),
+                background: String::new(),
+                alt: option.title.clone(),
+                class: "h-7 w-7 text-[8px]",
             }
             span { class: "min-w-0 flex-1 truncate", "{option.title}" }
             if current {

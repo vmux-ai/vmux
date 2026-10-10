@@ -543,7 +543,10 @@ fn sync_pages(
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
         ),
-        Without<crate::StartInlineTransitionView>,
+        (
+            With<HostsLauncher>,
+            Without<crate::StartInlineTransitionView>,
+        ),
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     browsers: NonSend<Browsers>,
@@ -701,6 +704,10 @@ fn begin_inline(
 mod tests {
     use super::*;
     use vmux_api::command_bar::CommandBarUiState;
+    #[cfg(ui)]
+    use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+    #[cfg(ui)]
+    use vmux_api::{BinEvent, UiEventPermissions};
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::page::PageManifest;
 
@@ -743,6 +750,26 @@ mod tests {
         app.world_mut().run_schedule(PreStartup);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+    }
+
+    #[test]
+    #[cfg(ui)]
+    fn start_page_allows_keyboard_routing() {
+        let mut app = App::new();
+        app.add_plugins(StartPlugin);
+        app.world_mut().run_schedule(PreStartup);
+        let mut permissions = app.world_mut().query::<&UiEventPermissions>();
+
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyContextRequest::PERMISSION,
+        ));
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyClaimsUiState::PERMISSION,
+        ));
     }
 
     #[test]

@@ -2,6 +2,7 @@ use crate::cn::cn;
 use dioxus::prelude::*;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
+const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -16,6 +17,13 @@ pub fn Avatar(
 ) -> Element {
     let class = cn([AVATAR, class.as_str()]);
     let avatar_seed = if seed.trim().is_empty() { &alt } else { &seed };
+    let background = if src.is_some() && background.trim().is_empty() {
+        "transparent".to_string()
+    } else if background.trim().is_empty() {
+        GeneratedAvatar::profile_color(avatar_seed).to_string()
+    } else {
+        background
+    };
     let generated = GeneratedAvatar::generate(avatar_seed, &background);
     rsx! {
         div {
@@ -72,6 +80,35 @@ pub fn Avatar(
     }
 }
 
+#[component]
+pub fn AgentThumbnail(
+    src: Option<String>,
+    seed: String,
+    background: String,
+    #[props(default)] alt: String,
+    #[props(default)] class: String,
+) -> Element {
+    let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
+    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
+    rsx! {
+        Avatar { src, seed, background, alt, class }
+    }
+}
+
+struct AgentThumbnailBackground;
+
+impl AgentThumbnailBackground {
+    fn resolve(background: &str, seed: &str, src: Option<&str>) -> String {
+        if !background.trim().is_empty() {
+            return background.to_string();
+        }
+        if let Some(color) = src.and_then(vmux_api::avatar::AvatarSpec::brand_color) {
+            return color.to_string();
+        }
+        vmux_api::avatar::AvatarSpec::agent_color(seed)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct GeneratedAvatar {
     background_color: &'static str,
@@ -87,6 +124,11 @@ struct GeneratedAvatar {
 }
 
 impl GeneratedAvatar {
+    fn profile_color(seed: &str) -> &'static str {
+        let mut random = AvatarRandom::from(seed);
+        GENERATED_AVATAR_COLORS[random.below(GENERATED_AVATAR_COLORS.len())]
+    }
+
     fn generate(seed: &str, shape_color: &str) -> Self {
         let mut random = AvatarRandom::from(seed);
         let background_color = GENERATED_AVATAR_COLORS[random.below(GENERATED_AVATAR_COLORS.len())];
@@ -191,7 +233,23 @@ impl AvatarRandom {
 
 #[cfg(test)]
 mod tests {
-    use super::GeneratedAvatar;
+    use super::{AgentThumbnailBackground, GeneratedAvatar};
+
+    #[test]
+    fn agent_thumbnail_uses_the_brand_in_its_icon_url_before_the_page_title() {
+        assert_eq!(
+            AgentThumbnailBackground::resolve(
+                "",
+                "hey",
+                Some("https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg")
+            ),
+            "#ff7000"
+        );
+        assert_eq!(
+            AgentThumbnailBackground::resolve("#123456", "hey", Some("mistral-vibe.svg")),
+            "#123456"
+        );
+    }
 
     #[test]
     fn generated_avatar_is_stable_for_a_profile() {

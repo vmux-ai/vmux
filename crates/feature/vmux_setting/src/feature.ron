@@ -448,7 +448,7 @@
             bookmark: Some(130),
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "SettingsUiState",
                 "CheckForUpdatesEvent",
                 "SettingsRequest",

@@ -13,7 +13,7 @@ impl ProjectQuery {
         registered: &[String],
     ) -> Vec<PathBuf> {
         let query = query.trim();
-        if query.is_empty() || Self::names_a_location(query) {
+        if Self::names_a_location(query) {
             return Vec::new();
         }
         Self::all(project_root, registered)

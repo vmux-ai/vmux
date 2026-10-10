@@ -661,7 +661,7 @@ mod tests {
 
         for (i, url) in [
             "https://github.com/vmux-ai/vmux",
-            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "file:///repo/crates/vmux_acp/src/plugin.rs",
             "vmux://terminal/",
         ]
         .into_iter()
@@ -753,7 +753,7 @@ mod tests {
 
         for (i, url) in [
             "https://github.com/vmux-ai/vmux/pull/221",
-            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "file:///repo/crates/vmux_acp/src/plugin.rs",
             "file:///repo/crates/vmux_layout/src/pane.rs",
             "vmux://terminal/",
             "https://github.com/vmux-ai/vmux/actions/runs/28544986467",
@@ -820,7 +820,7 @@ mod tests {
 
         for (i, url) in [
             "https://github.com/vmux-ai/vmux/pull/221",
-            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "file:///repo/crates/vmux_acp/src/plugin.rs",
             "vmux://terminal/",
             "https://github.com/vmux-ai/vmux/actions/runs/28544986467",
             "file:///repo/crates/vmux_layout/src/pane.rs",
@@ -886,7 +886,7 @@ mod tests {
 
         for (i, url) in [
             "https://github.com/vmux-ai/vmux/pull/221",
-            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "file:///repo/crates/vmux_acp/src/plugin.rs",
             "file:///repo/crates/vmux_layout/src/pane.rs",
             "vmux://terminal/",
             "file:///repo/crates/vmux_layout/src/placement.rs",
@@ -920,7 +920,7 @@ mod tests {
                 })
                 .unwrap()
         };
-        let plugin_parent = parent_for_url("file:///repo/crates/vmux_agent/src/plugin.rs");
+        let plugin_parent = parent_for_url("file:///repo/crates/vmux_acp/src/plugin.rs");
         let pane_parent = parent_for_url("file:///repo/crates/vmux_layout/src/pane.rs");
         let placement_parent = parent_for_url("file:///repo/crates/vmux_layout/src/placement.rs");
         let terminal_parent = parent_for_url("vmux://terminal/");
@@ -961,7 +961,7 @@ mod tests {
         for (i, url) in [
             "https://github.com/vmux-ai/vmux/pull/221",
             "file:///repo/crates/vmux_layout/src/pane.rs",
-            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "file:///repo/crates/vmux_acp/src/plugin.rs",
         ]
         .into_iter()
         .enumerate()
@@ -1004,7 +1004,7 @@ mod tests {
                 .unwrap()
         };
         let pr_parent = parent_for_url("https://github.com/vmux-ai/vmux/pull/221");
-        let plugin_parent = parent_for_url("file:///repo/crates/vmux_agent/src/plugin.rs");
+        let plugin_parent = parent_for_url("file:///repo/crates/vmux_acp/src/plugin.rs");
         let terminal_parent = parent_for_url("vmux://terminal/");
 
         assert_eq!(
@@ -1372,7 +1372,7 @@ mod tests {
             .write(OpenBesideRequest {
                 pane: agent_pane,
                 direction: Some(PaneDirection::Right),
-                url: "file:///repo/crates/vmux_agent/src/plugin.rs".into(),
+                url: "file:///repo/crates/vmux_acp/src/plugin.rs".into(),
                 request_id: [0u8; 16],
                 focus: false,
             });

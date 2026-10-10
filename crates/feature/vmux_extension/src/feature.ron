@@ -10,8 +10,8 @@
             manifest: true,
             permissions: [
                 "PageReady",
-                "ThemeEvent",
-                "ExtensionsEvent",
+                "ThemeUiState",
+                "ExtensionsUiState",
                 "ExtToggleRequest",
                 "ExtUninstallRequest",
                 "ExtensionPopupOpenRequest",

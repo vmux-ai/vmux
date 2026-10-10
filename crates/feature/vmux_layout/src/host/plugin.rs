@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_cef::prelude::UiInput;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
@@ -43,6 +44,7 @@ impl Plugin for LayoutPlugin {
                 PostUpdate,
                 sync_header_visibility.before(LayoutSystems::Layout),
             )
+            .add_observer(open_session_page)
             .add_plugins((LayoutContractPlugin, LayoutRequestPlugin, LayoutAgentPlugin))
             .register_persisted::<Open>()
             .register_persisted::<crate::profile::Profile>()
@@ -90,6 +92,17 @@ impl Plugin for LayoutPlugin {
                 crate::pending_stack::PendingStackPlugin,
             ));
     }
+}
+
+fn open_session_page(
+    trigger: On<UiInput<vmux_session::event::ChatOpenPage>>,
+    mut requests: MessageWriter<crate::stack::OpenRequest>,
+) {
+    let url = trigger.event().payload.url.clone();
+    if url.is_empty() {
+        return;
+    }
+    requests.write(crate::stack::OpenRequest { url: Some(url) });
 }
 
 fn spawn_update_state(mut commands: Commands) {

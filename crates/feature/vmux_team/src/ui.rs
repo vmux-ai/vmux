@@ -6,7 +6,7 @@ use vmux_api::team::{
     TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
     TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
 };
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::select::{
     Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger,
@@ -17,7 +17,8 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "TeamUiState"]
 )]
 pub(crate) struct TeamPage;
 
@@ -299,7 +300,7 @@ fn AgentAvatar(member: TeamMemberRow) -> Element {
 
     rsx! {
         div { class: "relative shrink-0",
-            Avatar {
+            AgentThumbnail {
                 src,
                 seed: member.name.clone(),
                 background: member.color.clone(),
