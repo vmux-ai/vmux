@@ -14,7 +14,7 @@ use self::decision::{RowText, TypedRow};
 use self::decision::{SelectedAgentModels, SelectedAgentModes};
 pub(super) use self::file::{CompletionQuery, Completions, FileRows};
 use self::results::{
-    CommandBarResultItem, PageRows, PickerRows, SearchRows, SearchRowsInput, SlashRows, StartRows,
+    CommandBarResultItem, PageRows, PickerRows, PromptRows, SearchRows, SearchRowsInput, SlashRows,
 };
 
 pub(super) use query::PaletteQuery;
@@ -62,7 +62,7 @@ impl PaletteDraft {
             return PageRows::open_sessions(&state.tabs, &state.pages);
         }
         if start_prompt_mode {
-            return StartRows::start(&state.pages, &state.search_engines, query);
+            return PromptRows::for_query(&state.pages, &state.search_engines, query);
         }
         let matched = SearchRows::filter(SearchRowsInput {
             query,
@@ -172,24 +172,29 @@ impl PaletteRows {
         let is_start = surface.is_start();
         let slash_commands = state.prompt_context.slash_commands.as_slice();
         let mode = PaletteQuery::new(query).mode(state.picker.clone(), slash_commands);
-        let prompt_targets = if is_start {
-            PageRows::prompt_targets(&state.pages, "")
-        } else {
-            Vec::new()
-        };
+        let prompt_targets = PageRows::prompt_targets(&state.pages, "");
         let default_target = prompt_targets
             .iter()
             .find(|item| PageRows::prompt_target_url(item) == Some(draft.target_url.as_str()))
             .cloned()
             .or_else(|| prompt_targets.first().cloned());
-        let start_prompt_mode = is_start && PaletteQuery::new(query).is_start_prompt();
+        let prompt_mode =
+            matches!(mode, PaletteMode::Search) && PaletteQuery::new(query).is_prompt();
+        let start_prompt_mode = is_start && prompt_mode;
 
         let mut items = draft.items(state, surface, &mode, start_prompt_mode);
         if start_prompt_mode {
-            StartRows::prepend_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
+            PromptRows::prepend_targets(
+                &mut items,
+                default_target.as_ref(),
+                &prompt_targets,
+                query,
+            );
+        } else if prompt_mode {
+            PromptRows::insert_target(&mut items, default_target.as_ref(), query);
         }
         for item in &mut items {
-            let show_hint = start_prompt_mode
+            let show_hint = prompt_mode
                 && PageRows::prompt_target_url(item).is_some()
                 && !PageRows::prompt_target_matches(item, query);
             if let CommandBarResultItem::Page { prompt_hint, .. } = item {
@@ -836,14 +841,28 @@ mod tests {
     }
 
     #[test]
-    fn the_modal_surface_offers_no_agents_and_no_composer_agent() {
+    fn the_modal_surface_offers_the_default_agent_for_prose() {
         let state = Launcher::state();
         let bar = PaletteState::modal(&state, PaletteDraft::typed("fix the failing test"));
 
-        assert!(bar.prompt_targets.is_empty());
-        assert!(bar.default_target.is_none());
+        assert_eq!(
+            PageRows::prompt_target_url(&bar.rows[0]),
+            Some("vmux://sessions/?agent=vibe")
+        );
+        assert_eq!(bar.rows[0].projection().title, "Ask Vibe");
         assert!(!bar.start_prompt_mode);
-        assert_eq!(bar.composer.agent_title, "Agent");
+        assert_eq!(bar.composer.agent_title, "Vibe");
+        assert_eq!(
+            bar.submit_modal(&[]),
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest {
+                    text: "fix the failing test".to_string(),
+                    target_url: Some("vmux://sessions/?agent=vibe".to_string()),
+                    attachments: Vec::new(),
+                },
+            }
+        );
     }
 
     #[test]
@@ -1219,8 +1238,8 @@ mod tests {
         assert_eq!(listed.selected, listed.rows.len() - 1);
 
         let single = PaletteState::modal(&state, PaletteDraft::typed("zzzz").at(4));
-        assert_eq!(single.rows.len(), 1, "{:?}", single.rows);
-        assert_eq!(single.selected, 0);
+        assert_eq!(single.rows.len(), 2, "{:?}", single.rows);
+        assert_eq!(single.selected, 1);
     }
 
     #[test]

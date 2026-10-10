@@ -117,7 +117,7 @@ fn RowIcon(item: CommandBarResultItem) -> Element {
             }
         };
     }
-    if !item.url.is_empty() {
+    if !item.url.is_empty() || !item.icon.is_none() {
         return rsx! {
             PageIconView {
                 icon: item.icon,

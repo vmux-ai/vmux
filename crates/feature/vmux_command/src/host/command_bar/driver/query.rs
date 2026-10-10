@@ -25,7 +25,7 @@ impl<'a> PaletteQuery<'a> {
             && Self::new(query).looks_like_url()
     }
 
-    pub fn is_start_prompt(&self) -> bool {
+    pub fn is_prompt(&self) -> bool {
         let query = self.0.trim();
         !query.is_empty()
             && !query.starts_with('@')
@@ -163,9 +163,9 @@ mod tests {
     }
 
     #[test]
-    fn start_prompt_rejects_navigation_and_commands() {
-        assert!(PaletteQuery::new("fix the failing test").is_start_prompt());
-        assert!(PaletteQuery::new("codex").is_start_prompt());
+    fn prompt_rejects_navigation_and_commands() {
+        assert!(PaletteQuery::new("fix the failing test").is_prompt());
+        assert!(PaletteQuery::new("codex").is_prompt());
         for query in [
             "https://example.com",
             "example.com",
@@ -177,7 +177,7 @@ mod tests {
             "> close tab",
             "@main.rs",
         ] {
-            assert!(!PaletteQuery::new(query).is_start_prompt(), "{query}");
+            assert!(!PaletteQuery::new(query).is_prompt(), "{query}");
         }
     }
 

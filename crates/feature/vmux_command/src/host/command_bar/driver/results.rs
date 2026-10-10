@@ -1,9 +1,9 @@
-use vmux_api::PageIcon;
 use vmux_api::chat::SlashCommandEntry;
 use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarTab, HistoryEntry, SearchEngine,
 };
+use vmux_api::{BuiltinIcon, PageIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use super::query::PaletteQuery;
@@ -124,7 +124,11 @@ impl CommandBarResultItem {
                 };
             }
             Self::Navigate { url, is_url } => {
-                row.leading = "\u{2315}".to_string();
+                row.icon = PageIcon::Builtin(if *is_url {
+                    BuiltinIcon::Globe
+                } else {
+                    BuiltinIcon::Search
+                });
                 row.title = if url.is_empty() {
                     translate("command-search")
                 } else if *is_url {
@@ -146,6 +150,7 @@ impl CommandBarResultItem {
             Self::Search { engine, query } => {
                 row.title = format!("Search with {}", engine.name);
                 row.url = engine.query_url(query);
+                row.icon = PageIcon::Builtin(BuiltinIcon::Globe);
                 row.trailing = "\u{21b5}".to_string();
             }
             Self::File {
@@ -386,16 +391,39 @@ impl PageRows {
     }
 }
 
-pub(super) struct StartRows;
+pub(super) struct PromptRows;
 
-impl StartRows {
+impl PromptRows {
+    pub fn insert_target(
+        results: &mut Vec<CommandBarResultItem>,
+        selected_target: Option<&CommandBarResultItem>,
+        query: &str,
+    ) {
+        let Some(target) = selected_target else {
+            return;
+        };
+        if PageRows::prompt_target_matches(target, query) {
+            return;
+        }
+        let at = results
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    CommandBarResultItem::Navigate { .. } | CommandBarResultItem::Search { .. }
+                )
+            })
+            .unwrap_or(results.len());
+        results.insert(at, target.clone());
+    }
+
     pub fn prepend_targets(
         results: &mut Vec<CommandBarResultItem>,
         selected_target: Option<&CommandBarResultItem>,
         recent_targets: &[CommandBarResultItem],
         query: &str,
     ) {
-        if !PaletteQuery::new(query).is_start_prompt()
+        if !PaletteQuery::new(query).is_prompt()
             || results
                 .iter()
                 .any(|item| PageRows::prompt_target_url(item).is_some())
@@ -459,8 +487,8 @@ impl PageRows {
     }
 }
 
-impl StartRows {
-    pub fn start(
+impl PromptRows {
+    pub fn for_query(
         pages: &[CommandBarPage],
         search_engines: &[SearchEngine],
         query: &str,
@@ -473,7 +501,7 @@ impl StartRows {
                 .filter(|item| PageRows::prompt_target_matches(item, query)),
         );
         let trimmed = query.trim();
-        if PaletteQuery::new(trimmed).is_start_prompt() {
+        if PaletteQuery::new(trimmed).is_prompt() {
             results.extend(search_engines.iter().take(3).cloned().map(|engine| {
                 CommandBarResultItem::Search {
                     engine,
@@ -499,7 +527,7 @@ impl StartRows {
                     prompt_hint: false,
                 }),
         );
-        if !PaletteQuery::new(trimmed).is_start_prompt() && !trimmed.is_empty() {
+        if !PaletteQuery::new(trimmed).is_prompt() && !trimmed.is_empty() {
             results.push(CommandBarResultItem::Navigate {
                 url: trimmed.to_string(),
                 is_url: PaletteQuery::new(trimmed).looks_like_url(),
@@ -671,6 +699,38 @@ mod tests {
             hosts: vec![format!("{id}.example")],
             query_url: format!("https://{id}.example/?q={{query}}"),
         }
+    }
+
+    #[test]
+    fn web_rows_project_synchronous_builtin_icons() {
+        let search = CommandBarResultItem::Navigate {
+            url: "question".to_string(),
+            is_url: false,
+        }
+        .projection();
+        let url = CommandBarResultItem::Navigate {
+            url: "example.com".to_string(),
+            is_url: true,
+        }
+        .projection();
+        let engine = CommandBarResultItem::Search {
+            engine: search_engine("google"),
+            query: "question".to_string(),
+        }
+        .projection();
+
+        assert_eq!(
+            search.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Search)
+        );
+        assert_eq!(
+            url.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Globe)
+        );
+        assert_eq!(
+            engine.icon,
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Globe)
+        );
     }
 
     fn sample_pages() -> Vec<CommandBarPage> {
@@ -876,7 +936,7 @@ mod tests {
 
     #[test]
     fn start_page_does_not_show_unmatched_agents() {
-        let results = StartRows::start(&sample_pages(), &[], "settings");
+        let results = PromptRows::for_query(&sample_pages(), &[], "settings");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -896,7 +956,7 @@ mod tests {
             search_engine("bing"),
             search_engine("duckduckgo"),
         ];
-        let results = StartRows::start(&sample_pages(), &engines, "fix the failing test");
+        let results = PromptRows::for_query(&sample_pages(), &engines, "fix the failing test");
         let actual = results
             .iter()
             .filter_map(|result| match result {
@@ -933,13 +993,13 @@ mod tests {
         ]);
         let agents = PageRows::prompt_targets(&pages, "");
         let selected = agents[1].clone();
-        let mut results = StartRows::start(
+        let mut results = PromptRows::for_query(
             &pages,
             &[search_engine("google"), search_engine("bing")],
             "show me something fun",
         );
 
-        StartRows::prepend_targets(
+        PromptRows::prepend_targets(
             &mut results,
             Some(&selected),
             &agents,
@@ -973,7 +1033,7 @@ mod tests {
             prompt_target: false,
             startup: false,
         });
-        let results = StartRows::start(&pages, &[], "terminal");
+        let results = PromptRows::for_query(&pages, &[], "terminal");
         assert!(matches!(
             results.first(),
             Some(CommandBarResultItem::Page { url, .. }) if url == "vmux://terminal/"

@@ -40,6 +40,48 @@ impl ArchivePath {
     }
 }
 
+enum TarLinkKind {
+    Symbolic,
+    Hard,
+}
+
+struct TarLink {
+    kind: TarLinkKind,
+    output: PathBuf,
+    target: ArchivePath,
+}
+
+impl TarLink {
+    fn new(kind: TarLinkKind, output: PathBuf, target: &Path) -> Result<Self, String> {
+        Ok(Self {
+            kind,
+            output,
+            target: ArchivePath::parse(target)?,
+        })
+    }
+
+    fn create(self, destination: &Path) -> Result<(), String> {
+        if let Some(parent) = self.output.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        match self.kind {
+            TarLinkKind::Symbolic => {
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(&self.target.0, &self.output)
+                        .map_err(|error| error.to_string())
+                }
+                #[cfg(not(unix))]
+                {
+                    Err("symbolic links are unsupported on this platform".to_string())
+                }
+            }
+            TarLinkKind::Hard => std::fs::hard_link(self.target.join(destination), self.output)
+                .map_err(|error| error.to_string()),
+        }
+    }
+}
+
 #[derive(Default)]
 struct ExpandedSize(u64);
 
@@ -118,6 +160,7 @@ impl ArchiveKind {
         let entries = archive.entries().map_err(|error| error.to_string())?;
         let mut entry_count = 0usize;
         let mut expanded = ExpandedSize::default();
+        let mut links = Vec::new();
         for entry in entries {
             entry_count += 1;
             if entry_count > MAX_ARCHIVE_ENTRIES {
@@ -136,6 +179,16 @@ impl ArchiveKind {
             };
             let output = relative.join(destination);
             if kind.is_symlink() || kind.is_hard_link() {
+                let target = entry
+                    .link_name()
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| format!("tar link has no target: {}", path.display()))?;
+                let link_kind = if kind.is_symlink() {
+                    TarLinkKind::Symbolic
+                } else {
+                    TarLinkKind::Hard
+                };
+                links.push(TarLink::new(link_kind, output, &target)?);
                 continue;
             }
             if kind.is_dir() {
@@ -150,6 +203,9 @@ impl ArchiveKind {
                 std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
             entry.unpack(&output).map_err(|error| error.to_string())?;
+        }
+        for link in links {
+            link.create(destination)?;
         }
         Ok(())
     }
@@ -278,6 +334,92 @@ mod tests {
             std::fs::read(dest.join("vibe-acp")).unwrap(),
             b"agent-binary"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extracts_safe_tar_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tar_path = tmp.path().join("agent.tar.gz");
+        {
+            let file = std::fs::File::create(&tar_path).unwrap();
+            let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            let mut builder = tar::Builder::new(encoder);
+
+            let payload = b"python-runtime";
+            let mut runtime = tar::Header::new_gnu();
+            runtime.set_entry_type(tar::EntryType::Regular);
+            runtime.set_mode(0o755);
+            runtime.set_size(payload.len() as u64);
+            runtime.set_cksum();
+            builder
+                .append_data(
+                    &mut runtime,
+                    "_internal/Python.framework/Versions/3.12/Python",
+                    payload.as_slice(),
+                )
+                .unwrap();
+
+            let mut symbolic = tar::Header::new_gnu();
+            symbolic.set_entry_type(tar::EntryType::Symlink);
+            symbolic.set_mode(0o755);
+            symbolic.set_size(0);
+            symbolic
+                .set_link_name("Python.framework/Versions/3.12/Python")
+                .unwrap();
+            symbolic.set_cksum();
+            builder
+                .append_data(&mut symbolic, "_internal/Python", std::io::empty())
+                .unwrap();
+
+            let mut hard = tar::Header::new_gnu();
+            hard.set_entry_type(tar::EntryType::Link);
+            hard.set_mode(0o755);
+            hard.set_size(0);
+            hard.set_link_name("_internal/Python.framework/Versions/3.12/Python")
+                .unwrap();
+            hard.set_cksum();
+            builder
+                .append_data(&mut hard, "python-hard-link", std::io::empty())
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let dest = tmp.path().join("out");
+        ArchiveKind::TarGz.extract(&tar_path, &dest, "_").unwrap();
+
+        assert_eq!(
+            std::fs::read(dest.join("_internal/Python")).unwrap(),
+            b"python-runtime"
+        );
+        assert_eq!(
+            std::fs::read(dest.join("python-hard-link")).unwrap(),
+            b"python-runtime"
+        );
+    }
+
+    #[test]
+    fn rejects_escaping_tar_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tar_path = tmp.path().join("agent.tar.gz");
+        {
+            let file = std::fs::File::create(&tar_path).unwrap();
+            let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            let mut builder = tar::Builder::new(encoder);
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_mode(0o755);
+            link.set_size(0);
+            link.set_link_name("../escape").unwrap();
+            link.set_cksum();
+            builder
+                .append_data(&mut link, "unsafe-link", std::io::empty())
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let dest = tmp.path().join("out");
+
+        assert!(ArchiveKind::TarGz.extract(&tar_path, &dest, "_").is_err());
+        assert!(!tmp.path().join("escape").exists());
     }
 
     #[test]

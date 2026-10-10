@@ -250,8 +250,7 @@ impl PaletteState {
             }
             return PaletteDecision::Attach(path.clone());
         }
-        if self.surface.is_start()
-            && (PaletteQuery::new(&self.query).is_start_prompt() || !attachments.is_empty())
+        if (PaletteQuery::new(&self.query).is_prompt() || !attachments.is_empty())
             && let Some(target_url) = PageRows::prompt_target_url(item)
         {
             return if PageRows::prompt_target_matches(item, &self.query) && attachments.is_empty() {

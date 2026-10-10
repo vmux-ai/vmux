@@ -32,6 +32,8 @@ pub(super) struct ResolvedAgent {
 
 const NODE_VERSION: &str = "22.11.0";
 const UV_VERSION: &str = "0.5.11";
+const BINARY_INSTALL_REVISION: &str = "binary-v2";
+const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
 
 pub(super) struct AgentInstaller {
     store: PackageStore,
@@ -313,6 +315,17 @@ impl BinaryTarget {
 }
 
 impl RegistryAgent {
+    fn binary_source_id(&self) -> String {
+        format!("acp:{}:{BINARY_INSTALL_REVISION}", self.id)
+    }
+
+    fn binary_install_is_current(&self, receipt: Option<&Receipt>) -> bool {
+        let Some(receipt) = receipt else {
+            return false;
+        };
+        receipt.version == self.version && receipt.source_id == self.binary_source_id()
+    }
+
     fn ensure_binary(
         &self,
         store: &PackageStore,
@@ -327,10 +340,8 @@ impl RegistryAgent {
         PackageName::parse(&archive)?;
         let command = target.command_path(&package_dir, &archive)?;
 
-        let up_to_date = store
-            .read_receipt(&name)
-            .map(|receipt| receipt.version == self.version)
-            .unwrap_or(false);
+        let receipt = store.read_receipt(&name);
+        let up_to_date = self.binary_install_is_current(receipt.as_ref());
         let package_added = !self.is_installed_at(store);
         if !up_to_date || !command.exists() {
             target.install(self, store, &name, &archive, &mut emit)?;
@@ -395,6 +406,17 @@ impl NodeRuntime {
         self.bin_dir()
             .is_some_and(|directory| directory.join("node").is_file())
             && self.cli("npx-cli.js").is_some_and(|path| path.is_file())
+    }
+
+    fn npm_config(&self) -> Result<PathBuf, String> {
+        let path = self.store.path().join("npmrc");
+        std::fs::create_dir_all(self.store.path()).map_err(|error| error.to_string())?;
+        vmux_path::AtomicFile::write(
+            &path,
+            format!("registry={NPM_REGISTRY}\nignore-scripts=false\n").as_bytes(),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(path)
     }
 
     fn ensure(
@@ -487,23 +509,34 @@ impl RegistryAgent {
             .cli("npx-cli.js")
             .filter(|path| path.is_file())
             .ok_or("managed npx missing after extract")?;
+        let npm_config = runtime.npm_config()?;
         self.write_receipt(store, version)?;
         emit(InstallPhase::Done, Some(100), "ready");
 
         let mut args = vec![
             npx.to_string_lossy().into_owned(),
+            format!("--userconfig={}", npm_config.to_string_lossy()),
+            format!("--registry={NPM_REGISTRY}"),
+            "--ignore-scripts=false".to_string(),
             "-y".to_string(),
             distribution.spec(version),
         ];
         args.extend(distribution.args.iter().cloned());
+        let mut env: Vec<_> = distribution
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        env.push((
+            "NPM_CONFIG_USERCONFIG".to_string(),
+            npm_config.to_string_lossy().into_owned(),
+        ));
+        env.push(("NPM_CONFIG_REGISTRY".to_string(), NPM_REGISTRY.to_string()));
+        env.push(("NPM_CONFIG_IGNORE_SCRIPTS".to_string(), "false".to_string()));
         Ok(ResolvedAgent {
             command: bin_dir.join("node").to_string_lossy().into_owned(),
             args,
-            env: distribution
-                .env
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect(),
+            env,
             path_prepend: Some(bin_dir.to_string_lossy().into_owned()),
             package_added,
         })
@@ -757,7 +790,7 @@ impl BinaryTarget {
         Receipt {
             name: name.clone(),
             version: agent.version.clone(),
-            source_id: format!("acp:{}", agent.id),
+            source_id: agent.binary_source_id(),
             bin: Default::default(),
         }
         .write_to(&staged_package)
@@ -789,6 +822,21 @@ mod tests {
                     args: vec![],
                     env: Default::default(),
                 }),
+                uvx: None,
+            },
+        }
+    }
+
+    fn binary_agent(id: &str) -> RegistryAgent {
+        RegistryAgent {
+            id: id.to_string(),
+            name: id.to_string(),
+            version: Some("1.0.0".to_string()),
+            description: None,
+            icon: None,
+            distribution: Distribution {
+                binary: Some(Default::default()),
+                npx: None,
                 uvx: None,
             },
         }
@@ -900,6 +948,69 @@ mod tests {
             env: Default::default(),
         };
         assert!(escaping.command_path(pkg, "a.tar.gz").is_err());
+    }
+
+    #[test]
+    fn binary_install_revision_invalidates_legacy_receipt() {
+        let agent = binary_agent("mistral-vibe");
+        let name = PackageName::parse(&agent.id).unwrap();
+        let legacy = Receipt {
+            name: name.clone(),
+            version: agent.version.clone(),
+            source_id: format!("acp:{}", agent.id),
+            bin: Default::default(),
+        };
+        let current = Receipt {
+            name,
+            version: agent.version.clone(),
+            source_id: agent.binary_source_id(),
+            bin: Default::default(),
+        };
+
+        assert!(!agent.binary_install_is_current(Some(&legacy)));
+        assert!(agent.binary_install_is_current(Some(&current)));
+    }
+
+    #[test]
+    fn npx_launch_uses_managed_npm_configuration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = PackageStore::at(tmp.path());
+        let runtime = NodeRuntime::new(&store);
+        let node = runtime.bin_dir().unwrap().join("node");
+        std::fs::create_dir_all(node.parent().unwrap()).unwrap();
+        std::fs::write(&node, b"").unwrap();
+        let npx = runtime.cli("npx-cli.js").unwrap();
+        std::fs::create_dir_all(npx.parent().unwrap()).unwrap();
+        std::fs::write(npx, b"").unwrap();
+
+        let resolved = npx_agent("codex-acp")
+            .ensure_npx(&store, None, |_, _, _| {})
+            .unwrap();
+        let config = store.path().join("npmrc");
+
+        assert!(
+            resolved
+                .args
+                .contains(&format!("--userconfig={}", config.to_string_lossy()))
+        );
+        assert!(
+            resolved
+                .args
+                .contains(&format!("--registry={NPM_REGISTRY}"))
+        );
+        assert!(
+            resolved
+                .args
+                .contains(&"--ignore-scripts=false".to_string())
+        );
+        assert!(resolved.env.contains(&(
+            "NPM_CONFIG_USERCONFIG".to_string(),
+            config.to_string_lossy().into_owned(),
+        )));
+        assert_eq!(
+            std::fs::read_to_string(config).unwrap(),
+            format!("registry={NPM_REGISTRY}\nignore-scripts=false\n")
+        );
     }
 
     #[test]
