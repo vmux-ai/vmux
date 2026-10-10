@@ -69,6 +69,7 @@ bevy = { workspace = true, optional = true }
 bevy_cef = { workspace = true, optional = true }
 futures-lite = { version = "2", optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff"], optional = true }
+ignore = "0.4"
 rfd = { workspace = true, optional = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }

@@ -92,7 +92,7 @@ impl ComposerState {
 
 #[derive(Component, Default)]
 pub(super) struct ComposerSelectors {
-    media_query: String,
+    media_query: Option<String>,
     resume_active: bool,
     resume_query: String,
     mcp_open: bool,
@@ -179,9 +179,7 @@ fn project_queries(
             },
         ),
     );
-    let media_query = InlineMediaQuery::parse(&composer.draft)
-        .map(|query| query.query.to_string())
-        .unwrap_or_default();
+    let media_query = InlineMediaQuery::parse(&composer.draft).map(|query| query.query.to_string());
     if selectors.media_query != media_query {
         selectors.media_query.clone_from(&media_query);
         commands.trigger(super::media::ChatMediaQuery::new(webview, media_query));
@@ -259,8 +257,22 @@ mod tests {
             .update("show @src");
         app.world_mut().trigger(ComposerChanged::new(composer));
         let selectors = app.world().get::<ComposerSelectors>(composer).unwrap();
-        assert_eq!(selectors.media_query, "src");
+        assert_eq!(selectors.media_query.as_deref(), Some("src"));
         assert!(!selectors.resume_active);
+
+        app.world_mut()
+            .get_mut::<ComposerState>(composer)
+            .unwrap()
+            .update("@");
+        app.world_mut().trigger(ComposerChanged::new(composer));
+        assert_eq!(
+            app.world()
+                .get::<ComposerSelectors>(composer)
+                .unwrap()
+                .media_query
+                .as_deref(),
+            Some("")
+        );
 
         app.world_mut()
             .get_mut::<ComposerState>(composer)

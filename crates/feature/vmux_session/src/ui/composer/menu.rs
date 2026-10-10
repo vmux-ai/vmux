@@ -16,8 +16,8 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
                 items: chat.media_options(),
                 selected: chat.list_selection(),
                 loading: media.loading,
-                loading_label: translate("agent-loading-media"),
-                empty_label: translate("agent-no-matching-media"),
+                loading_label: translate("agent-loading-files"),
+                empty_label: translate("agent-no-matching-files"),
                 on_hover: move |index| chat.point_at_list(index),
                 on_select: move |index| chat.choose_list(index),
             }

@@ -2,11 +2,14 @@ use base64::Engine;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use ignore::WalkBuilder;
+use std::cmp::Ordering;
+use std::path::{Path, PathBuf};
 
 use super::prompt::ChatPromptFocusRevision;
 use super::session::{
     ChatAttachmentProjection, ChatMediaProjection, ChatSnapshotProjection,
-    ChatTranscriptProjection, ChatView,
+    ChatTranscriptProjection, ChatView, SessionViews,
 };
 use crate as vmux_session;
 use crate::event::{
@@ -15,7 +18,11 @@ use crate::event::{
     ChatPickFiles, ChatRemoveAttachment, ChatSnapshot, ChatTranscriptState,
 };
 use vmux_api::prompt_media::{PromptComposerAttachment, PromptMediaOption};
+use vmux_ecs::Cwd;
 use vmux_ui::file_icon::FilePath;
+
+const MAX_COMPOSER_FILE_RESULTS: usize = 100;
+const MAX_COMPOSER_FILE_SCAN: usize = 100_000;
 
 pub struct ChatMediaPlugin;
 
@@ -70,12 +77,7 @@ struct AttachmentTasks<'w, 's> {
 }
 
 impl AttachmentTasks<'_, '_> {
-    fn spawn(
-        &mut self,
-        webview: Entity,
-        delivery: ChatAttachmentDelivery,
-        paths: Vec<std::path::PathBuf>,
-    ) {
+    fn spawn(&mut self, webview: Entity, delivery: ChatAttachmentDelivery, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
         }
@@ -102,7 +104,7 @@ impl AttachmentTasks<'_, '_> {
         });
     }
 
-    fn selected(&mut self, webview: Entity, paths: Vec<std::path::PathBuf>) {
+    fn selected(&mut self, webview: Entity, paths: Vec<PathBuf>) {
         self.spawn(webview, ChatAttachmentDelivery::Selected, paths);
     }
 }
@@ -132,25 +134,27 @@ struct ChatMediaPreviewTask {
 pub struct ChatMediaQuery {
     #[event_target]
     webview: Entity,
-    query: String,
+    query: Option<String>,
 }
 
 impl ChatMediaQuery {
-    pub fn new(webview: Entity, query: String) -> Self {
+    pub fn new(webview: Entity, query: Option<String>) -> Self {
         Self { webview, query }
     }
 }
 
 impl ChatMediaProjection {
-    fn start(&mut self, query: String) -> Option<u64> {
-        if self.0.query == query {
-            return None;
-        }
+    fn start(&mut self, query: Option<String>) -> Option<(u64, String)> {
         self.0.request_id = self.0.request_id.wrapping_add(1).max(1);
-        self.0.query = query;
-        self.0.entries.clear();
-        self.0.loading = !self.0.query.is_empty();
-        Some(self.0.request_id)
+        let Some(query) = query else {
+            self.0.query.clear();
+            self.0.entries.clear();
+            self.0.loading = false;
+            return None;
+        };
+        self.0.query.clone_from(&query);
+        self.0.loading = self.0.entries.is_empty();
+        Some((self.0.request_id, query))
     }
 
     fn finish(&mut self, entries: &ChatMediaEntries) -> bool {
@@ -160,6 +164,164 @@ impl ChatMediaProjection {
         self.0.entries.clone_from(&entries.entries);
         self.0.loading = false;
         true
+    }
+}
+
+struct ComposerFileQuery {
+    root: PathBuf,
+    query: String,
+}
+
+impl ComposerFileQuery {
+    fn new(root: PathBuf, query: String) -> Self {
+        Self { root, query }
+    }
+
+    fn search(self, request_id: u64) -> ChatMediaEntries {
+        let query = decode_media_query_path(&self.query)
+            .to_string_lossy()
+            .trim_start_matches("./")
+            .to_ascii_lowercase();
+        let mut hits = Vec::new();
+        let walk = WalkBuilder::new(&self.root)
+            .hidden(true)
+            .parents(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .follow_links(false)
+            .build();
+        for entry in walk.take(MAX_COMPOSER_FILE_SCAN) {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            if entry.depth() == 0 {
+                continue;
+            }
+            let Some(kind) = entry.file_type() else {
+                continue;
+            };
+            let Ok(relative) = entry.path().strip_prefix(&self.root) else {
+                continue;
+            };
+            let relative = relative.to_string_lossy().into_owned();
+            let Some(rank) = ComposerFileHit::rank(&relative, kind.is_dir(), &query) else {
+                continue;
+            };
+            hits.push(ComposerFileHit {
+                path: entry.path().to_path_buf(),
+                relative,
+                is_dir: kind.is_dir(),
+                rank,
+            });
+        }
+        hits.sort_by(ComposerFileHit::compare);
+        hits.truncate(MAX_COMPOSER_FILE_RESULTS);
+        let mut entries = Vec::with_capacity(hits.len());
+        for hit in hits {
+            entries.push(hit.entry());
+        }
+        ChatMediaEntries {
+            request_id,
+            query: self.query,
+            entries,
+        }
+    }
+}
+
+struct ComposerFileHit {
+    path: PathBuf,
+    relative: String,
+    is_dir: bool,
+    rank: u8,
+}
+
+impl ComposerFileHit {
+    fn rank(relative: &str, is_dir: bool, query: &str) -> Option<u8> {
+        if query.is_empty() {
+            return Some(0);
+        }
+        let relative = relative.to_ascii_lowercase();
+        let name = Path::new(&relative)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(relative.as_str());
+        if name == query {
+            return Some(0);
+        }
+        if name.starts_with(query) {
+            return Some(1);
+        }
+        if relative.starts_with(query) {
+            return Some(2);
+        }
+        if name.contains(query) {
+            return Some(3);
+        }
+        if relative.contains(query) {
+            return Some(4);
+        }
+        Self::subsequence(&relative, query).then_some(if is_dir { 5 } else { 6 })
+    }
+
+    fn subsequence(value: &str, query: &str) -> bool {
+        let mut query = query.chars();
+        let Some(mut wanted) = query.next() else {
+            return true;
+        };
+        for character in value.chars() {
+            if character != wanted {
+                continue;
+            }
+            let Some(next) = query.next() else {
+                return true;
+            };
+            wanted = next;
+        }
+        false
+    }
+
+    fn compare(left: &Self, right: &Self) -> Ordering {
+        left.rank
+            .cmp(&right.rank)
+            .then_with(|| {
+                left.relative
+                    .matches('/')
+                    .count()
+                    .cmp(&right.relative.matches('/').count())
+            })
+            .then_with(|| right.is_dir.cmp(&left.is_dir))
+            .then_with(|| {
+                left.relative
+                    .to_lowercase()
+                    .cmp(&right.relative.to_lowercase())
+            })
+    }
+
+    fn entry(self) -> ChatMediaEntry {
+        let name = self
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.relative.clone());
+        let parent = Path::new(&self.relative)
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mime_type = if self.is_dir {
+            String::new()
+        } else {
+            attachment_mime(&self.path)
+        };
+        ChatMediaEntry {
+            path: self.path.to_string_lossy().into_owned(),
+            name,
+            parent,
+            mime_type,
+            is_dir: self.is_dir,
+            preview_data_url: String::new(),
+        }
     }
 }
 
@@ -197,14 +359,14 @@ impl ChatAttachmentProjection {
         }
     }
 
-    fn start_hydration(&mut self, paths: &[String]) -> Vec<std::path::PathBuf> {
+    fn start_hydration(&mut self, paths: &[String]) -> Vec<PathBuf> {
         let mut started = Vec::new();
         for path in paths {
             if path.is_empty() || self.resolved.contains(path) || !self.pending.insert(path.clone())
             {
                 continue;
             }
-            started.push(std::path::PathBuf::from(path));
+            started.push(PathBuf::from(path));
         }
         started
     }
@@ -327,7 +489,7 @@ const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 
 const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 512;
 
-fn attachment_mime(path: &std::path::Path) -> String {
+fn attachment_mime(path: &Path) -> String {
     let path_str = path.to_string_lossy();
     if let Some(mime) = vmux_api::media::MediaKind::mime(&path_str) {
         return mime.to_string();
@@ -355,7 +517,7 @@ fn attachment_mime(path: &std::path::Path) -> String {
     .to_string()
 }
 
-fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
+fn chat_attachment(path: PathBuf) -> Option<ChatAttachment> {
     let metadata = std::fs::metadata(&path).ok()?;
     if !metadata.is_file() {
         return None;
@@ -371,7 +533,7 @@ fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
     })
 }
 
-fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String {
+fn media_thumbnail_data_url(path: &Path, source_size: u64) -> String {
     if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
         return String::new();
     }
@@ -401,13 +563,13 @@ fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String 
     )
 }
 
-fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
+fn chat_attachment_preview(path: PathBuf) -> Option<ChatAttachment> {
     let mut attachment = chat_attachment(path)?;
     if !attachment.mime_type.starts_with("image/") {
         return None;
     }
     attachment.preview_data_url =
-        media_thumbnail_data_url(std::path::Path::new(&attachment.path), attachment.size);
+        media_thumbnail_data_url(Path::new(&attachment.path), attachment.size);
     (!attachment.preview_data_url.is_empty()).then_some(attachment)
 }
 
@@ -469,7 +631,7 @@ fn project(views: ChangedMediaViews, mut commands: Commands) {
     }
 }
 
-fn decode_media_query_path(value: &str) -> std::path::PathBuf {
+fn decode_media_query_path(value: &str) -> PathBuf {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -488,11 +650,11 @@ fn decode_media_query_path(value: &str) -> std::path::PathBuf {
             index += 1;
         }
     }
-    std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
+    PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
 fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
-    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return ChatMediaEntries {
             request_id,
             query,
@@ -520,7 +682,7 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
         (
             candidate
                 .parent()
-                .map(std::path::Path::to_path_buf)
+                .map(Path::to_path_buf)
                 .unwrap_or_else(|| home.clone()),
             candidate
                 .file_name()
@@ -625,8 +787,7 @@ fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
         if source_size > remaining_thumbnail_bytes {
             continue;
         }
-        entry.preview_data_url =
-            media_thumbnail_data_url(std::path::Path::new(&entry.path), source_size);
+        entry.preview_data_url = media_thumbnail_data_url(Path::new(&entry.path), source_size);
         if !entry.preview_data_url.is_empty() {
             remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(source_size);
         }
@@ -647,13 +808,16 @@ fn list_request(trigger: On<UiInput<ChatMediaListRequest>>, mut commands: Comman
 fn query_request(trigger: On<UiInput<ChatMediaQueryRequest>>, mut commands: Commands) {
     commands.trigger(ChatMediaQuery::new(
         trigger.event().webview,
-        trigger.event().payload.query.clone(),
+        Some(trigger.event().payload.query.clone()),
     ));
 }
 
 fn query(
     trigger: On<ChatMediaQuery>,
     mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
+    views: SessionViews,
+    sessions: Query<&Cwd>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event_target();
@@ -661,19 +825,35 @@ fn query(
         return;
     };
     let query = trigger.event().query.clone();
-    let Some(request_id) = projection.start(query.clone()) else {
-        return;
-    };
+    let request = projection.start(query);
     commands.trigger(
         vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
             webview,
             &projection.0,
         ),
     );
-    if query.is_empty() {
+    let Some((request_id, query)) = request else {
         return;
-    }
-    let task = IoTaskPool::get().spawn(async move { chat_media_entries(request_id, query) });
+    };
+    let Some(root) = views
+        .session(webview)
+        .and_then(|session| sessions.get(session).ok())
+        .map(|cwd| cwd.0.clone())
+    else {
+        projection.0.loading = false;
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+                webview,
+                &projection.0,
+            ),
+        );
+        return;
+    };
+    let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
+    let task = IoTaskPool::get().spawn(async move {
+        let _wake = wake;
+        ComposerFileQuery::new(root, query).search(request_id)
+    });
     commands.spawn(ChatMediaListTask { webview, task });
 }
 
@@ -684,7 +864,7 @@ fn attach_paths(trigger: On<UiInput<ChatAttachPaths>>, mut tasks: AttachmentTask
         .paths
         .iter()
         .filter(|path| !path.is_empty())
-        .map(std::path::PathBuf::from)
+        .map(PathBuf::from)
         .collect();
     tasks.selected(trigger.event().webview, paths);
 }
@@ -734,7 +914,7 @@ fn remove_attachment(
 fn pick_files(trigger: On<UiInput<ChatPickFiles>>, mut tasks: AttachmentTasks) {
     let mut dialog = rfd::FileDialog::new();
     if let Some(home) = std::env::var_os("HOME") {
-        dialog = dialog.set_directory(std::path::PathBuf::from(home));
+        dialog = dialog.set_directory(PathBuf::from(home));
     }
     let Some(paths) = dialog.pick_files() else {
         return;
@@ -749,9 +929,9 @@ fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(output.into_inner())
 }
 
-fn clipboard_image_path() -> Option<std::path::PathBuf> {
+fn clipboard_image_path() -> Option<PathBuf> {
     if let Some(path) = vmux_clipboard::Clipboard::image_file_path() {
-        return Some(std::path::PathBuf::from(path));
+        return Some(PathBuf::from(path));
     }
     let png = vmux_clipboard::Clipboard::read_image_png().or_else(|| {
         vmux_clipboard::Clipboard::read_image_tiff().and_then(|bytes| tiff_to_png(&bytes))
@@ -854,7 +1034,7 @@ fn drain_attachment_tasks(
                 let paths = attachments
                     .iter()
                     .filter(|attachment| attachment.mime_type.starts_with("image/"))
-                    .map(|attachment| std::path::PathBuf::from(&attachment.path))
+                    .map(|attachment| PathBuf::from(&attachment.path))
                     .collect();
                 attachment_tasks.spawn(pending.webview, ChatAttachmentDelivery::Hydrated, paths);
             }
@@ -942,20 +1122,60 @@ mod tests {
     #[test]
     fn media_projection_rejects_stale_results() {
         let mut projection = ChatMediaProjection::default();
-        let stale = projection.start("old".into()).unwrap();
-        let current = projection.start("new".into()).unwrap();
+        let stale = projection.start(Some("old".into())).unwrap().0;
+        projection.0.entries.push(ChatMediaEntry {
+            path: "/repo/old.rs".into(),
+            name: "old.rs".into(),
+            ..Default::default()
+        });
+        let current = projection.start(Some("new".into())).unwrap().0;
+        assert_eq!(projection.0.entries[0].name, "old.rs");
+        assert!(!projection.0.loading);
         assert!(!projection.finish(&ChatMediaEntries {
             request_id: stale,
             query: "old".into(),
             entries: Vec::new(),
         }));
-        assert!(projection.0.loading);
+        assert!(!projection.0.loading);
+        assert_eq!(projection.0.entries[0].name, "old.rs");
         assert!(projection.finish(&ChatMediaEntries {
             request_id: current,
             query: "new".into(),
             entries: Vec::new(),
         }));
         assert!(!projection.0.loading);
+    }
+
+    #[test]
+    fn project_file_query_lists_source_files_for_bare_and_typed_mentions() {
+        let root =
+            std::env::temp_dir().join(format!("vmux-composer-file-query-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(root.join("docs/readme.md"), "docs").unwrap();
+
+        let all = ComposerFileQuery::new(root.clone(), String::new()).search(1);
+        assert!(all.entries.iter().any(|entry| entry.name == "main.rs"));
+        assert!(all.entries.iter().any(|entry| entry.name == "readme.md"));
+
+        let matched = ComposerFileQuery::new(root.clone(), "main".to_string()).search(2);
+        assert_eq!(matched.entries[0].name, "main.rs");
+        assert_eq!(matched.entries[0].parent, "src");
+        assert_eq!(matched.entries[0].display_path(), "src/main.rs");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn closing_the_file_selector_clears_its_projection() {
+        let mut projection = ChatMediaProjection::default();
+        projection.start(Some(String::new()));
+        assert!(projection.0.loading);
+
+        assert_eq!(projection.start(None), None);
+        assert!(!projection.0.loading);
+        assert!(projection.0.query.is_empty());
+        assert!(projection.0.entries.is_empty());
     }
 
     #[test]
@@ -1043,7 +1263,7 @@ mod tests {
     fn media_query_paths_decode_percent_escapes() {
         assert_eq!(
             decode_media_query_path("Pictures/My%20Image%25.png"),
-            std::path::PathBuf::from("Pictures/My Image%.png")
+            PathBuf::from("Pictures/My Image%.png")
         );
     }
 

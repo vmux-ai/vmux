@@ -22,7 +22,7 @@ impl AvatarSpec {
     pub fn for_registry(name: &str, seed: &str) -> Self {
         Self {
             initials: Self::initials(name),
-            color: Self::color(seed),
+            color: Self::agent_color(seed),
         }
     }
 
@@ -68,7 +68,7 @@ impl AvatarSpec {
         if segment.contains("codex") {
             return Some("#10a37f");
         }
-        if segment.contains("vibe") {
+        if segment.contains("mistral") || segment.contains("vibe") {
             return Some("#ff7000");
         }
         None
@@ -88,6 +88,7 @@ mod tests {
         assert_eq!(AvatarSpec::agent_color("codex"), "#10a37f");
         assert_eq!(AvatarSpec::agent_color("codex-acp"), "#10a37f");
         assert_eq!(AvatarSpec::agent_color("vibe"), "#ff7000");
+        assert_eq!(AvatarSpec::agent_color("mistral"), "#ff7000");
         assert_eq!(AvatarSpec::agent_color("Mistral Vibe"), "#ff7000");
     }
 
