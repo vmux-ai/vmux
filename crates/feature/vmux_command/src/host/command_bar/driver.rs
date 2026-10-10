@@ -12,8 +12,6 @@ pub(super) use self::decision::{PaletteDecision, PaletteState};
 #[cfg(test)]
 use self::decision::{RowText, TypedRow};
 use self::decision::{SelectedAgentModels, SelectedAgentModes};
-#[cfg(test)]
-use self::file::ProjectPath;
 pub(super) use self::file::{CompletionQuery, Completions, FileRows};
 use self::results::{
     CommandBarResultItem, PageRows, PickerRows, SearchRows, SearchRowsInput, SlashRows, StartRows,
@@ -64,14 +62,7 @@ impl PaletteDraft {
             return PageRows::open_sessions(&state.tabs, &state.pages);
         }
         if start_prompt_mode {
-            let matched = StartRows::start(
-                &state.pages,
-                &state.work_dirs,
-                &state.recent_files,
-                &state.search_engines,
-                query,
-            );
-            return self.with_completions(matched);
+            return StartRows::start(&state.pages, &state.search_engines, query);
         }
         let matched = SearchRows::filter(SearchRowsInput {
             query,
@@ -79,10 +70,7 @@ impl PaletteDraft {
             commands: &state.commands,
             pages: &state.pages,
             history: &self.history,
-            work_dirs: &state.work_dirs,
-            recent_files: &state.recent_files,
         });
-        let matched = self.with_completions(matched);
         if !is_start {
             return matched;
         }
@@ -116,23 +104,7 @@ impl PaletteDraft {
     }
 
     fn ghost(&self) -> String {
-        if CompletionQuery::only_files(&self.query) {
-            return String::new();
-        }
-        if CompletionQuery::parse(&self.query).is_none() {
-            return String::new();
-        }
-        let Some(first) = self.completions.first() else {
-            return String::new();
-        };
-        let typed = self.query.trim();
-        let full = &first.full_path;
-        if !full.to_lowercase().starts_with(&typed.to_lowercase())
-            || !full.is_char_boundary(typed.len())
-        {
-            return String::new();
-        }
-        full[typed.len()..].to_string()
+        String::new()
     }
 }
 
@@ -212,10 +184,7 @@ impl PaletteRows {
             .or_else(|| prompt_targets.first().cloned());
         let start_prompt_mode = is_start && PaletteQuery::new(query).is_start_prompt();
 
-        let mut items = FileRows::under_projects(
-            draft.items(state, surface, &mode, start_prompt_mode),
-            &state.projects,
-        );
+        let mut items = draft.items(state, surface, &mode, start_prompt_mode);
         if start_prompt_mode {
             StartRows::prepend_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
         }
@@ -272,10 +241,8 @@ impl Glyph {
             | CommandBarResultItem::Slash { .. }
             | CommandBarResultItem::Pick { .. } => PaletteGlyph::Command,
             CommandBarResultItem::File { .. }
-            | CommandBarResultItem::WorkDir { .. }
             | CommandBarResultItem::PartialIndex
-            | CommandBarResultItem::MoreMatches { .. }
-            | CommandBarResultItem::RecentFile { .. } => PaletteGlyph::Path,
+            | CommandBarResultItem::MoreMatches { .. } => PaletteGlyph::Path,
             CommandBarResultItem::Stack { .. } | CommandBarResultItem::History { .. } => {
                 PaletteGlyph::Url
             }
@@ -590,10 +557,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_word_keeps_commands_above_the_files_it_also_matched() {
+    fn a_file_name_keeps_commands_above_the_files_it_also_matched() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "settings",
+            "@settings",
             Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
@@ -605,7 +572,7 @@ mod tests {
     fn a_typed_path_puts_its_files_first() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "~/src",
+            "@~/src",
             Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
@@ -617,11 +584,14 @@ mod tests {
     fn a_recent_file_row_for_an_already_listed_file_is_dropped() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "~/src",
+            "@~/src",
             Completions::listing(&hits),
-            vec![CommandBarResultItem::RecentFile {
+            vec![CommandBarResultItem::History {
                 url: "file:///root/src/settings.rs".to_string(),
                 title: "settings.rs".to_string(),
+                favicon_url: String::new(),
+                visit_count: 1,
+                last_visited_at: 1,
             }],
         );
         assert_eq!(merged.len(), 1);
@@ -633,7 +603,7 @@ mod tests {
         let paths: Vec<String> = (0..40).map(|at| format!("src/main_{at:02}.rs")).collect();
         let named: Vec<&str> = paths.iter().map(String::as_str).collect();
         let hits = FileRows::hits(&named);
-        let merged = FileRows::merge("main.rs", Completions::listing(&hits), Vec::new());
+        let merged = FileRows::merge("@main.rs", Completions::listing(&hits), Vec::new());
 
         assert_eq!(merged.len(), 40);
         assert!(
@@ -649,7 +619,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::modal(
             &state,
-            PaletteDraft::typed("main.rs")
+            PaletteDraft::typed("@main.rs")
                 .completing(FileRows::hits(&["src/main.rs", "src/other/main.rs"]))
                 .out_of(14),
         );
@@ -667,7 +637,7 @@ mod tests {
     fn a_partial_index_owns_up_to_it_below_the_files_it_did_find() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "settings",
+            "@settings",
             Completions::partial(&hits),
             vec![FileRows::a_command()],
         );
@@ -678,7 +648,7 @@ mod tests {
 
     #[test]
     fn a_partial_index_that_found_nothing_still_says_why() {
-        let merged = FileRows::merge("settings", Completions::partial(&[]), Vec::new());
+        let merged = FileRows::merge("@settings", Completions::partial(&[]), Vec::new());
 
         assert_eq!(merged, vec![CommandBarResultItem::PartialIndex]);
     }
@@ -688,7 +658,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::modal(
             &state,
-            PaletteDraft::typed("settings")
+            PaletteDraft::typed("@settings")
                 .partially_completing(FileRows::hits(&["src/settings.rs"]))
                 .navigating(),
         );
@@ -701,7 +671,7 @@ mod tests {
         let submission = palette.activate(&palette.rows[at], &[]);
         assert_eq!(submission, PaletteDecision::Close);
         assert_eq!(
-            RowText::over(Some(&CommandBarResultItem::PartialIndex), "settings"),
+            RowText::over(Some(&CommandBarResultItem::PartialIndex), "@settings"),
             None
         );
     }
@@ -710,7 +680,7 @@ mod tests {
     fn a_complete_index_says_nothing() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "settings",
+            "@settings",
             Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
@@ -723,19 +693,21 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_word_reaches_the_host_but_prose_and_urls_do_not() {
-        assert_eq!(
-            CompletionQuery::parse("handler").as_deref(),
-            Some("handler")
-        );
-        assert_eq!(
-            CompletionQuery::parse("https://example.com").as_deref(),
-            None
-        );
-        assert_eq!(CompletionQuery::parse("file://~/x").as_deref(), Some("~/x"));
+    fn only_at_prefixed_queries_reach_file_search() {
+        for query in ["handler", "mobile main", "/root/src", "file://~/x"] {
+            assert_eq!(CompletionQuery::parse(query), None, "{query}");
+        }
         assert_eq!(
             CompletionQuery::parse("@main.rs").as_deref(),
             Some("main.rs")
+        );
+        assert_eq!(
+            CompletionQuery::parse("@mobile main").as_deref(),
+            Some("mobile main")
+        );
+        assert_eq!(
+            CompletionQuery::parse("@file://~/x").as_deref(),
+            Some("~/x")
         );
         assert_eq!(CompletionQuery::parse("@").as_deref(), Some(""));
     }
@@ -771,26 +743,25 @@ mod tests {
     }
 
     #[test]
-    fn several_words_reach_the_host_so_a_path_can_be_narrowed_word_by_word() {
-        assert_eq!(
-            CompletionQuery::parse("mobile main").as_deref(),
-            Some("mobile main")
-        );
-        assert_eq!(
-            CompletionQuery::parse("desktop src/lib").as_deref(),
-            Some("desktop src/lib")
-        );
-    }
-
-    #[test]
-    fn a_file_under_a_project_is_shown_against_that_project() {
-        let projects = vec!["/code/dashboard".to_string(), "/code".to_string()];
-        assert_eq!(
-            ProjectPath::split("/code/dashboard/src/main.rs", &projects),
-            Some(("dashboard".to_string(), "src/main.rs".to_string())),
-            "the longest matching root wins, or a worktree is shown against its parent repo"
-        );
-        assert_eq!(ProjectPath::split("/elsewhere/main.rs", &projects), None);
+    fn plain_queries_ignore_stale_file_completions() {
+        let files = FileRows::hits(&["src/main.rs"]);
+        for palette in [
+            PaletteState::start(
+                &Launcher::state(),
+                PaletteDraft::typed("how do i").completing(files.clone()),
+            ),
+            PaletteState::modal(
+                &Launcher::state(),
+                PaletteDraft::typed("main").completing(files.clone()),
+            ),
+        ] {
+            assert!(palette.rows.iter().all(|row| !matches!(
+                row,
+                CommandBarResultItem::File { .. }
+                    | CommandBarResultItem::PartialIndex
+                    | CommandBarResultItem::MoreMatches { .. }
+            )));
+        }
     }
 
     #[test]
@@ -1222,25 +1193,21 @@ mod tests {
     }
 
     #[test]
-    fn the_ghost_completes_a_typed_path_but_never_prose() {
+    fn file_results_never_overlay_the_typed_query() {
         let state = Launcher::state();
         let hits = FileRows::hits(&["src/main.rs"]);
 
-        let path = PaletteState::start(
+        let file = PaletteState::start(
             &state,
-            PaletteDraft::typed("/root/src").completing(hits.clone()),
+            PaletteDraft::typed("@main").completing(hits.clone()),
         );
-        assert_eq!(path.ghost, "/main.rs");
+        assert!(file.ghost.is_empty());
 
         let prose = PaletteState::start(
             &state,
             PaletteDraft::typed("how do i").completing(hits.clone()),
         );
         assert!(prose.ghost.is_empty());
-
-        let mismatched =
-            PaletteState::start(&state, PaletteDraft::typed("/other").completing(hits));
-        assert!(mismatched.ghost.is_empty());
     }
 
     #[test]

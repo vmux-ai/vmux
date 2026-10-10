@@ -250,7 +250,7 @@ mod tests {
             webview: page,
             payload: CommandPaletteDraftRequest {
                 open_id: OpenId(1),
-                query: "main".to_string(),
+                query: "@main".to_string(),
                 start: false,
             },
         });
@@ -268,7 +268,7 @@ mod tests {
             webview: page,
             payload: CommandPaletteDraftRequest {
                 open_id: OpenId(1),
-                query: "main.r".to_string(),
+                query: "@main.r".to_string(),
                 start: false,
             },
         });

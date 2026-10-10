@@ -494,13 +494,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     glass: false,
                     class: "p-2",
                     div { class: "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3",
-                        if !file_only && !projection.context_label.is_empty() {
-                            span {
-                                title: "{projection.context_label}",
-                                class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
-                                "{projection.context_label}"
-                            }
-                        }
                         if !file_only {
                             PaletteModeChip {
                                 mode: projection.mode.clone(),

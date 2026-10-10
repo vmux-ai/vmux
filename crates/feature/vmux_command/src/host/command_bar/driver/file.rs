@@ -7,11 +7,11 @@ pub(crate) struct CompletionQuery;
 
 impl CompletionQuery {
     pub fn parse(input: &str) -> Option<String> {
-        let file_only = Self::only_files(input);
-        let mut trimmed = input.trim();
-        if file_only {
-            trimmed = trimmed[1..].trim_start();
+        if !Self::only_files(input) {
+            return None;
         }
+        let mut trimmed = input.trim();
+        trimmed = trimmed[1..].trim_start();
         if let Some(rest) = trimmed.strip_prefix("file://") {
             return Some(rest.to_string());
         }
@@ -19,7 +19,7 @@ impl CompletionQuery {
             return Some(trimmed.to_string());
         }
         if trimmed.is_empty() {
-            return file_only.then(String::new);
+            return Some(String::new());
         }
         if trimmed.contains("://") || PaletteQuery::new(trimmed).is_data_uri() {
             return None;
@@ -143,59 +143,8 @@ impl FileRows {
 
     fn local_path(item: &CommandBarResultItem) -> Option<&str> {
         match item {
-            CommandBarResultItem::RecentFile { url, .. }
-            | CommandBarResultItem::History { url, .. } => url.strip_prefix("file://"),
+            CommandBarResultItem::History { url, .. } => url.strip_prefix("file://"),
             _ => None,
         }
-    }
-
-    pub fn under_projects(
-        items: Vec<CommandBarResultItem>,
-        projects: &[String],
-    ) -> Vec<CommandBarResultItem> {
-        let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            let Some(path) = Self::local_path(&item) else {
-                out.push(item);
-                continue;
-            };
-            let Some((project, relative)) = ProjectPath::split(path, projects) else {
-                out.push(item);
-                continue;
-            };
-            out.push(CommandBarResultItem::File {
-                path: path.to_string(),
-                is_dir: false,
-                project,
-                relative,
-            });
-        }
-        out
-    }
-}
-
-pub(super) struct ProjectPath;
-
-impl ProjectPath {
-    pub fn split(path: &str, projects: &[String]) -> Option<(String, String)> {
-        let mut owner = "";
-        for project in projects {
-            let root = project.trim().trim_end_matches('/');
-            if root.is_empty() || root.len() <= owner.len() {
-                continue;
-            }
-            let Some(rest) = path.strip_prefix(root) else {
-                continue;
-            };
-            if !rest.starts_with('/') {
-                continue;
-            }
-            owner = root;
-        }
-        if owner.is_empty() {
-            return None;
-        }
-        let label = owner.rsplit('/').next().unwrap_or(owner);
-        Some((label.to_string(), path[owner.len() + 1..].to_string()))
     }
 }

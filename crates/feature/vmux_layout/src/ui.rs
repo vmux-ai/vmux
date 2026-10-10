@@ -43,12 +43,17 @@ pub fn Page() -> Element {
     use_theme();
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
+    let center_offset = layout_ui
+        .value()
+        .layout
+        .unwrap_or_default()
+        .main_cef_center_offset();
 
     rsx! {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
             SideSheetView {}
             HeaderView {}
-            CommandBarPanel {}
+            CommandBarPanel { center_offset }
             ExtensionPopup {}
         }
     }

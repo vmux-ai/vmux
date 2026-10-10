@@ -275,11 +275,6 @@ impl PaletteState {
                 &format!("file://{path}"),
                 self.open_target,
             )),
-            CommandBarResultItem::WorkDir { path, .. } => Some(PaletteDecision::open(
-                true,
-                &format!("file://{path}"),
-                self.open_target,
-            )),
             CommandBarResultItem::Stack {
                 pane_id, tab_index, ..
             } => Some(PaletteDecision::switch_tab(*pane_id, *tab_index)),
@@ -291,9 +286,6 @@ impl PaletteState {
             | CommandBarResultItem::Navigate { url, .. }
             | CommandBarResultItem::History { url, .. } => {
                 (!url.is_empty()).then(|| PaletteDecision::open(true, url, self.open_target))
-            }
-            CommandBarResultItem::RecentFile { url, .. } => {
-                Some(PaletteDecision::open(true, url, self.open_target))
             }
             CommandBarResultItem::Search { engine, query } => Some(PaletteDecision::open(
                 true,
@@ -402,7 +394,6 @@ impl TypedRow {
             CommandBarResultItem::File { path, is_dir, .. } => {
                 !is_dir && Self::is_named(path, query)
             }
-            CommandBarResultItem::RecentFile { title, .. } => Self::is_called(title, query),
             _ => false,
         }
     }
@@ -459,10 +450,7 @@ impl RowText {
     }
 
     fn names_itself_in_the_row(item: &CommandBarResultItem) -> bool {
-        matches!(
-            item,
-            CommandBarResultItem::File { .. } | CommandBarResultItem::WorkDir { .. }
-        )
+        matches!(item, CommandBarResultItem::File { .. })
     }
 
     fn resolve(item: &CommandBarResultItem, query: &str) -> String {
@@ -476,8 +464,6 @@ impl RowText {
             CommandBarResultItem::Page { title, .. } => title.clone(),
             CommandBarResultItem::History { title, url, .. } => Self::titled(title, url),
             CommandBarResultItem::File { path, .. } => path.clone(),
-            CommandBarResultItem::WorkDir { path, .. } => path.clone(),
-            CommandBarResultItem::RecentFile { title, url } => Self::titled(title, url),
             CommandBarResultItem::PartialIndex | CommandBarResultItem::MoreMatches { .. } => {
                 query.to_string()
             }
