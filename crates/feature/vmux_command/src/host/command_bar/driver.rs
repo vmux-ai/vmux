@@ -755,6 +755,14 @@ mod tests {
                 .all(|row| matches!(row, CommandBarResultItem::File { .. }))
         );
         assert_eq!(palette.rows.len(), 1);
+        let start = PaletteState::start(
+            &Launcher::state(),
+            PaletteDraft::typed("@main").completing(FileRows::hits(&["src/main.rs"])),
+        );
+        assert_eq!(
+            start.submit_start(&[]),
+            PaletteDecision::Attach("/root/src/main.rs".to_string())
+        );
         assert_eq!(
             PaletteState::modal(&Launcher::state(), PaletteDraft::typed("@missing"))
                 .submit_modal(&[]),

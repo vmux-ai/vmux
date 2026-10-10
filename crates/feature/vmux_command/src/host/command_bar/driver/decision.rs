@@ -19,6 +19,7 @@ pub(crate) enum PaletteDecision {
     None,
     Close,
     Retype(String),
+    Attach(String),
     Prompt {
         close: bool,
         request: PromptRequest,
@@ -89,7 +90,7 @@ impl PaletteDecision {
             Self::Close | Self::Invoke(_) | Self::SwitchTab(_) | Self::Ex(_) | Self::Pick(_) => {
                 true
             }
-            Self::None | Self::Retype(_) => false,
+            Self::None | Self::Retype(_) | Self::Attach(_) => false,
         }
     }
 }
@@ -240,6 +241,15 @@ impl PaletteState {
         item: &CommandBarResultItem,
         attachments: &[ChatAttachment],
     ) -> PaletteDecision {
+        if self.surface.is_start()
+            && CompletionQuery::only_files(&self.query)
+            && let CommandBarResultItem::File { path, is_dir, .. } = item
+        {
+            if *is_dir {
+                return PaletteDecision::retyping(format!("@{path}"));
+            }
+            return PaletteDecision::Attach(path.clone());
+        }
         if self.surface.is_start()
             && (PaletteQuery::new(&self.query).is_start_prompt() || !attachments.is_empty())
             && let Some(target_url) = PageRows::prompt_target_url(item)

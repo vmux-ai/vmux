@@ -8,6 +8,7 @@ use vmux_api::command_bar::{
     CommandPaletteRemoveAttachmentRequest, CommandPaletteSubmitRequest, CommandPaletteUiState,
     OpenId,
 };
+use vmux_api::prompt_media::ChatAttachPaths;
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged, HostsLauncher,
@@ -115,6 +116,14 @@ struct PaletteDraftInput {
 }
 
 impl PaletteDraftInput {
+    fn replace_query(&mut self, query: &str) {
+        self.query.clear();
+        self.query.push_str(query);
+        self.selected = 0;
+        self.navigating = false;
+        self.input_revision = self.input_revision.wrapping_add(1).max(1);
+    }
+
     fn synchronize_results(&mut self, now: Instant) {
         if !self.start {
             self.result_query.clone_from(&self.query);
@@ -505,10 +514,19 @@ fn apply(
             let Ok(mut input) = inputs.get_mut(target) else {
                 return;
             };
-            input.query.clone_from(query);
-            input.selected = 0;
-            input.navigating = false;
-            input.input_revision = input.input_revision.wrapping_add(1).max(1);
+            input.replace_query(query);
+        }
+        PaletteDecision::Attach(path) => {
+            let Ok(mut input) = inputs.get_mut(target) else {
+                return;
+            };
+            input.replace_query("");
+            commands.trigger(UiInput {
+                webview: target,
+                payload: ChatAttachPaths {
+                    paths: vec![path.clone()],
+                },
+            });
         }
         PaletteDecision::Prompt { request, .. } => {
             commands.trigger(UiInput {
@@ -923,6 +941,9 @@ mod tests {
     #[derive(Component, Default)]
     struct CapturedDismissals(u32);
 
+    #[derive(Component, Default)]
+    struct CapturedAttachments(Vec<Vec<String>>);
+
     fn capture_invocation(
         trigger: On<UiInput<InvokeRequest>>,
         mut captured: Query<&mut CapturedInvocations>,
@@ -941,6 +962,16 @@ mod tests {
             return;
         };
         captured.0 += 1;
+    }
+
+    fn capture_attachment(
+        trigger: On<UiInput<ChatAttachPaths>>,
+        mut captured: Query<&mut CapturedAttachments>,
+    ) {
+        let Ok(mut captured) = captured.get_mut(trigger.event().webview) else {
+            return;
+        };
+        captured.0.push(trigger.event().payload.paths.clone());
     }
 
     #[test]
@@ -1271,5 +1302,37 @@ mod tests {
             1
         );
         assert_eq!(app.world().get::<CapturedDismissals>(page).unwrap().0, 1);
+    }
+
+    #[test]
+    fn attaching_a_prefixed_file_clears_the_query_without_closing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin)
+            .add_observer(capture_attachment);
+        let page = app
+            .world_mut()
+            .spawn((HostsLauncher, CapturedAttachments::default()))
+            .id();
+        app.update();
+        app.world_mut()
+            .get_mut::<PaletteDraftInput>(page)
+            .unwrap()
+            .query = "@main.rs".to_string();
+
+        app.world_mut().trigger(PaletteDecisionReady {
+            target: page,
+            decision: PaletteDecision::Attach("/repo/src/main.rs".to_string()),
+        });
+        app.update();
+
+        let input = app.world().get::<PaletteDraftInput>(page).unwrap();
+        assert_eq!(input.query, "");
+        assert_eq!(input.close_revision, 0);
+        assert_eq!(
+            app.world().get::<CapturedAttachments>(page).unwrap().0,
+            [vec!["/repo/src/main.rs".to_string()]]
+        );
     }
 }
