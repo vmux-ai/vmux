@@ -17,6 +17,7 @@
                 "HistoryLoadMoreRequest",
                 "HistoryDeleteRequest",
                 "HistoryClearAllRequest",
+                "HistoryClearConfirmRequest",
                 "HistoryOpenRequest",
             ],
         ),

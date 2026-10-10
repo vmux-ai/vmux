@@ -23,6 +23,7 @@
                 "ChatDraftChanged",
                 "ChatRemoveAttachment",
                 "ChatChoiceSelected",
+                "ChatListChooseRequest",
                 "ChatListSelectionChanged",
                 "ChatApproval",
                 "ChatComposerMenuRequest",
