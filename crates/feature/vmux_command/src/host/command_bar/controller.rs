@@ -648,22 +648,25 @@ fn close_panel(trigger: On<CommandBarPanelClose>, mut commands: Commands) {
     ));
 }
 
-fn dismiss(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
-    commands.trigger(CommandBarDismiss::new(trigger.event().webview, true));
-}
-
-fn close(
-    trigger: On<CommandBarDismiss>,
-    workspace: Single<&CommandBarWorkspaceSnapshot>,
+fn dismiss(
+    trigger: On<UiInput<DismissRequest>>,
     panels: Query<(), With<RendersLauncherPanel>>,
-    mut surface: CommandBarSurface,
-    mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     if panels.contains(webview) {
         commands.trigger(CommandBarPanelClose { layout: webview });
     }
+    commands.trigger(CommandBarDismiss::new(webview, true));
+}
+
+fn close(
+    trigger: On<CommandBarDismiss>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
+    mut surface: CommandBarSurface,
+    mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
+    mut commands: Commands,
+) {
     if let Some(modal_e) = surface.close() {
         commands
             .entity(modal_e)
@@ -1362,9 +1365,10 @@ mod tests {
     }
 
     #[test]
-    fn dismissing_a_layout_page_command_bar_closes_the_panel() {
+    fn page_dismiss_request_closes_the_panel() {
         let mut app = panel_app();
-        app.add_observer(close);
+        app.add_plugins(UiEventPlugin::<(DismissRequest,)>::default())
+            .add_observer(dismiss);
         app.world_mut().spawn((
             CommandBar,
             Node {
@@ -1375,8 +1379,10 @@ mod tests {
         ));
         let layout = app.world_mut().spawn(RendersLauncherPanel).id();
 
-        app.world_mut()
-            .trigger(CommandBarDismiss::new(layout, true));
+        app.world_mut().trigger(UiInput::<DismissRequest> {
+            webview: layout,
+            payload: DismissRequest,
+        });
         app.world_mut().flush();
 
         assert_eq!(emitted_to_page(&app), vec![layout]);
