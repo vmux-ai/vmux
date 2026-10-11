@@ -405,6 +405,11 @@ pub struct ResumableSessions {
     pub offset: u32,
     pub total: u32,
 }
+
+impl ResumableSessions {
+    pub const PAGE: u32 = 50;
+}
+
 #[vmux_api::contract(Copy, Default, Eq)]
 pub enum SlashCommand {
     #[default]

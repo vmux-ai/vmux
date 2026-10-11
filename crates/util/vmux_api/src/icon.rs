@@ -23,6 +23,7 @@ pub enum BuiltinIcon {
     Keyboard,
     GitBranch,
     Bookmark,
+    CheckCircle,
     Search,
     Globe,
 }

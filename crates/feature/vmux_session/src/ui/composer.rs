@@ -54,12 +54,10 @@ fn ChatComposer(chat: Chat) -> Element {
     let accent = AgentAccent::for_agent(&chat.agent());
     let keys = use_context::<ChatKeys>();
     let drafted = chat.draft();
-    let selector_open = chat.menu.opened().is_some() || chat.selector_open();
     rsx! {
         PromptComposer {
             shared_transition: true,
             show_send_button: false,
-            caret_visible: !selector_open,
             value: drafted,
             preview: String::new(),
             attachments: chat.composer_attachments(),

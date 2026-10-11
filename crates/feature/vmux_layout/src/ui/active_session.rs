@@ -11,7 +11,7 @@ use vmux_ui::components::tree_row::{
     SidebarTreeRowGroup,
 };
 use vmux_ui::hooks::send;
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
 
 use crate::event::{
@@ -76,7 +76,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                     div { class: "flex items-center gap-1.5",
                         Badge {
                             class: "rounded-full bg-foreground/[0.05] px-2 py-1 text-[9px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                            {translate(&task.stage_name)}
+                            {translate_humanized(&task.stage_name)}
                         }
                         if task.runtime != "inactive" {
                             span { class: "flex items-center gap-1.5 text-[10px] text-muted-foreground",

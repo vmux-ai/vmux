@@ -49,6 +49,8 @@ mod presentation;
 mod projection;
 mod prompt;
 #[cfg(host)]
+mod resume;
+#[cfg(host)]
 mod session;
 mod state;
 #[cfg(host)]
@@ -76,6 +78,7 @@ impl Plugin for SessionPlugin {
             FeaturePlugin::<crate::Feature>::default(),
             Self::MANIFEST.plugin(),
             catalog::CatalogPlugin,
+            resume::Plugin,
             session::ChatHostPlugin,
             command_bar::Plugin,
             transcript::Plugin,

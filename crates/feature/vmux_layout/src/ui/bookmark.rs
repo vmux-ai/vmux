@@ -18,7 +18,6 @@ use vmux_ui::components::tree_row::{
     SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN,
     SIDEBAR_TREE_SCROLLER, SidebarTreeRow, SidebarTreeRowGroup,
 };
-use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
@@ -444,20 +443,11 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                             }
                         },
                         title: "{row.metadata.title}",
-                        if vmux_api::VmuxRoute::parse(&row.metadata.url).is_some() {
-                            Favicon {
-                                favicon_url: row.metadata.icon.favicon_url().to_string(),
-                                url: row.metadata.url.clone(),
-                                class: "pointer-events-none h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
-                                globe_class: "pointer-events-none h-5 w-5 shrink-0 text-muted-foreground".to_string(),
-                            }
-                        } else {
-                            PageIconView {
-                                icon: row.metadata.icon.clone(),
-                                url: row.metadata.url.clone(),
-                                img_class: "pointer-events-none h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
-                                icon_class: "pointer-events-none h-5 w-5 shrink-0 text-muted-foreground".to_string(),
-                            }
+                        PageIconView {
+                            icon: row.metadata.icon.clone(),
+                            url: row.metadata.url.clone(),
+                            img_class: "pointer-events-none h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
+                            icon_class: "pointer-events-none h-5 w-5 shrink-0 text-muted-foreground".to_string(),
                         }
                     }
                 },

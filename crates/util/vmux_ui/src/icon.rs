@@ -303,6 +303,10 @@ mod wasm {
             BuiltinIcon::Bookmark => rsx! { Icon { class: "{class}",
                 path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
             } },
+            BuiltinIcon::CheckCircle => rsx! { Icon { class: "{class}",
+                circle { cx: "12", cy: "12", r: "9" }
+                path { d: "m8 12 2.5 2.5L16 9" }
+            } },
             BuiltinIcon::Search => rsx! { LineIconView {
                 icon: LineIcon::Search,
                 class: class.clone(),
