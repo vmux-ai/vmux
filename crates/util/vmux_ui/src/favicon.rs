@@ -14,12 +14,7 @@ impl FaviconSource {
     }
 
     pub fn agent(agent_id: &str) -> Option<String> {
-        AgentBrand::from_id(agent_id).map(|brand| {
-            format!(
-                "https://www.google.com/s2/favicons?domain={}&sz=64",
-                brand.host()
-            )
-        })
+        AgentBrand::from_id(agent_id).map(|brand| brand.icon_url().to_string())
     }
 
     pub fn vmux(url: &str) -> Option<String> {
@@ -68,12 +63,14 @@ impl AgentBrand {
         None
     }
 
-    fn host(&self) -> &'static str {
+    fn icon_url(&self) -> &'static str {
         match self {
-            Self::Claude => "claude.ai",
-            Self::Codex => "chatgpt.com",
-            Self::Gemini => "gemini.google.com",
-            Self::Mistral => "chat.mistral.ai",
+            Self::Claude => "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg",
+            Self::Codex => "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg",
+            Self::Gemini => "https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg",
+            Self::Mistral => {
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
+            }
         }
     }
 }
@@ -224,7 +221,10 @@ mod tests {
     fn agent_maps_vibe() {
         assert_eq!(
             FaviconSource::agent("mistral-vibe"),
-            Some("https://www.google.com/s2/favicons?domain=chat.mistral.ai&sz=64".to_string())
+            Some(
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
+                    .to_string()
+            )
         );
     }
 
@@ -232,11 +232,15 @@ mod tests {
     fn agent_maps_claude_and_codex() {
         assert_eq!(
             FaviconSource::agent("claude-acp"),
-            Some("https://www.google.com/s2/favicons?domain=claude.ai&sz=64".to_string())
+            Some(
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg".to_string()
+            )
         );
         assert_eq!(
             FaviconSource::agent("codex-acp"),
-            Some("https://www.google.com/s2/favicons?domain=chatgpt.com&sz=64".to_string())
+            Some(
+                "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg".to_string()
+            )
         );
     }
 
@@ -286,7 +290,7 @@ mod tests {
     fn agent_maps_gemini() {
         assert_eq!(
             FaviconSource::agent("gemini"),
-            Some("https://www.google.com/s2/favicons?domain=gemini.google.com&sz=64".to_string())
+            Some("https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg".to_string())
         );
     }
 

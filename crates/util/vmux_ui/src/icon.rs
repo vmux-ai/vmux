@@ -196,6 +196,7 @@ impl LineIcon {
 
 mod wasm {
     use super::{GIT_ICON_URL, LineIcon};
+    use crate::components::avatar::AgentThumbnail;
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
     use crate::file_icon::TypeIcon;
@@ -362,6 +363,19 @@ mod wasm {
             return rsx! { BuiltinIconView { icon: *builtin, class: icon_class } };
         }
         let favicon_url = icon.favicon_url().to_string();
+        if url.starts_with("vmux://sessions/") && !favicon_url.is_empty() {
+            return rsx! {
+                span { class: "inline-flex {img_class}",
+                    AgentThumbnail {
+                        src: Some(favicon_url.clone()),
+                        seed: favicon_url,
+                        background: String::new(),
+                        alt: String::new(),
+                        class: "size-full text-[6px]".to_string(),
+                    }
+                }
+            };
+        }
         rsx! {
             Favicon {
                 favicon_url,

@@ -91,7 +91,8 @@ fn info(
         }
         for (session_id, agent_id, mut profile) in &mut sessions {
             if session_id.0 == event.sid && profile.name != name {
-                *profile = Profile::registry(name, &agent_id.0);
+                let icon = profile.icon.clone();
+                *profile = Profile::registry(name, &agent_id.0).with_icon(icon);
             }
         }
     }
@@ -759,7 +760,8 @@ mod tests {
             .world_mut()
             .spawn((
                 TestSession::bundle("antigravity", "s1", "/tmp"),
-                Profile::registry("Configured", "antigravity"),
+                Profile::registry("Configured", "antigravity")
+                    .with_icon(Some("https://cdn.example/antigravity.svg".into())),
             ))
             .id();
         let unrelated = app
@@ -779,6 +781,14 @@ mod tests {
         assert_eq!(
             app.world().get::<Profile>(matching).unwrap().name,
             "Antigravity"
+        );
+        assert_eq!(
+            app.world()
+                .get::<Profile>(matching)
+                .unwrap()
+                .icon
+                .as_deref(),
+            Some("https://cdn.example/antigravity.svg")
         );
         assert_eq!(
             app.world().get::<Profile>(unrelated).unwrap().name,
