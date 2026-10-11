@@ -220,6 +220,10 @@ fn project(
 mod tests {
     use super::*;
     use crate::{CreateRequest, DomainPlugin, RenameRequest};
+    use bevy::MinimalPlugins;
+    use bevy::asset::AssetPlugin;
+    use moonshine_save::load::TriggerLoad;
+    use moonshine_save::prelude::{LoadWorld, load_on_default_event};
 
     #[test]
     fn catalog_tracks_session_metadata() {
@@ -251,5 +255,43 @@ mod tests {
             app.world().resource::<CatalogSnapshot>().sessions[0].name,
             "Renamed"
         );
+    }
+
+    #[test]
+    fn legacy_session_without_task_components_remains_in_catalog() {
+        let store = r#"(
+  resources: {},
+  entities: {
+    1: (
+      components: {
+        "bevy_ecs::name::Name": "Task",
+        "vmux_ecs::SessionId": ("session-1"),
+        "vmux_history::CreatedAt": (1),
+        "vmux_history::LastActivatedAt": (2),
+        "vmux_session::Session": (),
+        "vmux_session::Stage": (("in_progress")),
+        "vmux_session::StageChangedAt": (1),
+      },
+    ),
+  },
+)"#;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .add_plugins((vmux_ecs::PrimitivesPlugin, DomainPlugin))
+            .add_observer(load_on_default_event);
+        app.update();
+        app.world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_stream(std::io::Cursor::new(
+                store.as_bytes().to_vec(),
+            )));
+
+        app.update();
+
+        let catalog = app.world().resource::<CatalogSnapshot>();
+        assert_eq!(catalog.sessions.len(), 1);
+        assert_eq!(catalog.sessions[0].id, "session-1");
+        assert_eq!(catalog.sessions[0].cwd, "");
+        assert_eq!(catalog.sessions[0].description, "");
     }
 }

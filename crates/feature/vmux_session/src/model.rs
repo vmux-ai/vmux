@@ -12,10 +12,8 @@ use vmux_api::conversation::SessionId;
 #[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 #[cfg(host)]
-use vmux_ecs::{
-    ActivateRequest, CreatedAt, Cwd, Description, EntityTarget, LastActivatedAt, Order,
-    PageMetadata,
-};
+use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order, PageMetadata};
+use vmux_ecs::{Cwd, Description};
 
 #[cfg(host)]
 pub(crate) struct EntityPlugin;
@@ -70,7 +68,7 @@ impl Plugin for StagePlugin {
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
-#[require(Save)]
+#[require(Save, Cwd, Description)]
 #[type_path = "vmux_session"]
 pub struct Session;
 
