@@ -307,6 +307,13 @@ mod wasm {
                 circle { cx: "12", cy: "12", r: "9" }
                 path { d: "m8 12 2.5 2.5L16 9" }
             } },
+            BuiltinIcon::ListTodo => rsx! { Icon { class: "{class}",
+                path { d: "M13 5h8" }
+                path { d: "M13 12h8" }
+                path { d: "M13 19h8" }
+                path { d: "m3 7 2 2 4-4" }
+                path { d: "m3 17 2 2 4-4" }
+            } },
             BuiltinIcon::Search => rsx! { LineIconView {
                 icon: LineIcon::Search,
                 class: class.clone(),

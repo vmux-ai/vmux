@@ -24,6 +24,7 @@ pub enum BuiltinIcon {
     GitBranch,
     Bookmark,
     CheckCircle,
+    ListTodo,
     Search,
     Globe,
 }

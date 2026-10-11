@@ -172,9 +172,9 @@ mod apply_fallback_page_icons_tests {
             resolve(
                 "vmux://sessions/",
                 PageIcon::None,
-                Some(BuiltinIcon::CheckCircle),
+                Some(BuiltinIcon::ListTodo),
             ),
-            PageIcon::Builtin(BuiltinIcon::CheckCircle)
+            PageIcon::Builtin(BuiltinIcon::ListTodo)
         );
     }
 
@@ -184,7 +184,7 @@ mod apply_fallback_page_icons_tests {
             resolve(
                 "vmux://sessions/",
                 PageIcon::Favicon("x".into()),
-                Some(BuiltinIcon::CheckCircle),
+                Some(BuiltinIcon::ListTodo),
             ),
             PageIcon::Favicon("x".into())
         );

@@ -32,6 +32,11 @@ pub fn SessionsManager() -> Element {
         .iter()
         .filter(|session| session.matches(&search))
         .count();
+    let groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
+    let stages = groups
+        .iter()
+        .map(|group| group.stage.clone())
+        .collect::<Vec<_>>();
 
     rsx! {
         ManagerPage {
@@ -68,18 +73,13 @@ pub fn SessionsManager() -> Element {
                         detail: translate("sessions-empty-detail"),
                     }
                 } else {
-                    for stage in snapshot.stages.clone() {
+                    for group in groups {
                         StageSection {
-                            key: "{stage.id}",
-                            stage: stage.clone(),
-                            stages: snapshot.stages.clone(),
+                            key: "{group.stage.id}",
+                            stage: group.stage,
+                            stages: stages.clone(),
                             repositories: repositories.clone(),
-                            sessions: snapshot
-                                .sessions
-                                .iter()
-                                .filter(|session| session.stage == stage.id && session.matches(&search))
-                                .cloned()
-                                .collect(),
+                            sessions: group.sessions,
                             onedit: move |session: SessionSummary| {
                                 editing.set(Some(session.id));
                                 name.set(session.name);
@@ -91,6 +91,52 @@ pub fn SessionsManager() -> Element {
                 }
             }
         }
+    }
+}
+
+struct StageGroup {
+    stage: StageSummary,
+    sessions: Vec<SessionSummary>,
+}
+
+impl StageGroup {
+    fn from_catalog(
+        stages: &[StageSummary],
+        sessions: &[SessionSummary],
+        search: &str,
+    ) -> Vec<Self> {
+        let mut groups = stages
+            .iter()
+            .cloned()
+            .map(|stage| Self {
+                stage,
+                sessions: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+
+        for session in sessions {
+            if !session.matches(search) {
+                continue;
+            }
+            if let Some(group) = groups
+                .iter_mut()
+                .find(|group| group.stage.id == session.stage)
+            {
+                group.sessions.push(session.clone());
+                continue;
+            }
+            groups.push(Self {
+                stage: StageSummary {
+                    id: session.stage.clone(),
+                    name: session.stage.clone(),
+                    order: u32::MAX,
+                    terminal: false,
+                },
+                sessions: vec![session.clone()],
+            });
+        }
+
+        groups
     }
 }
 
@@ -319,4 +365,25 @@ fn runtime_label(runtime: &str) -> String {
         _ => "session-runtime-inactive",
     };
     translate(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_without_stage_definition_remains_visible() {
+        let session = SessionSummary {
+            id: "session-1".into(),
+            name: "Task".into(),
+            stage: "active".into(),
+            ..Default::default()
+        };
+
+        let groups = StageGroup::from_catalog(&[], std::slice::from_ref(&session), "");
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].stage.id, "active");
+        assert_eq!(groups[0].sessions, vec![session]);
+    }
 }

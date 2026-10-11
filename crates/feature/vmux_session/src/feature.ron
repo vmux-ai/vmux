@@ -12,7 +12,7 @@
                 reuse: Route,
             )),
             keywords: ["ai", "chat", "assistant", "agent"],
-            icon: "CheckCircle",
+            icon: "ListTodo",
             permissions: [
                 "PageReady",
                 "ThemeUiState",
