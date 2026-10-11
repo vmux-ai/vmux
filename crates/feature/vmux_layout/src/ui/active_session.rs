@@ -38,15 +38,6 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
     } else {
         page.title.clone()
     };
-    let status = agent.as_ref().map(|agent| {
-        if agent.is_running {
-            ("streaming", translate("agent-status-running"))
-        } else if agent.is_done_unseen {
-            ("idle", translate("agent-status-done"))
-        } else {
-            ("idle", translate("common-current"))
-        }
-    });
     rsx! {
         div { class: "border-t border-foreground/10 px-2.5 py-2.5",
             div { class: "flex min-w-0 items-center gap-2.5",
@@ -96,12 +87,6 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                             class: "size-4 text-[7px]",
                         }
                         span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground", "{agent.name}" }
-                        if let Some((status, label)) = status {
-                            span { class: "flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground",
-                                StatusDot { status: status.to_string(), size_class: "size-1.5".to_string() }
-                                "{label}"
-                            }
-                        }
                     }
                 }
                 if let Some(project) = project {

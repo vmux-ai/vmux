@@ -31,7 +31,6 @@ fn attach(
         ),
         Added<PendingAcpAgentAttachment>,
     >,
-    queues: Query<(), With<PromptQueue>>,
     mut commands: Commands,
 ) {
     for (
@@ -71,11 +70,10 @@ fn attach(
             vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent { sid: sid.clone() },
         ));
-        if !queues.contains(*session_entity) {
-            commands
-                .entity(*session_entity)
-                .insert(PromptQueue::default());
-        }
+        commands
+            .entity(*session_entity)
+            .entry::<PromptQueue>()
+            .or_default();
         if let Some(resume) = resume.clone() {
             commands
                 .entity(*session_entity)
@@ -122,6 +120,15 @@ fn attach(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Resource)]
+    struct DeferredPrompt(Entity);
+
+    fn queue_prompt(prompt: Res<DeferredPrompt>, mut commands: Commands) {
+        let mut queue = PromptQueue::default();
+        queue.enqueue("first".into());
+        commands.entity(prompt.0).insert(queue);
+    }
 
     #[test]
     fn acp_attach_gives_profile_agent_and_icon() {
@@ -171,9 +178,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         add(&mut app);
-        let mut queue = PromptQueue::default();
-        queue.enqueue("first".into());
-        let session = app.world_mut().spawn(queue).id();
+        app.add_systems(Update, queue_prompt.before(attach));
+        let session = app.world_mut().spawn_empty().id();
+        app.insert_resource(DeferredPrompt(session));
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(AcpAgentAttachment::new(
             session,
