@@ -6,6 +6,7 @@ pub use vmux_api::avatar::AvatarSpec;
 pub struct Profile {
     pub name: String,
     pub avatar: AvatarSpec,
+    pub icon: Option<String>,
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -24,19 +25,30 @@ impl Profile {
         Self {
             name: "You".into(),
             avatar: AvatarSpec::for_user(),
+            icon: None,
         }
     }
 
     pub fn user_named(name: String) -> Self {
         let avatar = AvatarSpec::for_user_named(&name);
-        Self { name, avatar }
+        Self {
+            name,
+            avatar,
+            icon: None,
+        }
     }
 
     pub fn registry(name: &str, seed: &str) -> Self {
         Self {
             name: name.to_string(),
             avatar: AvatarSpec::for_registry(name, seed),
+            icon: None,
         }
+    }
+
+    pub fn with_icon(mut self, icon: Option<String>) -> Self {
+        self.icon = icon;
+        self
     }
 }
 

@@ -34,7 +34,7 @@ use vmux_ecs::{
 };
 use vmux_session::{
     AgentConversationTitle, AgentId, ConversationEvent, CreateRequest, Created, EventIdentity,
-    MessageContent, Route, RunState, Session, SessionId, Transcripts,
+    MessageContent, PromptQueue, Route, RunState, Session, SessionId, Transcripts,
 };
 
 type ChatUiStateUpdates = UiState<ChatUiState>;
@@ -88,18 +88,31 @@ impl Plugin for ChatHostPlugin {
 }
 
 #[derive(Resource, Default)]
-struct PendingCreatedSessions(std::collections::HashMap<SessionId, Entity>);
+struct PendingCreatedSessions(std::collections::HashMap<SessionId, PendingCreatedSession>);
+
+struct PendingCreatedSession {
+    stack: Entity,
+    prompt: String,
+    attachments: Vec<vmux_api::protocol::AgentAttachment>,
+}
 
 fn open_created(
     trigger: On<Created>,
     mut pending: ResMut<PendingCreatedSessions>,
     mut requests: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
 ) {
-    let Some(stack) = pending.0.remove(&trigger.event().id) else {
+    let Some(created) = pending.0.remove(&trigger.event().id) else {
         return;
     };
+    let mut queue = PromptQueue::default();
+    queue.enqueue_with_attachments(created.prompt.clone(), created.attachments);
+    commands.entity(trigger.event().entity).insert(queue);
+    if let Some(title) = AgentConversationTitle::from_prompt(&created.prompt) {
+        commands.entity(trigger.event().entity).insert(title);
+    }
     requests.write(PageOpenRequest {
-        target: PageOpenTarget::Stack(stack),
+        target: PageOpenTarget::Stack(created.stack),
         url: Route::Session(trigger.event().id.clone()).url(),
         request_id: None,
     });
@@ -160,7 +173,14 @@ impl PromptSubmission<'_, '_> {
                     CreateRequest::new(name, String::new(), target.cwd(stack), Some(agent));
                 let id = create.id().clone();
                 self.session_requests.write(create);
-                self.pending.0.insert(id, stack);
+                self.pending.0.insert(
+                    id,
+                    PendingCreatedSession {
+                        stack,
+                        prompt: prompt.to_string(),
+                        attachments: attachments.clone(),
+                    },
+                );
                 created = true;
             }
             if inline_stack == Some(stack)
@@ -173,19 +193,19 @@ impl PromptSubmission<'_, '_> {
                     let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
                 }
             }
-            self.commands
-                .entity(stack)
-                .insert(PendingPrompt(prompt.to_string()));
-            if attachments.is_empty() {
-                self.commands
-                    .entity(stack)
-                    .remove::<PendingPromptAttachments>();
-            } else {
-                self.commands
-                    .entity(stack)
-                    .insert(PendingPromptAttachments(attachments));
-            }
             if !created {
+                self.commands
+                    .entity(stack)
+                    .insert(PendingPrompt(prompt.to_string()));
+                if attachments.is_empty() {
+                    self.commands
+                        .entity(stack)
+                        .remove::<PendingPromptAttachments>();
+                } else {
+                    self.commands
+                        .entity(stack)
+                        .insert(PendingPromptAttachments(attachments));
+                }
                 self.page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
                     url,
@@ -706,6 +726,56 @@ mod tests {
     use vmux_api::chat::{ChatBlock, ChatTurn};
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
+
+    #[test]
+    fn created_session_owns_the_initial_prompt_before_opening() {
+        let mut app = App::new();
+        app.init_resource::<PendingCreatedSessions>()
+            .add_message::<PageOpenRequest>()
+            .add_observer(open_created);
+        let id = SessionId("session-1".into());
+        let session = app.world_mut().spawn_empty().id();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<PendingCreatedSessions>()
+            .0
+            .insert(
+                id.clone(),
+                PendingCreatedSession {
+                    stack,
+                    prompt: "Fix session startup".into(),
+                    attachments: vec![vmux_api::protocol::AgentAttachment {
+                        path: "/tmp/screenshot.png".into(),
+                        name: "screenshot.png".into(),
+                        mime_type: "image/png".into(),
+                        size: 42,
+                    }],
+                },
+            );
+
+        app.world_mut().trigger(Created {
+            entity: session,
+            id: id.clone(),
+        });
+        app.update();
+
+        let queue = app.world().get::<PromptQueue>(session).unwrap();
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items.front().unwrap().text, "Fix session startup");
+        assert_eq!(queue.items.front().unwrap().attachments.len(), 1);
+        assert_eq!(
+            app.world().get::<AgentConversationTitle>(session),
+            Some(&AgentConversationTitle("Fix session startup".into()))
+        );
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url, Route::Session(id).url());
+        assert!(matches!(requests[0].target, PageOpenTarget::Stack(target) if target == stack));
+    }
 
     struct Conversation {
         view: Entity,

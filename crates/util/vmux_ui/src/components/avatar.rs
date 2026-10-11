@@ -1,4 +1,5 @@
 use crate::cn::cn;
+use crate::favicon::FaviconSource;
 use dioxus::prelude::*;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
@@ -88,6 +89,7 @@ pub fn AgentThumbnail(
     #[props(default)] alt: String,
     #[props(default)] class: String,
 ) -> Element {
+    let src = src.or_else(|| FaviconSource::agent(&seed));
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
     let class = cn([AGENT_THUMBNAIL, class.as_str()]);
     rsx! {

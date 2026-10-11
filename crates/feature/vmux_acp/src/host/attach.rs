@@ -50,6 +50,7 @@ fn attach(
     {
         let agent_id = agent_id.as_str();
         let url = vmux_session::Route::Session(SessionId(sid.clone())).url();
+        let profile_icon = (!icon.favicon_url().is_empty()).then(|| icon.favicon_url().to_string());
         commands.entity(*stack).insert((
             EntityTarget::<vmux_session::Session>::new(*session_entity),
             PageMetadata {
@@ -67,7 +68,7 @@ fn attach(
             ProcessAnchor(anchor),
             vmux_session::RunState::default(),
             vmux_session::ApprovalPolicy::default(),
-            vmux_ecs::team::Profile::registry(agent_name, agent_id),
+            vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent { sid: sid.clone() },
         ));
         if !queues.contains(*session_entity) {
@@ -147,6 +148,10 @@ mod tests {
             .get::<vmux_ecs::team::Profile>(session)
             .expect("profile");
         assert_eq!(profile.name, "Mistral Vibe");
+        assert_eq!(
+            profile.icon.as_deref(),
+            Some("https://cdn.example/vibe.svg")
+        );
         let agent = world.get::<vmux_ecs::team::Agent>(session).expect("agent");
         assert_eq!(agent.sid, "sid-1");
         let meta = world.get::<PageMetadata>(stack).expect("meta");

@@ -14,23 +14,12 @@ impl FaviconSource {
     }
 
     pub fn agent(agent_id: &str) -> Option<String> {
-        const AGENTS: &[(&str, &str)] = &[
-            ("vibe", "chat.mistral.ai"),
-            ("mistral-vibe", "chat.mistral.ai"),
-            ("claude", "claude.ai"),
-            ("claude-acp", "claude.ai"),
-            ("codex", "chatgpt.com"),
-            ("codex-acp", "chatgpt.com"),
-            ("gemini", "gemini.google.com"),
-        ];
-        for &(kind, host) in AGENTS {
-            if agent_id == kind {
-                return Some(format!(
-                    "https://www.google.com/s2/favicons?domain={host}&sz=64"
-                ));
-            }
-        }
-        None
+        AgentBrand::from_id(agent_id).map(|brand| {
+            format!(
+                "https://www.google.com/s2/favicons?domain={}&sz=64",
+                brand.host()
+            )
+        })
     }
 
     pub fn vmux(url: &str) -> Option<String> {
@@ -52,6 +41,40 @@ impl FaviconSource {
         }
         Self::host(url)
             .map(|host| format!("https://www.google.com/s2/favicons?domain={host}&sz=64"))
+    }
+}
+
+enum AgentBrand {
+    Claude,
+    Codex,
+    Gemini,
+    Mistral,
+}
+
+impl AgentBrand {
+    fn from_id(value: &str) -> Option<Self> {
+        for token in value
+            .to_ascii_lowercase()
+            .split(|character: char| !character.is_ascii_alphanumeric())
+        {
+            match token {
+                "claude" => return Some(Self::Claude),
+                "codex" => return Some(Self::Codex),
+                "gemini" => return Some(Self::Gemini),
+                "mistral" | "vibe" => return Some(Self::Mistral),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn host(&self) -> &'static str {
+        match self {
+            Self::Claude => "claude.ai",
+            Self::Codex => "chatgpt.com",
+            Self::Gemini => "gemini.google.com",
+            Self::Mistral => "chat.mistral.ai",
+        }
     }
 }
 

@@ -4,7 +4,6 @@ use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage,
 };
-use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
@@ -256,9 +255,9 @@ fn SessionListRow(
     let cleanup_id = session.id.clone();
     let select_id = session.id.clone();
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
-    let agent_icon = FaviconSource::agent(&session.agent);
-    let agent = session.agent.clone();
-    let subtitle = session.subtitle();
+    let agent = AgentPresentation::from_session(&session);
+    let title = session.display_title();
+    let preview = session.preview();
     let git_url = context.git_url.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let row_class = if selected {
@@ -268,7 +267,7 @@ fn SessionListRow(
     };
     rsx! {
         div {
-            class: "group relative grid min-h-11 cursor-pointer grid-cols-[minmax(16rem,1fr)_minmax(9rem,0.65fr)_7rem_4.5rem_2rem] items-center gap-3 border-t border-foreground/[0.055] px-3 text-xs transition-colors first:border-t-0 {row_class}",
+            class: "group relative grid min-h-12 cursor-pointer grid-cols-[minmax(16rem,1fr)_minmax(12rem,0.8fr)_7.5rem_4.5rem_2rem] items-center gap-3 border-t border-foreground/[0.055] px-3 text-xs transition-colors first:border-t-0 {row_class}",
             onclick: move |_| onselect.call(select_id.clone()),
             button {
                 r#type: "button",
@@ -276,24 +275,24 @@ fn SessionListRow(
                 tabindex: "-1",
                 div { class: "shrink-0",
                     AgentThumbnail {
-                        src: agent_icon,
-                        seed: agent.clone(),
-                        background: String::new(),
-                        alt: agent.clone(),
+                        src: agent.icon.clone(),
+                        seed: agent.id.clone(),
+                        background: agent.color.clone(),
+                        alt: agent.name.clone(),
                         class: "size-5 text-[6px]".to_string(),
                     }
                 }
                 div { class: "min-w-0 flex-1",
-                    span { class: "block w-full truncate font-medium text-foreground/90", "{session.name}" }
-                    if !subtitle.is_empty() {
-                        span { class: "block w-full truncate text-[10px] text-muted-foreground/65", "{subtitle}" }
+                    span { class: "block w-full truncate font-medium text-foreground/90", "{title}" }
+                    if !preview.is_empty() {
+                        span { class: "block w-full truncate text-[10px] text-muted-foreground/60", "{preview}" }
                     }
                 }
             }
             SessionContextView { context: context.clone() }
-            div { class: "flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground",
-                span { class: "size-1.5 shrink-0 rounded-full {runtime_dot}" }
-                span { class: "truncate", {runtime_label(&session.runtime)} }
+            MetadataPill {
+                dot: runtime_dot.to_string(),
+                label: runtime_label(&session.runtime),
             }
             time { class: "text-right text-[10px] tabular-nums text-muted-foreground/70", "{updated}" }
             SessionActions {
@@ -378,7 +377,9 @@ fn SessionBoardCard(
     let select_id = session.id.clone();
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
     let git_url = context.git_url.clone();
-    let agent_icon = FaviconSource::agent(&session.agent);
+    let agent = AgentPresentation::from_session(&session);
+    let title = session.display_title();
+    let preview = session.preview();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let card_class = if selected {
         "bg-primary/[0.08] ring-primary/25"
@@ -391,16 +392,16 @@ fn SessionBoardCard(
             onclick: move |_| onselect.call(select_id.clone()),
             div { class: "flex items-start gap-2",
                 AgentThumbnail {
-                    src: agent_icon,
-                    seed: session.agent.clone(),
-                    background: String::new(),
-                    alt: session.agent.clone(),
+                    src: agent.icon.clone(),
+                    seed: agent.id.clone(),
+                    background: agent.color.clone(),
+                    alt: agent.name.clone(),
                     class: "size-5 text-[6px]".to_string(),
                 }
                 div { class: "min-w-0 flex-1",
-                    div { class: "truncate text-xs font-medium text-foreground/90", "{session.name}" }
-                    if !session.agent.is_empty() {
-                        div { class: "truncate text-[10px] text-muted-foreground/65", "{session.agent}" }
+                    div { class: "truncate text-xs font-medium text-foreground/90", "{title}" }
+                    if !agent.name.is_empty() {
+                        div { class: "truncate text-[10px] text-muted-foreground/65", "{agent.name}" }
                     }
                 }
                 SessionActions {
@@ -410,20 +411,12 @@ fn SessionBoardCard(
                     onedit,
                 }
             }
-            if !session.description.is_empty() {
-                p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/70", "{session.description}" }
+            if !preview.is_empty() {
+                p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/65", "{preview}" }
             }
-            div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground",
-                span { class: "flex items-center gap-1",
-                    span { class: "size-1.5 rounded-full {runtime_dot}" }
-                    {runtime_label(&session.runtime)}
-                }
-                if !context.project.is_empty() {
-                    span { class: "max-w-32 truncate", "{context.project}" }
-                }
-                if !context.branch.is_empty() {
-                    span { class: "max-w-32 truncate font-mono", "{context.branch}" }
-                }
+            div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
+                MetadataPill { dot: runtime_dot.to_string(), label: runtime_label(&session.runtime) }
+                SessionContextView { context: context.clone() }
             }
             div { class: "mt-3 flex items-center gap-1.5 border-t border-foreground/[0.06] pt-2 text-[10px] text-muted-foreground/70",
                 time { class: "tabular-nums", "{updated}" }
@@ -446,23 +439,25 @@ fn SessionDetails(
 ) -> Element {
     let context = SessionContext::from(repository);
     let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
-    let agent_icon = FaviconSource::agent(&session.agent);
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
+    let title = session.display_title();
+    let preview = session.preview();
+    let agent = AgentPresentation::from_session(&session);
     let edit_session = session.clone();
     let git_url = context.git_url.clone();
     rsx! {
         aside { class: "flex min-h-0 w-[21rem] shrink-0 flex-col border-l border-foreground/[0.08] bg-background/80",
             header { class: "flex shrink-0 items-start gap-3 border-b border-foreground/[0.08] p-4",
                 AgentThumbnail {
-                    src: agent_icon,
-                    seed: session.agent.clone(),
-                    background: String::new(),
-                    alt: session.agent.clone(),
+                    src: agent.icon.clone(),
+                    seed: agent.id.clone(),
+                    background: agent.color.clone(),
+                    alt: agent.name.clone(),
                     class: "size-8 text-[9px]".to_string(),
                 }
                 div { class: "min-w-0 flex-1",
-                    h2 { class: "break-words text-sm font-semibold text-foreground", "{session.name}" }
+                    h2 { class: "break-words text-sm font-semibold text-foreground", "{title}" }
                     div { class: "mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground",
                         span { class: "size-1.5 rounded-full {runtime_dot}" }
                         span { {runtime_label(&session.runtime)} }
@@ -481,27 +476,44 @@ fn SessionDetails(
                 }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto p-4",
-                if !session.description.is_empty() {
-                    p { class: "mb-4 whitespace-pre-wrap text-xs leading-5 text-foreground/75", "{session.description}" }
+                if !preview.is_empty() {
+                    p { class: "mb-4 rounded-lg bg-foreground/[0.025] px-3 py-2.5 text-xs leading-5 text-foreground/70 ring-1 ring-inset ring-foreground/[0.07]", "{preview}" }
                 }
-                div { class: "grid gap-3",
-                    SessionDetailField { label: translate("sessions-stage"),
-                        StagePicker {
-                            session_id: session.id.clone(),
-                            selected: session.stage.clone(),
-                            stages,
+                if !session.description.is_empty() {
+                    p { class: "mb-4 whitespace-pre-wrap text-xs leading-5 text-foreground/65", "{session.description}" }
+                }
+                section { class: "rounded-lg bg-foreground/[0.018] ring-1 ring-inset ring-foreground/[0.08]",
+                    h3 { class: "border-b border-foreground/[0.07] px-3 py-2 text-[10px] font-medium text-muted-foreground", {translate("editor-properties")} }
+                    div { class: "grid gap-3 p-3",
+                        SessionDetailField { label: translate("sessions-stage"),
+                            StagePicker {
+                                session_id: session.id.clone(),
+                                selected: session.stage.clone(),
+                                stages,
+                            }
+                        }
+                        if !agent.name.is_empty() {
+                            SessionDetailField { label: translate("resume-column-agent"),
+                                MetadataPill { label: agent.name.clone() }
+                            }
+                        }
+                        if !context.project.is_empty() {
+                            SessionDetailField { label: translate("resume-column-project"),
+                                MetadataPill { label: context.project.clone(), icon: Some(LineIcon::Package) }
+                            }
+                        }
+                        if !context.branch.is_empty() {
+                            SessionDetailField { label: translate("resume-column-branch"),
+                                MetadataPill { label: context.branch.clone(), icon: Some(LineIcon::GitBranch), mono: true }
+                            }
+                        }
+                        if !session.cwd.is_empty() {
+                            SessionDetailText { label: translate("sessions-directory"), value: session.cwd.clone(), mono: true }
+                        }
+                        SessionDetailField { label: translate("resume-column-updated"),
+                            MetadataPill { dot: runtime_dot.to_string(), label: updated }
                         }
                     }
-                    if !context.project.is_empty() {
-                        SessionDetailText { label: translate("resume-column-project"), value: context.project.clone() }
-                    }
-                    if !context.branch.is_empty() {
-                        SessionDetailText { label: translate("resume-column-branch"), value: context.branch.clone() }
-                    }
-                    if !session.cwd.is_empty() {
-                        SessionDetailText { label: translate("sessions-directory"), value: session.cwd.clone(), mono: true }
-                    }
-                    SessionDetailText { label: translate("resume-column-updated"), value: updated }
                 }
             }
             footer { class: "flex shrink-0 items-center gap-2 border-t border-foreground/[0.08] p-3",
@@ -633,10 +645,12 @@ fn SessionActionItem(
 
 #[component]
 fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) -> Element {
+    let stage_dot = StageVisual::for_id(&selected).dot;
     rsx! {
-        div { class: "relative min-w-0",
+        div { class: "relative inline-flex min-w-0 items-center",
+            span { class: "pointer-events-none absolute left-2 size-1.5 rounded-full {stage_dot}" }
             select {
-                class: "h-7 w-full min-w-0 appearance-none rounded-md bg-foreground/[0.035] py-1 pl-2 pr-7 text-[10px] text-foreground/80 outline-none ring-1 ring-inset ring-foreground/[0.08] hover:bg-foreground/[0.06] focus-visible:ring-primary/35",
+                class: "h-6 max-w-full min-w-0 appearance-none rounded-full bg-foreground/[0.035] py-0.5 pl-5 pr-7 text-[10px] text-foreground/75 outline-none ring-1 ring-inset ring-foreground/[0.08] hover:bg-foreground/[0.06] focus-visible:ring-primary/35",
                 value: selected,
                 title: translate("sessions-stage"),
                 onchange: move |event| {
@@ -651,7 +665,7 @@ fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) 
             }
             LineIconView {
                 icon: LineIcon::ChevronDown,
-                class: "pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground".to_string(),
+                class: "pointer-events-none absolute right-2 top-1/2 size-2.5 -translate-y-1/2 text-muted-foreground".to_string(),
             }
         }
     }
@@ -660,13 +674,34 @@ fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) 
 #[component]
 fn SessionContextView(context: SessionContext) -> Element {
     rsx! {
-        div { class: "flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground",
+        div { class: "flex min-w-0 items-center gap-1.5",
             if !context.project.is_empty() {
-                span { class: "max-w-32 truncate", "{context.project}" }
+                MetadataPill { label: context.project, icon: Some(LineIcon::Package) }
             }
             if !context.branch.is_empty() {
-                span { class: "max-w-32 truncate font-mono text-muted-foreground/70", "{context.branch}" }
+                MetadataPill { label: context.branch, icon: Some(LineIcon::GitBranch), mono: true }
             }
+        }
+    }
+}
+
+#[component]
+fn MetadataPill(
+    label: String,
+    #[props(default)] dot: String,
+    #[props(default)] icon: Option<LineIcon>,
+    #[props(default)] mono: bool,
+) -> Element {
+    let label_class = if mono { "font-mono" } else { "" };
+    rsx! {
+        span { class: "inline-flex h-5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-foreground/[0.035] px-2 text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/[0.07]",
+            if !dot.is_empty() {
+                span { class: "size-1.5 shrink-0 rounded-full {dot}" }
+            }
+            if let Some(icon) = icon {
+                LineIconView { icon, class: "size-2.5 shrink-0 opacity-65".to_string() }
+            }
+            span { class: "max-w-32 truncate {label_class}", "{label}" }
         }
     }
 }
@@ -676,6 +711,29 @@ struct SessionContext {
     project: String,
     branch: String,
     git_url: String,
+}
+
+#[derive(Clone, PartialEq)]
+struct AgentPresentation {
+    id: String,
+    name: String,
+    icon: Option<String>,
+    color: String,
+}
+
+impl AgentPresentation {
+    fn from_session(session: &SessionSummary) -> Self {
+        Self {
+            id: session.agent.clone(),
+            name: if session.agent_name.is_empty() {
+                session.agent.clone()
+            } else {
+                session.agent_name.clone()
+            },
+            icon: (!session.agent_icon.is_empty()).then(|| session.agent_icon.clone()),
+            color: session.agent_color.clone(),
+        }
+    }
 }
 
 impl SessionContext {
@@ -820,7 +878,8 @@ impl StageGroup {
 
 trait SessionSummaryExt {
     fn matches(&self, query: &str) -> bool;
-    fn subtitle(&self) -> String;
+    fn display_title(&self) -> String;
+    fn preview(&self) -> String;
 }
 
 impl SessionSummaryExt for SessionSummary {
@@ -830,16 +889,26 @@ impl SessionSummaryExt for SessionSummary {
             || self.description.to_ascii_lowercase().contains(query)
             || self.cwd.to_ascii_lowercase().contains(query)
             || self.agent.to_ascii_lowercase().contains(query)
+            || self.agent_name.to_ascii_lowercase().contains(query)
+            || self.conversation_title.to_ascii_lowercase().contains(query)
+            || self.last_message.to_ascii_lowercase().contains(query)
     }
 
-    fn subtitle(&self) -> String {
-        if self.description.is_empty() {
-            return self.cwd.clone();
+    fn display_title(&self) -> String {
+        if self.conversation_title.is_empty() {
+            return self.name.clone();
         }
-        if self.cwd.is_empty() {
+        self.conversation_title.clone()
+    }
+
+    fn preview(&self) -> String {
+        if !self.last_message.is_empty() && self.last_message != self.display_title() {
+            return self.last_message.clone();
+        }
+        if !self.description.is_empty() {
             return self.description.clone();
         }
-        format!("{} · {}", self.description, self.cwd)
+        self.cwd.clone()
     }
 }
 
