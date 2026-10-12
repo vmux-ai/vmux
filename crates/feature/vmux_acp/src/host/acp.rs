@@ -162,6 +162,9 @@ fn operate_tool(
 #[derive(Component)]
 pub(crate) struct AcpLaunchStarted;
 
+#[derive(Component)]
+pub(crate) struct AcpSpawnQueued;
+
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AcpPackageChanged {
     pub(crate) agent_id: String,

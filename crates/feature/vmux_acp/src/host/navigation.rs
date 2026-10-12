@@ -460,6 +460,7 @@ impl SessionRuntime<'_, '_> {
             AcpSessionId,
             vmux_ecs::ProcessAnchor,
             crate::host::acp::AcpLaunchStarted,
+            crate::host::acp::AcpSpawnQueued,
             crate::host::runtime::AcpSessionConfigState,
             crate::host::toast::ErrorSurfaced,
             vmux_session::ApprovalPolicy,

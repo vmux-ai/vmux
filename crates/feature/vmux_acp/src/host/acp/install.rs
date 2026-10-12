@@ -201,7 +201,10 @@ fn poll(
                         Ok(Some(())) => {
                             service_requests.write(ServiceRequest(message));
                             *state = RunState::Idle;
-                            commands.entity(entity).remove::<AcpInstallWaiter>();
+                            commands
+                                .entity(entity)
+                                .insert(AcpSpawnQueued)
+                                .remove::<AcpInstallWaiter>();
                         }
                         Ok(None) => {
                             *state = RunState::Idle;
@@ -227,6 +230,6 @@ fn poll(
 
 fn cancel(trigger: On<Remove, ProcessAnchor>, mut commands: Commands) {
     if let Ok(mut entity) = commands.get_entity(trigger.event_target()) {
-        entity.remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
+        entity.remove::<(AcpInstallWaiter, AcpLaunchStarted, AcpSpawnQueued)>();
     }
 }

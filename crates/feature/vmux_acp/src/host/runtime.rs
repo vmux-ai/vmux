@@ -18,7 +18,7 @@ use super::handoff::PendingHandoff;
 use super::runtime_driver::AcpWorkspaceState;
 use super::runtime_driver::PromptWorkspace;
 use crate::AcpSessionId;
-use crate::host::acp::AcpLaunchStarted;
+use crate::host::acp::AcpSpawnQueued;
 use crate::host::event::{
     AcpAgentInfo, AcpSessionConfigSelectionResult, AcpSessionConfigSnapshot, AcpSessionCreated,
     AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest,
@@ -380,7 +380,7 @@ fn input(
         &AgentId,
         &mut RunState,
         &mut PromptQueue,
-        Has<AcpLaunchStarted>,
+        Has<AcpSpawnQueued>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,
@@ -395,12 +395,12 @@ fn input(
         agent_id,
         mut state,
         mut queue,
-        install_started,
+        spawn_queued,
         mut pending,
         mut imported,
     ) in &mut q
     {
-        if !acp_prompt_dispatch_ready(&state, &queue, install_started) {
+        if !acp_prompt_dispatch_ready(&state, &queue, spawn_queued) {
             continue;
         }
         let Some(prompt) = queue.take_next() else {
@@ -441,8 +441,8 @@ fn input(
     }
 }
 
-fn acp_prompt_dispatch_ready(state: &RunState, queue: &PromptQueue, install_started: bool) -> bool {
-    install_started && queue.ready(matches!(state, RunState::Idle))
+fn acp_prompt_dispatch_ready(state: &RunState, queue: &PromptQueue, spawn_queued: bool) -> bool {
+    spawn_queued && queue.ready(matches!(state, RunState::Idle))
 }
 
 fn close_on_remove(
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn queued_prompt_waits_for_acp_install_start() {
+    fn queued_prompt_waits_for_acp_spawn_request() {
         let mut queue = PromptQueue::default();
         queue.enqueue("hello".to_string());
 

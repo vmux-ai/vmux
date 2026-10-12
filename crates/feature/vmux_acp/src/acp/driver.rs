@@ -121,10 +121,6 @@ pub(super) enum AcpTranscriptInput {
     BeginHistoryReplay,
     Update(Box<SessionUpdate>),
     FinishHistoryReplay(bool),
-    PushUser {
-        text: String,
-        attachments: Vec<AgentAttachment>,
-    },
     Snapshot,
     ApprovalDetails {
         query: ApprovalDetailsQuery,
@@ -1192,10 +1188,6 @@ impl AcpDriver {
                         preferred_mode,
                     } => {
                         main_shared.cancel_requested.store(false, Ordering::SeqCst);
-                        main_shared.projection.transcript(AcpTranscriptInput::PushUser {
-                            text: text.clone(),
-                            attachments: attachments.clone(),
-                        });
                         main_shared.projection.status(AgentRunStatus::Streaming);
                         let ensured = ensure_session(&mut session_id, || {
                             let mut new_session = NewSessionRequest::new(main_shared.cwd());

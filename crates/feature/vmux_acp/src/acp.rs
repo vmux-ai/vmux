@@ -537,18 +537,35 @@ fn snapshot_selection(mut sessions: Query<(&mut AcpSelectionSnapshotInbox, &AcpS
 }
 
 fn route_input(
-    sessions: Query<(&SessionId, &AcpSessionInput)>,
+    mut sessions: Query<(
+        &SessionId,
+        &AcpSessionInput,
+        &AcpSessionShared,
+        &mut AcpProjector,
+    )>,
     mut requests: Query<(Entity, &mut AcpSessionInputRequest)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut requests {
         let mut accepted = false;
-        for (sid, input) in &sessions {
+        for (sid, input, shared, mut projector) in &mut sessions {
             if sid.0 != request.sid {
                 continue;
             }
             if let Some(session_input) = request.input.take() {
+                let user = match &session_input {
+                    AcpInput::User {
+                        text, attachments, ..
+                    } => Some((text.clone(), attachments.clone())),
+                    _ => None,
+                };
                 accepted = input.0.send(session_input).is_ok();
+                if accepted && let Some((text, attachments)) = user {
+                    projector.push_user(text, attachments);
+                    shared
+                        .0
+                        .emit(shared.0.snapshot_message(projector.messages()));
+                }
             }
             break;
         }
@@ -815,6 +832,55 @@ fn reap(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepted_user_input_is_projected_before_agent_startup() {
+        let mut app = App::new();
+        app.add_systems(Update, route_input);
+        let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+        let (stream_tx, mut stream_rx) = broadcast::channel(4);
+        let shared = Arc::new(AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(
+                vmux_process::ProcessManager::default(),
+            )),
+        ));
+        let session = app
+            .world_mut()
+            .spawn((
+                SessionId("s1".into()),
+                AcpSessionInput(input_tx),
+                AcpSessionShared(shared),
+                AcpProjector::default(),
+            ))
+            .id();
+        app.world_mut().spawn(AcpSessionInputRequest {
+            sid: "s1".into(),
+            input: Some(AcpInput::User {
+                text: "hello".into(),
+                context: None,
+                attachments: Vec::new(),
+                preferred_mode: None,
+            }),
+            response: None,
+        });
+
+        app.update();
+
+        assert!(matches!(input_rx.try_recv(), Ok(AcpInput::User { text, .. }) if text == "hello"));
+        assert!(matches!(
+            app.world().get::<AcpProjector>(session).unwrap().messages(),
+            [Message::User { text, .. }] if text == "hello"
+        ));
+        assert!(matches!(
+            stream_rx.try_recv(),
+            Ok(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }))
+                if matches!(messages.as_slice(), [Message::User { text, .. }] if text == "hello")
+        ));
+    }
 
     #[test]
     fn stdio_mcp_server_with_working_directory_is_rejected() {

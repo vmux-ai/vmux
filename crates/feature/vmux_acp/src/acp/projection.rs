@@ -155,12 +155,6 @@ fn project(
                         .0
                         .emit(shared.0.snapshot_message(projector.messages()));
                 }
-                AcpTranscriptInput::PushUser { text, attachments } => {
-                    projector.push_user(text, attachments);
-                    shared
-                        .0
-                        .emit(shared.0.snapshot_message(projector.messages()));
-                }
                 AcpTranscriptInput::Snapshot => {
                     shared
                         .0

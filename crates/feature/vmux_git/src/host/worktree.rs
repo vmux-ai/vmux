@@ -549,6 +549,11 @@ impl CheckoutInfo {
                 change: BranchChange::default(),
             });
         }
+        Ok(holders)
+    }
+
+    pub fn branch_holders_with_changes(&self) -> Result<Vec<BranchHolder>, GitError> {
+        let mut holders = self.branch_holders()?;
         BranchChange::fill(&self.root, &mut holders);
         Ok(holders)
     }
@@ -1183,7 +1188,7 @@ mod tests {
         assert_eq!(info.insertions, 3);
         assert_eq!(info.deletions, 1);
 
-        let holders = checkout.branch_holders().unwrap();
+        let holders = checkout.branch_holders_with_changes().unwrap();
         let change = |branch: &str| {
             holders
                 .iter()
@@ -1217,7 +1222,7 @@ mod tests {
         checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
         test_repo::write(&wt, "seed.txt", "seed\nscratch\n");
 
-        let holders = checkout.branch_holders().unwrap();
+        let holders = checkout.branch_holders_with_changes().unwrap();
         let feat = holders
             .iter()
             .find(|holder| holder.branch == "vmux/feat")
