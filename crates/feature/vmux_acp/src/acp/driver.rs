@@ -1177,7 +1177,6 @@ impl AcpDriver {
                 }
             }
             main_shared.mark_startup_ready();
-            main_shared.projection.status(AgentRunStatus::Idle);
 
             while let Some(input) = input_rx.recv().await {
                 match input {
