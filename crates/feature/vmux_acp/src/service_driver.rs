@@ -244,7 +244,7 @@ impl AcpServiceConnection {
                 tracing::warn!("local socket: ignoring a remote-only request");
             }
             ClientMessage::Shared(SharedMessage::AgentAttach { sid }) => {
-                self.attach(sid).await;
+                self.attach(sid, true).await;
             }
             ClientMessage::DetachAgentSession { sid } => {
                 self.detach(&sid);
@@ -357,26 +357,26 @@ impl AcpServiceConnection {
                     let _ = self.outbound.send(ServiceMessage::Error { message });
                     return Ok(());
                 }
-                self.attach(sid).await;
+                self.attach(sid, false).await;
             }
             other => return Err(other),
         }
         Ok(())
     }
 
-    async fn attach(&mut self, sid: String) {
+    async fn attach(&mut self, sid: String, include_status: bool) {
         let Some(mut messages) = self.service.sessions.subscribe(sid.clone()).await else {
             return;
         };
-        for message in [
+        let mut snapshots = vec![
             self.service.sessions.snapshot(sid.clone()).await,
             self.service.sessions.agent_info(sid.clone()).await,
             self.service.sessions.config_state(sid.clone()).await,
-            self.service.sessions.status(sid.clone()).await,
-        ]
-        .into_iter()
-        .flatten()
-        {
+        ];
+        if include_status {
+            snapshots.push(self.service.sessions.status(sid.clone()).await);
+        }
+        for message in snapshots.into_iter().flatten() {
             if self.outbound.send(message).is_err() {
                 return;
             }
