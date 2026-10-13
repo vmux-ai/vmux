@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::CefSystems;
-use bevy_cef::prelude::HostWindow;
+use bevy_cef::prelude::{CefSystems, HostWindow, UiInput};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::page::{PageReady, PrewarmPage};
 use vmux_ecs::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -67,6 +66,10 @@ fn handle_registered_page_open(
                     .entity(spare)
                     .insert((ChildOf(task.stack), KeyboardOwner))
                     .remove::<WarmPageSpare>();
+                commands.trigger(UiInput {
+                    webview: spare,
+                    payload: PageReady {},
+                });
             } else {
                 let webview = commands
                     .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
@@ -158,10 +161,19 @@ mod tests {
 
     use crate::cef::Browser;
 
+    #[derive(Resource, Default)]
+    struct ReadyEvents(Vec<Entity>);
+
+    fn record_ready(trigger: On<UiInput<PageReady>>, mut events: ResMut<ReadyEvents>) {
+        events.0.push(trigger.event().webview);
+    }
+
     #[test]
     fn registered_page_claims_ready_spare() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.init_resource::<ReadyEvents>()
+            .add_plugins(MinimalPlugins)
+            .add_observer(record_ready)
             .add_systems(Update, handle_registered_page_open);
         app.world_mut().spawn(PrewarmPage {
             host: "history",
@@ -198,6 +210,7 @@ mod tests {
             Some(stack)
         );
         assert!(app.world().get::<WarmPageSpare>(spare).is_none());
+        assert_eq!(app.world().resource::<ReadyEvents>().0, [spare]);
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
     }
 

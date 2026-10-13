@@ -191,8 +191,8 @@ fn SessionsList(
     onedit: EventHandler<SessionSummary>,
 ) -> Element {
     rsx! {
-        div { class: "min-h-0 flex-1 overflow-auto p-4",
-            div { class: "min-w-[48rem] rounded-lg bg-foreground/[0.018] ring-1 ring-inset ring-foreground/[0.08]",
+        div { class: "min-h-0 flex-1 overflow-auto",
+            div { class: "min-w-[48rem]",
                 for group in groups {
                     if !group.sessions.is_empty() {
                         SessionListGroup {
@@ -222,8 +222,8 @@ fn SessionListGroup(
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
-        section { class: "border-b border-foreground/[0.07] last:border-b-0",
-            div { class: "flex h-8 items-center gap-2 bg-foreground/[0.035] px-3",
+        section { class: "border-b border-foreground/[0.08] last:border-b-0",
+            div { class: "sticky top-0 z-10 flex h-9 items-center gap-2 border-b border-foreground/[0.08] bg-background/95 px-4 backdrop-blur",
                 span { class: "size-2 rounded-full {stage_dot}" }
                 h2 { class: "text-[11px] font-medium text-foreground/80", {translate_humanized(&stage.name)} }
                 span { class: "text-[10px] tabular-nums text-muted-foreground", "{sessions.len()}" }
@@ -261,13 +261,13 @@ fn SessionListRow(
     let git_url = context.git_url.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let row_class = if selected {
-        "bg-primary/[0.075] shadow-[inset_2px_0_0_0_var(--primary)]"
+        "bg-primary/[0.06] shadow-[inset_2px_0_0_0_var(--primary)]"
     } else {
-        "hover:bg-foreground/[0.04]"
+        "hover:bg-foreground/[0.035]"
     };
     rsx! {
         div {
-            class: "group relative grid min-h-12 cursor-pointer grid-cols-[minmax(16rem,1fr)_minmax(12rem,0.8fr)_7.5rem_4.5rem_2rem] items-center gap-3 border-t border-foreground/[0.055] px-3 text-xs transition-colors first:border-t-0 {row_class}",
+            class: "group relative grid min-h-12 cursor-pointer grid-cols-[minmax(16rem,1fr)_minmax(12rem,0.8fr)_7.5rem_4.5rem_2rem] items-center gap-3 border-b border-foreground/[0.055] px-4 text-xs transition-colors last:border-b-0 {row_class}",
             onclick: move |_| onselect.call(select_id.clone()),
             button {
                 r#type: "button",
@@ -314,7 +314,7 @@ fn SessionsBoard(
     onedit: EventHandler<SessionSummary>,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 gap-3 overflow-x-auto p-4",
+        div { class: "flex min-h-0 flex-1 overflow-x-auto",
             for group in groups {
                 SessionBoardColumn {
                     key: "{group.stage.id}",
@@ -341,13 +341,13 @@ fn SessionBoardColumn(
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
-        section { class: "flex min-h-0 w-[19rem] shrink-0 flex-col rounded-lg bg-foreground/[0.025] ring-1 ring-inset ring-foreground/[0.08]",
-            header { class: "flex h-10 shrink-0 items-center gap-2 border-b border-foreground/[0.07] px-3",
+        section { class: "flex min-h-0 w-[19rem] shrink-0 flex-col border-r border-foreground/[0.08] last:border-r-0",
+            header { class: "flex h-10 shrink-0 items-center gap-2 border-b border-foreground/[0.08] px-3",
                 span { class: "size-2 rounded-full {stage_dot}" }
                 h2 { class: "truncate text-xs font-medium text-foreground/85", {translate_humanized(&stage.name)} }
                 span { class: "ml-auto text-[10px] tabular-nums text-muted-foreground", "{sessions.len()}" }
             }
-            div { class: "min-h-0 flex-1 space-y-2 overflow-y-auto p-2",
+            div { class: "min-h-0 flex-1 overflow-y-auto",
                 for session in sessions {
                     SessionBoardCard {
                         key: "{session.id}",
@@ -382,13 +382,13 @@ fn SessionBoardCard(
     let preview = session.preview();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let card_class = if selected {
-        "bg-primary/[0.08] ring-primary/25"
+        "bg-primary/[0.06] shadow-[inset_2px_0_0_0_var(--primary)]"
     } else {
-        "bg-background/55 ring-foreground/[0.08] hover:bg-background/80 hover:ring-foreground/[0.14]"
+        "hover:bg-foreground/[0.035]"
     };
     rsx! {
         article {
-            class: "group relative cursor-pointer rounded-md p-3 ring-1 ring-inset transition-colors {card_class}",
+            class: "group relative cursor-pointer border-b border-foreground/[0.065] p-3 transition-colors {card_class}",
             onclick: move |_| onselect.call(select_id.clone()),
             div { class: "flex items-start gap-2",
                 AgentThumbnail {
