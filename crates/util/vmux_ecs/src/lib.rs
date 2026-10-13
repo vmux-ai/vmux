@@ -2,7 +2,6 @@
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
-#[cfg(host)]
 pub use component::{
     ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Cwd, Description,
     EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
@@ -45,7 +44,6 @@ mod archive;
 pub mod browser;
 #[cfg(all(host, feature = "host"))]
 pub mod cli;
-#[cfg(host)]
 mod component;
 pub mod event;
 #[cfg(all(host, feature = "host"))]
@@ -77,7 +75,6 @@ pub mod profile;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]
 pub mod service;
-#[cfg(all(host, feature = "host"))]
 pub mod team;
 #[cfg(all(host, feature = "host"))]
 pub mod terminal;

@@ -268,11 +268,13 @@ fn project(
     }
 }
 
+#[cfg(host)]
 struct ConversationPreview {
     title: String,
     last_message: String,
 }
 
+#[cfg(host)]
 impl ConversationPreview {
     fn from(title: Option<&AgentConversationTitle>, messages: &[Message]) -> Self {
         let title = title
@@ -292,13 +294,10 @@ impl ConversationPreview {
     fn message(message: &Message) -> Option<String> {
         let text = match message {
             Message::User { text, .. } => text,
-            Message::Assistant { blocks } => {
-                let text = blocks.iter().rev().find_map(|block| match block {
-                    AssistantBlock::Text(text) => Some(text),
-                    _ => None,
-                })?;
-                text
-            }
+            Message::Assistant { blocks } => blocks.iter().rev().find_map(|block| match block {
+                AssistantBlock::Text(text) => Some(text),
+                _ => None,
+            })?,
             Message::ToolResult { .. } => return None,
         };
         let text = Self::compact(text);
@@ -320,9 +319,13 @@ impl ConversationPreview {
 mod tests {
     use super::*;
     use crate::{CreateRequest, DomainPlugin, RenameRequest, SnapshotReceived};
+    #[cfg(feature = "app")]
     use bevy::MinimalPlugins;
+    #[cfg(feature = "app")]
     use bevy::asset::AssetPlugin;
+    #[cfg(feature = "app")]
     use moonshine_save::load::TriggerLoad;
+    #[cfg(feature = "app")]
     use moonshine_save::prelude::{LoadWorld, load_on_default_event};
 
     #[test]
@@ -388,6 +391,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "app")]
     fn legacy_session_without_task_components_remains_in_catalog() {
         let store = r#"(
   resources: {},

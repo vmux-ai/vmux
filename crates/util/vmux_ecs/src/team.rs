@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::Component;
 
 pub use vmux_api::avatar::AvatarSpec;
 

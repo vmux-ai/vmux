@@ -3,9 +3,9 @@ use bevy_ecs::prelude::*;
 use vmux_api::conversation::RemoteModelState;
 
 use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
-use crate::event::{
-    ModeState, ModelOptionEntry, ModelState, SlashCommand, SlashCommandEntry, SlashCommands,
-};
+#[cfg(host)]
+use crate::event::SlashCommand;
+use crate::event::{ModeState, ModelOptionEntry, ModelState, SlashCommandEntry, SlashCommands};
 
 pub struct ChatModelPlugin;
 
