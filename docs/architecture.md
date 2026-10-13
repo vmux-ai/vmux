@@ -931,11 +931,11 @@ request. There is no command-catalog resource, second command enum, or MCP-only 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
 
-External MCP connections belong to Vmux rather than to one agent runtime. `/mcp` in either
-composer manages the shared catalog; OAuth credentials stay in the platform credential store,
-with packaged macOS builds accessing Keychain through the stable signed `vmux` helper. `tools.toml`
-keeps the non-secret server definition. Agent launch projects that one source into Codex, Claude,
-Vibe, or ACP configuration and refreshes an expiring token before injection.
+Each ACP agent's default config file is authoritative for its native MCP servers. Vmux may discover
+recognized native configs for read-only display, but never copies them into `tools.toml` or injects
+them back into ACP session creation. Agent launch injects only the internal `vmux` MCP anchored to
+the Session workspace. Profile-owned integrations and OAuth are a separate future feature rather
+than another representation of agent-native MCP config.
 
 `read_layout` / `update_layout` are the interesting pair: fetch the pane tree with stable
 ids, mutate it, commit it back. Vmux diffs against the live graph and reconciles

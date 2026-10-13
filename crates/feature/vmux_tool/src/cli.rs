@@ -21,7 +21,6 @@ impl Plugin for ToolCliPlugin {
                     execute_apply,
                     execute_homebrew_import,
                     execute_npm_import,
-                    execute_mcp_import,
                     execute_dotfile_import,
                     execute_adopt,
                     execute_unlink,
@@ -42,9 +41,6 @@ struct HomebrewImportRequest(PathBuf);
 
 #[derive(Component)]
 struct NpmImportRequest(PathBuf);
-
-#[derive(Component)]
-struct McpImportRequest(Option<PathBuf>);
 
 #[derive(Component)]
 struct DotfileImportRequest(Option<PathBuf>);
@@ -80,11 +76,6 @@ fn route(
                 if let Some(path) = invocation.value_os("path") {
                     entity.insert(NpmImportRequest(PathBuf::from(path)));
                 }
-            }
-            "tool.import.mcp" => {
-                entity.insert(McpImportRequest(
-                    invocation.value_os("path").map(PathBuf::from),
-                ));
             }
             "tool.import.dotfiles" => {
                 entity.insert(DotfileImportRequest(
@@ -172,31 +163,6 @@ fn execute_npm_import(
         match result {
             Ok(imported) => {
                 println!("imported {imported} NPM package(s)");
-                commands.entity(entity).insert(CliResult::default());
-            }
-            Err(error) => {
-                commands
-                    .entity(entity)
-                    .insert(CliResult(Err(error.to_string())));
-            }
-        }
-    }
-}
-
-fn execute_mcp_import(
-    requests: Query<(Entity, &McpImportRequest), Added<McpImportRequest>>,
-    mut commands: Commands,
-) {
-    let store = crate::ToolStore::current();
-    for (entity, request) in &requests {
-        let result = match &request.0 {
-            Some(path) => store.import_mcp_config(path),
-            None => store.import_default_mcp_configs(),
-        }
-        .map_err(io::Error::other);
-        match result {
-            Ok(imported) => {
-                println!("imported {imported} MCP server(s)");
                 commands.entity(entity).insert(CliResult::default());
             }
             Err(error) => {

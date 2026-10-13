@@ -6,10 +6,9 @@ use std::thread::JoinHandle;
 use crate::AcpSessionId;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
-use vmux_api::protocol::ManagedMcpServer;
 #[cfg(test)]
 use vmux_ecs::event::InstallPhase;
-use vmux_ecs::profile::{CurrentProfile, McpCredentials};
+use vmux_ecs::profile::CurrentProfile;
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
@@ -224,8 +223,6 @@ struct AcpLaunch {
     command: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
-    managed_mcp_servers: Vec<ManagedMcpServer>,
-    mcp_revision: u64,
 }
 
 #[derive(Clone)]
@@ -237,7 +234,6 @@ struct AcpInstallProgressSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_ecs::profile::mcp_credentials::{McpCredentialAccess, McpCredentialStorage};
     use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
 
     fn install_test_app() -> App {
@@ -247,12 +243,8 @@ mod tests {
         let paths = ProfilePaths::current();
         app.world_mut().spawn((
             Name::new("Test"),
-            ActiveProfile(profile.clone()),
-            ProfileDirectories(paths.clone()),
-            McpCredentials {
-                access: McpCredentialAccess::default(),
-                storage: McpCredentialStorage::at(profile, paths),
-            },
+            ActiveProfile(profile),
+            ProfileDirectories(paths),
         ));
         app
     }

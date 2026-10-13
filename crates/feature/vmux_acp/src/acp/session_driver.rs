@@ -4,7 +4,7 @@ use bevy::prelude::Bundle;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::conversation::{Message, RemoteSession};
-use vmux_api::protocol::{ManagedMcpServer, ServiceMessage};
+use vmux_api::protocol::ServiceMessage;
 use vmux_ecs::ProcessId;
 use vmux_process::ProcessRuntime;
 
@@ -78,10 +78,9 @@ impl AcpSessions {
         processes: ProcessRuntime,
         mcp_command: Option<String>,
         mcp_args: Vec<String>,
-        managed_mcp_servers: Vec<ManagedMcpServer>,
         resume: Option<String>,
     ) -> Result<(), String> {
-        let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args, managed_mcp_servers);
+        let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args);
         let (response, receiver) = oneshot::channel();
         self.spawns
             .send(SpawnAcpSession {

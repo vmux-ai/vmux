@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use vmux_api::protocol::ClientMessage;
 use vmux_ecs::event::InstallPhase;
-use vmux_ecs::profile::McpCredentials;
 use vmux_ecs::{Cwd, ProcessAnchor};
 use vmux_editor::lsp::archive::ArchiveKind;
 use vmux_editor::lsp::download::{self, RemoteArtifact};
@@ -87,7 +86,6 @@ impl AcpInstallJob {
 pub(super) fn start_acp_install_job(
     request: AcpInstallRequest,
     wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    credentials: McpCredentials,
     agents: PathBuf,
 ) -> AcpInstallJob {
     let (progress_sender, progress) = crossbeam_channel::unbounded();
@@ -96,12 +94,8 @@ pub(super) fn start_acp_install_job(
         wake,
     };
     let thread = std::thread::spawn(move || {
-        let outcome = resolve_acp_install(
-            request,
-            &sink,
-            &credentials,
-            AgentInstaller::at(PackageStore::at(agents)),
-        );
+        let outcome =
+            resolve_acp_install(request, &sink, AgentInstaller::at(PackageStore::at(agents)));
         sink.notify();
         outcome
     });
@@ -116,7 +110,6 @@ pub(super) fn start_acp_install_job(
 fn resolve_acp_install(
     request: AcpInstallRequest,
     progress: &AcpInstallProgressSink,
-    credentials: &McpCredentials,
     installer: AgentInstaller,
 ) -> AcpInstallOutcome {
     let pinned_version = request
@@ -131,31 +124,17 @@ fn resolve_acp_install(
         .map(|resolved| resolved.package_added)
         .unwrap_or(false);
     let login_env = vmux_terminal::LoginShellEnvironment::get(&request.shell);
-    let managed_mcp =
-        match crate::managed_mcp_driver::PreparedManagedMcpServers::prepare(credentials) {
-            Ok(managed_mcp) => managed_mcp,
-            Err(message) => {
-                return AcpInstallOutcome {
-                    package_added,
-                    launch: Err(message),
-                };
-            }
-        };
     let launch = match resolved {
         Ok(resolved) => Ok(AcpLaunch {
             command: resolved.command,
             args: resolved.args,
             env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend).into_inner(),
-            managed_mcp_servers: managed_mcp.servers,
-            mcp_revision: managed_mcp.revision,
         }),
         Err(registry_error) => match request.fallback {
             Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
                 command: config.command,
                 args: config.args,
                 env: AcpEnvironment::build(config.env, login_env, None).into_inner(),
-                managed_mcp_servers: managed_mcp.servers,
-                mcp_revision: managed_mcp.revision,
             }),
             _ => Err(registry_error),
         },
@@ -224,7 +203,6 @@ impl AcpLaunch {
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
             mcp_args: mcp.map(|mcp| mcp.args).unwrap_or_default(),
             resume_acp_session_id: resume.map(|resume| resume.0.clone()),
-            managed_mcp_servers: self.managed_mcp_servers.clone(),
         }
     }
 }

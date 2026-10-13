@@ -22,8 +22,6 @@ mod broker_driver;
 #[cfg(all(host, feature = "app"))]
 mod host;
 #[cfg(all(host, feature = "app"))]
-mod managed_mcp_driver;
-#[cfg(all(host, feature = "app"))]
 mod mcp_driver;
 #[cfg(all(host, feature = "app"))]
 mod policy;

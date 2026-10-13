@@ -11,7 +11,6 @@ fn start(
     sessions: Query<(Entity, &SessionId, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
     targets: Query<&EntityTarget<Session>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
-    credentials: Query<&McpCredentials>,
     profile: CurrentProfile,
     focused: vmux_layout::stack::FocusedStack,
     settings: Option<Res<AppSettings>>,
@@ -21,9 +20,6 @@ fn start(
         return;
     };
     let Some(focused) = focused.as_ref() else {
-        return;
-    };
-    let Ok(credentials) = credentials.single() else {
         return;
     };
     let Some(agents) = profile.paths().map(|paths| paths.agents()) else {
@@ -68,12 +64,7 @@ fn start(
                         name,
                         key.clone(),
                         InstallState::preparing(),
-                        start_acp_install_job(
-                            request,
-                            wake.clone(),
-                            (*credentials).clone(),
-                            agents.clone(),
-                        ),
+                        start_acp_install_job(request, wake.clone(), agents.clone()),
                     ))
                     .id();
                 active_jobs.push((key, job));
@@ -95,7 +86,6 @@ fn poll(
     mut swaps: MessageReader<vmux_ecs::agent::SwapStackSession>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     settings: Option<Res<AppSettings>>,
-    credentials: Query<&McpCredentials>,
     mut jobs: Query<(
         Entity,
         &AcpInstallKey,
@@ -121,9 +111,6 @@ fn poll(
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Ok(credentials) = credentials.single() else {
-        return;
-    };
     let swapping: std::collections::HashSet<Entity> = swaps
         .read()
         .filter_map(|request| targets.get(request.stack).ok().map(EntityTarget::entity))
@@ -197,26 +184,12 @@ fn poll(
                         resume,
                         settings.as_deref(),
                     );
-                    match credentials.access.with_revision(launch.mcp_revision, || ()) {
-                        Ok(Some(())) => {
-                            service_requests.write(ServiceRequest(message));
-                            *state = RunState::Idle;
-                            commands
-                                .entity(entity)
-                                .insert(AcpSpawnQueued)
-                                .remove::<AcpInstallWaiter>();
-                        }
-                        Ok(None) => {
-                            *state = RunState::Idle;
-                            commands
-                                .entity(entity)
-                                .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
-                        }
-                        Err(error) => {
-                            *state = RunState::Errored(error);
-                            commands.entity(entity).remove::<AcpInstallWaiter>();
-                        }
-                    }
+                    service_requests.write(ServiceRequest(message));
+                    *state = RunState::Idle;
+                    commands
+                        .entity(entity)
+                        .insert(AcpSpawnQueued)
+                        .remove::<AcpInstallWaiter>();
                 }
                 Err(message) => {
                     *state = RunState::Errored(message.clone());

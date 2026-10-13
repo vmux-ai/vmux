@@ -11,16 +11,16 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
 use agent_client_protocol::schema::v1::{
     AudioContent, CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
-    EnvVariable, HttpHeader, ImageContent, Implementation, InitializeRequest, KillTerminalRequest,
-    KillTerminalResponse, LoadSessionRequest, McpServer, McpServerHttp, McpServerSse,
-    McpServerStdio, NewSessionRequest, PermissionOption, PermissionOptionId, PromptCapabilities,
-    PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome, SessionConfigOption,
-    SessionId, SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
-    TerminalOutputResponse, TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
+    ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
+    LoadSessionRequest, McpServer, McpServerStdio, NewSessionRequest, PermissionOption,
+    PermissionOptionId, PromptCapabilities, PromptRequest, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
+    SelectedPermissionOutcome, SessionConfigOption, SessionId, SessionModeState,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;
@@ -42,8 +42,8 @@ use super::{
 use vmux_api::conversation::AssistantBlock;
 use vmux_api::conversation::{Message, RemoteApproval};
 use vmux_api::protocol::{
-    AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ManagedMcpServer,
-    ManagedMcpTransport, ServiceMessage, SharedEvent,
+    AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ServiceMessage,
+    SharedEvent,
 };
 #[cfg(test)]
 use vmux_process::{Process, ProcessManager};
@@ -63,57 +63,14 @@ const STDERR_TAIL_SHOWN: usize = 8;
 pub(super) struct AcpMcpServers(pub(super) Vec<McpServer>);
 
 impl AcpMcpServers {
-    pub(super) fn from_sources(
-        mcp_command: Option<String>,
-        mcp_args: Vec<String>,
-        managed: Vec<ManagedMcpServer>,
-    ) -> Self {
+    pub(super) fn from_sources(mcp_command: Option<String>, mcp_args: Vec<String>) -> Self {
         let mut servers = Vec::new();
         if let Some(command) = mcp_command {
             servers.push(McpServer::Stdio(
                 McpServerStdio::new("vmux", PathBuf::from(command)).args(mcp_args),
             ));
         }
-        for server in managed {
-            if let Some(server) = Self::from_managed(server) {
-                servers.push(server);
-            }
-        }
         Self(servers)
-    }
-
-    pub(super) fn from_managed(server: ManagedMcpServer) -> Option<McpServer> {
-        if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
-            tracing::warn!(
-                "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
-                server.name
-            );
-            return None;
-        }
-        let mut headers = Vec::new();
-        for (name, value) in server.headers {
-            headers.push(HttpHeader::new(name, value));
-        }
-        match server.transport {
-            ManagedMcpTransport::Stdio => {
-                let command = server.command?;
-                let mut env = Vec::new();
-                for (name, value) in server.env {
-                    env.push(EnvVariable::new(name, value));
-                }
-                Some(McpServer::Stdio(
-                    McpServerStdio::new(server.name, command)
-                        .args(server.args)
-                        .env(env),
-                ))
-            }
-            ManagedMcpTransport::Http => server
-                .url
-                .map(|url| McpServer::Http(McpServerHttp::new(server.name, url).headers(headers))),
-            ManagedMcpTransport::Sse => server
-                .url
-                .map(|url| McpServer::Sse(McpServerSse::new(server.name, url).headers(headers))),
-        }
     }
 }
 

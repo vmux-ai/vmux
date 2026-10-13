@@ -3,8 +3,6 @@ use bevy::prelude::{
     Single, Update,
 };
 pub use driver::AcpInput;
-#[cfg(test)]
-use driver::AcpMcpServers;
 use driver::{
     AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpShared,
     AcpTranscriptInput,
@@ -17,8 +15,6 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::conversation::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_api::protocol::{AcpSessionConfig, AgentRunStatus, ServiceMessage, SharedEvent};
-#[cfg(test)]
-use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport};
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
 use vmux_session::SessionId;
@@ -880,22 +876,5 @@ mod tests {
             Ok(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }))
                 if matches!(messages.as_slice(), [Message::User { text, .. }] if text == "hello")
         ));
-    }
-
-    #[test]
-    fn stdio_mcp_server_with_working_directory_is_rejected() {
-        assert!(
-            AcpMcpServers::from_managed(ManagedMcpServer {
-                name: "local".into(),
-                transport: ManagedMcpTransport::Stdio,
-                command: Some("server".into()),
-                args: Vec::new(),
-                env: Vec::new(),
-                cwd: Some("/tmp/project".into()),
-                url: None,
-                headers: Vec::new(),
-            })
-            .is_none()
-        );
     }
 }

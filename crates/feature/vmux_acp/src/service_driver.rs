@@ -335,7 +335,6 @@ impl AcpServiceConnection {
                 mcp_command,
                 mcp_args,
                 resume_acp_session_id,
-                managed_mcp_servers,
             } => {
                 if let Err(message) = self
                     .service
@@ -351,7 +350,6 @@ impl AcpServiceConnection {
                         self.service.processes.clone(),
                         mcp_command,
                         mcp_args,
-                        managed_mcp_servers,
                         resume_acp_session_id,
                     )
                     .await

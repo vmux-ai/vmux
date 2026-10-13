@@ -48,25 +48,6 @@ impl AgentRequestId {
 }
 
 #[vmux_api::contract(Copy, Eq)]
-pub enum ManagedMcpTransport {
-    Stdio,
-    Http,
-    Sse,
-}
-
-#[vmux_api::contract(Eq)]
-pub struct ManagedMcpServer {
-    pub name: String,
-    pub transport: ManagedMcpTransport,
-    pub command: Option<String>,
-    pub args: Vec<String>,
-    pub env: Vec<(String, String)>,
-    pub cwd: Option<String>,
-    pub url: Option<String>,
-    pub headers: Vec<(String, String)>,
-}
-
-#[vmux_api::contract(Copy, Eq)]
 pub enum FileTouchKind {
     Read,
     Edit,
