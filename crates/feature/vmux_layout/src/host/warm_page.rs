@@ -72,7 +72,7 @@ fn handle_registered_page_open(
                 });
             } else {
                 let webview = commands
-                    .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
+                    .spawn(crate::cef::Browser::hosted_page(page.url, page.title))
                     .id();
                 commands
                     .entity(webview)
@@ -119,7 +119,7 @@ fn maintain_registered_page_pools(
             }
             remaining -= 1;
             let webview = commands
-                .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
+                .spawn(crate::cef::Browser::hosted_page(page.url, page.title))
                 .id();
             commands
                 .entity(webview)
@@ -157,6 +157,7 @@ fn pool_node_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_ecs::page::HostsPage;
     use vmux_ecs::{PageOpenId, PageOpenTask};
 
     use crate::cef::Browser;
@@ -241,7 +242,7 @@ mod tests {
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
         let pages = app
             .world_mut()
-            .query_filtered::<&ChildOf, With<Browser>>()
+            .query_filtered::<&ChildOf, (With<Browser>, With<HostsPage>)>()
             .iter(app.world())
             .filter(|child| child.parent() == stack)
             .count();
@@ -274,7 +275,7 @@ mod tests {
 
         assert_eq!(
             app.world_mut()
-                .query_filtered::<(), With<WarmPageSpare>>()
+                .query_filtered::<(), (With<WarmPageSpare>, With<HostsPage>)>()
                 .iter(app.world())
                 .count(),
             2

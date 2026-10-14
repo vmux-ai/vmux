@@ -50,20 +50,20 @@ pub fn SessionsManager() -> Element {
 
     rsx! {
         ManagerPage {
-            header { class: "flex shrink-0 items-center gap-3 border-b border-foreground/[0.08] px-4 py-2.5",
+            header { class: "flex h-11 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-background px-3",
                 div { class: "flex min-w-0 items-baseline gap-2",
                     h1 { class: "truncate text-sm font-semibold tracking-tight", {translate("sessions-title")} }
                     span { class: "text-[11px] tabular-nums text-muted-foreground", "{visible_count}" }
                 }
                 div { class: "flex-1" }
-                div { class: "relative w-48 max-w-[30vw] sm:w-64",
+                div { class: "relative w-44 max-w-[30vw] sm:w-60",
                     LineIconView {
                         icon: LineIcon::Search,
                         class: "pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground".to_string(),
                     }
                     input {
                         r#type: "search",
-                        class: "h-8 w-full rounded-md bg-foreground/[0.035] pl-8 pr-3 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/[0.08] placeholder:text-muted-foreground/55 focus:bg-foreground/[0.055] focus:ring-primary/30",
+                        class: "h-7 w-full rounded-md bg-foreground/[0.025] pl-8 pr-3 text-[11px] text-foreground outline-none ring-1 ring-inset ring-foreground/[0.08] placeholder:text-muted-foreground/55 focus:bg-foreground/[0.05] focus:ring-foreground/[0.16]",
                         placeholder: translate("sessions-search"),
                         value: query(),
                         oninput: move |event| query.set(event.value()),
@@ -74,6 +74,7 @@ pub fn SessionsManager() -> Element {
                     onselect: move |selected| view.set(selected),
                 }
                 ManagerButton {
+                    variant: ManagerButtonVariant::Secondary,
                     onclick: move |_| {
                         let _ = send(&ChatOpenPage {
                             url: "vmux://start/".to_string(),
@@ -90,7 +91,7 @@ pub fn SessionsManager() -> Element {
                     onclose: move |_| editor_open.set(false),
                 }
             }
-            div { class: "flex min-h-0 flex-1 overflow-hidden",
+            div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
                 if snapshot.sessions.is_empty() {
                     ManagerEmpty {
                         title: translate("sessions-empty"),
@@ -153,13 +154,13 @@ fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsVie
     let list_selected = selected == SessionsView::List;
     let board_selected = selected == SessionsView::Board;
     rsx! {
-        div { class: "flex h-8 items-center rounded-md bg-foreground/[0.04] p-0.5 ring-1 ring-inset ring-foreground/[0.08]",
+        div { class: "flex h-7 items-center gap-0.5 rounded-md bg-foreground/[0.025] p-0.5 ring-1 ring-inset ring-foreground/[0.07]",
             button {
                 r#type: "button",
                 class: if list_selected {
-                    "flex h-7 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-foreground shadow-sm bg-background ring-1 ring-inset ring-foreground/[0.08]"
+                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
                 } else {
-                    "flex h-7 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 aria_pressed: list_selected,
                 onclick: move |_| onselect.call(SessionsView::List),
@@ -169,9 +170,9 @@ fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsVie
             button {
                 r#type: "button",
                 class: if board_selected {
-                    "flex h-7 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-foreground shadow-sm bg-background ring-1 ring-inset ring-foreground/[0.08]"
+                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
                 } else {
-                    "flex h-7 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 aria_pressed: board_selected,
                 onclick: move |_| onselect.call(SessionsView::Board),
@@ -192,7 +193,7 @@ fn SessionsList(
 ) -> Element {
     rsx! {
         div { class: "min-h-0 flex-1 overflow-auto",
-            div { class: "min-w-[48rem]",
+            div { class: "min-w-[44rem] space-y-2 p-2",
                 for group in groups {
                     if !group.sessions.is_empty() {
                         SessionListGroup {
@@ -222,20 +223,23 @@ fn SessionListGroup(
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
-        section { class: "border-b border-foreground/[0.08] last:border-b-0",
-            div { class: "sticky top-0 z-10 flex h-9 items-center gap-2 border-b border-foreground/[0.08] bg-background/95 px-4 backdrop-blur",
+        section {
+            div { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md bg-foreground/[0.045] px-2.5 backdrop-blur",
+                LineIconView { icon: LineIcon::ChevronDown, class: "size-3 text-muted-foreground/65".to_string() }
                 span { class: "size-2 rounded-full {stage_dot}" }
-                h2 { class: "text-[11px] font-medium text-foreground/80", {translate_humanized(&stage.name)} }
-                span { class: "text-[10px] tabular-nums text-muted-foreground", "{sessions.len()}" }
+                h2 { class: "text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
+                span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
             }
-            for session in sessions {
-                SessionListRow {
-                    key: "{session.id}",
-                    repository: repositories.get(&session.id),
-                    selected: selected.as_deref() == Some(&session.id),
-                    session,
-                    onselect,
-                    onedit,
+            div { class: "px-1",
+                for session in sessions {
+                    SessionListRow {
+                        key: "{session.id}",
+                        repository: repositories.get(&session.id),
+                        selected: selected.as_deref() == Some(&session.id),
+                        session,
+                        onselect,
+                        onedit,
+                    }
                 }
             }
         }
@@ -254,47 +258,43 @@ fn SessionListRow(
     let edit_session = session.clone();
     let cleanup_id = session.id.clone();
     let select_id = session.id.clone();
-    let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
+    let runtime = RuntimeVisual::for_id(&session.runtime);
     let agent = AgentPresentation::from_session(&session);
     let title = session.display_title();
-    let preview = session.preview();
     let git_url = context.git_url.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let row_class = if selected {
-        "bg-primary/[0.06] shadow-[inset_2px_0_0_0_var(--primary)]"
+        "bg-foreground/[0.055]"
     } else {
-        "hover:bg-foreground/[0.035]"
+        "hover:bg-foreground/[0.03]"
     };
     rsx! {
         div {
-            class: "group relative grid min-h-12 cursor-pointer grid-cols-[minmax(16rem,1fr)_minmax(12rem,0.8fr)_7.5rem_4.5rem_2rem] items-center gap-3 border-b border-foreground/[0.055] px-4 text-xs transition-colors last:border-b-0 {row_class}",
+            class: "group relative flex h-9 cursor-pointer items-center gap-2 border-b border-foreground/[0.045] px-2.5 text-xs transition-colors last:border-b-0 {row_class}",
             onclick: move |_| onselect.call(select_id.clone()),
             button {
                 r#type: "button",
-                class: "flex min-w-0 items-center gap-2.5 py-2 text-left",
+                class: "min-w-0 flex-1 truncate text-left font-medium text-foreground/90",
                 tabindex: "-1",
-                div { class: "shrink-0",
-                    AgentThumbnail {
-                        src: agent.icon.clone(),
-                        seed: agent.id.clone(),
-                        background: agent.color.clone(),
-                        alt: agent.name.clone(),
-                        class: "size-5 text-[6px]".to_string(),
+                "{title}"
+            }
+            div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
+                SessionContextView { context: context.clone() }
+                if runtime.visible {
+                    MetadataPill {
+                        dot: runtime.dot.to_string(),
+                        label: runtime_label(&session.runtime),
                     }
                 }
-                div { class: "min-w-0 flex-1",
-                    span { class: "block w-full truncate font-medium text-foreground/90", "{title}" }
-                    if !preview.is_empty() {
-                        span { class: "block w-full truncate text-[10px] text-muted-foreground/60", "{preview}" }
-                    }
+                AgentThumbnail {
+                    src: agent.icon.clone(),
+                    seed: agent.id.clone(),
+                    background: agent.color.clone(),
+                    alt: agent.name.clone(),
+                    class: "size-4 text-[5px]".to_string(),
                 }
+                time { class: "w-10 text-right text-[10px] tabular-nums text-muted-foreground/65", "{updated}" }
             }
-            SessionContextView { context: context.clone() }
-            MetadataPill {
-                dot: runtime_dot.to_string(),
-                label: runtime_label(&session.runtime),
-            }
-            time { class: "text-right text-[10px] tabular-nums text-muted-foreground/70", "{updated}" }
             SessionActions {
                 session: edit_session,
                 git_url,
@@ -314,7 +314,7 @@ fn SessionsBoard(
     onedit: EventHandler<SessionSummary>,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 overflow-x-auto",
+        div { class: "flex min-h-0 flex-1 gap-2 overflow-x-auto p-2",
             for group in groups {
                 SessionBoardColumn {
                     key: "{group.stage.id}",
@@ -341,13 +341,13 @@ fn SessionBoardColumn(
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
-        section { class: "flex min-h-0 w-[19rem] shrink-0 flex-col border-r border-foreground/[0.08] last:border-r-0",
-            header { class: "flex h-10 shrink-0 items-center gap-2 border-b border-foreground/[0.08] px-3",
+        section { class: "flex min-h-0 w-[18rem] shrink-0 flex-col",
+            header { class: "flex h-8 shrink-0 items-center gap-2 rounded-md bg-foreground/[0.045] px-2.5",
                 span { class: "size-2 rounded-full {stage_dot}" }
-                h2 { class: "truncate text-xs font-medium text-foreground/85", {translate_humanized(&stage.name)} }
-                span { class: "ml-auto text-[10px] tabular-nums text-muted-foreground", "{sessions.len()}" }
+                h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
+                span { class: "ml-auto text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto",
+            div { class: "mt-1 min-h-0 flex-1 overflow-y-auto",
                 for session in sessions {
                     SessionBoardCard {
                         key: "{session.id}",
@@ -375,20 +375,20 @@ fn SessionBoardCard(
     let edit_session = session.clone();
     let cleanup_id = session.id.clone();
     let select_id = session.id.clone();
-    let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
+    let runtime = RuntimeVisual::for_id(&session.runtime);
     let git_url = context.git_url.clone();
     let agent = AgentPresentation::from_session(&session);
     let title = session.display_title();
     let preview = session.preview();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let card_class = if selected {
-        "bg-primary/[0.06] shadow-[inset_2px_0_0_0_var(--primary)]"
+        "bg-foreground/[0.055]"
     } else {
-        "hover:bg-foreground/[0.035]"
+        "hover:bg-foreground/[0.03]"
     };
     rsx! {
         article {
-            class: "group relative cursor-pointer border-b border-foreground/[0.065] p-3 transition-colors {card_class}",
+            class: "group relative cursor-pointer border-b border-foreground/[0.045] px-2.5 py-2.5 transition-colors {card_class}",
             onclick: move |_| onselect.call(select_id.clone()),
             div { class: "flex items-start gap-2",
                 AgentThumbnail {
@@ -415,7 +415,9 @@ fn SessionBoardCard(
                 p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/65", "{preview}" }
             }
             div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
-                MetadataPill { dot: runtime_dot.to_string(), label: runtime_label(&session.runtime) }
+                if runtime.visible {
+                    MetadataPill { dot: runtime.dot.to_string(), label: runtime_label(&session.runtime) }
+                }
                 SessionContextView { context: context.clone() }
             }
             div { class: "mt-3 flex items-center gap-1.5 border-t border-foreground/[0.06] pt-2 text-[10px] text-muted-foreground/70",
@@ -694,7 +696,7 @@ fn MetadataPill(
 ) -> Element {
     let label_class = if mono { "font-mono" } else { "" };
     rsx! {
-        span { class: "inline-flex h-5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-foreground/[0.035] px-2 text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/[0.07]",
+        span { class: "inline-flex h-[18px] max-w-full min-w-0 items-center gap-1 rounded-full bg-foreground/[0.045] px-1.5 text-[10px] text-muted-foreground",
             if !dot.is_empty() {
                 span { class: "size-1.5 shrink-0 rounded-full {dot}" }
             }
@@ -772,6 +774,7 @@ impl StageVisual {
 
 struct RuntimeVisual {
     dot: &'static str,
+    visible: bool,
 }
 
 impl RuntimeVisual {
@@ -784,7 +787,8 @@ impl RuntimeVisual {
             "idle" => "bg-primary/65",
             _ => "bg-muted-foreground/35",
         };
-        Self { dot }
+        let visible = matches!(id, "streaming" | "awaiting" | "installing" | "errored");
+        Self { dot, visible }
     }
 }
 
