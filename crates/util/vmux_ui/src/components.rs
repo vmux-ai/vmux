@@ -24,6 +24,7 @@ pub mod project_picker;
 pub mod prompt_box;
 pub mod prompt_media_options;
 pub mod select;
+pub mod sheet;
 pub mod skeleton;
 pub mod start_hero;
 pub mod switch;

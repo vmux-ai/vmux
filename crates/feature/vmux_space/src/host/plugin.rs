@@ -92,7 +92,6 @@ impl Plugin for SpacePlugin {
                 .after(CurrentSpaceSet)
                 .before(ReadCommandRequests),
         )
-        .add_systems(Update, sync_name_to_id)
         .add_systems(
             Startup,
             (ensure_bootstrap, ApplyDeferred, update_effective_startup)
@@ -801,14 +800,6 @@ impl SpaceViewTemplate {
     }
 }
 
-fn sync_name_to_id(mut spaces: Query<(&SpaceId, &mut Name), (With<Space>, Changed<SpaceId>)>) {
-    for (id, mut name) in &mut spaces {
-        if name.as_str() != id.0 {
-            *name = Name::new(id.0.clone());
-        }
-    }
-}
-
 fn rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut commands: Commands) {
     let request = &trigger.event().payload;
     let name = request.name.trim();
@@ -998,22 +989,22 @@ fn create(
     let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
         return;
     };
-    let count = graph
-        .spaces
-        .iter()
-        .filter(|(_, _, _, _, parent)| parent.parent() == main)
-        .count();
-    let requested_name = trigger.event().payload.name.trim();
-    let name = if requested_name.is_empty() {
-        format!("Space {}", count + 1)
-    } else {
-        requested_name.to_string()
-    };
     let existing: std::collections::HashSet<String> = graph
         .spaces
         .iter()
         .map(|(_, id, _, _, _)| id.0.clone())
         .collect();
+    let existing_names: std::collections::HashSet<String> = graph
+        .rows
+        .iter()
+        .map(|(_, _, name, _, _, _, _)| name.as_str().to_string())
+        .collect();
+    let requested_name = trigger.event().payload.name.trim();
+    let name = if requested_name.is_empty() {
+        SpaceRecord::suggested_planet_name(&existing_names)
+    } else {
+        requested_name.to_string()
+    };
     let id = SpaceRecord::unique_id(&existing, &name);
     let order = graph
         .spaces
@@ -1066,17 +1057,17 @@ fn handle_open_in_new(
             continue;
         };
 
-        let count = graph
-            .spaces
-            .iter()
-            .filter(|(_, _, _, _, parent)| parent.parent() == main)
-            .count();
-        let name = format!("Space {}", count + 1);
         let existing: std::collections::HashSet<String> = graph
             .spaces
             .iter()
             .map(|(_, sid, _, _, _)| sid.0.clone())
             .collect();
+        let existing_names: std::collections::HashSet<String> = graph
+            .rows
+            .iter()
+            .map(|(_, _, name, _, _, _, _)| name.as_str().to_string())
+            .collect();
+        let name = SpaceRecord::suggested_planet_name(&existing_names);
         let id = SpaceRecord::unique_id(&existing, &name);
         let order = graph
             .spaces

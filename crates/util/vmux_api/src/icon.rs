@@ -10,6 +10,7 @@ pub enum BuiltinIcon {
     Settings,
     Clock,
     Layers,
+    Planet,
     Users,
     Sparkles,
     Activity,

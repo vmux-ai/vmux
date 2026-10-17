@@ -10,7 +10,7 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
-use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView};
+use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
 
 use crate::event::{
     ChatOpenPage, SessionRepositories, SessionRepository, SessionsCleanup,
@@ -45,7 +45,13 @@ pub fn SessionsManager() -> Element {
     };
     let category_groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
     let applied_filters = filters();
-    let groups = StageGroup::filtered(&category_groups, applied_filters.as_slice());
+    let filtered_groups = StageGroup::filtered(&category_groups, applied_filters.as_slice());
+    let groups = if applied_filters.stage().is_none() {
+        StageGroup::inbox(&filtered_groups)
+    } else {
+        filtered_groups
+    };
+    let visible_sessions = groups.iter().any(|group| !group.sessions.is_empty());
     let stages = snapshot.stages.clone();
     let selected_filters = applied_filters.presentations(&stages);
     let selected_session = selected().and_then(|id| {
@@ -156,6 +162,13 @@ pub fn SessionsManager() -> Element {
                         ManagerEmpty {
                             title: translate("sessions-empty"),
                             detail: translate("sessions-empty-detail"),
+                            actions: rsx! { StartSessionButton {} },
+                        }
+                    } else if !visible_sessions {
+                        ManagerEmpty {
+                            title: translate("sessions-inbox-empty"),
+                            detail: translate("sessions-inbox-empty-detail"),
+                            actions: rsx! { StartSessionButton {} },
                         }
                     } else if view() == SessionsView::List {
                         SessionsList {
@@ -185,23 +198,41 @@ pub fn SessionsManager() -> Element {
 }
 
 #[component]
+fn StartSessionButton() -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "mt-2 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground hover:bg-primary/90",
+            onclick: move |_| {
+                let _ = send(&ChatOpenPage {
+                    url: "vmux://start/".to_string(),
+                });
+            },
+            LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+            span { {translate("sessions-start")} }
+        }
+    }
+}
+
+#[component]
 fn SessionCategories(
     groups: Vec<StageGroup>,
     selected: Option<String>,
     onselect: EventHandler<Option<String>>,
 ) -> Element {
-    let all_count = groups
+    let inbox_count = groups
         .iter()
+        .filter(|group| !group.stage.terminal)
         .map(|group| group.sessions.len())
         .sum::<usize>();
     rsx! {
         aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
             h2 { class: "px-2 pb-2 pt-1 text-xs font-semibold text-foreground/90", {translate("sessions-title")} }
             SessionCategory {
-                label: translate("sessions-all"),
-                count: all_count,
+                label: translate("sessions-inbox"),
+                count: inbox_count,
                 selected: selected.is_none(),
-                icon: Some(vmux_api::BuiltinIcon::MessagesRound),
+                icon: Some(LineIcon::Inbox),
                 onclick: move |_| onselect.call(None),
             }
             div { class: "h-2" }
@@ -226,7 +257,7 @@ fn SessionCategory(
     label: String,
     count: usize,
     selected: bool,
-    #[props(default)] icon: Option<vmux_api::BuiltinIcon>,
+    #[props(default)] icon: Option<LineIcon>,
     #[props(default)] dot: String,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
@@ -241,7 +272,7 @@ fn SessionCategory(
             class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] transition-colors {class}",
             onclick: move |event| onclick.call(event),
             if let Some(icon) = icon {
-                BuiltinIconView { icon, class: "size-3.5 shrink-0".to_string() }
+                LineIconView { icon, class: "size-3.5 shrink-0".to_string() }
             } else {
                 span { class: "size-2 shrink-0 rounded-full {dot}" }
             }
@@ -1154,7 +1185,7 @@ fn SessionActions(
     rsx! {
         Dropdown {
             open: open(),
-            class: "flex justify-end gap-0.5".to_string(),
+            class: "flex w-[5.5rem] shrink-0 justify-end gap-0.5".to_string(),
             on_dismiss: move |_| open.set(false),
             button {
                 r#type: "button",
@@ -1543,6 +1574,14 @@ struct StageGroup {
 }
 
 impl StageGroup {
+    fn inbox(groups: &[Self]) -> Vec<Self> {
+        groups
+            .iter()
+            .filter(|group| !group.stage.terminal)
+            .cloned()
+            .collect()
+    }
+
     fn filtered(groups: &[Self], filters: &[SessionFilter]) -> Vec<Self> {
         let selected_stage = filters.iter().find_map(|filter| match filter {
             SessionFilter::Stage(id) => Some(id.as_str()),
@@ -1816,5 +1855,37 @@ mod tests {
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].sessions, vec![recent]);
+    }
+
+    #[test]
+    fn inbox_excludes_terminal_stages() {
+        let active = StageGroup {
+            stage: StageSummary {
+                id: "in_progress".into(),
+                terminal: false,
+                ..Default::default()
+            },
+            sessions: vec![SessionSummary {
+                id: "active".into(),
+                ..Default::default()
+            }],
+        };
+        let completed = StageGroup {
+            stage: StageSummary {
+                id: "done".into(),
+                terminal: true,
+                ..Default::default()
+            },
+            sessions: vec![SessionSummary {
+                id: "completed".into(),
+                ..Default::default()
+            }],
+        };
+
+        let inbox = StageGroup::inbox(&[active.clone(), completed]);
+
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].stage.id, active.stage.id);
+        assert_eq!(inbox[0].sessions, active.sessions);
     }
 }

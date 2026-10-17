@@ -277,13 +277,18 @@ pub fn ManagerSpinner(detail: String) -> Element {
 }
 
 #[component]
-pub fn ManagerEmpty(title: String, detail: String) -> Element {
+pub fn ManagerEmpty(
+    title: String,
+    detail: String,
+    #[props(default = rsx! {})] actions: Element,
+) -> Element {
     rsx! {
-        div { class: "flex flex-col items-center gap-2 px-3 py-16 text-center",
+        div { class: "flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-3 py-16 text-center",
             div { class: "text-sm text-muted-foreground", "{title}" }
             if !detail.is_empty() {
                 div { class: "text-xs text-muted-foreground/70", "{detail}" }
             }
+            {actions}
         }
     }
 }

@@ -7,6 +7,7 @@ use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
@@ -206,6 +207,11 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     title: "{root.display_path}",
                     aria_expanded: choosing(),
                     onclick: move |_| choosing.set(!choosing()),
+                    TypeIcon {
+                        path: root.path.clone(),
+                        is_dir: true,
+                        class: "size-3.5 shrink-0".to_string(),
+                    }
                     span { class: "truncate-start min-w-0 flex-1 font-mono text-[10px] text-foreground", "{root.display_path}" }
                     LineIconView {
                         icon: LineIcon::ChevronDown,
@@ -229,8 +235,14 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            if !project.children.is_empty() {
-                div { class: "min-w-0 rounded-md bg-foreground/[0.035] py-1",
+            div { class: "min-w-0 rounded-md bg-foreground/[0.035] py-1.5",
+                div { class: "px-2 pb-1",
+                    span {
+                        class: "inline-flex max-w-full items-center rounded-full bg-foreground/[0.065] px-2 py-0.5 text-[9px] font-medium text-foreground/85 ring-1 ring-inset ring-foreground/[0.07]",
+                        span { class: "truncate", "{root.label}" }
+                    }
+                }
+                if !project.children.is_empty() {
                     for child in project.children {
                         ActiveWorkspaceProjectRow {
                             key: "{child.path}",

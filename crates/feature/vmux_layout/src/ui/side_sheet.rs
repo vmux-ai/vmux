@@ -1,14 +1,16 @@
 use crate::event::{ActiveSession, SideSheetPane, StackRevealTarget};
 use dioxus::prelude::*;
 use vmux_ecs::event::space::{
-    SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest, SpaceFormState,
-    SpaceRenameRequest,
+    SpaceAttachRequest, SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest,
+    SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
 };
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
+use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
+use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::scroll::ScrollIntoView;
 
 use super::active_session::ActiveSessionPanel;
@@ -23,14 +25,9 @@ use super::window_drag::WindowDragRegion;
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     let handle_class = if resizing() {
-        "relative flex h-10 w-2 items-center justify-center rounded-full bg-primary/20 shadow-sm ring-1 ring-primary/50"
+        "h-10 w-1 rounded-full bg-foreground/45"
     } else {
-        "relative flex h-8 w-1.5 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-foreground/15 transition-all duration-150 group-hover:h-10 group-hover:w-2 group-hover:bg-primary/15 group-hover:opacity-100 group-hover:ring-primary/45"
-    };
-    let line_class = if resizing() {
-        "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45"
-    } else {
-        "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-primary/45 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+        "h-8 w-1 rounded-full bg-foreground/20 opacity-0 transition-[height,background-color,opacity] duration-150 group-hover:h-10 group-hover:bg-foreground/35 group-hover:opacity-100"
     };
     rsx! {
         div {
@@ -40,10 +37,7 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
                 event.prevent_default();
                 resizing.set(true);
             },
-            div { class: "{line_class}" }
-            div { class: "{handle_class}",
-                div { class: "h-5 w-px rounded-full bg-foreground/40 transition-colors duration-150 group-hover:bg-primary/90" }
-            }
+            div { class: "{handle_class}" }
         }
     }
 }
@@ -92,6 +86,7 @@ fn SideSheetContent() -> Element {
     let state = ui.layout.unwrap_or_default();
     let side_sheet = ui.side_sheet.unwrap_or_default();
     let active_space = side_sheet.active_space;
+    let spaces = ui.spaces;
     let panes = side_sheet.panes;
     let bookmarks = ui.bookmarks;
     let bookmark_edit = ui.bookmark_edit;
@@ -139,7 +134,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] border-r border-foreground/[0.07] bg-background/35 pt-[var(--vmux-side-sheet-pad-top)] backdrop-blur-xl",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
@@ -156,6 +151,7 @@ fn SideSheetContent() -> Element {
                         SideSheetSpaceCard {
                             key: "{space.id}",
                             space,
+                            spaces,
                             form: space_form.clone(),
                             active_session,
                         }
@@ -207,27 +203,115 @@ fn SideSheetContent() -> Element {
 
 #[component]
 fn SideSheetSpaceCard(
-    space: vmux_ecs::event::space::SpaceRow,
+    space: SpaceRow,
+    spaces: SpacesListEvent,
     form: SpaceFormState,
     active_session: Option<ActiveSession>,
 ) -> Element {
-    let mut expanded = use_signal(|| true);
     rsx! {
-        div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+        div { class: "mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2",
             SideSheetSpaceRow {
                 space,
+                spaces,
                 form,
-                expanded: expanded(),
-                on_toggle: move |_| expanded.set(!expanded()),
             }
-            div { class: if expanded() {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                },
-                div { class: "min-h-0 overflow-hidden",
-                    if let Some(session) = active_session {
-                        ActiveSessionPanel { session }
+            if let Some(session) = active_session {
+                ActiveSessionPanel { session }
+            }
+        }
+    }
+}
+
+#[component]
+fn SideSheetSpaceRow(space: SpaceRow, spaces: SpacesListEvent, form: SpaceFormState) -> Element {
+    let mut open = use_signal(|| false);
+    let editing = form.open && form.space_id.as_deref() == Some(space.id.as_str());
+    let menu_value = use_signal(|| space.id.clone());
+    let menu_id = space.id.clone();
+    let menu_name = space.name.clone();
+
+    rsx! {
+        Dropdown {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            LayoutContextMenu {
+                ContextMenuTrigger { attributes: vec![],
+                    div {
+                        class: "group relative flex w-full cursor-pointer items-center rounded-md px-2 py-1.5 text-foreground hover:bg-foreground/5",
+                        button {
+                            r#type: "button",
+                            class: if editing {
+                                "pointer-events-none absolute inset-0 z-0 rounded outline-none"
+                            } else {
+                                "absolute inset-0 z-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
+                            },
+                            title: space.display_name(),
+                            aria_label: space.display_name(),
+                            disabled: editing,
+                            onclick: move |_| open.set(!open()),
+                        }
+                        div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2",
+                            LineIconView {
+                                icon: LineIcon::Planet,
+                                class: "h-4 w-4 shrink-0".to_string(),
+                            }
+                            if editing {
+                                SpaceRenameInput { form: form.clone() }
+                            } else {
+                                span { class: "min-w-0 flex-1 truncate px-1 py-0.5 text-left text-ui font-medium text-foreground",
+                                    {space.display_name()}
+                                }
+                            }
+                            div { class: "pointer-events-auto",
+                                SheetHeaderChevron {
+                                    expanded: open(),
+                                    label: translate("spaces-switch"),
+                                    onclick: move |event: MouseEvent| {
+                                        event.stop_propagation();
+                                        open.set(!open());
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+                ContextMenuContent { attributes: vec![],
+                    ContextMenuItem {
+                        index: 0usize,
+                        value: Into::<ReadSignal<String>>::into(menu_value),
+                        on_select: move |_: String| {
+                            let _ = send(&SpaceFormOpenRequest {
+                                space_id: Some(menu_id.clone()),
+                                draft: menu_name.clone(),
+                            });
+                        },
+                        attributes: vec![],
+                        {translate("common-rename")}
+                    }
+                }
+            }
+            if open() {
+                div { class: "absolute left-1 right-1 top-11 z-40 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
+                    for choice in spaces.spaces {
+                        SpaceChoice {
+                            key: "{choice.id}",
+                            space: choice,
+                            onselect: move |_| open.set(false),
+                        }
+                    }
+                    div { class: "my-1 h-px bg-foreground/[0.08]" }
+                    button {
+                        r#type: "button",
+                        class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+                        onclick: move |_| {
+                            open.set(false);
+                            let _ = send(&SpaceOpenPageRequest);
+                        },
+                        Icon { class: "size-3.5 shrink-0",
+                            path { d: "M12 5v14" }
+                            path { d: "M5 12h14" }
+                        }
+                        span { {translate("common-add")} }
                     }
                 }
             }
@@ -236,81 +320,28 @@ fn SideSheetSpaceCard(
 }
 
 #[component]
-fn SideSheetSpaceRow(
-    space: vmux_ecs::event::space::SpaceRow,
-    form: SpaceFormState,
-    expanded: bool,
-    on_toggle: EventHandler<()>,
-) -> Element {
-    let editing = form.open && form.space_id.as_deref() == Some(space.id.as_str());
-    let menu_value = use_signal(|| space.id.clone());
-    let rename_id = space.id.clone();
-    let rename_name = space.name.clone();
-    let menu_id = space.id.clone();
-    let menu_name = space.name.clone();
-
+fn SpaceChoice(space: SpaceRow, onselect: EventHandler<()>) -> Element {
+    let space_id = space.id.clone();
     rsx! {
-        LayoutContextMenu {
-            ContextMenuTrigger { attributes: vec![],
-                div {
-                    class: "group relative flex w-full cursor-pointer items-center px-2 py-1.5 text-foreground hover:bg-foreground/5",
-                    button {
-                        r#type: "button",
-                        class: if editing {
-                            "pointer-events-none absolute inset-0 z-0 rounded outline-none"
-                        } else {
-                            "absolute inset-0 z-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
-                        },
-                        title: space.name.clone(),
-                        aria_label: space.name.clone(),
-                        disabled: editing,
-                        onclick: move |_| {
-                            on_toggle.call(());
-                        },
-                    },
-                    div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2",
-                        Icon { class: "h-4 w-4 shrink-0",
-                            path { d: "M3 3h7v7H3z" }
-                            path { d: "M14 3h7v7h-7z" }
-                            path { d: "M3 14h7v7H3z" }
-                            path { d: "M14 14h7v7h-7z" }
-                        }
-                        if editing {
-                            SpaceRenameInput { form: form.clone() }
-                        } else {
-                            button {
-                                r#type: "button",
-                                class: "pointer-events-auto min-w-0 flex-1 cursor-text truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground hover:bg-foreground/[0.06]",
-                                title: translate("common-rename"),
-                                onclick: move |event| {
-                                    event.stop_propagation();
-                                    let _ = send(&SpaceFormOpenRequest {
-                                        space_id: Some(rename_id.clone()),
-                                        draft: rename_name.clone(),
-                                    });
-                                },
-                                "{space.name}"
-                            }
-                        }
-                        Icon {
-                            class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
-                            path { d: "m9 18 6-6-6-6" }
-                        }
-                    }
-                }
+        button {
+            r#type: "button",
+            class: if space.is_active {
+                "flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.07] px-2 text-left text-[11px] text-foreground"
+            } else {
+                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+            },
+            onclick: move |_| {
+                onselect.call(());
+                let _ = send(&SpaceAttachRequest { space_id: space_id.clone() });
+            },
+            LineIconView {
+                icon: LineIcon::Planet,
+                class: "size-3.5 shrink-0".to_string(),
             }
-            ContextMenuContent { attributes: vec![],
-                ContextMenuItem {
-                    index: 0usize,
-                    value: Into::<ReadSignal<String>>::into(menu_value),
-                    on_select: move |_: String| {
-                        let _ = send(&SpaceFormOpenRequest {
-                            space_id: Some(menu_id.clone()),
-                            draft: menu_name.clone(),
-                        });
-                    },
-                    attributes: vec![],
-                    {translate("common-rename")}
+            span { class: "min-w-0 flex-1 truncate", {space.display_name()} }
+            if space.is_active {
+                Icon { class: "size-3.5 shrink-0",
+                    path { d: "m5 12 4 4L19 6" }
                 }
             }
         }
@@ -396,17 +427,17 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
     let collapsed_stack = pane.collapsed_stack.clone();
     rsx! {
         div { class: if pane.is_active && any_loading {
-                "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg pane-loading-ring"
+                "group mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2 pane-loading-ring"
             } else {
-                "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg"
+                "group mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2"
             },
             div {
-                class: "flex items-center transition-colors hover:bg-glass-hover",
+                class: "flex items-center rounded-md transition-colors hover:bg-glass-hover",
                 div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
                     div { class: if pane.is_active {
-                            "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20"
+                            "grid h-7 w-7 shrink-0 place-items-center text-primary"
                         } else {
-                            "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10"
+                            "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground"
                         },
                         Icon { class: "h-3.5 w-3.5",
                             path { d: "M4 6h16M4 12h16M4 18h16" }
@@ -421,29 +452,22 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                         "{label}"
                     }
                 }
-                button {
-                    r#type: "button",
-                    aria_label: "{fold_title}",
-                    title: "{fold_title}",
-                    class: if expanded {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
-                    } else {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
-                    },
-                    onclick: move |_| {
-                        let _ = send(&crate::event::SideSheetSectionRequest::new(
-                            pane_id,
-                            "pane",
-                            !expanded,
-                        ));
-                    },
-                    Icon {
-                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
-                        path { d: "m9 18 6-6-6-6" }
+                div { class: "mr-2",
+                    SheetHeaderChevron {
+                        expanded,
+                        label: fold_title,
+                        subtle: true,
+                        onclick: move |_| {
+                            let _ = send(&crate::event::SideSheetSectionRequest::new(
+                                pane_id,
+                                "pane",
+                                !expanded,
+                            ));
+                        },
                     }
                 }
             }
-            div { class: "border-t border-foreground/10 p-1.5",
+            div { class: "px-1.5 pb-0 pt-0.5",
                 div { class: "flex flex-col gap-1",
                     if !expanded && let Some(stack) = collapsed_stack {
                         SideSheetStackRow { stack, pane_id }

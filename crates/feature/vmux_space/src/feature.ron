@@ -24,7 +24,7 @@
             bookmark: Some(100),
             title_message_id: "spaces-title",
             keywords: ["space"],
-            icon: "Layers",
+            icon: "Planet",
             command_bar: true,
             permissions: [
                 "PageReady",

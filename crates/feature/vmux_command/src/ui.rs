@@ -445,12 +445,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     rsx! {
         div { class: "relative",
             if is_start {
-                if let Some(accent) = accent {
-                    div { class: "{accent.glow_top} transform-gpu" }
-                    div { class: "{accent.glow_bottom} transform-gpu" }
-                }
-            }
-            if is_start {
                 {start_menus}
                 PromptComposer {
                     shared_transition: true,

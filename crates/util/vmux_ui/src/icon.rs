@@ -28,12 +28,14 @@ pub enum LineIcon {
     GitPullRequest,
     Globe,
     Image,
+    Inbox,
     Layout,
     List,
     MessagesRound,
     Minus,
     Notebook,
     Package,
+    Planet,
     Pencil,
     Plus,
     RefreshCw,
@@ -142,6 +144,10 @@ impl LineIcon {
                 "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
                 "m21 15-5-5L5 21",
             ],
+            Self::Inbox => &[
+                "M4 4h16l2 10v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4Z",
+                "M2 14h5l2 3h6l2-3h5",
+            ],
             Self::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
             Self::List => &["M4 6h16", "M4 12h16", "M4 18h16"],
             Self::MessagesRound => &[
@@ -161,6 +167,10 @@ impl LineIcon {
                 "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
                 "M3.3 7 12 12l8.7-5",
                 "M12 22V12",
+            ],
+            Self::Planet => &[
+                "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z",
+                "M2.5 15.5c2.8 2.3 8.8.9 13.8-2.5s7.7-7.7 5.2-10.2",
             ],
             Self::Pencil => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
             Self::Plus => &["M12 5v14", "M5 12h14"],
@@ -290,6 +300,10 @@ mod wasm {
                 path { d: "M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" }
                 path { d: "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" }
                 path { d: "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" }
+            } },
+            BuiltinIcon::Planet => rsx! { LineIconView {
+                icon: LineIcon::Planet,
+                class: class.clone(),
             } },
             BuiltinIcon::Users => rsx! { Icon { class: "{class}",
                 path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }

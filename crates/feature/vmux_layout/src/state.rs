@@ -49,7 +49,7 @@ pub enum UpdateStatus {
     },
 }
 
-#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 2)]
+#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 3)]
 pub struct LayoutUiState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
@@ -66,6 +66,7 @@ pub struct LayoutUiState {
     pub update: Option<UpdateStatus>,
     pub bookmark_menu: BookmarkMenuEffect,
     pub bookmark_edit: BookmarkEditState,
+    pub spaces: SpacesListEvent,
     pub space_form: SpaceFormState,
     pub reload_revision: u64,
 }
@@ -134,6 +135,9 @@ impl vmux_api::UiStateProjection<LayoutUiStatePatch> for LayoutUiState {
         }
         if let Some(event) = patch.bookmark_edit {
             self.bookmark_edit = event;
+        }
+        if let Some(event) = patch.spaces {
+            self.spaces = event;
         }
         if let Some(event) = patch.space_form {
             self.space_form = event;

@@ -97,17 +97,18 @@ fn apply_fallback_page_icons(
     manifests: Query<&PageManifest>,
 ) {
     for mut meta in &mut metas {
-        if !meta.icon.is_none() {
-            continue;
-        }
-        if meta.url.starts_with("file:") {
+        if meta.icon.is_none() && meta.url.starts_with("file:") {
             meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Files);
-        } else if meta.url.starts_with("chrome-extension://") {
+        } else if meta.icon.is_none() && meta.url.starts_with("chrome-extension://") {
             meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Puzzle);
         } else if let Some(icon) = manifests
             .iter()
             .find(|manifest| manifest.answers_for(&meta.url))
             .and_then(|manifest| manifest.icon)
+            && matches!(
+                meta.icon,
+                vmux_api::PageIcon::None | vmux_api::PageIcon::Builtin(_)
+            )
         {
             meta.icon = vmux_api::PageIcon::Builtin(icon);
         }
@@ -187,6 +188,18 @@ mod apply_fallback_page_icons_tests {
                 Some(BuiltinIcon::MessagesRound),
             ),
             PageIcon::Favicon("x".into())
+        );
+    }
+
+    #[test]
+    fn legacy_builtin_icon_is_updated_from_manifest() {
+        assert_eq!(
+            resolve(
+                "vmux://sessions/",
+                PageIcon::Builtin(BuiltinIcon::ListTodo),
+                Some(BuiltinIcon::MessagesRound),
+            ),
+            PageIcon::Builtin(BuiltinIcon::MessagesRound)
         );
     }
 }

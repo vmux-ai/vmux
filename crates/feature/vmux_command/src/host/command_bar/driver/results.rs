@@ -748,7 +748,7 @@ mod tests {
                 url: "vmux://spaces/".into(),
                 title: "Spaces".into(),
                 keywords: vec!["space".into()],
-                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Layers),
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Planet),
                 shortcut: String::new(),
                 prompt_target: false,
                 startup: false,
@@ -790,7 +790,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
-            icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Layers),
+            icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Planet),
             shortcut: String::new(),
             prompt_target: false,
             prompt_hint: false,
