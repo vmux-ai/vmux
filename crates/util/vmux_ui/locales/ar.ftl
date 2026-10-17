@@ -1012,6 +1012,7 @@ sessions-search = البحث في الجلسات
 sessions-view-list = قائمة
 sessions-view-board = لوحة
 sessions-open-chat = فتح المحادثة
+sessions-resume = استئناف
 sessions-actions = إجراءات الجلسة
 sessions-new = جلسة جديدة
 sessions-name = الاسم

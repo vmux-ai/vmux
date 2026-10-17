@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use vmux_session::{Route, SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage,
@@ -520,7 +521,8 @@ fn SessionDetails(
                 }
                 DetailHeaderButton {
                     icon: DetailHeaderIcon::Line(LineIcon::MessagesRound),
-                    label: translate("sessions-open-chat"),
+                    label: translate("sessions-resume"),
+                    primary: true,
                     onclick: move |_| {
                         let _ = send(&ChatOpenPage { url: header_open_url.clone() });
                     },
@@ -599,14 +601,20 @@ enum DetailHeaderIcon {
 fn DetailHeaderButton(
     icon: DetailHeaderIcon,
     label: String,
+    #[props(default)] primary: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let class = if primary {
+        "flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+    } else {
+        "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground"
+    };
     rsx! {
         button {
             r#type: "button",
-            class: "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
+            class,
             title: label.clone(),
-            aria_label: label,
+            aria_label: label.clone(),
             onclick: move |event| onclick.call(event),
             match icon {
                 DetailHeaderIcon::Line(icon) => rsx! {
@@ -615,6 +623,9 @@ fn DetailHeaderButton(
                 DetailHeaderIcon::Git => rsx! {
                     GitIconView { class: "size-3.5".to_string() }
                 },
+            }
+            if primary {
+                span { "{label}" }
             }
         }
     }
@@ -720,7 +731,10 @@ fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Elem
         "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
     };
     rsx! {
-        div { class: "relative flex justify-end gap-0.5",
+        Dropdown {
+            open: open(),
+            class: "flex justify-end gap-0.5".to_string(),
+            on_dismiss: move |_| open.set(false),
             button {
                 r#type: "button",
                 class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
@@ -795,7 +809,10 @@ fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) 
         .map(|stage| translate_humanized(&stage.name))
         .unwrap_or_else(|| translate_humanized(&selected));
     rsx! {
-        div { class: "relative inline-flex w-fit max-w-full min-w-0 justify-self-start",
+        Dropdown {
+            open: open(),
+            class: "inline-flex w-fit max-w-full min-w-0 justify-self-start".to_string(),
+            on_dismiss: move |_| open.set(false),
             button {
                 r#type: "button",
                 class: "inline-flex h-6 max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/[0.035] py-0.5 pl-2 pr-2 text-[10px] text-foreground/75 outline-none ring-1 ring-inset ring-foreground/[0.08] hover:bg-foreground/[0.06] focus-visible:ring-primary/35",

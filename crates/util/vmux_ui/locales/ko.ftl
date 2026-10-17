@@ -1009,6 +1009,7 @@ sessions-search = 세션 검색
 sessions-view-list = 목록
 sessions-view-board = 보드
 sessions-open-chat = 채팅 열기
+sessions-resume = 재개
 sessions-actions = 세션 작업
 sessions-new = 새 세션
 sessions-name = 이름

@@ -1012,6 +1012,7 @@ sessions-search = Sessies zoeken
 sessions-view-list = Lijst
 sessions-view-board = Bord
 sessions-open-chat = Chat openen
+sessions-resume = Hervatten
 sessions-actions = Sessieacties
 sessions-new = Nieuwe sessie
 sessions-name = Naam

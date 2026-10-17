@@ -1012,6 +1012,7 @@ sessions-search = Поиск сессий
 sessions-view-list = Список
 sessions-view-board = Доска
 sessions-open-chat = Открыть чат
+sessions-resume = Продолжить
 sessions-actions = Действия сессии
 sessions-new = Новая сессия
 sessions-name = Название

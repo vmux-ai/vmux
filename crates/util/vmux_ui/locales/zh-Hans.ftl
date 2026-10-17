@@ -1009,6 +1009,7 @@ sessions-search = 搜索会话
 sessions-view-list = 列表
 sessions-view-board = 看板
 sessions-open-chat = 打开聊天
+sessions-resume = 恢复
 sessions-actions = 会话操作
 sessions-new = 新建会话
 sessions-name = 名称

@@ -992,6 +992,7 @@ sessions-search = セッションを検索
 sessions-view-list = リスト
 sessions-view-board = ボード
 sessions-open-chat = チャットを開く
+sessions-resume = 再開
 sessions-actions = セッション操作
 sessions-new = 新規セッション
 sessions-name = 名前

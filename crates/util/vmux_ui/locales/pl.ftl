@@ -1012,6 +1012,7 @@ sessions-search = Szukaj sesji
 sessions-view-list = Lista
 sessions-view-board = Tablica
 sessions-open-chat = Otwórz czat
+sessions-resume = Wznów
 sessions-actions = Akcje sesji
 sessions-new = Nowa sesja
 sessions-name = Nazwa

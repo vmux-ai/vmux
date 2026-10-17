@@ -1012,6 +1012,7 @@ sessions-search = Пошук сесій
 sessions-view-list = Список
 sessions-view-board = Дошка
 sessions-open-chat = Відкрити чат
+sessions-resume = Продовжити
 sessions-actions = Дії сесії
 sessions-new = Нова сесія
 sessions-name = Назва

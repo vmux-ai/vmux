@@ -1001,6 +1001,7 @@ sessions-search = Search sessions
 sessions-view-list = List
 sessions-view-board = Board
 sessions-open-chat = Open chat
+sessions-resume = Resume
 sessions-actions = Session actions
 sessions-new = New session
 sessions-name = Name

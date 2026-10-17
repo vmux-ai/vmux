@@ -1009,6 +1009,7 @@ sessions-search = 搜尋工作階段
 sessions-view-list = 清單
 sessions-view-board = 看板
 sessions-open-chat = 開啟聊天
+sessions-resume = 繼續
 sessions-actions = 工作階段操作
 sessions-new = 新增工作階段
 sessions-name = 名稱

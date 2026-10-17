@@ -1012,6 +1012,7 @@ sessions-search = Sitzungen durchsuchen
 sessions-view-list = Liste
 sessions-view-board = Board
 sessions-open-chat = Chat öffnen
+sessions-resume = Fortsetzen
 sessions-actions = Sitzungsaktionen
 sessions-new = Neue Sitzung
 sessions-name = Name
