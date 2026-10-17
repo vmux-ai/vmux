@@ -1001,6 +1001,7 @@ git-shortcut-next-panel = 下一個面板
 git-shortcut-previous = 上一個項目
 git-shortcut-next = 下一個項目
 sessions-title = 工作階段
+sessions-all = 所有工作階段
 sessions-search = 搜尋工作階段
 sessions-view-list = 清單
 sessions-view-board = 看板

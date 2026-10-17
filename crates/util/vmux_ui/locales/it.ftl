@@ -1004,6 +1004,7 @@ git-shortcut-next-panel = Pannello successivo
 git-shortcut-previous = Elemento precedente
 git-shortcut-next = Elemento successivo
 sessions-title = Sessioni
+sessions-all = Tutte le sessioni
 sessions-search = Cerca sessioni
 sessions-view-list = Elenco
 sessions-view-board = Bacheca

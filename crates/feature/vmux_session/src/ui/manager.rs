@@ -20,6 +20,7 @@ pub fn SessionsManager() -> Element {
     let ui = use_ui_state::<ChatUiState>();
     let mut query = use_signal(String::new);
     let mut view = use_signal(|| SessionsView::List);
+    let mut stage_filter = use_signal(|| None::<String>);
     let mut selected = use_signal(|| None::<String>);
     let mut editing = use_signal(|| None::<String>);
     let mut name = use_signal(String::new);
@@ -30,16 +31,32 @@ pub fn SessionsManager() -> Element {
     let repositories = state.session_repositories.clone();
     drop(state);
     let search = query().trim().to_ascii_lowercase();
-    let visible_count = snapshot
-        .sessions
+    let category_groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
+    let groups = category_groups
         .iter()
-        .filter(|session| session.matches(&search))
-        .count();
-    let groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
-    let stages = groups
+        .filter(|group| {
+            stage_filter()
+                .as_deref()
+                .is_none_or(|stage| stage == group.stage.id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let visible_count = groups
+        .iter()
+        .map(|group| group.sessions.len())
+        .sum::<usize>();
+    let stages = category_groups
         .iter()
         .map(|group| group.stage.clone())
         .collect::<Vec<_>>();
+    let heading = stage_filter()
+        .and_then(|selected| {
+            category_groups
+                .iter()
+                .find(|group| group.stage.id == selected)
+                .map(|group| translate_humanized(&group.stage.name))
+        })
+        .unwrap_or_else(|| translate("sessions-all"));
     let selected_session = selected().and_then(|id| {
         snapshot
             .sessions
@@ -52,7 +69,7 @@ pub fn SessionsManager() -> Element {
         ManagerPage {
             header { class: "flex h-11 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-background px-3",
                 div { class: "flex min-w-0 items-baseline gap-2",
-                    h1 { class: "truncate text-sm font-semibold tracking-tight", {translate("sessions-title")} }
+                    h1 { class: "truncate text-sm font-semibold tracking-tight", "{heading}" }
                     span { class: "text-[11px] tabular-nums text-muted-foreground", "{visible_count}" }
                 }
                 div { class: "flex-1" }
@@ -92,53 +109,125 @@ pub fn SessionsManager() -> Element {
                 }
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
-                if snapshot.sessions.is_empty() {
-                    ManagerEmpty {
-                        title: translate("sessions-empty"),
-                        detail: translate("sessions-empty-detail"),
-                    }
-                } else if view() == SessionsView::List {
-                    SessionsList {
-                        groups: groups.clone(),
-                        repositories: repositories.clone(),
-                        selected: selected(),
-                        onselect: move |id| selected.set(Some(id)),
-                        onedit: move |session: SessionSummary| {
-                            editing.set(Some(session.id));
-                            name.set(session.name);
-                            description.set(session.description);
-                            editor_open.set(true);
-                        },
-                    }
-                } else {
-                    SessionsBoard {
-                        groups: groups.clone(),
-                        repositories: repositories.clone(),
-                        selected: selected(),
-                        onselect: move |id| selected.set(Some(id)),
-                        onedit: move |session: SessionSummary| {
-                            editing.set(Some(session.id));
-                            name.set(session.name);
-                            description.set(session.description);
-                            editor_open.set(true);
-                        },
-                    }
+                SessionCategories {
+                    groups: category_groups.clone(),
+                    selected: stage_filter(),
+                    onselect: move |stage| stage_filter.set(stage),
                 }
-                if let Some(session) = selected_session {
-                    SessionDetails {
-                        repository: repositories.get(&session.id),
-                        session,
-                        stages: stages.clone(),
-                        onclose: move |_| selected.set(None),
-                        onedit: move |session: SessionSummary| {
-                            editing.set(Some(session.id));
-                            name.set(session.name);
-                            description.set(session.description);
-                            editor_open.set(true);
-                        },
+                div { class: "flex min-w-0 flex-1 overflow-hidden",
+                    if snapshot.sessions.is_empty() {
+                        ManagerEmpty {
+                            title: translate("sessions-empty"),
+                            detail: translate("sessions-empty-detail"),
+                        }
+                    } else if view() == SessionsView::List {
+                        SessionsList {
+                            groups: groups.clone(),
+                            repositories: repositories.clone(),
+                            selected: selected(),
+                            onselect: move |id| selected.set(Some(id)),
+                            onedit: move |session: SessionSummary| {
+                                editing.set(Some(session.id));
+                                name.set(session.name);
+                                description.set(session.description);
+                                editor_open.set(true);
+                            },
+                        }
+                    } else {
+                        SessionsBoard {
+                            groups: groups.clone(),
+                            repositories: repositories.clone(),
+                            selected: selected(),
+                            onselect: move |id| selected.set(Some(id)),
+                            onedit: move |session: SessionSummary| {
+                                editing.set(Some(session.id));
+                                name.set(session.name);
+                                description.set(session.description);
+                                editor_open.set(true);
+                            },
+                        }
+                    }
+                    if let Some(session) = selected_session {
+                        SessionDetails {
+                            repository: repositories.get(&session.id),
+                            session,
+                            stages: stages.clone(),
+                            onclose: move |_| selected.set(None),
+                            onedit: move |session: SessionSummary| {
+                                editing.set(Some(session.id));
+                                name.set(session.name);
+                                description.set(session.description);
+                                editor_open.set(true);
+                            },
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn SessionCategories(
+    groups: Vec<StageGroup>,
+    selected: Option<String>,
+    onselect: EventHandler<Option<String>>,
+) -> Element {
+    let all_count = groups
+        .iter()
+        .map(|group| group.sessions.len())
+        .sum::<usize>();
+    rsx! {
+        aside { class: "hidden w-44 shrink-0 flex-col border-r border-foreground/[0.07] bg-foreground/[0.012] p-2 sm:flex",
+            h2 { class: "px-2 pb-2 pt-1 text-xs font-semibold text-foreground/90", {translate("sessions-title")} }
+            SessionCategory {
+                label: translate("sessions-all"),
+                count: all_count,
+                selected: selected.is_none(),
+                icon: Some(vmux_api::BuiltinIcon::ListTodo),
+                onclick: move |_| onselect.call(None),
+            }
+            div { class: "my-2 border-t border-foreground/[0.055]" }
+            for group in groups {
+                SessionCategory {
+                    key: "{group.stage.id}",
+                    label: translate_humanized(&group.stage.name),
+                    count: group.sessions.len(),
+                    selected: selected.as_deref() == Some(group.stage.id.as_str()),
+                    dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
+                    onclick: move |_| onselect.call(Some(group.stage.id.clone())),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionCategory(
+    label: String,
+    count: usize,
+    selected: bool,
+    #[props(default)] icon: Option<vmux_api::BuiltinIcon>,
+    #[props(default)] dot: String,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let class = if selected {
+        "bg-foreground/[0.065] text-foreground"
+    } else {
+        "text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground"
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] transition-colors {class}",
+            onclick: move |event| onclick.call(event),
+            if let Some(icon) = icon {
+                BuiltinIconView { icon, class: "size-3.5 shrink-0".to_string() }
+            } else {
+                span { class: "size-2 shrink-0 rounded-full {dot}" }
+            }
+            span { class: "min-w-0 flex-1 truncate", "{label}" }
+            span { class: "text-[10px] tabular-nums text-muted-foreground/65", "{count}" }
         }
     }
 }
@@ -193,7 +282,7 @@ fn SessionsList(
 ) -> Element {
     rsx! {
         div { class: "min-h-0 flex-1 overflow-auto",
-            div { class: "w-full min-w-[44rem] max-w-[56rem] space-y-2 p-2",
+            div { class: "w-full min-w-[44rem] max-w-[80rem] space-y-2 p-2",
                 for group in groups {
                     if !group.sessions.is_empty() {
                         SessionListGroup {
@@ -280,16 +369,12 @@ fn SessionListRow(
                 alt: agent.name.clone(),
                 class: "size-4 shrink-0 text-[5px]".to_string(),
             }
+            SessionIdPill { label: compact_id, title: session.id.clone() }
             button {
                 r#type: "button",
                 class: "min-w-0 flex-1 truncate text-left font-medium text-foreground/90",
                 tabindex: "-1",
                 "{title}"
-            }
-            MetadataPill {
-                label: compact_id,
-                title: session.id.clone(),
-                mono: true,
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
                 SessionContextView { context: context.clone() }
@@ -720,6 +805,17 @@ fn MetadataPill(
     }
 }
 
+#[component]
+fn SessionIdPill(label: String, title: String) -> Element {
+    rsx! {
+        span {
+            class: "inline-flex h-[18px] w-[6.75rem] shrink-0 items-center justify-center rounded-full bg-foreground/[0.025] px-1.5 font-mono text-[9px] text-muted-foreground/55",
+            title,
+            "{label}"
+        }
+    }
+}
+
 struct SessionIdentity<'a>(&'a str);
 
 impl<'a> SessionIdentity<'a> {
@@ -732,8 +828,8 @@ impl<'a> SessionIdentity<'a> {
         if characters.len() <= 13 {
             return self.0.to_string();
         }
-        let start = characters[..7].iter().collect::<String>();
-        let end = characters[characters.len() - 5..]
+        let start = characters[..6].iter().collect::<String>();
+        let end = characters[characters.len() - 4..]
             .iter()
             .collect::<String>();
         format!("{start}…{end}")
@@ -1045,6 +1141,6 @@ mod tests {
     fn session_identity_preserves_both_ends() {
         let id = SessionIdentity::new("01a0fc43-68f9-7121-a388-59e1891fdc41");
 
-        assert_eq!(id.compact(), "01a0fc4…fdc41");
+        assert_eq!(id.compact(), "01a0fc…dc41");
     }
 }

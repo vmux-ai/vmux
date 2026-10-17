@@ -993,6 +993,7 @@ resume-age-weeks = { $count }w
 resume-age-months = { $count }mo
 resume-age-years = { $count }y
 sessions-title = Sessions
+sessions-all = All sessions
 sessions-search = Search sessions
 sessions-view-list = List
 sessions-view-board = Board
