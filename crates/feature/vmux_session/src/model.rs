@@ -27,6 +27,7 @@ impl Plugin for EntityPlugin {
         app.register_persisted::<Session>()
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
+            .register_persisted::<AgentConversationTitle>()
             .register_persisted::<LocalTask>()
             .add_message::<CreateRequest>()
             .add_message::<CleanupRequest>()
@@ -564,6 +565,7 @@ mod tests {
         assert!(filter.is_allowed::<Session>());
         assert!(filter.is_allowed::<SessionId>());
         assert!(filter.is_allowed::<AgentId>());
+        assert!(filter.is_allowed::<AgentConversationTitle>());
         assert!(filter.is_allowed::<LocalTask>());
         assert!(filter.is_allowed::<Stage>());
         assert!(filter.is_allowed::<StageChangedAt>());

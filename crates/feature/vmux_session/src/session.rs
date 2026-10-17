@@ -2,10 +2,14 @@ use std::collections::{HashSet, VecDeque};
 
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
+use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::AgentAttachment;
 
-#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
 pub struct AgentConversationTitle(pub String);
 
 impl AgentConversationTitle {

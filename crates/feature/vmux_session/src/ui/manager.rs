@@ -296,14 +296,18 @@ fn SessionListRow(
     let agent = AgentPresentation::from_session(&session);
     let stage_dot = StageVisual::for_id(&stage).dot;
     let title = session.display_title();
-    let last_prompt = session.latest_prompt();
+    let preview = session.preview();
     let compact_id = SessionIdentity::new(&session.id).compact();
     let git_url = context.git_url.clone();
+    let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
         div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| onselect.call(select_id.clone()),
+            ondoubleclick: move |_| {
+                let _ = send(&ChatOpenPage { url: open_url.clone() });
+            },
             span { class: "size-3 shrink-0" }
             AgentThumbnail {
                 src: agent.icon.clone(),
@@ -318,8 +322,8 @@ fn SessionListRow(
             }
             div { class: "min-w-0 flex-1",
                 div { class: "truncate font-medium text-foreground/90", "{title}" }
-                if !last_prompt.is_empty() {
-                    div { class: "truncate text-[10px] leading-4 text-muted-foreground/60", "{last_prompt}" }
+                if !preview.is_empty() {
+                    div { class: "truncate text-[10px] leading-4 text-muted-foreground/60", "{preview}" }
                 }
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
@@ -403,7 +407,7 @@ fn SessionBoardCard(
     let git_url = context.git_url.clone();
     let agent = AgentPresentation::from_session(&session);
     let title = session.display_title();
-    let preview = session.latest_prompt();
+    let preview = session.preview();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
         article {
@@ -460,9 +464,11 @@ fn SessionDetails(
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let title = session.display_title();
-    let last_prompt = session.latest_prompt();
+    let last_prompt = session.last_prompt.clone();
     let agent = AgentPresentation::from_session(&session);
     let git_url = context.git_url.clone();
+    let header_open_url = open_url.clone();
+    let header_git_url = git_url.clone();
     let title_editing = use_signal(|| false);
     let title_draft = use_signal(|| title.clone());
     let rename_id = session.id.clone();
@@ -497,6 +503,22 @@ fn SessionDetails(
                         if !session.agent.is_empty() {
                             span { class: "truncate", "· {session.agent}" }
                         }
+                    }
+                }
+                DetailHeaderButton {
+                    icon: LineIcon::ExternalLink,
+                    label: translate("sessions-open-chat"),
+                    onclick: move |_| {
+                        let _ = send(&ChatOpenPage { url: header_open_url.clone() });
+                    },
+                }
+                if !header_git_url.is_empty() {
+                    DetailHeaderButton {
+                        icon: LineIcon::GitBranch,
+                        label: translate("git-title"),
+                        onclick: move |_| {
+                            let _ = send(&ChatOpenPage { url: header_git_url.clone() });
+                        },
                     }
                 }
                 button {
@@ -550,23 +572,20 @@ fn SessionDetails(
                     }
                 }
             }
-            footer { class: "flex shrink-0 items-center gap-2 p-3",
-                ManagerButton {
-                    onclick: move |_| {
-                        let _ = send(&ChatOpenPage { url: open_url.clone() });
-                    },
-                    {translate("sessions-open-chat")}
-                }
-                if !git_url.is_empty() {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Ghost,
-                        onclick: move |_| {
-                            let _ = send(&ChatOpenPage { url: git_url.clone() });
-                        },
-                        {translate("git-title")}
-                    }
-                }
-            }
+        }
+    }
+}
+
+#[component]
+fn DetailHeaderButton(icon: LineIcon, label: String, onclick: EventHandler<MouseEvent>) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
+            title: label.clone(),
+            aria_label: label,
+            onclick: move |event| onclick.call(event),
+            LineIconView { icon, class: "size-3.5".to_string() }
         }
     }
 }
@@ -1001,7 +1020,7 @@ impl StageGroup {
 trait SessionSummaryExt {
     fn matches(&self, query: &str) -> bool;
     fn display_title(&self) -> String;
-    fn latest_prompt(&self) -> String;
+    fn preview(&self) -> String;
 }
 
 impl SessionSummaryExt for SessionSummary {
@@ -1024,9 +1043,12 @@ impl SessionSummaryExt for SessionSummary {
         self.conversation_title.clone()
     }
 
-    fn latest_prompt(&self) -> String {
+    fn preview(&self) -> String {
         if !self.last_prompt.is_empty() && self.last_prompt != self.display_title() {
             return self.last_prompt.clone();
+        }
+        if !self.last_message.is_empty() && self.last_message != self.display_title() {
+            return self.last_message.clone();
         }
         String::new()
     }
