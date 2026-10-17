@@ -30,10 +30,7 @@ pub fn SessionsManager() -> Element {
     let search = query().trim().to_ascii_lowercase();
     let category_groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
     let groups = StageGroup::filtered(&category_groups, filter().as_ref());
-    let stages = category_groups
-        .iter()
-        .map(|group| group.stage.clone())
-        .collect::<Vec<_>>();
+    let stages = snapshot.stages.clone();
     let selected_session = selected().and_then(|id| {
         snapshot
             .sessions
@@ -121,12 +118,6 @@ fn SessionCategories(
         .iter()
         .map(|group| group.sessions.len())
         .sum::<usize>();
-    let stale_count = groups
-        .iter()
-        .filter(|group| !group.stage.terminal)
-        .flat_map(|group| group.sessions.iter())
-        .filter(|session| SessionFreshness::is_stale(session, false))
-        .count();
     rsx! {
         aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
             h2 { class: "px-2 pb-2 pt-1 text-xs font-semibold text-foreground/90", {translate("sessions-title")} }
@@ -136,15 +127,6 @@ fn SessionCategories(
                 selected: selected.is_none(),
                 icon: Some(vmux_api::BuiltinIcon::ListTodo),
                 onclick: move |_| onselect.call(None),
-            }
-            if stale_count > 0 {
-                SessionCategory {
-                    label: translate("sessions-stale"),
-                    count: stale_count,
-                    selected: matches!(selected.as_ref(), Some(SessionFilter::Stale)),
-                    dot: "bg-amber-400".to_string(),
-                    onclick: move |_| onselect.call(Some(SessionFilter::Stale)),
-                }
             }
             div { class: "h-2" }
             for group in groups {
@@ -202,7 +184,6 @@ enum SessionsView {
 #[derive(Clone, PartialEq)]
 enum SessionFilter {
     Stage(String),
-    Stale,
 }
 
 #[component]
@@ -273,7 +254,6 @@ fn SessionListGroup(
 ) -> Element {
     let mut collapsed = use_signal(|| false);
     let stage_dot = StageVisual::for_id(&stage.id).dot;
-    let terminal = stage.terminal;
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
             button {
@@ -302,7 +282,6 @@ fn SessionListGroup(
                             key: "{session.id}",
                             repository: repositories.get(&session.id),
                             stage: stage.id.clone(),
-                            stale: SessionFreshness::is_stale(&session, terminal),
                             session,
                             onselect,
                         }
@@ -318,7 +297,6 @@ fn SessionListRow(
     session: SessionSummary,
     repository: Option<SessionRepository>,
     stage: String,
-    stale: bool,
     onselect: EventHandler<String>,
 ) -> Element {
     let context = SessionContext::from(repository);
@@ -361,12 +339,6 @@ fn SessionListRow(
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
                 SessionContextView { context: context.clone() }
-                if stale {
-                    MetadataPill {
-                        dot: "bg-amber-400".to_string(),
-                        label: translate("sessions-stale"),
-                    }
-                }
                 if runtime.visible {
                     MetadataPill {
                         dot: runtime.dot.to_string(),
@@ -415,7 +387,6 @@ fn SessionBoardColumn(
     onselect: EventHandler<String>,
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
-    let terminal = stage.terminal;
     rsx! {
         section { class: "flex min-h-0 w-[18rem] shrink-0 flex-col",
             header { class: "flex h-8 shrink-0 items-center gap-2 rounded-md bg-foreground/[0.045] px-2.5",
@@ -428,7 +399,6 @@ fn SessionBoardColumn(
                     SessionBoardCard {
                         key: "{session.id}",
                         repository: repositories.get(&session.id),
-                        stale: SessionFreshness::is_stale(&session, terminal),
                         session,
                         onselect,
                     }
@@ -442,7 +412,6 @@ fn SessionBoardColumn(
 fn SessionBoardCard(
     session: SessionSummary,
     repository: Option<SessionRepository>,
-    stale: bool,
     onselect: EventHandler<String>,
 ) -> Element {
     let context = SessionContext::from(repository);
@@ -483,12 +452,6 @@ fn SessionBoardCard(
                 p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/65", "{preview}" }
             }
             div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
-                if stale {
-                    MetadataPill {
-                        dot: "bg-amber-400".to_string(),
-                        label: translate("sessions-stale"),
-                    }
-                }
                 if runtime.visible {
                     MetadataPill { dot: runtime.dot.to_string(), label: runtime_label(&session.runtime) }
                 }
@@ -513,10 +476,6 @@ fn SessionDetails(
     let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
-    let stale = stages
-        .iter()
-        .find(|stage| stage.id == session.stage)
-        .is_some_and(|stage| SessionFreshness::is_stale(&session, stage.terminal));
     let title = session.display_title();
     let last_prompt = session.last_prompt.clone();
     let agent = AgentPresentation::from_session(&session);
@@ -556,9 +515,6 @@ fn SessionDetails(
                         span { {runtime_label(&session.runtime)} }
                         if !session.agent.is_empty() {
                             span { class: "truncate", "· {session.agent}" }
-                        }
-                        if stale {
-                            span { class: "text-amber-400", "· {translate(\"sessions-stale\")}" }
                         }
                     }
                 }
@@ -1032,6 +988,7 @@ impl StageVisual {
     fn for_id(id: &str) -> Self {
         let dot = match id {
             "in_progress" => "bg-amber-400",
+            "stale" => "bg-muted-foreground/55",
             "in_review" => "bg-violet-400",
             "done" => "bg-success",
             "canceled" => "bg-muted-foreground/45",
@@ -1132,22 +1089,6 @@ impl StageGroup {
                 .filter(|group| group.stage.id == *id)
                 .cloned()
                 .collect(),
-            Some(SessionFilter::Stale) => {
-                let mut filtered = Vec::new();
-                for group in groups {
-                    if group.stage.terminal {
-                        continue;
-                    }
-                    let mut group = group.clone();
-                    group
-                        .sessions
-                        .retain(|session| SessionFreshness::is_stale(session, false));
-                    if !group.sessions.is_empty() {
-                        filtered.push(group);
-                    }
-                }
-                filtered
-            }
         }
     }
 
@@ -1164,9 +1105,41 @@ impl StageGroup {
                 sessions: Vec::new(),
             })
             .collect::<Vec<_>>();
-
         for session in sessions {
             if !session.matches(search) {
+                continue;
+            }
+            let terminal = stages
+                .iter()
+                .find(|stage| stage.id == session.stage)
+                .is_some_and(|stage| stage.terminal);
+            if SessionFreshness::is_stale(session, terminal) {
+                let stale_index = match groups.iter().position(|group| group.stage.id == "stale") {
+                    Some(index) => index,
+                    None => {
+                        let index = groups
+                            .iter()
+                            .position(|group| !group.stage.terminal)
+                            .map(|index| index + 1)
+                            .unwrap_or(groups.len());
+                        groups.insert(
+                            index,
+                            Self {
+                                stage: StageSummary {
+                                    id: "stale".into(),
+                                    name: "sessions-stale".into(),
+                                    order: 0,
+                                    terminal: false,
+                                },
+                                sessions: Vec::new(),
+                            },
+                        );
+                        index
+                    }
+                };
+                if let Some(group) = groups.get_mut(stale_index) {
+                    group.sessions.push(session.clone());
+                }
                 continue;
             }
             if let Some(group) = groups
@@ -1291,5 +1264,36 @@ mod tests {
             "idle",
             true,
         ));
+    }
+
+    #[test]
+    fn stale_session_moves_out_of_its_persisted_stage() {
+        let stages = vec![StageSummary {
+            id: "in_progress".into(),
+            name: "session-stage-active".into(),
+            order: 10,
+            terminal: false,
+        }];
+        let session = SessionSummary {
+            id: "session-1".into(),
+            stage: "in_progress".into(),
+            runtime: "idle".into(),
+            last_activated_at: vmux_ecs::UnixMillis::now().0
+                - (SessionFreshness::STALE_AFTER as i64 * 1_000),
+            ..Default::default()
+        };
+
+        let groups = StageGroup::from_catalog(&stages, std::slice::from_ref(&session), "");
+        let active = groups
+            .iter()
+            .find(|group| group.stage.id == "in_progress")
+            .unwrap();
+        let stale = groups
+            .iter()
+            .find(|group| group.stage.id == "stale")
+            .unwrap();
+
+        assert!(active.sessions.is_empty());
+        assert_eq!(stale.sessions, vec![session]);
     }
 }
