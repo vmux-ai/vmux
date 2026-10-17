@@ -50,6 +50,7 @@ pub(super) struct PageOpener<'w, 's> {
     >,
     children: Query<'w, 's, &'static Children>,
     queues: Query<'w, 's, &'static mut PromptQueue>,
+    transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
     pub(super) settings: Res<'w, AppSettings>,
     catalog: AcpCatalog<'w, 's>,
@@ -196,6 +197,11 @@ impl PageOpener<'_, '_> {
                         icon: icon.clone().map(PageIcon::favicon).unwrap_or_default(),
                     },
                 ));
+                if resume.is_some() && self.transcripts.get(session_entity).messages.is_empty() {
+                    self.commands
+                        .entity(session_entity)
+                        .insert(vmux_session::TranscriptLoading);
+                }
                 self.replace_children(task.stack, transition_webview);
                 self.enqueue_initial_prompt(
                     session_entity,

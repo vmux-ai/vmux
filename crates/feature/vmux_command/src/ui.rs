@@ -124,7 +124,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             return;
         }
         let projection = &snapshot.projection;
-        input.apply_host_input(projection.input_revision, input_id);
+        input.apply_host_input(opened.open_id, projection.input_revision, input_id);
     });
     use_effect(move || {
         let opened = state();

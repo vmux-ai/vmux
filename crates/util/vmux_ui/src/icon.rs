@@ -28,6 +28,7 @@ pub enum LineIcon {
     Image,
     Layout,
     List,
+    MessageCircle,
     Minus,
     Notebook,
     Package,
@@ -139,6 +140,7 @@ impl LineIcon {
             ],
             Self::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
             Self::List => &["M4 6h16", "M4 12h16", "M4 18h16"],
+            Self::MessageCircle => &["M21 15a4 4 0 0 1-4 4H8l-5 3v-6a9 9 0 1 1 18-1Z"],
             Self::Minus => &["M5 12h14"],
             Self::Notebook => &[
                 "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",

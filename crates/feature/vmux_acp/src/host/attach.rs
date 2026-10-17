@@ -32,6 +32,7 @@ fn attach(
         Added<PendingAcpAgentAttachment>,
     >,
     titles: Query<(), With<AgentConversationTitle>>,
+    transcripts: vmux_session::Transcripts,
     mut commands: Commands,
 ) {
     for (
@@ -77,7 +78,12 @@ fn attach(
             .or_default();
         if let Some(resume) = resume.clone() {
             let mut session = commands.entity(*session_entity);
-            session.insert((AcpSessionId(resume), vmux_session::TranscriptLoading));
+            session.insert(AcpSessionId(resume));
+            if transcripts.get(*session_entity).messages.is_empty() {
+                session.insert(vmux_session::TranscriptLoading);
+            } else {
+                session.remove::<vmux_session::TranscriptLoading>();
+            }
             if !titles.contains(*session_entity) {
                 session.insert((AgentConversationTitle(session_name.clone()), TitlePending));
             }
