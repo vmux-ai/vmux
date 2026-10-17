@@ -66,7 +66,7 @@ impl ManagerButtonVariant {
 pub fn ManagerPage(children: Element) -> Element {
     rsx! {
         main {
-            class: "flex h-full w-full flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_4%,transparent),transparent_62%)] text-foreground font-sans text-sm",
+            class: "flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-sans text-sm",
             {children}
         }
     }

@@ -134,7 +134,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] bg-background/35 pt-[var(--vmux-side-sheet-pad-top)] backdrop-blur-xl",
+            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
