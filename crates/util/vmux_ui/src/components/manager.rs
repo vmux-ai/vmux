@@ -46,7 +46,9 @@ pub enum ManagerButtonVariant {
 impl ManagerButtonVariant {
     fn classes(self) -> &'static str {
         match self {
-            Self::Primary => "bg-primary/15 text-primary ring-primary/30 hover:bg-primary/25",
+            Self::Primary => {
+                "vmux-primary-action text-primary ring-transparent hover:bg-foreground/[0.04]"
+            }
             Self::Secondary => {
                 "bg-foreground/[0.05] text-foreground/80 ring-foreground/10 hover:bg-foreground/[0.09]"
             }
@@ -64,7 +66,7 @@ impl ManagerButtonVariant {
 pub fn ManagerPage(children: Element) -> Element {
     rsx! {
         main {
-            class: "flex h-full w-full flex-col overflow-hidden bg-[color-mix(in_oklab,var(--background)_97%,var(--foreground))] bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] text-foreground font-sans text-sm ring-1 ring-inset ring-foreground/[0.06]",
+            class: "flex h-full w-full flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_4%,transparent),transparent_62%)] text-foreground font-sans text-sm",
             {children}
         }
     }
@@ -84,8 +86,8 @@ pub fn ManagerTabs(
     onselect: EventHandler<String>,
 ) -> Element {
     rsx! {
-        nav { class: "flex shrink-0 overflow-x-auto border-b border-foreground/[0.07] px-5 py-2.5",
-            div { class: "mx-auto flex min-w-max items-center gap-0.5 rounded-xl bg-foreground/[0.06] p-1 ring-1 ring-inset ring-foreground/[0.06]",
+        nav { class: "flex shrink-0 overflow-x-auto bg-foreground/[0.018] px-5 py-2.5",
+            div { class: "mx-auto flex min-w-max items-center gap-0.5 rounded-lg bg-foreground/[0.055] p-1",
                 for tab in tabs {
                     a {
                         href: "{tab.href}",
@@ -95,7 +97,7 @@ pub fn ManagerTabs(
                         },
                         aria_current: if tab.id == active { "page" } else { "false" },
                         class: if tab.id == active {
-                            "flex h-7 items-center rounded-lg bg-background px-3 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08]"
+                            "flex h-7 items-center rounded-md bg-foreground/[0.08] px-3 text-xs font-semibold text-foreground"
                         } else {
                             "flex h-7 items-center rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                         },
@@ -118,7 +120,7 @@ pub fn ManagerHeader(
     actions: Element,
 ) -> Element {
     rsx! {
-        header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
+        header { class: "shrink-0 bg-foreground/[0.018] px-5 py-3",
             div { class: "flex items-center gap-3",
                 h1 { class: "text-base font-semibold tracking-tight", "{title}" }
                 span { class: "text-xs tabular-nums text-muted-foreground/70", "{count}" }
@@ -127,7 +129,7 @@ pub fn ManagerHeader(
             }
             input {
                 r#type: "search",
-                class: "mt-3 w-full rounded-xl bg-foreground/[0.04] px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.06] focus:ring-primary/30",
+                class: "mt-3 w-full rounded-lg bg-foreground/[0.05] px-4 py-2.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.075]",
                 placeholder: "{search_placeholder}",
                 value: "{search_value}",
                 oninput: move |event| onsearch.call(event),
@@ -165,9 +167,9 @@ pub fn ManagerRow(
     #[props(default = true)] show_icon: bool,
 ) -> Element {
     rsx! {
-        div { class: "group flex items-center gap-4 rounded-2xl bg-foreground/[0.035] px-5 py-4 ring-1 ring-inset ring-foreground/10 backdrop-blur-xl transition-colors hover:bg-foreground/[0.07]",
+        div { class: "group flex items-center gap-4 rounded-lg bg-foreground/[0.03] px-4 py-3 transition-colors hover:bg-foreground/[0.065]",
             if show_icon {
-                div { class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
+                div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.065]",
                     {icon}
                 }
             }
@@ -246,7 +248,7 @@ pub fn ManagerSelect(
     rsx! {
         div { class: "relative min-w-0",
             select {
-                class: "w-full min-w-0 appearance-none rounded-xl bg-background/55 py-2 pl-3 pr-9 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-background/70 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-50",
+                class: "w-full min-w-0 appearance-none rounded-md bg-foreground/[0.055] py-2 pl-3 pr-9 text-xs text-foreground outline-none transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] disabled:pointer-events-none disabled:opacity-50",
                 disabled: disabled || empty,
                 value: selected.clone(),
                 onchange: move |event| onselect.call(event.value()),
@@ -297,8 +299,8 @@ pub fn ManagerEmpty(
 pub fn ManagerSkeleton() -> Element {
     rsx! {
         for i in 0..3 {
-            div { key: "{i}", class: "flex items-center gap-4 rounded-2xl bg-foreground/[0.035] px-5 py-4 ring-1 ring-inset ring-foreground/10",
-                Skeleton { class: "h-10 w-10 shrink-0 rounded-xl bg-foreground/[0.06]" }
+            div { key: "{i}", class: "flex items-center gap-4 rounded-lg bg-foreground/[0.03] px-4 py-3",
+                Skeleton { class: "h-9 w-9 shrink-0 rounded-lg bg-foreground/[0.06]" }
                 div { class: "flex min-w-0 flex-1 flex-col gap-1.5",
                     Skeleton { class: "h-3 w-32 bg-foreground/[0.06]" }
                     Skeleton { class: "h-2.5 w-48 bg-foreground/[0.05]" }

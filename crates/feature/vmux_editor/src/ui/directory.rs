@@ -50,7 +50,7 @@ pub(super) fn PreviewPane(preview: Option<FilePreviewItem>) -> Element {
                     div {
                         key: "{path}",
                         id: VIDEO_HOST_ID,
-                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-primary/20",
+                        class: "h-full w-full rounded-xl bg-background/70 ring-1 ring-primary/20",
                     }
                 }
             } else {

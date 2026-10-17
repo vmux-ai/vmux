@@ -462,13 +462,13 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
     let collapsed_stack = pane.collapsed_stack.clone();
     rsx! {
         div { class: if pane.is_active && any_loading {
-                "group mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2 pane-loading-ring"
+                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1 pane-loading-ring"
             } else {
-                "group mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2"
+                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1"
             },
             div {
-                class: "flex items-center rounded-md transition-colors hover:bg-glass-hover",
-                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
+                class: "flex h-9 items-center rounded-md transition-colors hover:bg-glass-hover",
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2",
                     div { class: if pane.is_active {
                             "grid h-7 w-7 shrink-0 place-items-center text-primary"
                         } else {
@@ -502,7 +502,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                     }
                 }
             }
-            div { class: "px-1.5 pb-0 pt-0.5",
+            div { class: "pt-0.5",
                 div { class: "flex flex-col gap-1",
                     if !expanded && let Some(stack) = collapsed_stack {
                         SideSheetStackRow { stack, pane_id }

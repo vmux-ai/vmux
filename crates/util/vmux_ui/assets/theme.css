@@ -2,67 +2,67 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.88 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(0.95 0 0);
+  --background: oklch(0.955 0.012 250);
+  --foreground: oklch(0.19 0.018 265);
+  --card: oklch(0.985 0.008 250);
   --primary: oklch(0.646 0.222 41.116);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.925 0.015 250);
+  --secondary-foreground: oklch(0.22 0.02 265);
+  --muted: oklch(0.925 0.012 250);
+  --muted-foreground: oklch(0.52 0.025 265);
+  --accent: oklch(0.91 0.025 255);
+  --accent-foreground: oklch(0.22 0.02 265);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   /* Paired with the background of its own scheme, not carried across from the other one. */
   --success: oklch(0.52 0.13 156);
   --success-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.86 0.018 250);
+  --input: oklch(0.86 0.018 250);
+  --ring: oklch(0.62 0.04 265);
   --scrim: oklch(0.145 0 0 / 0.35);
   --scrim-strong: oklch(0.145 0 0 / 0.55);
-  --glass: oklch(1 0 0 / 0.55);
-  --glass-hover: oklch(1 0 0 / 0.7);
-  --glass-active: oklch(1 0 0 / 0.85);
-  --glass-border: oklch(0 0 0 / 0.08);
-  --cef-surface: oklch(0.98 0 0 / 0.86);
-  --cef-surface-hover: oklch(0.94 0 0 / 0.78);
-  --cef-surface-active: oklch(0.9 0 0 / 0.82);
-  --cef-surface-border: oklch(0 0 0 / 0.1);
+  --glass: oklch(0.985 0.012 250 / 0.62);
+  --glass-hover: oklch(0.94 0.022 250 / 0.78);
+  --glass-active: oklch(0.9 0.03 250 / 0.85);
+  --glass-border: oklch(0.32 0.025 265 / 0.1);
+  --cef-surface: oklch(0.97 0.014 250 / 0.9);
+  --cef-surface-hover: oklch(0.92 0.024 250 / 0.82);
+  --cef-surface-active: oklch(0.88 0.03 250 / 0.86);
+  --cef-surface-border: oklch(0.32 0.025 265 / 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --background: oklch(0.175 0.016 270);
+  --foreground: oklch(0.94 0.01 255);
+  --card: oklch(0.215 0.018 270);
   --primary: oklch(0.75 0.183 55.934);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.255 0.02 270);
+  --secondary-foreground: oklch(0.94 0.01 255);
+  --muted: oklch(0.25 0.018 270);
+  --muted-foreground: oklch(0.72 0.02 255);
+  --accent: oklch(0.28 0.026 270);
+  --accent-foreground: oklch(0.95 0.01 255);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.205 0 0);
   --success: oklch(0.76 0.15 158);
   --success-foreground: oklch(0.205 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: oklch(0.78 0.02 255 / 0.13);
+  --input: oklch(0.78 0.02 255 / 0.17);
+  --ring: oklch(0.64 0.04 265);
   --scrim: oklch(0.08 0 0 / 0.72);
   --scrim-strong: oklch(0.05 0 0 / 0.82);
-  --glass: oklch(1 0 0 / 0.25);
-  --glass-hover: oklch(1 0 0 / 0.35);
-  --glass-active: oklch(1 0 0 / 0.45);
-  --glass-border: oklch(1 0 0 / 0.30);
-  --cef-surface: oklch(0.48 0 0 / 0.86);
-  --cef-surface-hover: oklch(0.58 0 0 / 0.72);
-  --cef-surface-active: oklch(0.64 0 0 / 0.78);
-  --cef-surface-border: oklch(1 0 0 / 0.22);
+  --glass: oklch(0.29 0.022 270 / 0.78);
+  --glass-hover: oklch(0.34 0.028 270 / 0.82);
+  --glass-active: oklch(0.39 0.032 270 / 0.86);
+  --glass-border: oklch(0.82 0.02 255 / 0.16);
+  --cef-surface: oklch(0.29 0.022 270 / 0.9);
+  --cef-surface-hover: oklch(0.35 0.028 270 / 0.84);
+  --cef-surface-active: oklch(0.4 0.032 270 / 0.88);
+  --cef-surface-border: oklch(0.82 0.02 255 / 0.18);
   }
 }
 

@@ -73,7 +73,7 @@ pub fn GitFooter(
 
     rsx! {
         div {
-            class: "flex h-7 min-w-0 shrink-0 items-center gap-3 overflow-hidden border-t border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
+            class: "flex h-7 min-w-0 shrink-0 items-center gap-3 overflow-hidden bg-foreground/[0.035] px-4 font-sans text-xs text-muted-foreground",
 
             {leading}
             if has_branch {
@@ -112,7 +112,7 @@ pub fn GitFooter(
                     }
                     Button {
                         variant: ButtonVariant::Ghost,
-                        class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-white/10 disabled:opacity-40",
+                        class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-foreground/10 disabled:opacity-40",
                         disabled: state.commit_message.trim().is_empty() || !state.commit_pending.is_empty(),
                         onclick: move |_| {
                             let _ = send(&GitCommitSubmitRequest);
@@ -135,7 +135,7 @@ pub fn GitFooter(
             if can_push {
                 Button {
                     variant: ButtonVariant::Ghost,
-                    class: "h-auto shrink-0 gap-1 px-2 py-0.5 text-xs hover:bg-white/10",
+                    class: "h-auto shrink-0 gap-1 px-2 py-0.5 text-xs hover:bg-foreground/10",
                     onclick: move |_| {
                         let _ = send(&GitPushRequest { path: git_state().path });
                     },

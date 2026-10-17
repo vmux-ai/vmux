@@ -141,6 +141,30 @@ impl AppSettings {
         StartupDir::resolve(self, space_id, None).map(|dir| dir.path)
     }
 
+    pub fn project_rows(&self, space_id: &str) -> Vec<ProjectRow> {
+        if let Some(overrides) = space_override(self, space_id) {
+            let rows = overrides.project_rows();
+            if !rows.is_empty() {
+                return rows;
+            }
+        }
+        self.projects
+            .iter()
+            .map(|project| ProjectRow {
+                path: project.in_use().to_string(),
+                label: project.display_label().to_string(),
+                display_path: project.in_use().to_string(),
+                depth: 0,
+                is_active: false,
+                is_worktree: project.checkout.is_some(),
+                missing: !std::path::Path::new(project.in_use()).is_dir(),
+                branch: String::new(),
+                kind: ProjectRowKind::Project,
+                expanded: false,
+            })
+            .collect()
+    }
+
     pub fn workspace_dir(
         &self,
         space_id: &str,
@@ -2547,6 +2571,21 @@ mod tests {
         );
         assert_eq!(rows[0].path, "/worktrees/a1b2");
         assert_eq!(rows[0].label, "gone");
+    }
+
+    #[test]
+    fn a_new_space_offers_known_projects_without_claiming_one() {
+        let project = tempfile::tempdir().expect("project");
+        let path = project.path().to_string_lossy().into_owned();
+        let mut settings = base_settings();
+        settings.projects.push(SpaceProject::at(path.clone()));
+
+        let rows = settings.project_rows("new-space");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, path);
+        assert!(!rows[0].is_active);
+        assert!(!rows[0].missing);
     }
 
     #[test]

@@ -64,7 +64,7 @@ pub fn SessionsManager() -> Element {
 
     rsx! {
         ManagerPage {
-            header { class: "flex h-11 shrink-0 items-center gap-2.5 border-b border-foreground/[0.06] bg-background/70 px-3",
+            header { class: "flex h-11 shrink-0 items-center gap-2.5 bg-foreground/[0.018] px-3",
                 Dropdown {
                     open: filter_requested,
                     class: "min-w-0 flex-1".to_string(),

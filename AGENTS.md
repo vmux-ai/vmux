@@ -69,6 +69,7 @@ Combinators are fine where they stay small and local — `map_err` to convert an
 ## Rules
 
 - Never show literal loading copy such as "Loading..." or "Loading data..." in product UI. Use a skeleton for structured content or matrix rain for a full-surface transition.
+- Page roots use themed surface tokens. Never use pure black or pure white as a page background; reserve them for content that requires it, such as media, QR codes, and scrims. Prefer flat surface hierarchy over borders and decorative shadows.
 - Reserve `Chrome` for Google Chrome or Chromium compatibility code. Never use `chrome` to mean application UI, window controls, a panel, a toolbar, a shell, or presentation state.
 - Do not use generic `Action` names for vmux-owned types, fields, functions, sets, or modules. Use `Request` for an intent entering a feature, `Operation` for accepted work being executed, `Effect` for a versioned UI-side effect, or a concrete domain noun such as `Selection`, `Decision`, or `Transition`. Externally fixed protocol vocabulary and standard domain terms such as LSP `CodeAction` are exempt at their boundaries; translate them when they enter vmux-owned state.
 - Do not repeat a crate, module, feature, or owning entity name in a type when the namespace already makes ownership clear. Prefer `Stage`, `Description`, and `AgentId` inside `vmux_session` over `SessionStage`, `SessionDescription`, and `SessionAgentId`; retain a prefix only at shared or serialized boundaries where it prevents a real collision.

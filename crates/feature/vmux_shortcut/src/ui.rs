@@ -54,8 +54,8 @@ pub fn Page() -> Element {
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
-            div { class: "pointer-events-none absolute inset-0 opacity-70 [background:radial-gradient(circle_at_14%_8%,color-mix(in_oklab,var(--primary)_12%,transparent),transparent_34%),radial-gradient(circle_at_88%_18%,color-mix(in_oklab,var(--primary)_10%,transparent),transparent_30%)]" }
-            header { class: "relative z-10 shrink-0 border-b border-border/70 bg-background/75 px-5 py-4 backdrop-blur-xl",
+            div { class: "pointer-events-none absolute inset-0 opacity-50 [background:radial-gradient(circle_at_14%_8%,color-mix(in_oklab,var(--primary)_7%,transparent),transparent_38%)]" }
+            header { class: "relative z-10 shrink-0 bg-foreground/[0.018] px-5 py-4",
                 div { class: "mx-auto flex w-full max-w-6xl items-center gap-4",
                     div { class: "min-w-0",
                         h1 { class: "text-xl font-semibold tracking-tight", {translate("shortcuts-title")} }
@@ -66,10 +66,10 @@ pub fn Page() -> Element {
             div { class: "relative z-10 min-h-0 flex-1 overflow-y-auto px-5 py-5 [scrollbar-gutter:stable]",
                 div { class: "mx-auto w-full max-w-6xl",
                     div {
-                        class: "group relative mb-5 flex min-h-40 w-full items-center justify-center overflow-hidden rounded-2xl border border-primary/20 bg-[linear-gradient(135deg,color-mix(in_oklab,var(--glass)_88%,var(--primary)_12%),color-mix(in_oklab,var(--glass)_94%,transparent))] px-20 py-8 text-center shadow-[0_18px_60px_-36px_color-mix(in_oklab,var(--primary)_75%,transparent)] backdrop-blur-2xl",
+                        class: "group relative mb-5 flex min-h-36 w-full items-center justify-center overflow-hidden rounded-lg bg-primary/[0.055] px-20 py-8 text-center",
                         aria_label: translate("shortcuts-try-title"),
                         span { class: "absolute left-5 top-4 flex items-center gap-2 text-xs font-semibold text-foreground/80",
-                            span { class: "flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20",
+                            span { class: "flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary",
                                 BuiltinIconView {
                                     icon: vmux_api::BuiltinIcon::Keyboard,
                                     class: "h-4 w-4".to_string(),
@@ -87,7 +87,7 @@ pub fn Page() -> Element {
                                     event.stop_propagation();
                                     let _ = send(&ShortcutProbeClearRequest);
                                 },
-                                kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[10px]", "Esc" }
+                                kbd { class: "rounded bg-foreground/[0.065] px-1.5 py-0.5 font-mono text-[10px]", "Esc" }
                                 {translate("shortcuts-clear")}
                             }
                         }
@@ -103,7 +103,7 @@ pub fn Page() -> Element {
                         }
                     }
                     if groups.is_empty() {
-                        div { class: "flex min-h-72 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-foreground/[0.015] text-sm text-muted-foreground",
+                        div { class: "flex min-h-72 items-center justify-center rounded-lg bg-foreground/[0.025] text-sm text-muted-foreground",
                             if matches!(probe.status, ShortcutProbeStatus::Miss) {
                                 {translate("shortcuts-no-match")}
                             } else {
@@ -171,9 +171,9 @@ impl ShortcutStroke {
 #[component]
 fn ShortcutGroupView(group: crate::ShortcutGroup) -> Element {
     rsx! {
-        section { class: "mb-3 inline-block w-full break-inside-avoid overflow-hidden rounded-2xl border border-border/70 bg-[color-mix(in_oklab,var(--glass)_88%,transparent)] shadow-sm",
-            h2 { class: "flex items-center gap-2 border-b border-primary/15 bg-primary/[0.075] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-primary",
-                span { class: "h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--primary)]" }
+        section { class: "mb-3 inline-block w-full break-inside-avoid overflow-hidden rounded-lg bg-foreground/[0.025]",
+            h2 { class: "flex items-center gap-2 bg-primary/[0.06] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-primary",
+                span { class: "h-1.5 w-1.5 rounded-full bg-primary" }
                 "{group.name}"
             }
             div { class: "divide-y divide-border/45",
@@ -256,7 +256,7 @@ fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
                     span { class: "px-1 text-lg text-muted-foreground/55", "›" }
                 }
                 for keycap in stroke.keycaps() {
-                    kbd { class: "inline-flex min-w-11 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 px-3 py-2.5 font-mono text-lg font-semibold leading-none text-primary shadow-[inset_0_-2px_0_color-mix(in_oklab,var(--primary)_24%,transparent)]", "{keycap}" }
+                    kbd { class: "inline-flex min-w-11 items-center justify-center rounded-lg bg-primary/10 px-3 py-2.5 font-mono text-lg font-semibold leading-none text-primary", "{keycap}" }
                 }
             }
         }
@@ -265,8 +265,8 @@ fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
 
 fn shortcut_key_class(emphasized: bool) -> &'static str {
     if emphasized {
-        "inline-flex min-w-6 items-center justify-center rounded-md border border-primary/25 bg-primary/10 px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-primary shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--primary)_24%,transparent)]"
+        "inline-flex min-w-6 items-center justify-center rounded-md bg-primary/10 px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-primary"
     } else {
-        "inline-flex min-w-6 items-center justify-center rounded-md border border-foreground/10 bg-foreground/[0.055] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--foreground)_10%,transparent)]"
+        "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.06] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground"
     }
 }

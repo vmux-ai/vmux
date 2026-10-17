@@ -37,6 +37,7 @@ pub struct SpaceFormState {
     pub open: bool,
     pub space_id: Option<String>,
     pub draft: String,
+    pub suggestion: String,
 }
 
 #[vmux_api::contract(Default, Eq)]

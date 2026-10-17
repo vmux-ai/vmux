@@ -515,9 +515,6 @@ fn sync_windowed_frames(
         let browser_ready = browsers.windowed_view_ready(&entity);
         let was_raised = memory.raised_frame.contains_key(&entity);
         let first_native_frame = browser_ready && !was_raised;
-        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
-            browsers.set_windowed_hidden(&entity, false);
-        }
         browsers.set_windowed_frame(
             &entity,
             frame.left,
@@ -526,6 +523,9 @@ fn sync_windowed_frames(
             frame.height,
             scale,
         );
+        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
+            browsers.set_windowed_hidden(&entity, false);
+        }
         browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
         let all_corners = windowed_page_all_corners(layout_is_hidden, visible_pane_count);
         browsers.set_windowed_corner_radius(

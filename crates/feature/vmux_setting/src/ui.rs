@@ -72,7 +72,7 @@ pub fn Page() -> Element {
 
     rsx! {
         div { class: "flex h-full min-h-0 flex-row bg-background text-foreground",
-            aside { class: "hidden w-56 shrink-0 border-r border-border px-4 py-6 lg:block",
+            aside { class: "hidden w-56 shrink-0 bg-foreground/[0.018] px-4 py-6 lg:block",
                 div { class: "mb-4 px-2",
                     div { class: "text-base font-semibold tracking-tight", {translate("settings-title")} }
                     div { class: "mt-0.5 text-[11px] text-muted-foreground", "settings.ron" }
@@ -98,7 +98,7 @@ pub fn Page() -> Element {
                     }
                     input {
                         r#type: "search",
-                        class: "sticky top-0 z-10 mb-6 w-full rounded-xl bg-background/95 px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-border backdrop-blur-xl transition-colors placeholder:text-muted-foreground/60 focus:bg-muted/40 focus:ring-primary/40",
+                        class: "sticky top-0 z-10 mb-6 w-full rounded-lg bg-foreground/[0.05] px-4 py-2.5 text-sm text-foreground outline-none backdrop-blur-xl transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.075]",
                         placeholder: "{search_placeholder}",
                         value: "{query}",
                         oninput: move |event: FormEvent| {
@@ -204,7 +204,7 @@ fn FieldView(field: SettingsRenderField, catalog: SettingsRenderCatalog) -> Elem
                 if let Some(hint) = hint {
                     p { class: "px-1 pb-2 text-xs text-muted-foreground", "{hint}" }
                 }
-                div { class: "flex flex-col divide-y divide-border/60 rounded-md border border-border/40 bg-muted/20 px-3",
+                div { class: "flex flex-col divide-y divide-border/60 rounded-md bg-foreground/[0.025] px-3",
                     RenderFields { fields, catalog }
                 }
             }
@@ -418,7 +418,7 @@ fn BindingsField(label: String, hint: Option<String>, rows: Vec<SettingsBindingR
 #[component]
 fn BindingRow(row: SettingsBindingRow) -> Element {
     rsx! {
-        div { class: "flex items-center justify-between gap-4 rounded-md border border-border/60 bg-muted/30 px-3 py-2",
+        div { class: "flex items-center justify-between gap-4 rounded-md bg-foreground/[0.035] px-3 py-2",
             span { class: "truncate font-mono text-xs text-foreground", "{row.command}" }
             if let Some(path) = row.edit_path {
                 ChordEditor { path, text: row.chord }
@@ -433,14 +433,14 @@ fn BindingRow(row: SettingsBindingRow) -> Element {
 fn ArrayBody(items: Vec<SettingsRenderItemId>, catalog: SettingsRenderCatalog) -> Element {
     let Some(first) = items.first().and_then(|id| catalog.item(*id)) else {
         return rsx! {
-            div { class: "rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground",
+            div { class: "rounded-md bg-foreground/[0.025] px-3 py-4 text-center text-xs text-muted-foreground",
                 {translate("settings-empty")}
             }
         };
     };
     if matches!(first, SettingsRenderItem::Value { .. }) {
         return rsx! {
-            div { class: "flex flex-col gap-1 rounded-md border border-border/60 bg-muted/30 p-2",
+            div { class: "flex flex-col gap-1 rounded-md bg-foreground/[0.035] p-2",
                 for (index, item_id) in items.into_iter().enumerate() {
                     if let Some(SettingsRenderItem::Value { text }) = catalog.item(item_id) {
                         div { key: "{index}", class: "rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-foreground",
@@ -469,12 +469,12 @@ fn ArrayItemCard(
     catalog: SettingsRenderCatalog,
 ) -> Element {
     rsx! {
-        div { class: "rounded-xl border border-border bg-muted/30 p-4",
+        div { class: "rounded-lg bg-foreground/[0.035] p-4",
             div { class: "mb-3 flex items-center justify-between gap-2",
                 div { class: "min-w-0",
                     div { class: "truncate text-sm font-semibold text-foreground", "{title}" }
                 }
-                span { class: "rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground",
+                span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground",
                     {translate("settings-item")}
                 }
             }
@@ -557,7 +557,7 @@ fn ChordEditor(path: String, text: String) -> Element {
         rsx! {
             button {
                 r#type: "button",
-                class: "inline-flex cursor-pointer items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:border-foreground/40 hover:bg-muted/70",
+                class: "inline-flex cursor-pointer items-center rounded-md bg-foreground/[0.055] px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:bg-foreground/[0.09]",
                 title: translate("settings-record-key"),
                 onclick: move |_| {
                     feedback.set(None);
@@ -572,7 +572,7 @@ fn ChordEditor(path: String, text: String) -> Element {
 #[component]
 fn Kbd(text: String) -> Element {
     rsx! {
-        span { class: "inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground",
+        span { class: "inline-flex items-center rounded-md bg-foreground/[0.055] px-2 py-1 font-mono text-[11px] text-foreground",
             "{text}"
         }
     }

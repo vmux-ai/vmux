@@ -50,17 +50,17 @@ pub fn Page() -> Element {
 
     rsx! {
         div { class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            header { class: "flex items-center justify-between border-b border-border px-5 py-4",
+            header { class: "flex items-center justify-between bg-foreground/[0.018] px-5 py-4",
                 h1 { class: "text-lg font-semibold tracking-tight", {translate("history-title")} }
                 if entry_count > 0 {
-                    span { class: "flex min-w-7 items-center justify-center rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground",
+                    span { class: "flex min-w-7 items-center justify-center rounded-full bg-foreground/[0.06] px-2.5 py-1 text-xs font-medium text-muted-foreground",
                         "{entry_count}"
                     }
                 }
             }
             main { class: "min-h-0 flex-1 overflow-y-auto px-5 py-5 text-sm",
                 div { class: "mx-auto w-full max-w-4xl",
-                    div { class: "glass mb-6 flex items-center gap-2 rounded-xl border border-border/70 p-2",
+                    div { class: "mb-6 flex items-center gap-2 rounded-lg bg-foreground/[0.04] p-2",
                         svg { class: "ml-1 size-4 shrink-0 text-muted-foreground", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
                             circle { cx: "11", cy: "11", r: "7" }
                             path { d: "m20 20-3.5-3.5" }
@@ -83,7 +83,7 @@ pub fn Page() -> Element {
                     for (label, group) in groups {
                         section { class: "mb-6",
                             h2 { class: "mb-2 px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", "{label}" }
-                            div { class: "overflow-hidden rounded-xl border border-border bg-card/30",
+                            div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
                                 for entry in group {
                                     div {
                                         class: "group flex cursor-pointer items-center gap-3 border-b border-border/70 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-foreground/[0.04]",

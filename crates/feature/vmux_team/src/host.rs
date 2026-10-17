@@ -27,7 +27,7 @@ use vmux_layout::cef::LayoutCef;
 use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::profile::Profile as SpaceProfile;
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
-use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, SpaceHierarchy};
+use vmux_layout::space::{CurrentSpace, Space, SpaceHierarchy};
 use vmux_layout::stack::{OpenRequest, Stack};
 use vmux_layout::window::WindowHierarchy;
 use vmux_session::{RunState, Session};
@@ -146,8 +146,11 @@ fn spawn_user_profile(mut commands: Commands) {
     }
 }
 
-fn sync_user_profile_name(active_space: FocusedSpace, mut user: Query<&mut Profile, With<User>>) {
-    let Some(name) = active_space.profile() else {
+fn sync_user_profile_name(
+    current: vmux_ecs::profile::CurrentProfile,
+    mut user: Query<&mut Profile, With<User>>,
+) {
+    let Some(name) = current.label() else {
         return;
     };
     let Ok(mut profile) = user.single_mut() else {
@@ -692,6 +695,32 @@ mod tests {
             .run_system_once(|projector: TeamProjector| projector.members(projector.current()))
             .unwrap();
         assert!(rows.iter().any(|row| !row.is_user && row.is_done_unseen));
+    }
+
+    #[test]
+    fn user_profile_name_does_not_follow_space_changes() {
+        let mut app = App::new();
+        app.add_systems(Update, sync_user_profile_name);
+        app.world_mut().spawn((
+            vmux_ecs::profile::ActiveProfile(vmux_ecs::profile::Profile::current()),
+            Name::new("Personal"),
+            vmux_ecs::profile::ProfileDirectories(vmux_ecs::profile::ProfilePaths::current()),
+        ));
+        let user = app
+            .world_mut()
+            .spawn((Profile::user_named("Old".to_string()), User))
+            .id();
+        app.world_mut().spawn((
+            Space,
+            CurrentSpace,
+            SpaceProfile {
+                name: String::new(),
+            },
+        ));
+
+        app.update();
+
+        assert_eq!(app.world().get::<Profile>(user).unwrap().name, "Personal");
     }
 
     #[test]

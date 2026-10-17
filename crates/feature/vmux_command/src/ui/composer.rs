@@ -91,7 +91,7 @@ pub fn CommandComposerMenus(
             ProjectPicker {
                 placement: PromptPopupPlacement::Downward,
                 projects: projects.clone(),
-                loaded: !composer.projects.is_empty(),
+                loaded: !composer.loading,
                 cursor,
                 on_hover: move |index| {
                     let _ = send(&CommandPaletteMenuHighlightRequest {

@@ -402,11 +402,25 @@ fn reset_sent(
     commands.entity(entity).remove::<SpacesListSent>();
 }
 
-fn open_form(trigger: On<UiInput<SpaceFormOpenRequest>>, mut commands: Commands) {
+fn open_form(
+    trigger: On<UiInput<SpaceFormOpenRequest>>,
+    spaces: Query<&Name, With<Space>>,
+    mut commands: Commands,
+) {
+    let suggestion = if trigger.event().payload.space_id.is_none() {
+        let existing = spaces
+            .iter()
+            .map(|name| name.as_str().to_string())
+            .collect::<std::collections::HashSet<_>>();
+        SpaceRecord::suggested_planet_name(&existing)
+    } else {
+        String::new()
+    };
     let form = SpaceFormState {
         open: true,
         space_id: trigger.event().payload.space_id.clone(),
         draft: trigger.event().payload.draft.clone(),
+        suggestion,
     };
     commands
         .entity(trigger.event().webview)

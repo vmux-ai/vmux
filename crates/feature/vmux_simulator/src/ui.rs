@@ -90,7 +90,7 @@ fn Mirror(
     });
     rsx! {
         div {
-            class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8 outline-none",
+            class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background bg-[radial-gradient(circle_at_50%_10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-8 outline-none",
             tabindex: 0,
             onmounted: move |event: Event<MountedData>| {
                 let target = event.data();
@@ -174,7 +174,7 @@ fn Mirror(
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
                 div {
-                    class: "relative overflow-hidden bg-black ring-1 ring-black",
+                    class: "relative overflow-hidden bg-zinc-950 ring-1 ring-foreground/10",
                     style: screen_style,
                     SimulatorScreenSkeleton { id: stream.loader_id.clone() }
                     canvas {
@@ -537,7 +537,7 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
     let _ = route;
     let frame = SimulatorFrame::fallback();
     rsx! {
-        div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8",
+        div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background bg-[radial-gradient(circle_at_50%_10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-8",
             div {
                 class: "relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
                 style: frame.phone_style(),
@@ -545,7 +545,7 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
                 div {
-                    class: "relative overflow-hidden bg-black ring-1 ring-black",
+                    class: "relative overflow-hidden bg-zinc-950 ring-1 ring-foreground/10",
                     style: frame.screen_style(),
                     SimulatorScreenSkeleton {}
                 }

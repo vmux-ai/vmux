@@ -41,7 +41,7 @@ fn SessionDetail() -> Element {
 
     rsx! {
         main {
-            class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-zinc-100 text-foreground outline-none dark:bg-zinc-900",
+            class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
             style: "--agent-accent:{accent.css};",
             tabindex: "-1",
             onkeydown: move |event| keys.on_root_keydown(event),

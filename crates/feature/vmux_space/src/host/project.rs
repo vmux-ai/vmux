@@ -203,10 +203,7 @@ impl SpaceProjects<'_, '_> {
         let Some(settings) = self.settings.as_deref() else {
             return Vec::new();
         };
-        let Some(overrides) = settings.space(space_id) else {
-            return Vec::new();
-        };
-        overrides.project_rows()
+        settings.project_rows(space_id)
     }
 
     fn rows_of(&self, space_id: &str, space: Option<Entity>) -> Vec<ProjectRow> {
