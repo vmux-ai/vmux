@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use vmux_session::{Route, SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage,
 };
@@ -22,10 +23,6 @@ pub fn SessionsManager() -> Element {
     let mut view = use_signal(|| SessionsView::List);
     let mut stage_filter = use_signal(|| None::<String>);
     let mut selected = use_signal(|| None::<String>);
-    let mut editing = use_signal(|| None::<String>);
-    let mut name = use_signal(String::new);
-    let mut description = use_signal(String::new);
-    let mut editor_open = use_signal(|| false);
     let state = ui.state.read();
     let snapshot = state.sessions.clone();
     let repositories = state.session_repositories.clone();
@@ -41,22 +38,10 @@ pub fn SessionsManager() -> Element {
         })
         .cloned()
         .collect::<Vec<_>>();
-    let visible_count = groups
-        .iter()
-        .map(|group| group.sessions.len())
-        .sum::<usize>();
     let stages = category_groups
         .iter()
         .map(|group| group.stage.clone())
         .collect::<Vec<_>>();
-    let heading = stage_filter()
-        .and_then(|selected| {
-            category_groups
-                .iter()
-                .find(|group| group.stage.id == selected)
-                .map(|group| translate_humanized(&group.stage.name))
-        })
-        .unwrap_or_else(|| translate("sessions-all"));
     let selected_session = selected().and_then(|id| {
         snapshot
             .sessions
@@ -68,7 +53,7 @@ pub fn SessionsManager() -> Element {
     rsx! {
         ManagerPage {
             header { class: "flex h-11 shrink-0 items-center gap-2.5 bg-background px-3",
-                div { class: "relative w-44 max-w-[30vw] sm:w-60",
+                div { class: "relative min-w-0 flex-1",
                     LineIconView {
                         icon: LineIcon::Search,
                         class: "pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground".to_string(),
@@ -81,11 +66,6 @@ pub fn SessionsManager() -> Element {
                         oninput: move |event| query.set(event.value()),
                     }
                 }
-                div { class: "flex min-w-0 items-baseline gap-2",
-                    h1 { class: "truncate text-xs font-medium text-muted-foreground", "{heading}" }
-                    span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{visible_count}" }
-                }
-                div { class: "flex-1" }
                 SessionsViewToggle {
                     selected: view(),
                     onselect: move |selected| view.set(selected),
@@ -98,14 +78,6 @@ pub fn SessionsManager() -> Element {
                         });
                     },
                     {translate("sessions-new")}
-                }
-            }
-            if editor_open() && let Some(id) = editing() {
-                Editor {
-                    id,
-                    name,
-                    description,
-                    onclose: move |_| editor_open.set(false),
                 }
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
@@ -124,27 +96,13 @@ pub fn SessionsManager() -> Element {
                         SessionsList {
                             groups: groups.clone(),
                             repositories: repositories.clone(),
-                            selected: selected(),
                             onselect: move |id| selected.set(Some(id)),
-                            onedit: move |session: SessionSummary| {
-                                editing.set(Some(session.id));
-                                name.set(session.name);
-                                description.set(session.description);
-                                editor_open.set(true);
-                            },
                         }
                     } else {
                         SessionsBoard {
                             groups: groups.clone(),
                             repositories: repositories.clone(),
-                            selected: selected(),
                             onselect: move |id| selected.set(Some(id)),
-                            onedit: move |session: SessionSummary| {
-                                editing.set(Some(session.id));
-                                name.set(session.name);
-                                description.set(session.description);
-                                editor_open.set(true);
-                            },
                         }
                     }
                     if let Some(session) = selected_session {
@@ -153,12 +111,6 @@ pub fn SessionsManager() -> Element {
                             session,
                             stages: stages.clone(),
                             onclose: move |_| selected.set(None),
-                            onedit: move |session: SessionSummary| {
-                                editing.set(Some(session.id));
-                                name.set(session.name);
-                                description.set(session.description);
-                                editor_open.set(true);
-                            },
                         }
                     }
                 }
@@ -276,9 +228,7 @@ fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsVie
 fn SessionsList(
     groups: Vec<StageGroup>,
     repositories: SessionRepositories,
-    selected: Option<String>,
     onselect: EventHandler<String>,
-    onedit: EventHandler<SessionSummary>,
 ) -> Element {
     rsx! {
         div { class: "min-h-0 flex-1 overflow-auto",
@@ -290,9 +240,7 @@ fn SessionsList(
                             stage: group.stage,
                             sessions: group.sessions,
                             repositories: repositories.clone(),
-                            selected: selected.clone(),
                             onselect,
-                            onedit,
                         }
                     }
                 }
@@ -306,16 +254,16 @@ fn SessionListGroup(
     stage: StageSummary,
     sessions: Vec<SessionSummary>,
     repositories: SessionRepositories,
-    selected: Option<String>,
     onselect: EventHandler<String>,
-    onedit: EventHandler<SessionSummary>,
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
             div { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md bg-foreground/[0.055] px-2.5 backdrop-blur",
                 LineIconView { icon: LineIcon::ChevronDown, class: "size-3 text-muted-foreground/65".to_string() }
-                span { class: "size-2 rounded-full {stage_dot}" }
+                span { class: "flex size-4 shrink-0 items-center justify-center",
+                    span { class: "size-2 rounded-full {stage_dot}" }
+                }
                 h2 { class: "text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
                 span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
             }
@@ -324,10 +272,9 @@ fn SessionListGroup(
                     SessionListRow {
                         key: "{session.id}",
                         repository: repositories.get(&session.id),
-                        selected: selected.as_deref() == Some(&session.id),
+                        stage: stage.id.clone(),
                         session,
                         onselect,
-                        onedit,
                     }
                 }
             }
@@ -339,29 +286,25 @@ fn SessionListGroup(
 fn SessionListRow(
     session: SessionSummary,
     repository: Option<SessionRepository>,
-    selected: bool,
+    stage: String,
     onselect: EventHandler<String>,
-    onedit: EventHandler<SessionSummary>,
 ) -> Element {
     let context = SessionContext::from(repository);
-    let edit_session = session.clone();
     let cleanup_id = session.id.clone();
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
     let agent = AgentPresentation::from_session(&session);
+    let stage_dot = StageVisual::for_id(&stage).dot;
     let title = session.display_title();
+    let last_prompt = session.latest_prompt();
     let compact_id = SessionIdentity::new(&session.id).compact();
     let git_url = context.git_url.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
-    let row_class = if selected {
-        "bg-foreground/[0.055]"
-    } else {
-        "hover:bg-foreground/[0.03]"
-    };
     rsx! {
         div {
-            class: "group relative flex h-9 cursor-pointer items-center gap-2 rounded-md px-2.5 text-xs transition-colors {row_class}",
+            class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| onselect.call(select_id.clone()),
+            span { class: "size-3 shrink-0" }
             AgentThumbnail {
                 src: agent.icon.clone(),
                 seed: agent.id.clone(),
@@ -370,11 +313,14 @@ fn SessionListRow(
                 class: "size-4 shrink-0 text-[5px]".to_string(),
             }
             SessionIdPill { label: compact_id, title: session.id.clone() }
-            button {
-                r#type: "button",
-                class: "min-w-0 flex-1 truncate text-left font-medium text-foreground/90",
-                tabindex: "-1",
-                "{title}"
+            span { class: "flex size-4 shrink-0 items-center justify-center",
+                span { class: "size-2 rounded-full {stage_dot}" }
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "truncate font-medium text-foreground/90", "{title}" }
+                if !last_prompt.is_empty() {
+                    div { class: "truncate text-[10px] leading-4 text-muted-foreground/60", "{last_prompt}" }
+                }
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
                 SessionContextView { context: context.clone() }
@@ -387,10 +333,8 @@ fn SessionListRow(
                 time { class: "w-10 text-right text-[10px] tabular-nums text-muted-foreground/65", "{updated}" }
             }
             SessionActions {
-                session: edit_session,
                 git_url,
                 cleanup_id,
-                onedit,
             }
         }
     }
@@ -400,9 +344,7 @@ fn SessionListRow(
 fn SessionsBoard(
     groups: Vec<StageGroup>,
     repositories: SessionRepositories,
-    selected: Option<String>,
     onselect: EventHandler<String>,
-    onedit: EventHandler<SessionSummary>,
 ) -> Element {
     rsx! {
         div { class: "flex min-h-0 flex-1 gap-2 overflow-x-auto p-2",
@@ -412,9 +354,7 @@ fn SessionsBoard(
                     stage: group.stage,
                     sessions: group.sessions,
                     repositories: repositories.clone(),
-                    selected: selected.clone(),
                     onselect,
-                    onedit,
                 }
             }
         }
@@ -426,9 +366,7 @@ fn SessionBoardColumn(
     stage: StageSummary,
     sessions: Vec<SessionSummary>,
     repositories: SessionRepositories,
-    selected: Option<String>,
     onselect: EventHandler<String>,
-    onedit: EventHandler<SessionSummary>,
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
@@ -443,10 +381,8 @@ fn SessionBoardColumn(
                     SessionBoardCard {
                         key: "{session.id}",
                         repository: repositories.get(&session.id),
-                        selected: selected.as_deref() == Some(session.id.as_str()),
                         session,
                         onselect,
-                        onedit,
                     }
                 }
             }
@@ -458,28 +394,20 @@ fn SessionBoardColumn(
 fn SessionBoardCard(
     session: SessionSummary,
     repository: Option<SessionRepository>,
-    selected: bool,
     onselect: EventHandler<String>,
-    onedit: EventHandler<SessionSummary>,
 ) -> Element {
     let context = SessionContext::from(repository);
-    let edit_session = session.clone();
     let cleanup_id = session.id.clone();
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
     let git_url = context.git_url.clone();
     let agent = AgentPresentation::from_session(&session);
     let title = session.display_title();
-    let preview = session.preview();
+    let preview = session.latest_prompt();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
-    let card_class = if selected {
-        "bg-foreground/[0.055]"
-    } else {
-        "hover:bg-foreground/[0.03]"
-    };
     rsx! {
         article {
-            class: "group relative cursor-pointer rounded-md bg-foreground/[0.014] px-2.5 py-2.5 transition-colors {card_class}",
+            class: "group relative cursor-pointer rounded-md bg-foreground/[0.014] px-2.5 py-2.5 transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| onselect.call(select_id.clone()),
             div { class: "flex items-start gap-2",
                 AgentThumbnail {
@@ -496,10 +424,8 @@ fn SessionBoardCard(
                     }
                 }
                 SessionActions {
-                    session: edit_session,
                     git_url: git_url.clone(),
                     cleanup_id,
-                    onedit,
                 }
             }
             if !preview.is_empty() {
@@ -528,17 +454,18 @@ fn SessionDetails(
     repository: Option<SessionRepository>,
     stages: Vec<StageSummary>,
     onclose: EventHandler<MouseEvent>,
-    onedit: EventHandler<SessionSummary>,
 ) -> Element {
     let context = SessionContext::from(repository);
     let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let title = session.display_title();
-    let preview = session.preview();
+    let last_prompt = session.latest_prompt();
     let agent = AgentPresentation::from_session(&session);
-    let edit_session = session.clone();
     let git_url = context.git_url.clone();
+    let title_editing = use_signal(|| false);
+    let title_draft = use_signal(|| title.clone());
+    let rename_id = session.id.clone();
     rsx! {
         aside { class: "flex min-h-0 w-[21rem] shrink-0 flex-col bg-foreground/[0.018]",
             header { class: "flex shrink-0 items-start gap-3 p-4",
@@ -550,7 +477,20 @@ fn SessionDetails(
                     class: "size-8 text-[9px]".to_string(),
                 }
                 div { class: "min-w-0 flex-1",
-                    h2 { class: "break-words text-sm font-semibold text-foreground", "{title}" }
+                    EditableText {
+                        value: title.clone(),
+                        editing: title_editing,
+                        draft: title_draft,
+                        display_class: "-mx-1 block w-full rounded px-1 text-left text-sm font-semibold text-foreground hover:bg-foreground/[0.05]".to_string(),
+                        input_class: "-mx-1 h-7 w-full rounded bg-foreground/[0.055] px-1 text-sm font-semibold text-foreground outline-none ring-1 ring-inset ring-primary/35".to_string(),
+                        title: translate("sessions-name"),
+                        on_commit: move |name| {
+                            let _ = send(&SessionsRename {
+                                id: rename_id.clone(),
+                                name,
+                            });
+                        },
+                    }
                     div { class: "mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground",
                         span { class: "size-1.5 rounded-full {runtime_dot}" }
                         span { {runtime_label(&session.runtime)} }
@@ -569,11 +509,12 @@ fn SessionDetails(
                 }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto p-4",
-                if !preview.is_empty() {
-                    p { class: "mb-4 rounded-lg bg-foreground/[0.035] px-3 py-2.5 text-xs leading-5 text-foreground/70", "{preview}" }
+                if !last_prompt.is_empty() && last_prompt != title {
+                    p { class: "mb-4 px-1 text-xs leading-5 text-muted-foreground", "{last_prompt}" }
                 }
-                if !session.description.is_empty() {
-                    p { class: "mb-4 whitespace-pre-wrap text-xs leading-5 text-foreground/65", "{session.description}" }
+                EditableDescription {
+                    session_id: session.id.clone(),
+                    value: session.description.clone(),
                 }
                 section { class: "rounded-lg bg-foreground/[0.035]",
                     h3 { class: "px-3 pb-1 pt-3 text-[10px] font-medium text-muted-foreground", {translate("editor-properties")} }
@@ -616,11 +557,6 @@ fn SessionDetails(
                     },
                     {translate("sessions-open-chat")}
                 }
-                ManagerButton {
-                    variant: ManagerButtonVariant::Secondary,
-                    onclick: move |_| onedit.call(edit_session.clone()),
-                    {translate("sessions-edit")}
-                }
                 if !git_url.is_empty() {
                     ManagerButton {
                         variant: ManagerButtonVariant::Ghost,
@@ -660,14 +596,75 @@ fn SessionDetailText(label: String, value: String, #[props(default)] mono: bool)
 }
 
 #[component]
-fn SessionActions(
-    session: SessionSummary,
-    git_url: String,
-    cleanup_id: String,
-    onedit: EventHandler<SessionSummary>,
-) -> Element {
+fn EditableDescription(session_id: String, value: String) -> Element {
+    let mut editing = use_signal(|| false);
+    let mut draft = use_signal(|| value.clone());
+    let mut canceled = use_signal(|| false);
+    let display = if value.is_empty() {
+        translate("sessions-description-placeholder")
+    } else {
+        value.clone()
+    };
+    if editing() {
+        let current = value.clone();
+        return rsx! {
+            textarea {
+                class: "mb-4 min-h-20 w-full resize-y rounded-lg bg-foreground/[0.035] px-3 py-2.5 text-xs leading-5 text-foreground outline-none ring-1 ring-inset ring-primary/35",
+                value: draft(),
+                placeholder: translate("sessions-description-placeholder"),
+                aria_label: translate("sessions-description"),
+                autofocus: true,
+                oninput: move |event| draft.set(event.value()),
+                onkeydown: move |event| {
+                    if event.key() != Key::Escape {
+                        return;
+                    }
+                    event.prevent_default();
+                    canceled.set(true);
+                    draft.set(current.clone());
+                    editing.set(false);
+                },
+                onblur: move |_| {
+                    if canceled() {
+                        canceled.set(false);
+                        return;
+                    }
+                    editing.set(false);
+                    let description = draft();
+                    if description == value {
+                        return;
+                    }
+                    let _ = send(&SessionsDescriptionUpdate {
+                        id: session_id.clone(),
+                        description,
+                    });
+                },
+            }
+        };
+    }
+    let edit_value = value.clone();
+    rsx! {
+        button {
+            r#type: "button",
+            class: if value.is_empty() {
+                "mb-4 block w-full rounded-lg px-3 py-2.5 text-left text-xs leading-5 text-muted-foreground/50 hover:bg-foreground/[0.035]"
+            } else {
+                "mb-4 block w-full whitespace-pre-wrap rounded-lg px-3 py-2.5 text-left text-xs leading-5 text-foreground/65 hover:bg-foreground/[0.035]"
+            },
+            title: translate("sessions-description"),
+            onclick: move |_| {
+                canceled.set(false);
+                draft.set(edit_value.clone());
+                editing.set(true);
+            },
+            "{display}"
+        }
+    }
+}
+
+#[component]
+fn SessionActions(git_url: String, cleanup_id: String) -> Element {
     let mut open = use_signal(|| false);
-    let edit_session = session.clone();
     rsx! {
         div { class: "relative flex justify-end",
             button {
@@ -685,13 +682,6 @@ fn SessionActions(
                 div {
                     class: "absolute right-0 top-7 z-30 w-36 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
                     onclick: move |event| event.stop_propagation(),
-                    SessionActionItem {
-                        label: translate("sessions-edit"),
-                        onclick: move |_| {
-                            open.set(false);
-                            onedit.call(edit_session.clone());
-                        },
-                    }
                     if !git_url.is_empty() {
                         SessionActionItem {
                             label: translate("git-title"),
@@ -1011,7 +1001,7 @@ impl StageGroup {
 trait SessionSummaryExt {
     fn matches(&self, query: &str) -> bool;
     fn display_title(&self) -> String;
-    fn preview(&self) -> String;
+    fn latest_prompt(&self) -> String;
 }
 
 impl SessionSummaryExt for SessionSummary {
@@ -1023,6 +1013,7 @@ impl SessionSummaryExt for SessionSummary {
             || self.agent.to_ascii_lowercase().contains(query)
             || self.agent_name.to_ascii_lowercase().contains(query)
             || self.conversation_title.to_ascii_lowercase().contains(query)
+            || self.last_prompt.to_ascii_lowercase().contains(query)
             || self.last_message.to_ascii_lowercase().contains(query)
     }
 
@@ -1033,75 +1024,11 @@ impl SessionSummaryExt for SessionSummary {
         self.conversation_title.clone()
     }
 
-    fn preview(&self) -> String {
-        if !self.last_message.is_empty() && self.last_message != self.display_title() {
-            return self.last_message.clone();
+    fn latest_prompt(&self) -> String {
+        if !self.last_prompt.is_empty() && self.last_prompt != self.display_title() {
+            return self.last_prompt.clone();
         }
-        if !self.description.is_empty() {
-            return self.description.clone();
-        }
-        self.cwd.clone()
-    }
-}
-
-#[component]
-fn Editor(
-    id: String,
-    name: Signal<String>,
-    description: Signal<String>,
-    onclose: EventHandler<MouseEvent>,
-) -> Element {
-    rsx! {
-        div { class: "fixed inset-0 z-50 flex items-start justify-center bg-background/65 px-4 pt-[12vh] backdrop-blur-sm",
-            section { class: "w-full max-w-lg rounded-xl bg-background p-5 shadow-2xl ring-1 ring-inset ring-foreground/12",
-                div { class: "grid gap-3",
-                    label { class: "grid gap-1 text-xs font-medium text-muted-foreground",
-                        {translate("sessions-name")}
-                        input {
-                            class: "rounded-lg bg-foreground/[0.035] px-3 py-2 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 focus:ring-primary/30",
-                            value: name(),
-                            placeholder: translate("sessions-name-placeholder"),
-                            oninput: move |event| name.set(event.value()),
-                        }
-                    }
-                    label { class: "grid gap-1 text-xs font-medium text-muted-foreground",
-                        {translate("sessions-description")}
-                        textarea {
-                            class: "min-h-20 resize-y rounded-lg bg-foreground/[0.035] px-3 py-2 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 focus:ring-primary/30",
-                            value: description(),
-                            placeholder: translate("sessions-description-placeholder"),
-                            oninput: move |event| description.set(event.value()),
-                        }
-                    }
-                    div { class: "flex justify-end gap-2 pt-1",
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Ghost,
-                            onclick: move |event| onclose.call(event),
-                            {translate("common-cancel")}
-                        }
-                        ManagerButton {
-                            disabled: name().trim().is_empty(),
-                            onclick: move |event| {
-                                let value = name().trim().to_string();
-                                if value.is_empty() {
-                                    return;
-                                }
-                                let _ = send(&SessionsRename {
-                                    id: id.clone(),
-                                    name: value,
-                                });
-                                let _ = send(&SessionsDescriptionUpdate {
-                                    id: id.clone(),
-                                    description: description(),
-                                });
-                                onclose.call(event);
-                            },
-                            {translate("common-save")}
-                        }
-                    }
-                }
-            }
-        }
+        String::new()
     }
 }
 

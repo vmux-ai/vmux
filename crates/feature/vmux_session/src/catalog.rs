@@ -48,6 +48,7 @@ pub struct SessionSummary {
     pub agent_color: String,
     pub runtime: String,
     pub conversation_title: String,
+    pub last_prompt: String,
     pub last_message: String,
 }
 
@@ -254,6 +255,7 @@ fn project(
                             .unwrap_or("inactive")
                             .to_string(),
                         conversation_title: conversation.title,
+                        last_prompt: conversation.last_prompt,
                         last_message: conversation.last_message,
                     }
                 },
@@ -271,6 +273,7 @@ fn project(
 #[cfg(host)]
 struct ConversationPreview {
     title: String,
+    last_prompt: String,
     last_message: String,
 }
 
@@ -280,6 +283,11 @@ impl ConversationPreview {
         let title = title
             .map(|title| Self::compact(&title.0))
             .unwrap_or_default();
+        let last_prompt = messages
+            .iter()
+            .rev()
+            .find_map(Self::prompt)
+            .unwrap_or_default();
         let last_message = messages
             .iter()
             .rev()
@@ -287,8 +295,17 @@ impl ConversationPreview {
             .unwrap_or_default();
         Self {
             title,
+            last_prompt,
             last_message,
         }
+    }
+
+    fn prompt(message: &Message) -> Option<String> {
+        let Message::User { text, .. } = message else {
+            return None;
+        };
+        let text = Self::compact(text);
+        (!text.is_empty()).then_some(text)
     }
 
     fn message(message: &Message) -> Option<String> {
@@ -365,16 +382,20 @@ mod tests {
                             "Added conversation previews and metadata pills".into(),
                         )],
                     },
+                    Message::user("Make it feel more like Linear"),
+                    Message::Assistant {
+                        blocks: vec![AssistantBlock::Text(
+                            "Aligned the session list with Linear".into(),
+                        )],
+                    },
                 ],
             });
         app.update();
 
         let summary = &app.world().resource::<CatalogSnapshot>().sessions[0];
         assert_eq!(summary.conversation_title, "Fix session manager");
-        assert_eq!(
-            summary.last_message,
-            "Added conversation previews and metadata pills"
-        );
+        assert_eq!(summary.last_prompt, "Make it feel more like Linear");
+        assert_eq!(summary.last_message, "Aligned the session list with Linear");
 
         app.world_mut()
             .resource_mut::<Messages<RenameRequest>>()
@@ -386,6 +407,10 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<CatalogSnapshot>().sessions[0].name,
+            "Renamed"
+        );
+        assert_eq!(
+            app.world().resource::<CatalogSnapshot>().sessions[0].conversation_title,
             "Renamed"
         );
     }

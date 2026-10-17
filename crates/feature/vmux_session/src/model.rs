@@ -16,6 +16,9 @@ use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order,
 use vmux_ecs::{Cwd, Description};
 
 #[cfg(host)]
+use crate::AgentConversationTitle;
+
+#[cfg(host)]
 pub(crate) struct EntityPlugin;
 
 #[cfg(host)]
@@ -349,12 +352,28 @@ fn project_views(
 #[cfg(host)]
 fn rename(
     mut requests: MessageReader<RenameRequest>,
-    mut sessions: Query<(&SessionId, &mut Name), With<Session>>,
+    mut sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &mut Name,
+            Option<&mut AgentConversationTitle>,
+        ),
+        With<Session>,
+    >,
+    mut commands: Commands,
 ) {
     for request in requests.read() {
-        for (id, mut name) in &mut sessions {
+        for (entity, id, mut name, title) in &mut sessions {
             if id == &request.id {
                 *name = Name::new(request.name.clone());
+                if let Some(mut title) = title {
+                    title.0.clone_from(&request.name);
+                } else {
+                    commands
+                        .entity(entity)
+                        .insert(AgentConversationTitle(request.name.clone()));
+                }
             }
         }
     }
@@ -598,5 +617,9 @@ mod tests {
         let metadata = app.world().get::<PageMetadata>(stack).unwrap();
         assert_eq!(metadata.title, "After");
         assert_eq!(metadata.url, "vmux://sessions/session-1");
+        assert_eq!(
+            app.world().get::<AgentConversationTitle>(session),
+            Some(&AgentConversationTitle("After".into()))
+        );
     }
 }
