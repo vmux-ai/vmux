@@ -29,18 +29,17 @@ pub(super) fn EmptyRepository() -> Element {
     let workspace = ui.workspace;
     let message = ui.message;
     let directory = directory();
+    if loading {
+        return rsx! { GitLoadingSkeleton {} };
+    }
     if directory.path.is_empty() {
         return rsx! {
-            if loading {
-                GitLoadingSkeleton {}
-            } else {
-                main { class: "flex min-h-0 flex-1 items-center justify-center p-8",
-                    div { class: "text-center",
-                        LineIconView { icon: LineIcon::GitBranch, class: "mx-auto h-7 w-7 text-muted-foreground" }
-                        h2 { class: "mt-4 text-lg font-semibold", {translate("git-no-repository")} }
-                        if !workspace.is_empty() {
-                            div { class: "mt-2 break-all font-mono text-xs text-muted-foreground", "{workspace}" }
-                        }
+            main { class: "flex min-h-0 flex-1 items-center justify-center p-8",
+                div { class: "text-center",
+                    LineIconView { icon: LineIcon::GitBranch, class: "mx-auto h-7 w-7 text-muted-foreground" }
+                    h2 { class: "mt-4 text-lg font-semibold", {translate("git-no-repository")} }
+                    if !workspace.is_empty() {
+                        div { class: "mt-2 break-all font-mono text-xs text-muted-foreground", "{workspace}" }
                     }
                 }
             }

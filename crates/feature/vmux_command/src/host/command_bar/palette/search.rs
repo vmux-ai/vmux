@@ -126,10 +126,10 @@ fn queue_files(
     commands: &mut Commands,
 ) {
     let generation = search.completion_generation.advance();
-    snapshot.0.completions.clear();
-    snapshot.0.completions_partial = false;
-    snapshot.0.completions_total = 0;
     let Some(query) = CompletionQuery::parse(&search.query) else {
+        snapshot.0.completions.clear();
+        snapshot.0.completions_partial = false;
+        snapshot.0.completions_total = 0;
         return;
     };
     commands.spawn((
@@ -226,5 +226,61 @@ fn request_history(
                 request_id: delay.0.generation,
             },
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_api::command_bar::{OpenId, PathEntry};
+    use vmux_ecs::launcher::RendersLauncherPanel;
+
+    #[test]
+    fn typing_keeps_file_rows_until_the_replacement_arrives() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(PaletteSearchPlugin);
+        let page = app
+            .world_mut()
+            .spawn((RendersLauncherPanel, PaletteSnapshot::default()))
+            .id();
+        app.update();
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: CommandPaletteDraftRequest {
+                open_id: OpenId(1),
+                query: "@main".to_string(),
+                start: false,
+            },
+        });
+        app.world_mut()
+            .get_mut::<PaletteSnapshot>(page)
+            .unwrap()
+            .0
+            .completions = vec![PathEntry {
+            name: "main.rs".to_string(),
+            full_path: "/repo/src/main.rs".to_string(),
+            ..Default::default()
+        }];
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: CommandPaletteDraftRequest {
+                open_id: OpenId(1),
+                query: "@main.r".to_string(),
+                start: false,
+            },
+        });
+
+        assert_eq!(
+            app.world()
+                .get::<PaletteSnapshot>(page)
+                .unwrap()
+                .0
+                .completions[0]
+                .full_path,
+            "/repo/src/main.rs"
+        );
     }
 }

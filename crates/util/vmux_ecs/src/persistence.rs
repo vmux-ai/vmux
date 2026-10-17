@@ -1,5 +1,9 @@
-use bevy::prelude::*;
-use bevy::reflect::{FromType, GetTypeRegistration, TypePath, TypeRegistry};
+use bevy_app::{App, Update};
+use bevy_ecs::prelude::*;
+#[cfg(test)]
+use bevy_ecs::reflect::AppTypeRegistry;
+use bevy_ecs::system::SystemParam;
+use bevy_reflect::{FromType, GetTypeRegistration, Reflect, TypePath, TypeRegistry};
 use bevy_world_serialization::WorldFilter;
 use std::path::PathBuf;
 
@@ -47,7 +51,7 @@ pub struct WorkspaceStoreValidator {
     pub rejects: fn(&str) -> bool,
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
+#[derive(SystemParam)]
 pub struct WorkspaceStoreValidators<'w, 's> {
     validators: Query<'w, 's, &'static WorkspaceStoreValidator>,
 }

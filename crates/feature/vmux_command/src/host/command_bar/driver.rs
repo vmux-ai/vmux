@@ -12,11 +12,9 @@ pub(super) use self::decision::{PaletteDecision, PaletteState};
 #[cfg(test)]
 use self::decision::{RowText, TypedRow};
 use self::decision::{SelectedAgentModels, SelectedAgentModes};
-#[cfg(test)]
-use self::file::ProjectPath;
 pub(super) use self::file::{CompletionQuery, Completions, FileRows};
 use self::results::{
-    CommandBarResultItem, PageRows, PickerRows, SearchRows, SearchRowsInput, SlashRows, StartRows,
+    CommandBarResultItem, PageRows, PickerRows, PromptRows, SearchRows, SearchRowsInput, SlashRows,
 };
 
 pub(super) use query::PaletteQuery;
@@ -57,18 +55,14 @@ impl PaletteDraft {
         if mode == &PaletteMode::Slash {
             return SlashRows::for_query(query, state.prompt_context.slash_commands.as_slice());
         }
+        if CompletionQuery::only_files(query) {
+            return self.with_completions(Vec::new());
+        }
         if is_start && query.trim().is_empty() {
             return PageRows::open_sessions(&state.tabs, &state.pages);
         }
         if start_prompt_mode {
-            let matched = StartRows::start(
-                &state.pages,
-                &state.work_dirs,
-                &state.recent_files,
-                &state.search_engines,
-                query,
-            );
-            return self.with_completions(matched);
+            return PromptRows::for_query(&state.pages, &state.search_engines, query);
         }
         let matched = SearchRows::filter(SearchRowsInput {
             query,
@@ -76,10 +70,7 @@ impl PaletteDraft {
             commands: &state.commands,
             pages: &state.pages,
             history: &self.history,
-            work_dirs: &state.work_dirs,
-            recent_files: &state.recent_files,
         });
-        let matched = self.with_completions(matched);
         if !is_start {
             return matched;
         }
@@ -113,20 +104,7 @@ impl PaletteDraft {
     }
 
     fn ghost(&self) -> String {
-        if CompletionQuery::parse(&self.query).is_none() {
-            return String::new();
-        }
-        let Some(first) = self.completions.first() else {
-            return String::new();
-        };
-        let typed = self.query.trim();
-        let full = &first.full_path;
-        if !full.to_lowercase().starts_with(&typed.to_lowercase())
-            || !full.is_char_boundary(typed.len())
-        {
-            return String::new();
-        }
-        full[typed.len()..].to_string()
+        String::new()
     }
 }
 
@@ -194,27 +172,29 @@ impl PaletteRows {
         let is_start = surface.is_start();
         let slash_commands = state.prompt_context.slash_commands.as_slice();
         let mode = PaletteQuery::new(query).mode(state.picker.clone(), slash_commands);
-        let prompt_targets = if is_start {
-            PageRows::prompt_targets(&state.pages, "")
-        } else {
-            Vec::new()
-        };
+        let prompt_targets = PageRows::prompt_targets(&state.pages, "");
         let default_target = prompt_targets
             .iter()
             .find(|item| PageRows::prompt_target_url(item) == Some(draft.target_url.as_str()))
             .cloned()
             .or_else(|| prompt_targets.first().cloned());
-        let start_prompt_mode = is_start && PaletteQuery::new(query).is_start_prompt();
+        let prompt_mode =
+            matches!(mode, PaletteMode::Search) && PaletteQuery::new(query).is_prompt();
+        let start_prompt_mode = is_start && prompt_mode;
 
-        let mut items = FileRows::under_projects(
-            draft.items(state, surface, &mode, start_prompt_mode),
-            &state.projects,
-        );
+        let mut items = draft.items(state, surface, &mode, start_prompt_mode);
         if start_prompt_mode {
-            StartRows::prepend_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
+            PromptRows::prepend_targets(
+                &mut items,
+                default_target.as_ref(),
+                &prompt_targets,
+                query,
+            );
+        } else if prompt_mode {
+            PromptRows::insert_target(&mut items, default_target.as_ref(), query);
         }
         for item in &mut items {
-            let show_hint = start_prompt_mode
+            let show_hint = prompt_mode
                 && PageRows::prompt_target_url(item).is_some()
                 && !PageRows::prompt_target_matches(item, query);
             if let CommandBarResultItem::Page { prompt_hint, .. } = item {
@@ -266,10 +246,8 @@ impl Glyph {
             | CommandBarResultItem::Slash { .. }
             | CommandBarResultItem::Pick { .. } => PaletteGlyph::Command,
             CommandBarResultItem::File { .. }
-            | CommandBarResultItem::WorkDir { .. }
             | CommandBarResultItem::PartialIndex
-            | CommandBarResultItem::MoreMatches { .. }
-            | CommandBarResultItem::RecentFile { .. } => PaletteGlyph::Path,
+            | CommandBarResultItem::MoreMatches { .. } => PaletteGlyph::Path,
             CommandBarResultItem::Stack { .. } | CommandBarResultItem::History { .. } => {
                 PaletteGlyph::Url
             }
@@ -329,12 +307,16 @@ impl Composer {
         };
         let mut agents = Vec::new();
         for item in prompt_targets {
-            let CommandBarResultItem::Page { url, title, .. } = item else {
+            let CommandBarResultItem::Page {
+                url, title, icon, ..
+            } = item
+            else {
                 continue;
             };
             agents.push(CommandPaletteAgent {
                 url: url.clone(),
                 title: title.clone(),
+                icon: icon.clone(),
             });
         }
         let models = SelectedAgentModels::find(&state.agent_models, &agent_url);
@@ -377,7 +359,7 @@ impl Composer {
         };
 
         CommandPaletteComposer {
-            loading: state.pages.is_empty(),
+            loading: state.pages.is_empty() && state.commands.is_empty(),
             agents,
             agent_title,
             agent_url,
@@ -414,10 +396,10 @@ mod tests {
         CommandBarPickRow, CommandBarPromptContext, CommandBarTab, ExRequest, OpenRequest,
         PickRequest, PromptRequest, SearchEngine, SwitchTabRequest,
     };
+    use vmux_api::conversation::ModelOptionEntry;
     use vmux_api::open_target::OpenTarget;
     use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
     use vmux_api::protocol::AcpModeOption;
-    use vmux_api::room::ModelOptionEntry;
     use vmux_api::space::ProjectRow;
 
     fn search_engine(id: &str) -> SearchEngine {
@@ -491,7 +473,7 @@ mod tests {
                         startup: false,
                     },
                     CommandBarPage {
-                        url: "vmux://sessions/vibe/".into(),
+                        url: "vmux://sessions/?agent=vibe".into(),
                         title: "Vibe".into(),
                         keywords: vec!["vibe".into()],
                         icon: vmux_api::PageIcon::None,
@@ -500,10 +482,10 @@ mod tests {
                         startup: false,
                     },
                     CommandBarPage {
-                        url: "vmux://sessions/codex/cli".into(),
+                        url: "vmux://sessions/?agent=codex".into(),
                         title: "Codex".into(),
                         keywords: vec!["codex".into()],
-                        icon: vmux_api::PageIcon::None,
+                        icon: vmux_api::PageIcon::Favicon("https://example.com/codex.png".into()),
                         shortcut: String::new(),
                         prompt_target: true,
                         startup: false,
@@ -558,7 +540,7 @@ mod tests {
             CommandBarOpenEvent {
                 tabs: vec![CommandBarTab {
                     title: "Docs".into(),
-                    url: "vmux://sessions/codex/def".into(),
+                    url: "vmux://sessions/session-codex".into(),
                     pane_id: 8,
                     tab_index: 1,
                     is_active: false,
@@ -580,10 +562,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_word_keeps_commands_above_the_files_it_also_matched() {
+    fn a_file_name_keeps_commands_above_the_files_it_also_matched() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "settings",
+            "@settings",
             Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
@@ -595,7 +577,7 @@ mod tests {
     fn a_typed_path_puts_its_files_first() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "~/src",
+            "@~/src",
             Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
@@ -607,11 +589,14 @@ mod tests {
     fn a_recent_file_row_for_an_already_listed_file_is_dropped() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "~/src",
+            "@~/src",
             Completions::listing(&hits),
-            vec![CommandBarResultItem::RecentFile {
+            vec![CommandBarResultItem::History {
                 url: "file:///root/src/settings.rs".to_string(),
                 title: "settings.rs".to_string(),
+                favicon_url: String::new(),
+                visit_count: 1,
+                last_visited_at: 1,
             }],
         );
         assert_eq!(merged.len(), 1);
@@ -623,7 +608,7 @@ mod tests {
         let paths: Vec<String> = (0..40).map(|at| format!("src/main_{at:02}.rs")).collect();
         let named: Vec<&str> = paths.iter().map(String::as_str).collect();
         let hits = FileRows::hits(&named);
-        let merged = FileRows::merge("main.rs", Completions::listing(&hits), Vec::new());
+        let merged = FileRows::merge("@main.rs", Completions::listing(&hits), Vec::new());
 
         assert_eq!(merged.len(), 40);
         assert!(
@@ -639,7 +624,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::modal(
             &state,
-            PaletteDraft::typed("main.rs")
+            PaletteDraft::typed("@main.rs")
                 .completing(FileRows::hits(&["src/main.rs", "src/other/main.rs"]))
                 .out_of(14),
         );
@@ -657,7 +642,7 @@ mod tests {
     fn a_partial_index_owns_up_to_it_below_the_files_it_did_find() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "settings",
+            "@settings",
             Completions::partial(&hits),
             vec![FileRows::a_command()],
         );
@@ -668,7 +653,7 @@ mod tests {
 
     #[test]
     fn a_partial_index_that_found_nothing_still_says_why() {
-        let merged = FileRows::merge("settings", Completions::partial(&[]), Vec::new());
+        let merged = FileRows::merge("@settings", Completions::partial(&[]), Vec::new());
 
         assert_eq!(merged, vec![CommandBarResultItem::PartialIndex]);
     }
@@ -678,7 +663,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::modal(
             &state,
-            PaletteDraft::typed("settings")
+            PaletteDraft::typed("@settings")
                 .partially_completing(FileRows::hits(&["src/settings.rs"]))
                 .navigating(),
         );
@@ -691,7 +676,7 @@ mod tests {
         let submission = palette.activate(&palette.rows[at], &[]);
         assert_eq!(submission, PaletteDecision::Close);
         assert_eq!(
-            RowText::over(Some(&CommandBarResultItem::PartialIndex), "settings"),
+            RowText::over(Some(&CommandBarResultItem::PartialIndex), "@settings"),
             None
         );
     }
@@ -700,7 +685,7 @@ mod tests {
     fn a_complete_index_says_nothing() {
         let hits = FileRows::hits(&["src/settings.rs"]);
         let merged = FileRows::merge(
-            "settings",
+            "@settings",
             Completions::listing(&hits),
             vec![FileRows::a_command()],
         );
@@ -713,39 +698,75 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_word_reaches_the_host_but_prose_and_urls_do_not() {
+    fn only_at_prefixed_queries_reach_file_search() {
+        for query in ["handler", "mobile main", "/root/src", "file://~/x"] {
+            assert_eq!(CompletionQuery::parse(query), None, "{query}");
+        }
         assert_eq!(
-            CompletionQuery::parse("handler").as_deref(),
-            Some("handler")
+            CompletionQuery::parse("@main.rs").as_deref(),
+            Some("main.rs")
         );
         assert_eq!(
-            CompletionQuery::parse("https://example.com").as_deref(),
-            None
-        );
-        assert_eq!(CompletionQuery::parse("file://~/x").as_deref(), Some("~/x"));
-    }
-
-    #[test]
-    fn several_words_reach_the_host_so_a_path_can_be_narrowed_word_by_word() {
-        assert_eq!(
-            CompletionQuery::parse("mobile main").as_deref(),
+            CompletionQuery::parse("@mobile main").as_deref(),
             Some("mobile main")
         );
         assert_eq!(
-            CompletionQuery::parse("desktop src/lib").as_deref(),
-            Some("desktop src/lib")
+            CompletionQuery::parse("@file://~/x").as_deref(),
+            Some("~/x")
+        );
+        assert_eq!(CompletionQuery::parse("@").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn at_prefix_offers_only_files() {
+        let files = FileRows::hits(&["src/main.rs"]);
+        let palette = PaletteState::modal(
+            &Launcher::state(),
+            PaletteDraft::typed("@main").completing(files),
+        );
+
+        assert!(
+            palette
+                .rows
+                .iter()
+                .all(|row| matches!(row, CommandBarResultItem::File { .. }))
+        );
+        assert_eq!(palette.rows.len(), 1);
+        let start = PaletteState::start(
+            &Launcher::state(),
+            PaletteDraft::typed("@main").completing(FileRows::hits(&["src/main.rs"])),
+        );
+        assert_eq!(
+            start.submit_start(&[]),
+            PaletteDecision::Attach("/root/src/main.rs".to_string())
+        );
+        assert_eq!(
+            PaletteState::modal(&Launcher::state(), PaletteDraft::typed("@missing"))
+                .submit_modal(&[]),
+            PaletteDecision::None
         );
     }
 
     #[test]
-    fn a_file_under_a_project_is_shown_against_that_project() {
-        let projects = vec!["/code/dashboard".to_string(), "/code".to_string()];
-        assert_eq!(
-            ProjectPath::split("/code/dashboard/src/main.rs", &projects),
-            Some(("dashboard".to_string(), "src/main.rs".to_string())),
-            "the longest matching root wins, or a worktree is shown against its parent repo"
-        );
-        assert_eq!(ProjectPath::split("/elsewhere/main.rs", &projects), None);
+    fn plain_queries_ignore_stale_file_completions() {
+        let files = FileRows::hits(&["src/main.rs"]);
+        for palette in [
+            PaletteState::start(
+                &Launcher::state(),
+                PaletteDraft::typed("how do i").completing(files.clone()),
+            ),
+            PaletteState::modal(
+                &Launcher::state(),
+                PaletteDraft::typed("main").completing(files.clone()),
+            ),
+        ] {
+            assert!(palette.rows.iter().all(|row| !matches!(
+                row,
+                CommandBarResultItem::File { .. }
+                    | CommandBarResultItem::PartialIndex
+                    | CommandBarResultItem::MoreMatches { .. }
+            )));
+        }
     }
 
     #[test]
@@ -794,29 +815,70 @@ mod tests {
         let defaulted = PaletteState::start(&state, PaletteDraft::typed("fix the failing test"));
         assert_eq!(
             PageRows::prompt_target_url(&defaulted.rows[0]),
-            Some("vmux://sessions/vibe/")
+            Some("vmux://sessions/?agent=vibe")
         );
 
         let chosen = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/?agent=codex"),
         );
         assert_eq!(
             PageRows::prompt_target_url(&chosen.rows[0]),
-            Some("vmux://sessions/codex/cli")
+            Some("vmux://sessions/?agent=codex")
         );
         assert_eq!(chosen.composer.agent_title, "Codex");
+        assert!(matches!(
+            chosen
+                .composer
+                .agents
+                .iter()
+                .find(|agent| agent.url == "vmux://sessions/?agent=codex")
+                .map(|agent| &agent.icon),
+            Some(vmux_api::PageIcon::Favicon(icon))
+                if icon == "https://example.com/codex.png"
+        ));
         assert_eq!(chosen.accent_agent.as_deref(), Some("codex"));
     }
 
     #[test]
-    fn the_modal_surface_offers_no_agents_and_no_composer_agent() {
+    fn the_modal_surface_offers_the_default_agent_for_prose() {
         let state = Launcher::state();
         let bar = PaletteState::modal(&state, PaletteDraft::typed("fix the failing test"));
 
-        assert!(bar.prompt_targets.is_empty());
-        assert!(bar.default_target.is_none());
+        assert_eq!(
+            PageRows::prompt_target_url(&bar.rows[0]),
+            Some("vmux://sessions/?agent=vibe")
+        );
+        assert_eq!(bar.rows[0].projection().title, "Ask Vibe");
         assert!(!bar.start_prompt_mode);
+        assert_eq!(bar.composer.agent_title, "Vibe");
+        assert_eq!(
+            bar.submit_modal(&[]),
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest {
+                    text: "fix the failing test".to_string(),
+                    target_url: Some("vmux://sessions/?agent=vibe".to_string()),
+                    attachments: Vec::new(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn a_loaded_palette_without_agents_does_not_stay_loading() {
+        let state = CommandBarOpenEvent {
+            commands: vec![CommandBarCommandEntry {
+                id: "settings".into(),
+                name: "Settings".into(),
+                shortcut: String::new(),
+            }],
+            ..CommandBarOpenEvent::default()
+        };
+
+        let bar = PaletteState::start(&state, PaletteDraft::default());
+
+        assert!(!bar.composer.loading);
         assert_eq!(bar.composer.agent_title, "Agent");
     }
 
@@ -1069,6 +1131,10 @@ mod tests {
             PaletteQuery::new("how do i").mode(None, &[]),
             PaletteMode::Search
         );
+        assert_eq!(
+            PaletteQuery::new("@main.rs").mode(None, &[]),
+            PaletteMode::Path
+        );
     }
 
     #[test]
@@ -1131,7 +1197,7 @@ mod tests {
 
     #[test]
     fn a_seeded_prefix_is_typed_past_but_a_seeded_url_is_replaced() {
-        for seed in [":", ">", "/"] {
+        for seed in [":", ">", "/", "@"] {
             assert!(
                 PaletteQuery::new(seed).opens_at_end(None),
                 "`{seed}` opens a mode, so the next keystroke must append to it"
@@ -1146,25 +1212,21 @@ mod tests {
     }
 
     #[test]
-    fn the_ghost_completes_a_typed_path_but_never_prose() {
+    fn file_results_never_overlay_the_typed_query() {
         let state = Launcher::state();
         let hits = FileRows::hits(&["src/main.rs"]);
 
-        let path = PaletteState::start(
+        let file = PaletteState::start(
             &state,
-            PaletteDraft::typed("/root/src").completing(hits.clone()),
+            PaletteDraft::typed("@main").completing(hits.clone()),
         );
-        assert_eq!(path.ghost, "/main.rs");
+        assert!(file.ghost.is_empty());
 
         let prose = PaletteState::start(
             &state,
             PaletteDraft::typed("how do i").completing(hits.clone()),
         );
         assert!(prose.ghost.is_empty());
-
-        let mismatched =
-            PaletteState::start(&state, PaletteDraft::typed("/other").completing(hits));
-        assert!(mismatched.ghost.is_empty());
     }
 
     #[test]
@@ -1176,8 +1238,8 @@ mod tests {
         assert_eq!(listed.selected, listed.rows.len() - 1);
 
         let single = PaletteState::modal(&state, PaletteDraft::typed("zzzz").at(4));
-        assert_eq!(single.rows.len(), 1, "{:?}", single.rows);
-        assert_eq!(single.selected, 0);
+        assert_eq!(single.rows.len(), 2, "{:?}", single.rows);
+        assert_eq!(single.selected, 1);
     }
 
     #[test]
@@ -1208,7 +1270,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: "fix the failing test".to_string(),
-                    target_url: Some("vmux://sessions/vibe/".to_string()),
+                    target_url: Some("vmux://sessions/?agent=vibe".to_string()),
                     attachments: Vec::new(),
                 },
             }
@@ -1220,7 +1282,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/?agent=codex"),
         );
 
         let submitted = palette.submit_start(&[]);
@@ -1231,7 +1293,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: "fix the failing test".to_string(),
-                    target_url: Some("vmux://sessions/codex/cli".to_string()),
+                    target_url: Some("vmux://sessions/?agent=codex".to_string()),
                     attachments: Vec::new(),
                 },
             }
@@ -1250,7 +1312,7 @@ mod tests {
             PaletteDecision::Open {
                 close: true,
                 request: OpenRequest {
-                    value: "vmux://sessions/vibe/".to_string(),
+                    value: "vmux://sessions/?agent=vibe".to_string(),
                     open: palette.open_target,
                 },
             }
@@ -1277,7 +1339,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: String::new(),
-                    target_url: Some("vmux://sessions/vibe/".to_string()),
+                    target_url: Some("vmux://sessions/?agent=vibe".to_string()),
                     attachments: vec![ChatSubmitAttachment::from(&attached[0])],
                 },
             }
@@ -1404,7 +1466,7 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/?agent=codex"),
         );
 
         assert_eq!(
@@ -1413,7 +1475,7 @@ mod tests {
                 close: true,
                 request: PromptRequest {
                     text: "fix the failing test".to_string(),
-                    target_url: Some("vmux://sessions/codex/cli".to_string()),
+                    target_url: Some("vmux://sessions/?agent=codex".to_string()),
                     attachments: Vec::new(),
                 },
             }
@@ -1437,7 +1499,7 @@ mod tests {
         let mut state = Launcher::state();
         state.agent_models = vec![AgentModels {
             agent_key: "vibe".into(),
-            url: "vmux://sessions/vibe/".into(),
+            url: "vmux://sessions/?agent=vibe".into(),
             selected: "big".into(),
             models: vec![
                 ModelOptionEntry {
@@ -1460,7 +1522,7 @@ mod tests {
 
         let codex = PaletteState::start(
             &state,
-            PaletteDraft::typed("fix it").targeting("vmux://sessions/codex/cli"),
+            PaletteDraft::typed("fix it").targeting("vmux://sessions/?agent=codex"),
         );
         assert!(codex.composer.model_name.is_empty());
         assert!(codex.composer.model_options.is_empty());
@@ -1471,7 +1533,7 @@ mod tests {
         let mut state = Launcher::state();
         state.agent_modes = vec![AgentModes {
             agent_key: "vibe".into(),
-            url: "vmux://sessions/vibe".into(),
+            url: "vmux://sessions/?agent=vibe".into(),
             selected: "agent".into(),
             modes: vec![AcpModeOption {
                 id: "agent".into(),
@@ -1538,7 +1600,10 @@ mod tests {
 
         assert_eq!(
             urls,
-            vec!["vmux://sessions/vibe/", "vmux://sessions/codex/cli"]
+            vec![
+                "vmux://sessions/?agent=vibe",
+                "vmux://sessions/?agent=codex"
+            ]
         );
     }
 }

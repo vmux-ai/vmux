@@ -12,7 +12,8 @@ use vmux_ecs::{FileUiStateUpdates, FileUiStateWrite};
 
 use crate::event::{
     DiffKind, FileGitState, FileStatus, GitCommitDraftRequest, GitCommitRequest,
-    GitCommitSubmitRequest, GitDiffRow, GitDiffViewport, GitFileStatus, GitOperationResult,
+    GitCommitSubmitRequest, GitDiffRevealRequest, GitDiffRow, GitDiffViewport, GitFileStatus,
+    GitOperationResult,
 };
 
 use super::GitDiffSource;
@@ -22,7 +23,6 @@ use super::watch::GitWatch;
 
 const STATUS_DEBOUNCE: Duration = Duration::from_millis(120);
 const DIFF_CONTEXT_LINES: usize = 3;
-const DIFF_REVEAL_LINES: usize = 20;
 
 pub(super) struct StatusPlugin;
 
@@ -298,12 +298,13 @@ impl FileGitStates<'_, '_> {
                 index += 1;
             }
             let hidden = index - start;
-            let (reveal_start, reveal_end) = if hidden <= DIFF_REVEAL_LINES {
+            let chunk = GitDiffRevealRequest::CHUNK as usize;
+            let (reveal_start, reveal_end) = if hidden <= chunk {
                 (start, index)
             } else if start == 0 {
-                (index - DIFF_REVEAL_LINES, index)
+                (index - chunk, index)
             } else {
-                (start, start + DIFF_REVEAL_LINES)
+                (start, start + chunk)
             };
             rows.push(GitDiffRow::Gap {
                 start: start as u32,

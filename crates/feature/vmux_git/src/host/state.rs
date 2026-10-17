@@ -9,8 +9,8 @@ use crate::event::GitDiffRow;
 #[cfg(test)]
 use crate::event::GitDiffViewport;
 use crate::event::{
-    DiffKind, GitBranchLog, GitBranchLogRequest, GitOperationError, GitOperationResult,
-    GitRepositoryRequest, GitRepositorySnapshot,
+    DiffKind, GitBranchLog, GitBranchLogRequest, GitDiffRevealRequest, GitOperationError,
+    GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
 };
 use crate::state::{GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState};
 
@@ -24,7 +24,6 @@ use super::watch::GitWatch;
 type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
 
 const DIFF_CONTEXT_LINES: usize = 3;
-const DIFF_REVEAL_LINES: usize = 20;
 
 pub(super) struct StatePlugin;
 
@@ -94,6 +93,12 @@ impl GitStates<'_, '_> {
             .get(entity)
             .ok()
             .map(|state| state.snapshot.workspace.clone())
+    }
+
+    pub(super) fn repository_loaded_at(&self, entity: Entity, path: &str) -> bool {
+        self.states.get(entity).is_ok_and(|state| {
+            state.snapshot.workspace == path && state.snapshot.repository.is_some()
+        })
     }
 
     pub(super) fn reset(&mut self, entity: Entity, workspace: String) {
@@ -280,12 +285,13 @@ fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
                 index += 1;
             }
             let hidden = index - start;
-            let (reveal_start, reveal_end) = if hidden <= DIFF_REVEAL_LINES {
+            let chunk = GitDiffRevealRequest::CHUNK as usize;
+            let (reveal_start, reveal_end) = if hidden <= chunk {
                 (start, index)
             } else if start == 0 {
-                (index - DIFF_REVEAL_LINES, index)
+                (index - chunk, index)
             } else {
-                (start, start + DIFF_REVEAL_LINES)
+                (start, start + chunk)
             };
             rows.push(GitDiffRow::Gap {
                 start: start as u32,
@@ -471,16 +477,16 @@ mod tests {
             .get_mut::<GitDiffRevealRanges>(entity)
             .unwrap()
             .0
-            .push((0, DIFF_REVEAL_LINES));
+            .push((0, GitDiffRevealRequest::CHUNK as usize));
         app.update();
         let state = app.world().get::<GitState>(entity).unwrap();
 
         assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Line(0)));
         assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Gap {
-            start: DIFF_REVEAL_LINES as u32,
+            start: GitDiffRevealRequest::CHUNK,
             end: 46,
-            reveal_start: DIFF_REVEAL_LINES as u32,
-            reveal_end: (DIFF_REVEAL_LINES * 2) as u32,
+            reveal_start: GitDiffRevealRequest::CHUNK,
+            reveal_end: GitDiffRevealRequest::CHUNK * 2,
         }));
     }
 }

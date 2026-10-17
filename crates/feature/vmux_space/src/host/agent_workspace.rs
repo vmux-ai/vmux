@@ -5,12 +5,12 @@ use vmux_api::BinEvent;
 use vmux_api::protocol::ProcessId;
 #[cfg(test)]
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
-use vmux_chat::host::USER_CHOICE_REQUESTED;
 use vmux_command::WriteCommandRequests;
 #[cfg(test)]
 use vmux_ecs::agent::CommandOrigin;
 use vmux_ecs::agent::{AgentRequestBlocked, AgentRequestInput, AgentRequestPrerequisiteSet};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_session::host::USER_CHOICE_REQUESTED;
 use vmux_setting::{AppSettings, StartupDir};
 
 use super::agent::{

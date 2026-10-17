@@ -4,10 +4,10 @@ use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::{Mutex, broadcast, mpsc};
+use vmux_api::conversation::ClientOpId;
 use vmux_api::protocol::{
     ClientMessage, ServiceMessage, SharedEvent, SharedMessage, SharedResponse,
 };
-use vmux_api::room::ClientOpId;
 use vmux_profile::ServicePaths;
 
 use crate::framing::LengthPrefixed;

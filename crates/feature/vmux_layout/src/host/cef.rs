@@ -276,7 +276,7 @@ mod apply_cef_state_tests {
     }
 
     #[test]
-    fn vmux_agent_url_accepts_dynamic_title_only() {
+    fn vmux_acp_url_accepts_dynamic_title_only() {
         for url in ["vmux://sessions/codex", "vmux://agent/codex"] {
             let mut meta = PageMetadata {
                 url: url.into(),

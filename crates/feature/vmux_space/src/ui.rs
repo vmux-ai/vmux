@@ -15,9 +15,11 @@ use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "SpacesUiState", "KeyClaimsUiState"]
 )]
 pub(crate) struct SpacesPage;
 
@@ -38,7 +40,7 @@ pub fn Page() -> Element {
     let active_name = spaces
         .iter()
         .find(|space| space.is_active)
-        .map(|space| space.name.clone())
+        .map(SpaceRow::display_name)
         .unwrap_or_else(|| {
             translate_with(
                 "spaces-default-name",
@@ -119,9 +121,9 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFor
     let nav_id = space.id.clone();
     let delete_id = space.id.clone();
     let rename_id = space.id.clone();
-    let rename_name = space.name.clone();
+    let rename_name = space.display_name();
     let menu_rename_id = space.id.clone();
-    let menu_rename_name = space.name.clone();
+    let menu_rename_name = space.display_name();
     let menu_delete_id = space.id.clone();
     let class = if selected {
         "relative flex min-h-24 cursor-pointer items-center justify-between rounded-xl border border-primary/40 bg-primary/[0.08] px-3 py-3 shadow-[0_0_18px_-6px_color-mix(in_oklab,var(--primary)_50%,transparent)]"
@@ -145,8 +147,8 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFor
                         } else {
                             "absolute inset-0 z-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
                         },
-                        title: space.name.clone(),
-                        aria_label: space.name.clone(),
+                        title: space.display_name(),
+                        aria_label: space.display_name(),
                         disabled: editing,
                         onclick: move |_| {
                         let _ = send(&SpaceAttachRequest { space_id: nav_id.clone() });
@@ -155,6 +157,10 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFor
                     div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center justify-between",
                         div { class: "min-w-0 flex-1",
                             div { class: "flex min-w-0 items-center gap-2",
+                                LineIconView {
+                                    icon: LineIcon::Planet,
+                                    class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                                }
                                 if editing {
                                     SpaceFormView { form: form.clone() }
                                 } else {
@@ -169,7 +175,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFor
                                                 draft: rename_name.clone(),
                                             });
                                         },
-                                        "{space.name}"
+                                        {space.display_name()}
                                     }
                                 }
                             if space.is_active {

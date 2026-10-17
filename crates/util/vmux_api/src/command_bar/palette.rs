@@ -1,7 +1,7 @@
 use super::CommandBarPicker;
 use crate::PageIcon;
+use crate::conversation::ModelOptionEntry;
 use crate::protocol::AcpModeOption;
-use crate::room::ModelOptionEntry;
 use crate::space::ProjectRow;
 
 #[vmux_api::contract(Default, Eq)]
@@ -28,6 +28,7 @@ pub enum PaletteGlyph {
 pub struct CommandPaletteAgent {
     pub url: String,
     pub title: String,
+    pub icon: PageIcon,
 }
 
 #[vmux_api::contract(Default)]

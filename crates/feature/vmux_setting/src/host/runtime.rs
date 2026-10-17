@@ -130,15 +130,7 @@ impl AppSettings {
             .map(str::trim)
             .filter(|s| !s.is_empty());
         let chosen = per_space.unwrap_or_else(|| self.browser.startup_url.trim());
-        if chosen.is_empty()
-            || [
-                "vmux://sessions/",
-                "vmux://sessions",
-                "vmux://agent/",
-                "vmux://agent",
-            ]
-            .contains(&chosen)
-        {
+        if chosen.is_empty() || ["vmux://sessions/", "vmux://sessions"].contains(&chosen) {
             default_url.to_string()
         } else {
             chosen.to_string()
@@ -1768,7 +1760,7 @@ mod tests {
 
     const MANIFESTS: [&str; 9] = [
         include_str!("../feature.ron"),
-        include_str!("../../../vmux_agent/src/feature.ron"),
+        include_str!("../../../vmux_acp/src/feature.ron"),
         include_str!("../../../vmux_editor/src/feature.ron"),
         include_str!("../../../vmux_input/src/feature.ron"),
         include_str!("../../../vmux_layout/src/feature.ron"),
@@ -1978,12 +1970,7 @@ mod tests {
 
     #[test]
     fn resolve_startup_url_treats_agent_roots_as_start() {
-        for url in [
-            "vmux://sessions/",
-            "vmux://sessions",
-            "vmux://agent/",
-            "vmux://agent",
-        ] {
+        for url in ["vmux://sessions/", "vmux://sessions"] {
             let mut s = base_settings();
             s.browser.startup_url = url.into();
             assert_eq!(

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::BinEvent;
+#[cfg(ui)]
+use vmux_api::UiEventPermissions;
 use vmux_ecs::event::*;
 
 use super::*;
@@ -16,6 +18,28 @@ impl ExplorerState {
             open_editors: paths.iter().map(PathBuf::from).collect(),
             ..Self::default()
         }
+    }
+}
+
+#[test]
+#[cfg(ui)]
+fn editor_page_allows_explorer_section_toggles() {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, crate::ui::FilePage::plugin()));
+    app.world_mut().run_schedule(PreStartup);
+    let mut permissions = app.world_mut().query::<&UiEventPermissions>();
+    let permissions = permissions.iter(app.world()).collect::<Vec<_>>();
+
+    for permission in [
+        ExplorerOpenEditorsToggle::PERMISSION,
+        ExplorerFilesToggle::PERMISSION,
+        ExplorerOutlineToggle::PERMISSION,
+    ] {
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter().copied(),
+            "file:///project/main.rs",
+            permission,
+        ));
     }
 }
 

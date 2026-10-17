@@ -2,16 +2,14 @@
 
 use dioxus::prelude::*;
 use vmux_ecs::event::{ProjectRow, ProjectTreeToggle};
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
-use vmux_ui::components::icon::Icon;
-use vmux_ui::components::tree_row::{
-    SIDEBAR_TREE_CHEVRON_CLOSED, SIDEBAR_TREE_CHEVRON_OPEN, SidebarTreeChildren, SidebarTreeRow,
-    SidebarTreeRowGroup,
-};
+use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
 
 use crate::event::{
@@ -22,25 +20,22 @@ use crate::event::{
 pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
     let ActiveSession {
         page,
+        task,
         agent,
         project,
         boundary,
         pane_id,
     } = session;
-    let title = if page.title.trim().is_empty() {
+    let title = if task
+        .as_ref()
+        .is_some_and(|task| !task.name.trim().is_empty())
+    {
+        task.as_ref().unwrap().name.clone()
+    } else if page.title.trim().is_empty() {
         page.url.clone()
     } else {
         page.title.clone()
     };
-    let status = agent.as_ref().map(|agent| {
-        if agent.is_running {
-            ("streaming", translate("agent-status-running"))
-        } else if agent.is_done_unseen {
-            ("idle", translate("agent-status-done"))
-        } else {
-            ("idle", translate("common-current"))
-        }
-    });
     rsx! {
         div { class: "border-t border-foreground/10 px-2.5 py-2.5",
             div { class: "flex min-w-0 items-center gap-2.5",
@@ -54,13 +49,35 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                 }
                 div { class: "min-w-0 flex-1",
                     div { class: "truncate text-ui font-semibold text-foreground", title: "{title}", "{title}" }
-                    div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                    if let Some(task) = task.as_ref() {
+                        if !task.description.trim().is_empty() {
+                            div { class: "truncate text-[10px] text-muted-foreground", title: "{task.description}", "{task.description}" }
+                        } else {
+                            div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                        }
+                    } else {
+                        div { class: "truncate text-[10px] text-muted-foreground", title: "{page.url}", "{page.url}" }
+                    }
                 }
             }
             div { class: "mt-2 flex flex-col gap-1",
+                if let Some(task) = task {
+                    div { class: "flex items-center gap-1.5",
+                        Badge {
+                            class: "rounded-full bg-foreground/[0.05] px-2 py-1 text-[9px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                            {translate_humanized(&task.stage_name)}
+                        }
+                        if task.runtime != "inactive" {
+                            span { class: "flex items-center gap-1.5 text-[10px] text-muted-foreground",
+                                StatusDot { status: task.runtime.clone(), size_class: "size-1.5".to_string() }
+                                {session_runtime_label(&task.runtime)}
+                            }
+                        }
+                    }
+                }
                 if let Some(agent) = agent {
                     div { class: "flex min-w-0 items-center gap-2 rounded-md bg-foreground/[0.035] px-2 py-1.5",
-                        Avatar {
+                        AgentThumbnail {
                             src: agent.icon.clone(),
                             seed: agent.name.clone(),
                             background: agent.color.clone(),
@@ -68,25 +85,30 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                             class: "size-4 text-[7px]",
                         }
                         span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground", "{agent.name}" }
-                        if let Some((status, label)) = status {
-                            span { class: "flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground",
-                                StatusDot { status: status.to_string(), size_class: "size-1.5".to_string() }
-                                "{label}"
-                            }
-                        }
                     }
-                }
-                if let Some(project) = project {
-                    ActiveWorkspaceProjectTree { project, pane_id }
                 }
                 if let Some(boundary) = boundary {
                     if boundary.is_git_repo {
                         ActiveSessionGit { boundary }
                     }
                 }
+                if let Some(project) = project {
+                    ActiveWorkspaceProjectTree { project, pane_id }
+                }
             }
         }
     }
+}
+
+fn session_runtime_label(runtime: &str) -> String {
+    let id = match runtime {
+        "idle" => "session-runtime-idle",
+        "streaming" => "session-runtime-streaming",
+        "awaiting" => "session-runtime-awaiting",
+        "errored" => "session-runtime-errored",
+        _ => "session-runtime-inactive",
+    };
+    translate(id)
 }
 
 #[component]
@@ -171,65 +193,56 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
 #[component]
 fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> Element {
     let root = project.root;
-    let tree_path = root.path.clone();
     let choices = project.choices;
     let mut choosing = use_signal(|| false);
     rsx! {
-        div { class: "relative min-w-0 rounded-md bg-foreground/[0.035]",
-            div { class: "group relative flex min-w-0 items-center rounded-md transition-colors hover:bg-glass-hover",
+        div { class: "flex min-w-0 flex-col gap-1",
+            Dropdown {
+                open: choosing(),
+                class: "min-w-0".to_string(),
+                on_dismiss: move |_| choosing.set(false),
                 button {
                     r#type: "button",
-                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1.5 pl-2 pr-10 text-left text-muted-foreground transition-colors group-hover:text-foreground",
+                    class: "flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md bg-foreground/[0.035] px-2.5 text-left text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
                     title: "{root.display_path}",
-                    onclick: move |_| {
-                        choosing.set(false);
-                        let _ = send(&ProjectTreeToggle {
-                            path: tree_path.clone(),
-                            pane_id: pane_id.to_string(),
-                        });
-                    },
-                    Icon {
-                        class: if root.expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
-                        path { d: "m9 18 6-6-6-6" }
+                    aria_expanded: choosing(),
+                    onclick: move |_| choosing.set(!choosing()),
+                    TypeIcon {
+                        path: root.path.clone(),
+                        is_dir: true,
+                        class: "size-3.5 shrink-0".to_string(),
                     }
-                    if root.is_worktree {
-                        LineIconView { icon: LineIcon::GitFork, class: "size-3.5 shrink-0".to_string() }
-                    } else {
-                        BuiltinIconView { icon: vmux_api::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
-                    }
-                    div { class: "min-w-0 flex-1",
-                        div { class: "truncate text-[10px] font-medium text-foreground", "{root.label}" }
-                        if !root.branch.is_empty() {
-                            div { class: "truncate font-mono text-[9px] text-muted-foreground", "{root.branch}" }
-                        }
+                    span { class: "truncate-start min-w-0 flex-1 font-mono text-[10px] text-foreground", "{root.display_path}" }
+                    LineIconView {
+                        icon: LineIcon::ChevronDown,
+                        class: if choosing() {
+                            "size-3.5 shrink-0 rotate-180 transition-transform".to_string()
+                        } else {
+                            "size-3.5 shrink-0 transition-transform".to_string()
+                        },
                     }
                 }
-                button {
-                    r#type: "button",
-                    class: "absolute right-1 top-1 z-10 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
-                    title: translate("git-switch-workspace"),
-                    aria_label: translate("git-switch-workspace"),
-                    onclick: move |event: MouseEvent| {
-                        event.stop_propagation();
-                        choosing.set(!choosing());
-                    },
-                    LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3.5".to_string() }
-                }
-            }
-            if choosing() {
-                div { class: "max-h-64 overflow-y-auto border-t border-foreground/[0.06] p-1",
-                    for choice in choices {
-                        ActiveWorkspaceChoice {
-                            key: "{choice.path}",
-                            project: choice,
-                            pane_id,
-                            on_pick: move |_| choosing.set(false),
+                if choosing() {
+                    div { class: "absolute left-0 right-0 top-9 z-30 max-h-64 overflow-y-auto rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
+                        for choice in choices {
+                            ActiveWorkspaceChoice {
+                                key: "{choice.path}",
+                                project: choice,
+                                pane_id,
+                                on_pick: move |_| choosing.set(false),
+                            }
                         }
                     }
                 }
             }
-            SidebarTreeChildren { expanded: root.expanded,
-                div { class: "border-t border-foreground/[0.06] py-1",
+            div { class: "min-w-0 rounded-md bg-foreground/[0.035] py-1.5",
+                div { class: "px-2 pb-1",
+                    span {
+                        class: "inline-flex max-w-full items-center rounded-full bg-foreground/[0.065] px-2 py-0.5 text-[9px] font-medium text-foreground/85 ring-1 ring-inset ring-foreground/[0.07]",
+                        span { class: "truncate", "{root.label}" }
+                    }
+                }
+                if !project.children.is_empty() {
                     for child in project.children {
                         ActiveWorkspaceProjectRow {
                             key: "{child.path}",

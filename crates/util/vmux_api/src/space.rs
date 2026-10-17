@@ -49,6 +49,42 @@ pub struct SpaceRow {
     pub startup_dir: String,
 }
 
+impl SpaceRow {
+    pub fn display_name(&self) -> String {
+        let source = if self.name.trim().is_empty() {
+            &self.id
+        } else {
+            &self.name
+        };
+        source
+            .split('/')
+            .map(Self::display_segment)
+            .collect::<Vec<_>>()
+            .join(" / ")
+    }
+
+    fn display_segment(segment: &str) -> String {
+        let mut output = String::new();
+        let mut capitalize = true;
+        for character in segment.chars() {
+            if character == '-' || character == '_' || character.is_whitespace() {
+                if !output.ends_with(' ') && !output.is_empty() {
+                    output.push(' ');
+                }
+                capitalize = true;
+                continue;
+            }
+            if capitalize {
+                output.extend(character.to_uppercase());
+                capitalize = false;
+            } else {
+                output.push(character);
+            }
+        }
+        output.trim().to_string()
+    }
+}
+
 #[vmux_api::ui_event(Eq)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
 pub struct SpaceOpenPageRequest;
@@ -148,6 +184,18 @@ pub struct ProjectBranch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_name_humanizes_slug_without_changing_storage() {
+        let row = SpaceRow {
+            id: "space-1".into(),
+            name: "proxima-centauri-b/team_alpha".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(row.display_name(), "Proxima Centauri B / Team Alpha");
+        assert_eq!(row.name, "proxima-centauri-b/team_alpha");
+    }
 
     #[test]
     fn space_row_keeps_profile_and_active_state() {

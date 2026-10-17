@@ -178,28 +178,40 @@ fn apply_lifecycle(
 }
 
 fn open(
-    entities: Query<EntityRef>,
+    mut state: ParamSet<(
+        Query<EntityRef>,
+        NonSendMut<PageRenderer>,
+        NonSendMut<Browsers>,
+    )>,
     requester: Option<Res<Requester>>,
     bin_ipc: Option<Res<BinIpcEventRawSender>>,
     metadata_sender: Query<&PageMetadataSender>,
     lifecycle_sender: Query<&PageLifecycleSender>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     settings: Res<AppSettings>,
-    mut renderer: NonSendMut<PageRenderer>,
-    mut browsers: NonSendMut<Browsers>,
     mut commands: Commands,
 ) {
-    let registered = entities
-        .iter()
-        .filter_map(|entity| entity.get::<PageRegistration>().copied())
-        .collect::<Vec<_>>();
+    let registered = {
+        let entities = state.p0();
+        entities
+            .iter()
+            .filter_map(|entity| entity.get::<PageRegistration>().copied())
+            .collect::<Vec<_>>()
+    };
     let mut wanted = Vec::new();
     for registration in registered {
-        for entity in claim_hosted_pages(&entities, registration) {
-            let Ok(candidate) = entities.get(entity) else {
-                continue;
+        let claimed = {
+            let entities = state.p0();
+            claim_hosted_pages(&entities, registration)
+        };
+        for entity in claimed {
+            let priority = {
+                let entities = state.p0();
+                let Ok(candidate) = entities.get(entity) else {
+                    continue;
+                };
+                registration_priority(candidate, registration)
             };
-            let priority = registration_priority(candidate, registration);
             let existing = wanted
                 .iter_mut()
                 .find(|(candidate, _, _)| *candidate == entity);
@@ -217,10 +229,13 @@ fn open(
         return;
     }
 
-    let primary_window = entities
-        .iter()
-        .find(|entity| entity.contains::<PrimaryWindow>())
-        .map(|entity| entity.id());
+    let primary_window = {
+        let entities = state.p0();
+        entities
+            .iter()
+            .find(|entity| entity.contains::<PrimaryWindow>())
+            .map(|entity| entity.id())
+    };
     let embedder = match load_page_embedder(
         requester.as_deref(),
         bin_ipc.as_deref(),
@@ -239,21 +254,28 @@ fn open(
     for (entity, registration, _) in wanted {
         let page = registration.page();
         let placement = registration.placement();
-        let Some(window_entity) = host_window_for(&entities, entity).or(primary_window) else {
-            report_waiting("page has no host window entity");
-            continue;
+        let candidate = {
+            let entities = state.p0();
+            let Some(window_entity) = host_window_for(&entities, entity).or(primary_window) else {
+                report_waiting("page has no host window entity");
+                continue;
+            };
+            let Ok(candidate) = entities.get(entity) else {
+                continue;
+            };
+            (
+                window_entity,
+                candidate.get::<HostedSurface>().copied(),
+                registration.instance(candidate),
+            )
         };
-        let Ok(candidate) = entities.get(entity) else {
-            continue;
-        };
-        let current = candidate.get::<HostedSurface>().copied();
-        let has_surface = renderer.0.contains_key(&entity);
+        let (window_entity, current, instance) = candidate;
+        let has_surface = state.p1().0.contains_key(&entity);
         if current.is_some_and(|current| {
             std::ptr::eq(current.page, page) && current.window == window_entity && has_surface
         }) {
             continue;
         }
-        let instance = registration.instance(candidate);
         if current.is_some_and(|current| {
             current.page.transparent == page.transparent
                 && current.page.document_url() == page.document_url()
@@ -261,6 +283,7 @@ fn open(
                 && has_surface
         }) {
             let remounted = {
+                let renderer = state.p1();
                 let surface = renderer.0.get(&entity).expect("the page was just found");
                 surface.navigate(page, instance)
             };
@@ -276,7 +299,7 @@ fn open(
             continue;
         }
         if current.is_some() {
-            renderer.0.remove(&entity);
+            state.p1().0.remove(&entity);
             commands
                 .entity(entity)
                 .remove::<(HostedSurface, crate::HostedPageLifecycle)>();
@@ -307,12 +330,12 @@ fn open(
                 if placement.paints_in_front() {
                     surface.raise_above_layers();
                 }
-                browsers.set_externally_hosted(entity);
+                state.p2().set_externally_hosted(entity);
                 info!(
                     "browser_platform: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
                     page.url
                 );
-                renderer.0.insert(entity, surface);
+                state.p1().0.insert(entity, surface);
                 commands.entity(entity).insert((
                     HostedSurface {
                         placement,
@@ -1007,11 +1030,22 @@ fn report_waiting(reason: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt, SimulatorFrame,
-        SimulatorFrameRequest,
+        MacosBrowserPlugin, PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt,
+        SimulatorFrame, SimulatorFrameRequest,
     };
+    use bevy::ecs::schedule::Schedules;
     use bevy::prelude::{App, MinimalPlugins, Update};
     use vmux_page::{PagePlacement, SiblingOrder};
+
+    #[test]
+    fn update_schedule_accepts_page_renderer_accesses() {
+        let mut app = App::new();
+        app.add_plugins(MacosBrowserPlugin);
+
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+        let mut update = schedules.remove(Update).unwrap();
+        update.initialize(app.world_mut()).unwrap();
+    }
 
     #[test]
     fn the_layout_is_asked_for_the_pointer_only_while_a_surface_of_its_own_is_up() {

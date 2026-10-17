@@ -22,15 +22,29 @@ impl AvatarSpec {
     pub fn for_registry(name: &str, seed: &str) -> Self {
         Self {
             initials: Self::initials(name),
-            color: Self::color(seed),
+            color: Self::agent_color(seed),
         }
     }
 
     pub fn agent_color(segment: &str) -> String {
-        match Self::agent_segment_color(segment) {
+        match Self::brand_color(segment) {
             Some(color) => color.to_string(),
             None => Self::color(segment),
         }
+    }
+
+    pub fn brand_color(segment: &str) -> Option<&'static str> {
+        let segment = segment.to_ascii_lowercase();
+        if segment.contains("claude") {
+            return Some("#d97757");
+        }
+        if segment.contains("codex") {
+            return Some("#10a37f");
+        }
+        if segment.contains("mistral") || segment.contains("vibe") {
+            return Some("#ff7000");
+        }
+        None
     }
 
     pub fn initials(name: &str) -> String {
@@ -59,15 +73,6 @@ impl AvatarSpec {
         }
         PALETTE[(hash % PALETTE.len() as u64) as usize].to_string()
     }
-
-    fn agent_segment_color(segment: &str) -> Option<&'static str> {
-        match segment {
-            "claude" => Some("#d97757"),
-            "codex" => Some("#10a37f"),
-            "vibe" => Some("#7c3aed"),
-            _ => None,
-        }
-    }
 }
 
 const USER_COLOR: &str = "#3b82f6";
@@ -79,8 +84,12 @@ mod tests {
     #[test]
     fn built_in_agents_keep_their_brand_colours() {
         assert_eq!(AvatarSpec::agent_color("claude"), "#d97757");
+        assert_eq!(AvatarSpec::agent_color("Claude Agent"), "#d97757");
         assert_eq!(AvatarSpec::agent_color("codex"), "#10a37f");
-        assert_eq!(AvatarSpec::agent_color("vibe"), "#7c3aed");
+        assert_eq!(AvatarSpec::agent_color("codex-acp"), "#10a37f");
+        assert_eq!(AvatarSpec::agent_color("vibe"), "#ff7000");
+        assert_eq!(AvatarSpec::agent_color("mistral"), "#ff7000");
+        assert_eq!(AvatarSpec::agent_color("Mistral Vibe"), "#ff7000");
     }
 
     #[test]
@@ -88,6 +97,6 @@ mod tests {
         let first = AvatarSpec::agent_color("some-acp-agent");
         assert_eq!(first, AvatarSpec::agent_color("some-acp-agent"));
         assert_ne!(first, AvatarSpec::agent_color("another-acp-agent"));
-        assert!(AvatarSpec::agent_segment_color("some-acp-agent").is_none());
+        assert!(AvatarSpec::brand_color("some-acp-agent").is_none());
     }
 }

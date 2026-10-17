@@ -59,7 +59,7 @@ pub fn CommandComposerMenus(
                         index: index as u32,
                     });
                 },
-                on_select: move |(_index, model): (usize, vmux_api::room::ModelOptionEntry)| {
+                on_select: move |(_index, model): (usize, vmux_api::conversation::ModelOptionEntry)| {
                     selection.model(&models, &model.id);
                 },
                 on_dismiss: move |()| {

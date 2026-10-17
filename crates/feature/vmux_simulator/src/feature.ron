@@ -3,7 +3,7 @@
         (
             url: "vmux://simulator/",
             title: "Simulator",
-            bookmark: Some(80),
+            bookmark: Some(130),
             owns_subtree: true,
             title_message_id: "simulator-title",
             keywords: ["simulator", "ios", "iphone", "device"],
@@ -11,7 +11,8 @@
             command_bar: true,
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
+                "SimulatorUiState",
                 "SimulatorReady",
                 "SimulatorTouch",
                 "SimulatorSoftwareKeyboard",

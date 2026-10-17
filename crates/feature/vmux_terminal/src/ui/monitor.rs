@@ -10,7 +10,11 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-#[vmux_page::page(page = "process_monitor", component = Page)]
+#[vmux_page::page(
+    page = "process_monitor",
+    component = Page,
+    states = ["ThemeUiState", "ProcessesUiState"]
+)]
 pub struct ProcessMonitorPage;
 
 #[component]

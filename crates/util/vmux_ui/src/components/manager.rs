@@ -64,7 +64,7 @@ impl ManagerButtonVariant {
 pub fn ManagerPage(children: Element) -> Element {
     rsx! {
         main {
-            class: "flex h-full w-full flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] text-foreground font-sans text-sm",
+            class: "flex h-full w-full flex-col overflow-hidden bg-[color-mix(in_oklab,var(--background)_97%,var(--foreground))] bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] text-foreground font-sans text-sm ring-1 ring-inset ring-foreground/[0.06]",
             {children}
         }
     }
@@ -277,13 +277,18 @@ pub fn ManagerSpinner(detail: String) -> Element {
 }
 
 #[component]
-pub fn ManagerEmpty(title: String, detail: String) -> Element {
+pub fn ManagerEmpty(
+    title: String,
+    detail: String,
+    #[props(default = rsx! {})] actions: Element,
+) -> Element {
     rsx! {
-        div { class: "flex flex-col items-center gap-2 px-3 py-16 text-center",
+        div { class: "flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-3 py-16 text-center",
             div { class: "text-sm text-muted-foreground", "{title}" }
             if !detail.is_empty() {
                 div { class: "text-xs text-muted-foreground/70", "{detail}" }
             }
+            {actions}
         }
     }
 }

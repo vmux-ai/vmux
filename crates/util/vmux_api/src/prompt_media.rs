@@ -72,6 +72,9 @@ pub struct ChatMediaEntry {
 impl ChatMediaEntry {
     pub fn reference(&self) -> String {
         let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
+        if self.parent.is_empty() {
+            return encode(&self.name);
+        }
         if self.parent == "~" {
             return format!("~/{name}", name = encode(&self.name));
         }
@@ -83,6 +86,9 @@ impl ChatMediaEntry {
     }
 
     pub fn display_path(&self) -> String {
+        if self.parent.is_empty() {
+            return self.name.clone();
+        }
         if self.parent == "~" {
             return format!("~/{}", self.name);
         }

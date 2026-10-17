@@ -174,6 +174,7 @@ pub fn DiffView(
         .max()
         .unwrap_or(0);
     let gw = maxno.max(1).to_string().len().max(3);
+    let total_rows = u32::try_from(rows.len()).unwrap_or(u32::MAX);
     let ends: Vec<Option<u32>> = rows
         .iter()
         .enumerate()
@@ -273,38 +274,134 @@ pub fn DiffView(
                             }
                         }
                     },
-                    GitDiffRow::Gap { start, end, reveal_start, reveal_end } => {
-                        let hidden = end - start;
-                        rsx! {
-                            div {
-                                key: "gap-{start}-{end}",
-                                class: "flex min-w-full items-center border-y border-foreground/[0.055] bg-foreground/[0.018] px-3 py-1 font-sans",
-                                div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
-                                Button {
-                                    variant: ButtonVariant::Ghost,
-                                    class: "mx-2 h-6 shrink-0 gap-1.5 rounded-full border border-foreground/[0.08] bg-background/70 px-3 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
-                                    title: translate_with(
-                                        "git-show-unchanged-lines",
-                                        &[("count", TranslationValue::Number(hidden as i64))],
-                                    ),
-                                    onclick: move |_| {
-                                        let _ = send(&GitDiffRevealRequest {
-                                            start: reveal_start,
-                                            end: reveal_end,
-                                        });
-                                    },
-                                    span { "⋯" }
-                                    span { {translate_with(
-                                        "git-show-unchanged-lines",
-                                        &[("count", TranslationValue::Number(hidden as i64))],
-                                    )} }
-                                }
-                                div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
-                            }
-                        }
-                    }
+                    GitDiffRow::Gap { start, end, .. } => rsx! {
+                        DiffGap { key: "gap-{start}-{end}", start, end, total: total_rows }
+                    },
                 }
             }
         }
+    }
+}
+
+struct DiffGapRange {
+    start: u32,
+    end: u32,
+    total: u32,
+}
+
+impl DiffGapRange {
+    fn hidden(&self) -> u32 {
+        self.end.saturating_sub(self.start)
+    }
+
+    fn chunk(&self) -> u32 {
+        self.hidden().min(GitDiffRevealRequest::CHUNK)
+    }
+
+    fn previous(&self) -> Option<(u32, u32)> {
+        (self.hidden() > self.chunk() && self.end < self.total)
+            .then(|| (self.end - self.chunk(), self.end))
+    }
+
+    fn next(&self) -> Option<(u32, u32)> {
+        (self.hidden() > self.chunk() && self.start > 0)
+            .then(|| (self.start, self.start + self.chunk()))
+    }
+}
+
+#[component]
+fn DiffGap(start: u32, end: u32, total: u32) -> Element {
+    let range = DiffGapRange { start, end, total };
+    let hidden = range.hidden();
+    let chunk = range.chunk();
+    let previous = range.previous();
+    let next = range.next();
+    let show_all = translate_with(
+        "git-show-unchanged-lines",
+        &[("count", TranslationValue::Number(hidden as i64))],
+    );
+    rsx! {
+        div { class: "flex min-w-full items-center border-y border-foreground/[0.055] bg-foreground/[0.018] px-3 py-1 font-sans",
+            div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
+            div { class: "mx-2 flex shrink-0 items-center gap-1",
+                if let Some((start, end)) = previous {
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        class: "h-6 shrink-0 gap-1 rounded-md border border-foreground/[0.08] bg-background/70 px-2 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
+                        title: translate_with(
+                            "git-show-previous-lines",
+                            &[("count", TranslationValue::Number(chunk as i64))],
+                        ),
+                        onclick: move |_| {
+                            let _ = send(&GitDiffRevealRequest { start, end });
+                        },
+                        LineIconView { icon: LineIcon::ArrowUp, class: "size-3" }
+                        "{chunk}"
+                    }
+                }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    class: "h-6 shrink-0 gap-1.5 rounded-md border border-foreground/[0.08] bg-background/70 px-3 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
+                    title: show_all.clone(),
+                    onclick: move |_| {
+                        let _ = send(&GitDiffRevealRequest { start, end });
+                    },
+                    span { "⋯" }
+                    span { "{show_all}" }
+                }
+                if let Some((start, end)) = next {
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        class: "h-6 shrink-0 gap-1 rounded-md border border-foreground/[0.08] bg-background/70 px-2 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
+                        title: translate_with(
+                            "git-show-next-lines",
+                            &[("count", TranslationValue::Number(chunk as i64))],
+                        ),
+                        onclick: move |_| {
+                            let _ = send(&GitDiffRevealRequest { start, end });
+                        },
+                        "{chunk}"
+                        LineIconView { icon: LineIcon::ArrowDown, class: "size-3" }
+                    }
+                }
+            }
+            div { class: "h-px min-w-4 flex-1 bg-foreground/[0.06]" }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn large_middle_gap_offers_both_chunk_directions() {
+        let gap = DiffGapRange {
+            start: 40,
+            end: 140,
+            total: 200,
+        };
+
+        assert_eq!(gap.previous(), Some((120, 140)));
+        assert_eq!(gap.next(), Some((40, 60)));
+    }
+
+    #[test]
+    fn edge_gap_only_expands_toward_the_file_edge() {
+        let top = DiffGapRange {
+            start: 0,
+            end: 100,
+            total: 200,
+        };
+        let bottom = DiffGapRange {
+            start: 100,
+            end: 200,
+            total: 200,
+        };
+
+        assert_eq!(top.previous(), Some((80, 100)));
+        assert_eq!(top.next(), None);
+        assert_eq!(bottom.previous(), None);
+        assert_eq!(bottom.next(), Some((100, 120)));
     }
 }

@@ -752,6 +752,8 @@ fn ui_state_write(
 ) {
     let webview = trigger.event().webview();
     if !states.contains(webview) {
+        commands.entity(webview).insert(GitState::default());
+        commands.trigger(trigger.event().clone());
         return;
     }
     let Ok((
@@ -774,17 +776,19 @@ fn ui_state_write(
         let path = crate::GitUrl::parse(page_url)
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| working_directory.clone());
-        states.reset(webview, path.clone());
-        controller.reset(String::new());
-        pending.0.clear();
-        revision.0 = 0;
-        commit_result.0 = 0;
-        revealed.0.clear();
-        *directory = GitDirectoryNavigation::default();
-        commands.trigger(UiInput {
-            webview,
-            payload: crate::event::GitDirectoryOpenRequest { path },
-        });
+        if !states.repository_loaded_at(webview, &path) {
+            states.reset(webview, path.clone());
+            controller.reset(String::new());
+            pending.0.clear();
+            revision.0 = 0;
+            commit_result.0 = 0;
+            revealed.0.clear();
+            *directory = GitDirectoryNavigation::default();
+            commands.trigger(UiInput {
+                webview,
+                payload: crate::event::GitDirectoryOpenRequest { path },
+            });
+        }
     }
     if let Some(GitRepositoryPicked { path }) = &patch.repository_picked
         && !path.is_empty()
@@ -1059,4 +1063,29 @@ fn submit_commit(
             message,
         },
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_received_before_page_state_is_replayed_after_initialization() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, ControllerPlugin));
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<GitUiState>::from_event(
+                webview,
+                &GitPageContext {
+                    working_directory: "/tmp/repository".to_string(),
+                    page_url: String::new(),
+                },
+            ));
+        app.update();
+
+        let state = app.world().get::<GitState>(webview).unwrap();
+        assert_eq!(state.workspace(), "/tmp/repository");
+    }
 }

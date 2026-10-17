@@ -10,7 +10,8 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::BuiltinIconView;
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "ShortcutUiState"]
 )]
 pub(crate) struct ShortcutPage;
 

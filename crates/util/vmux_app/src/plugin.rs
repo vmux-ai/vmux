@@ -10,10 +10,8 @@ pub enum VmuxPlugin {
     Command(vmux_command::CommandPlugin),
     #[plugin(feature = "setting", desktop, requires(ecs))]
     Setting(vmux_setting::SettingsPlugin),
-    #[plugin(feature = "session", desktop)]
+    #[plugin(feature = "session", desktop, mobile)]
     Session(vmux_session::SessionPlugin),
-    #[plugin(feature = "chat", desktop, mobile)]
-    Chat(vmux_chat::ChatPlugin),
     #[plugin(feature = "layout", desktop, requires(command, setting))]
     Layout(vmux_layout::LayoutPlugin),
     #[plugin(feature = "bookmark", desktop, requires(layout))]
@@ -26,20 +24,18 @@ pub enum VmuxPlugin {
     Terminal(vmux_terminal::TerminalPlugin),
     #[plugin(feature = "editor", desktop, requires(layout))]
     Editor(vmux_editor::EditorPlugin),
-    #[plugin(feature = "browser", desktop, requires(layout))]
-    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "extension", desktop, requires(browser))]
     Extension(vmux_extension::ExtensionPlugin),
+    #[plugin(feature = "browser", desktop, requires(layout))]
+    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "git", desktop, requires(layout))]
     Git(vmux_git::GitPlugin),
     #[plugin(
-        feature = "agent",
+        feature = "acp",
         desktop,
-        requires(
-            chat, command, editor, history, knowledge, service, session, space, terminal
-        )
+        requires(command, editor, history, knowledge, service, session, space, terminal)
     )]
-    Agent(vmux_agent::AgentPlugin),
+    Acp(vmux_acp::AcpPlugin),
     #[plugin(feature = "knowledge", desktop, requires(ecs))]
     Knowledge(vmux_knowledge::KnowledgePlugin),
     #[plugin(feature = "history", desktop, requires(ecs))]
@@ -79,7 +75,7 @@ impl Plugin for VmuxEcsPlugin {
     }
 }
 
-#[cfg(all(test, any(feature = "layout", feature = "agent")))]
+#[cfg(all(test, any(feature = "layout", feature = "acp")))]
 mod tests {
     use super::*;
 
@@ -101,13 +97,12 @@ mod tests {
         assert!(!options.layout);
     }
 
-    #[cfg(feature = "agent")]
+    #[cfg(feature = "acp")]
     #[test]
-    fn enabling_agent_enables_transitive_dependencies() {
-        let options = VmuxPluginOptions::none().agent(true);
+    fn enabling_acp_enables_transitive_dependencies() {
+        let options = VmuxPluginOptions::none().acp(true);
 
-        assert!(options.agent);
-        assert!(options.chat);
+        assert!(options.acp);
         assert!(options.command);
         assert!(options.ecs);
         assert!(options.layout);
@@ -120,16 +115,16 @@ mod tests {
         assert!(options.terminal);
     }
 
-    #[cfg(feature = "agent")]
+    #[cfg(feature = "acp")]
     #[test]
     fn disabling_layout_disables_transitive_dependents() {
-        let options = VmuxPluginOptions::none().agent(true).layout(false);
+        let options = VmuxPluginOptions::none().acp(true).layout(false);
 
         assert!(!options.layout);
         assert!(!options.editor);
         assert!(!options.space);
         assert!(!options.terminal);
-        assert!(!options.agent);
+        assert!(!options.acp);
         assert!(options.ecs);
         assert!(options.history);
         assert!(options.knowledge);

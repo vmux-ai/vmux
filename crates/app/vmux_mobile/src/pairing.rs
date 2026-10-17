@@ -10,7 +10,7 @@ use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
-use vmux_api::room::{RemoteAgent, RemoteSession};
+use vmux_api::conversation::{RemoteAgent, RemoteSession};
 use vmux_transport::{ClientCredential, DeviceId};
 use vmux_ui::i18n::translate;
 

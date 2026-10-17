@@ -1,7 +1,7 @@
 pub use crate::{VmuxPlugin, VmuxPluginBuilder, VmuxPluginOptions};
 
-#[cfg(feature = "agent")]
-pub use vmux_agent::AgentPlugin;
+#[cfg(feature = "acp")]
+pub use vmux_acp::AcpPlugin;
 #[cfg(feature = "browser")]
 pub use vmux_browser::BrowserPlugin;
 #[cfg(feature = "editor")]

@@ -1,4 +1,5 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
@@ -25,8 +26,22 @@ pub struct WindowFullscreen(pub bool);
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowFullscreenSet;
 
-#[derive(Component, Clone, Debug)]
-pub struct AgentWorkingDir(pub PathBuf);
+#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+pub struct Cwd(pub PathBuf);
+
+#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+pub struct Description(pub String);
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Terminal;
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct JsonArguments(pub serde_json::Value);

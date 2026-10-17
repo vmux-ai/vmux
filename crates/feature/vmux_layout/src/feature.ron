@@ -59,7 +59,7 @@
             manifest_title: "Layout",
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "LayoutUiState",
                 "SideSheetResizeEvent",
                 "WindowDragRegionEvent",
@@ -125,7 +125,7 @@
                 "SpaceCreateRequest",
                 "ProjectActivateRequest",
                 "ProjectTreeToggle",
-                "ExtensionsEvent",
+                "ExtensionsUiState",
                 "ExtensionPopupOpenRequest",
                 "ExtensionPopupBoundsRequest",
                 "ExtensionPopupCloseRequest",
@@ -174,9 +174,9 @@
                 "ChatPasteMedia",
                 "ChatMediaListRequest",
                 "ChatAttachPaths",
-                "UiKeyContext",
+                "KeyContextRequest",
                 "KeyStroke",
-                "KeyClaims",
+                "KeyClaimsUiState",
             ],
         )
         ,
@@ -185,7 +185,7 @@
             url: "vmux://error/",
             title: "Error",
             asset_host: "error",
-            permissions: ["PageReady", "ThemeEvent"],
+            permissions: ["PageReady", "ThemeUiState"],
         ),
     ],
     tools: [

@@ -19,7 +19,7 @@ pub use diff::GitDiffSource;
 pub use repository::{GitError, GitRepository};
 pub use status::FileGit;
 use vmux_ecs::manifest::FeaturePlugin;
-use vmux_ecs::page::HostedPage;
+use vmux_ecs::page::{HostedPage, PrewarmPage};
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 pub use watch::RepoInfoCache;
 
@@ -47,7 +47,8 @@ impl Plugin for GitPlugin {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins((GitPage::plugin(), LegacyGitPage::plugin()));
-        app.add_message::<GitCheckForUpdatesRequest>()
+        app.add_systems(PreStartup, prewarm)
+            .add_message::<GitCheckForUpdatesRequest>()
             .add_plugins(UiEventPlugin::<(
                 GitConfigEditRequest,
                 GitUpdateCheckRequest,
@@ -88,6 +89,15 @@ impl Plugin for GitPlugin {
                     .alias(HostedPage::page(Self::MANIFEST.url, "Git")),
             );
     }
+}
+
+fn prewarm(mut commands: Commands) {
+    commands.spawn(PrewarmPage {
+        host: "git",
+        url: crate::GIT_PAGE_URL,
+        title: "Git",
+        pool_size: 1,
+    });
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

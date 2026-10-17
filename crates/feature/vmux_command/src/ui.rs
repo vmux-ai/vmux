@@ -124,7 +124,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             return;
         }
         let projection = &snapshot.projection;
-        input.apply_host_input(projection.input_revision, input_id);
+        input.apply_host_input(opened.open_id, projection.input_revision, input_id);
     });
     use_effect(move || {
         let opened = state();
@@ -162,6 +162,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let projection = std::rc::Rc::new(palette_data.projection.clone());
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
     let q = projection.query.clone();
+    let file_only = q.trim_start().starts_with('@');
     let ghost_text = projection.ghost.clone();
     let media_menu_open = is_start && palette_data.media_query.is_some();
     let media_sel = (palette_data.media_selected as usize)
@@ -444,12 +445,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     rsx! {
         div { class: "relative",
             if is_start {
-                if let Some(accent) = accent {
-                    div { class: "{accent.glow_top} transform-gpu" }
-                    div { class: "{accent.glow_bottom} transform-gpu" }
-                }
-            }
-            if is_start {
                 {start_menus}
                 PromptComposer {
                     shared_transition: true,
@@ -493,16 +488,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     glass: false,
                     class: "p-2",
                     div { class: "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3",
-                        if !projection.context_label.is_empty() {
-                            span {
-                                title: "{projection.context_label}",
-                                class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
-                                "{projection.context_label}"
+                        if !file_only {
+                            PaletteModeChip {
+                                mode: projection.mode.clone(),
+                                label: projection.mode_label.clone(),
                             }
-                        }
-                        PaletteModeChip {
-                            mode: projection.mode.clone(),
-                            label: projection.mode_label.clone(),
                         }
                         if let Some(glyph) = projection.glyph {
                             PaletteGlyphIcon { glyph }

@@ -102,7 +102,6 @@ struct StartPromptContext<'w, 's> {
     pages: Single<'w, 's, Ref<'static, CommandBarPagesSnapshot>>,
     projects: Single<'w, 's, Ref<'static, CommandBarProjectRoots>>,
     work: Single<'w, 's, Ref<'static, CommandBarWorkSnapshot>>,
-    warmed_branches_for: Local<'s, String>,
 }
 
 impl StartPromptContext<'_, '_> {
@@ -180,6 +179,7 @@ impl StartPromptContext<'_, '_> {
             return Self::unrooted();
         }
         let path = Path::new(&cwd);
+        let is_git_repo = info.is_some() || worktree.is_some() || path.join(".git").exists();
         let named = match info {
             Some(info) => info.project_name(),
             None => path
@@ -191,7 +191,7 @@ impl StartPromptContext<'_, '_> {
         CommandBarPromptContext {
             workspace_name: named,
             cwd,
-            is_git_repo: info.is_some(),
+            is_git_repo,
             is_worktree: info.is_some_and(|info| info.is_worktree),
             branch: info.map(|info| info.branch.clone()).unwrap_or_default(),
             base_ref: worktree
@@ -516,7 +516,7 @@ fn apply_chosen_project(
 
 fn sync_pages(
     tab_gather: TabGather,
-    mut prompt_context: StartPromptContext,
+    prompt_context: StartPromptContext,
     contributions: (
         Query<
             (),
@@ -543,7 +543,10 @@ fn sync_pages(
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
         ),
-        Without<crate::StartInlineTransitionView>,
+        (
+            With<HostsLauncher>,
+            Without<crate::StartInlineTransitionView>,
+        ),
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     browsers: NonSend<Browsers>,
@@ -614,24 +617,7 @@ fn sync_pages(
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
         &locale,
     );
-    let project = payload
-        .prompt_context
-        .projects
-        .iter()
-        .find(|project| project.is_active)
-        .map(|project| project.path.clone())
-        .unwrap_or_else(|| payload.prompt_context.cwd.clone());
-    let warm_branches = !project.is_empty() && *prompt_context.warmed_branches_for != project;
-    if warm_branches {
-        *prompt_context.warmed_branches_for = project.clone();
-    }
     for (e, focus_requested) in targets {
-        if warm_branches {
-            commands.spawn(StartBranchQuery {
-                webview: e,
-                project: project.clone(),
-            });
-        }
         commands.trigger(vmux_ecs::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(e, &payload));
@@ -701,6 +687,10 @@ fn begin_inline(
 mod tests {
     use super::*;
     use vmux_api::command_bar::CommandBarUiState;
+    #[cfg(ui)]
+    use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+    #[cfg(ui)]
+    use vmux_api::{BinEvent, UiEventPermissions};
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::page::PageManifest;
 
@@ -743,6 +733,26 @@ mod tests {
         app.world_mut().run_schedule(PreStartup);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+    }
+
+    #[test]
+    #[cfg(ui)]
+    fn start_page_allows_keyboard_routing() {
+        let mut app = App::new();
+        app.add_plugins(StartPlugin);
+        app.world_mut().run_schedule(PreStartup);
+        let mut permissions = app.world_mut().query::<&UiEventPermissions>();
+
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyContextRequest::PERMISSION,
+        ));
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyClaimsUiState::PERMISSION,
+        ));
     }
 
     #[test]

@@ -128,9 +128,6 @@ impl Plugin for ToolRuntimePlugin {
         .add_systems(
             Update,
             (
-                finish_operation::<mcp::DiscoveredMcpServers>,
-                finish_operation::<mcp::ImportedMcpConfig>,
-                finish_operation::<mcp::ImportedMcpServer>,
                 finish_operation::<mcp::ForgottenMcpServer>,
                 finish_operation::<dotfiles::DiscoveredDotfilePackages>,
                 finish_operation::<dotfiles::DotfilePlan>,
@@ -411,75 +408,7 @@ brew "ripgrep"
     }
 
     #[test]
-    fn mcp_provider_discovers_and_imports_through_ecs() {
-        let temp = tempfile::tempdir().unwrap();
-        let config = temp.path().join("config");
-        let home = temp.path().join("home");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(
-            home.join(".mcp.json"),
-            r#"{"mcpServers":{"docs":{"url":"https://example.com/mcp"}}}"#,
-        )
-        .unwrap();
-        let store = ToolStore::new(config, home);
-        let mut app = App::new();
-        app.add_plugins((
-            bevy_app::TaskPoolPlugin::default(),
-            ToolRuntimePlugin,
-            mcp::McpToolPlugin,
-        ));
-        app.update();
-        let provider = {
-            let mut providers = app.world_mut().query::<(Entity, &ToolProviderBinding)>();
-            providers
-                .iter(app.world())
-                .find_map(|(entity, binding)| (binding.index() == 3).then_some(entity))
-                .unwrap()
-        };
-        let store_entity = app.world_mut().spawn(store.clone()).id();
-        let operation = app
-            .world_mut()
-            .spawn((
-                ToolOperationRequest(ToolImportRequest {
-                    provider: state::ToolProvider::new("mcp"),
-                    value: String::new(),
-                }),
-                ToolStoreTarget::new(store_entity),
-                ToolProviderTarget::new(provider),
-            ))
-            .id();
-
-        for _ in 0..100 {
-            app.update();
-            if app
-                .world()
-                .get::<ToolOperationSucceeded>(operation)
-                .is_some()
-            {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-
-        assert_eq!(
-            app.world().get::<ToolOperationSucceeded>(operation),
-            Some(&ToolOperationSucceeded(
-                "imported 1 MCP server(s)".to_string()
-            )),
-        );
-        assert!(
-            app.world()
-                .get::<ExternalToolOperation>(operation)
-                .is_none()
-        );
-        assert_eq!(
-            store.load().unwrap().mcp.servers["docs"].url.as_deref(),
-            Some("https://example.com/mcp")
-        );
-    }
-
-    #[test]
-    fn mcp_import_normalizes_codex_and_vibe_formats() {
+    fn mcp_config_parses_codex_and_vibe_formats() {
         let codex = McpConfigDocument::parse(
             r#"
 [mcp_servers.docs]
@@ -524,7 +453,7 @@ command = "vmux"
     }
 
     #[test]
-    fn mcp_import_normalizes_claude_json() {
+    fn mcp_config_parses_claude_json() {
         let imported = McpConfigDocument::parse(
             r#"{
                 "mcpServers": {
@@ -556,22 +485,16 @@ command = "vmux"
     }
 
     #[test]
-    fn file_imports_merge_without_removing_existing_desired_state() {
+    fn package_imports_merge_without_removing_existing_desired_state() {
         let temp = tempfile::tempdir().unwrap();
         let manifest_path = temp.path().join("tools.toml");
         let brewfile = temp.path().join("Brewfile");
         let package_json = temp.path().join("package.json");
-        let mcp = temp.path().join("mcp.json");
         let mut manifest = ToolsManifest::default();
         manifest.set_package("npm", "existing", true);
         manifest.write_to(&manifest_path).unwrap();
         std::fs::write(&brewfile, "brew \"ripgrep\"\ncask \"ghostty\"\n").unwrap();
         std::fs::write(&package_json, r#"{"devDependencies":{"eslint":"1"}}"#).unwrap();
-        std::fs::write(
-            &mcp,
-            r#"{"mcpServers":{"docs":{"url":"https://example.com"}}}"#,
-        )
-        .unwrap();
 
         let store = ToolStore::new(temp.path(), temp.path());
         assert_eq!(
@@ -584,10 +507,8 @@ command = "vmux"
                 .unwrap(),
             1
         );
-        assert_eq!(store.import_mcp_config_to(&mcp, &manifest_path).unwrap(), 1);
         let loaded = ToolsManifest::read(&manifest_path).unwrap();
         assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);
-        assert!(loaded.mcp.servers.contains_key("docs"));
     }
 
     #[cfg(unix)]

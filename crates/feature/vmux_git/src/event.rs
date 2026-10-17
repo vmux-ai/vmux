@@ -84,6 +84,10 @@ pub struct GitDiffRevealRequest {
     pub end: u32,
 }
 
+impl GitDiffRevealRequest {
+    pub const CHUNK: u32 = 20;
+}
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitBranchCollectionSelectRequest {
     pub collection: GitBranchCollection,

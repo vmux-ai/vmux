@@ -19,6 +19,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "VaultUiState"],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]

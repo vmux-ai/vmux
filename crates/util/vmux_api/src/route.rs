@@ -40,7 +40,7 @@ impl VmuxRoute {
     }
 
     pub fn is_agent(&self) -> bool {
-        self.is_host("sessions") || self.is_host("agent")
+        self.is_host("sessions")
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -59,11 +59,7 @@ impl VmuxRoute {
             return false;
         }
         let segments = self.path_segments().collect::<Vec<_>>();
-        match segments.as_slice() {
-            [] | [_] => true,
-            [_, session] => !matches!(*session, "cli" | "setup"),
-            _ => false,
-        }
+        matches!(segments.as_slice(), [] | [_])
     }
 
     pub fn path_segments(&self) -> impl Iterator<Item = &str> {
@@ -79,11 +75,7 @@ impl VmuxRoute {
 
     pub fn in_subtree(&self, root: &Self) -> bool {
         let candidate = self.clone().canonicalized();
-        let root_host = match root.host() {
-            "agent" => "sessions",
-            host => host,
-        };
-        if candidate.host() != root_host {
+        if candidate.host() != root.host() {
             return false;
         }
         let root_path = root.path().trim_end_matches('/');
@@ -105,10 +97,6 @@ impl VmuxRoute {
             return Self(url);
         }
         match (host.as_str(), root) {
-            ("agent", _) => {
-                url.set_host(Some("sessions"))
-                    .expect("static vmux route host");
-            }
             ("agents", true) => {
                 url.set_host(Some("tools")).expect("static vmux route host");
                 url.set_path("/acp");
@@ -209,10 +197,6 @@ mod tests {
             ("vmux://tools/extensions", "vmux://extensions/"),
             ("vmux://cheatsheet/", "vmux://shortcuts/"),
             ("vmux://cheetsheet", "vmux://shortcuts/"),
-            (
-                "vmux://agent/codex/cli/session",
-                "vmux://sessions/codex/cli/session",
-            ),
         ];
         for (input, expected) in cases {
             assert_eq!(VmuxRoute::canonical(input).as_deref(), Some(expected));
@@ -228,11 +212,15 @@ mod tests {
     }
 
     #[test]
-    fn agent_id_reads_canonical_and_legacy_routes() {
-        for url in ["vmux://sessions/codex/cli", "vmux://agent/codex/cli"] {
-            let route = VmuxRoute::parse(url).unwrap();
-            assert_eq!(route.agent_id(), Some("codex"));
-        }
+    fn agent_id_reads_session_routes_only() {
+        let route = VmuxRoute::parse("vmux://sessions/codex/cli").unwrap();
+        assert_eq!(route.agent_id(), Some("codex"));
+        assert_eq!(
+            VmuxRoute::parse("vmux://agent/codex/cli")
+                .unwrap()
+                .agent_id(),
+            None
+        );
         assert_eq!(
             VmuxRoute::parse("vmux://terminal/").unwrap().agent_id(),
             None
@@ -276,11 +264,7 @@ mod tests {
 
     #[test]
     fn inline_transition_accepts_only_page_agent_routes() {
-        for url in [
-            "vmux://sessions/",
-            "vmux://sessions/codex",
-            "vmux://sessions/openai/session-1",
-        ] {
+        for url in ["vmux://sessions/", "vmux://sessions/session-1"] {
             assert!(
                 VmuxRoute::try_from(url)
                     .expect("route")
@@ -288,9 +272,8 @@ mod tests {
             );
         }
         for url in [
-            "vmux://sessions/codex/cli",
-            "vmux://sessions/vibe/setup",
-            "vmux://sessions/provider/model/session",
+            "vmux://sessions/provider/session",
+            "vmux://agent/codex",
             "vmux://terminal/",
         ] {
             assert!(

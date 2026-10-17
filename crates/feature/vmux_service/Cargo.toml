@@ -40,7 +40,6 @@ vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_process = { path = "../../util/vmux_process" }
-vmux_session = { path = "../vmux_session" }
 tempfile = "3.27.0"
 uuid = { workspace = true }
 url = { workspace = true }
