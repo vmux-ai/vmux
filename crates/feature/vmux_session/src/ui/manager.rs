@@ -67,7 +67,7 @@ pub fn SessionsManager() -> Element {
 
     rsx! {
         ManagerPage {
-            header { class: "flex h-11 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-background px-3",
+            header { class: "flex h-11 shrink-0 items-center gap-2.5 bg-background px-3",
                 div { class: "relative w-44 max-w-[30vw] sm:w-60",
                     LineIconView {
                         icon: LineIcon::Search,
@@ -178,7 +178,7 @@ fn SessionCategories(
         .map(|group| group.sessions.len())
         .sum::<usize>();
     rsx! {
-        aside { class: "hidden w-44 shrink-0 flex-col border-r border-foreground/[0.07] bg-foreground/[0.012] p-2 sm:flex",
+        aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
             h2 { class: "px-2 pb-2 pt-1 text-xs font-semibold text-foreground/90", {translate("sessions-title")} }
             SessionCategory {
                 label: translate("sessions-all"),
@@ -187,7 +187,7 @@ fn SessionCategories(
                 icon: Some(vmux_api::BuiltinIcon::ListTodo),
                 onclick: move |_| onselect.call(None),
             }
-            div { class: "my-2 border-t border-foreground/[0.055]" }
+            div { class: "h-2" }
             for group in groups {
                 SessionCategory {
                     key: "{group.stage.id}",
@@ -312,14 +312,14 @@ fn SessionListGroup(
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
-        section {
-            div { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md bg-foreground/[0.045] px-2.5 backdrop-blur",
+        section { class: "rounded-lg bg-foreground/[0.014] p-1",
+            div { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md bg-foreground/[0.055] px-2.5 backdrop-blur",
                 LineIconView { icon: LineIcon::ChevronDown, class: "size-3 text-muted-foreground/65".to_string() }
                 span { class: "size-2 rounded-full {stage_dot}" }
                 h2 { class: "text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
                 span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
             }
-            div { class: "px-1",
+            div { class: "space-y-px pt-0.5",
                 for session in sessions {
                     SessionListRow {
                         key: "{session.id}",
@@ -360,7 +360,7 @@ fn SessionListRow(
     };
     rsx! {
         div {
-            class: "group relative flex h-9 cursor-pointer items-center gap-2 border-b border-foreground/[0.045] px-2.5 text-xs transition-colors last:border-b-0 {row_class}",
+            class: "group relative flex h-9 cursor-pointer items-center gap-2 rounded-md px-2.5 text-xs transition-colors {row_class}",
             onclick: move |_| onselect.call(select_id.clone()),
             AgentThumbnail {
                 src: agent.icon.clone(),
@@ -438,7 +438,7 @@ fn SessionBoardColumn(
                 h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
                 span { class: "ml-auto text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
             }
-            div { class: "mt-1 min-h-0 flex-1 overflow-y-auto",
+            div { class: "mt-1 min-h-0 flex-1 space-y-1 overflow-y-auto",
                 for session in sessions {
                     SessionBoardCard {
                         key: "{session.id}",
@@ -479,7 +479,7 @@ fn SessionBoardCard(
     };
     rsx! {
         article {
-            class: "group relative cursor-pointer border-b border-foreground/[0.045] px-2.5 py-2.5 transition-colors {card_class}",
+            class: "group relative cursor-pointer rounded-md bg-foreground/[0.014] px-2.5 py-2.5 transition-colors {card_class}",
             onclick: move |_| onselect.call(select_id.clone()),
             div { class: "flex items-start gap-2",
                 AgentThumbnail {
@@ -511,7 +511,7 @@ fn SessionBoardCard(
                 }
                 SessionContextView { context: context.clone() }
             }
-            div { class: "mt-3 flex items-center gap-1.5 border-t border-foreground/[0.06] pt-2 text-[10px] text-muted-foreground/70",
+            div { class: "mt-3 flex items-center gap-1.5 pt-1 text-[10px] text-muted-foreground/70",
                 time { class: "tabular-nums", "{updated}" }
                 div { class: "flex-1" }
                 if !git_url.is_empty() {
@@ -540,8 +540,8 @@ fn SessionDetails(
     let edit_session = session.clone();
     let git_url = context.git_url.clone();
     rsx! {
-        aside { class: "flex min-h-0 w-[21rem] shrink-0 flex-col border-l border-foreground/[0.08] bg-background/80",
-            header { class: "flex shrink-0 items-start gap-3 border-b border-foreground/[0.08] p-4",
+        aside { class: "flex min-h-0 w-[21rem] shrink-0 flex-col bg-foreground/[0.018]",
+            header { class: "flex shrink-0 items-start gap-3 p-4",
                 AgentThumbnail {
                     src: agent.icon.clone(),
                     seed: agent.id.clone(),
@@ -570,13 +570,13 @@ fn SessionDetails(
             }
             div { class: "min-h-0 flex-1 overflow-y-auto p-4",
                 if !preview.is_empty() {
-                    p { class: "mb-4 rounded-lg bg-foreground/[0.025] px-3 py-2.5 text-xs leading-5 text-foreground/70 ring-1 ring-inset ring-foreground/[0.07]", "{preview}" }
+                    p { class: "mb-4 rounded-lg bg-foreground/[0.035] px-3 py-2.5 text-xs leading-5 text-foreground/70", "{preview}" }
                 }
                 if !session.description.is_empty() {
                     p { class: "mb-4 whitespace-pre-wrap text-xs leading-5 text-foreground/65", "{session.description}" }
                 }
-                section { class: "rounded-lg bg-foreground/[0.018] ring-1 ring-inset ring-foreground/[0.08]",
-                    h3 { class: "border-b border-foreground/[0.07] px-3 py-2 text-[10px] font-medium text-muted-foreground", {translate("editor-properties")} }
+                section { class: "rounded-lg bg-foreground/[0.035]",
+                    h3 { class: "px-3 pb-1 pt-3 text-[10px] font-medium text-muted-foreground", {translate("editor-properties")} }
                     div { class: "grid gap-3 p-3",
                         SessionDetailField { label: translate("sessions-stage"),
                             StagePicker {
@@ -609,7 +609,7 @@ fn SessionDetails(
                     }
                 }
             }
-            footer { class: "flex shrink-0 items-center gap-2 border-t border-foreground/[0.08] p-3",
+            footer { class: "flex shrink-0 items-center gap-2 p-3",
                 ManagerButton {
                     onclick: move |_| {
                         let _ = send(&ChatOpenPage { url: open_url.clone() });
