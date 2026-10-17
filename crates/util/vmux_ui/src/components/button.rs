@@ -20,7 +20,7 @@ pub enum ButtonVariant {
 impl ButtonVariant {
     pub fn classes(&self) -> &'static str {
         match self {
-            ButtonVariant::Primary => "bg-primary text-primary-foreground hover:bg-primary/90",
+            ButtonVariant::Primary => "vmux-primary-action",
             ButtonVariant::Secondary => {
                 "bg-secondary text-secondary-foreground hover:bg-secondary/80"
             }

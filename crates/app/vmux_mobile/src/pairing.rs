@@ -689,7 +689,7 @@ pub(super) fn PairCard(props: PairCardProps) -> Element {
                 p { class: "mt-1 text-xs leading-5 text-muted-foreground", {translate("mobile-pair-subtitle")} }
             }
             button {
-                class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-xl shadow-black/20 disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none active:scale-[0.99] active:bg-primary/90",
+                class: "vmux-primary-action flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl text-sm font-semibold shadow-xl shadow-black/20 disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none",
                 r#type: "button",
                 disabled: unavailable.is_some(),
                 onclick: move |_| props.on_scan.call(()),

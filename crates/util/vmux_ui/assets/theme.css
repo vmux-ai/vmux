@@ -277,15 +277,21 @@ body {
   content: "\200E";
 }
 
-/* Ghost button with a gradient outline: transparent fill, gradient painted only on the border,
-   following the element's border-radius (the padding-box/border-box shorthand can't do a
-   transparent center, so mask out the interior). */
-.vmux-gradient-outline {
+.vmux-primary-action {
   position: relative;
   background: transparent;
+  color: #818cf8;
 }
 
-.vmux-gradient-outline::before {
+.vmux-primary-action:hover {
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.vmux-primary-action:active {
+  transform: scale(0.98);
+}
+
+.vmux-primary-action::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -303,6 +309,6 @@ body {
   pointer-events: none;
 }
 
-.vmux-gradient-outline > * {
+.vmux-primary-action > * {
   position: relative;
 }

@@ -76,7 +76,7 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
                     p { class: "text-sm leading-relaxed text-foreground", {translate("agent-error-version-suggestion")} }
                     if let Some(url) = version_error_target {
                         button {
-                            class: "vmux-gradient-outline inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
+                            class: "vmux-primary-action inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg",
                             onclick: move |_| {
                                 let _ = send(&ChatOpenPage { url: url.clone() });
                             },

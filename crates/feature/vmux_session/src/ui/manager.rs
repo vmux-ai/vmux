@@ -202,7 +202,7 @@ fn StartSessionButton() -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "mt-2 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground hover:bg-primary/90",
+            class: "vmux-primary-action mt-2 inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium",
             onclick: move |_| {
                 let _ = send(&ChatOpenPage {
                     url: "vmux://start/".to_string(),
@@ -583,7 +583,7 @@ fn SessionFilterMenu(
                     }
                     button {
                         r#type: "button",
-                        class: "h-8 shrink-0 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:cursor-default disabled:opacity-35",
+                        class: "vmux-primary-action h-8 shrink-0 rounded-md px-3 text-[11px] font-medium disabled:cursor-default disabled:opacity-35",
                         disabled: date_filter.is_none(),
                         onclick: move |_| {
                             if let Some(updated) = date_filter.clone() {
@@ -612,7 +612,7 @@ fn SessionFilterMenu(
                     }
                     button {
                         r#type: "button",
-                        class: "h-8 shrink-0 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:cursor-default disabled:opacity-35",
+                        class: "vmux-primary-action h-8 shrink-0 rounded-md px-3 text-[11px] font-medium disabled:cursor-default disabled:opacity-35",
                         disabled: within_filter.is_none(),
                         onclick: move |_| {
                             if let Some(updated) = within_filter.clone() {
@@ -1051,7 +1051,7 @@ fn DetailActionButton(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let class = if primary {
-        "vmux-gradient-outline flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-indigo-400 transition hover:bg-foreground/[0.04] active:scale-[0.98]"
+        "vmux-primary-action flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition"
     } else {
         "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground"
     };

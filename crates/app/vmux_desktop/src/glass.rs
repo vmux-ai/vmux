@@ -3,6 +3,7 @@ use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
+use bevy::window::{MonitorSelection, WindowMode};
 use bevy::winit::WINIT_WINDOWS;
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
 use objc2_app_kit::{
@@ -204,13 +205,17 @@ fn reveal_window(
 
 fn restore_fullscreen_after_reveal(
     state: NonSend<GlassState>,
-    primary_window: Query<
-        (Entity, &crate::window::PendingFullscreenRestore),
+    mut primary_window: Query<
+        (
+            Entity,
+            &mut Window,
+            &crate::window::PendingFullscreenRestore,
+        ),
         With<bevy::window::PrimaryWindow>,
     >,
     mut commands: Commands,
 ) {
-    let Ok((window, pending)) = primary_window.single() else {
+    let Ok((window, mut native_window, pending)) = primary_window.single_mut() else {
         return;
     };
     let Some(glass) = state.0.get(&window) else {
@@ -219,13 +224,8 @@ fn restore_fullscreen_after_reveal(
     if !glass.revealed {
         return;
     }
-    if pending.0
-        && let Some(parent_window) = &glass._parent_window
-        && !parent_window
-            .styleMask()
-            .contains(NSWindowStyleMask::FullScreen)
-    {
-        parent_window.toggleFullScreen(None);
+    if pending.0 {
+        native_window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Primary);
     }
     commands
         .entity(window)
@@ -272,16 +272,37 @@ fn toggle_fullscreen(
     state: NonSend<GlassState>,
     focused_window: vmux_layout::window::FocusedWindow,
     mut reader: MessageReader<ToggleFullscreenRequest>,
+    mut windows: Query<&mut Window>,
 ) {
     let toggle = reader.read().next().is_some();
-    if toggle
-        && let Some(parent_window) = focused_window
-            .entity()
-            .and_then(|window| state.0.get(&window))
-            .and_then(|glass| glass._parent_window.as_ref())
+    if !toggle {
+        return;
+    }
+    let Some(window_entity) = focused_window.entity() else {
+        return;
+    };
+    if let Some(parent_window) = state
+        .0
+        .get(&window_entity)
+        .and_then(|glass| glass._parent_window.as_ref())
+        && parent_window
+            .styleMask()
+            .contains(NSWindowStyleMask::FullScreen)
     {
         parent_window.toggleFullScreen(None);
+        return;
     }
+    let Ok(mut window) = windows.get_mut(window_entity) else {
+        return;
+    };
+    window.mode = if matches!(
+        window.mode,
+        WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(..)
+    ) {
+        WindowMode::Windowed
+    } else {
+        WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+    };
 }
 
 fn sync_window_visibility(
@@ -296,7 +317,6 @@ fn sync_window_visibility(
     mut exit_fullscreen: MessageReader<crate::window::ExitFullscreenRequest>,
     mut shortcut: MessageReader<vmux_input::ExitFullscreenShortcut>,
 ) {
-    let mut focused_fullscreen = false;
     let exit_fullscreen =
         exit_fullscreen.read().next().is_some() || shortcut.read().next().is_some();
     state.0.retain(|entity, _| window_q.contains(*entity));
@@ -315,7 +335,6 @@ fn sync_window_visibility(
             .is_some_and(|window| window.styleMask().contains(NSWindowStyleMask::FullScreen));
         let fullscreen = bevy_fullscreen || native_fullscreen;
         if focused_window.entity() == Some(entity) {
-            focused_fullscreen = fullscreen;
             if exit_fullscreen {
                 if native_fullscreen {
                     if let Some(parent_window) = &glass._parent_window {
@@ -330,7 +349,7 @@ fn sync_window_visibility(
             window_fullscreen.0 = fullscreen;
         }
 
-        let visible = !fullscreen;
+        let visible = window.visible;
         if let (Some(backdrop_window), Some(parent_window)) =
             (&glass._backdrop_window, &glass._parent_window)
         {
@@ -357,12 +376,7 @@ fn sync_window_visibility(
         glass.visible = visible;
     }
 
-    let [r, g, b] = vmux_layout::window::WINDOW_BACKGROUND_SRGB;
-    let want_clear = if focused_fullscreen {
-        Color::srgb(r, g, b)
-    } else {
-        Color::NONE
-    };
+    let want_clear = Color::NONE;
     if clear_color.0 != want_clear {
         clear_color.0 = want_clear;
     }
@@ -498,5 +512,27 @@ mod tests {
         assert!(!focus_shadow_visible(false, true, false));
         assert!(!focus_shadow_visible(true, false, false));
         assert!(!focus_shadow_visible(true, true, true));
+    }
+
+    #[test]
+    fn fullscreen_command_uses_borderless_mode_without_a_native_space() {
+        let mut app = App::new();
+        app.add_message::<ToggleFullscreenRequest>()
+            .add_systems(Update, toggle_fullscreen)
+            .insert_non_send(GlassState::default());
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_ecs::Active))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<ToggleFullscreenRequest>>()
+            .write(ToggleFullscreenRequest);
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<Window>(window).unwrap().mode,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        ));
     }
 }
