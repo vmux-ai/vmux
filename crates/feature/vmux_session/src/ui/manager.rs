@@ -605,7 +605,7 @@ fn DetailHeaderButton(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let class = if primary {
-        "flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+        "vmux-gradient-outline flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-indigo-400 transition hover:bg-foreground/[0.04] active:scale-[0.98]"
     } else {
         "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground"
     };
@@ -625,7 +625,7 @@ fn DetailHeaderButton(
                 },
             }
             if primary {
-                span { "{label}" }
+                span { class: "bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent", "{label}" }
             }
         }
     }
