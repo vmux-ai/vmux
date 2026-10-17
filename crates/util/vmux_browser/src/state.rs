@@ -21,7 +21,7 @@ use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, UpdateState,
     event::{
-        AddressParts, HEADER_HEIGHT_PX, LayoutGeometry, PANE_GAP_PX, PaneNode, PaneTreeState,
+        AddressParts, HEADER_HEIGHT_PX, LayoutGeometry, PaneNode, PaneTreeState, SIDE_SHEET_GAP_PX,
         StackNavigationState, StackNode, StackRow, TabBoundary, TabBoundaryState, TabListState,
         TabRow, UpdateCleared, UpdateProgress, UpdateReady,
     },
@@ -569,7 +569,7 @@ fn push_layout_emit(
             .map(|offsets| offsets.height)
             .unwrap_or(HEADER_HEIGHT_PX),
         side_sheet_width,
-        pane_gap: PANE_GAP_PX,
+        pane_gap: SIDE_SHEET_GAP_PX,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),
         header_top: header_offsets.map(|offsets| offsets.top),

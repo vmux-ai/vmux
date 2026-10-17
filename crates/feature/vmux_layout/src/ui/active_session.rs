@@ -6,6 +6,7 @@ use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
@@ -195,6 +196,12 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     let root = project.root;
     let choices = project.choices;
     let mut choosing = use_signal(|| false);
+    let mut expanded = use_signal(|| false);
+    let toggle_label = if expanded() {
+        translate("common-collapse")
+    } else {
+        translate("common-expand")
+    };
     rsx! {
         div { class: "flex min-w-0 flex-col gap-1",
             Dropdown {
@@ -214,12 +221,8 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                     span { class: "truncate-start min-w-0 flex-1 font-mono text-[10px] text-foreground", "{root.display_path}" }
                     LineIconView {
-                        icon: LineIcon::ChevronDown,
-                        class: if choosing() {
-                            "size-3.5 shrink-0 rotate-180 transition-transform".to_string()
-                        } else {
-                            "size-3.5 shrink-0 transition-transform".to_string()
-                        },
+                        icon: LineIcon::ChevronsUpDown,
+                        class: "size-3.5 shrink-0".to_string(),
                     }
                 }
                 if choosing() {
@@ -236,18 +239,33 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                 }
             }
             div { class: "min-w-0 rounded-md bg-foreground/[0.035] py-1.5",
-                div { class: "px-2 pb-1",
+                div { class: "flex items-center gap-1 px-2 pb-1",
                     span {
-                        class: "inline-flex max-w-full items-center rounded-full bg-foreground/[0.065] px-2 py-0.5 text-[9px] font-medium text-foreground/85 ring-1 ring-inset ring-foreground/[0.07]",
+                        class: "inline-flex min-w-0 max-w-full items-center rounded-full bg-foreground/[0.065] px-2 py-0.5 text-[9px] font-medium text-foreground/85 ring-1 ring-inset ring-foreground/[0.07]",
                         span { class: "truncate", "{root.label}" }
                     }
+                    div { class: "ml-auto",
+                        SheetHeaderChevron {
+                            expanded: expanded(),
+                            label: toggle_label,
+                            onclick: move |_| expanded.set(!expanded()),
+                        }
+                    }
                 }
-                if !project.children.is_empty() {
-                    for child in project.children {
-                        ActiveWorkspaceProjectRow {
-                            key: "{child.path}",
-                            project: child,
-                            pane_id,
+                div { class: if expanded() {
+                        "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                    } else {
+                        "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                    },
+                    div { class: "min-h-0 overflow-hidden",
+                        if !project.children.is_empty() {
+                            for child in project.children {
+                                ActiveWorkspaceProjectRow {
+                                    key: "{child.path}",
+                                    project: child,
+                                    pane_id,
+                                }
+                            }
                         }
                     }
                 }

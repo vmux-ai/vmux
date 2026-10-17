@@ -224,7 +224,7 @@ fn HeaderContent() -> Element {
 fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
     (
         String::new(),
-        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+        "flex min-w-0 flex-1 shrink-0 items-center gap-1 bg-glass px-2 text-foreground backdrop-blur-xl backdrop-saturate-150".to_string(),
     )
 }
 

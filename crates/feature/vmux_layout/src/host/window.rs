@@ -381,7 +381,7 @@ fn spawn_window_shell(
                 right: Val::Px(settings.window.pad_right()),
                 bottom: Val::Px(settings.window.pad_bottom()),
             },
-            column_gap: Val::Px(crate::event::PANE_GAP_PX),
+            column_gap: Val::Px(crate::event::SIDE_SHEET_GAP_PX),
             ..default()
         },
     });
@@ -715,7 +715,7 @@ fn persist(
     let pad_right = settings.window.pad_right();
     let pad_bottom = settings.window.pad_bottom();
     let pad_left = settings.window.pad_left();
-    let gap = crate::event::PANE_GAP_PX;
+    let gap = crate::event::SIDE_SHEET_GAP_PX;
     let configured_width =
         crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     for (host, mut node) in &mut window_q {
@@ -1002,7 +1002,7 @@ mod tests {
             .expect("window root");
         let node = app.world().get::<Node>(root).expect("window node");
 
-        assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
+        assert_eq!(node.column_gap, Val::Px(crate::event::SIDE_SHEET_GAP_PX));
     }
 
     #[test]

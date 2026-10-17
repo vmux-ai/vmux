@@ -7,7 +7,7 @@ use vmux_ecs::event::space::{
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::sheet::SheetHeaderChevron;
+use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -134,7 +134,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] border-r border-foreground/[0.07] bg-background/35 pt-[var(--vmux-side-sheet-pad-top)] backdrop-blur-xl",
+            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] bg-background/35 pt-[var(--vmux-side-sheet-pad-top)] backdrop-blur-xl",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
@@ -208,22 +208,39 @@ fn SideSheetSpaceCard(
     form: SpaceFormState,
     active_session: Option<ActiveSession>,
 ) -> Element {
+    let mut expanded = use_signal(|| true);
     rsx! {
         div { class: "mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2",
             SideSheetSpaceRow {
                 space,
                 spaces,
                 form,
+                expanded: expanded(),
+                on_toggle: move |_| expanded.set(!expanded()),
             }
-            if let Some(session) = active_session {
-                ActiveSessionPanel { session }
+            div { class: if expanded() {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "min-h-0 overflow-hidden",
+                    if let Some(session) = active_session {
+                        ActiveSessionPanel { session }
+                    }
+                }
             }
         }
     }
 }
 
 #[component]
-fn SideSheetSpaceRow(space: SpaceRow, spaces: SpacesListEvent, form: SpaceFormState) -> Element {
+fn SideSheetSpaceRow(
+    space: SpaceRow,
+    spaces: SpacesListEvent,
+    form: SpaceFormState,
+    expanded: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
     let mut open = use_signal(|| false);
     let editing = form.open && form.space_id.as_deref() == Some(space.id.as_str());
     let menu_value = use_signal(|| space.id.clone());
@@ -248,7 +265,7 @@ fn SideSheetSpaceRow(space: SpaceRow, spaces: SpacesListEvent, form: SpaceFormSt
                             title: space.display_name(),
                             aria_label: space.display_name(),
                             disabled: editing,
-                            onclick: move |_| open.set(!open()),
+                            onclick: move |_| on_toggle.call(()),
                         }
                         div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2",
                             LineIconView {
@@ -263,12 +280,30 @@ fn SideSheetSpaceRow(space: SpaceRow, spaces: SpacesListEvent, form: SpaceFormSt
                                 }
                             }
                             div { class: "pointer-events-auto",
-                                SheetHeaderChevron {
-                                    expanded: open(),
+                                SheetHeaderAction {
                                     label: translate("spaces-switch"),
+                                    active: open(),
                                     onclick: move |event: MouseEvent| {
                                         event.stop_propagation();
                                         open.set(!open());
+                                    },
+                                    LineIconView {
+                                        icon: LineIcon::ChevronsUpDown,
+                                        class: "size-3.5".to_string(),
+                                    }
+                                }
+                            }
+                            div { class: "pointer-events-auto",
+                                SheetHeaderChevron {
+                                    expanded,
+                                    label: if expanded {
+                                        translate("common-collapse")
+                                    } else {
+                                        translate("common-expand")
+                                    },
+                                    onclick: move |event: MouseEvent| {
+                                        event.stop_propagation();
+                                        on_toggle.call(());
                                     },
                                 }
                             }

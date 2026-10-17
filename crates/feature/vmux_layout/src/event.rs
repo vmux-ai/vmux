@@ -85,7 +85,7 @@ fn default_side_sheet_width() -> f32 {
 }
 
 fn default_pane_gap() -> f32 {
-    8.0
+    SIDE_SHEET_GAP_PX
 }
 
 fn default_window_pad() -> f32 {
@@ -102,6 +102,7 @@ pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 pub const WINDOW_PAD_PX: f32 = 8.0;
 
 pub const PANE_GAP_PX: f32 = 4.0;
+pub const SIDE_SHEET_GAP_PX: f32 = 0.0;
 
 pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
 pub const SIDE_SHEET_MIN_WIDTH_PX: f32 = 160.0;
