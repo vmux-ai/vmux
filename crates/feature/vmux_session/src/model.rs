@@ -434,6 +434,7 @@ fn cleanup(
         for (entity, id) in &sessions {
             if id == &request.id {
                 commands.trigger(Cleanup { entity });
+                commands.entity(entity).despawn();
             }
         }
     }
@@ -590,6 +591,7 @@ mod tests {
         app.update();
 
         assert_eq!(app.world().resource::<Cleaned>().0, vec![session]);
+        assert!(app.world().get_entity(session).is_err());
     }
 
     #[test]

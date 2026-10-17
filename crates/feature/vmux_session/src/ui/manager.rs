@@ -137,22 +137,26 @@ fn SessionCategories(
                 icon: Some(vmux_api::BuiltinIcon::ListTodo),
                 onclick: move |_| onselect.call(None),
             }
-            SessionCategory {
-                label: translate("sessions-stale"),
-                count: stale_count,
-                selected: matches!(selected.as_ref(), Some(SessionFilter::Stale)),
-                dot: "bg-amber-400".to_string(),
-                onclick: move |_| onselect.call(Some(SessionFilter::Stale)),
+            if stale_count > 0 {
+                SessionCategory {
+                    label: translate("sessions-stale"),
+                    count: stale_count,
+                    selected: matches!(selected.as_ref(), Some(SessionFilter::Stale)),
+                    dot: "bg-amber-400".to_string(),
+                    onclick: move |_| onselect.call(Some(SessionFilter::Stale)),
+                }
             }
             div { class: "h-2" }
             for group in groups {
-                SessionCategory {
-                    key: "{group.stage.id}",
-                    label: translate_humanized(&group.stage.name),
-                    count: group.sessions.len(),
-                    selected: matches!(selected.as_ref(), Some(SessionFilter::Stage(id)) if id == &group.stage.id),
-                    dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
-                    onclick: move |_| onselect.call(Some(SessionFilter::Stage(group.stage.id.clone()))),
+                if !group.sessions.is_empty() {
+                    SessionCategory {
+                        key: "{group.stage.id}",
+                        label: translate_humanized(&group.stage.name),
+                        count: group.sessions.len(),
+                        selected: matches!(selected.as_ref(), Some(SessionFilter::Stage(id)) if id == &group.stage.id),
+                        dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
+                        onclick: move |_| onselect.call(Some(SessionFilter::Stage(group.stage.id.clone()))),
+                    }
                 }
             }
         }
@@ -389,12 +393,14 @@ fn SessionsBoard(
     rsx! {
         div { class: "flex min-h-0 flex-1 gap-2 overflow-x-auto p-2",
             for group in groups {
-                SessionBoardColumn {
-                    key: "{group.stage.id}",
-                    stage: group.stage,
-                    sessions: group.sessions,
-                    repositories: repositories.clone(),
-                    onselect,
+                if !group.sessions.is_empty() {
+                    SessionBoardColumn {
+                        key: "{group.stage.id}",
+                        stage: group.stage,
+                        sessions: group.sessions,
+                        repositories: repositories.clone(),
+                        onselect,
+                    }
                 }
             }
         }
@@ -752,11 +758,16 @@ fn EditableDescription(session_id: String, value: String) -> Element {
 #[component]
 fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Element {
     let mut open = use_signal(|| false);
+    let visibility = if open() {
+        "opacity-100"
+    } else {
+        "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+    };
     rsx! {
         div { class: "relative flex justify-end gap-0.5",
             button {
                 r#type: "button",
-                class: "flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100",
+                class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
                 title: translate("sessions-open-chat"),
                 aria_label: translate("sessions-open-chat"),
                 onclick: move |event| {
@@ -768,7 +779,7 @@ fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Elem
             if !git_url.is_empty() {
                 button {
                     r#type: "button",
-                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100",
+                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
                     title: translate("git-title"),
                     aria_label: translate("git-title"),
                     onclick: move |event| {
@@ -780,22 +791,20 @@ fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Elem
             }
             button {
                 r#type: "button",
-                class: "flex size-7 items-center justify-center rounded-md text-sm tracking-[1px] text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100",
+                class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
                 title: translate("sessions-actions"),
                 aria_label: translate("sessions-actions"),
                 onclick: move |event| {
                     event.stop_propagation();
                     open.set(!open());
                 },
-                "•••"
+                LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5".to_string() }
             }
             if open() {
                 div {
                     class: "absolute right-0 top-7 z-30 w-36 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
                     onclick: move |event| event.stop_propagation(),
-                    SessionActionItem {
-                        label: translate("sessions-cleanup"),
-                        danger: true,
+                    SessionDeleteButton {
                         onclick: move |_| {
                             open.set(false);
                             let _ = send(&SessionsCleanup { id: cleanup_id.clone() });
@@ -808,22 +817,14 @@ fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Elem
 }
 
 #[component]
-fn SessionActionItem(
-    label: String,
-    #[props(default)] danger: bool,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
-    let class = if danger {
-        "text-ansi-1 hover:bg-ansi-1/10"
-    } else {
-        "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
-    };
+fn SessionDeleteButton(onclick: EventHandler<MouseEvent>) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] transition-colors {class}",
+            class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-ansi-1 transition-colors hover:bg-ansi-1/10",
             onclick: move |event| onclick.call(event),
-            "{label}"
+            LineIconView { icon: LineIcon::Trash, class: "size-3.5 shrink-0".to_string() }
+            span { {translate("sessions-delete")} }
         }
     }
 }

@@ -15,6 +15,7 @@ pub enum LineIcon {
     ChevronsUpDown,
     Clock,
     Copy,
+    Ellipsis,
     ExternalLink,
     File,
     FileOutput,
@@ -86,6 +87,7 @@ impl LineIcon {
                 "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z",
                 "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
             ],
+            Self::Ellipsis => &["M6 12h.01", "M12 12h.01", "M18 12h.01"],
             Self::ExternalLink => &[
                 "M14 3h7v7",
                 "m21 3-9 9",
