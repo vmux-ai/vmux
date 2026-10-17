@@ -790,7 +790,9 @@ git-loading-diff = جارٍ تحميل الفرق…
 git-no-changes = لا توجد تغييرات لعرضها
 git-stage-hunk = تجهيز المقطع
 git-revert-hunk = التراجع عن المقطع
-git-show-unchanged-lines = عرض { $count } أسطر بلا تغييرات
+git-show-unchanged-lines = عرض كل الأسطر غير المتغيرة وعددها { $count }
+git-show-previous-lines = عرض الأسطر السابقة وعددها { $count }
+git-show-next-lines = عرض الأسطر التالية وعددها { $count }
 
 terminal-runs-when-ready = يعمل عند الجاهزية · Ctrl+C يمسح · Esc يتخطى
 terminal-booting = جارٍ التمهيد

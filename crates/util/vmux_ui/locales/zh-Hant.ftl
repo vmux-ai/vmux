@@ -787,7 +787,9 @@ git-loading-diff = 正在載入差異…
 git-no-changes = 沒有可顯示的變更
 git-stage-hunk = 暫存程式碼區塊
 git-revert-hunk = 還原程式碼區塊
-git-show-unchanged-lines = 顯示 { $count } 行未變更內容
+git-show-unchanged-lines = 顯示全部 { $count } 行未變更內容
+git-show-previous-lines = 顯示前 { $count } 行
+git-show-next-lines = 顯示後 { $count } 行
 
 terminal-runs-when-ready = 準備好後執行 · Ctrl+C 清除 · Esc 略過
 terminal-booting = 啟動中

@@ -9,8 +9,8 @@ use crate::event::GitDiffRow;
 #[cfg(test)]
 use crate::event::GitDiffViewport;
 use crate::event::{
-    DiffKind, GitBranchLog, GitBranchLogRequest, GitOperationError, GitOperationResult,
-    GitRepositoryRequest, GitRepositorySnapshot,
+    DiffKind, GitBranchLog, GitBranchLogRequest, GitDiffRevealRequest, GitOperationError,
+    GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
 };
 use crate::state::{GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState};
 
@@ -284,11 +284,20 @@ fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
             while index < lines.len() && !visible[index] {
                 index += 1;
             }
+            let hidden = index - start;
+            let chunk = GitDiffRevealRequest::CHUNK as usize;
+            let (reveal_start, reveal_end) = if hidden <= chunk {
+                (start, index)
+            } else if start == 0 {
+                (index - chunk, index)
+            } else {
+                (start, start + chunk)
+            };
             rows.push(GitDiffRow::Gap {
                 start: start as u32,
                 end: index as u32,
-                reveal_start: start as u32,
-                reveal_end: index as u32,
+                reveal_start: reveal_start as u32,
+                reveal_end: reveal_end as u32,
             });
         }
         if state.snapshot.diff_rows != rows {
@@ -462,24 +471,22 @@ mod tests {
     }
 
     #[test]
-    fn diff_projection_reveals_the_requested_gap() {
+    fn diff_projection_reveals_only_the_requested_chunk() {
         let (mut app, entity) = app_with_change(60, 49);
         app.world_mut()
             .get_mut::<GitDiffRevealRanges>(entity)
             .unwrap()
             .0
-            .push((0, 46));
+            .push((0, GitDiffRevealRequest::CHUNK as usize));
         app.update();
         let state = app.world().get::<GitState>(entity).unwrap();
 
         assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Line(0)));
-        assert!(!state.snapshot.diff_rows.iter().any(|row| matches!(
-            row,
-            GitDiffRow::Gap {
-                start: 0,
-                end: 46,
-                ..
-            }
-        )));
+        assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Gap {
+            start: GitDiffRevealRequest::CHUNK,
+            end: 46,
+            reveal_start: GitDiffRevealRequest::CHUNK,
+            reveal_end: GitDiffRevealRequest::CHUNK * 2,
+        }));
     }
 }

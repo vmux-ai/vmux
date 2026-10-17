@@ -787,7 +787,9 @@ git-loading-diff = diff 로드 중…
 git-no-changes = 표시할 변경 사항 없음
 git-stage-hunk = 헝크 스테이징
 git-revert-hunk = 헝크 되돌리기
-git-show-unchanged-lines = 변경 없는 줄 { $count }개 표시
+git-show-unchanged-lines = 변경 없는 줄 { $count }개 모두 표시
+git-show-previous-lines = 이전 { $count }줄 표시
+git-show-next-lines = 다음 { $count }줄 표시
 
 terminal-runs-when-ready = 준비되면 실행 · Ctrl+C로 지우기 · Esc로 건너뛰기
 terminal-booting = 부팅 중

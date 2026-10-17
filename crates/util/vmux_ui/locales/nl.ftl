@@ -790,7 +790,9 @@ git-loading-diff = Diff laden…
 git-no-changes = Geen wijzigingen om te tonen
 git-stage-hunk = Blok stagen
 git-revert-hunk = Blok terugdraaien
-git-show-unchanged-lines = Toon { $count } ongewijzigde regels
+git-show-unchanged-lines = Toon alle { $count } ongewijzigde regels
+git-show-previous-lines = Toon vorige { $count } regels
+git-show-next-lines = Toon volgende { $count } regels
 
 terminal-runs-when-ready = voert uit zodra klaar · Ctrl+C wist · Esc slaat over
 terminal-booting = opstarten

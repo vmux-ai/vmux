@@ -790,7 +790,9 @@ git-loading-diff = Загрузка различий…
 git-no-changes = Нет изменений для просмотра
 git-stage-hunk = Добавить блок в индекс
 git-revert-hunk = Откатить блок
-git-show-unchanged-lines = Показать неизменённые строки: { $count }
+git-show-unchanged-lines = Показать все неизменённые строки: { $count }
+git-show-previous-lines = Показать предыдущие строки: { $count }
+git-show-next-lines = Показать следующие строки: { $count }
 
 terminal-runs-when-ready = запустится, когда будет готово · Ctrl+C очищает · Esc пропускает
 terminal-booting = запуск

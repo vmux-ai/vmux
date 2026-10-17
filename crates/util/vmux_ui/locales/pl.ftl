@@ -790,7 +790,9 @@ git-loading-diff = Wczytywanie diffu…
 git-no-changes = Brak zmian do pokazania
 git-stage-hunk = Dodaj fragment
 git-revert-hunk = Przywróć fragment
-git-show-unchanged-lines = Pokaż { $count } niezmienionych wierszy
+git-show-unchanged-lines = Pokaż wszystkie { $count } niezmienionych wierszy
+git-show-previous-lines = Pokaż poprzednie { $count } wierszy
+git-show-next-lines = Pokaż następne { $count } wierszy
 
 terminal-runs-when-ready = uruchomi się, gdy będzie gotowe · Ctrl+C czyści · Esc pomija
 terminal-booting = uruchamianie
