@@ -520,7 +520,7 @@ fn SessionDetails(
                     }
                 }
                 DetailHeaderButton {
-                    icon: DetailHeaderIcon::Line(LineIcon::MessageCircle),
+                    icon: DetailHeaderIcon::Line(LineIcon::MessagesRound),
                     label: translate("sessions-open-chat"),
                     onclick: move |_| {
                         let _ = send(&ChatOpenPage { url: header_open_url.clone() });
