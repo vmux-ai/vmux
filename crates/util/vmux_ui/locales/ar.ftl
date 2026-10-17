@@ -1007,6 +1007,7 @@ git-shortcut-previous = العنصر السابق
 git-shortcut-next = العنصر التالي
 sessions-title = الجلسات
 sessions-all = جميع الجلسات
+sessions-stale = متوقفة
 sessions-search = البحث في الجلسات
 sessions-view-list = قائمة
 sessions-view-board = لوحة

@@ -1004,6 +1004,7 @@ git-shortcut-previous = 이전 항목
 git-shortcut-next = 다음 항목
 sessions-title = 세션
 sessions-all = 모든 세션
+sessions-stale = 장기 미업데이트
 sessions-search = 세션 검색
 sessions-view-list = 목록
 sessions-view-board = 보드

@@ -1004,6 +1004,7 @@ git-shortcut-previous = 上一项
 git-shortcut-next = 下一项
 sessions-title = 会话
 sessions-all = 所有会话
+sessions-stale = 长期未更新
 sessions-search = 搜索会话
 sessions-view-list = 列表
 sessions-view-board = 看板

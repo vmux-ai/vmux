@@ -987,6 +987,7 @@ resume-age-months = { $count }か月前
 resume-age-years = { $count }年前
 sessions-title = セッション
 sessions-all = すべてのセッション
+sessions-stale = 停滞中
 sessions-search = セッションを検索
 sessions-view-list = リスト
 sessions-view-board = ボード

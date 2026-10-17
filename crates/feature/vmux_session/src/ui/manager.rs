@@ -21,7 +21,7 @@ pub fn SessionsManager() -> Element {
     let ui = use_ui_state::<ChatUiState>();
     let mut query = use_signal(String::new);
     let mut view = use_signal(|| SessionsView::List);
-    let mut stage_filter = use_signal(|| None::<String>);
+    let mut filter = use_signal(|| None::<SessionFilter>);
     let mut selected = use_signal(|| None::<String>);
     let state = ui.state.read();
     let snapshot = state.sessions.clone();
@@ -29,15 +29,7 @@ pub fn SessionsManager() -> Element {
     drop(state);
     let search = query().trim().to_ascii_lowercase();
     let category_groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
-    let groups = category_groups
-        .iter()
-        .filter(|group| {
-            stage_filter()
-                .as_deref()
-                .is_none_or(|stage| stage == group.stage.id)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let groups = StageGroup::filtered(&category_groups, filter().as_ref());
     let stages = category_groups
         .iter()
         .map(|group| group.stage.clone())
@@ -83,8 +75,8 @@ pub fn SessionsManager() -> Element {
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
                 SessionCategories {
                     groups: category_groups.clone(),
-                    selected: stage_filter(),
-                    onselect: move |stage| stage_filter.set(stage),
+                    selected: filter(),
+                    onselect: move |selected| filter.set(selected),
                 }
                 div { class: "flex min-w-0 flex-1 overflow-hidden",
                     if snapshot.sessions.is_empty() {
@@ -122,13 +114,19 @@ pub fn SessionsManager() -> Element {
 #[component]
 fn SessionCategories(
     groups: Vec<StageGroup>,
-    selected: Option<String>,
-    onselect: EventHandler<Option<String>>,
+    selected: Option<SessionFilter>,
+    onselect: EventHandler<Option<SessionFilter>>,
 ) -> Element {
     let all_count = groups
         .iter()
         .map(|group| group.sessions.len())
         .sum::<usize>();
+    let stale_count = groups
+        .iter()
+        .filter(|group| !group.stage.terminal)
+        .flat_map(|group| group.sessions.iter())
+        .filter(|session| SessionFreshness::is_stale(session, false))
+        .count();
     rsx! {
         aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
             h2 { class: "px-2 pb-2 pt-1 text-xs font-semibold text-foreground/90", {translate("sessions-title")} }
@@ -139,15 +137,22 @@ fn SessionCategories(
                 icon: Some(vmux_api::BuiltinIcon::ListTodo),
                 onclick: move |_| onselect.call(None),
             }
+            SessionCategory {
+                label: translate("sessions-stale"),
+                count: stale_count,
+                selected: matches!(selected.as_ref(), Some(SessionFilter::Stale)),
+                dot: "bg-amber-400".to_string(),
+                onclick: move |_| onselect.call(Some(SessionFilter::Stale)),
+            }
             div { class: "h-2" }
             for group in groups {
                 SessionCategory {
                     key: "{group.stage.id}",
                     label: translate_humanized(&group.stage.name),
                     count: group.sessions.len(),
-                    selected: selected.as_deref() == Some(group.stage.id.as_str()),
+                    selected: matches!(selected.as_ref(), Some(SessionFilter::Stage(id)) if id == &group.stage.id),
                     dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
-                    onclick: move |_| onselect.call(Some(group.stage.id.clone())),
+                    onclick: move |_| onselect.call(Some(SessionFilter::Stage(group.stage.id.clone()))),
                 }
             }
         }
@@ -190,6 +195,12 @@ enum SessionsView {
     Board,
 }
 
+#[derive(Clone, PartialEq)]
+enum SessionFilter {
+    Stage(String),
+    Stale,
+}
+
 #[component]
 fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsView>) -> Element {
     let list_selected = selected == SessionsView::List;
@@ -199,9 +210,9 @@ fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsVie
             button {
                 r#type: "button",
                 class: if list_selected {
-                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
+                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
                 } else {
-                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 aria_pressed: list_selected,
                 onclick: move |_| onselect.call(SessionsView::List),
@@ -211,9 +222,9 @@ fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsVie
             button {
                 r#type: "button",
                 class: if board_selected {
-                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
+                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
                 } else {
-                    "flex h-6 items-center gap-1.5 rounded px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 aria_pressed: board_selected,
                 onclick: move |_| onselect.call(SessionsView::Board),
@@ -258,6 +269,7 @@ fn SessionListGroup(
 ) -> Element {
     let mut collapsed = use_signal(|| false);
     let stage_dot = StageVisual::for_id(&stage.id).dot;
+    let terminal = stage.terminal;
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
             button {
@@ -286,6 +298,7 @@ fn SessionListGroup(
                             key: "{session.id}",
                             repository: repositories.get(&session.id),
                             stage: stage.id.clone(),
+                            stale: SessionFreshness::is_stale(&session, terminal),
                             session,
                             onselect,
                         }
@@ -301,6 +314,7 @@ fn SessionListRow(
     session: SessionSummary,
     repository: Option<SessionRepository>,
     stage: String,
+    stale: bool,
     onselect: EventHandler<String>,
 ) -> Element {
     let context = SessionContext::from(repository);
@@ -314,13 +328,14 @@ fn SessionListRow(
     let compact_id = SessionIdentity::new(&session.id).compact();
     let git_url = context.git_url.clone();
     let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
+    let doubleclick_url = open_url.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
         div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| onselect.call(select_id.clone()),
             ondoubleclick: move |_| {
-                let _ = send(&ChatOpenPage { url: open_url.clone() });
+                let _ = send(&ChatOpenPage { url: doubleclick_url.clone() });
             },
             span { class: "size-3 shrink-0" }
             AgentThumbnail {
@@ -342,6 +357,12 @@ fn SessionListRow(
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
                 SessionContextView { context: context.clone() }
+                if stale {
+                    MetadataPill {
+                        dot: "bg-amber-400".to_string(),
+                        label: translate("sessions-stale"),
+                    }
+                }
                 if runtime.visible {
                     MetadataPill {
                         dot: runtime.dot.to_string(),
@@ -351,6 +372,7 @@ fn SessionListRow(
                 time { class: "w-10 text-right text-[10px] tabular-nums text-muted-foreground/65", "{updated}" }
             }
             SessionActions {
+                open_url,
                 git_url,
                 cleanup_id,
             }
@@ -387,6 +409,7 @@ fn SessionBoardColumn(
     onselect: EventHandler<String>,
 ) -> Element {
     let stage_dot = StageVisual::for_id(&stage.id).dot;
+    let terminal = stage.terminal;
     rsx! {
         section { class: "flex min-h-0 w-[18rem] shrink-0 flex-col",
             header { class: "flex h-8 shrink-0 items-center gap-2 rounded-md bg-foreground/[0.045] px-2.5",
@@ -399,6 +422,7 @@ fn SessionBoardColumn(
                     SessionBoardCard {
                         key: "{session.id}",
                         repository: repositories.get(&session.id),
+                        stale: SessionFreshness::is_stale(&session, terminal),
                         session,
                         onselect,
                     }
@@ -412,6 +436,7 @@ fn SessionBoardColumn(
 fn SessionBoardCard(
     session: SessionSummary,
     repository: Option<SessionRepository>,
+    stale: bool,
     onselect: EventHandler<String>,
 ) -> Element {
     let context = SessionContext::from(repository);
@@ -419,6 +444,7 @@ fn SessionBoardCard(
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
     let git_url = context.git_url.clone();
+    let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
     let agent = AgentPresentation::from_session(&session);
     let title = session.display_title();
     let preview = session.preview();
@@ -442,6 +468,7 @@ fn SessionBoardCard(
                     }
                 }
                 SessionActions {
+                    open_url,
                     git_url: git_url.clone(),
                     cleanup_id,
                 }
@@ -450,6 +477,12 @@ fn SessionBoardCard(
                 p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/65", "{preview}" }
             }
             div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
+                if stale {
+                    MetadataPill {
+                        dot: "bg-amber-400".to_string(),
+                        label: translate("sessions-stale"),
+                    }
+                }
                 if runtime.visible {
                     MetadataPill { dot: runtime.dot.to_string(), label: runtime_label(&session.runtime) }
                 }
@@ -458,9 +491,6 @@ fn SessionBoardCard(
             div { class: "mt-3 flex items-center gap-1.5 pt-1 text-[10px] text-muted-foreground/70",
                 time { class: "tabular-nums", "{updated}" }
                 div { class: "flex-1" }
-                if !git_url.is_empty() {
-                    GitIconView { class: "size-3".to_string() }
-                }
             }
         }
     }
@@ -477,6 +507,10 @@ fn SessionDetails(
     let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
+    let stale = stages
+        .iter()
+        .find(|stage| stage.id == session.stage)
+        .is_some_and(|stage| SessionFreshness::is_stale(&session, stage.terminal));
     let title = session.display_title();
     let last_prompt = session.last_prompt.clone();
     let agent = AgentPresentation::from_session(&session);
@@ -501,8 +535,8 @@ fn SessionDetails(
                         value: title.clone(),
                         editing: title_editing,
                         draft: title_draft,
-                        display_class: "-mx-1 block w-full rounded px-1 text-left text-sm font-semibold text-foreground hover:bg-foreground/[0.05]".to_string(),
-                        input_class: "-mx-1 h-7 w-full rounded bg-foreground/[0.055] px-1 text-sm font-semibold text-foreground outline-none ring-1 ring-inset ring-primary/35".to_string(),
+                        display_class: "-mx-1 block w-full rounded-md px-1 text-left text-sm font-semibold text-foreground hover:bg-foreground/[0.05]".to_string(),
+                        input_class: "-mx-1 h-7 w-full rounded-md bg-foreground/[0.055] px-1 text-sm font-semibold text-foreground outline-none ring-1 ring-inset ring-primary/35".to_string(),
                         title: translate("sessions-name"),
                         on_commit: move |name| {
                             let _ = send(&SessionsRename {
@@ -516,6 +550,9 @@ fn SessionDetails(
                         span { {runtime_label(&session.runtime)} }
                         if !session.agent.is_empty() {
                             span { class: "truncate", "· {session.agent}" }
+                        }
+                        if stale {
+                            span { class: "text-amber-400", "· {translate(\"sessions-stale\")}" }
                         }
                     }
                 }
@@ -537,7 +574,7 @@ fn SessionDetails(
                 }
                 button {
                     r#type: "button",
-                    class: "flex size-7 shrink-0 items-center justify-center rounded text-lg leading-none text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
+                    class: "flex size-7 shrink-0 items-center justify-center rounded-md text-lg leading-none text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
                     title: translate("common-close"),
                     aria_label: translate("common-close"),
                     onclick: move |event| onclose.call(event),
@@ -605,7 +642,7 @@ fn DetailHeaderButton(
     rsx! {
         button {
             r#type: "button",
-            class: "flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
+            class: "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
             title: label.clone(),
             aria_label: label,
             onclick: move |event| onclick.call(event),
@@ -713,13 +750,37 @@ fn EditableDescription(session_id: String, value: String) -> Element {
 }
 
 #[component]
-fn SessionActions(git_url: String, cleanup_id: String) -> Element {
+fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Element {
     let mut open = use_signal(|| false);
     rsx! {
-        div { class: "relative flex justify-end",
+        div { class: "relative flex justify-end gap-0.5",
             button {
                 r#type: "button",
-                class: "flex size-7 items-center justify-center rounded text-sm tracking-[1px] text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100",
+                class: "flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100",
+                title: translate("sessions-open-chat"),
+                aria_label: translate("sessions-open-chat"),
+                onclick: move |event| {
+                    event.stop_propagation();
+                    let _ = send(&ChatOpenPage { url: open_url.clone() });
+                },
+                LineIconView { icon: LineIcon::MessagesRound, class: "size-3.5".to_string() }
+            }
+            if !git_url.is_empty() {
+                button {
+                    r#type: "button",
+                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100",
+                    title: translate("git-title"),
+                    aria_label: translate("git-title"),
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        let _ = send(&ChatOpenPage { url: git_url.clone() });
+                    },
+                    GitIconView { class: "size-3.5".to_string() }
+                }
+            }
+            button {
+                r#type: "button",
+                class: "flex size-7 items-center justify-center rounded-md text-sm tracking-[1px] text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100",
                 title: translate("sessions-actions"),
                 aria_label: translate("sessions-actions"),
                 onclick: move |event| {
@@ -732,15 +793,6 @@ fn SessionActions(git_url: String, cleanup_id: String) -> Element {
                 div {
                     class: "absolute right-0 top-7 z-30 w-36 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
                     onclick: move |event| event.stop_propagation(),
-                    if !git_url.is_empty() {
-                        SessionActionItem {
-                            label: translate("git-title"),
-                            onclick: move |_| {
-                                open.set(false);
-                                let _ = send(&ChatOpenPage { url: git_url.clone() });
-                            },
-                        }
-                    }
                     SessionActionItem {
                         label: translate("sessions-cleanup"),
                         danger: true,
@@ -769,7 +821,7 @@ fn SessionActionItem(
     rsx! {
         button {
             r#type: "button",
-            class: "flex w-full items-center rounded px-2 py-1.5 text-left text-[11px] transition-colors {class}",
+            class: "flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] transition-colors {class}",
             onclick: move |event| onclick.call(event),
             "{label}"
         }
@@ -789,7 +841,7 @@ fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) 
         div { class: "relative inline-flex w-fit max-w-full min-w-0 justify-self-start",
             button {
                 r#type: "button",
-                class: "inline-flex h-6 max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full bg-foreground/[0.035] py-0.5 pl-2 pr-2 text-[10px] text-foreground/75 outline-none ring-1 ring-inset ring-foreground/[0.08] hover:bg-foreground/[0.06] focus-visible:ring-primary/35",
+                class: "inline-flex h-6 max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/[0.035] py-0.5 pl-2 pr-2 text-[10px] text-foreground/75 outline-none ring-1 ring-inset ring-foreground/[0.08] hover:bg-foreground/[0.06] focus-visible:ring-primary/35",
                 title: translate("sessions-stage"),
                 aria_expanded: open(),
                 onclick: move |_| open.set(!open()),
@@ -835,9 +887,9 @@ fn StagePickerOption(
         button {
             r#type: "button",
             class: if selected {
-                "flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[10px] text-foreground bg-foreground/[0.07]"
+                "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[10px] text-foreground bg-foreground/[0.07]"
             } else {
-                "flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[10px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[10px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             },
             onclick: move |_| {
                 open.set(false);
@@ -881,7 +933,7 @@ fn MetadataPill(
         title
     };
     rsx! {
-        span { class: "inline-flex h-[18px] max-w-full min-w-0 items-center gap-1 rounded-full bg-foreground/[0.045] px-1.5 text-[10px] text-muted-foreground", title,
+        span { class: "inline-flex h-[18px] max-w-full min-w-0 items-center gap-1 rounded-md bg-foreground/[0.045] px-1.5 text-[10px] text-muted-foreground", title,
             if !dot.is_empty() {
                 span { class: "size-1.5 shrink-0 rounded-full {dot}" }
             }
@@ -897,7 +949,7 @@ fn MetadataPill(
 fn SessionIdPill(label: String, title: String) -> Element {
     rsx! {
         span {
-            class: "inline-flex h-[18px] w-[6.75rem] shrink-0 items-center justify-center rounded-full bg-foreground/[0.025] px-1.5 font-mono text-[9px] text-muted-foreground/55",
+            class: "inline-flex h-[18px] w-[6.75rem] shrink-0 items-center justify-center rounded-md bg-foreground/[0.025] px-1.5 font-mono text-[9px] text-muted-foreground/55",
             title,
             "{label}"
         }
@@ -993,6 +1045,21 @@ struct RuntimeVisual {
     visible: bool,
 }
 
+struct SessionFreshness;
+
+impl SessionFreshness {
+    const STALE_AFTER: u64 = 3 * RelativeTime::DAY;
+
+    fn is_stale(session: &SessionSummary, terminal: bool) -> bool {
+        let age = RelativeTime::from_millis(session.last_activated_at);
+        Self::from_age(age, &session.runtime, terminal)
+    }
+
+    fn from_age(age: RelativeTime, runtime: &str, terminal: bool) -> bool {
+        !terminal && !RuntimeVisual::for_id(runtime).visible && age.0 >= Self::STALE_AFTER
+    }
+}
+
 impl RuntimeVisual {
     fn for_id(id: &str) -> Self {
         let dot = match id {
@@ -1056,6 +1123,33 @@ struct StageGroup {
 }
 
 impl StageGroup {
+    fn filtered(groups: &[Self], filter: Option<&SessionFilter>) -> Vec<Self> {
+        match filter {
+            None => groups.to_vec(),
+            Some(SessionFilter::Stage(id)) => groups
+                .iter()
+                .filter(|group| group.stage.id == *id)
+                .cloned()
+                .collect(),
+            Some(SessionFilter::Stale) => {
+                let mut filtered = Vec::new();
+                for group in groups {
+                    if group.stage.terminal {
+                        continue;
+                    }
+                    let mut group = group.clone();
+                    group
+                        .sessions
+                        .retain(|session| SessionFreshness::is_stale(session, false));
+                    if !group.sessions.is_empty() {
+                        filtered.push(group);
+                    }
+                }
+                filtered
+            }
+        }
+    }
+
     fn from_catalog(
         stages: &[StageSummary],
         sessions: &[SessionSummary],
@@ -1170,5 +1264,31 @@ mod tests {
         let id = SessionIdentity::new("01a0fc43-68f9-7121-a388-59e1891fdc41");
 
         assert_eq!(id.compact(), "01a0fc…dc41");
+    }
+
+    #[test]
+    fn stale_requires_three_days_without_active_work() {
+        let threshold = SessionFreshness::STALE_AFTER;
+
+        assert!(!SessionFreshness::from_age(
+            RelativeTime(threshold - 1),
+            "idle",
+            false,
+        ));
+        assert!(SessionFreshness::from_age(
+            RelativeTime(threshold),
+            "idle",
+            false,
+        ));
+        assert!(!SessionFreshness::from_age(
+            RelativeTime(threshold),
+            "streaming",
+            false,
+        ));
+        assert!(!SessionFreshness::from_age(
+            RelativeTime(threshold),
+            "idle",
+            true,
+        ));
     }
 }

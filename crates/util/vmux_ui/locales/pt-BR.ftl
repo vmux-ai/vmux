@@ -1007,6 +1007,7 @@ git-shortcut-previous = Item anterior
 git-shortcut-next = Próximo item
 sessions-title = Sessões
 sessions-all = Todas as sessões
+sessions-stale = Inativa
 sessions-search = Buscar sessões
 sessions-view-list = Lista
 sessions-view-board = Quadro
