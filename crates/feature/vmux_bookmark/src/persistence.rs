@@ -12,6 +12,8 @@ use vmux_shortcut::ShortcutUrl;
 
 use crate::persistence_driver::{BookmarkFilter, BookmarkPersistencePath};
 
+const BOOKMARK_PIN_ORDER_REVISION: u32 = 1;
+
 pub(super) struct BookmarkPersistencePlugin;
 
 impl Plugin for BookmarkPersistencePlugin {
@@ -112,6 +114,8 @@ struct BookmarkLoadPending;
 pub(super) struct OfferedBookmarkDefaults {
     urls: Vec<String>,
     #[reflect(default)]
+    pin_order_revision: u32,
+    #[reflect(default)]
     folders: Vec<String>,
     #[reflect(default)]
     folder_bookmarks: Vec<String>,
@@ -128,7 +132,7 @@ impl BookmarkSeed<'_, '_> {
 
 #[derive(SystemParam)]
 struct BookmarkSeed<'w, 's> {
-    pins: Query<'w, 's, &'static PageMetadata, With<Pin>>,
+    pins: Query<'w, 's, (Entity, &'static PageMetadata, &'static BookmarkOrder), With<Pin>>,
     folders:
         Query<'w, 's, (Entity, &'static Name, Option<&'static SmartBookmarkFolder>), With<Folder>>,
     orders: Query<'w, 's, &'static BookmarkOrder, BookmarkFilter>,
@@ -178,10 +182,14 @@ fn insert_defaults(
     seed.offered.folder_bookmarks.clear();
     let mut changed =
         !claimed_urls.is_empty() || !claimed_folders.is_empty() || legacy_folder_bookmarks;
-    let mut pinned = seed
+    let existing_pins = seed
         .pins
         .iter()
-        .map(|metadata| BookmarkSeed::key(&metadata.url))
+        .map(|(entity, metadata, order)| (entity, BookmarkSeed::key(&metadata.url), order.0))
+        .collect::<Vec<_>>();
+    let mut pinned = existing_pins
+        .iter()
+        .map(|(_, key, _)| key.clone())
         .collect::<HashSet<_>>();
     let mut next_order = seed
         .orders
@@ -189,10 +197,57 @@ fn insert_defaults(
         .map(|order| order.0)
         .max()
         .map_or(0, |order| order.saturating_add(1));
+    let mut claimed_orders = HashMap::new();
+    if seed.offered.pin_order_revision < BOOKMARK_PIN_ORDER_REVISION {
+        let claimed = claimed_urls
+            .iter()
+            .map(|url| BookmarkSeed::key(url))
+            .collect::<HashSet<_>>();
+        let mut default_keys = Vec::new();
+        let mut seen = HashSet::new();
+        for url in urls {
+            let key = BookmarkSeed::key(url);
+            if seen.insert(key.clone()) && (pinned.contains(&key) || claimed.contains(&key)) {
+                default_keys.push(key);
+            }
+        }
+        let default_orders = default_keys
+            .iter()
+            .enumerate()
+            .map(|(order, key)| (key.clone(), order as u32))
+            .collect::<HashMap<_, _>>();
+        for (entity, key, _) in &existing_pins {
+            if let Some(order) = default_orders.get(key) {
+                seed.commands.entity(*entity).insert(BookmarkOrder(*order));
+            }
+        }
+        for url in &claimed_urls {
+            let key = BookmarkSeed::key(url);
+            if let Some(order) = default_orders.get(&key) {
+                claimed_orders.insert(key, *order);
+            }
+        }
+        let mut custom_pins = existing_pins
+            .iter()
+            .filter(|(_, key, _)| !default_orders.contains_key(key))
+            .collect::<Vec<_>>();
+        custom_pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
+        let mut order = default_orders.len() as u32;
+        for (entity, _, _) in custom_pins {
+            seed.commands.entity(*entity).insert(BookmarkOrder(order));
+            order = order.saturating_add(1);
+        }
+        seed.offered.pin_order_revision = BOOKMARK_PIN_ORDER_REVISION;
+        changed = true;
+    }
     for url in claimed_urls {
         if !pinned.insert(BookmarkSeed::key(&url)) {
             continue;
         }
+        let order = claimed_orders
+            .get(&BookmarkSeed::key(&url))
+            .copied()
+            .unwrap_or(next_order);
         seed.commands.spawn((
             Pin,
             Uuid(uuid::Uuid::new_v4().to_string()),
@@ -202,9 +257,11 @@ fn insert_defaults(
                 icon: PageIcon::None,
                 bg_color: None,
             },
-            BookmarkOrder(next_order),
+            BookmarkOrder(order),
         ));
-        next_order = next_order.saturating_add(1);
+        if order == next_order {
+            next_order = next_order.saturating_add(1);
+        }
     }
     let mut existing_folders = seed
         .folders
@@ -495,9 +552,9 @@ mod tests {
         assert_eq!(
             pins,
             [
-                ("https://example.com".into(), 4),
-                ("vmux://start/".into(), 5),
-                ("vmux://terminal/".into(), 6),
+                ("https://example.com".into(), 2),
+                ("vmux://start/".into(), 0),
+                ("vmux://terminal/".into(), 1),
             ]
         );
         assert_eq!(

@@ -21,7 +21,7 @@
         (
             url: "vmux://spaces/",
             title: "Spaces",
-            bookmark: Some(90),
+            bookmark: Some(100),
             title_message_id: "spaces-title",
             keywords: ["space"],
             icon: "Layers",

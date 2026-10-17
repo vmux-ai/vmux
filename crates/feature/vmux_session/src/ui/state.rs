@@ -663,6 +663,10 @@ impl Transcript {
     pub fn current(self) -> ChatTranscriptState {
         self.root.read().transcript.clone()
     }
+
+    pub fn ready(self) -> bool {
+        self.root.read().transcript_revision > 0
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]

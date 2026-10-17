@@ -5,6 +5,7 @@ pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineIcon {
     AlertCircle,
+    Archive,
     ArrowDown,
     ArrowUp,
     BookOpen,
@@ -58,6 +59,7 @@ impl LineIcon {
                 "M12 8v4",
                 "M12 16h.01",
             ],
+            Self::Archive => &["M21 8v13H3V8", "M1 3h22v5H1Z", "M10 12h4"],
             Self::ArrowDown => &["M12 5v14", "m19 12-7 7-7-7"],
             Self::ArrowUp => &["m5 12 7-7 7 7", "M12 19V5"],
             Self::BookOpen => &[
@@ -203,7 +205,11 @@ impl LineIcon {
             Self::Wrench => &[
                 "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
             ],
-            Self::Columns3 => &["M3 4h5v16H3Z", "M10 4h5v16h-5Z", "M17 4h4v16h-4Z"],
+            Self::Columns3 => &[
+                "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+                "M9 4v16",
+                "M15 4v16",
+            ],
         }
     }
 }
@@ -321,6 +327,10 @@ mod wasm {
             BuiltinIcon::CheckCircle => rsx! { Icon { class: "{class}",
                 circle { cx: "12", cy: "12", r: "9" }
                 path { d: "m8 12 2.5 2.5L16 9" }
+            } },
+            BuiltinIcon::MessagesRound => rsx! { LineIconView {
+                icon: LineIcon::MessagesRound,
+                class: class.clone(),
             } },
             BuiltinIcon::ListTodo => rsx! { Icon { class: "{class}",
                 path { d: "M13 5h8" }

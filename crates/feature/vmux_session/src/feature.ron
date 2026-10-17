@@ -3,7 +3,7 @@
         (
             url: "vmux://sessions/",
             title: "Sessions",
-            bookmark: Some(15),
+            bookmark: Some(20),
             owns_subtree: true,
             reports_title: true,
             placement: Some((
@@ -12,7 +12,7 @@
                 reuse: Route,
             )),
             keywords: ["ai", "chat", "assistant", "agent"],
-            icon: "ListTodo",
+            icon: "MessagesRound",
             permissions: [
                 "PageReady",
                 "ThemeUiState",

@@ -55,7 +55,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut at_bottom = chat.transcript.at_bottom;
     let mut last_top = chat.transcript.last_top;
     let transcript = chat.transcript.current();
-    let transcript_loading = chat.transcript_loading();
+    let transcript_loading = chat.transcript_loading() || !chat.transcript.ready();
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;

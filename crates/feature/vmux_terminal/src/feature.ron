@@ -121,7 +121,7 @@
             keywords: ["shell", "console"],
             icon: "Terminal",
             command_bar: true,
-            bookmark: Some(20),
+            bookmark: Some(50),
             permissions: [
                 "PageReady",
                 "ThemeUiState",
@@ -145,7 +145,7 @@
             keywords: ["processes", "monitor"],
             icon: "Activity",
             command_bar: true,
-            bookmark: Some(70),
+            bookmark: Some(140),
             manifest: true,
             permissions: [
                 "PageReady",

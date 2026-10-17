@@ -445,7 +445,7 @@
             keywords: ["preferences", "config"],
             icon: "Settings",
             command_bar: true,
-            bookmark: Some(130),
+            bookmark: Some(150),
             permissions: [
                 "PageReady",
                 "ThemeUiState",

@@ -1,7 +1,9 @@
+use chrono::{Duration, Local, NaiveDate, TimeZone};
 use dioxus::prelude::*;
 use vmux_session::{Route, SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage,
@@ -22,16 +24,30 @@ pub fn SessionsManager() -> Element {
     let ui = use_ui_state::<ChatUiState>();
     let mut query = use_signal(String::new);
     let mut view = use_signal(|| SessionsView::List);
-    let mut filter = use_signal(|| None::<SessionFilter>);
+    let mut filters = use_signal(SessionFilters::default);
+    let mut filter_step = use_signal(|| SessionFilterStep::Field);
+    let mut filter_value = use_signal(String::new);
     let mut selected = use_signal(|| None::<String>);
     let state = ui.state.read();
     let snapshot = state.sessions.clone();
     let repositories = state.session_repositories.clone();
     drop(state);
-    let search = query().trim().to_ascii_lowercase();
+    let filter_requested = query().starts_with('#');
+    let filter_needle = query()
+        .strip_prefix('#')
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let search = if filter_requested {
+        String::new()
+    } else {
+        query().trim().to_ascii_lowercase()
+    };
     let category_groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
-    let groups = StageGroup::filtered(&category_groups, filter().as_ref());
+    let applied_filters = filters();
+    let groups = StageGroup::filtered(&category_groups, applied_filters.as_slice());
     let stages = snapshot.stages.clone();
+    let selected_filters = applied_filters.presentations(&stages);
     let selected_session = selected().and_then(|id| {
         snapshot
             .sessions
@@ -42,18 +58,74 @@ pub fn SessionsManager() -> Element {
 
     rsx! {
         ManagerPage {
-            header { class: "flex h-11 shrink-0 items-center gap-2.5 bg-background px-3",
-                div { class: "relative min-w-0 flex-1",
-                    LineIconView {
-                        icon: LineIcon::Search,
-                        class: "pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground".to_string(),
+            header { class: "flex h-11 shrink-0 items-center gap-2.5 border-b border-foreground/[0.06] bg-background/70 px-3",
+                Dropdown {
+                    open: filter_requested,
+                    class: "min-w-0 flex-1".to_string(),
+                    on_dismiss: move |_| {
+                        query.set(String::new());
+                        filter_step.set(SessionFilterStep::Field);
+                        filter_value.set(String::new());
+                    },
+                    div { class: "relative z-30 flex h-7 min-w-0 items-center gap-1.5 rounded-md bg-foreground/[0.025] px-2.5 ring-1 ring-inset ring-foreground/[0.08] focus-within:bg-foreground/[0.05] focus-within:ring-foreground/[0.16]",
+                        LineIconView {
+                            icon: LineIcon::Search,
+                            class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
+                        }
+                        for (index, presentation) in selected_filters.iter().cloned().enumerate() {
+                            FilterPill {
+                                key: "filter-pill-{index}",
+                                label: presentation.label,
+                                dot: presentation.dot,
+                                clear_label: translate("common-remove-filter"),
+                                onclear: move |_| filters.write().remove(index),
+                            }
+                        }
+                        input {
+                            r#type: "search",
+                            class: "h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/55",
+                            placeholder: translate("sessions-search"),
+                            value: query(),
+                            oninput: move |event| query.set(event.value()),
+                            onkeydown: move |event: KeyboardEvent| {
+                                if event.key() == Key::Backspace && query().is_empty() {
+                                    filters.write().pop();
+                                }
+                            },
+                        }
+                        FilterTrigger {
+                            active: filter_requested,
+                            label: translate("common-filter"),
+                            onclick: move |_| {
+                                if filter_requested {
+                                    query.set(String::new());
+                                } else {
+                                    query.set("#".to_string());
+                                }
+                                filter_step.set(SessionFilterStep::Field);
+                                filter_value.set(String::new());
+                            },
+                        }
                     }
-                    input {
-                        r#type: "search",
-                        class: "h-7 w-full rounded-md bg-foreground/[0.025] pl-8 pr-3 text-[11px] text-foreground outline-none ring-1 ring-inset ring-foreground/[0.08] placeholder:text-muted-foreground/55 focus:bg-foreground/[0.05] focus:ring-foreground/[0.16]",
-                        placeholder: translate("sessions-search"),
-                        value: query(),
-                        oninput: move |event| query.set(event.value()),
+                    if filter_requested {
+                        SessionFilterMenu {
+                            groups: category_groups.clone(),
+                            needle: filter_needle,
+                            step: filter_step(),
+                            value: filter_value(),
+                            onstep: move |step| {
+                                filter_step.set(step);
+                                filter_value.set(String::new());
+                                query.set("#".to_string());
+                            },
+                            onvalue: move |value| filter_value.set(value),
+                            onselect: move |selected| {
+                                filters.write().upsert(selected);
+                                query.set(String::new());
+                                filter_step.set(SessionFilterStep::Field);
+                                filter_value.set(String::new());
+                            },
+                        }
                     }
                 }
                 SessionsViewToggle {
@@ -70,11 +142,14 @@ pub fn SessionsManager() -> Element {
                     {translate("sessions-new")}
                 }
             }
-            div { class: "flex min-h-0 flex-1 overflow-hidden bg-background",
+            div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
                 SessionCategories {
                     groups: category_groups.clone(),
-                    selected: filter(),
-                    onselect: move |selected| filter.set(selected),
+                    selected: applied_filters.stage().map(str::to_string),
+                    onselect: move |selected| {
+                        filters.write().set_stage(selected);
+                        query.set(String::new());
+                    },
                 }
                 div { class: "flex min-w-0 flex-1 overflow-hidden",
                     if snapshot.sessions.is_empty() {
@@ -112,8 +187,8 @@ pub fn SessionsManager() -> Element {
 #[component]
 fn SessionCategories(
     groups: Vec<StageGroup>,
-    selected: Option<SessionFilter>,
-    onselect: EventHandler<Option<SessionFilter>>,
+    selected: Option<String>,
+    onselect: EventHandler<Option<String>>,
 ) -> Element {
     let all_count = groups
         .iter()
@@ -126,7 +201,7 @@ fn SessionCategories(
                 label: translate("sessions-all"),
                 count: all_count,
                 selected: selected.is_none(),
-                icon: Some(vmux_api::BuiltinIcon::ListTodo),
+                icon: Some(vmux_api::BuiltinIcon::MessagesRound),
                 onclick: move |_| onselect.call(None),
             }
             div { class: "h-2" }
@@ -136,9 +211,9 @@ fn SessionCategories(
                         key: "{group.stage.id}",
                         label: translate_humanized(&group.stage.name),
                         count: group.sessions.len(),
-                        selected: matches!(selected.as_ref(), Some(SessionFilter::Stage(id)) if id == &group.stage.id),
+                        selected: selected.as_ref() == Some(&group.stage.id),
                         dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
-                        onclick: move |_| onselect.call(Some(SessionFilter::Stage(group.stage.id.clone()))),
+                        onclick: move |_| onselect.call(Some(group.stage.id.clone())),
                     }
                 }
             }
@@ -185,6 +260,340 @@ enum SessionsView {
 #[derive(Clone, PartialEq)]
 enum SessionFilter {
     Stage(String),
+    Updated(UpdatedFilter),
+}
+
+impl SessionFilter {
+    fn presentation(&self, stages: &[StageSummary]) -> SessionFilterPresentation {
+        match self {
+            Self::Stage(id) => {
+                let name = stages
+                    .iter()
+                    .find(|stage| stage.id == *id)
+                    .map(|stage| translate_humanized(&stage.name))
+                    .unwrap_or_else(|| {
+                        if id == "stale" {
+                            translate("sessions-stale")
+                        } else {
+                            translate_humanized(id)
+                        }
+                    });
+                SessionFilterPresentation {
+                    label: format!("{} · {name}", translate("common-status")),
+                    dot: StageVisual::for_id(id).dot.to_string(),
+                }
+            }
+            Self::Updated(updated) => SessionFilterPresentation {
+                label: format!(
+                    "{} · {} · {}",
+                    translate("common-updated"),
+                    updated.comparison.label(),
+                    updated.value_label
+                ),
+                dot: String::new(),
+            },
+        }
+    }
+
+    fn matches(&self, session: &SessionSummary) -> bool {
+        match self {
+            Self::Stage(_) => true,
+            Self::Updated(updated) => updated.matches(session.last_activated_at),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct SessionFilterPresentation {
+    label: String,
+    dot: String,
+}
+
+#[derive(Clone, Default, PartialEq)]
+struct SessionFilters(Vec<SessionFilter>);
+
+impl SessionFilters {
+    fn as_slice(&self) -> &[SessionFilter] {
+        &self.0
+    }
+
+    fn presentations(&self, stages: &[StageSummary]) -> Vec<SessionFilterPresentation> {
+        self.0
+            .iter()
+            .map(|filter| filter.presentation(stages))
+            .collect()
+    }
+
+    fn stage(&self) -> Option<&str> {
+        self.0.iter().find_map(|filter| match filter {
+            SessionFilter::Stage(id) => Some(id.as_str()),
+            SessionFilter::Updated(_) => None,
+        })
+    }
+
+    fn set_stage(&mut self, stage: Option<String>) {
+        self.0
+            .retain(|filter| !matches!(filter, SessionFilter::Stage(_)));
+        if let Some(stage) = stage {
+            self.0.insert(0, SessionFilter::Stage(stage));
+        }
+    }
+
+    fn upsert(&mut self, selected: SessionFilter) {
+        match selected {
+            SessionFilter::Stage(stage) => self.set_stage(Some(stage)),
+            SessionFilter::Updated(updated) => {
+                self.0
+                    .retain(|filter| !matches!(filter, SessionFilter::Updated(_)));
+                self.0.push(SessionFilter::Updated(updated));
+            }
+        }
+    }
+
+    fn remove(&mut self, index: usize) {
+        if index < self.0.len() {
+            self.0.remove(index);
+        }
+    }
+
+    fn pop(&mut self) {
+        self.0.pop();
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SessionFilterStep {
+    Field,
+    Status,
+    Updated,
+    Date(UpdatedComparison),
+    Within,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum UpdatedComparison {
+    Before,
+    OnOrBefore,
+    After,
+    OnOrAfter,
+    Within,
+}
+
+impl UpdatedComparison {
+    fn label(self) -> String {
+        translate(match self {
+            Self::Before => "common-before",
+            Self::OnOrBefore => "common-on-or-before",
+            Self::After => "common-after",
+            Self::OnOrAfter => "common-on-or-after",
+            Self::Within => "common-within",
+        })
+    }
+
+    fn detail(self) -> String {
+        match self {
+            Self::Before => "<",
+            Self::OnOrBefore => "≤",
+            Self::After => ">",
+            Self::OnOrAfter => "≥",
+            Self::Within => "",
+        }
+        .to_string()
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct UpdatedFilter {
+    comparison: UpdatedComparison,
+    threshold: i64,
+    value_label: String,
+}
+
+impl UpdatedFilter {
+    fn from_date(comparison: UpdatedComparison, value: &str) -> Option<Self> {
+        let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+        let start = Self::day_start(date)?;
+        let next = Self::day_start(date.succ_opt()?)?;
+        let threshold = match comparison {
+            UpdatedComparison::Before | UpdatedComparison::OnOrAfter => start,
+            UpdatedComparison::OnOrBefore | UpdatedComparison::After => next,
+            UpdatedComparison::Within => return None,
+        };
+        Some(Self {
+            comparison,
+            threshold,
+            value_label: value.to_string(),
+        })
+    }
+
+    fn within(days: u64) -> Option<Self> {
+        if days == 0 {
+            return None;
+        }
+        let duration = Duration::try_days(days.try_into().ok()?)?;
+        Some(Self {
+            comparison: UpdatedComparison::Within,
+            threshold: vmux_ecs::UnixMillis::now().0 - duration.num_milliseconds(),
+            value_label: translate_with(
+                "common-days-value",
+                &[("count", TranslationValue::Number(days as i64))],
+            ),
+        })
+    }
+
+    fn day_start(date: NaiveDate) -> Option<i64> {
+        let local = Local.from_local_datetime(&date.and_hms_opt(0, 0, 0)?);
+        local.earliest().map(|date| date.timestamp_millis())
+    }
+
+    fn matches(&self, timestamp: i64) -> bool {
+        match self.comparison {
+            UpdatedComparison::Before | UpdatedComparison::OnOrBefore => timestamp < self.threshold,
+            UpdatedComparison::After | UpdatedComparison::OnOrAfter | UpdatedComparison::Within => {
+                timestamp >= self.threshold
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionFilterMenu(
+    groups: Vec<StageGroup>,
+    needle: String,
+    step: SessionFilterStep,
+    value: String,
+    onstep: EventHandler<SessionFilterStep>,
+    onvalue: EventHandler<String>,
+    onselect: EventHandler<SessionFilter>,
+) -> Element {
+    let date_filter = match step {
+        SessionFilterStep::Date(comparison) => UpdatedFilter::from_date(comparison, &value),
+        _ => None,
+    };
+    let within_filter = if step == SessionFilterStep::Within {
+        value.parse().ok().and_then(UpdatedFilter::within)
+    } else {
+        None
+    };
+    match step {
+        SessionFilterStep::Field => rsx! {
+            FilterMenu { title: translate("common-filter"),
+                if needle.is_empty() || translate("common-status").to_ascii_lowercase().contains(&needle) {
+                    FilterOption {
+                        label: translate("common-status"),
+                        prefix: "#".to_string(),
+                        next: true,
+                        onclick: move |_| onstep.call(SessionFilterStep::Status),
+                    }
+                }
+                if needle.is_empty() || translate("common-updated").to_ascii_lowercase().contains(&needle) {
+                    FilterOption {
+                        label: translate("common-updated"),
+                        prefix: "#".to_string(),
+                        next: true,
+                        onclick: move |_| onstep.call(SessionFilterStep::Updated),
+                    }
+                }
+            }
+        },
+        SessionFilterStep::Status => rsx! {
+            FilterMenu {
+                title: translate("common-status"),
+                onback: move |_| onstep.call(SessionFilterStep::Field),
+                for group in groups {
+                    if needle.is_empty() || translate_humanized(&group.stage.name).to_ascii_lowercase().contains(&needle) {
+                        FilterOption {
+                            key: "filter-{group.stage.id}",
+                            label: translate_humanized(&group.stage.name),
+                            dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
+                            trailing: group.sessions.len().to_string(),
+                            onclick: move |_| onselect.call(SessionFilter::Stage(group.stage.id.clone())),
+                        }
+                    }
+                }
+            }
+        },
+        SessionFilterStep::Updated => rsx! {
+            FilterMenu {
+                title: translate("common-updated"),
+                onback: move |_| onstep.call(SessionFilterStep::Field),
+                for comparison in [
+                    UpdatedComparison::Before,
+                    UpdatedComparison::OnOrBefore,
+                    UpdatedComparison::After,
+                    UpdatedComparison::OnOrAfter,
+                ] {
+                    FilterOption {
+                        key: "updated-{comparison:?}",
+                        label: comparison.label(),
+                        detail: comparison.detail(),
+                        next: true,
+                        onclick: move |_| onstep.call(SessionFilterStep::Date(comparison)),
+                    }
+                }
+                FilterOption {
+                    label: UpdatedComparison::Within.label(),
+                    detail: UpdatedComparison::Within.detail(),
+                    next: true,
+                    onclick: move |_| onstep.call(SessionFilterStep::Within),
+                }
+            }
+        },
+        SessionFilterStep::Date(comparison) => rsx! {
+            FilterMenu {
+                title: format!("{} · {}", translate("common-updated"), comparison.label()),
+                onback: move |_| onstep.call(SessionFilterStep::Updated),
+                div { class: "flex items-center gap-2 p-1",
+                    input {
+                        r#type: "date",
+                        class: "h-8 min-w-0 flex-1 rounded-md bg-foreground/[0.035] px-2 text-[11px] text-foreground outline-none ring-1 ring-inset ring-foreground/[0.09] focus:ring-foreground/[0.18]",
+                        value: value,
+                        oninput: move |event| onvalue.call(event.value()),
+                    }
+                    button {
+                        r#type: "button",
+                        class: "h-8 shrink-0 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:cursor-default disabled:opacity-35",
+                        disabled: date_filter.is_none(),
+                        onclick: move |_| {
+                            if let Some(updated) = date_filter.clone() {
+                                onselect.call(SessionFilter::Updated(updated));
+                            }
+                        },
+                        {translate("common-apply")}
+                    }
+                }
+            }
+        },
+        SessionFilterStep::Within => rsx! {
+            FilterMenu {
+                title: format!("{} · {}", translate("common-updated"), UpdatedComparison::Within.label()),
+                onback: move |_| onstep.call(SessionFilterStep::Updated),
+                div { class: "flex items-center gap-2 p-1",
+                    div { class: "flex h-8 min-w-0 flex-1 items-center rounded-md bg-foreground/[0.035] ring-1 ring-inset ring-foreground/[0.09] focus-within:ring-foreground/[0.18]",
+                        input {
+                            r#type: "number",
+                            min: "1",
+                            class: "h-full min-w-0 flex-1 bg-transparent px-2 text-[11px] text-foreground outline-none",
+                            value,
+                            oninput: move |event| onvalue.call(event.value()),
+                        }
+                        span { class: "shrink-0 pr-2 text-[10px] text-muted-foreground", {translate("common-days")} }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "h-8 shrink-0 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:cursor-default disabled:opacity-35",
+                        disabled: within_filter.is_none(),
+                        onclick: move |_| {
+                            if let Some(updated) = within_filter.clone() {
+                                onselect.call(SessionFilter::Updated(updated));
+                            }
+                        },
+                        {translate("common-apply")}
+                    }
+                }
+            }
+        },
+    }
 }
 
 #[component]
@@ -302,6 +711,7 @@ fn SessionListRow(
 ) -> Element {
     let context = SessionContext::from(repository);
     let cleanup_id = session.id.clone();
+    let archived = session.stage == "done";
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
     let agent = AgentPresentation::from_session(&session);
@@ -352,6 +762,7 @@ fn SessionListRow(
                 open_url,
                 git_url,
                 cleanup_id,
+                archived,
             }
         }
     }
@@ -417,6 +828,7 @@ fn SessionBoardCard(
 ) -> Element {
     let context = SessionContext::from(repository);
     let cleanup_id = session.id.clone();
+    let archived = session.stage == "done";
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
     let git_url = context.git_url.clone();
@@ -447,6 +859,7 @@ fn SessionBoardCard(
                     open_url,
                     git_url: git_url.clone(),
                     cleanup_id,
+                    archived,
                 }
             }
             if !preview.is_empty() {
@@ -481,8 +894,8 @@ fn SessionDetails(
     let last_prompt = session.last_prompt.clone();
     let agent = AgentPresentation::from_session(&session);
     let git_url = context.git_url.clone();
-    let header_open_url = open_url.clone();
-    let header_git_url = git_url.clone();
+    let action_open_url = open_url.clone();
+    let action_git_url = git_url.clone();
     let title_editing = use_signal(|| false);
     let title_draft = use_signal(|| title.clone());
     let rename_id = session.id.clone();
@@ -517,23 +930,6 @@ fn SessionDetails(
                         if !session.agent.is_empty() {
                             span { class: "truncate", "· {session.agent}" }
                         }
-                    }
-                }
-                DetailHeaderButton {
-                    icon: DetailHeaderIcon::Line(LineIcon::MessagesRound),
-                    label: translate("sessions-resume"),
-                    primary: true,
-                    onclick: move |_| {
-                        let _ = send(&ChatOpenPage { url: header_open_url.clone() });
-                    },
-                }
-                if !header_git_url.is_empty() {
-                    DetailHeaderButton {
-                        icon: DetailHeaderIcon::Git,
-                        label: translate("git-title"),
-                        onclick: move |_| {
-                            let _ = send(&ChatOpenPage { url: header_git_url.clone() });
-                        },
                     }
                 }
                 button {
@@ -587,19 +983,38 @@ fn SessionDetails(
                     }
                 }
             }
+            footer { class: "flex shrink-0 items-center justify-end gap-1.5 px-4 pb-4 pt-2",
+                if !action_git_url.is_empty() {
+                    DetailActionButton {
+                        icon: DetailActionIcon::Git,
+                        label: translate("git-title"),
+                        onclick: move |_| {
+                            let _ = send(&ChatOpenPage { url: action_git_url.clone() });
+                        },
+                    }
+                }
+                DetailActionButton {
+                    icon: DetailActionIcon::Line(LineIcon::MessagesRound),
+                    label: translate("sessions-resume"),
+                    primary: true,
+                    onclick: move |_| {
+                        let _ = send(&ChatOpenPage { url: action_open_url.clone() });
+                    },
+                }
+            }
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum DetailHeaderIcon {
+enum DetailActionIcon {
     Line(LineIcon),
     Git,
 }
 
 #[component]
-fn DetailHeaderButton(
-    icon: DetailHeaderIcon,
+fn DetailActionButton(
+    icon: DetailActionIcon,
     label: String,
     #[props(default)] primary: bool,
     onclick: EventHandler<MouseEvent>,
@@ -617,10 +1032,10 @@ fn DetailHeaderButton(
             aria_label: label.clone(),
             onclick: move |event| onclick.call(event),
             match icon {
-                DetailHeaderIcon::Line(icon) => rsx! {
+                DetailActionIcon::Line(icon) => rsx! {
                     LineIconView { icon, class: "size-3.5".to_string() }
                 },
-                DetailHeaderIcon::Git => rsx! {
+                DetailActionIcon::Git => rsx! {
                     GitIconView { class: "size-3.5".to_string() }
                 },
             }
@@ -723,8 +1138,14 @@ fn EditableDescription(session_id: String, value: String) -> Element {
 }
 
 #[component]
-fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Element {
+fn SessionActions(
+    open_url: String,
+    git_url: String,
+    cleanup_id: String,
+    archived: bool,
+) -> Element {
     let mut open = use_signal(|| false);
+    let archive_id = cleanup_id.clone();
     let visibility = if open() {
         "opacity-100"
     } else {
@@ -774,6 +1195,17 @@ fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Elem
                 div {
                     class: "absolute right-0 top-7 z-30 w-36 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
                     onclick: move |event| event.stop_propagation(),
+                    if !archived {
+                        SessionArchiveButton {
+                            onclick: move |_| {
+                                open.set(false);
+                                let _ = send(&SessionsStageChange {
+                                    id: archive_id.clone(),
+                                    stage: "done".to_string(),
+                                });
+                            },
+                        }
+                    }
                     SessionDeleteButton {
                         onclick: move |_| {
                             open.set(false);
@@ -782,6 +1214,19 @@ fn SessionActions(open_url: String, git_url: String, cleanup_id: String) -> Elem
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn SessionArchiveButton(onclick: EventHandler<MouseEvent>) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
+            onclick: move |event| onclick.call(event),
+            LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
+            span { {translate("sessions-archive")} }
         }
     }
 }
@@ -1098,15 +1543,23 @@ struct StageGroup {
 }
 
 impl StageGroup {
-    fn filtered(groups: &[Self], filter: Option<&SessionFilter>) -> Vec<Self> {
-        match filter {
-            None => groups.to_vec(),
-            Some(SessionFilter::Stage(id)) => groups
-                .iter()
-                .filter(|group| group.stage.id == *id)
-                .cloned()
-                .collect(),
+    fn filtered(groups: &[Self], filters: &[SessionFilter]) -> Vec<Self> {
+        let selected_stage = filters.iter().find_map(|filter| match filter {
+            SessionFilter::Stage(id) => Some(id.as_str()),
+            SessionFilter::Updated(_) => None,
+        });
+        let mut filtered = Vec::new();
+        for group in groups {
+            if selected_stage.is_some_and(|stage| stage != group.stage.id.as_str()) {
+                continue;
+            }
+            let mut group = group.clone();
+            group
+                .sessions
+                .retain(|session| filters.iter().all(|filter| filter.matches(session)));
+            filtered.push(group);
         }
+        filtered
     }
 
     fn from_catalog(
@@ -1312,5 +1765,56 @@ mod tests {
 
         assert!(active.sessions.is_empty());
         assert_eq!(stale.sessions, vec![session]);
+    }
+
+    #[test]
+    fn stage_and_updated_filters_compose() {
+        let recent = SessionSummary {
+            id: "recent".into(),
+            stage: "in_progress".into(),
+            last_activated_at: 200,
+            ..Default::default()
+        };
+        let old = SessionSummary {
+            id: "old".into(),
+            stage: "in_progress".into(),
+            last_activated_at: 50,
+            ..Default::default()
+        };
+        let done = SessionSummary {
+            id: "done".into(),
+            stage: "done".into(),
+            last_activated_at: 200,
+            ..Default::default()
+        };
+        let groups = vec![
+            StageGroup {
+                stage: StageSummary {
+                    id: "in_progress".into(),
+                    ..Default::default()
+                },
+                sessions: vec![recent.clone(), old],
+            },
+            StageGroup {
+                stage: StageSummary {
+                    id: "done".into(),
+                    ..Default::default()
+                },
+                sessions: vec![done],
+            },
+        ];
+        let filters = vec![
+            SessionFilter::Stage("in_progress".into()),
+            SessionFilter::Updated(UpdatedFilter {
+                comparison: UpdatedComparison::OnOrAfter,
+                threshold: 100,
+                value_label: String::new(),
+            }),
+        ];
+
+        let filtered = StageGroup::filtered(&groups, &filters);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].sessions, vec![recent]);
     }
 }

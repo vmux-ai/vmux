@@ -3,7 +3,7 @@
         (
             url: "vmux://team/",
             title: "Team",
-            bookmark: Some(100),
+            bookmark: Some(90),
             title_message_id: "team-title",
             keywords: ["team", "agents", "profile"],
             icon: "Users",

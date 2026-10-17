@@ -8,6 +8,7 @@
             keywords: ["repository", "changes", "commit", "branch", "source control"],
             icon: "GitBranch",
             command_bar: true,
+            bookmark: Some(30),
             permissions: [
                 "PageReady",
                 "ThemeUiState",

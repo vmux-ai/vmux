@@ -216,7 +216,7 @@ impl SpaceProjects<'_, '_> {
         };
         let mut rows = Vec::new();
         for mut project in listed {
-            let open = !project.missing && expanded.holds(&project.path);
+            let open = !project.missing && (project.is_active || expanded.holds(&project.path));
             project.expanded = open;
             let path = project.path.clone();
             let depth = project.depth;

@@ -1,4 +1,4 @@
-use crate::event::{SideSheetPane, StackRevealTarget};
+use crate::event::{ActiveSession, SideSheetPane, StackRevealTarget};
 use dioxus::prelude::*;
 use vmux_ecs::event::space::{
     SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest, SpaceFormState,
@@ -153,15 +153,11 @@ fn SideSheetContent() -> Element {
                     class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground [scrollbar-gutter:stable]",
                     ..BookmarkDragState::listeners(drag_state),
                     if let Some(space) = active_space {
-                        div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
-                            SideSheetSpaceRow {
-                                key: "{space.id}",
-                                space: space.clone(),
-                                form: space_form.clone(),
-                            }
-                            if let Some(session) = active_session {
-                                ActiveSessionPanel { session }
-                            }
+                        SideSheetSpaceCard {
+                            key: "{space.id}",
+                            space,
+                            form: space_form.clone(),
+                            active_session,
                         }
                     }
                     if let Some(pane) = active_pane {
@@ -210,7 +206,42 @@ fn SideSheetContent() -> Element {
 }
 
 #[component]
-fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow, form: SpaceFormState) -> Element {
+fn SideSheetSpaceCard(
+    space: vmux_ecs::event::space::SpaceRow,
+    form: SpaceFormState,
+    active_session: Option<ActiveSession>,
+) -> Element {
+    let mut expanded = use_signal(|| true);
+    rsx! {
+        div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            SideSheetSpaceRow {
+                space,
+                form,
+                expanded: expanded(),
+                on_toggle: move |_| expanded.set(!expanded()),
+            }
+            div { class: if expanded() {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "min-h-0 overflow-hidden",
+                    if let Some(session) = active_session {
+                        ActiveSessionPanel { session }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SideSheetSpaceRow(
+    space: vmux_ecs::event::space::SpaceRow,
+    form: SpaceFormState,
+    expanded: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
     let editing = form.open && form.space_id.as_deref() == Some(space.id.as_str());
     let menu_value = use_signal(|| space.id.clone());
     let rename_id = space.id.clone();
@@ -234,7 +265,7 @@ fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow, form: SpaceFormSta
                         aria_label: space.name.clone(),
                         disabled: editing,
                         onclick: move |_| {
-                            let _ = send(&vmux_ecs::event::space::SpaceOpenPageRequest);
+                            on_toggle.call(());
                         },
                     },
                     div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2",
@@ -260,6 +291,10 @@ fn SideSheetSpaceRow(space: vmux_ecs::event::space::SpaceRow, form: SpaceFormSta
                                 },
                                 "{space.name}"
                             }
+                        }
+                        Icon {
+                            class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                            path { d: "m9 18 6-6-6-6" }
                         }
                     }
                 }
