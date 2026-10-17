@@ -193,7 +193,7 @@ fn SessionsList(
 ) -> Element {
     rsx! {
         div { class: "min-h-0 flex-1 overflow-auto",
-            div { class: "min-w-[44rem] space-y-2 p-2",
+            div { class: "w-full min-w-[44rem] max-w-[56rem] space-y-2 p-2",
                 for group in groups {
                     if !group.sessions.is_empty() {
                         SessionListGroup {
@@ -261,6 +261,7 @@ fn SessionListRow(
     let runtime = RuntimeVisual::for_id(&session.runtime);
     let agent = AgentPresentation::from_session(&session);
     let title = session.display_title();
+    let compact_id = SessionIdentity::new(&session.id).compact();
     let git_url = context.git_url.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let row_class = if selected {
@@ -272,11 +273,23 @@ fn SessionListRow(
         div {
             class: "group relative flex h-9 cursor-pointer items-center gap-2 border-b border-foreground/[0.045] px-2.5 text-xs transition-colors last:border-b-0 {row_class}",
             onclick: move |_| onselect.call(select_id.clone()),
+            AgentThumbnail {
+                src: agent.icon.clone(),
+                seed: agent.id.clone(),
+                background: agent.color.clone(),
+                alt: agent.name.clone(),
+                class: "size-4 shrink-0 text-[5px]".to_string(),
+            }
             button {
                 r#type: "button",
                 class: "min-w-0 flex-1 truncate text-left font-medium text-foreground/90",
                 tabindex: "-1",
                 "{title}"
+            }
+            MetadataPill {
+                label: compact_id,
+                title: session.id.clone(),
+                mono: true,
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
                 SessionContextView { context: context.clone() }
@@ -285,13 +298,6 @@ fn SessionListRow(
                         dot: runtime.dot.to_string(),
                         label: runtime_label(&session.runtime),
                     }
-                }
-                AgentThumbnail {
-                    src: agent.icon.clone(),
-                    seed: agent.id.clone(),
-                    background: agent.color.clone(),
-                    alt: agent.name.clone(),
-                    class: "size-4 text-[5px]".to_string(),
                 }
                 time { class: "w-10 text-right text-[10px] tabular-nums text-muted-foreground/65", "{updated}" }
             }
@@ -690,13 +696,19 @@ fn SessionContextView(context: SessionContext) -> Element {
 #[component]
 fn MetadataPill(
     label: String,
+    #[props(default)] title: String,
     #[props(default)] dot: String,
     #[props(default)] icon: Option<LineIcon>,
     #[props(default)] mono: bool,
 ) -> Element {
     let label_class = if mono { "font-mono" } else { "" };
+    let title = if title.is_empty() {
+        label.clone()
+    } else {
+        title
+    };
     rsx! {
-        span { class: "inline-flex h-[18px] max-w-full min-w-0 items-center gap-1 rounded-full bg-foreground/[0.045] px-1.5 text-[10px] text-muted-foreground",
+        span { class: "inline-flex h-[18px] max-w-full min-w-0 items-center gap-1 rounded-full bg-foreground/[0.045] px-1.5 text-[10px] text-muted-foreground", title,
             if !dot.is_empty() {
                 span { class: "size-1.5 shrink-0 rounded-full {dot}" }
             }
@@ -705,6 +717,26 @@ fn MetadataPill(
             }
             span { class: "max-w-32 truncate {label_class}", "{label}" }
         }
+    }
+}
+
+struct SessionIdentity<'a>(&'a str);
+
+impl<'a> SessionIdentity<'a> {
+    fn new(id: &'a str) -> Self {
+        Self(id)
+    }
+
+    fn compact(&self) -> String {
+        let characters = self.0.chars().collect::<Vec<_>>();
+        if characters.len() <= 13 {
+            return self.0.to_string();
+        }
+        let start = characters[..7].iter().collect::<String>();
+        let end = characters[characters.len() - 5..]
+            .iter()
+            .collect::<String>();
+        format!("{start}…{end}")
     }
 }
 
@@ -1007,5 +1039,12 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].stage.id, "active");
         assert_eq!(groups[0].sessions, vec![session]);
+    }
+
+    #[test]
+    fn session_identity_preserves_both_ends() {
+        let id = SessionIdentity::new("01a0fc43-68f9-7121-a388-59e1891fdc41");
+
+        assert_eq!(id.compact(), "01a0fc4…fdc41");
     }
 }

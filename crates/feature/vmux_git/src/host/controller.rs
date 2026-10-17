@@ -774,17 +774,19 @@ fn ui_state_write(
         let path = crate::GitUrl::parse(page_url)
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| working_directory.clone());
-        states.reset(webview, path.clone());
-        controller.reset(String::new());
-        pending.0.clear();
-        revision.0 = 0;
-        commit_result.0 = 0;
-        revealed.0.clear();
-        *directory = GitDirectoryNavigation::default();
-        commands.trigger(UiInput {
-            webview,
-            payload: crate::event::GitDirectoryOpenRequest { path },
-        });
+        if !states.repository_loaded_at(webview, &path) {
+            states.reset(webview, path.clone());
+            controller.reset(String::new());
+            pending.0.clear();
+            revision.0 = 0;
+            commit_result.0 = 0;
+            revealed.0.clear();
+            *directory = GitDirectoryNavigation::default();
+            commands.trigger(UiInput {
+                webview,
+                payload: crate::event::GitDirectoryOpenRequest { path },
+            });
+        }
     }
     if let Some(GitRepositoryPicked { path }) = &patch.repository_picked
         && !path.is_empty()

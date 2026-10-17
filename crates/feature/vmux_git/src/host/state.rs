@@ -96,6 +96,12 @@ impl GitStates<'_, '_> {
             .map(|state| state.snapshot.workspace.clone())
     }
 
+    pub(super) fn repository_loaded_at(&self, entity: Entity, path: &str) -> bool {
+        self.states.get(entity).is_ok_and(|state| {
+            state.snapshot.workspace == path && state.snapshot.repository.is_some()
+        })
+    }
+
     pub(super) fn reset(&mut self, entity: Entity, workspace: String) {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return;
