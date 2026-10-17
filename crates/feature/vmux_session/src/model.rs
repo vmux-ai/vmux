@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[cfg(host)]
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
@@ -16,7 +16,7 @@ use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order,
 use vmux_ecs::{Cwd, Description};
 
 #[cfg(host)]
-use crate::AgentConversationTitle;
+use crate::{AgentConversationTitle, TitlePending};
 
 #[cfg(host)]
 pub(crate) struct EntityPlugin;
@@ -28,6 +28,7 @@ impl Plugin for EntityPlugin {
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
             .register_persisted::<AgentConversationTitle>()
+            .register_persisted::<TitlePending>()
             .register_persisted::<LocalTask>()
             .add_message::<CreateRequest>()
             .add_message::<CleanupRequest>()
@@ -65,8 +66,7 @@ impl Plugin for StagePlugin {
             .register_type::<StageId>()
             .register_type::<StageDefinition>()
             .add_message::<StageChangeRequest>()
-            .add_systems(Startup, spawn_stages)
-            .add_systems(Update, change_stage.in_set(MutationSet));
+            .add_systems(Update, (ensure_stages, change_stage).in_set(MutationSet));
     }
 }
 
@@ -243,8 +243,18 @@ struct StageSeed {
 }
 
 #[cfg(host)]
-fn spawn_stages(mut commands: Commands, configuration: Res<Configuration>) {
+fn ensure_stages(
+    configuration: Res<Configuration>,
+    definitions: Query<
+        (Entity, &StageId, &Name, &Order, Has<vmux_ecs::Terminal>),
+        With<StageDefinition>,
+    >,
+    mut commands: Commands,
+) {
     for stage in &configuration.stages {
+        if definitions.iter().any(|(_, id, _, _, _)| id.0 == stage.id) {
+            continue;
+        }
         let mut entity = commands.spawn((
             StageDefinition,
             StageId(stage.id.clone()),
@@ -375,6 +385,7 @@ fn rename(
                         .entity(entity)
                         .insert(AgentConversationTitle(request.name.clone()));
                 }
+                commands.entity(entity).remove::<TitlePending>();
             }
         }
     }
@@ -477,6 +488,32 @@ mod tests {
     }
 
     #[test]
+    fn stage_definitions_are_available_after_update() {
+        let mut app = App::new();
+        app.add_plugins(StagePlugin);
+
+        app.update();
+        app.update();
+
+        let mut definitions = app
+            .world_mut()
+            .query_filtered::<(&StageId, &Order), With<StageDefinition>>()
+            .iter(app.world())
+            .map(|(id, order)| (id.0.clone(), order.0))
+            .collect::<Vec<_>>();
+        definitions.sort_by_key(|(_, order)| *order);
+        assert_eq!(
+            definitions,
+            vec![
+                ("in_progress".into(), 10),
+                ("in_review".into(), 20),
+                ("done".into(), 30),
+                ("canceled".into(), 40),
+            ]
+        );
+    }
+
+    #[test]
     fn stage_change_rejects_unknown_stage_and_records_transition_time() {
         let mut app = App::new();
         app.add_plugins(StagePlugin);
@@ -566,6 +603,7 @@ mod tests {
         assert!(filter.is_allowed::<SessionId>());
         assert!(filter.is_allowed::<AgentId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());
+        assert!(filter.is_allowed::<TitlePending>());
         assert!(filter.is_allowed::<LocalTask>());
         assert!(filter.is_allowed::<Stage>());
         assert!(filter.is_allowed::<StageChangedAt>());

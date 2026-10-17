@@ -339,7 +339,9 @@ impl PageOpener<'_, '_> {
             return;
         }
         if let Some(title) = AgentConversationTitle::from_prompt(&prompt) {
-            self.commands.entity(session).insert(title);
+            self.commands
+                .entity(session)
+                .insert((title, vmux_session::TitlePending));
         }
         if let Ok(mut queue) = self.queues.get_mut(session) {
             queue.enqueue_with_attachments(prompt, initial_attachments);

@@ -275,6 +275,10 @@ impl Chat {
         self.identity.snapshot.value.read().installing_splash
     }
 
+    pub fn transcript_loading(&self) -> bool {
+        self.identity.snapshot.value.read().transcript_loading
+    }
+
     pub fn install_detail(&self) -> String {
         let detail = self.run.error();
         if detail.is_empty() {

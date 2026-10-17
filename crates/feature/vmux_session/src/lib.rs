@@ -21,7 +21,10 @@ pub use model::{
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};
-pub use session::{AgentConversationTitle, ApprovalPolicy, PromptQueue, QueuedPrompt};
+pub use session::{
+    AgentConversationTitle, ApprovalPolicy, PromptQueue, QueuedPrompt, TitlePending,
+    TranscriptLoading,
+};
 pub use title::ConversationTitle;
 pub use vmux_api::conversation::SessionId;
 

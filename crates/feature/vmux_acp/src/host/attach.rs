@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor};
-use vmux_session::{PromptQueue, SessionId};
+use vmux_session::{AgentConversationTitle, PromptQueue, SessionId, TitlePending};
 
 pub(super) use super::attach_driver::AcpAgentAttachment;
 use super::attach_driver::{
@@ -31,6 +31,7 @@ fn attach(
         ),
         Added<PendingAcpAgentAttachment>,
     >,
+    titles: Query<(), With<AgentConversationTitle>>,
     mut commands: Commands,
 ) {
     for (
@@ -75,11 +76,15 @@ fn attach(
             .entry::<PromptQueue>()
             .or_default();
         if let Some(resume) = resume.clone() {
+            let mut session = commands.entity(*session_entity);
+            session.insert((AcpSessionId(resume), vmux_session::TranscriptLoading));
+            if !titles.contains(*session_entity) {
+                session.insert((AgentConversationTitle(session_name.clone()), TitlePending));
+            }
+        } else {
             commands
                 .entity(*session_entity)
-                .insert(AcpSessionId(resume));
-        } else {
-            commands.entity(*session_entity).remove::<AcpSessionId>();
+                .remove::<(AcpSessionId, vmux_session::TranscriptLoading)>();
         }
         let view = if let Some(webview) = webview {
             webview.entity()

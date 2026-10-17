@@ -107,6 +107,7 @@ pub struct ChatSnapshot {
     pub agent_id: String,
     pub agent_name: String,
     pub conversation_title: String,
+    pub transcript_loading: bool,
     pub agent_icon: String,
     pub accent_color: String,
     #[serde(default)]

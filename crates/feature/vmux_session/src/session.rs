@@ -29,6 +29,15 @@ impl AgentConversationTitle {
     }
 }
 
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TranscriptLoading;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct TitlePending;
+
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]
 #[reflect(Component)]
 pub struct ApprovalPolicy {

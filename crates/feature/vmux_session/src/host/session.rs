@@ -109,7 +109,9 @@ fn open_created(
     queue.enqueue_with_attachments(created.prompt.clone(), created.attachments);
     commands.entity(trigger.event().entity).insert(queue);
     if let Some(title) = AgentConversationTitle::from_prompt(&created.prompt) {
-        commands.entity(trigger.event().entity).insert(title);
+        commands
+            .entity(trigger.event().entity)
+            .insert((title, vmux_session::TitlePending));
     }
     requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(created.stack),
@@ -347,6 +349,9 @@ fn set_conversation_title(
                             .entity(session)
                             .insert(AgentConversationTitle(title.to_string()));
                     }
+                    commands
+                        .entity(session)
+                        .remove::<vmux_session::TitlePending>();
                     AgentCommandResult::Ok
                 }
             }
@@ -767,6 +772,11 @@ mod tests {
             app.world().get::<AgentConversationTitle>(session),
             Some(&AgentConversationTitle("Fix session startup".into()))
         );
+        assert!(
+            app.world()
+                .entity(session)
+                .contains::<vmux_session::TitlePending>()
+        );
         let requests = app
             .world_mut()
             .resource_mut::<Messages<PageOpenRequest>>()
@@ -921,7 +931,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(AgentProjectionPlugin);
         let anchor = ProcessId::new();
-        let session = app.world_mut().spawn((Session, AgentSessionRoot)).id();
+        let session = app
+            .world_mut()
+            .spawn((Session, AgentSessionRoot, vmux_session::TitlePending))
+            .id();
         let stack = app
             .world_mut()
             .spawn(EntityTarget::<Session>::new(session))
@@ -945,6 +958,11 @@ mod tests {
         assert_eq!(
             app.world().get::<AgentConversationTitle>(session),
             Some(&AgentConversationTitle("Feature-owned title".to_string()))
+        );
+        assert!(
+            !app.world()
+                .entity(session)
+                .contains::<vmux_session::TitlePending>()
         );
     }
 

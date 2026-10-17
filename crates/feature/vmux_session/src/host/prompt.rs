@@ -133,7 +133,9 @@ fn submit(
     if title.is_none()
         && let Some(title) = AgentConversationTitle::from_prompt(&text)
     {
-        commands.entity(session).insert(title);
+        commands
+            .entity(session)
+            .insert((title, vmux_session::TitlePending));
     }
     enqueue_prompt(&mut queue, &mut state, text, attachments);
     let effect = composer.effect(String::new(), true);

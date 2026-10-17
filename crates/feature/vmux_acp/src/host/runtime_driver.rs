@@ -25,10 +25,13 @@ pub(super) struct PromptWorkspace<'w, 's> {
 }
 
 impl PromptWorkspace<'_, '_> {
+    const TITLE_INSTRUCTION: &'static str = "Before answering, call set_conversation_title with a concise 3 to 7 word model-written summary of the conversation. Do not copy the user's prompt verbatim.";
+
     pub(super) fn prompt(
         policy: &AcpWorkspacePolicy,
         handoff: Option<String>,
         state: Option<AcpWorkspaceState>,
+        title_pending: bool,
     ) -> Option<String> {
         let policy = match state {
             Some(AcpWorkspaceState::Bound) | None => None,
@@ -38,12 +41,17 @@ impl PromptWorkspace<'_, '_> {
                 Some(policy.repository_needs_worktree.as_str())
             }
         };
-        match (handoff, policy) {
-            (Some(handoff), Some(policy)) => Some(format!("{handoff}\n\n{policy}")),
-            (Some(handoff), None) => Some(handoff),
-            (None, Some(policy)) => Some(policy.to_string()),
-            (None, None) => None,
+        let mut context = Vec::new();
+        if title_pending {
+            context.push(Self::TITLE_INSTRUCTION.to_string());
         }
+        if let Some(handoff) = handoff {
+            context.push(handoff);
+        }
+        if let Some(policy) = policy {
+            context.push(policy.to_string());
+        }
+        (!context.is_empty()).then(|| context.join("\n\n"))
     }
 
     pub(super) fn state(&self, entity: Entity) -> Option<AcpWorkspaceState> {

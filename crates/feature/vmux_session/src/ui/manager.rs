@@ -205,7 +205,7 @@ fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsVie
                 },
                 aria_pressed: list_selected,
                 onclick: move |_| onselect.call(SessionsView::List),
-                BuiltinIconView { icon: vmux_api::BuiltinIcon::ListTodo, class: "size-3.5".to_string() }
+                LineIconView { icon: LineIcon::List, class: "size-3.5".to_string() }
                 span { class: "hidden sm:inline", {translate("sessions-view-list")} }
             }
             button {
@@ -217,7 +217,7 @@ fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsVie
                 },
                 aria_pressed: board_selected,
                 onclick: move |_| onselect.call(SessionsView::Board),
-                LineIconView { icon: LineIcon::Layout, class: "size-3.5".to_string() }
+                LineIconView { icon: LineIcon::Columns3, class: "size-3.5".to_string() }
                 span { class: "hidden sm:inline", {translate("sessions-view-board")} }
             }
         }
@@ -232,7 +232,7 @@ fn SessionsList(
 ) -> Element {
     rsx! {
         div { class: "min-h-0 flex-1 overflow-auto",
-            div { class: "w-full min-w-[44rem] max-w-[80rem] space-y-2 p-2",
+            div { class: "w-full min-w-[44rem] space-y-2 p-2",
                 for group in groups {
                     if !group.sessions.is_empty() {
                         SessionListGroup {

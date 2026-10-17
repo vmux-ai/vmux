@@ -68,8 +68,18 @@ pub(super) fn add(app: &mut App) {
 fn route_messages(
     mut inbound: MessageReader<AgentMessagesSnapshot>,
     mut snapshots: MessageWriter<SnapshotReceived>,
+    sessions: Query<(Entity, &SessionId), With<Session>>,
+    mut commands: Commands,
 ) {
     for inbound in inbound.read() {
+        if let Some((session, _)) = sessions
+            .iter()
+            .find(|(_, session_id)| session_id.0 == inbound.sid)
+        {
+            commands
+                .entity(session)
+                .remove::<vmux_session::TranscriptLoading>();
+        }
         snapshots.write(SnapshotReceived {
             session: SessionId(inbound.sid.clone()),
             messages: inbound.messages.clone(),
@@ -252,5 +262,41 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].request_id, request_id);
+    }
+
+    #[test]
+    fn message_snapshot_finishes_transcript_loading() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId("session-1".into()),
+                vmux_session::TranscriptLoading,
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<AgentMessagesSnapshot>>()
+            .write(AgentMessagesSnapshot {
+                sid: "session-1".into(),
+                messages: vec![Message::user("hello")],
+            });
+
+        app.update();
+
+        assert!(
+            !app.world()
+                .entity(session)
+                .contains::<vmux_session::TranscriptLoading>()
+        );
+        let snapshots = app
+            .world_mut()
+            .resource_mut::<Messages<SnapshotReceived>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].session.0, "session-1");
     }
 }

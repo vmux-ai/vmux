@@ -56,12 +56,14 @@ struct ChatProjection {
 type ChangedSession = (
     Entity,
     &'static AgentId,
+    Ref<'static, Name>,
     Ref<'static, RunState>,
     Option<Ref<'static, AgentTurnMeta>>,
     Option<Ref<'static, Profile>>,
     Ref<'static, PromptQueue>,
     Option<Ref<'static, ImportedConversation>>,
     Option<Ref<'static, AgentConversationTitle>>,
+    Has<vmux_session::TranscriptLoading>,
     Ref<'static, Children>,
 );
 
@@ -131,12 +133,14 @@ struct ReadyWorld<'w, 's> {
 
 type SessionProjection = (
     &'static AgentId,
+    &'static Name,
     &'static RunState,
     Option<&'static AgentTurnMeta>,
     Option<&'static Profile>,
     &'static PromptQueue,
     Option<&'static ImportedConversation>,
     Option<&'static AgentConversationTitle>,
+    Has<vmux_session::TranscriptLoading>,
 );
 
 type HistorySource = (
@@ -184,11 +188,23 @@ fn push_to_page(
         .collect::<std::collections::HashSet<_>>();
     last_push.retain(|session, _| world.sessions.contains(*session));
     owed.retain(|session| world.sessions.contains(*session));
-    for (session, agent_id, state, turn_meta, profile, queue, imported, title, children) in
-        &world.sessions
+    for (
+        session,
+        agent_id,
+        name,
+        state,
+        turn_meta,
+        profile,
+        queue,
+        imported,
+        title,
+        transcript_loading,
+        children,
+    ) in &world.sessions
     {
         let conversation_changed = children.is_changed() || changed_transcripts.contains(&session);
         let moved = user_moved
+            || name.is_changed()
             || state.is_changed()
             || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
             || profile.as_ref().is_some_and(|profile| profile.is_changed())
@@ -234,6 +250,8 @@ fn push_to_page(
             &queue,
             imported.as_deref(),
             title.as_deref(),
+            name.as_str(),
+            transcript_loading,
             world.choices.get(webview).ok(),
         );
         let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
@@ -293,6 +311,8 @@ impl ChatProjection {
         queue: &PromptQueue,
         imported: Option<&ImportedConversation>,
         conversation_title: Option<&AgentConversationTitle>,
+        fallback_title: &str,
+        transcript_loading: bool,
         choice: Option<&PendingAgentChoice>,
     ) -> Self {
         let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
@@ -350,7 +370,9 @@ impl ChatProjection {
             agent_name,
             conversation_title: conversation_title
                 .map(|title| title.0.clone())
-                .unwrap_or_default(),
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| fallback_title.to_string()),
+            transcript_loading,
             agent_icon,
             accent_color,
             user_name,
@@ -423,8 +445,17 @@ fn sync_ready_views(
             .get(webview)
             .map(ChildOf::parent)
             .unwrap_or(Entity::PLACEHOLDER);
-        let Ok((agent_id, state, turn_meta, profile, queue, imported, title)) =
-            world.sessions.get(session_entity)
+        let Ok((
+            agent_id,
+            name,
+            state,
+            turn_meta,
+            profile,
+            queue,
+            imported,
+            title,
+            transcript_loading,
+        )) = world.sessions.get(session_entity)
         else {
             continue;
         };
@@ -441,6 +472,8 @@ fn sync_ready_views(
             queue,
             imported,
             title,
+            name.as_str(),
+            transcript_loading,
             world.choices.get(webview).ok(),
         );
         transcript.merge_tail(projection.transcript);
@@ -656,6 +689,8 @@ mod tests {
             &PromptQueue::default(),
             Some(&imported),
             None,
+            "",
+            false,
             None,
         )
         .snapshot;
@@ -682,6 +717,8 @@ mod tests {
             &PromptQueue::default(),
             None,
             None,
+            "",
+            false,
             None,
         )
         .snapshot;
@@ -710,6 +747,8 @@ mod tests {
             &PromptQueue::default(),
             None,
             Some(&title),
+            "First prompt",
+            false,
             None,
         )
         .snapshot;
@@ -718,6 +757,30 @@ mod tests {
             snapshot.conversation_title,
             "Refine generated chat summaries"
         );
+    }
+
+    #[test]
+    fn snapshot_uses_session_name_until_model_writes_title() {
+        let agent = AgentId("codex".into());
+        let snapshot = ChatProjection::new(
+            &agent,
+            &[],
+            &[],
+            &RunState::Idle,
+            None,
+            None,
+            None,
+            None,
+            &PromptQueue::default(),
+            None,
+            None,
+            "First prompt",
+            false,
+            None,
+        )
+        .snapshot;
+
+        assert_eq!(snapshot.conversation_title, "First prompt");
     }
 
     #[test]
@@ -736,6 +799,8 @@ mod tests {
             &PromptQueue::default(),
             None,
             None,
+            "",
+            false,
             None,
         )
         .snapshot;

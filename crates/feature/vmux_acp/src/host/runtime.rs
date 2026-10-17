@@ -25,7 +25,9 @@ use crate::host::event::{
 };
 use crate::policy::AcpWorkspacePolicy;
 use vmux_session::host::{ChatView, ImportedConversation};
-use vmux_session::{AgentId, ApprovalPolicy, PromptQueue, Route, RunState, Session, SessionId};
+use vmux_session::{
+    AgentId, ApprovalPolicy, PromptQueue, Route, RunState, Session, SessionId, TitlePending,
+};
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AcpSessionConfigSet;
@@ -381,6 +383,7 @@ fn input(
         &mut RunState,
         &mut PromptQueue,
         Has<AcpSpawnQueued>,
+        Has<TitlePending>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,
@@ -396,6 +399,7 @@ fn input(
         mut state,
         mut queue,
         spawn_queued,
+        title_pending,
         mut pending,
         mut imported,
     ) in &mut q
@@ -421,7 +425,7 @@ fn input(
             imported.first_prompt = Some(text.clone());
         }
         let workspace_state = workspace.state(entity);
-        let context = PromptWorkspace::prompt(&policy, handoff, workspace_state);
+        let context = PromptWorkspace::prompt(&policy, handoff, workspace_state, title_pending);
         let preferred_mode = modes
             .as_ref()
             .and_then(|modes| modes.by_agent.get(&agent_id.0))
@@ -533,7 +537,8 @@ mod tests {
     fn unbound_workspace_context_requires_project_selection_before_file_access() {
         let policy = crate::policy_driver::PolicyDriver::bundled();
         let context =
-            PromptWorkspace::prompt(&policy, None, Some(AcpWorkspaceState::Unbound)).unwrap();
+            PromptWorkspace::prompt(&policy, None, Some(AcpWorkspaceState::Unbound), false)
+                .unwrap();
 
         assert!(context.contains("Before accessing project files"));
         assert!(context.contains("select_project"));
@@ -554,6 +559,7 @@ mod tests {
             &policy,
             None,
             Some(AcpWorkspaceState::RepositoryNeedsWorktree),
+            false,
         )
         .unwrap();
 
@@ -572,6 +578,7 @@ mod tests {
             &policy,
             Some("prior conversation".into()),
             Some(AcpWorkspaceState::PendingWorktree),
+            false,
         )
         .unwrap();
 
@@ -589,10 +596,22 @@ mod tests {
                 &policy,
                 Some("prior conversation".into()),
                 Some(AcpWorkspaceState::Bound),
+                false,
             )
             .as_deref(),
             Some("prior conversation")
         );
+    }
+
+    #[test]
+    fn provisional_title_requires_model_written_summary() {
+        let policy = crate::policy_driver::PolicyDriver::bundled();
+        let context =
+            PromptWorkspace::prompt(&policy, None, Some(AcpWorkspaceState::Bound), true).unwrap();
+
+        assert!(context.contains("call set_conversation_title"));
+        assert!(context.contains("3 to 7 word model-written summary"));
+        assert!(context.contains("Do not copy the user's prompt verbatim"));
     }
 
     #[test]

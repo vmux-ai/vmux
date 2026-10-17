@@ -6,6 +6,7 @@ use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::AgentAccent;
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -54,6 +55,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut at_bottom = chat.transcript.at_bottom;
     let mut last_top = chat.transcript.last_top;
     let transcript = chat.transcript.current();
+    let transcript_loading = chat.transcript_loading();
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;
@@ -89,7 +91,9 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
             },
             div { class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
-                if loaded_start > 0 {
+                if transcript_loading {
+                    TranscriptSkeleton {}
+                } else if loaded_start > 0 {
                     button {
                         id: "chat-load-older",
                         class: "mx-auto mb-3 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50",
@@ -98,24 +102,26 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         {if history_loading { translate("agent-loading-older") } else { translate("agent-load-older") }}
                     }
                 }
-                if chat.installing_splash() {
+                if !transcript_loading && chat.installing_splash() {
                     InstallIntro { chat, detail: chat.install_detail() }
-                } else if items.is_empty() && chat.status() == "idle" {
+                } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
                     ReadyIntro { chat }
                 }
-                for (i , item) in items.iter().cloned().enumerate() {
-                    ChatItemRow {
-                        key: "{loaded_start as usize + i}",
-                        absolute_index: loaded_start as usize + i,
-                        item,
-                        agent_name: agent_name.clone(),
-                        agent_avatar: agent_avatar.clone(),
-                        agent_color: agent_color.clone(),
-                        user_name: user_name.clone(),
-                        user_color: user_color.clone(),
-                    }
-                    if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start as usize + i) {
-                        HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
+                if !transcript_loading {
+                    for (i , item) in items.iter().cloned().enumerate() {
+                        ChatItemRow {
+                            key: "{loaded_start as usize + i}",
+                            absolute_index: loaded_start as usize + i,
+                            item,
+                            agent_name: agent_name.clone(),
+                            agent_avatar: agent_avatar.clone(),
+                            agent_color: agent_color.clone(),
+                            user_name: user_name.clone(),
+                            user_color: user_color.clone(),
+                        }
+                        if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start as usize + i) {
+                            HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
+                        }
                     }
                 }
                 if chat.status() == "errored" {
@@ -128,6 +134,37 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         span { class: "h-px flex-1 bg-foreground/10" }
                     }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn TranscriptSkeleton() -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-8 py-8",
+            div { class: "ml-auto flex w-2/3 items-start justify-end gap-3",
+                div { class: "flex min-w-0 flex-1 flex-col items-end gap-2 pt-1",
+                    Skeleton { class: "h-2.5 w-12 bg-foreground/[0.07]" }
+                    Skeleton { class: "h-3 w-40 bg-foreground/[0.08]" }
+                }
+                Skeleton { class: "size-7 shrink-0 rounded-full bg-foreground/[0.08]" }
+            }
+            div { class: "flex w-3/4 items-start gap-3",
+                Skeleton { class: "size-7 shrink-0 rounded-full bg-foreground/[0.08]" }
+                div { class: "flex min-w-0 flex-1 flex-col gap-2 pt-1",
+                    Skeleton { class: "h-2.5 w-14 bg-foreground/[0.07]" }
+                    Skeleton { class: "h-3 w-full bg-foreground/[0.08]" }
+                    Skeleton { class: "h-3 w-4/5 bg-foreground/[0.07]" }
+                    Skeleton { class: "h-3 w-3/5 bg-foreground/[0.06]" }
+                }
+            }
+            div { class: "ml-auto flex w-1/2 items-start justify-end gap-3",
+                div { class: "flex min-w-0 flex-1 flex-col items-end gap-2 pt-1",
+                    Skeleton { class: "h-2.5 w-12 bg-foreground/[0.07]" }
+                    Skeleton { class: "h-3 w-32 bg-foreground/[0.08]" }
+                }
+                Skeleton { class: "size-7 shrink-0 rounded-full bg-foreground/[0.08]" }
             }
         }
     }
