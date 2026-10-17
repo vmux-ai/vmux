@@ -1026,6 +1026,7 @@ sessions-open = Openen
 sessions-edit = Bewerken
 sessions-cleanup = Opruimen
 session-stage-in-progress = Bezig
+session-stage-active = Actief
 session-stage-in-review = In beoordeling
 session-stage-done = Klaar
 session-stage-canceled = Geannuleerd

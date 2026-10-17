@@ -1023,6 +1023,7 @@ sessions-open = 打开
 sessions-edit = 编辑
 sessions-cleanup = 清理
 session-stage-in-progress = 进行中
+session-stage-active = 活跃
 session-stage-in-review = 审核中
 session-stage-done = 已完成
 session-stage-canceled = 已取消

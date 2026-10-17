@@ -1026,6 +1026,7 @@ sessions-open = Abrir
 sessions-edit = Editar
 sessions-cleanup = Limpar
 session-stage-in-progress = Em andamento
+session-stage-active = Ativas
 session-stage-in-review = Em revisão
 session-stage-done = Concluído
 session-stage-canceled = Cancelado

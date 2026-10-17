@@ -1026,6 +1026,7 @@ sessions-open = Открыть
 sessions-edit = Изменить
 sessions-cleanup = Очистить
 session-stage-in-progress = В работе
+session-stage-active = Активные
 session-stage-in-review = На проверке
 session-stage-done = Готово
 session-stage-canceled = Отменено

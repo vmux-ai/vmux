@@ -1006,6 +1006,7 @@ sessions-open = 開く
 sessions-edit = 編集
 sessions-cleanup = クリーンアップ
 session-stage-in-progress = 進行中
+session-stage-active = アクティブ
 session-stage-in-review = レビュー中
 session-stage-done = 完了
 session-stage-canceled = キャンセル

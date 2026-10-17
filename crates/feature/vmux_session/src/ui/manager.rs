@@ -68,11 +68,6 @@ pub fn SessionsManager() -> Element {
     rsx! {
         ManagerPage {
             header { class: "flex h-11 shrink-0 items-center gap-2.5 border-b border-foreground/[0.07] bg-background px-3",
-                div { class: "flex min-w-0 items-baseline gap-2",
-                    h1 { class: "truncate text-sm font-semibold tracking-tight", "{heading}" }
-                    span { class: "text-[11px] tabular-nums text-muted-foreground", "{visible_count}" }
-                }
-                div { class: "flex-1" }
                 div { class: "relative w-44 max-w-[30vw] sm:w-60",
                     LineIconView {
                         icon: LineIcon::Search,
@@ -86,6 +81,11 @@ pub fn SessionsManager() -> Element {
                         oninput: move |event| query.set(event.value()),
                     }
                 }
+                div { class: "flex min-w-0 items-baseline gap-2",
+                    h1 { class: "truncate text-xs font-medium text-muted-foreground", "{heading}" }
+                    span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{visible_count}" }
+                }
+                div { class: "flex-1" }
                 SessionsViewToggle {
                     selected: view(),
                     onselect: move |selected| view.set(selected),

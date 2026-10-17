@@ -1023,6 +1023,7 @@ sessions-open = 열기
 sessions-edit = 편집
 sessions-cleanup = 정리
 session-stage-in-progress = 진행 중
+session-stage-active = 활성
 session-stage-in-review = 검토 중
 session-stage-done = 완료
 session-stage-canceled = 취소됨

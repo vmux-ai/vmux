@@ -24,7 +24,6 @@ use super::watch::GitWatch;
 type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
 
 const DIFF_CONTEXT_LINES: usize = 3;
-const DIFF_REVEAL_LINES: usize = 20;
 
 pub(super) struct StatePlugin;
 
@@ -285,19 +284,11 @@ fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
             while index < lines.len() && !visible[index] {
                 index += 1;
             }
-            let hidden = index - start;
-            let (reveal_start, reveal_end) = if hidden <= DIFF_REVEAL_LINES {
-                (start, index)
-            } else if start == 0 {
-                (index - DIFF_REVEAL_LINES, index)
-            } else {
-                (start, start + DIFF_REVEAL_LINES)
-            };
             rows.push(GitDiffRow::Gap {
                 start: start as u32,
                 end: index as u32,
-                reveal_start: reveal_start as u32,
-                reveal_end: reveal_end as u32,
+                reveal_start: start as u32,
+                reveal_end: index as u32,
             });
         }
         if state.snapshot.diff_rows != rows {
@@ -471,22 +462,24 @@ mod tests {
     }
 
     #[test]
-    fn diff_projection_reveals_only_the_requested_chunk() {
+    fn diff_projection_reveals_the_requested_gap() {
         let (mut app, entity) = app_with_change(60, 49);
         app.world_mut()
             .get_mut::<GitDiffRevealRanges>(entity)
             .unwrap()
             .0
-            .push((0, DIFF_REVEAL_LINES));
+            .push((0, 46));
         app.update();
         let state = app.world().get::<GitState>(entity).unwrap();
 
         assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Line(0)));
-        assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Gap {
-            start: DIFF_REVEAL_LINES as u32,
-            end: 46,
-            reveal_start: DIFF_REVEAL_LINES as u32,
-            reveal_end: (DIFF_REVEAL_LINES * 2) as u32,
-        }));
+        assert!(!state.snapshot.diff_rows.iter().any(|row| matches!(
+            row,
+            GitDiffRow::Gap {
+                start: 0,
+                end: 46,
+                ..
+            }
+        )));
     }
 }

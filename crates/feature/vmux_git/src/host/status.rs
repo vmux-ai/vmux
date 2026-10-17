@@ -22,7 +22,6 @@ use super::watch::GitWatch;
 
 const STATUS_DEBOUNCE: Duration = Duration::from_millis(120);
 const DIFF_CONTEXT_LINES: usize = 3;
-const DIFF_REVEAL_LINES: usize = 20;
 
 pub(super) struct StatusPlugin;
 
@@ -297,19 +296,11 @@ impl FileGitStates<'_, '_> {
             while index < lines.len() && !visible[index] {
                 index += 1;
             }
-            let hidden = index - start;
-            let (reveal_start, reveal_end) = if hidden <= DIFF_REVEAL_LINES {
-                (start, index)
-            } else if start == 0 {
-                (index - DIFF_REVEAL_LINES, index)
-            } else {
-                (start, start + DIFF_REVEAL_LINES)
-            };
             rows.push(GitDiffRow::Gap {
                 start: start as u32,
                 end: index as u32,
-                reveal_start: reveal_start as u32,
-                reveal_end: reveal_end as u32,
+                reveal_start: start as u32,
+                reveal_end: index as u32,
             });
         }
         file.state.diff_rows = rows;

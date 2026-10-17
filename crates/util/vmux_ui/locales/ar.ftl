@@ -1026,6 +1026,7 @@ sessions-open = فتح
 sessions-edit = تعديل
 sessions-cleanup = تنظيف
 session-stage-in-progress = قيد التنفيذ
+session-stage-active = نشطة
 session-stage-in-review = قيد المراجعة
 session-stage-done = مكتمل
 session-stage-canceled = ملغى
