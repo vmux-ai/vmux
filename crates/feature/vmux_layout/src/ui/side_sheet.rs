@@ -25,14 +25,14 @@ use super::window_drag::WindowDragRegion;
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     let handle_class = if resizing() {
-        "h-10 w-1 rounded-full bg-foreground/45"
+        "h-10 w-1 rounded-full bg-foreground/45 opacity-100"
     } else {
         "h-8 w-1 rounded-full bg-foreground/20 opacity-0 transition-[height,background-color,opacity] duration-150 group-hover:h-10 group-hover:bg-foreground/35 group-hover:opacity-100"
     };
     rsx! {
         div {
-            class: "group absolute inset-y-0 z-20 flex w-6 cursor-col-resize items-center justify-center",
-            style: "right:-10px;",
+            class: "group absolute inset-y-0 z-20 flex w-4 cursor-col-resize items-center justify-center",
+            style: "right:-12px;",
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);

@@ -976,9 +976,11 @@ fn SessionDetails(
                 if !last_prompt.is_empty() && last_prompt != title {
                     p { class: "mb-4 px-1 text-xs leading-5 text-muted-foreground", "{last_prompt}" }
                 }
-                EditableDescription {
-                    session_id: session.id.clone(),
-                    value: session.description.clone(),
+                if !session.description.trim().is_empty() {
+                    EditableDescription {
+                        session_id: session.id.clone(),
+                        value: session.description.clone(),
+                    }
                 }
                 section { class: "rounded-lg bg-foreground/[0.035]",
                     h3 { class: "px-3 pb-1 pt-3 text-[10px] font-medium text-muted-foreground", {translate("editor-properties")} }
@@ -1014,7 +1016,7 @@ fn SessionDetails(
                     }
                 }
             }
-            footer { class: "flex shrink-0 items-center justify-end gap-1.5 px-4 pb-4 pt-2",
+            footer { class: "flex shrink-0 items-center gap-1.5 px-4 pb-4 pt-2",
                 if !action_git_url.is_empty() {
                     DetailActionButton {
                         icon: DetailActionIcon::Git,
@@ -1051,7 +1053,7 @@ fn DetailActionButton(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let class = if primary {
-        "vmux-primary-action flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition"
+        "vmux-primary-action flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-semibold transition"
     } else {
         "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground"
     };
