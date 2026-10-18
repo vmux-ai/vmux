@@ -224,7 +224,7 @@ fn HeaderContent() -> Element {
 fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
     (
         String::new(),
-        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] bg-glass px-2 text-foreground backdrop-blur-xl backdrop-saturate-150".to_string(),
+        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] bg-card px-2 text-foreground".to_string(),
     )
 }
 
@@ -262,17 +262,17 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
     let inactive_hover_classes = if visual.active() {
         ""
     } else {
-        "hover:bg-glass-hover hover:text-foreground"
+        "hover:bg-card hover:text-foreground"
     };
 
     let trunc = StackTitle::truncate_class(&display_title);
     let (surface_style, surface_class, title_class, close_class) = if is_active {
         (
-            "--tab-bg:var(--glass);background-color:var(--glass);border-bottom-width:0;"
+            "--tab-bg:var(--card);background-color:var(--card);border-bottom-width:0;"
                 .to_string(),
             cn([
                 skirt_classes,
-                "glass mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
             ]),
             cn([
                 "min-w-0 flex-1",
@@ -283,9 +283,9 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         )
     } else {
         (
-            "background-color:color-mix(in oklab,var(--glass) 58%,transparent);".to_string(),
+            String::new(),
             cn([
-                "my-1 flex h-8 w-full items-center gap-2 rounded-lg border border-glass-border/65 px-3.5 text-muted-foreground shadow-sm transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "my-1 flex h-8 w-full items-center gap-2 rounded-lg px-3.5 text-muted-foreground transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
                 inactive_hover_classes,
             ]),
             cn([
@@ -414,7 +414,7 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.07] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.07] focus-visible:text-foreground",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground shadow-none outline-none transition-colors hover:bg-card hover:text-foreground active:bg-secondary focus-visible:bg-card focus-visible:text-foreground",
                 onclick: move |_| {
                     let _ = send(&TabCreateRequest);
                 },
