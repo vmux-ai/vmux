@@ -7,7 +7,7 @@ use vmux_ecs::event::space::{
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
+use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -210,7 +210,7 @@ fn SideSheetSpaceCard(
 ) -> Element {
     let mut expanded = use_signal(|| true);
     rsx! {
-        div { class: "mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1",
+        div { class: SHEET_SECTION,
             SideSheetSpaceRow {
                 space,
                 spaces,
@@ -462,9 +462,9 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
     let collapsed_stack = pane.collapsed_stack.clone();
     rsx! {
         div { class: if pane.is_active && any_loading {
-                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1 pane-loading-ring"
+                format!("group {SHEET_SECTION} pane-loading-ring")
             } else {
-                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1"
+                format!("group {SHEET_SECTION}")
             },
             div {
                 class: "flex h-9 items-center rounded-md transition-colors hover:bg-glass-hover",
@@ -491,7 +491,6 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                     SheetHeaderChevron {
                         expanded,
                         label: fold_title,
-                        subtle: true,
                         onclick: move |_| {
                             let _ = send(&crate::event::SideSheetSectionRequest::new(
                                 pane_id,

@@ -164,19 +164,34 @@ jobs:
         run: |
           set -euo pipefail
 
-          links_cef() {
-            cargo tree --locked -p "$1" -i bevy_cef >/dev/null 2>&1
+          out=$(mktemp)
+          err=$(mktemp)
+
+          query_cef() {
+            local status
+            set +e
+            cargo tree --locked "$@" -i bevy_cef >"$out" 2>"$err"
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ] && ! grep -q 'did not match any packages' "$err"; then
+              echo "::error::cargo tree failed, so this job proved nothing:"
+              cat "$err" >&2
+              exit 1
+            fi
+            [ "$status" -eq 0 ] || : >"$out"
           }
 
-          if ! links_cef vmux_desktop; then
+          query_cef -p vmux_desktop
+          if [ ! -s "$out" ]; then
             echo "::error::positive control failed: bevy_cef not found in vmux_desktop, so this job is asserting nothing"
             exit 1
           fi
           echo "control ok: vmux_desktop links bevy_cef"
 
-          if cargo tree --locked -p vmux_session --no-default-features -i bevy_cef >/dev/null 2>&1; then
+          query_cef -p vmux_session --no-default-features
+          if [ -s "$out" ]; then
             echo "::error::render-free vmux_session links bevy_cef:"
-            cargo tree --locked -p vmux_session --no-default-features -i bevy_cef
+            cat "$out"
             exit 1
           fi
           echo "ok: render-free vmux_session does not link bevy_cef"

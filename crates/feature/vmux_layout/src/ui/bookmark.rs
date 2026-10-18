@@ -14,7 +14,7 @@ use vmux_ecs::PageMetadata;
 use vmux_ui::components::context_menu::ContextMenuTrigger;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
+use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::tree_row::{
     SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeRow, SidebarTreeRowGroup,
 };
@@ -58,7 +58,7 @@ pub(super) fn BookmarksSection(
     rsx! {
         div {
             "data-bookmark-drop": "root",
-            class: "group relative z-30 mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1",
+            class: "group relative z-30 {SHEET_SECTION}",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
                 let _ = send(&BookmarkMenuRootRequest);
@@ -104,7 +104,6 @@ pub(super) fn BookmarksSection(
                     SheetHeaderChevron {
                     expanded,
                     label: bookmarks_title,
-                    subtle: true,
                     onclick: move |_| {
                         let _ = send(&SideSheetSectionRequest::new(
                             pane_id,

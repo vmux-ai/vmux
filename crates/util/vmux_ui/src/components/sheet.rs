@@ -3,6 +3,8 @@ use dioxus::prelude::*;
 use crate::components::icon::Icon;
 use crate::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 
+pub const SHEET_SECTION: &str = "mb-2 flex shrink-0 flex-col rounded-lg border-0 bg-foreground/[0.055] p-1 shadow-none outline-none";
+
 #[component]
 pub fn SheetHeaderAction(
     label: String,
