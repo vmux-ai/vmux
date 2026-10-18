@@ -139,13 +139,16 @@ pub fn SessionsManager() -> Element {
                     onchange: move |selected| view.set(selected),
                 }
                 ManagerButton {
-                    variant: ManagerButtonVariant::Secondary,
+                    variant: ManagerButtonVariant::Primary,
                     onclick: move |_| {
                         let _ = send(&ChatOpenPage {
                             url: "vmux://start/".to_string(),
                         });
                     },
-                    {translate("sessions-new")}
+                    span { class: "inline-flex items-center gap-1.5",
+                        LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                        span { {translate("sessions-start")} }
+                    }
                 }
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",

@@ -3,8 +3,7 @@ use dioxus::prelude::*;
 use crate::components::icon::Icon;
 use crate::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 
-pub const SHEET_SECTION: &str =
-    "vmux-sheet-section mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg p-1";
+pub const SHEET_SECTION: &str = "vmux-sheet-section mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg bg-foreground/[0.055] p-1";
 
 #[component]
 pub fn SheetHeaderAction(

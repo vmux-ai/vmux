@@ -257,7 +257,7 @@ fn SideSheetSpaceRow(
             LayoutContextMenu {
                 ContextMenuTrigger { attributes: vec![],
                     div {
-                        class: "group relative flex w-full cursor-pointer items-center rounded-md px-2 py-1.5 text-foreground hover:bg-foreground/5",
+                        class: "group relative flex w-full cursor-pointer items-center rounded-md px-2 py-1.5 text-foreground",
                         button {
                             r#type: "button",
                             class: if editing {
@@ -506,7 +506,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                 format!("group {SHEET_SECTION}")
             },
             div {
-                class: "flex h-9 items-center rounded-md transition-colors hover:bg-glass-hover",
+                class: "flex h-9 items-center rounded-md",
                 div { class: "flex min-w-0 flex-1 items-center gap-2 px-2",
                     div { class: if pane.is_active {
                             "grid h-7 w-7 shrink-0 place-items-center text-primary"

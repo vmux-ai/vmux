@@ -70,7 +70,7 @@ pub(super) fn BookmarksSection(
                 class: if root_targeted {
                     "flex items-center rounded-md bg-foreground/10 ring-1 ring-inset ring-ring"
                 } else {
-                    "flex items-center rounded-md transition-colors hover:bg-glass-hover"
+                    "flex items-center rounded-md"
                 },
                 div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
                     div { class: "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground",
@@ -414,11 +414,11 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         },
                         style: "{visual.style()}",
                         class: if visual.dragging {
-                            "absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-foreground/[0.08]"
+                            "vmux-sheet-tile absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-foreground/[0.08]"
                         } else if active {
-                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-primary/15 text-primary transition-colors hover:bg-primary/20"
+                            "vmux-sheet-tile vmux-sheet-tile-active absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md transition-colors"
                         } else {
-                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-foreground/[0.07] transition-colors hover:bg-foreground/[0.11]"
+                            "vmux-sheet-tile absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-foreground/[0.07] transition-colors hover:bg-foreground/[0.11]"
                         },
                         onclick: {
                             let u = url_open.clone();
