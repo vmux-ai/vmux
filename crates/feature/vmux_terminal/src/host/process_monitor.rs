@@ -145,7 +145,7 @@ struct Sparkline {
 }
 
 impl Sparkline {
-    fn plot(samples: &[f32], floor: f32) -> Self {
+    fn plot(samples: &[f32], minimum_span: f32) -> Self {
         let samples = if samples.is_empty() {
             vec![0.0, 0.0]
         } else if samples.len() == 1 {
@@ -153,12 +153,22 @@ impl Sparkline {
         } else {
             samples.to_vec()
         };
-        let ceiling = samples.iter().copied().fold(floor, f32::max).max(1.0);
+        let minimum = samples.iter().copied().fold(f32::INFINITY, f32::min);
+        let maximum = samples.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let sample_span = maximum - minimum;
+        let span = (sample_span * 1.1).max(minimum_span).max(1.0);
+        let center = (minimum + maximum) / 2.0;
+        let mut lower = center - span / 2.0;
+        let mut upper = center + span / 2.0;
+        if lower < 0.0 {
+            upper -= lower;
+            lower = 0.0;
+        }
         let last = (samples.len() - 1) as f32;
         let mut points = Vec::with_capacity(samples.len());
         for (index, sample) in samples.iter().enumerate() {
             let x = index as f32 / last * 100.0;
-            let y = 39.0 - (sample / ceiling).clamp(0.0, 1.0) * 37.0;
+            let y = 39.0 - ((sample - lower) / (upper - lower)).clamp(0.0, 1.0) * 37.0;
             points.push((x, y));
         }
         let segments = Self::curve_segments(&points);
@@ -758,8 +768,8 @@ fn broadcast_to_monitors(
             .iter()
             .copied()
             .collect::<Vec<_>>();
-        let cpu_graph = Sparkline::plot(&cpu_history, 100.0);
-        let memory_graph = Sparkline::plot(&memory_history, 128.0);
+        let cpu_graph = Sparkline::plot(&cpu_history, 5.0);
+        let memory_graph = Sparkline::plot(&memory_history, 64.0);
         let state = ProcessesUiState {
             connected,
             query: monitor.query.clone(),
@@ -917,14 +927,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sparkline_scales_against_a_floor() {
-        let graph = Sparkline::plot(&[0.0, 50.0, 100.0], 100.0);
+    fn sparkline_uses_the_visible_sample_range() {
+        let graph = Sparkline::plot(&[19.0, 19.5, 20.0], 5.0);
 
         assert_eq!(
             graph.line,
-            "M 0.00 39.00 C 8.33 35.92, 33.33 26.67, 50.00 20.50 C 66.67 14.33, 91.67 5.08, 100.00 2.00"
+            "M 0.00 24.20 C 8.33 23.58, 33.33 21.73, 50.00 20.50 C 66.67 19.27, 91.67 17.42, 100.00 16.80"
         );
-        assert!(graph.area.starts_with("M 0 40 L 0.00 39.00"));
+        assert!(graph.area.starts_with("M 0 40 L 0.00 24.20"));
         assert!(graph.area.ends_with("L 100 40 Z"));
     }
 
