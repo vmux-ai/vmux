@@ -81,21 +81,23 @@ pub(super) fn BookmarksSection(
                     if let Some(label) = root_drop_label {
                         span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
                     } else {
-                        span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{bookmarks_title}" }
-                        SheetHeaderAction {
-                            label: new_folder_title,
-                            onclick: move |event: MouseEvent| {
-                                event.prevent_default();
-                                event.stop_propagation();
-                                let _ = send(&BookmarkFolderEditOpenRequest {
-                                    parent: None,
-                                    draft: translate("layout-new-folder"),
-                                });
-                            },
-                            Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                                path { d: "M12 10v6" }
-                                path { d: "M9 13h6" }
+                        span { class: "min-w-0 flex-1 truncate whitespace-nowrap text-ui font-semibold text-foreground", "{bookmarks_title}" }
+                        div { class: "shrink-0",
+                            SheetHeaderAction {
+                                label: new_folder_title,
+                                onclick: move |event: MouseEvent| {
+                                    event.prevent_default();
+                                    event.stop_propagation();
+                                    let _ = send(&BookmarkFolderEditOpenRequest {
+                                        parent: None,
+                                        draft: translate("layout-new-folder"),
+                                    });
+                                },
+                                Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                    path { d: "M12 10v6" }
+                                    path { d: "M9 13h6" }
+                                }
                             }
                         }
                     }
@@ -124,7 +126,7 @@ pub(super) fn BookmarksSection(
                         if !pins.is_empty() {
                             div {
                                 "data-bookmark-drop": "",
-                                class: "mb-1 grid grid-cols-6 gap-1.5 p-1 @min-[24rem]:grid-cols-7 @min-[28rem]:grid-cols-8 @min-[32rem]:grid-cols-9",
+                                class: "mb-1 grid gap-1.5 p-1 [grid-template-columns:repeat(auto-fill,minmax(2rem,1fr))]",
                                 for (index, pin) in pins.iter().enumerate() {
                                     PinTile {
                                         key: "{pin.row.uuid}",

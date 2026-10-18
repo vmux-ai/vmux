@@ -197,7 +197,7 @@ fn sync_winit_power_mode(
     }
 }
 
-const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(16_666_666);
+const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(33_333_333);
 
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -484,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn cef_wake_policy_follows_display_refresh_but_not_past_60hz() {
+    fn cef_wake_policy_follows_display_refresh_but_not_past_30hz() {
         assert_eq!(
             WakePolicy::foreground_cef([Some(60_000)]),
             MIN_FOREGROUND_CEF_WAKE_INTERVAL
@@ -495,7 +495,7 @@ mod tests {
             "a faster panel must not make the app wake faster"
         );
         assert!(
-            WakePolicy::foreground_cef([Some(30_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL,
+            WakePolicy::foreground_cef([Some(20_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL,
             "a slower panel still wakes less often"
         );
         assert_eq!(

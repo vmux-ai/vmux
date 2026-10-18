@@ -962,6 +962,8 @@ resume-age-years = { $count } a
 
 
 git-title = Git
+git-latest = Mais recente
+git-branch-changes = Alterações da branch
 git-status = Status
 git-files = Arquivos
 git-commits = Commits

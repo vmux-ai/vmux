@@ -962,6 +962,8 @@ resume-age-years = { $count } г
 
 
 git-title = Git
+git-latest = Последний
+git-branch-changes = Изменения ветки
 git-status = Состояние
 git-files = Файлы
 git-commits = Коммиты

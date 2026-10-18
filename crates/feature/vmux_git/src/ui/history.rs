@@ -10,6 +10,7 @@ use crate::event::*;
 use crate::state::GitOperationEligibility;
 
 use super::operation::HeaderOperationButton;
+use super::shared::ListPager;
 
 #[component]
 pub(super) fn HistoryCard(
@@ -17,6 +18,15 @@ pub(super) fn HistoryCard(
     selected_commit: String,
     operations: GitOperationEligibility,
 ) -> Element {
+    let total = repository.commits.len();
+    let pager = ListPager::use_state();
+    let selected_index = repository
+        .commits
+        .iter()
+        .position(|entry| entry.sha == selected_commit);
+    let visible_count = pager
+        .visible(total)
+        .max(selected_index.map(|index| index + 1).unwrap_or_default());
     let selected = repository
         .commits
         .iter()
@@ -70,11 +80,13 @@ pub(super) fn HistoryCard(
             div { class: "flex h-10 shrink-0 items-center justify-end px-3",
                 {commit_operations}
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+            div {
+                class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                onscroll: move |event| pager.load_more(event, total),
                 if repository.commits.is_empty() {
                     div { class: "flex h-full min-h-32 items-center justify-center p-4 text-center text-xs text-muted-foreground", {translate("git-no-commits")} }
                 }
-                for (index, commit) in repository.commits.into_iter().enumerate() {
+                for (index, commit) in repository.commits.into_iter().take(visible_count).enumerate() {
                     Button {
                         id: "git-commit-row-{index}",
                         variant: ButtonVariant::Ghost,
@@ -110,6 +122,15 @@ pub(super) fn StashCard(
     selected_stash: String,
     operations: GitOperationEligibility,
 ) -> Element {
+    let total = repository.stashes.len();
+    let pager = ListPager::use_state();
+    let selected_index = repository
+        .stashes
+        .iter()
+        .position(|entry| entry.reference == selected_stash);
+    let visible_count = pager
+        .visible(total)
+        .max(selected_index.map(|index| index + 1).unwrap_or_default());
     let selected = repository
         .stashes
         .iter()
@@ -153,8 +174,10 @@ pub(super) fn StashCard(
                 {stash_operations}
             }
             if !stashes.is_empty() {
-                div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
-                    for (index, stash) in stashes.into_iter().enumerate() {
+                div {
+                    class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                    onscroll: move |event| pager.load_more(event, total),
+                    for (index, stash) in stashes.into_iter().take(visible_count).enumerate() {
                         Button {
                             id: "git-stash-row-{index}",
                             variant: ButtonVariant::Ghost,

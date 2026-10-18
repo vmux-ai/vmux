@@ -11,6 +11,34 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 use crate::event::GitDiffRow;
 use crate::event::*;
 
+const LIST_PAGE_SIZE: usize = 40;
+
+#[derive(Clone, Copy)]
+pub(super) struct ListPager(Signal<usize>);
+
+impl ListPager {
+    pub(super) fn use_state() -> Self {
+        Self(use_signal(|| LIST_PAGE_SIZE))
+    }
+
+    pub(super) fn visible(self, total: usize) -> usize {
+        self.0().min(total)
+    }
+
+    pub(super) fn load_more(self, event: Event<ScrollData>, total: usize) {
+        let current = self.0();
+        if current >= total {
+            return;
+        }
+        let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+        if remaining > 96 {
+            return;
+        }
+        let mut visible = self.0;
+        visible.set(current.saturating_add(LIST_PAGE_SIZE).min(total));
+    }
+}
+
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
     let mut s = format!("color:rgb({r},{g},{b});");

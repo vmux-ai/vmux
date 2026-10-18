@@ -13,6 +13,8 @@ use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 use crate::event::*;
 use crate::state::GitPanel;
 
+use super::shared::ListPager;
+
 #[component]
 pub(super) fn RepositoryHeader(
     repository: GitRepositorySnapshot,
@@ -23,11 +25,15 @@ pub(super) fn RepositoryHeader(
 ) -> Element {
     let changed = repository.files.len();
     let clean = changed == 0;
-    let head = repository.commits.first().cloned();
+    let has_head = !repository.commits.is_empty();
     let push_path = repository.repo_root.clone();
     let mut repository_open = use_signal(|| false);
     let mut branch_open = use_signal(|| false);
     let mut commit_open = use_signal(|| false);
+    let branch_pager = ListPager::use_state();
+    let commit_pager = ListPager::use_state();
+    let branch_total = repository.branches.len();
+    let commit_total = repository.commits.len();
     let root_projects = projects
         .into_iter()
         .filter(|project| project.depth == 0 && !project.missing)
@@ -107,8 +113,10 @@ pub(super) fn RepositoryHeader(
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                     }
                     if branch_open() {
-                        div { class: "absolute left-0 top-9 z-40 max-h-80 min-w-72 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                            for branch in repository.branches.iter() {
+                        div {
+                            class: "absolute left-0 top-9 z-40 max-h-80 min-w-72 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                            onscroll: move |event| branch_pager.load_more(event, branch_total),
+                            for branch in repository.branches.iter().take(branch_pager.visible(branch_total)) {
                                 {
                                     let repo_root = repository.repo_root.clone();
                                     let name = branch.name.clone();
@@ -143,7 +151,7 @@ pub(super) fn RepositoryHeader(
                         }
                     }
                 }
-                if let Some(head) = head {
+                if has_head {
                     BreadcrumbSeparator {}
                     Dropdown {
                         open: commit_open(),
@@ -152,16 +160,17 @@ pub(super) fn RepositoryHeader(
                         button {
                             r#type: "button",
                             class: "flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
-                            title: "{head.sha} — {head.summary}",
+                            title: translate("git-latest"),
                             onclick: move |_| commit_open.set(!commit_open()),
                             LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
-                            code { class: "shrink-0 font-mono text-[10px] text-foreground/85", "{head.short_sha}" }
-                            span { class: "hidden min-w-0 truncate lg:inline", "{head.summary}" }
+                            span { class: "shrink-0 text-[10px] font-medium text-foreground/85", {translate("git-latest")} }
                             LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                         }
                         if commit_open() {
-                            div { class: "absolute left-0 top-9 z-40 max-h-80 min-w-80 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                                for commit in repository.commits.iter() {
+                            div {
+                                class: "absolute left-0 top-9 z-40 max-h-80 min-w-80 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                                onscroll: move |event| commit_pager.load_more(event, commit_total),
+                                for commit in repository.commits.iter().take(commit_pager.visible(commit_total)) {
                                     {
                                         let sha = commit.sha.clone();
                                         rsx! {

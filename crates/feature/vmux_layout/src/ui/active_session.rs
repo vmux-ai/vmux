@@ -132,7 +132,7 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
         format!("{} ← {}", boundary.base_ref, branch)
     };
     rsx! {
-        div { class: "min-w-0 rounded-md bg-foreground/[0.035] px-2.5 py-2.5",
+        div { class: "min-w-0 rounded-md px-2.5 py-2.5 ring-1 ring-inset ring-foreground/[0.11]",
             div { class: "flex min-w-0 items-center gap-2",
                 GitSymbolView {
                     symbol: GitSymbol::Repository,
@@ -179,17 +179,6 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
                     class: "gap-1.5 rounded-full bg-foreground/[0.05] px-2 py-1 font-mono tabular-nums ring-1 ring-inset ring-foreground/10",
                     span { class: "text-success", "+{boundary.insertions}" }
                     span { class: "text-destructive", "−{boundary.deletions}" }
-                }
-            }
-            if !boundary.effective_dir.is_empty() {
-                div { class: "mt-2 flex min-w-0 items-center gap-1.5 text-muted-foreground/65",
-                    LineIconView { icon: LineIcon::ExternalLink, class: "size-3 shrink-0".to_string() }
-                    span {
-                        dir: "rtl",
-                        class: "min-w-0 truncate text-left font-mono text-[9px]",
-                        title: "{boundary.effective_dir}",
-                        "{boundary.effective_dir}"
-                    }
                 }
             }
         }

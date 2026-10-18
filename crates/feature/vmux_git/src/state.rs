@@ -238,7 +238,7 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 3)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 4)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,

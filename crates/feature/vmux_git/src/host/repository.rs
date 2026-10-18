@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::Write;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -95,7 +95,7 @@ impl GitRepository {
             .collect())
     }
 
-    pub fn file_statuses(&self) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
+    pub fn file_statuses(&self) -> Result<HashMap<String, FileStatus>, GitError> {
         let (stdout, stderr, ok) = GitCommand::read_bytes(
             &self.0,
             &[
@@ -808,8 +808,12 @@ impl GitCommitEntry {
 
 impl GitBranchEntry {
     fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
-        let registrations =
-            crate::host::worktree::CheckoutInfo::try_from(root)?.worktree_registrations()?;
+        let checkout = crate::host::worktree::CheckoutInfo::try_from(root)?;
+        let holders = checkout
+            .branch_holders_with_changes()?
+            .into_iter()
+            .map(|holder| (holder.branch.clone(), holder))
+            .collect::<HashMap<_, _>>();
         let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         let format = if has_head {
             "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname:short)%00%(ahead-behind:HEAD)"
@@ -835,18 +839,22 @@ impl GitBranchEntry {
                 continue;
             }
             let (ahead, behind) = Self::relation(fields[4]);
+            let holder = holders.get(fields[0]);
+            let change = holder.map(|holder| holder.change).unwrap_or_default();
             branches.push(Self {
                 name: fields[0].to_string(),
                 current: fields[1] == "*",
                 upstream: fields[2].to_string(),
-                checkout: registrations
-                    .iter()
-                    .find(|registration| registration.branch.as_deref() == Some(fields[0]))
-                    .map(|registration| registration.path.to_string_lossy().into_owned())
+                checkout: holder
+                    .and_then(|holder| holder.checkout.as_ref())
+                    .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or_default(),
                 short_sha: fields[3].to_string(),
                 ahead,
                 behind,
+                changed_files: change.changed_files,
+                insertions: change.insertions,
+                deletions: change.deletions,
             });
         }
         if branches.is_empty() && !current.is_empty() && current != "(detached)" {
@@ -858,6 +866,9 @@ impl GitBranchEntry {
                 short_sha: String::new(),
                 ahead: 0,
                 behind: 0,
+                changed_files: 0,
+                insertions: 0,
+                deletions: 0,
             });
         }
         Ok(branches)
@@ -897,6 +908,9 @@ impl GitBranchEntry {
                 short_sha: fields[2].to_string(),
                 ahead,
                 behind,
+                changed_files: 0,
+                insertions: 0,
+                deletions: 0,
             });
         }
         Ok(branches)
@@ -1002,10 +1016,7 @@ impl GitRepositorySnapshot {
         let behind = parsed.behind;
         let mut files = parsed.into_file_entries();
         files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
-        let repo_name = repo_root
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
+        let repo_name = crate::host::worktree::RepoInfo::name_at(repo_root);
         let commits = GitCommitEntry::recent(repo_root)?;
         let branches = GitBranchEntry::local(repo_root, &branch)?;
         let remote_branches = GitBranchEntry::remote(repo_root)?;
@@ -1201,6 +1212,41 @@ mod tests {
         );
         assert!(repository.tags.iter().any(|tag| tag.name == "v1.0.0"));
         assert!(repository.stashes.is_empty());
+    }
+
+    #[test]
+    fn repository_snapshot_names_the_project_and_reports_worktree_changes() {
+        let origin = tempfile::tempdir().unwrap();
+        test_repo::run(origin.path(), &["init", "-q", "--bare"]);
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "tracked.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "tracked.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+        test_repo::run(
+            repo.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        let worktree = repo.path().join(".worktrees/feature");
+        crate::host::worktree::CheckoutInfo::try_from(repo.path())
+            .unwrap()
+            .add_worktree(&worktree, "feature", "main")
+            .unwrap();
+        test_repo::write(&worktree, "tracked.txt", "one\ntwo\n");
+
+        let repository = GitRepositorySnapshot::load(&worktree).unwrap();
+        let branch = repository
+            .branches
+            .iter()
+            .find(|branch| branch.name == "feature")
+            .unwrap();
+
+        assert_eq!(
+            repository.repo_name,
+            origin.path().file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(branch.changed_files, 1);
+        assert_eq!(branch.insertions, 1);
+        assert_eq!(branch.deletions, 0);
     }
 
     #[test]

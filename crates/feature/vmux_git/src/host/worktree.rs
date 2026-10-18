@@ -637,6 +637,18 @@ impl RepoInfo {
         named.unwrap_or_else(|| self.name.clone())
     }
 
+    pub fn name_at(dir: &Path) -> String {
+        if let Ok((remote, _, true)) = GitCommand::read(dir, &["remote", "get-url", "origin"])
+            && let Some(name) = Self::name_from_remote(&remote)
+        {
+            return name;
+        }
+        dir.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| dir.to_string_lossy().into_owned())
+    }
+
     fn name_from_remote(url: &str) -> Option<String> {
         let name = url
             .trim()
@@ -777,19 +789,7 @@ impl RepoInfo {
         let repo_root = dirs.next()?;
         let git_dir = dirs.next()?;
         let common_dir = dirs.next()?;
-        let mut name = None;
-        if let Ok((remote, _, ok)) = GitCommand::read(dir, &["remote", "get-url", "origin"])
-            && ok
-        {
-            name = Self::name_from_remote(&remote);
-        }
-        let name = name.unwrap_or_else(|| {
-            repo_root
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned()
-        });
+        let name = Self::name_at(&repo_root);
         let base = BaseRef::resolve(&repo_root);
         let change = if branch.is_empty() {
             BranchChange::default()
@@ -1262,7 +1262,7 @@ mod tests {
         assert_eq!(
             spare.change,
             BranchChange::default(),
-            "measuring every local branch would cost two git calls each, so only worktrees pay"
+            "unheld branches stay cheap until a worktree needs their full change summary"
         );
     }
 

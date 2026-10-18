@@ -959,6 +959,8 @@ resume-age-years = { $count } 年前
 
 
 git-title = Git
+git-latest = 最新
+git-branch-changes = 分支更改
 git-status = 状态
 git-files = 文件
 git-commits = 提交

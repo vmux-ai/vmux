@@ -13,6 +13,7 @@ use crate::state::{GitOperationEligibility, GitPanel};
 
 use super::model::FileStatusView;
 use super::operation::HeaderOperationButton;
+use super::shared::ListPager;
 
 #[component]
 pub(super) fn ChangesCard(
@@ -34,6 +35,26 @@ pub(super) fn ChangesCard(
         }
     }
     let staged_count = staged.len() as u32;
+    let staged_total = staged.len();
+    let unstaged_total = unstaged.len();
+    let total_rows = staged_total + unstaged_total;
+    let pager = ListPager::use_state();
+    let selected_row = staged
+        .iter()
+        .position(|(_, entry)| entry.path_bytes == selected_path_bytes)
+        .or_else(|| {
+            unstaged
+                .iter()
+                .position(|(_, entry)| entry.path_bytes == selected_path_bytes)
+                .map(|index| staged_total + index)
+        });
+    let visible_rows = pager
+        .visible(total_rows)
+        .max(selected_row.map(|index| index + 1).unwrap_or_default());
+    let visible_staged = visible_rows.min(staged_total);
+    let visible_unstaged = visible_rows
+        .saturating_sub(staged_total)
+        .min(unstaged_total);
     let file_operations = rsx! {
         div { class: "flex shrink-0 items-center gap-0.5",
             HeaderOperationButton {
@@ -66,7 +87,9 @@ pub(super) fn ChangesCard(
             div { class: "flex h-10 shrink-0 items-center justify-end px-3",
                 {file_operations}
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+            div {
+                class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                onscroll: move |event| pager.load_more(event, total_rows),
                 if repository.files.is_empty() {
                     div { class: "flex h-full min-h-16 items-center justify-center gap-2 px-3 text-center text-xs text-muted-foreground",
                         LineIconView { icon: LineIcon::ShieldCheck, class: "h-4 w-4 shrink-0 text-ansi-2" }
@@ -76,7 +99,8 @@ pub(super) fn ChangesCard(
                     if !staged.is_empty() {
                         FileSection {
                             title: translate("git-staged-changes"),
-                            files: staged,
+                            files: staged.into_iter().take(visible_staged).collect(),
+                            total: staged_total,
                             repo_root: repository.repo_root.clone(),
                             staged_view: true,
                             selected_path_bytes: selected_path_bytes.clone(),
@@ -86,7 +110,8 @@ pub(super) fn ChangesCard(
                     if !unstaged.is_empty() {
                         FileSection {
                             title: translate("git-unstaged-changes"),
-                            files: unstaged,
+                            files: unstaged.into_iter().take(visible_unstaged).collect(),
+                            total: unstaged_total,
                             repo_root: repository.repo_root.clone(),
                             staged_view: false,
                             selected_path_bytes: selected_path_bytes.clone(),
@@ -109,6 +134,7 @@ pub(super) fn ChangesCard(
 fn FileSection(
     title: String,
     files: Vec<(usize, GitFileEntry)>,
+    total: usize,
     repo_root: String,
     staged_view: bool,
     selected_path_bytes: Vec<u8>,
@@ -118,7 +144,7 @@ fn FileSection(
         div { class: "pb-1 last:pb-0",
             div { class: "flex h-8 items-center justify-between px-2.5 text-[10px] font-semibold text-muted-foreground",
                 span { "{title}" }
-                span { class: "tabular-nums", "{files.len()}" }
+                span { class: "tabular-nums", "{total}" }
             }
             div {
                 for (row_index, entry) in files {

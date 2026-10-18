@@ -959,6 +959,8 @@ resume-age-years = { $count }년 전
 
 
 git-title = Git
+git-latest = 최신
+git-branch-changes = 브랜치 변경 사항
 git-status = 상태
 git-files = 파일
 git-commits = 커밋

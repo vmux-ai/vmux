@@ -13,6 +13,7 @@ use crate::event::*;
 use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility};
 
 use super::operation::HeaderOperationButton;
+use super::shared::ListPager;
 
 #[component]
 pub(super) fn BranchPromptDialog() -> Element {
@@ -87,6 +88,8 @@ pub(super) fn BranchPromptDialog() -> Element {
 pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLog>) -> Element {
     let log = branch_log.filter(|event| event.branch == branch);
     let commit_count = log.as_ref().map(|event| event.commits.len()).unwrap_or(0);
+    let pager = ListPager::use_state();
+    let visible_count = pager.visible(commit_count);
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
@@ -95,12 +98,14 @@ pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLog>) ->
                 span { class: "text-[11px] font-medium text-muted-foreground", {translate("git-log")} }
                 span { class: "min-w-0 truncate font-mono text-[10px] text-foreground/85", "{branch}" }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-4 py-2",
+            div {
+                class: "min-h-0 flex-1 overflow-y-auto px-4 py-2",
+                onscroll: move |event| pager.load_more(event, commit_count),
                 if let Some(log) = log {
                     if log.commits.is_empty() {
                         div { class: "flex h-full min-h-64 items-center justify-center text-sm text-muted-foreground", {translate("git-no-commits")} }
                     } else {
-                        for (index, commit) in log.commits.into_iter().enumerate() {
+                        for (index, commit) in log.commits.into_iter().take(visible_count).enumerate() {
                             article { key: "{commit.sha}", class: "relative grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2.5 py-3 first:pt-1",
                                 div { class: "relative flex justify-center",
                                     if index > 0 {
@@ -152,7 +157,15 @@ pub(super) fn BranchesCard(
     operations: GitOperationEligibility,
 ) -> Element {
     let collection = branch_collection;
-    let reference_count = collection.references(&repository).len();
+    let references = collection.references(&repository);
+    let reference_count = references.len();
+    let pager = ListPager::use_state();
+    let selected_index = references
+        .iter()
+        .position(|reference| reference == &selected_branch);
+    let visible_count = pager
+        .visible(reference_count)
+        .max(selected_index.map(|index| index + 1).unwrap_or_default());
     let selected = if collection == GitBranchCollection::Local {
         repository
             .branches
@@ -265,10 +278,12 @@ pub(super) fn BranchesCard(
                     {branch_operations}
                 }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+            div {
+                class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                onscroll: move |event| pager.load_more(event, reference_count),
                 match collection {
                     GitBranchCollection::Local => rsx! {
-                        for (index, branch) in repository.branches.into_iter().enumerate() {
+                        for (index, branch) in repository.branches.into_iter().take(visible_count).enumerate() {
                             BranchRow {
                                 key: "local-{branch.name}",
                                 branch,
@@ -279,7 +294,7 @@ pub(super) fn BranchesCard(
                         }
                     },
                     GitBranchCollection::Remote => rsx! {
-                        for (index, branch) in repository.remote_branches.into_iter().enumerate() {
+                        for (index, branch) in repository.remote_branches.into_iter().take(visible_count).enumerate() {
                             BranchRow {
                                 key: "remote-{branch.name}",
                                 branch,
@@ -290,7 +305,7 @@ pub(super) fn BranchesCard(
                         }
                     },
                     GitBranchCollection::Tags => rsx! {
-                        for (index, tag) in repository.tags.into_iter().enumerate() {
+                        for (index, tag) in repository.tags.into_iter().take(visible_count).enumerate() {
                             TagRow {
                                 key: "tag-{tag.name}",
                                 tag,
@@ -371,13 +386,20 @@ fn BranchRow(
                 if branch.behind > 0 {
                     span { class: "shrink-0 rounded-full bg-violet-400/10 px-1.5 font-mono text-[8px] text-violet-400", "↓{branch.behind}" }
                 }
+                if branch.changed_files > 0 {
+                    span {
+                        class: "flex shrink-0 items-center gap-1 font-mono text-[8px] tabular-nums text-muted-foreground",
+                        title: translate("git-branch-changes"),
+                        LineIconView { icon: LineIcon::File, class: "size-2.5" }
+                        span { class: "text-foreground/80", "{branch.changed_files}" }
+                        span { class: "text-success", "+{branch.insertions}" }
+                        span { class: "text-destructive", "−{branch.deletions}" }
+                    }
+                }
                 if branch.current {
                     span { class: "shrink-0 rounded-full bg-ansi-2/10 px-1.5 text-[8px] font-medium text-ansi-2", {translate("common-current")} }
                 } else if !branch.upstream.is_empty() {
                     span { class: "max-w-[42%] shrink truncate font-mono text-[8px] text-muted-foreground", "{branch.upstream}" }
-                }
-                if !branch.short_sha.is_empty() {
-                    code { class: "shrink-0 font-mono text-[8px] text-muted-foreground/60", "{branch.short_sha}" }
                 }
             }
         }

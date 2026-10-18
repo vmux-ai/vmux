@@ -267,6 +267,9 @@ pub struct GitBranchEntry {
     pub short_sha: String,
     pub ahead: u32,
     pub behind: u32,
+    pub changed_files: u32,
+    pub insertions: u32,
+    pub deletions: u32,
 }
 
 #[vmux_api::contract(Eq)]
