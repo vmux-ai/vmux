@@ -39,7 +39,10 @@ impl Plugin for StartPlugin {
                 .hosted(vmux_ecs::page::HostedPage::page(Self::URL, "Start")),
         )
         .add_message::<InlineTransitionRequested>()
-        .add_systems(Update, (mark_launcher, begin_inline));
+        .add_systems(
+            Update,
+            (mark_launcher, begin_inline, ApplyDeferred, sync_pages).chain(),
+        );
         app.add_plugins(UiEventPlugin::<(
             StartSelectWorkspace,
             vmux_api::command_bar::StartBranchesRequest,
@@ -52,12 +55,7 @@ impl Plugin for StartPlugin {
             .add_observer(focus_command_bar)
             .add_systems(
                 Update,
-                (
-                    sync_pages,
-                    finish_workspace_pickers,
-                    read_branches,
-                    finish_branch_reads,
-                ),
+                (finish_workspace_pickers, read_branches, finish_branch_reads),
             );
     }
 }
@@ -549,7 +547,6 @@ fn sync_pages(
         ),
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
-    browsers: NonSend<Browsers>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
@@ -593,9 +590,6 @@ fn sync_pages(
         .iter()
         .filter_map(|(e, meta, synced, keyboard_target)| {
             if !meta.url.starts_with(StartPlugin::URL) {
-                return None;
-            }
-            if !browsers.can_emit_to(&e) {
                 return None;
             }
             let focus_requested =
