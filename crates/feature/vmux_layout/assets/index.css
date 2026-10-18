@@ -20,7 +20,7 @@
   }
 }
 
-.vmux-sheet-section {
+.vmux-sheet-surface {
   border: 0 !important;
   background-color: var(--card) !important;
   background-clip: padding-box;
@@ -29,6 +29,12 @@
 }
 
 .vmux-sheet-tile {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.vmux-sheet-tile:not(.vmux-sheet-tile-active) {
   border: 0 !important;
   background-color: color-mix(in oklab, var(--card) 90%, var(--foreground)) !important;
   background-clip: padding-box;
