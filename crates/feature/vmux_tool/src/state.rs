@@ -41,6 +41,7 @@ pub enum ToolStatus {
     Failed,
 }
 
+#[cfg(all(host, ui))]
 impl ToolStatus {
     pub(crate) fn display_order(self) -> u8 {
         match self {
