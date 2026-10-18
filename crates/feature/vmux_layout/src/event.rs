@@ -193,6 +193,13 @@ mod address_tests {
     }
 
     #[test]
+    fn an_internal_page_decodes_escaped_path_segments_for_display() {
+        let parts = AddressParts::internal("vmux://simulator/ios/27.0/iPhone%2018%20Pro");
+        assert_eq!(parts.origin, "");
+        assert_eq!(parts.rest, "vmux://simulator/ios/27.0/iPhone 18 Pro");
+    }
+
+    #[test]
     fn a_file_in_a_checkout_is_shown_against_its_repository_and_branch() {
         let parts = AddressParts::in_repo(
             Path::new("/w/.worktrees/lsp/client/crates/app/main.rs"),
@@ -402,7 +409,9 @@ impl AddressParts {
     }
 
     pub fn internal(url: &str) -> Self {
-        Self::new("", url.trim_end_matches('/'))
+        let url = url.trim_end_matches('/');
+        let decoded = percent_encoding::percent_decode_str(url).decode_utf8_lossy();
+        Self::new("", decoded)
     }
 
     pub fn in_repo(path: &Path, root: &Path, name: &str, branch: &str) -> Self {
