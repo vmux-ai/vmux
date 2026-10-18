@@ -612,7 +612,7 @@ impl AddressRoots<'_> {
             true => path,
             false => path.parent()?,
         };
-        self.repos.as_mut()?.observe(dir)
+        self.repos.as_mut()?.snapshot(dir)
     }
 }
 
@@ -864,11 +864,18 @@ fn push_projects_host_emit(
         });
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
+        cache.release(cef_e);
         for row in &mut projects {
             if row.missing || row.kind != vmux_api::space::ProjectRowKind::Project {
                 continue;
             }
-            if let Some(info) = cache.observe(std::path::Path::new(&row.path)) {
+            let path = std::path::Path::new(&row.path);
+            let info = if row.is_active {
+                cache.observe(cef_e, path)
+            } else {
+                cache.snapshot(path)
+            };
+            if let Some(info) = info {
                 row.branch = info.branch.clone();
                 if row.is_active {
                     let repository = info.project_name();

@@ -7,7 +7,7 @@ use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 use vmux_ecs::event::ProjectRow;
 use vmux_ecs::page::PageReady;
-use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
+use vmux_ecs::{Cwd, EntityTarget, KeyboardOwner, ProcessAnchor};
 use vmux_git::RepoInfoCache;
 use vmux_git::worktree::RepoInfo;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
@@ -65,17 +65,26 @@ struct ComposerProjection<'w, 's> {
 }
 
 impl ComposerProjection<'_, '_> {
-    fn context(&mut self, stack: Entity) -> Option<ComposerContext> {
+    fn context(&mut self, stack: Entity, observer: Option<Entity>) -> Option<ComposerContext> {
         let session = self.targets.get(stack).ok()?.entity();
         let (cwd, policy) = self.sessions.get(session).ok()?;
         let mut input = self.input(stack, cwd, policy);
         input.projects = self.space_projects.rows(stack);
         let info = if input.cwd.as_os_str().is_empty() {
+            if let Some(observer) = observer
+                && let Some(cache) = self.repo_info.as_mut()
+            {
+                cache.bypass_change_detection().release(observer);
+            }
             None
         } else {
-            self.repo_info
-                .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().observe(&input.cwd))
+            self.repo_info.as_mut().and_then(|cache| {
+                let cache = cache.bypass_change_detection();
+                match observer {
+                    Some(observer) => cache.observe_active(observer, &input.cwd),
+                    None => cache.snapshot(&input.cwd),
+                }
+            })
         };
         Some(input.context(info.as_ref()))
     }
@@ -118,17 +127,29 @@ impl ComposerProjection<'_, '_> {
 }
 
 fn push_context_to_page(
-    mut views: Query<(Entity, &ChildOf, Ref<PageReady>, &mut ChatComposerContext), With<ChatView>>,
+    mut views: Query<
+        (
+            Entity,
+            &ChildOf,
+            Ref<PageReady>,
+            Has<KeyboardOwner>,
+            &mut ChatComposerContext,
+        ),
+        With<ChatView>,
+    >,
     browsers: NonSend<Browsers>,
     mut projection: ComposerProjection,
     mut commands: Commands,
 ) {
-    for (webview, parent, ready, mut current) in &mut views {
+    for (webview, parent, ready, active, mut current) in &mut views {
         if !browsers.can_emit_to(&webview) {
             continue;
         }
+        if !active && !ready.is_changed() {
+            continue;
+        }
         let stack = parent.parent();
-        let Some(context) = projection.context(stack) else {
+        let Some(context) = projection.context(stack, active.then_some(webview)) else {
             continue;
         };
         let changed = current.0 != context;

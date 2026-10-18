@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_ecs::KeyboardOwner;
 use vmux_path::PathIdentity;
 
 pub(super) struct WatchPlugin;
@@ -18,10 +19,11 @@ impl Plugin for WatchPlugin {
             .add_systems(Startup, spawn_repo_info_cache)
             .add_systems(
                 Update,
-                (drain, start_repo_info_loads, poll_info, info)
+                (drain, start_repo_info_loads, poll_info)
                     .chain()
                     .in_set(GitUpdateSet::Watch),
-            );
+            )
+            .add_systems(PostUpdate, info);
     }
 }
 
@@ -60,6 +62,8 @@ fn spawn_repo_info_cache(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands
             entries: HashMap::new(),
             canonical: HashMap::new(),
             guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
             wake,
         },
     ));
@@ -97,12 +101,15 @@ struct RepoInfoCacheEntry {
     info: Option<super::worktree::RepoInfo>,
     loaded: bool,
     dirty: bool,
-    observe: bool,
     watch_attempted: bool,
-    watched: bool,
     last_accessed: Instant,
     pending: Option<Task<Option<super::worktree::RepoInfo>>>,
     ignore_events_until: Option<Instant>,
+}
+
+struct RepoInfoLease {
+    path: PathBuf,
+    active_only: bool,
 }
 
 const UNRESOLVED_RETRY: Duration = Duration::from_secs(1);
@@ -133,20 +140,51 @@ pub struct RepoInfoCache {
     entries: HashMap<PathBuf, RepoInfoCacheEntry>,
     canonical: HashMap<PathBuf, PathBuf>,
     guessed: HashMap<PathBuf, GuessedPath>,
+    repositories: HashMap<PathBuf, PathBuf>,
+    leases: HashMap<Entity, RepoInfoLease>,
     wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
 }
 
 impl RepoInfoCache {
-    pub fn observe(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
-        self.request(path, true)
+    pub fn observe(&mut self, owner: Entity, path: &Path) -> Option<super::worktree::RepoInfo> {
+        self.observe_with(owner, path, false)
+    }
+
+    pub fn observe_active(
+        &mut self,
+        owner: Entity,
+        path: &Path,
+    ) -> Option<super::worktree::RepoInfo> {
+        self.observe_with(owner, path, true)
     }
 
     pub fn snapshot(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
-        self.request(path, false)
+        let path = self.entry_path(path);
+        self.request(path)
     }
 
-    fn request(&mut self, path: &Path, observe: bool) -> Option<super::worktree::RepoInfo> {
-        let path = self.canonical_path(path);
+    pub fn release(&mut self, owner: Entity) {
+        self.leases.remove(&owner);
+    }
+
+    fn observe_with(
+        &mut self,
+        owner: Entity,
+        path: &Path,
+        active_only: bool,
+    ) -> Option<super::worktree::RepoInfo> {
+        let path = self.entry_path(path);
+        self.leases.insert(
+            owner,
+            RepoInfoLease {
+                path: path.clone(),
+                active_only,
+            },
+        );
+        self.request(path)
+    }
+
+    fn request(&mut self, path: PathBuf) -> Option<super::worktree::RepoInfo> {
         let entry = self
             .entries
             .entry(path.clone())
@@ -154,16 +192,28 @@ impl RepoInfoCache {
                 info: None,
                 loaded: false,
                 dirty: true,
-                observe,
                 watch_attempted: false,
-                watched: false,
                 last_accessed: Instant::now(),
                 pending: None,
                 ignore_events_until: None,
             });
-        entry.observe |= observe;
         entry.last_accessed = Instant::now();
         entry.info.clone()
+    }
+
+    fn entry_path(&mut self, path: &Path) -> PathBuf {
+        let path = self.canonical_path(path);
+        self.repositories
+            .iter()
+            .filter(|(root, _)| path.starts_with(root))
+            .max_by_key(|(root, _)| root.components().count())
+            .map(|(_, entry)| entry.clone())
+            .unwrap_or(path)
+    }
+
+    fn remember_repository(&mut self, path: PathBuf, info: &super::worktree::RepoInfo) {
+        let root = PathIdentity::resolve(&info.repo_root).into_path_buf();
+        self.repositories.entry(root).or_insert(path);
     }
 
     fn canonical_path(&mut self, path: &Path) -> PathBuf {
@@ -195,10 +245,10 @@ impl RepoInfoCache {
         }
     }
 
-    fn inactive_paths(&mut self) -> Vec<PathBuf> {
+    fn inactive_paths(&mut self, active: &HashSet<PathBuf>) -> Vec<PathBuf> {
         let mut inactive = Vec::new();
         for (path, entry) in &mut self.entries {
-            if entry.pending.is_some() {
+            if entry.pending.is_some() || active.contains(path) {
                 continue;
             }
             if entry.last_accessed.elapsed() >= REPO_INFO_IDLE_TTL {
@@ -212,6 +262,7 @@ impl RepoInfoCache {
         self.entries.remove(path);
         self.canonical.retain(|_, canonical| canonical != path);
         self.guessed.remove(path);
+        self.repositories.retain(|_, entry| entry != path);
     }
 
     fn wake_soon(&self) {
@@ -464,8 +515,33 @@ impl GitWatch {
         }
     }
 
-    fn evict_inactive_repo_info(&mut self, repo_info: &mut RepoInfoCache) {
-        for path in repo_info.inactive_paths() {
+    fn release_inactive_repo_info(
+        &mut self,
+        repo_info: &mut RepoInfoCache,
+        active: &HashSet<PathBuf>,
+    ) {
+        let paths = self
+            .repo_info_subscriptions
+            .keys()
+            .filter(|path| !active.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        for path in paths {
+            if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
+                self.release_targets(&targets);
+            }
+            if let Some(entry) = repo_info.entries.get_mut(&path) {
+                entry.watch_attempted = false;
+            }
+        }
+    }
+
+    fn evict_inactive_repo_info(
+        &mut self,
+        repo_info: &mut RepoInfoCache,
+        active: &HashSet<PathBuf>,
+    ) {
+        for path in repo_info.inactive_paths(active) {
             if let Some(targets) = self.repo_info_subscriptions.remove(&path) {
                 self.release_targets(&targets);
             }
@@ -613,10 +689,11 @@ fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>) {
 }
 
 fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
-    let changed = {
+    let (changed, repositories) = {
         let repo_info = repo_info.bypass_change_detection();
         let mut changed = false;
-        for entry in repo_info.entries.values_mut() {
+        let mut repositories = Vec::new();
+        for (path, entry) in &mut repo_info.entries {
             let Some(task) = entry.pending.as_mut() else {
                 continue;
             };
@@ -627,31 +704,51 @@ fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
             entry.info = info;
             entry.loaded = true;
             entry.watch_attempted = false;
-            entry.watched = false;
             entry.pending = None;
             entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
+            if let Some(info) = entry.info.as_ref() {
+                repositories.push((path.clone(), info.clone()));
+            }
         }
-        changed
+        (changed, repositories)
     };
+    for (path, info) in repositories {
+        repo_info.remember_repository(path, &info);
+    }
     if changed {
         repo_info.set_changed();
     }
 }
 
-fn info(watch: Option<NonSendMut<GitWatch>>, mut repo_info: Single<&mut RepoInfoCache>) {
+fn info(
+    watch: Option<NonSendMut<GitWatch>>,
+    mut repo_info: Single<&mut RepoInfoCache>,
+    entities: Query<(), ()>,
+    active_owners: Query<(), With<KeyboardOwner>>,
+) {
     let repo_info = repo_info.bypass_change_detection();
+    repo_info.leases.retain(|owner, lease| {
+        entities.contains(*owner) && (!lease.active_only || active_owners.contains(*owner))
+    });
+    let active = repo_info
+        .leases
+        .values()
+        .map(|lease| lease.path.clone())
+        .collect::<HashSet<_>>();
     let Some(mut watch) = watch else {
-        for path in repo_info.inactive_paths() {
+        for path in repo_info.inactive_paths(&active) {
             repo_info.remove(&path);
         }
         return;
     };
-    watch.evict_inactive_repo_info(repo_info);
+    watch.release_inactive_repo_info(repo_info, &active);
+    watch.evict_inactive_repo_info(repo_info, &active);
     let paths: Vec<PathBuf> = repo_info
         .entries
         .iter()
         .filter_map(|(path, entry)| {
-            (entry.observe && entry.loaded && !entry.watch_attempted).then_some(path.clone())
+            (active.contains(path) && entry.loaded && !entry.watch_attempted)
+                .then_some(path.clone())
         })
         .collect();
     for path in paths {
@@ -659,10 +756,9 @@ fn info(watch: Option<NonSendMut<GitWatch>>, mut repo_info: Single<&mut RepoInfo
             .entries
             .get(&path)
             .and_then(|entry| entry.info.clone());
-        let watched = watch.subscribe_repo_info(&path, info.as_ref());
+        let _ = watch.subscribe_repo_info(&path, info.as_ref());
         if let Some(entry) = repo_info.entries.get_mut(&path) {
             entry.watch_attempted = true;
-            entry.watched = watched;
         }
     }
 }
@@ -821,9 +917,7 @@ mod tests {
                         info: Some(active_info.clone()),
                         loaded: true,
                         dirty: false,
-                        observe: true,
                         watch_attempted: true,
-                        watched: true,
                         last_accessed: Instant::now(),
                         pending: None,
                         ignore_events_until: None,
@@ -835,9 +929,7 @@ mod tests {
                         info: Some(stale_info.clone()),
                         loaded: true,
                         dirty: false,
-                        observe: true,
                         watch_attempted: true,
-                        watched: true,
                         last_accessed: Instant::now() - REPO_INFO_IDLE_TTL,
                         pending: None,
                         ignore_events_until: None,
@@ -846,14 +938,16 @@ mod tests {
             ]),
             canonical: HashMap::new(),
             guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
             wake: None,
         };
         let mut watch = GitWatch::test();
         assert!(watch.subscribe_repo_info(&active_path, Some(&active_info)));
         assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
 
-        assert!(cache.observe(&active_path).is_some());
-        watch.evict_inactive_repo_info(&mut cache);
+        let active = HashSet::from([active_path.clone()]);
+        watch.evict_inactive_repo_info(&mut cache, &active);
 
         assert!(cache.entries.contains_key(&active_path));
         assert!(!cache.entries.contains_key(&stale_path));
@@ -862,6 +956,56 @@ mod tests {
             stale_targets
                 .iter()
                 .all(|target| !watch.watch_references.contains_key(target))
+        );
+    }
+
+    #[test]
+    fn inactive_owner_releases_repo_info_watch_immediately() {
+        let repo = test_repo::init();
+        let path = PathIdentity::resolve(repo.path()).into_path_buf();
+        let repo_info = super::super::worktree::RepoInfo::read(&path).unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(PostUpdate, info);
+        app.insert_non_send(GitWatch::test());
+        let owner = app.world_mut().spawn(KeyboardOwner).id();
+        let mut cache = RepoInfoCache {
+            entries: HashMap::from([(
+                path.clone(),
+                RepoInfoCacheEntry {
+                    info: Some(repo_info),
+                    loaded: true,
+                    dirty: false,
+                    watch_attempted: false,
+                    last_accessed: Instant::now(),
+                    pending: None,
+                    ignore_events_until: None,
+                },
+            )]),
+            canonical: HashMap::new(),
+            guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
+            wake: None,
+        };
+        assert!(cache.observe_active(owner, &path).is_some());
+        app.world_mut().spawn(cache);
+
+        app.update();
+        assert!(
+            app.world()
+                .non_send::<GitWatch>()
+                .repo_info_subscriptions
+                .contains_key(&path)
+        );
+
+        app.world_mut().entity_mut(owner).remove::<KeyboardOwner>();
+        app.update();
+        assert!(
+            app.world()
+                .non_send::<GitWatch>()
+                .repo_info_subscriptions
+                .is_empty()
         );
     }
 
@@ -924,6 +1068,8 @@ mod tests {
             entries: HashMap::new(),
             canonical: HashMap::new(),
             guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
             wake: None,
         };
 
@@ -944,6 +1090,31 @@ mod tests {
     }
 
     #[test]
+    fn known_repository_reuses_one_cache_entry_for_nested_paths() {
+        let repo = test_repo::init();
+        let first = repo.path().join("first");
+        let second = repo.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let mut cache = RepoInfoCache {
+            entries: HashMap::new(),
+            canonical: HashMap::new(),
+            guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
+            wake: None,
+        };
+
+        assert!(cache.snapshot(&first).is_none());
+        let first = PathIdentity::resolve(&first).into_path_buf();
+        let info = super::super::worktree::RepoInfo::read(&first).unwrap();
+        cache.remember_repository(first, &info);
+        assert!(cache.snapshot(&second).is_none());
+
+        assert_eq!(cache.entries.len(), 1);
+    }
+
+    #[test]
     fn repo_info_cache_refreshes_only_after_invalidation() {
         IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let repo = test_repo::init();
@@ -955,6 +1126,8 @@ mod tests {
             entries: HashMap::new(),
             canonical: HashMap::new(),
             guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
             wake: None,
         };
         let mut app = App::new();
@@ -967,7 +1140,7 @@ mod tests {
                     .world_mut()
                     .get_mut::<RepoInfoCache>(cache)
                     .unwrap()
-                    .observe(&path);
+                    .snapshot(&path);
                 app.update();
                 if let Some(info) = info
                     && info.uncommitted == expected
@@ -985,7 +1158,7 @@ mod tests {
             app.world_mut()
                 .get_mut::<RepoInfoCache>(cache)
                 .unwrap()
-                .observe(&path)
+                .snapshot(&path)
                 .unwrap()
                 .uncommitted,
             0
@@ -1009,11 +1182,14 @@ mod tests {
             entries: HashMap::new(),
             canonical: HashMap::new(),
             guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
             wake: None,
         };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (start_repo_info_loads, poll_info, info).chain());
+            .add_systems(Update, (start_repo_info_loads, poll_info).chain())
+            .add_systems(PostUpdate, info);
         app.insert_non_send(GitWatch::test());
         let cache = app.world_mut().spawn(cache).id();
 
@@ -1059,15 +1235,15 @@ mod tests {
         let cache = RepoInfoCache {
             canonical: HashMap::new(),
             guessed: HashMap::new(),
+            repositories: HashMap::new(),
+            leases: HashMap::new(),
             entries: HashMap::from([(
                 path.clone(),
                 RepoInfoCacheEntry {
                     info: None,
                     loaded: false,
                     dirty: false,
-                    observe: true,
                     watch_attempted: false,
-                    watched: false,
                     last_accessed: Instant::now(),
                     pending: Some(IoTaskPool::get().spawn(async move { stale })),
                     ignore_events_until: None,
@@ -1089,7 +1265,7 @@ mod tests {
                 .world_mut()
                 .get_mut::<RepoInfoCache>(cache)
                 .unwrap()
-                .observe(&path)
+                .snapshot(&path)
                 .is_some_and(|info| info.uncommitted == 1)
             {
                 return;

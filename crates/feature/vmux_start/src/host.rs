@@ -562,13 +562,19 @@ fn sync_pages(
         mut removed_modes,
     ) = contributions;
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
-    let git_info = (!cwd.is_empty())
-        .then(|| {
-            repo_info
-                .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().observe(Path::new(&cwd)))
+    let observer = starts.iter().find_map(|(entity, metadata, _, active)| {
+        (active && metadata.url.starts_with(StartPlugin::URL)).then_some(entity)
+    });
+    let git_info = observer.and_then(|observer| {
+        repo_info.as_mut().and_then(|cache| {
+            let cache = cache.bypass_change_detection();
+            if cwd.is_empty() {
+                cache.release(observer);
+                return None;
+            }
+            cache.observe_active(observer, Path::new(&cwd))
         })
-        .flatten();
+    });
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
     let focus_changed = focused.is_changed();
     let contributions_changed = !contribution_changes.is_empty()
