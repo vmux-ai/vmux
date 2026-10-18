@@ -72,15 +72,20 @@
     tools: [
             (
                 name: "set_conversation_title",
-                description: r#"Set the agent conversation header to a concise model-written summary without asking permission. Always call first after the first user message to replace the provisional raw-prompt title. On later messages, call first only when the topic materially changes. Use 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."#,
+                description: r#"Set the conversation title and task summary without asking permission. Always call first after the first user message to replace provisional metadata. On later messages, call first only when the topic or outcome materially changes. Use a 3 to 7 word title and a concise one-sentence summary of the user's goal and current outcome. Use correct spelling and grammar, and never copy the user's prompt verbatim."#,
                 input_schema: (
                     type: Object,
-                    required: ["title"],
+                    required: ["title", "summary"],
                     properties: {
                         "title": (
                             type: String,
                             min_length: Some(1),
                             max_length: Some(120),
+                        ),
+                        "summary": (
+                            type: String,
+                            min_length: Some(1),
+                            max_length: Some(500),
                         ),
                     },
                 ),

@@ -58,7 +58,7 @@ pub(super) fn BookmarksSection(
     rsx! {
         div {
             "data-bookmark-drop": "root",
-            class: "group relative z-30 mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1",
+            class: "group relative z-30 mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
                 let _ = send(&BookmarkMenuRootRequest);
@@ -415,11 +415,11 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         },
                         style: "{visual.style()}",
                         class: if visual.dragging {
-                            "absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-white/5"
+                            "absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-foreground/[0.08]"
                         } else if active {
-                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-primary/15 text-primary ring-1 ring-inset ring-primary/30 transition-colors hover:bg-primary/20"
+                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-primary/15 text-primary transition-colors hover:bg-primary/20"
                         } else {
-                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-white/5 transition-colors hover:bg-white/10"
+                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-foreground/[0.07] transition-colors hover:bg-foreground/[0.11]"
                         },
                         onclick: {
                             let u = url_open.clone();

@@ -129,8 +129,8 @@ fn UsageChart(
                     for y in [10, 20, 30] {
                         line { x1: "0", x2: "100", y1: "{y}", y2: "{y}", stroke: "currentColor", stroke_opacity: "0.08", stroke_width: "0.5" }
                     }
-                    polygon { points: "{usage.area}", fill }
-                    polyline { points: "{usage.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", vector_effect: "non-scaling-stroke" }
+                    path { d: "{usage.area}", fill }
+                    path { d: "{usage.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", stroke_linecap: "round", stroke_linejoin: "round", vector_effect: "non-scaling-stroke" }
                 }
             }
         }

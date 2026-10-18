@@ -610,7 +610,8 @@ mod tests {
             PromptWorkspace::prompt(&policy, None, Some(AcpWorkspaceState::Bound), true).unwrap();
 
         assert!(context.contains("call set_conversation_title"));
-        assert!(context.contains("3 to 7 word model-written summary"));
+        assert!(context.contains("3 to 7 word model-written title"));
+        assert!(context.contains("one-sentence summary"));
         assert!(context.contains("Do not copy the user's prompt verbatim"));
     }
 

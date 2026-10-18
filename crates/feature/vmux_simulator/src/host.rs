@@ -372,6 +372,8 @@ type SimulatorViews<'w, 's> = Query<
         &'static PageMetadata,
         Option<&'static ChildOf>,
         Option<&'static UiState<SimulatorUiState>>,
+        Has<DeviceAttachment>,
+        Option<&'static AttachmentFailed>,
     ),
     With<PageReady>,
 >;
@@ -400,7 +402,7 @@ struct AttachedRoute(SimulatorRoute);
 struct DeviceAttachment(Task<Result<AttachedDevice, String>>);
 
 #[derive(Component)]
-struct AttachmentFailed;
+struct AttachmentFailed(String);
 
 struct AttachedDevice {
     axe: Axe,
@@ -543,7 +545,7 @@ fn finish_device_attachments(
             Ok(attached) => attached,
             Err(error) => {
                 error!("could not attach an iOS Simulator: {error}");
-                commands.entity(entity).insert(AttachmentFailed);
+                commands.entity(entity).insert(AttachmentFailed(error));
                 continue;
             }
         };
@@ -579,13 +581,15 @@ fn announce(
     attachments: Query<(&StreamServer, &SimulatorDevice)>,
     mut commands: Commands,
 ) {
-    for (entity, meta, child_of, announced) in views.iter() {
+    for (entity, meta, child_of, announced, starting, failed) in views.iter() {
         if !meta.url.starts_with(SimulatorPlugin::URL) {
             continue;
         }
         let payload = match attachments.get(entity) {
             Ok((server, device)) => SimulatorUiState {
                 port: server.port(),
+                status: "ready".to_string(),
+                error: String::new(),
                 capability: server.capability().to_string(),
                 version: device
                     .version
@@ -597,7 +601,17 @@ fn announce(
                 frame_height: server.frame_height(),
                 frame_stride: server.frame_stride(),
             },
-            Err(_) => SimulatorUiState::default(),
+            Err(_) => SimulatorUiState {
+                status: if failed.is_some() {
+                    "errored".to_string()
+                } else if starting {
+                    "starting".to_string()
+                } else {
+                    "waiting".to_string()
+                },
+                error: failed.map(|failed| failed.0.clone()).unwrap_or_default(),
+                ..Default::default()
+            },
         };
         if let Ok((_, device)) = attachments.get(entity)
             && let Some(canonical_url) = device.canonical_url()

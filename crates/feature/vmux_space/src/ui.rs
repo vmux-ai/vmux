@@ -91,7 +91,7 @@ pub fn Page() -> Element {
                         });
                     },
                     LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                    span { {translate("common-new")} }
+                    span { {translate("common-add")} }
                 }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-4 py-4",
@@ -266,7 +266,7 @@ fn SpaceActions(space_id: String, name: String, deletable: bool) -> Element {
 #[component]
 fn NewSpaceRow(form: SpaceFormState) -> Element {
     rsx! {
-        div { class: "flex min-h-14 items-center gap-3 rounded-md bg-foreground/[0.04] px-3 shadow-[inset_2px_0_0_color-mix(in_oklab,var(--primary)_55%,transparent)]",
+        div { class: "m-2 flex min-h-14 items-center gap-3 rounded-md bg-foreground/[0.055] px-4 py-2 shadow-[inset_2px_0_0_color-mix(in_oklab,var(--primary)_55%,transparent)]",
             LineIconView { icon: LineIcon::Planet, class: "size-4 shrink-0 text-primary".to_string() }
             SpaceFormView { form }
         }
@@ -278,7 +278,6 @@ fn SpaceFormView(form: SpaceFormState) -> Element {
     let mut finished = use_signal(|| false);
     let submission = SpaceFormSubmission(form.clone());
     let enter = submission.clone();
-    let blur = submission.clone();
     let placeholder = if form.suggestion.is_empty() {
         translate("spaces-new-placeholder")
     } else {
@@ -317,7 +316,7 @@ fn SpaceFormView(form: SpaceFormState) -> Element {
             onblur: move |_| {
                 if !finished() {
                     finished.set(true);
-                    blur.submit();
+                    let _ = send(&SpaceFormCloseRequest);
                 }
             },
         }

@@ -25,7 +25,7 @@ pub(super) struct PromptWorkspace<'w, 's> {
 }
 
 impl PromptWorkspace<'_, '_> {
-    const TITLE_INSTRUCTION: &'static str = "Before answering, call set_conversation_title with a concise 3 to 7 word model-written summary of the conversation. Do not copy the user's prompt verbatim.";
+    const TITLE_INSTRUCTION: &'static str = "Before answering, call set_conversation_title with a concise 3 to 7 word model-written title and a one-sentence summary of the user's goal and current outcome. Do not copy the user's prompt verbatim.";
 
     pub(super) fn prompt(
         policy: &AcpWorkspacePolicy,

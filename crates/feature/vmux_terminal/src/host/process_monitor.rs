@@ -159,11 +159,38 @@ impl Sparkline {
         for (index, sample) in samples.iter().enumerate() {
             let x = index as f32 / last * 100.0;
             let y = 39.0 - (sample / ceiling).clamp(0.0, 1.0) * 37.0;
-            points.push(format!("{x:.2},{y:.2}"));
+            points.push((x, y));
         }
-        let line = points.join(" ");
-        let area = format!("0,40 {line} 100,40");
+        let segments = Self::curve_segments(&points);
+        let line = format!("M {:.2} {:.2}{segments}", points[0].0, points[0].1);
+        let area = format!(
+            "M 0 40 L {:.2} {:.2}{segments} L 100 40 Z",
+            points[0].0, points[0].1
+        );
         Self { line, area }
+    }
+
+    fn curve_segments(points: &[(f32, f32)]) -> String {
+        let mut path = String::new();
+        for index in 0..points.len() - 1 {
+            let previous = points[index.saturating_sub(1)];
+            let current = points[index];
+            let next = points[index + 1];
+            let following = points[(index + 2).min(points.len() - 1)];
+            let control_a = (
+                current.0 + (next.0 - previous.0) / 6.0,
+                current.1 + (next.1 - previous.1) / 6.0,
+            );
+            let control_b = (
+                next.0 - (following.0 - current.0) / 6.0,
+                next.1 - (following.1 - current.1) / 6.0,
+            );
+            path.push_str(&format!(
+                " C {:.2} {:.2}, {:.2} {:.2}, {:.2} {:.2}",
+                control_a.0, control_a.1, control_b.0, control_b.1, next.0, next.1
+            ));
+        }
+        path
     }
 }
 
@@ -893,8 +920,12 @@ mod tests {
     fn sparkline_scales_against_a_floor() {
         let graph = Sparkline::plot(&[0.0, 50.0, 100.0], 100.0);
 
-        assert_eq!(graph.line, "0.00,39.00 50.00,20.50 100.00,2.00");
-        assert!(graph.area.starts_with("0,40 "));
+        assert_eq!(
+            graph.line,
+            "M 0.00 39.00 C 8.33 35.92, 33.33 26.67, 50.00 20.50 C 66.67 14.33, 91.67 5.08, 100.00 2.00"
+        );
+        assert!(graph.area.starts_with("M 0 40 L 0.00 39.00"));
+        assert!(graph.area.ends_with("L 100 40 Z"));
     }
 
     #[test]

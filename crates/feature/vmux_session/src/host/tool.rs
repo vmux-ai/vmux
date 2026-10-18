@@ -32,6 +32,7 @@ struct RequestUserChoiceTool {
 #[serde(deny_unknown_fields)]
 struct SetConversationTitleTool {
     title: String,
+    summary: String,
 }
 
 fn request_user_choice(
@@ -89,7 +90,16 @@ fn set_conversation_title(
             if title.chars().count() > 120 {
                 return Err("set_conversation_title.title exceeds 120 characters".to_string());
             }
-            AgentRequest::encode(&AgentSetConversationTitle { anchor, title })
+            let summary = Text::into_option(args.summary.clone())
+                .ok_or("set_conversation_title.summary is empty")?;
+            if summary.chars().count() > 500 {
+                return Err("set_conversation_title.summary exceeds 500 characters".to_string());
+            }
+            AgentRequest::encode(&AgentSetConversationTitle {
+                anchor,
+                title,
+                summary,
+            })
         });
         commands.entity(entity).insert(ToolCommand(command));
     }

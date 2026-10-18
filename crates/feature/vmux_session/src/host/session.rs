@@ -29,7 +29,7 @@ use vmux_ecs::agent::{
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_ecs::team::Profile;
 use vmux_ecs::{
-    EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
+    Description, EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
     PendingPromptAttachments,
 };
 use vmux_session::{
@@ -63,6 +63,7 @@ pub(crate) struct AgentRequestUserChoice {
 pub(crate) struct AgentSetConversationTitle {
     pub anchor: ProcessId,
     pub title: String,
+    pub summary: String,
 }
 
 #[cfg(host)]
@@ -330,7 +331,7 @@ fn request_user_choice(
 fn set_conversation_title(
     mut requests: MessageReader<AgentRequestMessage<AgentSetConversationTitle>>,
     targets: AgentChatTarget,
-    mut titles: Query<&mut AgentConversationTitle>,
+    mut metadata: Query<(Option<&mut AgentConversationTitle>, &mut Description)>,
     mut responses: MessageWriter<AgentCommandResponse>,
     mut commands: Commands,
 ) {
@@ -342,17 +343,25 @@ fn set_conversation_title(
             match targets.resolve(request.payload.anchor) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((_, session)) => {
-                    if let Ok(mut current) = titles.get_mut(session) {
-                        current.0 = title.to_string();
-                    } else {
+                    let summary = request.payload.summary.trim();
+                    if summary.is_empty() {
+                        AgentCommandResult::Error("conversation summary is empty".to_string())
+                    } else if let Ok((current, mut description)) = metadata.get_mut(session) {
+                        if let Some(mut current) = current {
+                            current.0 = title.to_string();
+                        } else {
+                            commands
+                                .entity(session)
+                                .insert(AgentConversationTitle(title.to_string()));
+                        }
+                        description.0 = summary.to_string();
                         commands
                             .entity(session)
-                            .insert(AgentConversationTitle(title.to_string()));
+                            .remove::<vmux_session::TitlePending>();
+                        AgentCommandResult::Ok
+                    } else {
+                        AgentCommandResult::Error("session metadata not found".to_string())
                     }
-                    commands
-                        .entity(session)
-                        .remove::<vmux_session::TitlePending>();
-                    AgentCommandResult::Ok
                 }
             }
         };
@@ -949,6 +958,7 @@ mod tests {
             request: AgentRequest::encode(&AgentSetConversationTitle {
                 anchor,
                 title: "Feature-owned title".to_string(),
+                summary: "Tracks the current feature-owned session outcome.".to_string(),
             })
             .unwrap(),
         });
@@ -958,6 +968,12 @@ mod tests {
         assert_eq!(
             app.world().get::<AgentConversationTitle>(session),
             Some(&AgentConversationTitle("Feature-owned title".to_string()))
+        );
+        assert_eq!(
+            app.world().get::<Description>(session),
+            Some(&Description(
+                "Tracks the current feature-owned session outcome.".to_string()
+            ))
         );
         assert!(
             !app.world()

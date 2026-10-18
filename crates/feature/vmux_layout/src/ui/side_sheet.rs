@@ -210,7 +210,7 @@ fn SideSheetSpaceCard(
 ) -> Element {
     let mut expanded = use_signal(|| true);
     rsx! {
-        div { class: "mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1",
+        div { class: "mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1",
             SideSheetSpaceRow {
                 space,
                 spaces,
@@ -462,9 +462,9 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
     let collapsed_stack = pane.collapsed_stack.clone();
     rsx! {
         div { class: if pane.is_active && any_loading {
-                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1 pane-loading-ring"
+                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1 pane-loading-ring"
             } else {
-                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1"
+                "group mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.055] p-1"
             },
             div {
                 class: "flex h-9 items-center rounded-md transition-colors hover:bg-glass-hover",

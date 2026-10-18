@@ -14,7 +14,7 @@ use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::Platform;
 use vmux_ui::script::PageScript;
 
@@ -37,7 +37,11 @@ pub fn Page() -> Element {
     rsx! {
         div { class: "flex h-screen w-screen items-center justify-center overflow-hidden bg-background",
             if announced.port == 0 {
-                Waiting { route }
+                Waiting {
+                    route,
+                    status: announced.status,
+                    error: announced.error,
+                }
             } else {
                 Mirror {
                     key: "{announced.port}-{announced.capability}",
@@ -533,11 +537,45 @@ impl BrowserCode {
 }
 
 #[component]
-fn Waiting(route: Option<SimulatorRoute>) -> Element {
-    let _ = route;
+fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Element {
     let frame = SimulatorFrame::fallback();
+    let target = match route {
+        Some(SimulatorRoute::Pinned {
+            version,
+            device_name: Some(device),
+        }) => translate_with(
+            "simulator-waiting-device",
+            &[
+                ("device", TranslationValue::String(&device)),
+                ("version", TranslationValue::String(version.as_str())),
+            ],
+        ),
+        Some(SimulatorRoute::Pinned { version, .. }) => translate_with(
+            "simulator-waiting-version",
+            &[("version", TranslationValue::String(version.as_str()))],
+        ),
+        _ => translate("simulator-title"),
+    };
+    let failed = status == "errored";
+    let phase = if failed {
+        translate("common-error")
+    } else {
+        translate("composer-status-starting")
+    };
     rsx! {
         div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background bg-[radial-gradient(circle_at_50%_10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-8",
+            div { class: "absolute left-5 top-5 z-20 flex max-w-[calc(100%-2.5rem)] items-center gap-2 rounded-full bg-foreground/[0.055] px-3 py-1.5 text-xs text-muted-foreground",
+                span { class: if failed { "size-2 shrink-0 rounded-full bg-destructive" } else { "size-2 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" } }
+                span { class: "truncate font-medium text-foreground", "{target}" }
+                span { class: "shrink-0", "· {phase}" }
+            }
+            if failed && !error.is_empty() {
+                div {
+                    class: "absolute bottom-5 left-1/2 z-20 max-w-[min(36rem,calc(100%-2.5rem))] -translate-x-1/2 truncate rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive",
+                    title: "{error}",
+                    "{error}"
+                }
+            }
             div {
                 class: "relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
                 style: frame.phone_style(),
