@@ -28,23 +28,24 @@ impl Plugin for WatchPlugin {
 }
 
 fn initialize(world: &mut World) {
-    let (tx, rx) = mpsc::channel();
     let proxy = world
         .get_resource::<EventLoopProxyWrapper>()
         .map(|wrapper| (**wrapper).clone());
+    let events = GitWatchEvents::start(proxy);
+    let tx = events.sender;
     match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
         if !GitWatch::should_forward(&result) {
             return;
         }
-        let _ = tx.send(result);
-        if let Some(proxy) = proxy.as_ref() {
-            let _ = proxy.send_event(WinitUserEvent::WakeUp);
-        }
+        let Ok(event) = result else {
+            return;
+        };
+        let _ = tx.send(event.paths);
     }) {
         Ok(watcher) => {
             world.insert_non_send(GitWatch {
                 watcher,
-                rx,
+                rx: events.receiver,
                 watch_references: HashMap::new(),
                 subscriptions: HashMap::new(),
                 repo_info_subscriptions: HashMap::new(),
@@ -91,7 +92,7 @@ struct GitSubscription {
 
 pub(super) struct GitWatch {
     watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    rx: mpsc::Receiver<GitWatchBatch>,
     watch_references: HashMap<GitWatchTarget, usize>,
     subscriptions: HashMap<Entity, GitSubscription>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
@@ -104,7 +105,6 @@ struct RepoInfoCacheEntry {
     watch_attempted: bool,
     last_accessed: Instant,
     pending: Option<Task<Option<super::worktree::RepoInfo>>>,
-    ignore_events_until: Option<Instant>,
 }
 
 struct RepoInfoLease {
@@ -195,7 +195,6 @@ impl RepoInfoCache {
                 watch_attempted: false,
                 last_accessed: Instant::now(),
                 pending: None,
-                ignore_events_until: None,
             });
         entry.last_accessed = Instant::now();
         entry.info.clone()
@@ -264,18 +263,87 @@ impl RepoInfoCache {
         self.guessed.remove(path);
         self.repositories.retain(|_, entry| entry != path);
     }
+}
 
-    fn wake_soon(&self) {
-        let Some(wake) = &self.wake else {
-            return;
-        };
-        let _ = wake.send_event(WinitUserEvent::WakeUp);
+const WATCH_EVENT_LIMIT: usize = 256;
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
+const WATCH_TARGET_LIMIT: usize = 128;
+const CANONICAL_CAP: usize = 4096;
+
+#[derive(Default)]
+struct GitWatchBatch {
+    paths: HashSet<PathBuf>,
+    overflow: bool,
+}
+
+impl GitWatchBatch {
+    fn extend(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
+        for path in paths {
+            if self.overflow || GitWatchTarget::is_lock_path(&path) {
+                continue;
+            }
+            if !self.paths.contains(&path) && self.paths.len() >= WATCH_EVENT_LIMIT {
+                self.paths.clear();
+                self.overflow = true;
+                continue;
+            }
+            self.paths.insert(path);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        !self.overflow && self.paths.is_empty()
     }
 }
 
-const WATCH_DRAIN_BUDGET: usize = 256;
-const WATCH_TARGET_LIMIT: usize = 128;
-const CANONICAL_CAP: usize = 4096;
+struct GitWatchEvents {
+    sender: mpsc::Sender<Vec<PathBuf>>,
+    receiver: mpsc::Receiver<GitWatchBatch>,
+}
+
+impl GitWatchEvents {
+    fn start(proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
+        let (input_tx, input_rx) = mpsc::channel::<Vec<PathBuf>>();
+        let (output_tx, output_rx) = mpsc::channel::<GitWatchBatch>();
+        let worker = std::thread::Builder::new()
+            .name("vmux-git-watch-debounce".to_string())
+            .spawn(move || {
+                while let Ok(paths) = input_rx.recv() {
+                    let mut batch = GitWatchBatch::default();
+                    batch.extend(paths);
+                    let mut disconnected = false;
+                    loop {
+                        match input_rx.recv_timeout(WATCH_DEBOUNCE) {
+                            Ok(paths) => batch.extend(paths),
+                            Err(mpsc::RecvTimeoutError::Timeout) => break,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                disconnected = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !batch.is_empty() {
+                        if output_tx.send(batch).is_err() {
+                            break;
+                        }
+                        if let Some(proxy) = proxy.as_ref() {
+                            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+                        }
+                    }
+                    if disconnected {
+                        break;
+                    }
+                }
+            });
+        if let Err(error) = worker {
+            bevy::log::warn!("git watch debounce init failed: {error}");
+        }
+        Self {
+            sender: input_tx,
+            receiver: output_rx,
+        }
+    }
+}
 
 impl GitWatchTarget {
     fn for_checkout(file: &Path) -> Result<(PathBuf, Vec<Self>), super::repository::GitError> {
@@ -571,11 +639,8 @@ impl GitWatch {
 
     #[cfg(test)]
     fn test() -> Self {
-        let (tx, rx) = mpsc::channel();
-        let watcher = notify::recommended_watcher(move |result| {
-            let _ = tx.send(result);
-        })
-        .unwrap();
+        let (_, rx) = mpsc::channel();
+        let watcher = notify::recommended_watcher(|_| {}).unwrap();
         Self {
             watcher,
             rx,
@@ -599,36 +664,29 @@ fn drain(
     };
     let repo_info = repo_info.bypass_change_detection();
     let mut changed = HashSet::new();
-    let mut drained = 0;
-    while drained < WATCH_DRAIN_BUDGET {
-        let Ok(result) = watch.rx.try_recv() else {
-            break;
-        };
-        drained += 1;
-        let Ok(event) = result else {
-            continue;
-        };
-        if matches!(event.kind, EventKind::Access(_)) {
+    let mut overflow = false;
+    while let Ok(batch) = watch.rx.try_recv() {
+        overflow |= batch.overflow;
+        if overflow {
+            changed.clear();
             continue;
         }
-        for path in event.paths {
+        for path in batch.paths {
             changed.insert(repo_info.canonical_path(&path));
         }
     }
-    if drained == WATCH_DRAIN_BUDGET {
-        repo_info.wake_soon();
-    }
-    if changed.is_empty() {
+    if changed.is_empty() && !overflow {
         return;
     }
     let affected: Vec<Entity> = watch
         .subscriptions
         .iter()
         .filter(|(_, subscription)| {
-            subscription
-                .targets
-                .iter()
-                .any(|target| changed.iter().any(|path| target.matches(path)))
+            overflow
+                || subscription
+                    .targets
+                    .iter()
+                    .any(|target| changed.iter().any(|path| target.matches(path)))
         })
         .map(|(entity, _)| *entity)
         .collect();
@@ -650,9 +708,10 @@ fn drain(
         .repo_info_subscriptions
         .iter()
         .filter(|(_, targets)| {
-            targets
-                .iter()
-                .any(|target| changed.iter().any(|path| target.matches(path)))
+            overflow
+                || targets
+                    .iter()
+                    .any(|target| changed.iter().any(|path| target.matches(path)))
         })
         .map(|(path, _)| path.clone())
         .collect();
@@ -671,14 +730,7 @@ fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>) {
         entry.dirty = false;
         let path = path.clone();
         let wake = wake.clone();
-        let delay = entry
-            .ignore_events_until
-            .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
-            .unwrap_or_default();
         entry.pending = Some(IoTaskPool::get().spawn(async move {
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
-            }
             let info = super::worktree::RepoInfo::read(&path);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
@@ -705,7 +757,6 @@ fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
             entry.loaded = true;
             entry.watch_attempted = false;
             entry.pending = None;
-            entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
             if let Some(info) = entry.info.as_ref() {
                 repositories.push((path.clone(), info.clone()));
             }
@@ -901,6 +952,18 @@ mod tests {
     }
 
     #[test]
+    fn event_burst_collapses_to_one_overflow_refresh() {
+        let mut batch = GitWatchBatch::default();
+        batch.extend(
+            (0..=WATCH_EVENT_LIMIT)
+                .map(|index| PathBuf::from(format!("/tmp/vmux-git-event-{index}"))),
+        );
+
+        assert!(batch.overflow);
+        assert!(batch.paths.is_empty());
+    }
+
+    #[test]
     fn inactive_repo_info_entries_release_their_watch_targets() {
         let active_repo = test_repo::init();
         let stale_repo = test_repo::init();
@@ -920,7 +983,6 @@ mod tests {
                         watch_attempted: true,
                         last_accessed: Instant::now(),
                         pending: None,
-                        ignore_events_until: None,
                     },
                 ),
                 (
@@ -932,7 +994,6 @@ mod tests {
                         watch_attempted: true,
                         last_accessed: Instant::now() - REPO_INFO_IDLE_TTL,
                         pending: None,
-                        ignore_events_until: None,
                     },
                 ),
             ]),
@@ -979,7 +1040,6 @@ mod tests {
                     watch_attempted: false,
                     last_accessed: Instant::now(),
                     pending: None,
-                    ignore_events_until: None,
                 },
             )]),
             canonical: HashMap::new(),
@@ -1246,7 +1306,6 @@ mod tests {
                     watch_attempted: false,
                     last_accessed: Instant::now(),
                     pending: Some(IoTaskPool::get().spawn(async move { stale })),
-                    ignore_events_until: None,
                 },
             )]),
             wake: None,

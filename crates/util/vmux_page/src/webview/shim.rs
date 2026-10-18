@@ -302,8 +302,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       subtree: true,
     });
   };
+  let started = false;
   window.vmuxWry = {
-    start() { holdLinks(); watchFavicon(); pumpEdits(); },
+    start() {
+      if (started) return;
+      started = true;
+      holdLinks();
+      watchFavicon();
+      pumpEdits();
+    },
     binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
     binListen(id, callback) {
       const existing = listeners.get(id) || [];
