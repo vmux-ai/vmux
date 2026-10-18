@@ -217,17 +217,6 @@ impl PaletteRuntime {
             PaletteContributionRows::default(),
         )
     }
-
-    fn attach(
-        entity: Entity,
-        existing: &Query<(), With<PaletteSnapshot>>,
-        commands: &mut Commands,
-    ) {
-        if existing.contains(entity) {
-            return;
-        }
-        commands.entity(entity).insert(Self::bundle());
-    }
 }
 
 #[vmux_command::command]
@@ -263,7 +252,11 @@ fn attach_launcher(
     existing: Query<(), With<PaletteSnapshot>>,
     mut commands: Commands,
 ) {
-    PaletteRuntime::attach(trigger.event_target(), &existing, &mut commands);
+    let entity = trigger.event_target();
+    if existing.contains(entity) {
+        return;
+    }
+    commands.entity(entity).insert(PaletteRuntime::bundle());
 }
 
 fn attach_panel(
@@ -271,7 +264,11 @@ fn attach_panel(
     existing: Query<(), With<PaletteSnapshot>>,
     mut commands: Commands,
 ) {
-    PaletteRuntime::attach(trigger.event_target(), &existing, &mut commands);
+    let entity = trigger.event_target();
+    if existing.contains(entity) {
+        return;
+    }
+    commands.entity(entity).insert(PaletteRuntime::bundle());
 }
 
 fn open(
