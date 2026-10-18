@@ -1048,6 +1048,12 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
+Provider session stores remain authoritative for conversations created outside Vmux. Provider
+readers in `vmux_acp` project metadata from Codex, Claude, and Vibe storage into the
+provider-neutral Session catalog. Browsing an external entry does not copy it into durable Vmux
+state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets the
+provider load the conversation through its normal ACP implementation.
+
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
 `vmux_ecs` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,

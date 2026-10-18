@@ -11,7 +11,7 @@ use vmux_api::chat::{
 use vmux_api::command_bar::CommandBarUiState;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
-use vmux_session::{AgentId, Route, Session, SessionId, Transcripts};
+use vmux_session::{AgentId, ProviderCatalog, Route, Session, SessionId, Transcripts};
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, ChatView};
@@ -21,12 +21,13 @@ pub(super) struct Plugin;
 
 impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            PromptHistoryRequest,
-            ResumeListRequest,
-            ResumeSession,
-            ChatResumeQueryRequest,
-        )>::default())
+        app.init_resource::<ProviderCatalog>()
+            .add_plugins(UiEventPlugin::<(
+                PromptHistoryRequest,
+                ResumeListRequest,
+                ResumeSession,
+                ChatResumeQueryRequest,
+            )>::default())
             .add_observer(prompt_history)
             .add_observer(list)
             .add_observer(open)
@@ -51,6 +52,7 @@ type Sessions<'w, 's> = Query<
 #[derive(SystemParam)]
 struct ResumeCatalog<'w, 's> {
     sessions: Sessions<'w, 's>,
+    providers: Res<'w, ProviderCatalog>,
     cache: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
 }
 
@@ -116,6 +118,61 @@ impl ResumeCatalog<'_, '_> {
                     project,
                     branch,
                     cross_runtime: false,
+                },
+            ));
+        }
+        for session in &self.providers.sessions {
+            let path = Path::new(&session.cwd);
+            let info = self.cache.as_mut().and_then(|cache| cache.lookup(path));
+            let subtitle = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| session.cwd.clone());
+            let project = info
+                .as_ref()
+                .map(vmux_git::worktree::RepoInfo::project_name)
+                .filter(|project| !project.is_empty())
+                .unwrap_or_else(|| subtitle.clone());
+            let branch = info.map(|info| info.branch).unwrap_or_default();
+            if !query_lower.is_empty()
+                && ![
+                    session.name.as_str(),
+                    session.description.as_str(),
+                    session.cwd.as_str(),
+                    project.as_str(),
+                    branch.as_str(),
+                    session.agent_name.as_str(),
+                ]
+                .iter()
+                .any(|value| value.to_ascii_lowercase().contains(&query_lower))
+            {
+                continue;
+            }
+            let age_seconds = now.saturating_sub(session.updated_at.max(0)).max(0) as u64 / 1_000;
+            let updated_at = chrono::DateTime::from_timestamp_millis(session.updated_at)
+                .map(|timestamp| {
+                    timestamp
+                        .with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            sessions.push((
+                session.updated_at,
+                ResumableSessionEntry {
+                    kind: session.kind.clone(),
+                    sid: session.sid.clone(),
+                    cwd: session.cwd.clone(),
+                    url: String::new(),
+                    title: session.name.clone(),
+                    latest: session.description.clone(),
+                    subtitle,
+                    age_seconds,
+                    updated_at,
+                    agent_name: session.agent_name.clone(),
+                    project,
+                    branch,
+                    cross_runtime: true,
                 },
             ));
         }

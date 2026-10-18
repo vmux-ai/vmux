@@ -13,6 +13,7 @@ mod command;
 mod command_bar;
 mod continuation;
 mod event;
+mod external;
 mod follow;
 mod follow_driver;
 mod handoff;

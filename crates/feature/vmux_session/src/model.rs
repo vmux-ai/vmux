@@ -124,6 +124,9 @@ pub struct CreateRequest {
     pub description: String,
     pub cwd: PathBuf,
     pub agent: Option<AgentId>,
+    created_at: Option<i64>,
+    activated_at: Option<i64>,
+    local: bool,
 }
 
 impl CreateRequest {
@@ -139,6 +142,29 @@ impl CreateRequest {
             description: description.into(),
             cwd,
             agent,
+            created_at: None,
+            activated_at: None,
+            local: true,
+        }
+    }
+
+    pub fn imported(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        cwd: PathBuf,
+        agent: AgentId,
+        created_at: i64,
+        activated_at: i64,
+    ) -> Self {
+        Self {
+            id: SessionId(uuid::Uuid::new_v4().to_string()),
+            name: name.into(),
+            description: description.into(),
+            cwd,
+            agent: Some(agent),
+            created_at: Some(created_at),
+            activated_at: Some(activated_at),
+            local: false,
         }
     }
 
@@ -286,6 +312,8 @@ fn create(
             continue;
         }
         let now = vmux_ecs::UnixMillis::now().0;
+        let created_at = request.created_at.unwrap_or(now);
+        let activated_at = request.activated_at.unwrap_or(now);
         let entity = {
             let mut session = commands.spawn((
                 Session,
@@ -293,12 +321,14 @@ fn create(
                 Name::new(request.name.clone()),
                 Description(request.description.clone()),
                 Cwd(request.cwd.clone()),
-                CreatedAt(now),
-                LastActivatedAt(now),
+                CreatedAt(created_at),
+                LastActivatedAt(activated_at),
                 Stage(configuration.default_stage.clone()),
-                StageChangedAt(now),
-                LocalTask,
+                StageChangedAt(activated_at),
             ));
+            if request.local {
+                session.insert(LocalTask);
+            }
             if let Some(agent) = request.agent.clone() {
                 session.insert(agent);
             }
@@ -504,6 +534,33 @@ mod tests {
         assert_eq!(cwd.0, PathBuf::from("/tmp/project"));
         assert_eq!(stage.0.0, "in_progress");
         assert_eq!(agent.0, "codex");
+    }
+
+    #[test]
+    fn provider_import_preserves_time_without_marking_a_local_task() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, StagePlugin));
+        let request = CreateRequest::imported(
+            "Imported",
+            "Provider session",
+            PathBuf::from("/tmp/project"),
+            AgentId("codex".into()),
+            100,
+            200,
+        );
+        app.world_mut()
+            .resource_mut::<Messages<CreateRequest>>()
+            .write(request);
+
+        app.update();
+
+        let mut sessions = app
+            .world_mut()
+            .query_filtered::<(&CreatedAt, &LastActivatedAt, Has<LocalTask>), With<Session>>();
+        let (created, activated, local) = sessions.single(app.world()).unwrap();
+        assert_eq!(created.0, 100);
+        assert_eq!(activated.0, 200);
+        assert!(!local);
     }
 
     #[test]

@@ -6,7 +6,9 @@ extern crate self as vmux_session;
 #[cfg(host)]
 use bevy_app::{App, Plugin};
 
-pub use catalog::{CatalogSnapshot, SessionSummary, StageSummary};
+pub use catalog::{
+    CatalogSnapshot, ProviderCatalog, ProviderSession, SessionSummary, StageSummary,
+};
 #[cfg(host)]
 pub use conversation::{
     ConversationEvent, Document, DocumentKind, EventIdentity, MaterializedEvent, Member,

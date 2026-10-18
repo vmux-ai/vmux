@@ -24,6 +24,40 @@ pub struct CatalogSnapshot {
     pub sessions: Vec<SessionSummary>,
 }
 
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProviderCatalog {
+    pub sessions: Vec<ProviderSession>,
+}
+
+impl ProviderCatalog {
+    pub fn get(&self, kind: &str, sid: &str) -> Option<&ProviderSession> {
+        self.sessions
+            .iter()
+            .find(|session| session.kind == kind && session.sid == sid)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProviderSession {
+    pub kind: String,
+    pub sid: String,
+    pub agent: String,
+    pub agent_name: String,
+    pub name: String,
+    pub description: String,
+    pub cwd: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub conversation_title: String,
+    pub last_prompt: String,
+}
+
+impl ProviderSession {
+    pub fn catalog_id(&self) -> String {
+        format!("{}:{}", self.kind, self.sid)
+    }
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct StageSummary {
     pub id: String,
@@ -35,6 +69,9 @@ pub struct StageSummary {
 #[vmux_api::contract(Default, Eq)]
 pub struct SessionSummary {
     pub id: String,
+    pub kind: String,
+    pub sid: String,
+    pub managed: bool,
     pub name: String,
     pub description: String,
     pub cwd: String,
@@ -59,6 +96,7 @@ pub(crate) struct CatalogPlugin;
 impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CatalogSnapshot>()
+            .init_resource::<ProviderCatalog>()
             .add_systems(PostUpdate, project);
     }
 }
@@ -192,77 +230,100 @@ impl CatalogChanges<'_, '_> {
 fn project(
     sessions: SessionCatalog,
     stages: Query<(&StageId, &Name, &Order, Has<Terminal>), With<StageDefinition>>,
+    providers: Res<ProviderCatalog>,
     transcripts: Transcripts,
     mut changes: CatalogChanges,
     mut catalog: ResMut<CatalogSnapshot>,
 ) {
-    if !catalog.is_added() && !changes.any() {
+    if !catalog.is_added() && !providers.is_changed() && !changes.any() {
         return;
     }
-    let mut next = CatalogSnapshot {
-        stages: stages
-            .iter()
-            .map(|(id, name, order, terminal)| StageSummary {
-                id: id.0.clone(),
-                name: name.as_str().to_string(),
-                order: order.0,
-                terminal,
-            })
-            .collect(),
-        sessions: sessions
-            .iter()
-            .map(
-                |(
-                    entity,
-                    id,
-                    name,
-                    description,
-                    cwd,
-                    stage,
-                    created_at,
-                    last_activated_at,
-                    stage_changed_at,
-                    agent,
-                    profile,
-                    runtime,
-                    conversation_title,
-                )| {
-                    let conversation = ConversationPreview::from(
-                        conversation_title,
-                        &transcripts.get(entity).messages,
-                    );
-                    SessionSummary {
-                        id: id.0.clone(),
-                        name: name.as_str().to_string(),
-                        description: description.0.clone(),
-                        cwd: cwd.0.to_string_lossy().into_owned(),
-                        stage: stage.0.0.clone(),
-                        created_at: created_at.0,
-                        last_activated_at: last_activated_at.0,
-                        stage_changed_at: stage_changed_at.0,
-                        agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
-                        agent_name: profile
-                            .map(|profile| profile.name.clone())
-                            .unwrap_or_default(),
-                        agent_icon: profile
-                            .and_then(|profile| profile.icon.clone())
-                            .unwrap_or_default(),
-                        agent_color: profile
-                            .map(|profile| profile.avatar.color.clone())
-                            .unwrap_or_default(),
-                        runtime: runtime
-                            .map(RunState::status)
-                            .unwrap_or("inactive")
-                            .to_string(),
-                        conversation_title: conversation.title,
-                        last_prompt: conversation.last_prompt,
-                        last_message: conversation.last_message,
-                    }
-                },
-            )
-            .collect(),
-    };
+    let mut next = CatalogSnapshot::default();
+    for (id, name, order, terminal) in &stages {
+        next.stages.push(StageSummary {
+            id: id.0.clone(),
+            name: name.as_str().to_string(),
+            order: order.0,
+            terminal,
+        });
+    }
     next.stages.sort_by_key(|stage| stage.order);
+    let default_stage = next
+        .stages
+        .iter()
+        .find(|stage| !stage.terminal)
+        .map(|stage| stage.id.clone())
+        .unwrap_or_default();
+    for (
+        entity,
+        id,
+        name,
+        description,
+        cwd,
+        stage,
+        created_at,
+        last_activated_at,
+        stage_changed_at,
+        agent,
+        profile,
+        runtime,
+        conversation_title,
+    ) in &sessions
+    {
+        let conversation =
+            ConversationPreview::from(conversation_title, &transcripts.get(entity).messages);
+        next.sessions.push(SessionSummary {
+            id: id.0.clone(),
+            kind: "session".to_string(),
+            sid: id.0.clone(),
+            managed: true,
+            name: name.as_str().to_string(),
+            description: description.0.clone(),
+            cwd: cwd.0.to_string_lossy().into_owned(),
+            stage: stage.0.0.clone(),
+            created_at: created_at.0,
+            last_activated_at: last_activated_at.0,
+            stage_changed_at: stage_changed_at.0,
+            agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
+            agent_name: profile
+                .map(|profile| profile.name.clone())
+                .unwrap_or_default(),
+            agent_icon: profile
+                .and_then(|profile| profile.icon.clone())
+                .unwrap_or_default(),
+            agent_color: profile
+                .map(|profile| profile.avatar.color.clone())
+                .unwrap_or_default(),
+            runtime: runtime
+                .map(RunState::status)
+                .unwrap_or("inactive")
+                .to_string(),
+            conversation_title: conversation.title,
+            last_prompt: conversation.last_prompt,
+            last_message: conversation.last_message,
+        });
+    }
+    for session in &providers.sessions {
+        next.sessions.push(SessionSummary {
+            id: session.catalog_id(),
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+            managed: false,
+            name: session.name.clone(),
+            description: session.description.clone(),
+            cwd: session.cwd.clone(),
+            stage: default_stage.clone(),
+            created_at: session.created_at,
+            last_activated_at: session.updated_at,
+            stage_changed_at: session.updated_at,
+            agent: session.agent.clone(),
+            agent_name: session.agent_name.clone(),
+            runtime: "inactive".to_string(),
+            conversation_title: session.conversation_title.clone(),
+            last_prompt: session.last_prompt.clone(),
+            ..Default::default()
+        });
+    }
     next.sessions
         .sort_by_key(|session| std::cmp::Reverse(session.last_activated_at));
     if *catalog != next {

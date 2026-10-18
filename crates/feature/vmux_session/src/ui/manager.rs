@@ -1,6 +1,6 @@
 use chrono::{Duration, Local, NaiveDate, TimeZone};
 use dioxus::prelude::*;
-use vmux_session::{Route, SessionSummary, StageSummary};
+use vmux_session::{SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
@@ -14,7 +14,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_
 use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
 
 use crate::event::{
-    ChatOpenPage, SessionRepositories, SessionRepository, SessionsCleanup,
+    ChatOpenPage, ResumeSession, SessionRepositories, SessionRepository, SessionsCleanup,
     SessionsDescriptionUpdate, SessionsRename, SessionsStageChange,
 };
 use crate::state::ChatUiState;
@@ -712,17 +712,17 @@ fn SessionListRow(
     let stage_dot = StageVisual::for_id(&stage).dot;
     let title = session.display_title();
     let preview = session.preview();
-    let compact_id = SessionIdentity::new(&session.id).compact();
+    let compact_id = SessionIdentity::new(&session.sid).compact();
     let git_url = context.git_url.clone();
-    let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
-    let doubleclick_url = open_url.clone();
+    let resume = ResumeTarget::from(&session);
+    let doubleclick_resume = resume.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
         div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| onselect.call(select_id.clone()),
             ondoubleclick: move |_| {
-                let _ = send(&ChatOpenPage { url: doubleclick_url.clone() });
+                doubleclick_resume.open();
             },
             span { class: "size-3 shrink-0" }
             AgentThumbnail {
@@ -732,7 +732,7 @@ fn SessionListRow(
                 alt: agent.name.clone(),
                 class: "size-4 shrink-0 text-[5px]".to_string(),
             }
-            SessionIdPill { label: compact_id, title: session.id.clone() }
+            SessionIdPill { label: compact_id, title: session.sid.clone() }
             span { class: "flex size-4 shrink-0 items-center justify-center",
                 span { class: "size-2 rounded-full {stage_dot}" }
             }
@@ -753,10 +753,11 @@ fn SessionListRow(
                 time { class: "w-10 text-right text-[10px] tabular-nums text-muted-foreground/65", "{updated}" }
             }
             SessionActions {
-                open_url,
+                resume,
                 git_url,
                 cleanup_id,
                 archived,
+                managed: session.managed,
             }
         }
     }
@@ -826,7 +827,7 @@ fn SessionBoardCard(
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
     let git_url = context.git_url.clone();
-    let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
+    let resume = ResumeTarget::from(&session);
     let agent = AgentPresentation::from_session(&session);
     let title = session.display_title();
     let preview = session.preview();
@@ -850,10 +851,11 @@ fn SessionBoardCard(
                     }
                 }
                 SessionActions {
-                    open_url,
+                    resume,
                     git_url: git_url.clone(),
                     cleanup_id,
                     archived,
+                    managed: session.managed,
                 }
             }
             if !preview.is_empty() {
@@ -881,14 +883,14 @@ fn SessionDetails(
     onclose: EventHandler<MouseEvent>,
 ) -> Element {
     let context = SessionContext::from(repository);
-    let open_url = Route::Session(vmux_session::SessionId(session.id.clone())).url();
+    let resume = ResumeTarget::from(&session);
     let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     let title = session.display_title();
     let last_prompt = session.last_prompt.clone();
     let agent = AgentPresentation::from_session(&session);
     let git_url = context.git_url.clone();
-    let action_open_url = open_url.clone();
+    let action_resume = resume.clone();
     let action_git_url = git_url.clone();
     let title_editing = use_signal(|| false);
     let title_draft = use_signal(|| title.clone());
@@ -904,19 +906,23 @@ fn SessionDetails(
                     class: "size-8 text-[9px]".to_string(),
                 }
                 div { class: "min-w-0 flex-1",
-                    EditableText {
-                        value: title.clone(),
-                        editing: title_editing,
-                        draft: title_draft,
-                        display_class: "-mx-1 block w-full rounded-md px-1 text-left text-sm font-semibold text-foreground hover:bg-foreground/[0.05]".to_string(),
-                        input_class: "-mx-1 h-7 w-full rounded-md bg-foreground/[0.055] px-1 text-sm font-semibold text-foreground outline-none ring-1 ring-inset ring-primary/35".to_string(),
-                        title: translate("sessions-name"),
-                        on_commit: move |name| {
-                            let _ = send(&SessionsRename {
-                                id: rename_id.clone(),
-                                name,
-                            });
-                        },
+                    if session.managed {
+                        EditableText {
+                            value: title.clone(),
+                            editing: title_editing,
+                            draft: title_draft,
+                            display_class: "-mx-1 block w-full rounded-md px-1 text-left text-sm font-semibold text-foreground hover:bg-foreground/[0.05]".to_string(),
+                            input_class: "-mx-1 h-7 w-full rounded-md bg-foreground/[0.055] px-1 text-sm font-semibold text-foreground outline-none ring-1 ring-inset ring-primary/35".to_string(),
+                            title: translate("sessions-name"),
+                            on_commit: move |name| {
+                                let _ = send(&SessionsRename {
+                                    id: rename_id.clone(),
+                                    name,
+                                });
+                            },
+                        }
+                    } else {
+                        h2 { class: "text-sm font-semibold text-foreground", "{title}" }
                     }
                     div { class: "mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground",
                         span { class: "size-1.5 rounded-full {runtime_dot}" }
@@ -939,20 +945,29 @@ fn SessionDetails(
                 if !last_prompt.is_empty() && last_prompt != title {
                     p { class: "mb-4 px-1 text-xs leading-5 text-muted-foreground", "{last_prompt}" }
                 }
-                if !session.description.trim().is_empty() {
+                if session.managed && !session.description.trim().is_empty() {
                     EditableDescription {
                         session_id: session.id.clone(),
                         value: session.description.clone(),
                     }
+                } else if !session.managed && !session.description.trim().is_empty() {
+                    p { class: "mb-4 px-1 text-xs leading-5 text-muted-foreground", "{session.description}" }
                 }
                 section { class: "rounded-lg bg-foreground/[0.035]",
                     h3 { class: "px-3 pb-1 pt-3 text-[10px] font-medium text-muted-foreground", {translate("editor-properties")} }
                     div { class: "grid gap-3 p-3",
                         SessionDetailField { label: translate("sessions-stage"),
-                            StagePicker {
-                                session_id: session.id.clone(),
-                                selected: session.stage.clone(),
-                                stages,
+                            if session.managed {
+                                StagePicker {
+                                    session_id: session.id.clone(),
+                                    selected: session.stage.clone(),
+                                    stages,
+                                }
+                            } else {
+                                MetadataPill {
+                                    dot: StageVisual::for_id(&session.stage).dot.to_string(),
+                                    label: translate_humanized(&session.stage),
+                                }
                             }
                         }
                         if !agent.name.is_empty() {
@@ -994,7 +1009,7 @@ fn SessionDetails(
                     label: translate("sessions-resume"),
                     primary: true,
                     onclick: move |_| {
-                        let _ = send(&ChatOpenPage { url: action_open_url.clone() });
+                        action_resume.open();
                     },
                 }
             }
@@ -1135,10 +1150,11 @@ fn EditableDescription(session_id: String, value: String) -> Element {
 
 #[component]
 fn SessionActions(
-    open_url: String,
+    resume: ResumeTarget,
     git_url: String,
     cleanup_id: String,
     archived: bool,
+    managed: bool,
 ) -> Element {
     let mut open = use_signal(|| false);
     let archive_id = cleanup_id.clone();
@@ -1159,7 +1175,7 @@ fn SessionActions(
                 aria_label: translate("sessions-open-chat"),
                 onclick: move |event| {
                     event.stop_propagation();
-                    let _ = send(&ChatOpenPage { url: open_url.clone() });
+                    resume.open();
                 },
                 LineIconView { icon: LineIcon::MessagesRound, class: "size-3.5".to_string() }
             }
@@ -1176,18 +1192,20 @@ fn SessionActions(
                     GitIconView { class: "size-3.5".to_string() }
                 }
             }
-            button {
-                r#type: "button",
-                class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
-                title: translate("sessions-actions"),
-                aria_label: translate("sessions-actions"),
-                onclick: move |event| {
-                    event.stop_propagation();
-                    open.set(!open());
-                },
-                LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5".to_string() }
+            if managed {
+                button {
+                    r#type: "button",
+                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
+                    title: translate("sessions-actions"),
+                    aria_label: translate("sessions-actions"),
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        open.set(!open());
+                    },
+                    LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5".to_string() }
+                }
             }
-            if open() {
+            if managed && open() {
                 div {
                     class: "absolute right-0 top-7 z-30 w-36 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
                     onclick: move |event| event.stop_propagation(),
@@ -1388,6 +1406,33 @@ impl<'a> SessionIdentity<'a> {
             .iter()
             .collect::<String>();
         format!("{start}…{end}")
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct ResumeTarget {
+    kind: String,
+    sid: String,
+    cwd: String,
+}
+
+impl From<&SessionSummary> for ResumeTarget {
+    fn from(session: &SessionSummary) -> Self {
+        Self {
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+            cwd: session.cwd.clone(),
+        }
+    }
+}
+
+impl ResumeTarget {
+    fn open(&self) {
+        let _ = send(&ResumeSession {
+            kind: self.kind.clone(),
+            sid: self.sid.clone(),
+            cwd: self.cwd.clone(),
+        });
     }
 }
 
