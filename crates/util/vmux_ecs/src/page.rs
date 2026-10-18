@@ -13,10 +13,13 @@ pub use vmux_api::PageReady;
 use crate::KeyboardOwner;
 use crate::page_driver::PageAssets;
 
+type PresentPages<'w, 's, M> = Query<'w, 's, (), (With<M>, With<PageReady>)>;
+type ActivePages<'w, 's, M> = Query<'w, 's, (), (With<M>, With<PageReady>, With<KeyboardOwner>)>;
+
 #[derive(SystemParam)]
 pub struct Activity<'w, 's, M: Component> {
-    present: Query<'w, 's, (), (With<M>, With<PageReady>)>,
-    active: Query<'w, 's, (), (With<M>, With<PageReady>, With<KeyboardOwner>)>,
+    present: PresentPages<'w, 's, M>,
+    active: ActivePages<'w, 's, M>,
 }
 
 impl<M: Component> Activity<'_, '_, M> {
