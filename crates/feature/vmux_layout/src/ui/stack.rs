@@ -61,9 +61,9 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     },
                     id: "sidesheet-stack-{pane_id}-{stack_id}",
                     class: if is_active {
-                        "flex h-9 cursor-default items-center gap-2 bg-primary/[0.10] px-2 shadow-[inset_2px_0_0_var(--primary)]"
+                        "flex h-9 cursor-default items-center gap-2 rounded-md bg-foreground/[0.09] px-2"
                     } else {
-                        "flex h-9 cursor-pointer items-center gap-2 px-2 text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground"
+                        "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground"
                     },
                     onmouseenter: move |_| hovered.set(true),
                     onmouseleave: move |_| hovered.set(false),

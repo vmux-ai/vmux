@@ -414,11 +414,11 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         },
                         style: "{visual.style()}",
                         class: if visual.dragging {
-                            "vmux-sheet-tile absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-foreground/[0.08]"
+                            "absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-foreground/[0.10]"
                         } else if active {
-                            "vmux-sheet-tile vmux-sheet-tile-active absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md transition-colors"
+                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-foreground/[0.09] text-foreground transition-colors"
                         } else {
-                            "vmux-sheet-tile absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-foreground/[0.07] transition-colors hover:bg-foreground/[0.11]"
+                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground"
                         },
                         onclick: {
                             let u = url_open.clone();

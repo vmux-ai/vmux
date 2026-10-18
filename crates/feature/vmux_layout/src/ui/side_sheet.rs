@@ -541,7 +541,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                 }
             }
             div { class: "pt-0.5",
-                div { class: "flex flex-col overflow-hidden rounded-md bg-foreground/[0.035]",
+                div { class: "flex flex-col gap-0.5",
                     if !expanded && let Some(stack) = collapsed_stack {
                         SideSheetStackRow { stack, pane_id }
                     }

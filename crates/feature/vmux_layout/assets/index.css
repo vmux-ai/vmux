@@ -20,38 +20,6 @@
   }
 }
 
-.vmux-sheet-surface {
-  border: 0 !important;
-  background-color: color-mix(in oklab, var(--background) 82%, var(--foreground)) !important;
-  background-clip: padding-box;
-  box-shadow: none !important;
-  outline: 0 !important;
-}
-
-.vmux-sheet-tile {
-  border: 0 !important;
-  box-shadow: none !important;
-  outline: 0 !important;
-}
-
-.vmux-sheet-tile:not(.vmux-sheet-tile-active) {
-  border: 0 !important;
-  background-color: transparent !important;
-  background-clip: padding-box;
-  box-shadow: none !important;
-  outline: 0 !important;
-}
-
-.vmux-sheet-tile:hover {
-  background-color: transparent !important;
-  color: var(--foreground);
-}
-
-.vmux-sheet-tile-active {
-  background-color: transparent !important;
-  color: var(--primary);
-}
-
 @keyframes loading-sweep {
   0% {
     background-position: 200% 0;
