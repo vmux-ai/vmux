@@ -847,10 +847,7 @@ pub fn Page() -> Element {
                             EditorFocus::file();
                         }
                     }
-                    Mode::Dir => {
-                        e.prevent_default();
-                        EditorFocus::container();
-                    }
+                    Mode::Dir => {}
                     Mode::Media(_) => EditorFocus::container(),
                 }
             },

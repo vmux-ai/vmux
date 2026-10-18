@@ -210,7 +210,7 @@ fn SideSheetSpaceCard(
 ) -> Element {
     let mut expanded = use_signal(|| true);
     rsx! {
-        div { class: "mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2",
+        div { class: "mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1",
             SideSheetSpaceRow {
                 space,
                 spaces,

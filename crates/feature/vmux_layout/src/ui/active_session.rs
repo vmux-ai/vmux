@@ -38,7 +38,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         page.title.clone()
     };
     rsx! {
-        div { class: "border-t border-foreground/10 px-2.5 py-2.5",
+        div { class: "px-2 py-2",
             div { class: "flex min-w-0 items-center gap-2.5",
                 div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
                     PageIconView {

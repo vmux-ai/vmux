@@ -296,17 +296,22 @@ fn chat_go_to_branch(
         return;
     };
     let checkout = evt.checkout.trim();
-    let request = if checkout.is_empty() {
-        let project = evt.project.trim();
+    let project = evt.project.trim();
+    let request = if !checkout.is_empty() {
+        AgentRequest::encode(&AgentChooseWorkspaceAtPath {
+            anchor: anchor.0,
+            path: checkout.to_string(),
+        })
+    } else if evt.branch.trim().is_empty() {
+        AgentRequest::encode(&AgentChooseWorkspaceAtPath {
+            anchor: anchor.0,
+            path: project.to_string(),
+        })
+    } else {
         AgentRequest::encode(&AgentCreateWorktreeOnBranch {
             anchor: anchor.0,
             branch: evt.branch.clone(),
             project: (!project.is_empty()).then(|| project.to_string()),
-        })
-    } else {
-        AgentRequest::encode(&AgentChooseWorkspaceAtPath {
-            anchor: anchor.0,
-            path: checkout.to_string(),
         })
     };
     let Ok(request) = request else {

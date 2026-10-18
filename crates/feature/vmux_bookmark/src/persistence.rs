@@ -12,7 +12,8 @@ use vmux_shortcut::ShortcutUrl;
 
 use crate::persistence_driver::{BookmarkFilter, BookmarkPersistencePath};
 
-const BOOKMARK_PIN_ORDER_REVISION: u32 = 1;
+const BOOKMARK_PIN_ORDER_REVISION: u32 = 2;
+const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
 
 pub(super) struct BookmarkPersistencePlugin;
 
@@ -148,6 +149,29 @@ fn insert_defaults(
 ) {
     let urls = &settings.browser.bookmarks;
     let folders = &settings.browser.bookmark_folders;
+    let retired_keys = RETIRED_DEFAULT_BOOKMARKS
+        .iter()
+        .map(|url| BookmarkSeed::key(url))
+        .collect::<HashSet<_>>();
+    let offered_before = seed
+        .offered
+        .urls
+        .iter()
+        .map(|url| BookmarkSeed::key(url))
+        .collect::<HashSet<_>>();
+    let mut retired_entities = HashSet::new();
+    if seed.offered.pin_order_revision < BOOKMARK_PIN_ORDER_REVISION {
+        for (entity, metadata, _) in &seed.pins {
+            let key = BookmarkSeed::key(&metadata.url);
+            if retired_keys.contains(&key) && offered_before.contains(&key) {
+                seed.commands.entity(entity).despawn();
+                retired_entities.insert(entity);
+            }
+        }
+        seed.offered
+            .urls
+            .retain(|url| !retired_keys.contains(&BookmarkSeed::key(url)));
+    }
     let mut offered_urls = seed
         .offered
         .urls
@@ -180,11 +204,14 @@ fn insert_defaults(
     }
     let legacy_folder_bookmarks = !seed.offered.folder_bookmarks.is_empty();
     seed.offered.folder_bookmarks.clear();
-    let mut changed =
-        !claimed_urls.is_empty() || !claimed_folders.is_empty() || legacy_folder_bookmarks;
+    let mut changed = !claimed_urls.is_empty()
+        || !claimed_folders.is_empty()
+        || legacy_folder_bookmarks
+        || !retired_entities.is_empty();
     let existing_pins = seed
         .pins
         .iter()
+        .filter(|(entity, _, _)| !retired_entities.contains(entity))
         .map(|(entity, metadata, order)| (entity, BookmarkSeed::key(&metadata.url), order.0))
         .collect::<Vec<_>>();
     let mut pinned = existing_pins

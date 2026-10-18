@@ -58,7 +58,7 @@ pub(super) fn BookmarksSection(
     rsx! {
         div {
             "data-bookmark-drop": "root",
-            class: "group relative z-30 mb-2 flex shrink-0 flex-col border-b border-foreground/[0.08] pb-2",
+            class: "group relative z-30 mb-2 flex shrink-0 flex-col rounded-lg bg-foreground/[0.035] p-1",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
                 let _ = send(&BookmarkMenuRootRequest);

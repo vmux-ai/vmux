@@ -28,7 +28,7 @@ pub fn UserBubble(
 ) -> Element {
     let you = translate("team-you");
     rsx! {
-        div { class: "chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
+        div { class: "chat-message-enter chat-user-bubble group flex w-full flex-row-reverse items-start justify-start gap-3 px-1 py-1 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
             Avatar {
                 src: None,
                 seed: avatar_name.clone(),
@@ -56,7 +56,7 @@ pub fn AssistantTurn(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
+        div { class: "chat-message-enter chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
             AgentThumbnail {
                 src: avatar_src,
                 seed: name.clone(),
@@ -937,6 +937,8 @@ fn md_to_html(src: &str) -> String {
 
 pub const MD_CSS: &str = r#"
 .session-chat-page{background-image:none}
+@keyframes chat-message-enter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.chat-message-enter{animation:chat-message-enter 180ms cubic-bezier(.16,1,.3,1) both}
 .chat-assistant-turn .disclosure>summary{transition:color 160ms ease}
 .chat-assistant-turn .disclosure>summary:hover{color:color-mix(in srgb,currentColor 68%,var(--agent-accent))}
 .agent-themed-activity{color:var(--agent-accent);background:color-mix(in srgb,var(--agent-accent) 11%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 18%,transparent)}
@@ -948,5 +950,5 @@ pub const MD_CSS: &str = r#"
 .agent-turn-meta-dot{background:var(--agent-accent)}
 .user-context-panel{border-color:color-mix(in srgb,var(--agent-accent) 14%,transparent);background:color-mix(in srgb,var(--agent-accent) 5%,rgba(127,127,127,0.025))}
 .user-context-panel>summary:hover{color:color-mix(in srgb,currentColor 65%,var(--agent-accent))}
-@media (prefers-reduced-motion:reduce){.agent-chat-caret{animation:none}}
+@media (prefers-reduced-motion:reduce){.agent-chat-caret,.chat-message-enter{animation:none}}
 "#;

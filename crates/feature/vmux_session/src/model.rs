@@ -49,7 +49,10 @@ impl Plugin for MetadataPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<RenameRequest>()
             .add_message::<DescriptionUpdateRequest>()
-            .add_systems(Update, (rename, update_description).in_set(MutationSet))
+            .add_systems(
+                Update,
+                (rename, update_description, sync_conversation_title).in_set(MutationSet),
+            )
             .add_systems(Update, project_views.after(MutationSet));
     }
 }
@@ -356,6 +359,21 @@ fn project_views(
             };
             page.title = name.as_str().to_string();
             page.url.clone_from(&url);
+        }
+    }
+}
+
+#[cfg(host)]
+fn sync_conversation_title(
+    mut sessions: Query<
+        (&AgentConversationTitle, &mut Name),
+        (With<Session>, Changed<AgentConversationTitle>),
+    >,
+) {
+    for (title, mut name) in &mut sessions {
+        let title = title.0.trim();
+        if !title.is_empty() && name.as_str() != title {
+            *name = Name::new(title.to_string());
         }
     }
 }
