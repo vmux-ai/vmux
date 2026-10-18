@@ -309,6 +309,7 @@ fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
 fn page_ready(
     trigger: On<UiInput<PageReady>>,
     pages: Query<&vmux_ecs::PageMetadata>,
+    states: Query<(), With<GitState>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -316,6 +317,9 @@ fn page_ready(
         return;
     };
     if !page.url.starts_with(crate::GIT_PAGE_URL) && page.url != super::GitPlugin::MANIFEST.url {
+        return;
+    }
+    if states.contains(entity) {
         return;
     }
     commands.entity(entity).insert(GitState::default());
@@ -488,5 +492,37 @@ mod tests {
             reveal_start: GitDiffRevealRequest::CHUNK,
             reveal_end: GitDiffRevealRequest::CHUNK * 2,
         }));
+    }
+
+    #[test]
+    fn page_ready_preserves_repository_loading_state() {
+        let mut app = App::new();
+        app.add_observer(page_ready);
+        let entity = app
+            .world_mut()
+            .spawn((
+                vmux_ecs::PageMetadata {
+                    url: crate::GIT_PAGE_URL.to_string(),
+                    ..Default::default()
+                },
+                GitState {
+                    snapshot: GitPageSnapshot {
+                        workspace: "/workspace".to_string(),
+                        loading: true,
+                        ..Default::default()
+                    },
+                },
+            ))
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview: entity,
+            payload: PageReady {},
+        });
+        app.update();
+
+        let state = app.world().get::<GitState>(entity).unwrap();
+        assert_eq!(state.snapshot.workspace, "/workspace");
+        assert!(state.snapshot.loading);
     }
 }

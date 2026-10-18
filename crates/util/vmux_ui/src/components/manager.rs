@@ -1,6 +1,7 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
 use crate::components::skeleton::Skeleton;
+use crate::icon::{LineIcon, LineIconView};
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -83,25 +84,33 @@ pub struct ManagerTab {
 pub fn ManagerTabs(
     active: String,
     tabs: Vec<ManagerTab>,
+    #[props(default)] content_class: String,
     onselect: EventHandler<String>,
 ) -> Element {
+    let content_class = if content_class.is_empty() {
+        "mx-auto flex w-full items-center justify-center".to_string()
+    } else {
+        content_class
+    };
     rsx! {
         nav { class: "flex shrink-0 overflow-x-auto bg-foreground/[0.018] px-5 py-2.5",
-            div { class: "mx-auto flex min-w-max items-center gap-0.5 rounded-lg bg-foreground/[0.055] p-1",
-                for tab in tabs {
-                    a {
-                        href: "{tab.href}",
-                        onclick: move |event| {
-                            event.prevent_default();
-                            onselect.call(tab.href.clone());
-                        },
-                        aria_current: if tab.id == active { "page" } else { "false" },
-                        class: if tab.id == active {
-                            "flex h-7 items-center rounded-md bg-foreground/[0.08] px-3 text-xs font-semibold text-foreground"
-                        } else {
-                            "flex h-7 items-center rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-                        },
-                        "{tab.label}"
+            div { class: "{content_class}",
+                div { class: "flex min-w-max items-center gap-0.5 rounded-lg bg-foreground/[0.055] p-1",
+                    for tab in tabs {
+                        a {
+                            href: "{tab.href}",
+                            onclick: move |event| {
+                                event.prevent_default();
+                                onselect.call(tab.href.clone());
+                            },
+                            aria_current: if tab.id == active { "page" } else { "false" },
+                            class: if tab.id == active {
+                                "flex h-7 items-center rounded-md bg-foreground/[0.08] px-3 text-xs font-semibold text-foreground"
+                            } else {
+                                "flex h-7 items-center rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                            },
+                            "{tab.label}"
+                        }
                     }
                 }
             }
@@ -117,27 +126,74 @@ pub fn ManagerHeader(
     search_placeholder: String,
     onsearch: EventHandler<FormEvent>,
     onkeydown: Option<EventHandler<KeyboardEvent>>,
+    #[props(default)] content_class: String,
     actions: Element,
 ) -> Element {
     rsx! {
         header { class: "shrink-0 bg-foreground/[0.018] px-5 py-3",
-            div { class: "flex items-center gap-3",
-                h1 { class: "text-base font-semibold tracking-tight", "{title}" }
-                span { class: "text-xs tabular-nums text-muted-foreground/70", "{count}" }
-                div { class: "flex-1" }
-                {actions}
+            div { class: "{content_class}",
+                div { class: "flex items-center gap-3",
+                    h1 { class: "text-base font-semibold tracking-tight", "{title}" }
+                    span { class: "text-xs tabular-nums text-muted-foreground/70", "{count}" }
+                    div { class: "flex-1" }
+                    {actions}
+                }
+                input {
+                    r#type: "search",
+                    class: "mt-3 w-full rounded-lg bg-foreground/[0.05] px-4 py-2.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.075]",
+                    placeholder: "{search_placeholder}",
+                    value: "{search_value}",
+                    oninput: move |event| onsearch.call(event),
+                    onkeydown: move |event| {
+                        if let Some(handler) = &onkeydown {
+                            handler.call(event);
+                        }
+                    },
+                }
             }
-            input {
-                r#type: "search",
-                class: "mt-3 w-full rounded-lg bg-foreground/[0.05] px-4 py-2.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.075]",
-                placeholder: "{search_placeholder}",
-                value: "{search_value}",
-                oninput: move |event| onsearch.call(event),
-                onkeydown: move |event| {
-                    if let Some(handler) = &onkeydown {
-                        handler.call(event);
-                    }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum ManagerView {
+    #[default]
+    List,
+    Grid,
+}
+
+#[component]
+pub fn ManagerViewToggle(
+    view: ManagerView,
+    list_label: String,
+    grid_label: String,
+    onchange: EventHandler<ManagerView>,
+) -> Element {
+    rsx! {
+        div { class: "flex items-center rounded-lg bg-foreground/[0.05] p-0.5",
+            button {
+                r#type: "button",
+                aria_label: list_label,
+                aria_pressed: view == ManagerView::List,
+                class: if view == ManagerView::List {
+                    "flex size-7 items-center justify-center rounded-md bg-foreground/[0.09] text-foreground"
+                } else {
+                    "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                 },
+                onclick: move |_| onchange.call(ManagerView::List),
+                LineIconView { icon: LineIcon::List, class: "size-3.5" }
+            }
+            button {
+                r#type: "button",
+                aria_label: grid_label,
+                aria_pressed: view == ManagerView::Grid,
+                class: if view == ManagerView::Grid {
+                    "flex size-7 items-center justify-center rounded-md bg-foreground/[0.09] text-foreground"
+                } else {
+                    "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                },
+                onclick: move |_| onchange.call(ManagerView::Grid),
+                LineIconView { icon: LineIcon::Grid2X2, class: "size-3.5" }
             }
         }
     }
@@ -165,9 +221,43 @@ pub fn ManagerRow(
     meta: Element,
     actions: Element,
     #[props(default = true)] show_icon: bool,
+    #[props(default)] selected: bool,
+    #[props(default)] onselect: Option<EventHandler<()>>,
 ) -> Element {
+    let interactive = onselect.is_some();
+    let class = match (interactive, selected) {
+        (_, true) => {
+            "group flex items-center gap-4 rounded-lg bg-primary/[0.09] px-4 py-3 shadow-[inset_2px_0_0_var(--primary)] transition-colors"
+        }
+        (true, false) => {
+            "group flex cursor-pointer items-center gap-4 rounded-lg bg-foreground/[0.03] px-4 py-3 transition-colors hover:bg-foreground/[0.065]"
+        }
+        (false, false) => {
+            "group flex items-center gap-4 rounded-lg bg-foreground/[0.03] px-4 py-3 transition-colors hover:bg-foreground/[0.065]"
+        }
+    };
     rsx! {
-        div { class: "group flex items-center gap-4 rounded-lg bg-foreground/[0.03] px-4 py-3 transition-colors hover:bg-foreground/[0.065]",
+        div {
+            class,
+            role: if interactive { "button" } else { "group" },
+            tabindex: if interactive { "0" } else { "-1" },
+            aria_selected: selected,
+            onclick: move |_| {
+                if let Some(handler) = &onselect {
+                    handler.call(());
+                }
+            },
+            onkeydown: move |event| {
+                let activate = event.key() == Key::Enter
+                    || matches!(event.key(), Key::Character(key) if key == " ");
+                if !activate {
+                    return;
+                }
+                event.prevent_default();
+                if let Some(handler) = &onselect {
+                    handler.call(());
+                }
+            },
             if show_icon {
                 div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.065]",
                     {icon}

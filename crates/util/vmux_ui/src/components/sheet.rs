@@ -28,7 +28,6 @@ pub fn SheetHeaderAction(
         button {
             r#type: "button",
             aria_label: label.clone(),
-            title: label,
             class,
             onclick: move |event| onclick.call(event),
             {children}

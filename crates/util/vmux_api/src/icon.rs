@@ -19,6 +19,7 @@ pub enum BuiltinIcon {
     Bash,
     Zsh,
     Hammer,
+    Toolbox,
     Vault,
     Smartphone,
     Keyboard,

@@ -1,8 +1,9 @@
 use crate::event::{ActiveSession, SideSheetPane, StackRevealTarget};
 use dioxus::prelude::*;
 use vmux_ecs::event::space::{
-    SpaceAttachRequest, SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest,
-    SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
+    SpaceAttachRequest, SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest,
+    SpaceFormOpenRequest, SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
+    SpacesListEvent,
 };
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::dropdown::Dropdown;
@@ -11,6 +12,7 @@ use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderCh
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
 
 use super::active_session::ActiveSessionPanel;
@@ -24,18 +26,42 @@ use super::window_drag::WindowDragRegion;
 
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
-    let handle_class = if resizing() {
+    let mut visible = use_signal(|| false);
+    let mut last_motion = use_signal(|| 0i64);
+    use_future(move || async move {
+        loop {
+            Platform::sleep(120).await;
+            if resizing() || !visible() {
+                continue;
+            }
+            if Platform::now() - last_motion() >= 240 {
+                visible.set(false);
+            }
+        }
+    });
+    let handle_class = if resizing() || visible() {
         "h-10 w-1 rounded-full bg-foreground/45 opacity-100"
     } else {
-        "h-8 w-1 rounded-full bg-foreground/20 opacity-0 transition-[height,background-color,opacity] duration-150 group-hover:h-10 group-hover:bg-foreground/35 group-hover:opacity-100"
+        "h-8 w-1 rounded-full bg-foreground/20 opacity-0 transition-[height,background-color,opacity] duration-150"
     };
     rsx! {
         div {
-            class: "group absolute inset-y-0 z-20 flex w-4 cursor-col-resize items-center justify-center",
+            class: "absolute inset-y-0 z-20 flex w-4 cursor-col-resize items-center justify-center",
             style: "right:-12px;",
+            onmouseenter: move |_| {
+                last_motion.set(Platform::now());
+                visible.set(true);
+            },
+            onmousemove: move |_| {
+                last_motion.set(Platform::now());
+                visible.set(true);
+            },
+            onmouseleave: move |_| visible.set(false),
+            onpointerleave: move |_| visible.set(false),
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);
+                visible.set(true);
             },
             div { class: "{handle_class}" }
         }
@@ -246,6 +272,7 @@ fn SideSheetSpaceRow(
     let menu_value = use_signal(|| space.id.clone());
     let menu_id = space.id.clone();
     let menu_name = space.name.clone();
+    let deletable = spaces.spaces.len() > 1;
 
     rsx! {
         Dropdown {
@@ -326,12 +353,14 @@ fn SideSheetSpaceRow(
                 }
             }
             if open() {
-                div { class: "absolute left-1 right-1 top-11 z-40 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
+                div { class: "absolute left-2 right-2 top-12 z-40 isolate rounded-xl bg-background/95 p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.38)] ring-1 ring-inset ring-foreground/[0.14]",
                     for choice in spaces.spaces {
                         SpaceChoice {
                             key: "{choice.id}",
                             space: choice,
+                            deletable,
                             onselect: move |_| open.set(false),
+                            ondelete: move |_| open.set(false),
                         }
                     }
                     div { class: "my-1 h-px bg-foreground/[0.08]" }
@@ -355,28 +384,60 @@ fn SideSheetSpaceRow(
 }
 
 #[component]
-fn SpaceChoice(space: SpaceRow, onselect: EventHandler<()>) -> Element {
-    let space_id = space.id.clone();
+fn SpaceChoice(
+    space: SpaceRow,
+    deletable: bool,
+    onselect: EventHandler<()>,
+    ondelete: EventHandler<()>,
+) -> Element {
+    let select_id = space.id.clone();
+    let delete_id = space.id.clone();
     rsx! {
-        button {
-            r#type: "button",
+        div {
             class: if space.is_active {
-                "flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.07] px-2 text-left text-[11px] text-foreground"
+                "group relative flex h-8 w-full items-center rounded-md bg-foreground/[0.07] text-left text-[11px] text-foreground"
             } else {
-                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                "group relative flex h-8 w-full items-center rounded-md text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
             },
-            onclick: move |_| {
-                onselect.call(());
-                let _ = send(&SpaceAttachRequest { space_id: space_id.clone() });
-            },
-            LineIconView {
-                icon: LineIcon::Planet,
-                class: "size-3.5 shrink-0".to_string(),
+            button {
+                r#type: "button",
+                class: "absolute inset-0 z-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60",
+                aria_label: space.display_name(),
+                onclick: move |_| {
+                    onselect.call(());
+                    let _ = send(&SpaceAttachRequest { space_id: select_id.clone() });
+                },
             }
-            span { class: "min-w-0 flex-1 truncate", {space.display_name()} }
-            if space.is_active {
-                Icon { class: "size-3.5 shrink-0",
-                    path { d: "m5 12 4 4L19 6" }
+            div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2 px-2",
+                LineIconView {
+                    icon: LineIcon::Planet,
+                    class: "size-3.5 shrink-0".to_string(),
+                }
+                span { class: "min-w-0 flex-1 truncate", {space.display_name()} }
+                if deletable {
+                    div { class: "pointer-events-auto relative size-6 shrink-0",
+                        if space.is_active {
+                            Icon { class: "absolute inset-1 size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
+                                path { d: "m5 12 4 4L19 6" }
+                            }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "absolute inset-0 flex items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100",
+                            aria_label: translate("common-delete"),
+                            onclick: move |event| {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                ondelete.call(());
+                                let _ = send(&SpaceDeleteRequest { space_id: delete_id.clone() });
+                            },
+                            LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }
+                        }
+                    }
+                } else if space.is_active {
+                    Icon { class: "size-3.5 shrink-0",
+                        path { d: "m5 12 4 4L19 6" }
+                    }
                 }
             }
         }

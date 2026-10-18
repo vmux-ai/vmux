@@ -21,7 +21,7 @@
                 "mcp",
                 "import",
             ],
-            icon: "Hammer",
+            icon: "Toolbox",
             command_bar: true,
             manifest: true,
             permissions: [

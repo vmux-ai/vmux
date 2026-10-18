@@ -27,6 +27,7 @@ pub enum LineIcon {
     GitMerge,
     GitPullRequest,
     Globe,
+    Grid2X2,
     Image,
     Inbox,
     Layout,
@@ -138,6 +139,12 @@ impl LineIcon {
                 "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
                 "M2 12h20",
                 "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z",
+            ],
+            Self::Grid2X2 => &[
+                "M4 4h6v6H4Z",
+                "M14 4h6v6h-6Z",
+                "M4 14h6v6H4Z",
+                "M14 14h6v6h-6Z",
             ],
             Self::Image => &[
                 "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
@@ -318,6 +325,12 @@ mod wasm {
             } },
             BuiltinIcon::Hammer => rsx! { Icon { class: "{class}",
                 path { d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94Z" }
+            } },
+            BuiltinIcon::Toolbox => rsx! { Icon { class: "{class}",
+                path { d: "M8 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }
+                path { d: "M4 8h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" }
+                path { d: "M2 13h20" }
+                path { d: "M9 13v3h6v-3" }
             } },
             BuiltinIcon::Vault => rsx! { Icon { class: "{class}",
                 path { d: "M12 3 4.5 6v5.5c0 4.7 3.2 8.1 7.5 9.5 4.3-1.4 7.5-4.8 7.5-9.5V6Z" }

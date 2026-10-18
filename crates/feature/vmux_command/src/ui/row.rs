@@ -19,9 +19,9 @@ pub fn ResultRow(
     let section = item.section.clone();
     let disabled = item.disabled;
     let row_class = if selected {
-        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden bg-primary/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
+        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden bg-primary/12 px-2.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
     } else {
-        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
+        "flex min-h-15 min-w-0 w-full items-center justify-between overflow-hidden px-2.5 py-2.5 hover:bg-foreground/5"
     };
     rsx! {
         if let Some(section) = section {
@@ -174,7 +174,7 @@ fn SectionRow(section: CommandBarSection) -> Element {
         return rsx! {};
     }
     rsx! {
-        div { class: "sticky top-0 z-10 flex min-w-0 items-center gap-1.5 border-y border-foreground/[0.06] bg-background/95 px-4 py-1.5 backdrop-blur",
+        div { class: "sticky top-0 z-10 flex min-w-0 items-center gap-1.5 border-y border-foreground/[0.06] bg-background/95 px-2.5 py-1.5 backdrop-blur",
             for label in section.labels {
                 span {
                     class: "flex h-6 min-w-0 items-center rounded-md bg-foreground/[0.045] px-2 text-[11px] text-muted-foreground/75",

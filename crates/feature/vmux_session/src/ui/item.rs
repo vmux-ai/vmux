@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use dioxus::prelude::*;
 use vmux_api::chat::{
     ChatDiffLineKind, ChatItem, ChatPlanStatus, ChatSubagentState, ChatSubagentStatus,
@@ -15,7 +17,7 @@ use crate::activity::{ActivityIcon, ToolPresentation};
 use vmux_ui::clipboard::Clipboard;
 use vmux_ui::platform::Platform;
 
-use pulldown_cmark::{Event, Options, Parser, html};
+use pulldown_cmark::{CowStr, Event, Options, Parser, html};
 
 #[component]
 pub fn UserBubble(
@@ -122,6 +124,24 @@ mod timestamp_tests {
     #[test]
     fn missing_message_timestamp_stays_hidden() {
         assert_eq!(message_timestamp(0), None);
+    }
+
+    #[test]
+    fn streaming_markdown_animates_each_new_word() {
+        let html = md_to_streaming_html("Hello brave world", "Hello ");
+
+        assert_eq!(html.matches("chat-stream-word").count(), 2);
+        assert!(html.contains("Hello "));
+        assert!(html.contains("brave"));
+        assert!(html.contains("world"));
+    }
+
+    #[test]
+    fn streaming_markdown_keeps_existing_words_stable() {
+        let html = md_to_streaming_html("One two three", "One two");
+
+        assert_eq!(html.matches("chat-stream-word").count(), 1);
+        assert!(html.contains("One two "));
     }
 }
 
@@ -252,6 +272,15 @@ pub fn TurnView(
     let key = turn_index;
     let turn = &turn;
     let reconnecting = matches!(turn.rows.last(), Some(ChatTurnRow::Reconnect { .. }));
+    let live_text_index = turn
+        .running
+        .then(|| {
+            turn.rows.iter().rev().find_map(|row| match row {
+                ChatTurnRow::Text { index, .. } => Some(*index),
+                _ => None,
+            })
+        })
+        .flatten();
     let duration_label = turn.duration_secs.map(|duration| {
         if turn.step_count == 0 {
             let elapsed = Elapsed(duration).to_string();
@@ -291,7 +320,11 @@ pub fn TurnView(
                     copy_text: turn.copy_text.clone(),
                     created_at_ms: turn.created_at_ms,
                     for row in turn.rows.iter().cloned() {
-                        TurnBlock { key: "{row.index()}", row }
+                        TurnBlock {
+                            key: "{row.index()}",
+                            streaming: live_text_index == Some(row.index()),
+                            row,
+                        }
                     }
                     if turn.running && !reconnecting {
                         WorkingIndicator {}
@@ -598,16 +631,14 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
 }
 
 #[component]
-pub fn TurnBlock(row: ChatTurnRow) -> Element {
+pub fn TurnBlock(row: ChatTurnRow, #[props(default)] streaming: bool) -> Element {
     let key = row.index();
     match row {
-        ChatTurnRow::Text { text, .. } => rsx! {
-            div {
-                key: "{key}",
-                class: CHAT_MD_CLASS,
-                dangerous_inner_html: md_to_html(&text),
+        ChatTurnRow::Text { text, .. } => {
+            rsx! {
+                StreamingMarkdown { key: "{key}", text, streaming }
             }
-        },
+        }
         ChatTurnRow::Thinking { text, latest, .. } => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 ActivityIconView { kind: ActivityIcon::Thinking }
@@ -935,10 +966,128 @@ fn md_to_html(src: &str) -> String {
     out
 }
 
+#[component]
+fn StreamingMarkdown(text: String, streaming: bool) -> Element {
+    let previous = use_hook(|| RefCell::new(String::new()));
+    let html = if streaming {
+        let previous_text = previous.borrow().clone();
+        md_to_streaming_html(&text, &previous_text)
+    } else {
+        md_to_html(&text)
+    };
+    previous.replace(text.clone());
+    rsx! {
+        div {
+            class: CHAT_MD_CLASS,
+            dangerous_inner_html: html,
+        }
+    }
+}
+
+fn md_to_streaming_html(src: &str, previous: &str) -> String {
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TABLES);
+    let stable = shared_visible_prefix(
+        &markdown_visible_text(previous),
+        &markdown_visible_text(src),
+    );
+    let mut visible_offset = 0;
+    let mut word_index = 0;
+    let mut events = Vec::new();
+    for event in Parser::new_ext(src, opts)
+        .filter(|event| !matches!(event, Event::Html(_) | Event::InlineHtml(_)))
+    {
+        match event {
+            Event::Text(text) => {
+                let text = text.to_string();
+                let end = visible_offset + text.len();
+                if end <= stable {
+                    events.push(Event::Text(CowStr::Boxed(text.into_boxed_str())));
+                } else {
+                    let split = stable.saturating_sub(visible_offset).min(text.len());
+                    if split > 0 {
+                        events.push(Event::Text(CowStr::Boxed(
+                            text[..split].to_string().into_boxed_str(),
+                        )));
+                    }
+                    push_animated_words(&mut events, &text[split..], &mut word_index);
+                }
+                visible_offset = end;
+            }
+            Event::Code(text) => {
+                visible_offset += text.len();
+                events.push(Event::Code(text));
+            }
+            event => events.push(event),
+        }
+    }
+    let mut out = String::new();
+    html::push_html(&mut out, events.into_iter());
+    out
+}
+
+fn markdown_visible_text(src: &str) -> String {
+    let mut visible = String::new();
+    for event in Parser::new_ext(src, Options::empty()) {
+        match event {
+            Event::Text(text) | Event::Code(text) => visible.push_str(&text),
+            _ => {}
+        }
+    }
+    visible
+}
+
+fn shared_visible_prefix(previous: &str, current: &str) -> usize {
+    let mut shared = 0;
+    for (left, right) in previous.chars().zip(current.chars()) {
+        if left != right {
+            break;
+        }
+        shared += left.len_utf8();
+    }
+    shared
+}
+
+fn push_animated_words<'a>(events: &mut Vec<Event<'a>>, text: &str, word_index: &mut usize) {
+    let mut start = 0;
+    while start < text.len() {
+        let whitespace = text[start..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace);
+        let end = text[start..]
+            .char_indices()
+            .skip(1)
+            .find(|(_, character)| character.is_whitespace() != whitespace)
+            .map(|(index, _)| start + index)
+            .unwrap_or(text.len());
+        let segment = &text[start..end];
+        if whitespace {
+            events.push(Event::Text(CowStr::Boxed(
+                segment.to_string().into_boxed_str(),
+            )));
+        } else {
+            let delay = (*word_index * 35).min(280);
+            let opening =
+                format!("<span class=\"chat-stream-word\" style=\"animation-delay:{delay}ms\">");
+            events.push(Event::Html(CowStr::Boxed(opening.into_boxed_str())));
+            events.push(Event::Text(CowStr::Boxed(
+                segment.to_string().into_boxed_str(),
+            )));
+            events.push(Event::Html(CowStr::Borrowed("</span>")));
+            *word_index += 1;
+        }
+        start = end;
+    }
+}
+
 pub const MD_CSS: &str = r#"
 .session-chat-page{background-image:none}
 @keyframes chat-message-enter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .chat-message-enter{animation:chat-message-enter 180ms cubic-bezier(.16,1,.3,1) both}
+@keyframes chat-stream-word-enter{from{opacity:.18;filter:blur(1.5px)}to{opacity:1;filter:blur(0)}}
+.chat-stream-word{animation:chat-stream-word-enter 180ms cubic-bezier(.16,1,.3,1) both}
 .chat-assistant-turn .disclosure>summary{transition:color 160ms ease}
 .chat-assistant-turn .disclosure>summary:hover{color:color-mix(in srgb,currentColor 68%,var(--agent-accent))}
 .agent-themed-activity{color:var(--agent-accent);background:color-mix(in srgb,var(--agent-accent) 11%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 18%,transparent)}
@@ -950,5 +1099,5 @@ pub const MD_CSS: &str = r#"
 .agent-turn-meta-dot{background:var(--agent-accent)}
 .user-context-panel{border-color:color-mix(in srgb,var(--agent-accent) 14%,transparent);background:color-mix(in srgb,var(--agent-accent) 5%,rgba(127,127,127,0.025))}
 .user-context-panel>summary:hover{color:color-mix(in srgb,currentColor 65%,var(--agent-accent))}
-@media (prefers-reduced-motion:reduce){.agent-chat-caret,.chat-message-enter{animation:none}}
+@media (prefers-reduced-motion:reduce){.agent-chat-caret,.chat-message-enter,.chat-stream-word{animation:none}}
 "#;

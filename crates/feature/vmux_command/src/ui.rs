@@ -486,8 +486,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             } else {
                 PromptBox {
                     glass: false,
-                    class: "p-2",
-                    div { class: "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3",
+                    class: "px-1.5 py-2",
+                    div { class: "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-2",
                         if !file_only {
                             PaletteModeChip {
                                 mode: projection.mode.clone(),
