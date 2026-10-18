@@ -573,7 +573,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         key: "{i}",
                         index: i,
                         item: item.clone(),
-                        selected: i == projection.selected as usize,
+                        selected: i == projection.selected as usize
+                            && (projection.navigating || !q.trim().is_empty()),
                         on_activate: move |_| {
                             let _ = send(&CommandPaletteActivateRequest {
                                 open_id: state().open_id,

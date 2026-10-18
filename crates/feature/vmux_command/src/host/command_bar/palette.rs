@@ -73,6 +73,8 @@ impl Plugin for PalettePlugin {
             .add_observer(complete)
             .add_observer(dismiss)
             .add_observer(submit)
+            .add_observer(attach_launcher)
+            .add_observer(attach_panel)
             .add_systems(PreUpdate, (attach, detach))
             .add_systems(Update, settle_results)
             .add_systems(
@@ -201,6 +203,33 @@ struct PaletteRowsSnapshot(PaletteRows);
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 struct PaletteContributionRows(Vec<Entity>);
 
+struct PaletteRuntime;
+
+impl PaletteRuntime {
+    fn bundle() -> impl Bundle {
+        (
+            PaletteSnapshot::default(),
+            PaletteOpen::default(),
+            PaletteContext::default(),
+            PaletteDraftInput::default(),
+            PublishedQuery::default(),
+            PaletteRowsSnapshot::default(),
+            PaletteContributionRows::default(),
+        )
+    }
+
+    fn attach(
+        entity: Entity,
+        existing: &Query<(), With<PaletteSnapshot>>,
+        commands: &mut Commands,
+    ) {
+        if existing.contains(entity) {
+            return;
+        }
+        commands.entity(entity).insert(Self::bundle());
+    }
+}
+
 #[vmux_command::command]
 struct CommandBarNextBinding;
 
@@ -225,16 +254,24 @@ struct PaletteDecisionReady {
 
 fn attach(pages: Query<Entity, NewPalette<PaletteSnapshot>>, mut commands: Commands) {
     for page in &pages {
-        commands.entity(page).insert((
-            PaletteSnapshot::default(),
-            PaletteOpen::default(),
-            PaletteContext::default(),
-            PaletteDraftInput::default(),
-            PublishedQuery::default(),
-            PaletteRowsSnapshot::default(),
-            PaletteContributionRows::default(),
-        ));
+        commands.entity(page).insert(PaletteRuntime::bundle());
     }
+}
+
+fn attach_launcher(
+    trigger: On<Add, HostsLauncher>,
+    existing: Query<(), With<PaletteSnapshot>>,
+    mut commands: Commands,
+) {
+    PaletteRuntime::attach(trigger.event_target(), &existing, &mut commands);
+}
+
+fn attach_panel(
+    trigger: On<Add, RendersLauncherPanel>,
+    existing: Query<(), With<PaletteSnapshot>>,
+    mut commands: Commands,
+) {
+    PaletteRuntime::attach(trigger.event_target(), &existing, &mut commands);
 }
 
 fn open(
@@ -261,6 +298,14 @@ fn open(
     };
     current.0.clone_from(opened);
     if draft.initialized && draft.open_id == opened.open_id {
+        commands.trigger(UiInput {
+            webview: trigger.event().webview(),
+            payload: CommandPaletteDraftRequest {
+                open_id: opened.open_id,
+                query: draft.query.clone(),
+                start,
+            },
+        });
         return;
     }
     draft.initialized = true;
@@ -1069,6 +1114,68 @@ mod tests {
             snapshot.0.projection.composer.agents[0].url,
             "vmux://sessions/?agent=codex-acp"
         );
+    }
+
+    #[test]
+    fn start_surface_refreshes_a_none_open_id_after_catalog_arrives() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin);
+        let page = app.world_mut().spawn(HostsLauncher).id();
+        app.update();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                page,
+                &CommandBarOpenEvent::default(),
+            ));
+        app.update();
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                page,
+                &CommandBarOpenEvent {
+                    pages: vec![CommandBarPage {
+                        url: "vmux://sessions/?agent=codex-acp".into(),
+                        title: "Codex".into(),
+                        prompt_target: true,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert_eq!(snapshot.0.projection.composer.agents.len(), 1);
+        assert!(!snapshot.0.projection.composer.loading);
+    }
+
+    #[test]
+    fn launcher_addition_attaches_palette_before_the_first_snapshot() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin);
+        app.update();
+        let page = app.world_mut().spawn_empty().id();
+        app.world_mut().entity_mut(page).insert(HostsLauncher);
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                page,
+                &CommandBarOpenEvent {
+                    commands: vec![CommandBarCommandEntry {
+                        id: "settings".into(),
+                        name: "Settings".into(),
+                        shortcut: String::new(),
+                    }],
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert!(!snapshot.0.projection.composer.loading);
     }
 
     #[test]

@@ -186,7 +186,7 @@ pub fn DiffView(
 
     rsx! {
         div {
-            class: if visible { "min-h-0 flex-1 overflow-auto bg-background/35 font-mono text-xs leading-5" } else { "hidden" },
+            class: if visible { "min-h-0 flex-1 overflow-auto bg-background font-mono text-xs leading-6" } else { "hidden" },
 
             if loading {
                 div { class: "flex flex-col gap-2 p-3",
@@ -208,23 +208,23 @@ pub fn DiffView(
                         rsx! {
                             div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
                                 div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
-                                    span { class: "sticky left-0 z-[1] flex shrink-0 select-none border-r border-foreground/[0.08] bg-background/95 shadow-[4px_0_10px_-8px_rgba(0,0,0,0.8)] backdrop-blur-sm",
+                                    span { class: "flex shrink-0 select-none bg-card/70",
                                         span {
                                             class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
                                             style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
                                             "{opt_no(line.old_no)}"
                                         }
                                         span {
-                                            class: "flex shrink-0 items-center justify-end border-l border-foreground/[0.045] px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
+                                            class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
                                             style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
                                             "{opt_no(line.new_no)}"
                                         }
                                         span {
-                                            class: "flex w-6 shrink-0 items-center justify-center border-l border-foreground/[0.045] font-semibold {DiffPresentation::from(line.kind).text_class()}",
+                                            class: "flex w-6 shrink-0 items-center justify-center font-semibold {DiffPresentation::from(line.kind).text_class()}",
                                             "{DiffPresentation::from(line.kind).sign()}"
                                         }
                                     }
-                                    span { class: "min-w-0 pr-8",
+                                    span { class: "min-w-0 px-2 pr-8",
                                         for (j, styled) in line.spans.iter().enumerate() {
                                             span { key: "{j}", style: "{span_style(styled)}", "{styled.text}" }
                                         }
@@ -236,7 +236,7 @@ pub fn DiffView(
                                         let reject_path_bytes = path_bytes.clone();
                                         rsx! {
                                             div {
-                                                class: "flex min-w-full items-center justify-end gap-1.5 border-y border-foreground/[0.06] bg-background/70 px-3 py-1 font-sans text-[11px] select-none backdrop-blur-sm",
+                                                class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
                                                 Button {
                                                     variant: ButtonVariant::Ghost,
                                                     class: "h-6 gap-1 rounded-md border border-ansi-2/15 bg-ansi-2/[0.045] px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/10 hover:text-ansi-2",

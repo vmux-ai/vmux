@@ -201,7 +201,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     let root = project.root;
     let choices = project.choices;
     let mut choosing = use_signal(|| false);
-    let mut expanded = use_signal(|| false);
+    let mut expanded = use_signal(|| true);
     let toggle_label = if expanded() {
         translate("common-collapse")
     } else {

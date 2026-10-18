@@ -256,7 +256,7 @@ pub(super) fn BranchesCard(
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-9 shrink-0 items-center gap-1 px-2",
+            div { class: "flex h-10 shrink-0 items-center gap-1 px-3",
                 BranchCollectionTabs {
                     branch_collection,
                 }
@@ -265,7 +265,7 @@ pub(super) fn BranchesCard(
                     {branch_operations}
                 }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-0.5",
+            div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                 match collection {
                     GitBranchCollection::Local => rsx! {
                         for (index, branch) in repository.branches.into_iter().enumerate() {
@@ -348,9 +348,9 @@ fn BranchRow(
             r#type: "button",
             title: if branch.checkout.is_empty() { branch.upstream.clone() } else { branch.checkout.clone() },
             class: if selected_branch == branch.name {
-                "flex h-5 w-full items-center justify-start gap-1 rounded px-1.5 text-left text-foreground bg-primary/[0.10] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md bg-primary/[0.10] px-2.5 text-left text-foreground"
             } else {
-                "flex h-5 w-full items-center justify-start gap-1 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md px-2.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
                 let _ = send(&GitBranchSelectRequest {
@@ -364,7 +364,7 @@ fn BranchRow(
                 remote,
             }
             div { class: "flex min-w-0 flex-1 items-center gap-1.5",
-                span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{branch.name}" }
+                span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{branch.name}" }
                 if branch.ahead > 0 {
                     span { class: "shrink-0 rounded-full bg-sky-400/10 px-1.5 font-mono text-[8px] text-sky-400", "↑{branch.ahead}" }
                 }
@@ -393,9 +393,9 @@ fn TagRow(tag: GitTagEntry, index: usize, selected_branch: String) -> Element {
             r#type: "button",
             title: "{tag.message}",
             class: if selected_branch == tag.name {
-                "flex h-5 w-full items-center justify-start gap-1.5 rounded px-1.5 text-left text-foreground bg-primary/[0.10] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md bg-primary/[0.10] px-2.5 text-left text-foreground"
             } else {
-                "flex h-5 w-full items-center justify-start gap-1.5 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md px-2.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
                 let _ = send(&GitBranchSelectRequest {
@@ -403,7 +403,7 @@ fn TagRow(tag: GitTagEntry, index: usize, selected_branch: String) -> Element {
                 });
             },
             LineIconView { icon: LineIcon::Tag, class: "size-3 shrink-0 text-violet-400/75" }
-            span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{tag.name}" }
+            span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{tag.name}" }
             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{tag.short_sha}" }
             span { class: "shrink-0 text-[8px] text-muted-foreground", "{tag.date}" }
         }

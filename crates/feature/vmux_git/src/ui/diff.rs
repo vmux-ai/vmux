@@ -30,7 +30,7 @@ pub(super) fn CommitDiffCard(
         .unwrap_or_else(|| translate("git-no-commits"));
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.012] px-3",
+            div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
                 LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0 text-muted-foreground" }
                 span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{title}" }
             }
@@ -64,7 +64,7 @@ pub(super) fn DiffCard(
 ) -> Element {
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.012] px-3",
+            div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
                 TypeIcon { path: selected_path(), is_dir: false, class: "size-3.5 shrink-0" }
                 span { class: "min-w-0 flex-1 truncate font-mono text-[11px] font-medium",
                     if selected_path().is_empty() { {translate("git-select-file")} } else { "{selected_path}" }

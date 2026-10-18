@@ -124,7 +124,7 @@ pub(super) fn BookmarksSection(
                         if !pins.is_empty() {
                             div {
                                 "data-bookmark-drop": "",
-                                class: "mb-1 grid grid-cols-4 gap-1.5 p-1 @min-[20rem]:grid-cols-5 @min-[24rem]:grid-cols-6 @min-[28rem]:grid-cols-7 @min-[32rem]:grid-cols-8 @min-[36rem]:grid-cols-9",
+                                class: "mb-1 grid grid-cols-6 gap-1 p-1 @min-[24rem]:grid-cols-7 @min-[28rem]:grid-cols-8 @min-[32rem]:grid-cols-9",
                                 for (index, pin) in pins.iter().enumerate() {
                                     PinTile {
                                         key: "{pin.row.uuid}",
@@ -392,7 +392,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
     };
     rsx! {
         div {
-            class: "relative aspect-square w-full max-w-10 justify-self-center",
+            class: "relative aspect-square w-full max-w-8 justify-self-center",
             onpointerenter: move |_| set_bookmark_drop_target(drag_state, drop_target.clone()),
             onpointerleave: move |_| clear_bookmark_drop_target(drag_state, &leave_target),
             if targeted {

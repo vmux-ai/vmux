@@ -271,7 +271,29 @@ impl GitRepository {
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
-        Ok(parse::DiffParser::parse(&stdout))
+        let first_path = stdout.lines().find_map(Self::diff_file_path);
+        let mut path = first_path.map(|path| self.0.join(path)).unwrap_or_default();
+        let mut lines = parse::DiffParser::parse(&stdout);
+        for line in &mut lines {
+            let text = line
+                .spans
+                .first()
+                .map(|span| span.text.clone())
+                .unwrap_or_default();
+            if matches!(line.kind, DiffKind::Hunk) {
+                if !text.starts_with("@@") && !text.is_empty() {
+                    path = self.0.join(&text);
+                }
+                continue;
+            }
+            line.spans = crate::host::highlight::Highlighter::line(&text, &path);
+        }
+        Ok(lines)
+    }
+
+    fn diff_file_path(line: &str) -> Option<&str> {
+        let (_, path) = line.split_once(" b/")?;
+        line.starts_with("diff --git").then_some(path)
     }
 
     pub fn apply_hunk(&self, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
@@ -1202,6 +1224,28 @@ mod tests {
 
         assert_eq!(files, vec!["a.txt", "b.txt"]);
         assert!(lines.iter().any(|line| line.kind == DiffKind::Add));
+    }
+
+    #[test]
+    fn commit_diff_lines_use_each_files_syntax() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "lib.rs", "pub fn answer() -> u32 { 42 }\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+
+        let lines = GitRepository::at(repo.path())
+            .commit_diff_lines("HEAD")
+            .unwrap();
+        let colors = lines
+            .iter()
+            .filter(|line| !matches!(line.kind, DiffKind::Hunk))
+            .flat_map(|line| line.spans.iter().map(|span| span.fg))
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(
+            colors.len() > 1,
+            "Rust commit diff should be syntax highlighted"
+        );
     }
 
     #[test]

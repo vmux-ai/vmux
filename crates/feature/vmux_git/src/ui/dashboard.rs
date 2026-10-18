@@ -17,6 +17,7 @@ pub(super) fn GitDashboard() -> Element {
     let GitPageState {
         snapshot,
         controller,
+        projects,
         ..
     } = use_context::<GitPageState>();
     let ui = snapshot();
@@ -36,13 +37,14 @@ pub(super) fn GitDashboard() -> Element {
     rsx! {
         RepositoryHeader {
             repository: repository.clone(),
+            projects: projects().rows,
             focused_panel: active_panel,
             fetching: ui.fetching,
             can_push: controller_state.operations.push,
         }
-        main { class: "flex min-h-0 flex-1 flex-col bg-background/55",
-            div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)] sm:grid-rows-1",
-                aside { class: "min-h-0 overflow-hidden bg-foreground/[0.025]",
+        main { class: "flex min-h-0 flex-1 flex-col bg-background",
+            div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] sm:grid-rows-1",
+                aside { class: "min-h-0 overflow-hidden bg-card/55",
                     if active_panel == GitPanel::Files {
                         ChangesCard {
                             repository: repository.clone(),
@@ -73,7 +75,7 @@ pub(super) fn GitDashboard() -> Element {
                         }
                     }
                 }
-                section { class: "min-h-0 min-w-0 overflow-hidden",
+                section { class: "min-h-0 min-w-0 overflow-hidden bg-background",
                     if active_panel == GitPanel::Branches {
                         BranchLogCard {
                             branch: controller_state.selected_branch.clone(),

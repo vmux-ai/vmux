@@ -67,10 +67,10 @@ pub(super) fn HistoryCard(
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-9 shrink-0 items-center justify-end px-2",
+            div { class: "flex h-10 shrink-0 items-center justify-end px-3",
                 {commit_operations}
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
+            div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                 if repository.commits.is_empty() {
                     div { class: "flex h-full min-h-32 items-center justify-center p-4 text-center text-xs text-muted-foreground", {translate("git-no-commits")} }
                 }
@@ -81,9 +81,9 @@ pub(super) fn HistoryCard(
                         key: "{commit.sha}",
                         title: "{commit.summary} — {commit.author} — {commit.date}",
                         class: if selected_commit == commit.sha {
-                            "h-7 w-full justify-start gap-1.5 rounded-md bg-foreground/[0.075] px-2 py-0 text-left text-foreground"
+                            "h-9 w-full justify-start gap-2 rounded-md bg-foreground/[0.075] px-2.5 py-0 text-left text-foreground"
                         } else {
-                            "h-7 w-full justify-start gap-1.5 rounded-md px-2 py-0 text-left text-foreground hover:bg-foreground/[0.04]"
+                            "h-9 w-full justify-start gap-2 rounded-md px-2.5 py-0 text-left text-foreground hover:bg-foreground/[0.04]"
                         },
                         onclick: {
                             let sha = commit.sha.clone();
@@ -95,8 +95,8 @@ pub(super) fn HistoryCard(
                         },
                         LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3 shrink-0 text-sky-400/70" }
                         code { class: "shrink-0 font-mono text-[9px] text-sky-400", "{commit.short_sha}" }
-                        span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{commit.summary}" }
-                        span { class: "shrink-0 text-[8px] text-muted-foreground", "{commit.date}" }
+                        span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{commit.summary}" }
+                        span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
                     }
                 }
             }
@@ -149,11 +149,11 @@ pub(super) fn StashCard(
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-9 shrink-0 items-center justify-end px-2",
+            div { class: "flex h-10 shrink-0 items-center justify-end px-3",
                 {stash_operations}
             }
             if !stashes.is_empty() {
-                div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
+                div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                     for (index, stash) in stashes.into_iter().enumerate() {
                         Button {
                             id: "git-stash-row-{index}",
@@ -161,9 +161,9 @@ pub(super) fn StashCard(
                             key: "{stash.reference}",
                             title: "{stash.message}",
                             class: if selected_stash == stash.reference {
-                                "h-7 w-full justify-start gap-1.5 rounded-md bg-foreground/[0.075] px-2 py-0 text-left text-foreground"
+                                "h-9 w-full justify-start gap-2 rounded-md bg-foreground/[0.075] px-2.5 py-0 text-left text-foreground"
                             } else {
-                                "h-7 w-full justify-start gap-1.5 rounded-md px-2 py-0 text-left text-foreground hover:bg-foreground/[0.04]"
+                                "h-9 w-full justify-start gap-2 rounded-md px-2.5 py-0 text-left text-foreground hover:bg-foreground/[0.04]"
                             },
                             onclick: {
                                 let reference = stash.reference.clone();
@@ -174,7 +174,7 @@ pub(super) fn StashCard(
                                 }
                             },
                             span { class: "shrink-0 rounded bg-rose-400/[0.08] px-1 font-mono text-[8px] text-rose-400", "{stash.index}" }
-                            span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{stash.message}" }
+                            span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{stash.message}" }
                             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{stash.reference}" }
                         }
                     }

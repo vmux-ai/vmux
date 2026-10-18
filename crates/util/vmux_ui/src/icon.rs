@@ -397,9 +397,9 @@ mod wasm {
                 path { d: "M2 13h20" }
                 path { d: "M9 13v3h6v-3" }
             } },
-            BuiltinIcon::Vault => rsx! { Icon { class: "{class}",
-                path { d: "M12 3 4.5 6v5.5c0 4.7 3.2 8.1 7.5 9.5 4.3-1.4 7.5-4.8 7.5-9.5V6Z" }
-                path { d: "m9 12 2 2 4-4" }
+            BuiltinIcon::Vault => rsx! { LineIconView {
+                icon: LineIcon::RefreshCw,
+                class: class.clone(),
             } },
             BuiltinIcon::Smartphone => rsx! { Icon { class: "{class}",
                 rect { x: "6", y: "2", width: "12", height: "20", rx: "3" }

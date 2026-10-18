@@ -63,10 +63,10 @@ pub(super) fn ChangesCard(
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-9 shrink-0 items-center justify-end px-2",
+            div { class: "flex h-10 shrink-0 items-center justify-end px-3",
                 {file_operations}
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
+            div { class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                 if repository.files.is_empty() {
                     div { class: "flex h-full min-h-16 items-center justify-center gap-2 px-3 text-center text-xs text-muted-foreground",
                         LineIconView { icon: LineIcon::ShieldCheck, class: "h-4 w-4 shrink-0 text-ansi-2" }
@@ -116,7 +116,7 @@ fn FileSection(
 ) -> Element {
     rsx! {
         div { class: "pb-1 last:pb-0",
-            div { class: "flex h-7 items-center justify-between px-2.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground",
+            div { class: "flex h-8 items-center justify-between px-2.5 text-[10px] font-semibold text-muted-foreground",
                 span { "{title}" }
                 span { class: "tabular-nums", "{files.len()}" }
             }
@@ -163,9 +163,9 @@ fn FileRow(
         div {
             id: "{row_id}",
             class: if selected {
-                "group mx-1 flex min-h-8 cursor-default items-center gap-2 rounded-md bg-primary/[0.10] px-2 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                "group flex min-h-9 cursor-default items-center gap-2 rounded-md bg-primary/[0.10] px-2.5 text-foreground"
             } else {
-                "group mx-1 flex min-h-8 cursor-default items-center gap-2 rounded-md px-2 hover:bg-foreground/[0.045]"
+                "group flex min-h-9 cursor-default items-center gap-2 rounded-md px-2.5 hover:bg-foreground/[0.045]"
             },
             onclick: {
                 let file_path_bytes = file_path_bytes.clone();
@@ -178,7 +178,7 @@ fn FileRow(
             span { class: "w-4 shrink-0 text-center font-mono text-xs font-semibold {status_class}", title: "{status_label}", "{status_code}" }
             TypeIcon { path: entry.path.clone(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" }
             div { class: "min-w-0 flex-1",
-                div { class: "truncate text-xs", "{file_name}" }
+                div { class: "truncate text-[13px]", "{file_name}" }
                 if !parent.is_empty() {
                     div { class: "truncate text-[10px] text-muted-foreground", "{parent}" }
                 }
@@ -242,7 +242,7 @@ fn CommitPanel(
     let can_commit = can_commit && !commit_message.trim().is_empty() && commit_pending.is_empty();
 
     rsx! {
-        div { class: "shrink-0 bg-foreground/[0.025] p-2",
+        div { class: "shrink-0 bg-card/70 p-3",
             Textarea {
                 variant: TextareaVariant::Outline,
                 class: "min-h-8 w-full resize-none rounded-md border-0 bg-foreground/[0.035] px-2 py-1.5 text-[11px] shadow-none outline-none placeholder:text-muted-foreground focus:bg-foreground/[0.055] focus:ring-0",

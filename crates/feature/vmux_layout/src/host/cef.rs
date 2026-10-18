@@ -213,6 +213,7 @@ impl Browser {
         (
             Self,
             WebviewWindowed,
+            WebviewOpaqueWindowedBackground,
             HostsPage,
             PageMetadata {
                 title: title.to_string(),
