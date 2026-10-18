@@ -1,6 +1,52 @@
-pub use wasm::{BuiltinIconView, GitIconView, LineIconView, PageIconView};
+pub use wasm::{BuiltinIconView, GitIconView, GitSymbolView, LineIconView, PageIconView};
 
 pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GitSymbol {
+    Repository,
+    Branch,
+    Commit,
+    Fork,
+    Merge,
+    PullRequest,
+}
+
+impl GitSymbol {
+    fn for_line(icon: LineIcon) -> Option<Self> {
+        match icon {
+            LineIcon::GitBranch => Some(Self::Branch),
+            LineIcon::GitCommit => Some(Self::Commit),
+            LineIcon::GitFork => Some(Self::Fork),
+            LineIcon::GitMerge => Some(Self::Merge),
+            LineIcon::GitPullRequest => Some(Self::PullRequest),
+            _ => None,
+        }
+    }
+
+    fn paths(self) -> &'static [&'static str] {
+        match self {
+            Self::Repository => &[
+                "M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z",
+            ],
+            Self::Branch => &[
+                "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z",
+            ],
+            Self::Commit => &[
+                "M11.93 8.5a4.002 4.002 0 0 1-7.86 0H.75a.75.75 0 0 1 0-1.5h3.32a4.002 4.002 0 0 1 7.86 0h3.32a.75.75 0 0 1 0 1.5Zm-1.43-.75a2.5 2.5 0 1 0-5 0 2.5 2.5 0 0 0 5 0Z",
+            ],
+            Self::Fork => &[
+                "M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 0 1.5Z",
+            ],
+            Self::Merge => &[
+                "M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 3.25a.75.75 0 1 0 0 .005V3.25Z",
+            ],
+            Self::PullRequest => &[
+                "M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z",
+            ],
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineIcon {
@@ -232,7 +278,7 @@ impl LineIcon {
 }
 
 mod wasm {
-    use super::{GIT_ICON_URL, LineIcon};
+    use super::{GIT_ICON_URL, GitSymbol, LineIcon};
     use crate::components::avatar::AgentThumbnail;
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
@@ -242,9 +288,27 @@ mod wasm {
 
     #[component]
     pub fn LineIconView(icon: LineIcon, class: String) -> Element {
+        if let Some(symbol) = GitSymbol::for_line(icon) {
+            return rsx! { GitSymbolView { symbol, class } };
+        }
         rsx! {
             Icon { class: "{class}", stroke_width: 1.8,
                 for d in icon.paths() {
+                    path { d: "{d}" }
+                }
+            }
+        }
+    }
+
+    #[component]
+    pub fn GitSymbolView(symbol: GitSymbol, class: String) -> Element {
+        rsx! {
+            svg {
+                class: "{class}",
+                view_box: "0 0 16 16",
+                fill: "currentColor",
+                "aria-hidden": "true",
+                for d in symbol.paths() {
                     path { d: "{d}" }
                 }
             }

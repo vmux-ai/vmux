@@ -18,8 +18,9 @@ pub use conversation::{
 #[cfg(feature = "app")]
 pub use host::SessionPlugin;
 pub use model::{
-    AgentId, Cleanup, CleanupRequest, CreateRequest, Created, DescriptionUpdateRequest, LocalTask,
-    RenameRequest, Session, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
+    AgentFamily, AgentId, Cleanup, CleanupRequest, CreateRequest, Created,
+    DescriptionUpdateRequest, LocalTask, RenameRequest, Session, Stage, StageChangeRequest,
+    StageChangedAt, StageDefinition, StageId,
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};

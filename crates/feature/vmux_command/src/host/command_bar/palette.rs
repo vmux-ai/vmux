@@ -671,9 +671,14 @@ fn query(
     mut commands: Commands,
 ) {
     for (target, opened, input, mut published) in &mut palettes {
+        let query = if input.start {
+            input.result_query.clone()
+        } else {
+            input.query.clone()
+        };
         let next = PublishedQuery {
             open_id: opened.0.open_id,
-            query: input.query.clone(),
+            query,
             start: input.start,
             open: opened.0.target,
             picker: opened.0.picker.clone(),

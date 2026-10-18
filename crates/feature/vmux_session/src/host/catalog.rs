@@ -7,8 +7,8 @@ use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
-use vmux_ecs::page::PageReady;
-use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::page::{Activity, PageReady};
+use vmux_ecs::{KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{UiState, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
@@ -48,7 +48,14 @@ impl Plugin for CatalogPlugin {
             .add_observer(cleanup)
             .add_observer(ready)
             .add_systems(Update, finish_directory_pickers)
-            .add_systems(PostUpdate, (sync_repositories, publish).chain());
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_repositories.run_if(Activity::<SessionManagerView>::active),
+                    publish,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -304,12 +311,23 @@ fn publish(
 fn sync_repositories(
     catalog: Res<CatalogSnapshot>,
     mut cache: Option<Single<&mut RepoInfoCache>>,
+    claimed: Query<(), (With<SessionManagerView>, Added<KeyboardOwner>)>,
     mut repositories: ResMut<SessionRepositories>,
 ) {
+    let cache_changed = cache.as_ref().is_some_and(|cache| cache.is_changed());
+    if !catalog.is_changed() && !cache_changed && claimed.is_empty() {
+        return;
+    }
     let mut sessions = Vec::with_capacity(catalog.sessions.len());
     for session in &catalog.sessions {
         let path = Path::new(&session.cwd);
-        let info = cache.as_mut().and_then(|cache| cache.lookup(path));
+        let info = if session.managed {
+            cache
+                .as_mut()
+                .and_then(|cache| cache.bypass_change_detection().snapshot(path))
+        } else {
+            None
+        };
         let repository = match info {
             Some(info) => SessionRepository {
                 id: session.id.clone(),

@@ -132,7 +132,7 @@ fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) -> E
             on_dismiss: move |_| open.set(false),
             button {
                 r#type: "button",
-                class: "flex h-7 min-w-32 max-w-48 items-center gap-2 rounded-md bg-foreground/[0.025] px-2.5 text-[11px] font-medium text-foreground ring-1 ring-inset ring-foreground/[0.08] transition-colors hover:bg-foreground/[0.055]",
+                class: "flex h-7 min-w-32 max-w-48 items-center gap-2 rounded-md px-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-foreground/[0.045]",
                 aria_expanded: open(),
                 onclick: move |_| open.set(!open()),
                 span { class: "min-w-0 flex-1 truncate text-left", "{selected_label}" }

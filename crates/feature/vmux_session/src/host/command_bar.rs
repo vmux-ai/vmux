@@ -24,6 +24,7 @@ struct ResumeState {
     offset: u32,
     total: u32,
     sessions: Vec<ResumableSessionEntry>,
+    loading: bool,
 }
 
 #[derive(Component)]
@@ -37,7 +38,7 @@ type ResumeEntities<'w, 's> =
 
 fn query(
     trigger: On<CommandBarQueryChanged>,
-    states: Query<&ResumeState>,
+    mut states: Query<&mut ResumeState>,
     mut results: ResumeResults,
 ) {
     let event = trigger.event();
@@ -49,6 +50,14 @@ fn query(
             .remove::<ResumeState>();
         return;
     };
+    if let Ok(mut state) = states.get_mut(event.target) {
+        state.filter = filter.to_string();
+        results.spawn(event.target, &state.sessions, &state.filter);
+        if state.loading {
+            results.pending(event.target, state.sessions.len() as i32);
+        }
+        return;
+    }
     let request_id = states
         .get(event.target)
         .map(|state| state.request_id.wrapping_add(1).max(1))
@@ -59,6 +68,7 @@ fn query(
         offset: 0,
         total: 0,
         sessions: Vec::new(),
+        loading: true,
     });
     results.pending(event.target, 0);
     results.commands.trigger(UiInput {
@@ -103,9 +113,11 @@ fn receive(
     results.spawn(target, &state.sessions, &state.filter);
     let loaded = state.sessions.len() as u32;
     if loaded >= state.total {
+        state.loading = false;
         return;
     }
     state.offset = loaded;
+    state.loading = true;
     results.pending(target, loaded as i32);
     results.commands.trigger(UiInput {
         webview: target,

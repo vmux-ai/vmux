@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, mpsc};
+use std::time::Duration;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -11,8 +12,8 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_session::{
-    AgentConversationTitle, AgentId, CreateRequest, Created, ProviderCatalog, ProviderSession,
-    Route, Session, SessionId,
+    AgentConversationTitle, AgentFamily, AgentId, CreateRequest, Created, ProviderCatalog,
+    ProviderSession, Route, Session, SessionId,
 };
 use vmux_setting::AppSettings;
 
@@ -30,8 +31,10 @@ pub(super) fn add(app: &mut App) {
         .add_observer(open)
         .add_observer(attach)
         .add_systems(Startup, start)
-        .add_systems(Update, (watch, scan, finish, project).chain());
+        .add_systems(Update, (watch, delay, scan, finish, project).chain());
 }
+
+const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
 
 #[derive(Resource, Default)]
 struct SourceSnapshot(Vec<ProviderSession>);
@@ -48,11 +51,14 @@ struct PendingImport {
 #[derive(Component)]
 struct Runtime {
     changes: Mutex<mpsc::Receiver<()>>,
-    _watchers: Vec<RecommendedWatcher>,
+    _watcher: Option<RecommendedWatcher>,
 }
 
 #[derive(Component)]
 struct ScanRequested;
+
+#[derive(Component)]
+struct ScanDelay(Task<()>);
 
 #[derive(Component)]
 struct ScanTask(Task<Vec<ProviderSession>>);
@@ -90,10 +96,22 @@ impl SourcePaths {
 
     fn watches(&self) -> Vec<(PathBuf, RecursiveMode)> {
         vec![
-            (self.codex.clone(), RecursiveMode::Recursive),
+            (self.codex.clone(), RecursiveMode::NonRecursive),
             (self.claude.clone(), RecursiveMode::NonRecursive),
             (self.vibe.join("logs/session"), RecursiveMode::Recursive),
         ]
+    }
+
+    fn contains(&self, paths: &[PathBuf]) -> bool {
+        let codex = self.codex.join("session_index.jsonl");
+        let claude = self.claude.join("history.jsonl");
+        let vibe = self.vibe.join("logs/session");
+        paths.iter().any(|path| {
+            path == &codex
+                || path == &claude
+                || path.starts_with(&vibe)
+                    && path.file_name().and_then(|name| name.to_str()) == Some("meta.json")
+        })
     }
 }
 
@@ -123,45 +141,48 @@ fn start(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
     };
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let (sender, receiver) = mpsc::channel();
-    let mut watchers = Vec::new();
+    let watched_paths = paths.clone();
+    let watcher =
+        notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
+            let Ok(event) = result else {
+                return;
+            };
+            if (!event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove())
+                || !watched_paths.contains(&event.paths)
+            {
+                return;
+            }
+            let _ = sender.send(());
+            if let Some(wake) = wake.as_ref() {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+        });
+    let mut watcher = watcher.ok();
     for (path, mode) in paths.watches() {
         if !path.exists() {
             continue;
         }
-        let changes = sender.clone();
-        let wake = wake.clone();
-        let watcher =
-            notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
-                let Ok(event) = result else {
-                    return;
-                };
-                if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
-                    return;
-                }
-                let _ = changes.send(());
-                if let Some(wake) = wake.as_ref() {
-                    let _ = wake.send_event(WinitUserEvent::WakeUp);
-                }
-            });
-        let Ok(mut watcher) = watcher else {
-            continue;
+        let Some(active) = watcher.as_mut() else {
+            break;
         };
-        if watcher.watch(&path, mode).is_ok() {
-            watchers.push(watcher);
-        }
+        let _ = active.watch(&path, mode);
     }
     commands.spawn((
         Name::new("ACP provider session catalog"),
         Runtime {
             changes: Mutex::new(receiver),
-            _watchers: watchers,
+            _watcher: watcher,
         },
         paths,
         ScanRequested,
     ));
 }
 
-fn watch(runtime: Single<(Entity, &Runtime)>, mut commands: Commands) {
+fn watch(
+    runtime: Single<(Entity, &Runtime)>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
     let (entity, runtime) = *runtime;
     let Ok(changes) = runtime.changes.lock() else {
         return;
@@ -171,7 +192,26 @@ fn watch(runtime: Single<(Entity, &Runtime)>, mut commands: Commands) {
         changed = true;
     }
     if changed {
-        commands.entity(entity).insert(ScanRequested);
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            std::thread::sleep(SCAN_DEBOUNCE);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+        });
+        commands.entity(entity).insert(ScanDelay(task));
+    }
+}
+
+fn delay(mut delays: Query<(Entity, &mut ScanDelay)>, mut commands: Commands) {
+    for (entity, mut delay) in &mut delays {
+        if future::block_on(future::poll_once(&mut delay.0)).is_none() {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .remove::<ScanDelay>()
+            .insert(ScanRequested);
     }
 }
 
@@ -356,25 +396,6 @@ impl AgentCatalog<'_, '_> {
             return AgentId(agent.id.clone());
         }
         AgentId(source.to_string())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct AgentFamily(String);
-
-impl AgentFamily {
-    fn of(agent: &str) -> Self {
-        let normalized = agent.to_ascii_lowercase();
-        if normalized.contains("codex") {
-            return Self("codex".to_string());
-        }
-        if normalized.contains("claude") {
-            return Self("claude".to_string());
-        }
-        if normalized.contains("mistral") || normalized.contains("vibe") {
-            return Self("vibe".to_string());
-        }
-        Self(normalized)
     }
 }
 

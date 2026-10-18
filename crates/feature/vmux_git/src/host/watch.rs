@@ -97,6 +97,8 @@ struct RepoInfoCacheEntry {
     info: Option<super::worktree::RepoInfo>,
     loaded: bool,
     dirty: bool,
+    observe: bool,
+    watch_attempted: bool,
     watched: bool,
     last_accessed: Instant,
     pending: Option<Task<Option<super::worktree::RepoInfo>>>,
@@ -135,7 +137,15 @@ pub struct RepoInfoCache {
 }
 
 impl RepoInfoCache {
-    pub fn lookup(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
+    pub fn observe(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
+        self.request(path, true)
+    }
+
+    pub fn snapshot(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
+        self.request(path, false)
+    }
+
+    fn request(&mut self, path: &Path, observe: bool) -> Option<super::worktree::RepoInfo> {
         let path = self.canonical_path(path);
         let entry = self
             .entries
@@ -144,11 +154,14 @@ impl RepoInfoCache {
                 info: None,
                 loaded: false,
                 dirty: true,
+                observe,
+                watch_attempted: false,
                 watched: false,
                 last_accessed: Instant::now(),
                 pending: None,
                 ignore_events_until: None,
             });
+        entry.observe |= observe;
         entry.last_accessed = Instant::now();
         entry.info.clone()
     }
@@ -210,6 +223,7 @@ impl RepoInfoCache {
 }
 
 const WATCH_DRAIN_BUDGET: usize = 256;
+const WATCH_TARGET_LIMIT: usize = 128;
 const CANONICAL_CAP: usize = 4096;
 
 impl GitWatchTarget {
@@ -391,6 +405,19 @@ impl GitWatch {
     }
 
     fn acquire_targets(&mut self, targets: &[GitWatchTarget]) -> bool {
+        let missing = targets
+            .iter()
+            .filter(|target| !self.watch_references.contains_key(*target))
+            .count();
+        if self.watch_references.len().saturating_add(missing) > WATCH_TARGET_LIMIT {
+            bevy::log::warn!(
+                current = self.watch_references.len(),
+                requested = missing,
+                limit = WATCH_TARGET_LIMIT,
+                "git watch target limit reached"
+            );
+            return false;
+        }
         let mut acquired = Vec::new();
         for target in targets {
             if let Some(references) = self.watch_references.get_mut(target) {
@@ -599,6 +626,7 @@ fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
             changed |= entry.info != info;
             entry.info = info;
             entry.loaded = true;
+            entry.watch_attempted = false;
             entry.watched = false;
             entry.pending = None;
             entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
@@ -622,7 +650,9 @@ fn info(watch: Option<NonSendMut<GitWatch>>, mut repo_info: Single<&mut RepoInfo
     let paths: Vec<PathBuf> = repo_info
         .entries
         .iter()
-        .filter_map(|(path, entry)| (entry.loaded && !entry.watched).then_some(path.clone()))
+        .filter_map(|(path, entry)| {
+            (entry.observe && entry.loaded && !entry.watch_attempted).then_some(path.clone())
+        })
         .collect();
     for path in paths {
         let info = repo_info
@@ -631,6 +661,7 @@ fn info(watch: Option<NonSendMut<GitWatch>>, mut repo_info: Single<&mut RepoInfo
             .and_then(|entry| entry.info.clone());
         let watched = watch.subscribe_repo_info(&path, info.as_ref());
         if let Some(entry) = repo_info.entries.get_mut(&path) {
+            entry.watch_attempted = true;
             entry.watched = watched;
         }
     }
@@ -750,6 +781,30 @@ mod tests {
     }
 
     #[test]
+    fn watch_target_limit_rejects_new_targets() {
+        let mut watch = GitWatch::test();
+        for index in 0..WATCH_TARGET_LIMIT {
+            watch.watch_references.insert(
+                GitWatchTarget {
+                    path: PathBuf::from(format!("/tmp/vmux-git-watch-{index}")),
+                    recursive: false,
+                    kind: GitWatchKind::Metadata,
+                },
+                1,
+            );
+        }
+        let target = GitWatchTarget {
+            path: PathBuf::from("/tmp/vmux-git-watch-overflow"),
+            recursive: false,
+            kind: GitWatchKind::Metadata,
+        };
+
+        assert!(!watch.acquire_targets(std::slice::from_ref(&target)));
+        assert_eq!(watch.watch_references.len(), WATCH_TARGET_LIMIT);
+        assert!(!watch.watch_references.contains_key(&target));
+    }
+
+    #[test]
     fn inactive_repo_info_entries_release_their_watch_targets() {
         let active_repo = test_repo::init();
         let stale_repo = test_repo::init();
@@ -766,6 +821,8 @@ mod tests {
                         info: Some(active_info.clone()),
                         loaded: true,
                         dirty: false,
+                        observe: true,
+                        watch_attempted: true,
                         watched: true,
                         last_accessed: Instant::now(),
                         pending: None,
@@ -778,6 +835,8 @@ mod tests {
                         info: Some(stale_info.clone()),
                         loaded: true,
                         dirty: false,
+                        observe: true,
+                        watch_attempted: true,
                         watched: true,
                         last_accessed: Instant::now() - REPO_INFO_IDLE_TTL,
                         pending: None,
@@ -793,7 +852,7 @@ mod tests {
         assert!(watch.subscribe_repo_info(&active_path, Some(&active_info)));
         assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
 
-        assert!(cache.lookup(&active_path).is_some());
+        assert!(cache.observe(&active_path).is_some());
         watch.evict_inactive_repo_info(&mut cache);
 
         assert!(cache.entries.contains_key(&active_path));
@@ -908,7 +967,7 @@ mod tests {
                     .world_mut()
                     .get_mut::<RepoInfoCache>(cache)
                     .unwrap()
-                    .lookup(&path);
+                    .observe(&path);
                 app.update();
                 if let Some(info) = info
                     && info.uncommitted == expected
@@ -926,7 +985,7 @@ mod tests {
             app.world_mut()
                 .get_mut::<RepoInfoCache>(cache)
                 .unwrap()
-                .lookup(&path)
+                .observe(&path)
                 .unwrap()
                 .uncommitted,
             0
@@ -936,6 +995,55 @@ mod tests {
             .unwrap()
             .invalidate(&path);
         assert_eq!(wait_for(&mut app, 1).uncommitted, 1);
+    }
+
+    #[test]
+    fn snapshot_requests_do_not_register_watch_targets() {
+        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "a.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+        let path = PathIdentity::resolve(repo.path()).into_path_buf();
+        let cache = RepoInfoCache {
+            entries: HashMap::new(),
+            canonical: HashMap::new(),
+            guessed: HashMap::new(),
+            wake: None,
+        };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (start_repo_info_loads, poll_info, info).chain());
+        app.insert_non_send(GitWatch::test());
+        let cache = app.world_mut().spawn(cache).id();
+
+        for _ in 0..500 {
+            let loaded = app
+                .world_mut()
+                .get_mut::<RepoInfoCache>(cache)
+                .unwrap()
+                .snapshot(&path)
+                .is_some();
+            app.update();
+            if loaded {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(
+            app.world_mut()
+                .get_mut::<RepoInfoCache>(cache)
+                .unwrap()
+                .snapshot(&path)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .non_send::<GitWatch>()
+                .repo_info_subscriptions
+                .is_empty()
+        );
     }
 
     #[test]
@@ -957,6 +1065,8 @@ mod tests {
                     info: None,
                     loaded: false,
                     dirty: false,
+                    observe: true,
+                    watch_attempted: false,
                     watched: false,
                     last_accessed: Instant::now(),
                     pending: Some(IoTaskPool::get().spawn(async move { stale })),
@@ -979,7 +1089,7 @@ mod tests {
                 .world_mut()
                 .get_mut::<RepoInfoCache>(cache)
                 .unwrap()
-                .lookup(&path)
+                .observe(&path)
                 .is_some_and(|info| info.uncommitted == 1)
             {
                 return;

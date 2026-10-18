@@ -39,6 +39,7 @@ pub fn Page() -> Element {
             ManagerHeader {
                 title: translate("services-title"),
                 count: process_count,
+                content_class: "mx-auto w-full max-w-7xl".to_string(),
                 search_value: snapshot.query.clone(),
                 search_placeholder: translate("services-filter"),
                 onsearch: move |event: FormEvent| {

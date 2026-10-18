@@ -87,6 +87,35 @@ pub struct Session;
 #[type_path = "vmux_session"]
 pub struct AgentId(pub String);
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AgentFamily(String);
+
+impl AgentFamily {
+    pub fn of(agent: &str) -> Self {
+        let normalized = agent.to_ascii_lowercase();
+        if normalized.contains("codex") {
+            return Self("codex".to_string());
+        }
+        if normalized.contains("claude") {
+            return Self("claude".to_string());
+        }
+        if normalized.contains("mistral") || normalized.contains("vibe") {
+            return Self("vibe".to_string());
+        }
+        Self(normalized)
+    }
+
+    pub fn name(&self, fallback: &str) -> String {
+        match self.0.as_str() {
+            "codex" => "Codex".to_string(),
+            "claude" => "Claude".to_string(),
+            "vibe" => "Mistral Vibe".to_string(),
+            _ if !fallback.trim().is_empty() => fallback.to_string(),
+            _ => self.0.clone(),
+        }
+    }
+}
+
 #[derive(
     Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
 )]
@@ -499,6 +528,22 @@ mod tests {
     impl Cleaned {
         fn record(trigger: On<Cleanup>, mut cleaned: ResMut<Cleaned>) {
             cleaned.0.push(trigger.event_target());
+        }
+    }
+
+    #[test]
+    fn agent_clients_share_their_provider_family() {
+        for id in ["codex", "codex-cli", "Codex ACP"] {
+            assert_eq!(AgentFamily::of(id), AgentFamily::of("codex"));
+            assert_eq!(AgentFamily::of(id).name(id), "Codex");
+        }
+        for id in ["claude", "claude-code", "Claude Desktop"] {
+            assert_eq!(AgentFamily::of(id), AgentFamily::of("claude"));
+            assert_eq!(AgentFamily::of(id).name(id), "Claude");
+        }
+        for id in ["vibe", "mistral-vibe", "Vibe Desktop"] {
+            assert_eq!(AgentFamily::of(id), AgentFamily::of("vibe"));
+            assert_eq!(AgentFamily::of(id).name(id), "Mistral Vibe");
         }
     }
 

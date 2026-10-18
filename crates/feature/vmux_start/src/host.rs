@@ -566,7 +566,7 @@ fn sync_pages(
         .then(|| {
             repo_info
                 .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().lookup(Path::new(&cwd)))
+                .and_then(|cache| cache.bypass_change_detection().observe(Path::new(&cwd)))
         })
         .flatten();
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;

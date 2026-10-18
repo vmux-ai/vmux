@@ -10,7 +10,24 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_cef_core::prelude::CefEmbeddedHost;
 pub use vmux_api::PageReady;
 
+use crate::KeyboardOwner;
 use crate::page_driver::PageAssets;
+
+#[derive(SystemParam)]
+pub struct Activity<'w, 's, M: Component> {
+    present: Query<'w, 's, (), (With<M>, With<PageReady>)>,
+    active: Query<'w, 's, (), (With<M>, With<PageReady>, With<KeyboardOwner>)>,
+}
+
+impl<M: Component> Activity<'_, '_, M> {
+    pub fn present(activity: Activity<M>) -> bool {
+        !activity.present.is_empty()
+    }
+
+    pub fn active(activity: Activity<M>) -> bool {
+        !activity.active.is_empty()
+    }
+}
 
 pub struct PagePlugin;
 

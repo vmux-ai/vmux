@@ -11,7 +11,7 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
-use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use crate::event::{
     ChatOpenPage, ResumeSession, SessionRepositories, SessionRepository, SessionsCleanup,
@@ -1047,7 +1047,10 @@ fn DetailActionButton(
                     LineIconView { icon, class: "size-3.5".to_string() }
                 },
                 DetailActionIcon::Git => rsx! {
-                    GitIconView { class: "size-3.5".to_string() }
+                    GitSymbolView {
+                        symbol: GitSymbol::Repository,
+                        class: "size-3.5".to_string(),
+                    }
                 },
             }
             if primary {
@@ -1189,7 +1192,10 @@ fn SessionActions(
                         event.stop_propagation();
                         let _ = send(&ChatOpenPage { url: git_url.clone() });
                     },
-                    GitIconView { class: "size-3.5".to_string() }
+                    GitSymbolView {
+                        symbol: GitSymbol::Repository,
+                        class: "size-3.5".to_string(),
+                    }
                 }
             }
             if managed {

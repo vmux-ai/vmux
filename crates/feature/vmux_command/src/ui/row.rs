@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarResultItem, CommandBarSection};
 use vmux_ui::cn::cn;
 use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::badge::Badge;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::favicon::Favicon;
@@ -174,15 +175,15 @@ fn SectionRow(section: CommandBarSection) -> Element {
         return rsx! {};
     }
     rsx! {
-        div { class: "sticky top-0 z-10 flex min-w-0 items-center gap-1.5 border-y border-foreground/[0.06] bg-background/95 px-2.5 py-1.5 backdrop-blur",
+        div { class: "sticky top-0 z-10 flex min-w-0 items-center gap-1.5 bg-background px-2.5 py-2",
             for label in section.labels {
-                span {
-                    class: "flex h-6 min-w-0 items-center rounded-md bg-foreground/[0.045] px-2 text-[11px] text-muted-foreground/75",
+                Badge {
+                    class: "h-6 min-w-0 max-w-[38%] overflow-hidden rounded-full bg-foreground/[0.065] px-2.5 text-[11px] font-medium text-muted-foreground/80",
                     title: "{label}",
                     span { class: "min-w-0 truncate", "{label}" }
                 }
             }
-            span { class: "ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055] px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/55", "{section.count}" }
+            Badge { class: "ml-auto h-5 min-w-5 rounded-full bg-foreground/[0.05] px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/55", "{section.count}" }
         }
     }
 }

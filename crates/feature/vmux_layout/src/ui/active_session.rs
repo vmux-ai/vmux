@@ -11,7 +11,9 @@ use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{translate, translate_humanized};
-use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
+use vmux_ui::icon::{
+    BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconView,
+};
 
 use crate::event::{
     ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, TabBoundary,
@@ -127,12 +129,15 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
     let relation = if boundary.base_ref.is_empty() || boundary.base_ref == boundary.branch {
         branch
     } else {
-        format!("{} → {}", boundary.base_ref, branch)
+        format!("{} ← {}", boundary.base_ref, branch)
     };
     rsx! {
         div { class: "min-w-0 rounded-md bg-foreground/[0.035] px-2.5 py-2.5",
             div { class: "flex min-w-0 items-center gap-2",
-                GitIconView { class: "size-3.5 shrink-0".to_string() }
+                GitSymbolView {
+                    symbol: GitSymbol::Repository,
+                    class: "size-3.5 shrink-0".to_string(),
+                }
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-semibold text-foreground", title: "{repository}", "{repository}" }
                 if boundary.is_worktree {
                     span {

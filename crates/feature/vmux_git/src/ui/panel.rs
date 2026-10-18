@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_ui::components::badge::Badge;
-use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 #[component]
 pub(super) fn PanelHeader(
@@ -23,7 +23,12 @@ pub(super) fn PanelHeader(
             },
             div { class: "flex size-5 shrink-0 items-center justify-center rounded-md {icon_class}",
                 match icon {
-                    PanelIcon::Git => rsx! { GitIconView { class: "h-3 w-3" } },
+                    PanelIcon::Git => rsx! {
+                        GitSymbolView {
+                            symbol: GitSymbol::Repository,
+                            class: "h-3 w-3".to_string(),
+                        }
+                    },
                     PanelIcon::Line(icon) => rsx! { LineIconView { icon, class: "h-3 w-3" } },
                 }
             }

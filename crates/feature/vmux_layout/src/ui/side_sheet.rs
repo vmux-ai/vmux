@@ -135,7 +135,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)]",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
@@ -144,7 +144,7 @@ fn SideSheetContent() -> Element {
                 style: "left:80px;right:4px;",
             }
             SideSheetGrab { resizing: sheet_resizing }
-            div { class: "flex h-full min-h-0 flex-col",
+            div { class: "flex h-full min-h-0 flex-col pt-[var(--vmux-side-sheet-pad-top)]",
                 div {
                     class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground [scrollbar-gutter:stable]",
                     ..BookmarkDragState::listeners(drag_state),

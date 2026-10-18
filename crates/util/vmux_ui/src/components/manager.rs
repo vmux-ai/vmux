@@ -129,6 +129,11 @@ pub fn ManagerHeader(
     #[props(default)] content_class: String,
     actions: Element,
 ) -> Element {
+    let content_class = if content_class.is_empty() {
+        "mx-auto w-full max-w-3xl".to_string()
+    } else {
+        content_class
+    };
     rsx! {
         header { class: "shrink-0 bg-foreground/[0.018] px-5 py-3",
             div { class: "{content_class}",

@@ -9,9 +9,10 @@ use vmux_api::chat::{
     ResumeListRequest, ResumeSession,
 };
 use vmux_api::command_bar::CommandBarUiState;
+use vmux_ecs::team::Profile;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
-use vmux_session::{AgentId, ProviderCatalog, Route, Session, SessionId, Transcripts};
+use vmux_session::{AgentFamily, AgentId, ProviderCatalog, Route, Session, SessionId, Transcripts};
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, ChatView};
@@ -45,6 +46,7 @@ type Sessions<'w, 's> = Query<
         &'static Cwd,
         &'static LastActivatedAt,
         Option<&'static AgentId>,
+        Option<&'static Profile>,
     ),
     With<Session>,
 >;
@@ -61,9 +63,9 @@ impl ResumeCatalog<'_, '_> {
         let query_lower = query.trim().to_ascii_lowercase();
         let now = vmux_ecs::UnixMillis::now().0;
         let mut sessions = Vec::new();
-        for (id, name, description, cwd, activated, agent) in &self.sessions {
+        for (id, name, description, cwd, activated, agent, profile) in &self.sessions {
             let path = cwd.0.as_path();
-            let info = self.cache.as_mut().and_then(|cache| cache.lookup(path));
+            let info = self.cache.as_mut().and_then(|cache| cache.snapshot(path));
             let subtitle = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -75,7 +77,12 @@ impl ResumeCatalog<'_, '_> {
                 .unwrap_or_else(|| subtitle.clone());
             let branch = info.map(|info| info.branch).unwrap_or_default();
             let agent_name = agent
-                .map(|agent| agent.0.clone())
+                .map(|agent| {
+                    let fallback = profile
+                        .map(|profile| profile.name.as_str())
+                        .unwrap_or(agent.0.as_str());
+                    AgentFamily::of(&agent.0).name(fallback)
+                })
                 .filter(|agent| !agent.is_empty())
                 .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-title"));
             let cwd = path.to_string_lossy().into_owned();
@@ -123,17 +130,12 @@ impl ResumeCatalog<'_, '_> {
         }
         for session in &self.providers.sessions {
             let path = Path::new(&session.cwd);
-            let info = self.cache.as_mut().and_then(|cache| cache.lookup(path));
             let subtitle = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| session.cwd.clone());
-            let project = info
-                .as_ref()
-                .map(vmux_git::worktree::RepoInfo::project_name)
-                .filter(|project| !project.is_empty())
-                .unwrap_or_else(|| subtitle.clone());
-            let branch = info.map(|info| info.branch).unwrap_or_default();
+            let project = subtitle.clone();
+            let branch = String::new();
             if !query_lower.is_empty()
                 && ![
                     session.name.as_str(),
@@ -141,6 +143,7 @@ impl ResumeCatalog<'_, '_> {
                     session.cwd.as_str(),
                     project.as_str(),
                     branch.as_str(),
+                    session.agent.as_str(),
                     session.agent_name.as_str(),
                 ]
                 .iter()
@@ -169,7 +172,7 @@ impl ResumeCatalog<'_, '_> {
                     subtitle,
                     age_seconds,
                     updated_at,
-                    agent_name: session.agent_name.clone(),
+                    agent_name: AgentFamily::of(&session.agent).name(&session.agent_name),
                     project,
                     branch,
                     cross_runtime: true,

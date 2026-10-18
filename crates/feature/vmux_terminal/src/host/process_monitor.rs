@@ -7,7 +7,7 @@ use vmux_api::service::*;
 use vmux_command::{CommandInvocation, ResolvedLocale};
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
-use vmux_ecs::page::PageReady;
+use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
@@ -51,9 +51,13 @@ impl Plugin for ProcessMonitorPlugin {
                 Update,
                 (
                     reconcile_service_processes,
-                    request_process_list,
-                    sample_process_usage,
-                    broadcast_to_monitors,
+                    (
+                        request_process_list,
+                        sample_process_usage,
+                        broadcast_to_monitors,
+                    )
+                        .chain()
+                        .run_if(Activity::<ProcessMonitorView>::active),
                 )
                     .chain()
                     .after(vmux_ecs::service::ServiceMessageSet),

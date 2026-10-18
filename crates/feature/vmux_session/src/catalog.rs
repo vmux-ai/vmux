@@ -13,8 +13,8 @@ use vmux_ecs::{CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 
 #[cfg(host)]
 use crate::{
-    AgentConversationTitle, AgentId, ConversationEvent, MessageContent, RunState, Session,
-    SessionId, Stage, StageChangedAt, StageDefinition, StageId, Transcripts,
+    AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent, RunState,
+    Session, SessionId, Stage, StageChangedAt, StageDefinition, StageId, Transcripts,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -272,6 +272,14 @@ fn project(
     {
         let conversation =
             ConversationPreview::from(conversation_title, &transcripts.get(entity).messages);
+        let agent_name = agent
+            .map(|agent| {
+                let fallback = profile
+                    .map(|profile| profile.name.as_str())
+                    .unwrap_or(agent.0.as_str());
+                AgentFamily::of(&agent.0).name(fallback)
+            })
+            .unwrap_or_default();
         next.sessions.push(SessionSummary {
             id: id.0.clone(),
             kind: "session".to_string(),
@@ -285,9 +293,7 @@ fn project(
             last_activated_at: last_activated_at.0,
             stage_changed_at: stage_changed_at.0,
             agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
-            agent_name: profile
-                .map(|profile| profile.name.clone())
-                .unwrap_or_default(),
+            agent_name,
             agent_icon: profile
                 .and_then(|profile| profile.icon.clone())
                 .unwrap_or_default(),
@@ -317,7 +323,7 @@ fn project(
             last_activated_at: session.updated_at,
             stage_changed_at: session.updated_at,
             agent: session.agent.clone(),
-            agent_name: session.agent_name.clone(),
+            agent_name: AgentFamily::of(&session.agent).name(&session.agent_name),
             runtime: "inactive".to_string(),
             conversation_title: session.conversation_title.clone(),
             last_prompt: session.last_prompt.clone(),
