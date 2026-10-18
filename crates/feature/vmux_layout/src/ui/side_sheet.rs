@@ -502,7 +502,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                 }
             }
             div { class: "pt-0.5",
-                div { class: "flex flex-col gap-1",
+                div { class: "flex flex-col overflow-hidden rounded-md bg-foreground/[0.035]",
                     if !expanded && let Some(stack) = collapsed_stack {
                         SideSheetStackRow { stack, pane_id }
                     }
@@ -512,7 +512,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                             "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                         },
                         div { class: "min-h-0 overflow-hidden",
-                            div { class: "flex flex-col gap-1",
+                            div { class: "flex flex-col",
                                 for stack in pane.stacks.iter() {
                                     SideSheetStackRow { stack: stack.clone(), pane_id }
                                 }
