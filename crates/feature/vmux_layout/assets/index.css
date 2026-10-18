@@ -22,7 +22,7 @@
 
 .vmux-sheet-surface {
   border: 0 !important;
-  background-color: var(--card) !important;
+  background-color: color-mix(in oklab, var(--background) 82%, var(--foreground)) !important;
   background-clip: padding-box;
   box-shadow: none !important;
   outline: 0 !important;
@@ -36,18 +36,19 @@
 
 .vmux-sheet-tile:not(.vmux-sheet-tile-active) {
   border: 0 !important;
-  background-color: color-mix(in oklab, var(--card) 90%, var(--foreground)) !important;
+  background-color: transparent !important;
   background-clip: padding-box;
   box-shadow: none !important;
   outline: 0 !important;
 }
 
 .vmux-sheet-tile:hover {
-  background-color: color-mix(in oklab, var(--card) 84%, var(--foreground)) !important;
+  background-color: transparent !important;
+  color: var(--foreground);
 }
 
 .vmux-sheet-tile-active {
-  background-color: color-mix(in oklab, var(--card) 82%, var(--primary)) !important;
+  background-color: transparent !important;
   color: var(--primary);
 }
 
