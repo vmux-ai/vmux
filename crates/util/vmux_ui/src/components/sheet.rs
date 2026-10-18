@@ -13,13 +13,13 @@ pub fn SheetHeaderAction(
 ) -> Element {
     let class = match (active, subtle) {
         (true, _) => {
-            "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+            "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground/[0.055] text-foreground"
         }
         (false, true) => {
-            "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+            "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity] group-hover:opacity-100 focus-visible:opacity-100 hover:text-foreground"
         }
         (false, false) => {
-            "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+            "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
         }
     };
     rsx! {
