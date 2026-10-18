@@ -2,13 +2,13 @@ use dioxus::prelude::*;
 use vmux_ui::hooks::use_ui_state;
 use vmux_ui::scroll::ScrollIntoView;
 
-use crate::state::{GitDirectoryState, GitPageControllerState, GitPageSnapshot, GitUiState};
+use crate::state::{GitPageControllerState, GitPageSnapshot, GitProjects, GitUiState};
 
 #[derive(Clone, Copy)]
 pub(super) struct GitPageState {
     pub(super) snapshot: Memo<GitPageSnapshot>,
     pub(super) controller: Memo<GitPageControllerState>,
-    pub(super) directory: Memo<GitDirectoryState>,
+    pub(super) projects: Memo<GitProjects>,
     handled_selection_reveal: Signal<u64>,
 }
 
@@ -18,7 +18,7 @@ impl GitPageState {
         let state = Self {
             snapshot: use_memo(move || root().snapshot),
             controller: use_memo(move || root().controller),
-            directory: use_memo(move || root().directory),
+            projects: use_memo(move || root().projects),
             handled_selection_reveal: use_signal(|| 0),
         };
         state.subscribe(root);

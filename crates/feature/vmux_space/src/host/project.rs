@@ -2,7 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
+use vmux_ecs::page::PageReady;
 use vmux_ecs::persistence::PersistenceAppExt;
+use vmux_ecs::{PageMetadata, UiStateWrite};
 use vmux_git::worktree::LinkedRepoRoot;
 #[cfg(test)]
 use vmux_layout::pane::Pane;
@@ -28,6 +30,7 @@ impl Plugin for SpaceProjectPlugin {
                     publish_roots
                         .in_set(WriteCommandBarSnapshots)
                         .after(remember),
+                    publish_git_projects.after(remember),
                 ),
             );
     }
@@ -78,6 +81,34 @@ fn publish_roots(projects: SpaceProjects, mut roots: Single<&mut CommandBarProje
     };
     if **roots != next {
         **roots = next;
+    }
+}
+
+#[derive(Component, Default)]
+struct GitProjectsProjection(Vec<ProjectRow>);
+
+fn publish_git_projects(
+    projects: SpaceProjects,
+    views: Query<(Entity, &PageMetadata, Option<&GitProjectsProjection>), With<PageReady>>,
+    mut commands: Commands,
+) {
+    let rows = projects.active_projects();
+    for (entity, page, current) in &views {
+        if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
+            && page.url != vmux_git::GitPlugin::MANIFEST.url
+        {
+            continue;
+        }
+        if current.is_some_and(|current| current.0 == rows) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .insert(GitProjectsProjection(rows.clone()));
+        commands.trigger(UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+            entity,
+            &vmux_git::state::GitProjects { rows: rows.clone() },
+        ));
     }
 }
 

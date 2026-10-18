@@ -88,17 +88,16 @@ impl GitStates<'_, '_> {
         self.states.contains(entity)
     }
 
-    pub(super) fn workspace(&self, entity: Entity) -> Option<String> {
-        self.states
-            .get(entity)
-            .ok()
-            .map(|state| state.snapshot.workspace.clone())
-    }
-
     pub(super) fn repository_loaded_at(&self, entity: Entity, path: &str) -> bool {
         self.states.get(entity).is_ok_and(|state| {
             state.snapshot.workspace == path && state.snapshot.repository.is_some()
         })
+    }
+
+    pub(super) fn repository_loading_at(&self, entity: Entity, path: &str) -> bool {
+        self.states
+            .get(entity)
+            .is_ok_and(|state| state.snapshot.workspace == path && state.snapshot.loading)
     }
 
     pub(super) fn reset(&mut self, entity: Entity, workspace: String) {

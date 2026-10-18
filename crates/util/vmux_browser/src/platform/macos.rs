@@ -156,6 +156,9 @@ fn apply_lifecycle(
             }
             LifecycleUpdate::FramePending => page.frame_pending = true,
             LifecycleUpdate::FrameDelivered => page.frame_pending = false,
+            LifecycleUpdate::FrameApplied => {
+                page.frames_applied = page.frames_applied.wrapping_add(1).max(1);
+            }
             LifecycleUpdate::UiEventHandled => {
                 page.ui_events = page.ui_events.wrapping_add(1);
             }
@@ -374,7 +377,7 @@ fn registration_priority(entity: EntityRef<'_>, registration: PageRegistration) 
 
 fn place(
     renderer: Option<NonSendMut<PageRenderer>>,
-    hosted: Query<(Entity, &HostedSurface), With<HostsPage>>,
+    hosted: Query<(Entity, &HostedSurface, &crate::HostedPageLifecycle), With<HostsPage>>,
     frames: Query<&PaneFrame>,
     rings: Query<&FocusRing>,
     corners: Query<&AllCorners>,
@@ -393,7 +396,7 @@ fn place(
     {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
-    for (entity, page) in &hosted {
+    for (entity, page, lifecycle) in &hosted {
         let Some(surface) = renderer.0.get(&entity) else {
             continue;
         };
@@ -407,12 +410,16 @@ fn place(
         surface.set_corner_radius(settings.layout.radius as f64, all_corners);
         let ring = rings.get(entity).copied().unwrap_or_default();
         surface.set_focus_ring(ring.width as f64, ring.rgb);
-        surface.set_visible(true);
+        surface.set_visible(hosted_surface_ready(lifecycle));
         let window_is_capturing = capturing.iter().any(|host| host.0 == page.window);
         if let Some(order) = page.placement.pointer_order(window_is_capturing) {
             surface.order_among_siblings(order);
         }
     }
+}
+
+fn hosted_surface_ready(lifecycle: &crate::HostedPageLifecycle) -> bool {
+    lifecycle.frames_applied > 0
 }
 
 fn render(renderer: Option<NonSend<PageRenderer>>, lifecycle: Query<&crate::HostedPageLifecycle>) {
@@ -1031,7 +1038,7 @@ fn report_waiting(reason: &str) {
 mod tests {
     use super::{
         MacosBrowserPlugin, PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt,
-        SimulatorFrame, SimulatorFrameRequest,
+        SimulatorFrame, SimulatorFrameRequest, hosted_surface_ready,
     };
     use bevy::ecs::schedule::Schedules;
     use bevy::prelude::{App, MinimalPlugins, Update};
@@ -1045,6 +1052,15 @@ mod tests {
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();
         update.initialize(app.world_mut()).unwrap();
+    }
+
+    #[test]
+    fn hosted_surface_waits_for_its_first_applied_frame() {
+        let mut lifecycle = crate::HostedPageLifecycle::default();
+        assert!(!hosted_surface_ready(&lifecycle));
+
+        lifecycle.frames_applied = 1;
+        assert!(hosted_surface_ready(&lifecycle));
     }
 
     #[test]

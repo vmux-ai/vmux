@@ -130,6 +130,7 @@ impl Dom {
     ) {
         if Self::acknowledges_last_frame(request) {
             self.page_flushed();
+            self.lifecycle.update(LifecycleUpdate::FrameApplied);
         }
         if let Some(stale) = self.parked.borrow_mut().take() {
             self.respond(stale, PageFrame::new(Vec::new(), Vec::new()));

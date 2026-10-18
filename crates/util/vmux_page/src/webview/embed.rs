@@ -15,6 +15,7 @@ pub enum LifecycleUpdate {
     Remounted,
     FramePending,
     FrameDelivered,
+    FrameApplied,
     UiEventHandled,
     HostEventDelivered,
     ListenerRegistered,

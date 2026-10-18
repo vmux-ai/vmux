@@ -1,4 +1,5 @@
 use bevy_ecs::prelude::Component;
+use vmux_api::space::ProjectRow;
 
 use crate::event::{
     GitBranchLog, GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot,
@@ -157,6 +158,11 @@ pub struct GitWorkspaceChanged {
     pub error: String,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct GitProjects {
+    pub rows: Vec<ProjectRow>,
+}
+
 #[vmux_api::contract]
 pub struct GitCommandLogEntry {
     pub operation: String,
@@ -229,17 +235,19 @@ pub struct GitUiStatePatch {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
     pub workspace: Option<GitWorkspaceChanged>,
+    pub projects: Option<Box<GitProjects>>,
     pub snapshot: Option<Box<GitPageSnapshot>>,
     pub directory: Option<Box<GitDirectoryState>>,
     pub controller: Option<Box<GitPageControllerState>>,
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 2)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 3)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
     pub workspace: Option<GitWorkspaceChanged>,
+    pub projects: GitProjects,
     pub snapshot: GitPageSnapshot,
     pub directory: GitDirectoryState,
     pub controller: GitPageControllerState,
@@ -256,6 +264,9 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
         }
         if let Some(workspace) = patch.workspace {
             self.workspace = Some(workspace);
+        }
+        if let Some(projects) = patch.projects {
+            self.projects = *projects;
         }
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;
@@ -291,6 +302,14 @@ mod tests {
                     ..Default::default()
                 }
                 .into(),
+                GitProjects {
+                    rows: vec![ProjectRow {
+                        path: "/tmp/repo".to_string(),
+                        label: "repo".to_string(),
+                        ..Default::default()
+                    }],
+                }
+                .into(),
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
@@ -304,5 +323,6 @@ mod tests {
             Some("/tmp")
         );
         assert_eq!(decoded.snapshot.workspace, "/tmp/repo");
+        assert_eq!(decoded.projects.rows[0].path, "/tmp/repo");
     }
 }

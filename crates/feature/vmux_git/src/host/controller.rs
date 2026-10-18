@@ -811,7 +811,10 @@ fn ui_state_write(
         states.apply_workspace_error(webview, error.clone());
         return;
     }
-    if path.is_empty() || states.workspace(webview).as_deref() == Some(path) {
+    if path.is_empty()
+        || states.repository_loaded_at(webview, path)
+        || states.repository_loading_at(webview, path)
+    {
         return;
     }
     states.reset(webview, path.clone());
