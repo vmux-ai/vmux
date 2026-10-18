@@ -11,6 +11,24 @@ use wry::WebViewExtMacOS;
 
 use super::{Appearance, SiblingOrder, WebView};
 
+pub(super) struct Transparency;
+
+impl Transparency {
+    pub(super) fn prepare(webview: &wry::WebView) {
+        let wk = webview.webview();
+        let clear = NSColor::clearColor();
+        unsafe {
+            wk.setUnderPageBackgroundColor(Some(&clear));
+        }
+        let view: &NSView = &wk;
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            layer.setOpaque(false);
+            layer.setBackgroundColor(Some(&clear.CGColor()));
+        }
+    }
+}
+
 impl WebView {
     pub fn order_among_siblings(&self, order: SiblingOrder) {
         let wk = self.webview.webview();

@@ -414,7 +414,7 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground active:bg-foreground/[0.09] focus-visible:bg-foreground/[0.055] focus-visible:text-foreground",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.07] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.07] focus-visible:text-foreground",
                 onclick: move |_| {
                     let _ = send(&TabCreateRequest);
                 },

@@ -88,7 +88,12 @@ impl WebView {
             .with_bounds(bounds)
             .build_as_child(window)?;
         #[cfg(target_os = "macos")]
-        macos::LinkPreviewPolicy::forbid(&webview);
+        {
+            macos::LinkPreviewPolicy::forbid(&webview);
+            if page.transparent {
+                macos::Transparency::prepare(&webview);
+            }
+        }
         Ok(Self {
             webview,
             dom,
