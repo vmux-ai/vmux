@@ -6,17 +6,19 @@ use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
     ToolOperationNotice, ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest,
-    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest,
-    ToolsRefreshRequest, ToolsUiState,
+    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, ToolsUiState,
 };
 use dioxus::prelude::*;
+use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
-    ManagerRow, ManagerSpinner, ManagerTab, ManagerTabs, ManagerThumbnail, ManagerView,
+    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage, ManagerRow,
+    ManagerSearch, ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView,
     ManagerViewToggle,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::route::ToolRoute;
 
@@ -71,31 +73,120 @@ impl ToolSelection {
     }
 }
 
-#[component]
-fn ToolsManagerTabs(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
-    let mut seen = BTreeSet::new();
-    let mut tabs = Vec::new();
-    for provider in providers {
-        if provider.route.is_empty() || !seen.insert(provider.route.clone()) {
-            continue;
+impl ToolItem {
+    fn installed(&self) -> bool {
+        matches!(self.status, ToolStatus::Installed | ToolStatus::Outdated)
+    }
+
+    fn installable(&self) -> bool {
+        self.operations.contains(&ToolOperationKind::Install)
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct ToolEntry {
+    item: ToolItem,
+    provider: ToolProviderMetadata,
+}
+
+#[derive(Clone, PartialEq)]
+struct ToolRouteOption {
+    id: String,
+    label: String,
+    url: String,
+}
+
+impl ToolRouteOption {
+    fn all(providers: Vec<ToolProviderMetadata>) -> Vec<Self> {
+        let mut options = Vec::new();
+        let mut seen = BTreeSet::new();
+        for provider in providers {
+            if provider.route.is_empty() || !seen.insert(provider.route.clone()) {
+                continue;
+            }
+            let route = ToolRoute::named(provider.route.clone());
+            let label = provider.localized_route_title();
+            options.push(Self {
+                id: provider.route,
+                label,
+                url: route.url(),
+            });
         }
-        let route = ToolRoute::named(provider.route.clone());
-        let label = provider.localized_route_title();
-        tabs.push(ManagerTab {
-            id: provider.route,
-            label,
-            href: route.url(),
-        });
+        options
+    }
+}
+
+#[component]
+fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
+    let mut open = use_signal(|| false);
+    let options = ToolRouteOption::all(providers);
+    let selected_label = options
+        .iter()
+        .find(|option| option.id == active)
+        .map(|option| option.label.clone())
+        .unwrap_or_else(|| translate("tools-title"));
+    rsx! {
+        Dropdown {
+            open: open(),
+            class: "shrink-0".to_string(),
+            on_dismiss: move |_| open.set(false),
+            button {
+                r#type: "button",
+                class: "flex h-7 min-w-32 max-w-48 items-center gap-2 rounded-md bg-foreground/[0.025] px-2.5 text-[11px] font-medium text-foreground ring-1 ring-inset ring-foreground/[0.08] transition-colors hover:bg-foreground/[0.055]",
+                aria_expanded: open(),
+                onclick: move |_| open.set(!open()),
+                span { class: "min-w-0 flex-1 truncate text-left", "{selected_label}" }
+                LineIconView {
+                    icon: LineIcon::ChevronDown,
+                    class: if open() {
+                        "size-3 shrink-0 rotate-180 text-muted-foreground".to_string()
+                    } else {
+                        "size-3 shrink-0 text-muted-foreground".to_string()
+                    },
+                }
+            }
+            if open() {
+                div { class: "absolute left-0 top-8 z-30 min-w-full w-48 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
+                    for option in options {
+                        button {
+                            key: "{option.id}",
+                            r#type: "button",
+                            class: if option.id == active {
+                                "flex w-full items-center gap-2 rounded-md bg-foreground/[0.07] px-2 py-1.5 text-left text-[11px] text-foreground"
+                            } else {
+                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                            },
+                            onclick: move |_| {
+                                open.set(false);
+                                let _ = send(&ToolsNavigateRequest { url: option.url.clone() });
+                            },
+                            span { class: "min-w-0 flex-1 truncate", "{option.label}" }
+                            if option.id == active {
+                                LineIconView { icon: LineIcon::Check, class: "size-3 shrink-0".to_string() }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolThumbnail(item: ToolItem, provider: ToolProviderMetadata, class: String) -> Element {
+    if provider.provider.is("acp") {
+        return rsx! {
+            AgentThumbnail {
+                src: item.icon,
+                seed: item.id,
+                background: String::new(),
+                alt: item.name,
+                class,
+            }
+        };
     }
     rsx! {
-        ManagerTabs {
-            active,
-            tabs,
-            content_class: "mx-auto flex w-full max-w-5xl items-center".to_string(),
-            onselect: move |url: String| {
-                let _ = send(&ToolsNavigateRequest { url });
-            },
-        }
+        ManagerThumbnail { src: item.icon, fallback: provider.short_label }
     }
 }
 
@@ -114,12 +205,25 @@ fn ToolManager(state: ToolsUiState) -> Element {
         selected.set(None);
     }));
     let apply_provider = view.apply_provider.clone();
-    let route_title = if view.route_title_message_id.is_empty() {
-        view.route_title.clone()
-    } else {
-        translate(&view.route_title_message_id)
-    };
     let selection = selected();
+    let mut installed = Vec::new();
+    let mut available = Vec::new();
+    for category in &view.categories {
+        let Some(provider) = snapshot.provider(&category.provider) else {
+            continue;
+        };
+        for item in &category.items {
+            let entry = ToolEntry {
+                item: item.clone(),
+                provider: provider.clone(),
+            };
+            if item.installed() {
+                installed.push(entry);
+            } else {
+                available.push(entry);
+            }
+        }
+    }
     let selected_tool = selection.as_ref().and_then(|selection| {
         view.categories.iter().find_map(|category| {
             let item = category.items.iter().find(|item| selection.matches(item))?;
@@ -129,53 +233,46 @@ fn ToolManager(state: ToolsUiState) -> Element {
     });
     rsx! {
         ManagerPage {
-            ToolsManagerTabs { active: view.route.clone(), providers: snapshot.providers.clone() }
-            ManagerHeader {
-                content_class: "mx-auto w-full max-w-5xl".to_string(),
-                title: route_title,
-                count: view.visible_count as usize,
-                search_value: view.query.clone(),
-                search_placeholder: translate("tools-search"),
-                onsearch: move |event: FormEvent| {
-                    let _ = send(&ToolsFilterRequest { query: event.value() });
-                },
-                onkeydown: None,
-                actions: rsx! {
-                    if snapshot.loaded && view.visible_count > 0 {
-                        ManagerViewToggle {
-                            view: manager_view(),
-                            list_label: translate("tools-view-list"),
-                            grid_label: translate("tools-view-grid"),
-                            onchange: move |view| manager_view.set(view),
-                        }
+            ManagerToolbar {
+                ToolsRouteSelector {
+                    active: view.route.clone(),
+                    providers: snapshot.providers.clone(),
+                }
+                ManagerSearch {
+                    value: view.query.clone(),
+                    placeholder: translate("tools-search"),
+                    onsearch: move |event: FormEvent| {
+                        let _ = send(&ToolsFilterRequest { query: event.value() });
+                    },
+                    onkeydown: None,
+                }
+                if snapshot.loaded && view.visible_count > 0 {
+                    ManagerViewToggle {
+                        view: manager_view(),
+                        list_label: translate("tools-view-list"),
+                        grid_label: translate("tools-view-grid"),
+                        onchange: move |view| manager_view.set(view),
                     }
-                    if let Some(provider) = apply_provider {
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Secondary,
-                            disabled: pending.contains(&ToolOperationKey::new(
-                                provider.clone(),
-                                ToolOperationKind::Apply,
-                                "",
-                            )),
-                            onclick: move |_| {
-                                send_operation(
-                                    provider.clone(),
-                                    ToolOperationKind::Apply,
-                                    String::new(),
-                                    String::new(),
-                                );
-                            },
-                            {translate("tools-apply")}
-                        }
-                    }
+                }
+                if let Some(provider) = apply_provider {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
+                        disabled: pending.contains(&ToolOperationKey::new(
+                            provider.clone(),
+                            ToolOperationKind::Apply,
+                            "",
+                        )),
                         onclick: move |_| {
-                            request_snapshot(true);
+                            send_operation(
+                                provider.clone(),
+                                ToolOperationKind::Apply,
+                                String::new(),
+                                String::new(),
+                            );
                         },
-                        {translate("common-refresh")}
+                        {translate("tools-apply")}
                     }
-                },
+                }
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
                 ManagerList {
@@ -216,39 +313,24 @@ fn ToolManager(state: ToolsUiState) -> Element {
                             detail: translate("tools-empty-detail"),
                         }
                     } else {
-                        for category in view.categories.iter() {
-                            if let Some(provider) = snapshot.provider(&category.provider) {
-                                div { class: "mt-3 flex items-center gap-2 px-1 first:mt-0",
-                                    h2 { class: "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", {provider.localized_title()} }
-                                    span { class: "text-[10px] text-muted-foreground/60",
-                                        "{category.items.len()}"
-                                    }
-                                }
-                                div { class: if manager_view() == ManagerView::Grid {
-                                        "grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
-                                    } else {
-                                        "flex flex-col gap-2"
-                                    },
-                                    for item in category.items.iter() {
-                                        if manager_view() == ManagerView::Grid {
-                                            ToolCard {
-                                                key: "{category.provider.id()}:{item.id}",
-                                                item: item.clone(),
-                                                provider: provider.clone(),
-                                                selected: selection.as_ref().is_some_and(|selected| selected.matches(item)),
-                                                onselect: move |selection| selected.set(Some(selection)),
-                                            }
-                                        } else {
-                                            ToolRow {
-                                                key: "{category.provider.id()}:{item.id}",
-                                                item: item.clone(),
-                                                provider: provider.clone(),
-                                                selected: selection.as_ref().is_some_and(|selected| selected.matches(item)),
-                                                onselect: move |selection| selected.set(Some(selection)),
-                                            }
-                                        }
-                                    }
-                                }
+                        if !installed.is_empty() {
+                            ToolSection {
+                                label: translate("common-installed"),
+                                entries: installed,
+                                view: manager_view(),
+                                selection: selection.clone(),
+                                pending: pending.clone(),
+                                onselect: move |selection| selected.set(Some(selection)),
+                            }
+                        }
+                        if !available.is_empty() {
+                            ToolSection {
+                                label: translate("tools-status-available"),
+                                entries: available,
+                                view: manager_view(),
+                                selection,
+                                pending: pending.clone(),
+                                onselect: move |selection| selected.set(Some(selection)),
                             }
                         }
                     }
@@ -259,6 +341,53 @@ fn ToolManager(state: ToolsUiState) -> Element {
                         provider,
                         pending: pending.clone(),
                         onclose: move |_| selected.set(None),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolSection(
+    label: String,
+    entries: Vec<ToolEntry>,
+    view: ManagerView,
+    selection: Option<ToolSelection>,
+    pending: BTreeSet<ToolOperationKey>,
+    onselect: EventHandler<ToolSelection>,
+) -> Element {
+    let count = entries.len();
+    rsx! {
+        section { class: "flex flex-col gap-2",
+            header { class: "flex items-center gap-2 px-1",
+                h2 { class: "text-[11px] font-semibold text-foreground/80", "{label}" }
+                span { class: "text-[10px] tabular-nums text-muted-foreground/55", "{count}" }
+            }
+            div { class: if view == ManagerView::Grid {
+                    "grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-2"
+                } else {
+                    "flex flex-col gap-2"
+                },
+                for entry in entries {
+                    if view == ManagerView::Grid {
+                        ToolCard {
+                            key: "{entry.provider.provider.id()}:{entry.item.id}",
+                            item: entry.item.clone(),
+                            provider: entry.provider,
+                            selected: selection.as_ref().is_some_and(|selected| selected.matches(&entry.item)),
+                            pending: pending.clone(),
+                            onselect,
+                        }
+                    } else {
+                        ToolRow {
+                            key: "{entry.provider.provider.id()}:{entry.item.id}",
+                            item: entry.item.clone(),
+                            provider: entry.provider,
+                            selected: selection.as_ref().is_some_and(|selected| selected.matches(&entry.item)),
+                            pending: pending.clone(),
+                            onselect,
+                        }
                     }
                 }
             }
@@ -303,6 +432,7 @@ fn ToolRow(
     item: ToolItem,
     provider: ToolProviderMetadata,
     selected: bool,
+    pending: BTreeSet<ToolOperationKey>,
     onselect: EventHandler<ToolSelection>,
 ) -> Element {
     let version = item.version.clone().unwrap_or_default();
@@ -311,17 +441,24 @@ fn ToolRow(
     rsx! {
         ManagerRow {
             show_icon,
+            icon_surface: !provider.provider.is("acp"),
             selected,
             onselect: move |_| onselect.call(selection.clone()),
             icon: rsx! {
-                ManagerThumbnail { src: item.icon.clone(), fallback: "ACP".to_string() }
+                ToolThumbnail {
+                    item: item.clone(),
+                    provider: provider.clone(),
+                    class: "size-7 text-[8px]".to_string(),
+                }
             },
             title: item.name.clone(),
             subtitle: version,
             meta: rsx! {
                 ToolMeta { item: item.clone(), provider: provider.clone() }
             },
-            actions: rsx! {},
+            actions: rsx! {
+                ToolQuickInstall { item: item.clone(), pending }
+            },
         }
     }
 }
@@ -331,6 +468,7 @@ fn ToolCard(
     item: ToolItem,
     provider: ToolProviderMetadata,
     selected: bool,
+    pending: BTreeSet<ToolOperationKey>,
     onselect: EventHandler<ToolSelection>,
 ) -> Element {
     let version = item.version.clone().unwrap_or_default();
@@ -339,9 +477,9 @@ fn ToolCard(
     rsx! {
         div {
             class: if selected {
-                "group flex min-h-36 min-w-0 cursor-pointer flex-col rounded-xl bg-primary/[0.09] p-3.5 shadow-[inset_2px_0_0_var(--primary)] transition-colors"
+                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-primary/[0.09] p-3 shadow-[inset_2px_0_0_var(--primary)] transition-colors"
             } else {
-                "group flex min-h-36 min-w-0 cursor-pointer flex-col rounded-xl bg-foreground/[0.03] p-3.5 transition-colors hover:bg-foreground/[0.06]"
+                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-foreground/[0.03] p-3 transition-colors hover:bg-foreground/[0.06]"
             },
             role: "button",
             tabindex: "0",
@@ -358,8 +496,12 @@ fn ToolCard(
             },
             div { class: "flex min-w-0 items-start gap-3",
                 if provider.thumbnails {
-                    div { class: "flex size-10 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.065]",
-                        ManagerThumbnail { src: item.icon.clone(), fallback: provider.short_label.clone() }
+                    div { class: "flex size-10 shrink-0 items-center justify-center",
+                        ToolThumbnail {
+                            item: item.clone(),
+                            provider: provider.clone(),
+                            class: "size-10 text-[10px]".to_string(),
+                        }
                     }
                 }
                 div { class: "min-w-0 flex-1",
@@ -368,10 +510,45 @@ fn ToolCard(
                         div { class: "mt-0.5 truncate text-xs text-muted-foreground/70", "{version}" }
                     }
                 }
+                ToolQuickInstall { item: item.clone(), pending }
             }
             div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
                 ToolMeta { item: item.clone(), provider }
             }
+        }
+    }
+}
+
+#[component]
+fn ToolQuickInstall(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
+    if !item.installable() {
+        return rsx! {};
+    }
+    let operation = ToolOperationKey::new(
+        item.provider.clone(),
+        ToolOperationKind::Install,
+        item.id.clone(),
+    );
+    let disabled = pending.contains(&operation);
+    let provider = item.provider;
+    let id = item.id;
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.04] text-muted-foreground/70 opacity-60 transition-[background-color,color,opacity] hover:bg-foreground/[0.10] hover:text-foreground hover:opacity-100 disabled:pointer-events-none disabled:opacity-25",
+            title: translate("common-install"),
+            aria_label: translate("common-install"),
+            disabled,
+            onclick: move |event| {
+                event.stop_propagation();
+                send_operation(
+                    provider.clone(),
+                    ToolOperationKind::Install,
+                    id.clone(),
+                    String::new(),
+                );
+            },
+            LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
         }
     }
 }
@@ -388,8 +565,12 @@ fn ToolDetails(
         aside { class: "flex min-h-0 w-[21rem] shrink-0 flex-col bg-foreground/[0.018]",
             header { class: "flex shrink-0 items-start gap-3 p-4",
                 if provider.thumbnails {
-                    div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.065]",
-                        ManagerThumbnail { src: item.icon.clone(), fallback: provider.short_label.clone() }
+                    div { class: "flex size-9 shrink-0 items-center justify-center",
+                        ToolThumbnail {
+                            item: item.clone(),
+                            provider: provider.clone(),
+                            class: "size-9 text-[9px]".to_string(),
+                        }
                     }
                 }
                 div { class: "min-w-0 flex-1",
@@ -471,10 +652,6 @@ fn ToolActions(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
             }
         }
     }
-}
-
-fn request_snapshot(refresh: bool) {
-    let _ = send(&ToolsRefreshRequest { refresh });
 }
 
 fn send_operation(provider: ToolProvider, kind: ToolOperationKind, id: String, value: String) {

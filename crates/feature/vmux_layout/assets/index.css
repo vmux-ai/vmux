@@ -20,6 +20,12 @@
   }
 }
 
+.vmux-sheet-section {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
 @keyframes loading-sweep {
   0% {
     background-position: 200% 0;

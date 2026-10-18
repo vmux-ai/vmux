@@ -12,7 +12,6 @@ use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderCh
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
 
 use super::active_session::ActiveSessionPanel;
@@ -26,42 +25,18 @@ use super::window_drag::WindowDragRegion;
 
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
-    let mut visible = use_signal(|| false);
-    let mut last_motion = use_signal(|| 0i64);
-    use_future(move || async move {
-        loop {
-            Platform::sleep(120).await;
-            if resizing() || !visible() {
-                continue;
-            }
-            if Platform::now() - last_motion() >= 240 {
-                visible.set(false);
-            }
-        }
-    });
-    let handle_class = if resizing() || visible() {
+    let handle_class = if resizing() {
         "h-10 w-1 rounded-full bg-foreground/45 opacity-100"
     } else {
-        "h-8 w-1 rounded-full bg-foreground/20 opacity-0 transition-[height,background-color,opacity] duration-150"
+        "h-8 w-1 rounded-full bg-foreground/20 opacity-0 transition-[height,background-color,opacity] duration-150 group-hover:opacity-100"
     };
     rsx! {
         div {
-            class: "absolute inset-y-0 z-20 flex w-4 cursor-col-resize items-center justify-center",
+            class: "group absolute inset-y-0 z-20 flex w-4 cursor-col-resize items-center justify-center",
             style: "right:-12px;",
-            onmouseenter: move |_| {
-                last_motion.set(Platform::now());
-                visible.set(true);
-            },
-            onmousemove: move |_| {
-                last_motion.set(Platform::now());
-                visible.set(true);
-            },
-            onmouseleave: move |_| visible.set(false),
-            onpointerleave: move |_| visible.set(false),
             onmousedown: move |event: Event<MouseData>| {
                 event.prevent_default();
                 resizing.set(true);
-                visible.set(true);
             },
             div { class: "{handle_class}" }
         }
@@ -175,7 +150,6 @@ fn SideSheetContent() -> Element {
                     ..BookmarkDragState::listeners(drag_state),
                     if let Some(space) = active_space {
                         SideSheetSpaceCard {
-                            key: "{space.id}",
                             space,
                             spaces,
                             form: space_form.clone(),
@@ -272,6 +246,8 @@ fn SideSheetSpaceRow(
     let menu_value = use_signal(|| space.id.clone());
     let menu_id = space.id.clone();
     let menu_name = space.name.clone();
+    let edit_id = space.id.clone();
+    let edit_name = space.name.clone();
     let deletable = spaces.spaces.len() > 1;
 
     rsx! {
@@ -302,7 +278,16 @@ fn SideSheetSpaceRow(
                             if editing {
                                 SpaceRenameInput { form: form.clone() }
                             } else {
-                                span { class: "min-w-0 flex-1 truncate px-1 py-0.5 text-left text-ui font-medium text-foreground",
+                                button {
+                                    r#type: "button",
+                                    class: "pointer-events-auto min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055]",
+                                    onclick: move |event| {
+                                        event.stop_propagation();
+                                        let _ = send(&SpaceFormOpenRequest {
+                                            space_id: Some(edit_id.clone()),
+                                            draft: edit_name.clone(),
+                                        });
+                                    },
                                     {space.display_name()}
                                 }
                             }
@@ -353,14 +338,13 @@ fn SideSheetSpaceRow(
                 }
             }
             if open() {
-                div { class: "absolute left-2 right-2 top-12 z-40 isolate rounded-xl bg-background/95 p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.38)] ring-1 ring-inset ring-foreground/[0.14]",
+                div { class: "absolute left-2 right-2 top-12 z-40 isolate rounded-xl border-0 bg-background/95 p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.30)] outline-none ring-0",
                     for choice in spaces.spaces {
                         SpaceChoice {
                             key: "{choice.id}",
                             space: choice,
                             deletable,
                             onselect: move |_| open.set(false),
-                            ondelete: move |_| open.set(false),
                         }
                     }
                     div { class: "my-1 h-px bg-foreground/[0.08]" }
@@ -384,12 +368,7 @@ fn SideSheetSpaceRow(
 }
 
 #[component]
-fn SpaceChoice(
-    space: SpaceRow,
-    deletable: bool,
-    onselect: EventHandler<()>,
-    ondelete: EventHandler<()>,
-) -> Element {
+fn SpaceChoice(space: SpaceRow, deletable: bool, onselect: EventHandler<()>) -> Element {
     let select_id = space.id.clone();
     let delete_id = space.id.clone();
     rsx! {
@@ -428,7 +407,6 @@ fn SpaceChoice(
                             onclick: move |event| {
                                 event.prevent_default();
                                 event.stop_propagation();
-                                ondelete.call(());
                                 let _ = send(&SpaceDeleteRequest { space_id: delete_id.clone() });
                             },
                             LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }

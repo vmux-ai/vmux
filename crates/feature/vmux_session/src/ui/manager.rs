@@ -6,7 +6,8 @@ use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage,
+    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch, ManagerToolbar,
+    ManagerView, ManagerViewToggle,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
@@ -23,7 +24,7 @@ pub fn SessionsManager() -> Element {
     use_theme();
     let ui = use_ui_state::<ChatUiState>();
     let mut query = use_signal(String::new);
-    let mut view = use_signal(|| SessionsView::List);
+    let mut view = use_signal(ManagerView::default);
     let mut filters = use_signal(SessionFilters::default);
     let mut filter_step = use_signal(|| SessionFilterStep::Field);
     let mut filter_value = use_signal(String::new);
@@ -64,7 +65,7 @@ pub fn SessionsManager() -> Element {
 
     rsx! {
         ManagerPage {
-            header { class: "flex h-11 shrink-0 items-center gap-2.5 bg-foreground/[0.018] px-3",
+            ManagerToolbar {
                 Dropdown {
                     open: filter_requested,
                     class: "min-w-0 flex-1".to_string(),
@@ -73,45 +74,41 @@ pub fn SessionsManager() -> Element {
                         filter_step.set(SessionFilterStep::Field);
                         filter_value.set(String::new());
                     },
-                    div { class: "relative z-30 flex h-7 min-w-0 items-center gap-1.5 rounded-md bg-foreground/[0.025] px-2.5 ring-1 ring-inset ring-foreground/[0.08] focus-within:bg-foreground/[0.05] focus-within:ring-foreground/[0.16]",
-                        LineIconView {
-                            icon: LineIcon::Search,
-                            class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
-                        }
-                        for (index, presentation) in selected_filters.iter().cloned().enumerate() {
-                            FilterPill {
-                                key: "filter-pill-{index}",
-                                label: presentation.label,
-                                dot: presentation.dot,
-                                clear_label: translate("common-remove-filter"),
-                                onclear: move |_| filters.write().remove(index),
+                    ManagerSearch {
+                        value: query(),
+                        placeholder: translate("sessions-search"),
+                        onsearch: move |event: FormEvent| query.set(event.value()),
+                        onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                            if event.key() == Key::Backspace && query().is_empty() {
+                                filters.write().pop();
                             }
-                        }
-                        input {
-                            r#type: "search",
-                            class: "h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/55",
-                            placeholder: translate("sessions-search"),
-                            value: query(),
-                            oninput: move |event| query.set(event.value()),
-                            onkeydown: move |event: KeyboardEvent| {
-                                if event.key() == Key::Backspace && query().is_empty() {
-                                    filters.write().pop();
+                        })),
+                        prefix: rsx! {
+                            for (index, presentation) in selected_filters.iter().cloned().enumerate() {
+                                FilterPill {
+                                    key: "filter-pill-{index}",
+                                    label: presentation.label,
+                                    dot: presentation.dot,
+                                    clear_label: translate("common-remove-filter"),
+                                    onclear: move |_| filters.write().remove(index),
                                 }
-                            },
-                        }
-                        FilterTrigger {
-                            active: filter_requested,
-                            label: translate("common-filter"),
-                            onclick: move |_| {
-                                if filter_requested {
-                                    query.set(String::new());
-                                } else {
-                                    query.set("#".to_string());
-                                }
-                                filter_step.set(SessionFilterStep::Field);
-                                filter_value.set(String::new());
-                            },
-                        }
+                            }
+                        },
+                        suffix: rsx! {
+                            FilterTrigger {
+                                active: filter_requested,
+                                label: translate("common-filter"),
+                                onclick: move |_| {
+                                    if filter_requested {
+                                        query.set(String::new());
+                                    } else {
+                                        query.set("#".to_string());
+                                    }
+                                    filter_step.set(SessionFilterStep::Field);
+                                    filter_value.set(String::new());
+                                },
+                            }
+                        },
                     }
                     if filter_requested {
                         SessionFilterMenu {
@@ -134,9 +131,12 @@ pub fn SessionsManager() -> Element {
                         }
                     }
                 }
-                SessionsViewToggle {
-                    selected: view(),
-                    onselect: move |selected| view.set(selected),
+                ManagerViewToggle {
+                    view: view(),
+                    list_label: translate("sessions-view-list"),
+                    grid_label: translate("sessions-view-board"),
+                    grid_icon: LineIcon::Columns3,
+                    onchange: move |selected| view.set(selected),
                 }
                 ManagerButton {
                     variant: ManagerButtonVariant::Secondary,
@@ -170,7 +170,7 @@ pub fn SessionsManager() -> Element {
                             detail: translate("sessions-inbox-empty-detail"),
                             actions: rsx! { StartSessionButton {} },
                         }
-                    } else if view() == SessionsView::List {
+                    } else if view() == ManagerView::List {
                         SessionsList {
                             groups: groups.clone(),
                             repositories: repositories.clone(),
@@ -280,12 +280,6 @@ fn SessionCategory(
             span { class: "text-[10px] tabular-nums text-muted-foreground/65", "{count}" }
         }
     }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum SessionsView {
-    List,
-    Board,
 }
 
 #[derive(Clone, PartialEq)]
@@ -624,40 +618,6 @@ fn SessionFilterMenu(
                 }
             }
         },
-    }
-}
-
-#[component]
-fn SessionsViewToggle(selected: SessionsView, onselect: EventHandler<SessionsView>) -> Element {
-    let list_selected = selected == SessionsView::List;
-    let board_selected = selected == SessionsView::Board;
-    rsx! {
-        div { class: "flex h-7 items-center gap-0.5 rounded-md bg-foreground/[0.025] p-0.5 ring-1 ring-inset ring-foreground/[0.07]",
-            button {
-                r#type: "button",
-                class: if list_selected {
-                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
-                } else {
-                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
-                },
-                aria_pressed: list_selected,
-                onclick: move |_| onselect.call(SessionsView::List),
-                LineIconView { icon: LineIcon::List, class: "size-3.5".to_string() }
-                span { class: "hidden sm:inline", {translate("sessions-view-list")} }
-            }
-            button {
-                r#type: "button",
-                class: if board_selected {
-                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-foreground bg-foreground/[0.08]"
-                } else {
-                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
-                },
-                aria_pressed: board_selected,
-                onclick: move |_| onselect.call(SessionsView::Board),
-                LineIconView { icon: LineIcon::Columns3, class: "size-3.5".to_string() }
-                span { class: "hidden sm:inline", {translate("sessions-view-board")} }
-            }
-        }
     }
 }
 

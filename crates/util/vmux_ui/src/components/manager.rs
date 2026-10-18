@@ -155,6 +155,48 @@ pub fn ManagerHeader(
     }
 }
 
+#[component]
+pub fn ManagerToolbar(children: Element) -> Element {
+    rsx! {
+        header { class: "flex h-11 shrink-0 items-center gap-2.5 bg-foreground/[0.018] px-3",
+            {children}
+        }
+    }
+}
+
+#[component]
+pub fn ManagerSearch(
+    value: String,
+    placeholder: String,
+    onsearch: EventHandler<FormEvent>,
+    onkeydown: Option<EventHandler<KeyboardEvent>>,
+    #[props(default = rsx! {})] prefix: Element,
+    #[props(default = rsx! {})] suffix: Element,
+) -> Element {
+    rsx! {
+        div { class: "relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md bg-foreground/[0.025] px-2.5 ring-1 ring-inset ring-foreground/[0.08] focus-within:bg-foreground/[0.05] focus-within:ring-foreground/[0.16]",
+            LineIconView {
+                icon: LineIcon::Search,
+                class: "size-3.5 shrink-0 text-muted-foreground",
+            }
+            {prefix}
+            input {
+                r#type: "search",
+                class: "h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/55",
+                placeholder,
+                value,
+                oninput: move |event| onsearch.call(event),
+                onkeydown: move |event| {
+                    if let Some(handler) = &onkeydown {
+                        handler.call(event);
+                    }
+                },
+            }
+            {suffix}
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum ManagerView {
     #[default]
@@ -167,33 +209,36 @@ pub fn ManagerViewToggle(
     view: ManagerView,
     list_label: String,
     grid_label: String,
+    #[props(default = LineIcon::Grid2X2)] grid_icon: LineIcon,
     onchange: EventHandler<ManagerView>,
 ) -> Element {
     rsx! {
-        div { class: "flex items-center rounded-lg bg-foreground/[0.05] p-0.5",
+        div { class: "flex h-7 items-center gap-0.5 rounded-md bg-foreground/[0.025] p-0.5 ring-1 ring-inset ring-foreground/[0.07]",
             button {
                 r#type: "button",
                 aria_label: list_label,
                 aria_pressed: view == ManagerView::List,
                 class: if view == ManagerView::List {
-                    "flex size-7 items-center justify-center rounded-md bg-foreground/[0.09] text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded-md bg-foreground/[0.08] px-2 text-[11px] font-medium text-foreground"
                 } else {
-                    "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 onclick: move |_| onchange.call(ManagerView::List),
                 LineIconView { icon: LineIcon::List, class: "size-3.5" }
+                span { class: "hidden sm:inline", "{list_label}" }
             }
             button {
                 r#type: "button",
                 aria_label: grid_label,
                 aria_pressed: view == ManagerView::Grid,
                 class: if view == ManagerView::Grid {
-                    "flex size-7 items-center justify-center rounded-md bg-foreground/[0.09] text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded-md bg-foreground/[0.08] px-2 text-[11px] font-medium text-foreground"
                 } else {
-                    "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                    "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
                 },
                 onclick: move |_| onchange.call(ManagerView::Grid),
-                LineIconView { icon: LineIcon::Grid2X2, class: "size-3.5" }
+                LineIconView { icon: grid_icon, class: "size-3.5" }
+                span { class: "hidden sm:inline", "{grid_label}" }
             }
         }
     }
@@ -221,6 +266,7 @@ pub fn ManagerRow(
     meta: Element,
     actions: Element,
     #[props(default = true)] show_icon: bool,
+    #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
     #[props(default)] onselect: Option<EventHandler<()>>,
 ) -> Element {
@@ -259,7 +305,11 @@ pub fn ManagerRow(
                 }
             },
             if show_icon {
-                div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.065]",
+                div { class: if icon_surface {
+                        "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.065]"
+                    } else {
+                        "flex h-9 w-9 shrink-0 items-center justify-center"
+                    },
                     {icon}
                 }
             }
