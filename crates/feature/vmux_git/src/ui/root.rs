@@ -71,22 +71,19 @@ mod tests {
 
     #[test]
     fn number_keys_select_panels() {
-        assert_eq!(GitPanel::from_key("0"), Some(GitPanel::Status));
-        assert_eq!(GitPanel::from_key("1"), Some(GitPanel::Status));
-        assert_eq!(GitPanel::from_key("2"), Some(GitPanel::Files));
-        assert_eq!(GitPanel::from_key("3"), Some(GitPanel::Branches));
-        assert_eq!(GitPanel::from_key("4"), Some(GitPanel::Commits));
-        assert_eq!(GitPanel::from_key("5"), Some(GitPanel::Stash));
-        assert_eq!(GitPanel::from_key("6"), None);
+        assert_eq!(GitPanel::from_key("0"), Some(GitPanel::Files));
+        assert_eq!(GitPanel::from_key("1"), Some(GitPanel::Files));
+        assert_eq!(GitPanel::from_key("2"), Some(GitPanel::Branches));
+        assert_eq!(GitPanel::from_key("3"), Some(GitPanel::Commits));
+        assert_eq!(GitPanel::from_key("4"), Some(GitPanel::Stash));
+        assert_eq!(GitPanel::from_key("5"), None);
     }
 
     #[test]
     fn tab_cycles_panels_in_both_directions() {
-        assert_eq!(GitPanel::Status.next(false), GitPanel::Files);
         assert_eq!(GitPanel::Commits.next(false), GitPanel::Stash);
-        assert_eq!(GitPanel::Stash.next(false), GitPanel::Status);
-        assert_eq!(GitPanel::Status.next(true), GitPanel::Stash);
+        assert_eq!(GitPanel::Stash.next(false), GitPanel::Files);
         assert_eq!(GitPanel::Stash.next(true), GitPanel::Commits);
-        assert_eq!(GitPanel::Files.next(true), GitPanel::Status);
+        assert_eq!(GitPanel::Files.next(true), GitPanel::Stash);
     }
 }

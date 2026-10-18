@@ -7,9 +7,9 @@ use super::changes::ChangesCard;
 use super::command_log::CommandLogCard;
 use super::diff::{CommitDiffCard, DiffCard};
 use super::history::{HistoryCard, StashCard};
-use super::shortcuts::{GitShortcutBar, GitShortcutHelp};
+use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
-use super::status::{StatusCard, StatusDetailCard};
+use super::status::RepositoryHeader;
 use crate::state::GitPanel;
 
 #[component]
@@ -31,81 +31,79 @@ pub(super) fn GitDashboard() -> Element {
     let selected_path_bytes = use_memo(move || controller().selected_path_bytes);
     let selected_abs_path = use_memo(move || controller().selected_abs_path);
     let selected_commit = use_memo(move || controller().selected_commit);
+    let active_panel = controller_state.focused_panel;
 
     rsx! {
-        main { class: "min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(120%_90%_at_50%_-20%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-1.5 sm:overflow-hidden sm:p-2",
-            div { class: "grid min-h-full grid-cols-1 gap-1.5 sm:h-full sm:grid-cols-[minmax(18rem,0.86fr)_minmax(0,2.14fr)] sm:grid-rows-[4rem_minmax(7rem,0.55fr)_minmax(9rem,1fr)_minmax(5rem,0.75fr)_minmax(5rem,0.75fr)_1.75rem] sm:gap-2 xl:grid-cols-[minmax(22rem,0.9fr)_minmax(0,2.1fr)]",
-                StatusCard {
-                    repository: repository.clone(),
-                    focused_panel: controller_state.focused_panel,
-                    fetching: ui.fetching,
-                }
-                ChangesCard {
-                    repository: repository.clone(),
-                    selected_path_bytes: controller_state.selected_path_bytes.clone(),
-                    confirm_discard: controller_state.confirm_discard.clone(),
-                    commit_message: controller_state.commit_message.clone(),
-                    commit_pending: controller_state.commit_pending.clone(),
-                    focused_panel: controller_state.focused_panel,
-                    operations: controller_state.operations.clone(),
-                }
-                BranchesCard {
-                    repository: repository.clone(),
-                    selected_branch: controller_state.selected_branch.clone(),
-                    branch_collection: controller_state.branch_collection,
-                    focused_panel: controller_state.focused_panel,
-                    operations: controller_state.operations.clone(),
-                }
-                HistoryCard {
-                    repository: repository.clone(),
-                    selected_commit: controller_state.selected_commit.clone(),
-                    focused_panel: controller_state.focused_panel,
-                    operations: controller_state.operations.clone(),
-                }
-                StashCard {
-                    repository: repository.clone(),
-                    selected_stash: controller_state.selected_stash.clone(),
-                    focused_panel: controller_state.focused_panel,
-                    operations: controller_state.operations.clone(),
-                }
-                if controller_state.focused_panel == GitPanel::Status {
-                    StatusDetailCard {
-                        repository: repository.clone(),
-                        fetching: ui.fetching,
-                        can_push: controller_state.operations.push,
-                    }
-                } else if controller_state.focused_panel == GitPanel::Branches {
-                    BranchLogCard {
-                        branch: controller_state.selected_branch.clone(),
-                        branch_log: ui.branch_log.clone(),
-                    }
-                } else if controller_state.focused_panel == GitPanel::Commits {
-                    CommitDiffCard {
-                        repository: repository.clone(),
-                        repo_root,
-                        selected_commit,
-                        diff_viewport,
-                        diff_rows,
-                        loading: ui.diff_loading,
-                    }
-                } else {
-                    DiffCard {
-                        repo_root,
-                        selected_path,
-                        selected_path_bytes,
-                        selected_abs_path,
-                        diff_viewport,
-                        diff_rows,
-                        loading: ui.diff_loading,
+        RepositoryHeader {
+            repository: repository.clone(),
+            focused_panel: active_panel,
+            fetching: ui.fetching,
+            can_push: controller_state.operations.push,
+        }
+        main { class: "flex min-h-0 flex-1 flex-col bg-background/55",
+            div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)] sm:grid-rows-1",
+                aside { class: "min-h-0 overflow-hidden bg-foreground/[0.025]",
+                    if active_panel == GitPanel::Files {
+                        ChangesCard {
+                            repository: repository.clone(),
+                            selected_path_bytes: controller_state.selected_path_bytes.clone(),
+                            confirm_discard: controller_state.confirm_discard.clone(),
+                            commit_message: controller_state.commit_message.clone(),
+                            commit_pending: controller_state.commit_pending.clone(),
+                            operations: controller_state.operations.clone(),
+                        }
+                    } else if active_panel == GitPanel::Branches {
+                        BranchesCard {
+                            repository: repository.clone(),
+                            selected_branch: controller_state.selected_branch.clone(),
+                            branch_collection: controller_state.branch_collection,
+                            operations: controller_state.operations.clone(),
+                        }
+                    } else if active_panel == GitPanel::Commits {
+                        HistoryCard {
+                            repository: repository.clone(),
+                            selected_commit: controller_state.selected_commit.clone(),
+                            operations: controller_state.operations.clone(),
+                        }
+                    } else {
+                        StashCard {
+                            repository: repository.clone(),
+                            selected_stash: controller_state.selected_stash.clone(),
+                            operations: controller_state.operations.clone(),
+                        }
                     }
                 }
+                section { class: "min-h-0 min-w-0 overflow-hidden",
+                    if active_panel == GitPanel::Branches {
+                        BranchLogCard {
+                            branch: controller_state.selected_branch.clone(),
+                            branch_log: ui.branch_log.clone(),
+                        }
+                    } else if active_panel == GitPanel::Commits {
+                        CommitDiffCard {
+                            repository: repository.clone(),
+                            repo_root,
+                            selected_commit,
+                            diff_viewport,
+                            diff_rows,
+                            loading: ui.diff_loading,
+                        }
+                    } else {
+                        DiffCard {
+                            repo_root,
+                            selected_path,
+                            selected_path_bytes,
+                            selected_abs_path,
+                            diff_viewport,
+                            diff_rows,
+                            loading: ui.diff_loading,
+                        }
+                    }
+                }
+            }
+            if !ui.command_log.is_empty() {
                 CommandLogCard { command_log: ui.command_log }
             }
-        }
-        GitShortcutBar {
-            repo_root: repository.repo_root,
-            focused_panel: controller_state.focused_panel,
-            branch_collection: controller_state.branch_collection,
         }
         if controller_state.shortcut_help_visible {
             GitShortcutHelp {}

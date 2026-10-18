@@ -3,7 +3,6 @@
 use dioxus::prelude::*;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
@@ -11,9 +10,9 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
-use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPanel};
+use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility};
 
-use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
+use super::operation::HeaderOperationButton;
 
 #[component]
 pub(super) fn BranchPromptDialog() -> Element {
@@ -90,16 +89,13 @@ pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLog>) ->
     let commit_count = log.as_ref().map(|event| event.commits.len()).unwrap_or(0);
 
     rsx! {
-        Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-violet-400/30 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
-            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-violet-400/[0.065] to-transparent px-2",
-                div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-violet-400/10 text-violet-400 ring-1 ring-inset ring-violet-400/15",
-                    LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3" }
-                }
-                span { class: "font-mono text-[9px] font-semibold text-muted-foreground", "[0]" }
-                span { class: "text-[11px] font-semibold tracking-[-0.01em]", {translate("git-log")} }
-                span { class: "min-w-0 truncate rounded-full border border-violet-400/20 bg-violet-400/[0.07] px-2 py-0.5 font-mono text-[10px] text-violet-300", "{branch}" }
+        section { class: "flex h-full min-h-0 flex-col",
+            div { class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.012] px-3",
+                LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 text-muted-foreground" }
+                span { class: "text-[11px] font-medium text-muted-foreground", {translate("git-log")} }
+                span { class: "min-w-0 truncate font-mono text-[10px] text-foreground/85", "{branch}" }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-4",
+            div { class: "min-h-0 flex-1 overflow-y-auto px-4 py-2",
                 if let Some(log) = log {
                     if log.commits.is_empty() {
                         div { class: "flex h-full min-h-64 items-center justify-center text-sm text-muted-foreground", {translate("git-no-commits")} }
@@ -153,7 +149,6 @@ pub(super) fn BranchesCard(
     repository: GitRepositorySnapshot,
     selected_branch: String,
     branch_collection: GitBranchCollection,
-    focused_panel: GitPanel,
     operations: GitOperationEligibility,
 ) -> Element {
     let collection = branch_collection;
@@ -260,32 +255,15 @@ pub(super) fn BranchesCard(
     });
 
     rsx! {
-        Card {
-            variant: CardVariant::Panel,
-            class: if focused_panel == GitPanel::Branches {
-                "order-5 min-h-44 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
-            } else {
-                "order-5 min-h-44 border-t-violet-400/30 sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
-            },
-            onclick: move |_| {
-                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
-            },
-            PanelHeader {
-                index: 3,
-                title: translate("git-branches"),
-                count: Some(reference_count),
-                icon: PanelIcon::Line(LineIcon::GitBranch),
-                icon_class: "bg-violet-400/10 text-violet-400 ring-1 ring-inset ring-violet-400/15",
-                badge_class: "border-violet-400/20 bg-violet-400/[0.08] text-violet-400",
-                focused: focused_panel == GitPanel::Branches,
-                operations: rsx! {
-                    div { class: "flex shrink-0 items-center gap-1",
-                        BranchCollectionTabs {
-                            branch_collection,
-                        }
-                        {branch_operations}
-                    }
-                },
+        section { class: "flex h-full min-h-0 flex-col",
+            div { class: "flex h-9 shrink-0 items-center gap-1 px-2",
+                BranchCollectionTabs {
+                    branch_collection,
+                }
+                span { class: "text-[9px] tabular-nums text-muted-foreground", "{reference_count}" }
+                div { class: "ml-auto flex shrink-0 items-center gap-1",
+                    {branch_operations}
+                }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-0.5",
                 match collection {
@@ -330,7 +308,7 @@ pub(super) fn BranchesCard(
 #[component]
 fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
     rsx! {
-        div { class: "flex h-5 shrink-0 items-center rounded-md bg-background/50 p-0.5 ring-1 ring-inset ring-foreground/10",
+        div { class: "flex h-6 shrink-0 items-center rounded-md bg-foreground/[0.035] p-0.5",
             for (collection, label) in [
                 (GitBranchCollection::Local, translate("git-local")),
                 (GitBranchCollection::Remote, translate("git-remote")),
@@ -339,9 +317,9 @@ fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
                 button {
                     r#type: "button",
                     class: if branch_collection == collection {
-                        "h-4 rounded px-1.5 text-[8px] font-semibold text-foreground shadow-sm bg-foreground/[0.10]"
+                        "h-5 rounded px-1.5 text-[8px] font-semibold text-foreground bg-foreground/[0.09]"
                     } else {
-                        "h-4 rounded px-1.5 text-[8px] font-medium text-muted-foreground hover:text-foreground"
+                        "h-5 rounded px-1.5 text-[8px] font-medium text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground"
                     },
                     onclick: {
                         move |event: MouseEvent| {

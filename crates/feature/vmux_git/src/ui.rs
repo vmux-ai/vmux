@@ -9,7 +9,7 @@ mod diff;
 mod empty;
 mod history;
 mod model;
-mod panel;
+mod operation;
 mod root;
 mod shared;
 mod shortcuts;

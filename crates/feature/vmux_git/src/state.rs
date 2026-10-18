@@ -8,7 +8,6 @@ use crate::event::{
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum GitPanel {
     #[default]
-    Status,
     Files,
     Branches,
     Commits,
@@ -18,24 +17,21 @@ pub enum GitPanel {
 impl GitPanel {
     pub fn from_key(key: &str) -> Option<Self> {
         match key {
-            "0" | "1" => Some(Self::Status),
-            "2" => Some(Self::Files),
-            "3" => Some(Self::Branches),
-            "4" => Some(Self::Commits),
-            "5" => Some(Self::Stash),
+            "0" | "1" => Some(Self::Files),
+            "2" => Some(Self::Branches),
+            "3" => Some(Self::Commits),
+            "4" => Some(Self::Stash),
             _ => None,
         }
     }
 
     pub fn next(self, reverse: bool) -> Self {
         match (self, reverse) {
-            (Self::Status, false) => Self::Files,
             (Self::Files, false) => Self::Branches,
             (Self::Branches, false) => Self::Commits,
             (Self::Commits, false) => Self::Stash,
-            (Self::Stash, false) => Self::Status,
-            (Self::Status, true) => Self::Stash,
-            (Self::Files, true) => Self::Status,
+            (Self::Stash, false) => Self::Files,
+            (Self::Files, true) => Self::Stash,
             (Self::Branches, true) => Self::Files,
             (Self::Commits, true) => Self::Branches,
             (Self::Stash, true) => Self::Commits,

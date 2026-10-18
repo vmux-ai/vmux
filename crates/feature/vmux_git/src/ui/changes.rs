@@ -2,7 +2,6 @@
 
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
-use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::components::textarea::{Textarea, TextareaVariant};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
@@ -13,7 +12,7 @@ use crate::event::*;
 use crate::state::{GitOperationEligibility, GitPanel};
 
 use super::model::FileStatusView;
-use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
+use super::operation::HeaderOperationButton;
 
 #[component]
 pub(super) fn ChangesCard(
@@ -22,7 +21,6 @@ pub(super) fn ChangesCard(
     confirm_discard: Vec<u8>,
     commit_message: String,
     commit_pending: String,
-    focused_panel: GitPanel,
     operations: GitOperationEligibility,
 ) -> Element {
     let mut staged = Vec::new();
@@ -64,33 +62,9 @@ pub(super) fn ChangesCard(
     };
 
     rsx! {
-        Card {
-            variant: CardVariant::Panel,
-            class: if focused_panel == GitPanel::Files {
-                if repository.files.is_empty() {
-                    "order-4 min-h-[13rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                } else {
-                    "order-4 min-h-[19rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                }
-            } else {
-                if repository.files.is_empty() {
-                    "order-4 min-h-[13rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                } else {
-                    "order-4 min-h-[19rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
-                }
-            },
-            onclick: move |_| {
-                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
-            },
-            PanelHeader {
-                index: 2,
-                title: translate("git-files"),
-                count: Some(repository.files.len()),
-                icon: PanelIcon::Line(LineIcon::File),
-                icon_class: "bg-amber-400/10 text-amber-500 ring-1 ring-inset ring-amber-400/15",
-                badge_class: "border-amber-400/20 bg-amber-400/[0.08] text-amber-500",
-                focused: focused_panel == GitPanel::Files,
-                operations: file_operations,
+        section { class: "flex h-full min-h-0 flex-col",
+            div { class: "flex h-9 shrink-0 items-center justify-end px-2",
+                {file_operations}
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
                 if repository.files.is_empty() {
@@ -268,10 +242,10 @@ fn CommitPanel(
     let can_commit = can_commit && !commit_message.trim().is_empty() && commit_pending.is_empty();
 
     rsx! {
-        div { class: "shrink-0 border-t border-foreground/[0.07] bg-foreground/[0.015] p-1.5",
+        div { class: "shrink-0 bg-foreground/[0.025] p-2",
             Textarea {
                 variant: TextareaVariant::Outline,
-                class: "min-h-8 w-full resize-none rounded-md border border-foreground/[0.09] bg-background/65 px-2 py-1.5 text-[11px] shadow-inner outline-none placeholder:text-muted-foreground focus:border-primary/40 focus:ring-2 focus:ring-primary/10",
+                class: "min-h-8 w-full resize-none rounded-md border-0 bg-foreground/[0.035] px-2 py-1.5 text-[11px] shadow-none outline-none placeholder:text-muted-foreground focus:bg-foreground/[0.055] focus:ring-0",
                 placeholder: translate("git-commit-message"),
                 value: "{commit_message}",
                 oninput: move |event: Event<FormData>| {

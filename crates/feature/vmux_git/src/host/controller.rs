@@ -10,13 +10,12 @@ use crate::event::{
     GitAmendRequest, GitBranchCollectionSelectRequest, GitBranchDraftRequest, GitBranchLogRequest,
     GitBranchPromptCloseRequest, GitBranchPromptOpenRequest, GitBranchSelectRequest,
     GitBranchSubmitRequest, GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitDraftRequest,
-    GitCommitRequest, GitCommitSelectRequest, GitCommitSubmitRequest, GitConfigEditRequest,
-    GitCreateBranchRequest, GitDeleteBranchRequest, GitDiscardFileRequest, GitDiscardRequest,
-    GitFastForwardRequest, GitFileSelectRequest, GitKeyRequest, GitMergeRequest,
-    GitPanelSelectRequest, GitRebaseRequest, GitRepositoryPickerRequest, GitRepositoryRequest,
-    GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest,
-    GitStageRequest, GitStashDropRequest, GitStashPopRequest, GitStashPushRequest,
-    GitStashSelectRequest, GitUnstageRequest, GitUpdateCheckRequest,
+    GitCommitRequest, GitCommitSelectRequest, GitCommitSubmitRequest, GitCreateBranchRequest,
+    GitDeleteBranchRequest, GitDiscardFileRequest, GitDiscardRequest, GitFastForwardRequest,
+    GitFileSelectRequest, GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest,
+    GitRepositoryRequest, GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest,
+    GitStageAllRequest, GitStageRequest, GitStashDropRequest, GitStashPopRequest,
+    GitStashPushRequest, GitStashSelectRequest, GitUnstageRequest,
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
@@ -184,7 +183,6 @@ impl GitPageControllerState {
         revision: &mut SelectionRevealRevision,
     ) -> Option<GitSelectionReveal> {
         let id = match self.focused_panel {
-            GitPanel::Status => return None,
             GitPanel::Files => self.move_file_selection(direction, repository),
             GitPanel::Branches => self.move_branch_selection(direction, repository),
             GitPanel::Commits => self.move_commit_selection(direction, repository),
@@ -357,22 +355,6 @@ fn dispatch_git_key(
         return;
     };
     match (controller.focused_panel, request.key.as_str()) {
-        (GitPanel::Status, "e") => commands.trigger(UiInput {
-            webview,
-            payload: GitConfigEditRequest {
-                repo_root: repository.repo_root.clone(),
-            },
-        }),
-        (GitPanel::Status, "u") => commands.trigger(UiInput {
-            webview,
-            payload: GitUpdateCheckRequest,
-        }),
-        (GitPanel::Status, "Enter") => commands.trigger(UiInput {
-            webview,
-            payload: GitRepositoryPickerRequest {
-                path: repository.repo_root.clone(),
-            },
-        }),
         (GitPanel::Files, "a") if controller.operations.stage_all => commands.trigger(UiInput {
             webview,
             payload: GitStageAllRequest {
