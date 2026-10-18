@@ -22,7 +22,7 @@ pub fn Page() -> Element {
             class: "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background px-5 py-8 text-foreground sm:px-8",
             div { class: "m-auto flex w-full max-w-2xl flex-col gap-3",
                 div { class: "flex flex-col items-start gap-1 px-1 text-left",
-                    h1 { class: "text-xl font-semibold tracking-tight text-foreground", "vmux" }
+                    h1 { class: "text-2xl font-semibold tracking-tight text-foreground", "vmux" }
                     p { class: "text-ui text-muted-foreground", {translate("start-tagline")} }
                 }
                 div { class: "relative w-full",

@@ -22,6 +22,7 @@
 
 .vmux-sheet-section {
   border: 0 !important;
+  background-color: color-mix(in oklab, var(--background) 94.5%, var(--foreground));
   box-shadow: none !important;
   outline: 0 !important;
 }

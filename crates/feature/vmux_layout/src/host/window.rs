@@ -201,7 +201,8 @@ const _: () = {
 #[derive(Asset, TypePath)]
 pub struct WindowMaterial;
 
-pub const WINDOW_BACKGROUND_SRGB: [f32; 3] = [0.16, 0.16, 0.16];
+pub const WINDOW_BACKGROUND_DARK_SRGB: [f32; 3] = [0.16, 0.16, 0.16];
+pub const WINDOW_BACKGROUND_LIGHT_SRGB: [f32; 3] = [0.9, 0.9, 0.9];
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct WindowBackground(pub Color);
