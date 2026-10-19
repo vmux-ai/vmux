@@ -24,12 +24,14 @@ pub mod progress;
 pub mod project_picker;
 pub mod prompt_box;
 pub mod prompt_media_options;
+pub mod segmented_control;
 pub mod select;
 pub mod sheet;
 pub mod skeleton;
 pub mod start_hero;
 pub mod switch;
 pub mod textarea;
+pub mod tooltip;
 pub mod tree_row;
 
 #[cfg(test)]

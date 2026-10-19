@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
+use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -322,29 +323,37 @@ pub(super) fn BranchesCard(
 
 #[component]
 fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
+    let active = match branch_collection {
+        GitBranchCollection::Local => "local",
+        GitBranchCollection::Remote => "remote",
+        GitBranchCollection::Tags => "tags",
+    };
+    let items = vec![
+        SegmentedControlItem {
+            id: "local".to_string(),
+            label: translate("git-local"),
+        },
+        SegmentedControlItem {
+            id: "remote".to_string(),
+            label: translate("git-remote"),
+        },
+        SegmentedControlItem {
+            id: "tags".to_string(),
+            label: translate("git-tags"),
+        },
+    ];
     rsx! {
-        div { class: "flex h-6 shrink-0 items-center rounded-md bg-foreground/[0.035] p-0.5",
-            for (collection, label) in [
-                (GitBranchCollection::Local, translate("git-local")),
-                (GitBranchCollection::Remote, translate("git-remote")),
-                (GitBranchCollection::Tags, translate("git-tags")),
-            ] {
-                button {
-                    r#type: "button",
-                    class: if branch_collection == collection {
-                        "h-5 rounded px-1.5 text-[8px] font-semibold text-foreground bg-foreground/[0.09]"
-                    } else {
-                        "h-5 rounded px-1.5 text-[8px] font-medium text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground"
-                    },
-                    onclick: {
-                        move |event: MouseEvent| {
-                            event.stop_propagation();
-                            let _ = send(&GitBranchCollectionSelectRequest { collection });
-                        }
-                    },
-                    "{label}"
-                }
-            }
+        SegmentedControl {
+            active: active.to_string(),
+            items,
+            onselect: move |id: String| {
+                let collection = match id.as_str() {
+                    "remote" => GitBranchCollection::Remote,
+                    "tags" => GitBranchCollection::Tags,
+                    _ => GitBranchCollection::Local,
+                };
+                let _ = send(&GitBranchCollectionSelectRequest { collection });
+            },
         }
     }
 }
