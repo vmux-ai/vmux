@@ -41,8 +41,8 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         page.title.clone()
     };
     rsx! {
-        div { class: "min-w-0 px-2 py-2",
-            div { class: "flex min-w-0 items-center gap-2.5",
+        div { class: "w-full max-w-full min-w-0 overflow-hidden px-2 py-2",
+            div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden",
                 div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
                     PageIconView {
                         icon: page.icon.clone(),
@@ -51,8 +51,8 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                         icon_class: "size-4 shrink-0 text-muted-foreground".to_string(),
                     }
                 }
-                div { class: "min-w-0 flex-1",
-                    div { class: "truncate text-ui font-semibold text-foreground", title: "{title}", "{title}" }
+                div { class: "w-0 min-w-0 flex-1 overflow-hidden",
+                    div { class: "block max-w-full truncate text-ui font-semibold text-foreground", title: "{title}", "{title}" }
                     if let Some(task) = task.as_ref() {
                         if !task.description.trim().is_empty() {
                             div { class: "truncate text-[10px] text-muted-foreground", title: "{task.description}", "{task.description}" }

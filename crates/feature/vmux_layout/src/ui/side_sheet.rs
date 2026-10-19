@@ -146,7 +146,7 @@ fn SideSheetContent() -> Element {
             SideSheetGrab { resizing: sheet_resizing }
             div { class: "flex h-full min-h-0 flex-col pt-[var(--vmux-side-sheet-pad-top)]",
                 div {
-                    class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-3 pl-2 pt-2 text-foreground",
+                    class: "scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-3 pl-2 pt-2 text-foreground",
                     ..BookmarkDragState::listeners(drag_state),
                     if let Some(space) = active_space {
                         SideSheetSpaceCard {

@@ -259,6 +259,14 @@
   content: "\200E";
 }
 
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 .vmux-primary-action {
   position: relative;
   background: transparent;
