@@ -857,6 +857,7 @@ git-unstaged-changes = Changes
 git-repository-clean = Working tree clean
 git-select-file = Select a file to inspect its diff
 git-stage = Stage
+git-revert = Revert
 git-discard = Discard
 git-recent-commits = Recent commits
 git-no-commits = No commits yet

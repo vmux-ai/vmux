@@ -979,6 +979,7 @@ git-unstaged-changes = Cambios sin preparar
 git-repository-clean = El árbol de trabajo está limpio
 git-select-file = Selecciona un archivo para ver sus diferencias
 git-stage = Preparar
+git-revert = Revertir
 git-discard = Descartar
 git-recent-commits = Commits recientes
 git-no-commits = Aún no hay commits

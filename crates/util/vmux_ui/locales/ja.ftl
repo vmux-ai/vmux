@@ -809,6 +809,7 @@ git-unstaged-changes = 未ステージの変更
 git-repository-clean = 作業ツリーはクリーンです
 git-select-file = 差分を確認するファイルを選択してください
 git-stage = ステージ
+git-revert = 取り消し
 git-discard = 変更を破棄
 git-recent-commits = 最近のコミット
 git-no-commits = コミットはまだありません

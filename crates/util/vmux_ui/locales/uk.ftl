@@ -979,6 +979,7 @@ git-unstaged-changes = Неіндексовані зміни
 git-repository-clean = Робоче дерево чисте
 git-select-file = Виберіть файл для перегляду відмінностей
 git-stage = Індексувати
+git-revert = Відкотити
 git-discard = Відкинути
 git-recent-commits = Останні коміти
 git-no-commits = Комітів ще немає

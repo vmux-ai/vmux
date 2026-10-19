@@ -979,6 +979,7 @@ git-unstaged-changes = Nicht bereitgestellte Änderungen
 git-repository-clean = Arbeitsverzeichnis ist unverändert
 git-select-file = Wähle eine Datei aus, um den Diff anzuzeigen
 git-stage = Bereitstellen
+git-revert = Zurücksetzen
 git-discard = Verwerfen
 git-recent-commits = Letzte Commits
 git-no-commits = Noch keine Commits

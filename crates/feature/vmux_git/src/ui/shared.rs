@@ -267,7 +267,7 @@ pub fn DiffView(
                                                 class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
                                                 Button {
                                                     variant: ButtonVariant::Ghost,
-                                                    class: "h-6 gap-1 rounded-md border border-ansi-2/15 bg-ansi-2/[0.045] px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/10 hover:text-ansi-2",
+                                                    class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
                                                     onclick: move |_| {
                                                         let _ = send(&GitHunkRequest {
                                                             repo_root: repo_root(),
@@ -278,11 +278,11 @@ pub fn DiffView(
                                                         });
                                                     },
                                                     LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
-                                                    {translate("git-stage-hunk")}
+                                                    {translate("git-stage")}
                                                 }
                                                 Button {
                                                     variant: ButtonVariant::Ghost,
-                                                    class: "h-6 gap-1 rounded-md border border-foreground/[0.08] bg-foreground/[0.025] px-2 text-[11px] text-muted-foreground hover:bg-ansi-1/10 hover:text-ansi-1",
+                                                    class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
                                                     onclick: move |_| {
                                                         let _ = send(&GitHunkRequest {
                                                             repo_root: repo_root(),
@@ -293,7 +293,7 @@ pub fn DiffView(
                                                         });
                                                     },
                                                     LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
-                                                    {translate("git-revert-hunk")}
+                                                    {translate("git-revert")}
                                                 }
                                             }
                                         }

@@ -979,6 +979,7 @@ git-unstaged-changes = Niet-gestagede wijzigingen
 git-repository-clean = Werkmap is schoon
 git-select-file = Selecteer een bestand om de diff te bekijken
 git-stage = Stagen
+git-revert = Terugdraaien
 git-discard = Verwerpen
 git-recent-commits = Recente commits
 git-no-commits = Nog geen commits

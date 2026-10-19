@@ -979,6 +979,7 @@ git-unstaged-changes = Zmiany poza indeksem
 git-repository-clean = Drzewo robocze jest czyste
 git-select-file = Wybierz plik, aby wyświetlić różnice
 git-stage = Dodaj do indeksu
+git-revert = Przywróć
 git-discard = Odrzuć
 git-recent-commits = Ostatnie commity
 git-no-commits = Brak commitów

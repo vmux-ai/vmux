@@ -976,6 +976,7 @@ git-unstaged-changes = 스테이징되지 않은 변경 사항
 git-repository-clean = 작업 트리가 깨끗합니다
 git-select-file = diff를 확인할 파일을 선택하세요
 git-stage = 스테이징
+git-revert = 되돌리기
 git-discard = 변경 취소
 git-recent-commits = 최근 커밋
 git-no-commits = 아직 커밋이 없습니다

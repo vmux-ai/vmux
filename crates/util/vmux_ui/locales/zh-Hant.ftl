@@ -976,6 +976,7 @@ git-unstaged-changes = 未暫存的變更
 git-repository-clean = 工作區乾淨
 git-select-file = 選取檔案以檢視差異
 git-stage = 暫存
+git-revert = 還原
 git-discard = 捨棄
 git-recent-commits = 最近提交
 git-no-commits = 尚無提交

@@ -979,6 +979,7 @@ git-unstaged-changes = التغييرات غير المرحّلة
 git-repository-clean = شجرة العمل نظيفة
 git-select-file = اختر ملفًا لمعاينة الفروقات
 git-stage = تجهيز
+git-revert = تراجع
 git-discard = تجاهل
 git-recent-commits = الإيداعات الأخيرة
 git-no-commits = لا توجد إيداعات بعد
