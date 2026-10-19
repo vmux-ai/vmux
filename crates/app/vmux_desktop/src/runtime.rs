@@ -198,7 +198,7 @@ fn sync_winit_power_mode(
 }
 
 #[cfg(target_os = "macos")]
-const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_millis(100);
+const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_millis(250);
 #[cfg(not(target_os = "macos"))]
 const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(33_333_333);
 
@@ -500,14 +500,14 @@ mod tests {
         #[cfg(target_os = "macos")]
         assert_eq!(
             WakePolicy::foreground_cef([Some(20_000)]),
-            Duration::from_millis(100)
+            MIN_FOREGROUND_CEF_WAKE_INTERVAL
         );
         #[cfg(not(target_os = "macos"))]
         assert_eq!(
             WakePolicy::foreground_cef([Some(20_000)]),
             Duration::from_millis(50)
         );
-        assert!(WakePolicy::foreground_cef([Some(5_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL);
+        assert!(WakePolicy::foreground_cef([Some(2_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL);
         assert_eq!(
             WakePolicy::cef(false, true, true, Duration::from_millis(7)),
             Duration::from_millis(7)
