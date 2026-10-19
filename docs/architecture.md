@@ -1052,7 +1052,10 @@ Provider session stores remain authoritative for conversations created outside V
 readers in `vmux_acp` project metadata from Codex, Claude, and Vibe storage into the
 provider-neutral Session catalog. Browsing an external entry does not copy it into durable Vmux
 state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets the
-provider load the conversation through its normal ACP implementation.
+provider load the conversation through its normal ACP implementation. Provider-store watches
+debounce into one wake, rescan only the changed provider, and bound untrusted history traversal.
+The Session manager publishes only to its active page and leases Git metadata for every displayed
+repository while that page remains active.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a

@@ -1,17 +1,19 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use vmux_session::ProviderSession;
 
-use super::{PromptText, Reader as ProviderReader, Timestamp};
+use super::{BoundedLines, PromptText, Reader as ProviderReader, Timestamp};
 
 pub(super) struct Reader {
     sessions: PathBuf,
 }
 
 impl Reader {
+    const MAX_SESSIONS: usize = 50_000;
+
     pub(super) fn at(root: &Path) -> Self {
         Self {
             sessions: root.join("logs/session"),
@@ -19,12 +21,12 @@ impl Reader {
     }
 
     fn read_meta(path: &Path) -> Option<VibeMeta> {
+        if path.symlink_metadata().ok()?.file_type().is_symlink() {
+            return None;
+        }
         let file = File::open(path).ok()?;
         let mut meta = VibeMeta::default();
-        for line in BufReader::new(file).lines().take(160) {
-            let Ok(line) = line else {
-                continue;
-            };
+        for line in BoundedLines::new(BufReader::new(file)).take(160) {
             let line = line.trim();
             if line.starts_with("\"tools_available\"") {
                 break;
@@ -43,13 +45,27 @@ impl Reader {
 
 impl ProviderReader for Reader {
     fn read(&self) -> Result<Vec<ProviderSession>, String> {
-        let entries = match std::fs::read_dir(&self.sessions) {
+        let root = match self.sessions.canonicalize() {
+            Ok(root) => root,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.to_string()),
+        };
+        let entries = match std::fs::read_dir(root) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(error.to_string()),
         };
         let mut sessions = Vec::new();
-        for entry in entries.flatten() {
+        for (index, entry) in entries.flatten().enumerate() {
+            if index >= Self::MAX_SESSIONS {
+                break;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if !kind.is_dir() || kind.is_symlink() {
+                continue;
+            }
             let path = entry.path().join("meta.json");
             let Some(meta) = Self::read_meta(&path) else {
                 continue;

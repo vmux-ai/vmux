@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, Read};
 use std::path::PathBuf;
 use std::sync::{Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -31,16 +32,49 @@ pub(super) fn add(app: &mut App) {
         .add_observer(open)
         .add_observer(attach)
         .add_systems(Startup, start)
-        .add_systems(Update, (watch, delay, scan, finish, project).chain());
+        .add_systems(Update, (watch, scan, finish, project).chain());
 }
 
 const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
+const SCAN_MAX_LATENCY: Duration = Duration::from_secs(2);
+const PROVIDER_READ_LIMIT: usize = 256 * 1024 * 1024;
+const PROVIDER_LINE_LIMIT: usize = 2 * 1024 * 1024;
 
 #[derive(Resource, Default)]
-struct SourceSnapshot(Vec<ProviderSession>);
+struct SourceSnapshot(HashMap<SourceKind, Vec<ProviderSession>>);
 
 #[derive(Resource, Default)]
-struct PendingImports(HashMap<SessionId, PendingImport>);
+struct PendingImports {
+    by_id: HashMap<SessionId, PendingImport>,
+    by_source: HashMap<(AgentFamily, String), SessionId>,
+}
+
+impl PendingImports {
+    fn reserve(&mut self, id: SessionId, import: PendingImport) -> bool {
+        let key = (
+            AgentFamily::of(&import.source.agent),
+            import.source.sid.clone(),
+        );
+        if let Some(existing) = self.by_source.get(&key)
+            && let Some(pending) = self.by_id.get_mut(existing)
+        {
+            pending.stack = import.stack;
+            return false;
+        }
+        self.by_source.insert(key, id.clone());
+        self.by_id.insert(id, import);
+        true
+    }
+
+    fn take(&mut self, id: &SessionId) -> Option<PendingImport> {
+        let import = self.by_id.remove(id)?;
+        self.by_source.remove(&(
+            AgentFamily::of(&import.source.agent),
+            import.source.sid.clone(),
+        ));
+        Some(import)
+    }
+}
 
 struct PendingImport {
     stack: Entity,
@@ -50,18 +84,65 @@ struct PendingImport {
 
 #[derive(Component)]
 struct Runtime {
-    changes: Mutex<mpsc::Receiver<()>>,
-    _watcher: Option<RecommendedWatcher>,
+    changes: Mutex<mpsc::Receiver<HashSet<SourceKind>>>,
+    watcher: Option<RecommendedWatcher>,
+    watched: HashMap<PathBuf, bool>,
+}
+
+impl Runtime {
+    fn ensure_watches(&mut self, paths: &SourcePaths) {
+        let Some(watcher) = self.watcher.as_mut() else {
+            return;
+        };
+        for (target, recursive) in paths.watches() {
+            let mut path = target.clone();
+            while !path.exists() && path.pop() {}
+            if !path.exists() {
+                continue;
+            }
+            let recursive = recursive && path == target;
+            if self
+                .watched
+                .get(&path)
+                .is_some_and(|current| *current || !recursive)
+            {
+                continue;
+            }
+            if self.watched.remove(&path).is_some() {
+                let _ = watcher.unwatch(&path);
+            }
+            let mode = if recursive {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+            if watcher.watch(&path, mode).is_ok() {
+                self.watched.insert(path, recursive);
+            }
+        }
+    }
 }
 
 #[derive(Component)]
-struct ScanRequested;
+struct ScanRequested(HashSet<SourceKind>);
 
 #[derive(Component)]
-struct ScanDelay(Task<()>);
+struct ScanTask(Task<Vec<SourceRead>>);
 
-#[derive(Component)]
-struct ScanTask(Task<Vec<ProviderSession>>);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum SourceKind {
+    Codex,
+    Claude,
+    Vibe,
+}
+
+impl SourceKind {
+    const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Vibe];
+
+    fn all() -> HashSet<Self> {
+        Self::ALL.into_iter().collect()
+    }
+}
 
 #[derive(Component, Clone)]
 struct SourcePaths {
@@ -86,32 +167,55 @@ impl SourcePaths {
         })
     }
 
-    fn readers(&self) -> Readers {
-        Readers(vec![
-            Box::new(codex::Reader::at(&self.codex)),
-            Box::new(claude::Reader::at(&self.claude)),
-            Box::new(vibe::Reader::at(&self.vibe)),
-        ])
+    fn readers(&self, sources: &HashSet<SourceKind>) -> Readers {
+        let mut readers = Vec::<(SourceKind, Box<dyn Reader>)>::new();
+        for source in SourceKind::ALL {
+            if !sources.contains(&source) {
+                continue;
+            }
+            let reader: Box<dyn Reader> = match source {
+                SourceKind::Codex => Box::new(codex::Reader::at(&self.codex)),
+                SourceKind::Claude => Box::new(claude::Reader::at(&self.claude)),
+                SourceKind::Vibe => Box::new(vibe::Reader::at(&self.vibe)),
+            };
+            readers.push((source, reader));
+        }
+        Readers(readers)
     }
 
-    fn watches(&self) -> Vec<(PathBuf, RecursiveMode)> {
+    fn watches(&self) -> Vec<(PathBuf, bool)> {
         vec![
-            (self.codex.clone(), RecursiveMode::NonRecursive),
-            (self.claude.clone(), RecursiveMode::NonRecursive),
-            (self.vibe.join("logs/session"), RecursiveMode::Recursive),
+            (self.codex.clone(), false),
+            (self.claude.clone(), false),
+            (self.vibe.join("logs/session"), true),
         ]
     }
 
-    fn contains(&self, paths: &[PathBuf]) -> bool {
+    fn sources(&self, paths: &[PathBuf]) -> HashSet<SourceKind> {
         let codex = self.codex.join("session_index.jsonl");
         let claude = self.claude.join("history.jsonl");
         let vibe = self.vibe.join("logs/session");
-        paths.iter().any(|path| {
-            path == &codex
+        let mut sources = HashSet::new();
+        for path in paths {
+            if path == &self.codex
+                || path == &codex
+                || path.parent() == Some(self.codex.as_path())
+                || self.codex.starts_with(path)
+            {
+                sources.insert(SourceKind::Codex);
+            }
+            if path == &self.claude
                 || path == &claude
-                || path.starts_with(&vibe)
-                    && path.file_name().and_then(|name| name.to_str()) == Some("meta.json")
-        })
+                || path.parent() == Some(self.claude.as_path())
+                || self.claude.starts_with(path)
+            {
+                sources.insert(SourceKind::Claude);
+            }
+            if path == &vibe || path.starts_with(&vibe) || vibe.starts_with(path) {
+                sources.insert(SourceKind::Vibe);
+            }
+        }
+        sources
     }
 }
 
@@ -119,19 +223,141 @@ trait Reader: Send + Sync {
     fn read(&self) -> Result<Vec<ProviderSession>, String>;
 }
 
-struct Readers(Vec<Box<dyn Reader>>);
+struct Readers(Vec<(SourceKind, Box<dyn Reader>)>);
 
 impl Readers {
-    fn read(&self) -> Vec<ProviderSession> {
-        let mut sessions = Vec::new();
-        for reader in &self.0 {
-            match reader.read() {
-                Ok(mut read) => sessions.append(&mut read),
-                Err(error) => bevy::log::warn!("failed to read provider sessions: {error}"),
+    fn read(self) -> Vec<SourceRead> {
+        let mut reads = Vec::new();
+        for (source, reader) in self.0 {
+            reads.push(SourceRead::read(source, reader));
+        }
+        reads
+    }
+}
+
+struct SourceRead {
+    source: SourceKind,
+    sessions: Result<Vec<ProviderSession>, String>,
+}
+
+impl SourceRead {
+    fn read(source: SourceKind, reader: Box<dyn Reader>) -> Self {
+        let sessions = reader.read().map(Self::deduplicated);
+        Self { source, sessions }
+    }
+
+    fn deduplicated(sessions: Vec<ProviderSession>) -> Vec<ProviderSession> {
+        let mut indexed = HashMap::<(String, String), ProviderSession>::new();
+        for session in sessions {
+            if session.kind.trim().is_empty() || session.sid.trim().is_empty() {
+                continue;
+            }
+            let key = (session.kind.clone(), session.sid.clone());
+            match indexed.get(&key) {
+                Some(current) if current.updated_at > session.updated_at => {}
+                _ => {
+                    indexed.insert(key, session);
+                }
             }
         }
+        let mut sessions = indexed.into_values().collect::<Vec<_>>();
         sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
         sessions
+    }
+}
+
+struct BoundedLines<R> {
+    reader: R,
+    remaining: usize,
+}
+
+impl<R: BufRead> BoundedLines<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            remaining: PROVIDER_READ_LIMIT,
+        }
+    }
+}
+
+impl<R: BufRead> Iterator for BoundedLines<R> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.remaining > 0 {
+            let limit = self.remaining.min(PROVIDER_LINE_LIMIT.saturating_add(1));
+            let mut bytes = Vec::new();
+            let read = {
+                let mut limited = Read::by_ref(&mut self.reader).take(limit as u64);
+                limited.read_until(b'\n', &mut bytes).ok()?
+            };
+            if read == 0 {
+                return None;
+            }
+            self.remaining = self.remaining.saturating_sub(read);
+            if bytes.len() > PROVIDER_LINE_LIMIT {
+                let skipped = self.reader.skip_until(b'\n').ok()?;
+                self.remaining = self.remaining.saturating_sub(skipped);
+                continue;
+            }
+            while matches!(bytes.last(), Some(b'\n' | b'\r')) {
+                bytes.pop();
+            }
+            if let Ok(line) = String::from_utf8(bytes) {
+                return Some(line);
+            }
+        }
+        None
+    }
+}
+
+struct SourceWatchEvents {
+    sender: mpsc::Sender<SourceKind>,
+    receiver: mpsc::Receiver<HashSet<SourceKind>>,
+}
+
+impl SourceWatchEvents {
+    fn start(proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
+        let (input_tx, input_rx) = mpsc::channel::<SourceKind>();
+        let (output_tx, output_rx) = mpsc::channel::<HashSet<SourceKind>>();
+        let worker = std::thread::Builder::new()
+            .name("vmux-acp-session-watch-debounce".to_string())
+            .spawn(move || {
+                while let Ok(source) = input_rx.recv() {
+                    let started = Instant::now();
+                    let mut sources = HashSet::from([source]);
+                    let mut disconnected = false;
+                    while let Some(remaining) = SCAN_MAX_LATENCY.checked_sub(started.elapsed()) {
+                        let timeout = SCAN_DEBOUNCE.min(remaining);
+                        match input_rx.recv_timeout(timeout) {
+                            Ok(source) => {
+                                sources.insert(source);
+                            }
+                            Err(mpsc::RecvTimeoutError::Timeout) => break,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                disconnected = true;
+                                break;
+                            }
+                        }
+                    }
+                    if output_tx.send(sources).is_err() {
+                        break;
+                    }
+                    if let Some(proxy) = proxy.as_ref() {
+                        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+                    }
+                    if disconnected {
+                        break;
+                    }
+                }
+            });
+        if let Err(error) = worker {
+            bevy::log::warn!("ACP provider watch debounce init failed: {error}");
+        }
+        Self {
+            sender: input_tx,
+            receiver: output_rx,
+        }
     }
 }
 
@@ -140,95 +366,75 @@ fn start(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
         return;
     };
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let (sender, receiver) = mpsc::channel();
+    let events = SourceWatchEvents::start(wake);
+    let sender = events.sender;
     let watched_paths = paths.clone();
     let watcher =
         notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
             let Ok(event) = result else {
                 return;
             };
-            if (!event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove())
-                || !watched_paths.contains(&event.paths)
-            {
+            if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
                 return;
             }
-            let _ = sender.send(());
-            if let Some(wake) = wake.as_ref() {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            for source in watched_paths.sources(&event.paths) {
+                let _ = sender.send(source);
             }
         });
-    let mut watcher = watcher.ok();
-    for (path, mode) in paths.watches() {
-        if !path.exists() {
-            continue;
-        }
-        let Some(active) = watcher.as_mut() else {
-            break;
-        };
-        let _ = active.watch(&path, mode);
-    }
+    let mut runtime = Runtime {
+        changes: Mutex::new(events.receiver),
+        watcher: watcher.ok(),
+        watched: HashMap::new(),
+    };
+    runtime.ensure_watches(&paths);
     commands.spawn((
         Name::new("ACP provider session catalog"),
-        Runtime {
-            changes: Mutex::new(receiver),
-            _watcher: watcher,
-        },
+        runtime,
         paths,
-        ScanRequested,
+        ScanRequested(SourceKind::all()),
     ));
 }
 
 fn watch(
-    runtime: Single<(Entity, &Runtime)>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    runtime: Single<(Entity, &mut Runtime, &SourcePaths)>,
+    mut requested: Query<&mut ScanRequested>,
     mut commands: Commands,
 ) {
-    let (entity, runtime) = *runtime;
-    let Ok(changes) = runtime.changes.lock() else {
-        return;
-    };
-    let mut changed = false;
-    while changes.try_recv().is_ok() {
-        changed = true;
-    }
-    if changed {
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            std::thread::sleep(SCAN_DEBOUNCE);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-        });
-        commands.entity(entity).insert(ScanDelay(task));
-    }
-}
-
-fn delay(mut delays: Query<(Entity, &mut ScanDelay)>, mut commands: Commands) {
-    for (entity, mut delay) in &mut delays {
-        if future::block_on(future::poll_once(&mut delay.0)).is_none() {
-            continue;
+    let (entity, mut runtime, paths) = runtime.into_inner();
+    let mut changed = HashSet::new();
+    {
+        let Ok(changes) = runtime.changes.lock() else {
+            return;
+        };
+        while let Ok(sources) = changes.try_recv() {
+            changed.extend(sources);
         }
-        commands
-            .entity(entity)
-            .remove::<ScanDelay>()
-            .insert(ScanRequested);
+    }
+    if changed.is_empty() {
+        return;
+    }
+    runtime.ensure_watches(paths);
+    if let Ok(mut requested) = requested.get_mut(entity) {
+        requested.0.extend(changed);
+    } else {
+        commands.entity(entity).insert(ScanRequested(changed));
     }
 }
 
 fn scan(
-    runtime: Single<(Entity, &SourcePaths), (With<ScanRequested>, Without<ScanTask>)>,
+    runtime: Single<(Entity, &SourcePaths, &ScanRequested), (With<Runtime>, Without<ScanTask>)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let (entity, paths) = *runtime;
-    let readers = paths.readers();
+    let (entity, paths, requested) = *runtime;
+    let readers = paths.readers(&requested.0);
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let task = IoTaskPool::get().spawn(async move {
-        let sessions = readers.read();
+        let reads = readers.read();
         if let Some(wake) = wake {
             let _ = wake.send_event(WinitUserEvent::WakeUp);
         }
-        sessions
+        reads
     });
     commands
         .entity(entity)
@@ -242,11 +448,22 @@ fn finish(
     mut commands: Commands,
 ) {
     let (entity, mut task) = task.into_inner();
-    let Some(sessions) = future::block_on(future::poll_once(&mut task.0)) else {
+    let Some(reads) = future::block_on(future::poll_once(&mut task.0)) else {
         return;
     };
-    if snapshot.0 != sessions {
-        snapshot.0 = sessions;
+    let mut next = snapshot.0.clone();
+    for read in reads {
+        match read.sessions {
+            Ok(sessions) => {
+                next.insert(read.source, sessions);
+            }
+            Err(error) => {
+                bevy::log::warn!("failed to read provider sessions: {error}");
+            }
+        }
+    }
+    if snapshot.0 != next {
+        snapshot.0 = next;
     }
     commands.entity(entity).remove::<ScanTask>();
 }
@@ -267,12 +484,18 @@ fn project(
         .map(|(agent, sid)| (AgentFamily::of(&agent.0), sid.0.clone()))
         .collect::<HashSet<_>>();
     let mut sessions = Vec::new();
-    for session in &snapshot.0 {
-        let key = (AgentFamily::of(&session.agent), session.sid.clone());
-        if !imported.contains(&key) {
-            sessions.push(session.clone());
+    for source in SourceKind::ALL {
+        let Some(source_sessions) = snapshot.0.get(&source) else {
+            continue;
+        };
+        for session in source_sessions {
+            let key = (AgentFamily::of(&session.agent), session.sid.clone());
+            if !imported.contains(&key) {
+                sessions.push(session.clone());
+            }
         }
     }
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
     if catalog.sessions != sessions {
         catalog.sessions = sessions;
     }
@@ -292,7 +515,7 @@ fn open(
     if !request.kind.starts_with("acp:") {
         return;
     }
-    let Some(source) = catalog.get(&request.kind, &request.sid).cloned() else {
+    let Some(mut source) = catalog.get(&request.kind, &request.sid).cloned() else {
         return;
     };
     let Ok(parent) = parents.get(trigger.event().webview) else {
@@ -311,6 +534,13 @@ fn open(
         });
         return;
     }
+    let Ok(cwd) = PathBuf::from(&source.cwd).canonicalize() else {
+        return;
+    };
+    if !cwd.is_dir() {
+        return;
+    }
+    source.cwd = cwd.to_string_lossy().into_owned();
     let agent = agents.resolve(&source.agent);
     let name = if source.name.trim().is_empty() {
         source.sid.clone()
@@ -320,19 +550,21 @@ fn open(
     let create = CreateRequest::imported(
         name,
         source.description.clone(),
-        PathBuf::from(&source.cwd),
+        cwd,
         agent.clone(),
         source.created_at,
         source.updated_at,
     );
-    pending.0.insert(
+    if !pending.reserve(
         create.id().clone(),
         PendingImport {
             stack,
             source,
             agent,
         },
-    );
+    ) {
+        return;
+    }
     creates.write(create);
 }
 
@@ -343,7 +575,7 @@ fn attach(
     mut commands: Commands,
 ) {
     let event = trigger.event();
-    let Some(import) = pending.0.remove(&event.id) else {
+    let Some(import) = pending.take(&event.id) else {
         return;
     };
     let title = if import.source.conversation_title.trim().is_empty() {
@@ -428,7 +660,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn missing_provider_directory_upgrades_from_parent_watch() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = SourcePaths {
+            codex: home.path().join(".codex"),
+            claude: home.path().join(".claude"),
+            vibe: home.path().join(".vibe"),
+        };
+        let (_, receiver) = mpsc::channel();
+        let mut runtime = Runtime {
+            changes: Mutex::new(receiver),
+            watcher: notify::recommended_watcher(|_| {}).ok(),
+            watched: HashMap::new(),
+        };
+
+        runtime.ensure_watches(&paths);
+        assert_eq!(runtime.watched.get(home.path()), Some(&false));
+
+        std::fs::create_dir_all(&paths.codex).unwrap();
+        runtime.ensure_watches(&paths);
+        assert_eq!(runtime.watched.get(&paths.codex), Some(&false));
+    }
+
+    #[test]
+    fn bounded_lines_skip_an_oversized_record_without_losing_the_next_one() {
+        let mut input = vec![b'x'; PROVIDER_LINE_LIMIT + 1];
+        input.extend_from_slice(b"\nvalid\n");
+
+        let lines = BoundedLines::new(std::io::Cursor::new(input)).collect::<Vec<_>>();
+
+        assert_eq!(lines, vec!["valid"]);
+    }
+
+    #[test]
     fn provider_resume_materializes_a_vmux_session_before_navigation() {
+        let cwd = tempfile::tempdir().unwrap();
+        let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
@@ -446,7 +713,7 @@ mod tests {
                 agent: "codex".into(),
                 agent_name: "Codex".into(),
                 name: "Provider task".into(),
-                cwd: "/work/vmux".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
                 created_at: 100,
                 updated_at: 200,
                 conversation_title: "Provider task".into(),
@@ -460,7 +727,15 @@ mod tests {
             payload: ResumeSession {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
-                cwd: "/work/vmux".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+            },
+        });
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
             },
         });
 
@@ -494,5 +769,68 @@ mod tests {
             opened[0].target,
             PageOpenTarget::Stack(entity) if entity == stack
         ));
+    }
+
+    #[test]
+    fn provider_resume_rejects_a_missing_working_directory() {
+        let mut app = App::new();
+        app.init_resource::<ProviderCatalog>()
+            .init_resource::<PendingImports>()
+            .init_resource::<AppSettings>()
+            .add_message::<CreateRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_observer(open);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "missing".into(),
+                agent: "codex".into(),
+                cwd: "/vmux/provider/session/path/that/does/not/exist".into(),
+                ..Default::default()
+            });
+        let stack = app.world_mut().spawn_empty().id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeSession {
+                kind: "acp:codex".into(),
+                sid: "missing".into(),
+                cwd: String::new(),
+            },
+        });
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<CreateRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn provider_sessions_keep_only_the_latest_duplicate_identity() {
+        let sessions = SourceRead::deduplicated(vec![
+            ProviderSession {
+                kind: "acp:mistral-vibe".into(),
+                sid: "same".into(),
+                name: "old".into(),
+                updated_at: 1,
+                ..Default::default()
+            },
+            ProviderSession {
+                kind: "acp:mistral-vibe".into(),
+                sid: "same".into(),
+                name: "new".into(),
+                updated_at: 2,
+                ..Default::default()
+            },
+        ]);
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].name, "new");
     }
 }

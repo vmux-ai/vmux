@@ -108,7 +108,7 @@ struct RepoInfoCacheEntry {
 }
 
 struct RepoInfoLease {
-    path: PathBuf,
+    paths: HashSet<PathBuf>,
     active_only: bool,
 }
 
@@ -163,6 +163,26 @@ impl RepoInfoCache {
         self.request(path)
     }
 
+    pub fn observe_active_paths(
+        &mut self,
+        owner: Entity,
+        paths: impl IntoIterator<Item = PathBuf>,
+    ) {
+        let mut observed = HashSet::new();
+        for path in paths {
+            let path = self.entry_path(&path);
+            let _ = self.request(path.clone());
+            observed.insert(path);
+        }
+        self.leases.insert(
+            owner,
+            RepoInfoLease {
+                paths: observed,
+                active_only: true,
+            },
+        );
+    }
+
     pub fn release(&mut self, owner: Entity) {
         self.leases.remove(&owner);
     }
@@ -174,13 +194,9 @@ impl RepoInfoCache {
         active_only: bool,
     ) -> Option<super::worktree::RepoInfo> {
         let path = self.entry_path(path);
-        self.leases.insert(
-            owner,
-            RepoInfoLease {
-                path: path.clone(),
-                active_only,
-            },
-        );
+        let paths = HashSet::from([path.clone()]);
+        self.leases
+            .insert(owner, RepoInfoLease { paths, active_only });
         self.request(path)
     }
 
@@ -267,6 +283,7 @@ impl RepoInfoCache {
 
 const WATCH_EVENT_LIMIT: usize = 256;
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
+const WATCH_MAX_LATENCY: Duration = Duration::from_secs(2);
 const WATCH_TARGET_LIMIT: usize = 128;
 const CANONICAL_CAP: usize = 4096;
 
@@ -309,11 +326,13 @@ impl GitWatchEvents {
             .name("vmux-git-watch-debounce".to_string())
             .spawn(move || {
                 while let Ok(paths) = input_rx.recv() {
+                    let started = Instant::now();
                     let mut batch = GitWatchBatch::default();
                     batch.extend(paths);
                     let mut disconnected = false;
-                    loop {
-                        match input_rx.recv_timeout(WATCH_DEBOUNCE) {
+                    while let Some(remaining) = WATCH_MAX_LATENCY.checked_sub(started.elapsed()) {
+                        let timeout = WATCH_DEBOUNCE.min(remaining);
+                        match input_rx.recv_timeout(timeout) {
                             Ok(paths) => batch.extend(paths),
                             Err(mpsc::RecvTimeoutError::Timeout) => break,
                             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -784,7 +803,7 @@ fn info(
     let active = repo_info
         .leases
         .values()
-        .map(|lease| lease.path.clone())
+        .flat_map(|lease| lease.paths.iter().cloned())
         .collect::<HashSet<_>>();
     let Some(mut watch) = watch else {
         for path in repo_info.inactive_paths(&active) {
@@ -1021,43 +1040,56 @@ mod tests {
     }
 
     #[test]
-    fn inactive_owner_releases_repo_info_watch_immediately() {
-        let repo = test_repo::init();
-        let path = PathIdentity::resolve(repo.path()).into_path_buf();
-        let repo_info = super::super::worktree::RepoInfo::read(&path).unwrap();
+    fn active_owner_watches_multiple_repositories_and_releases_them_together() {
+        let first = test_repo::init();
+        let second = test_repo::init();
+        let first_path = PathIdentity::resolve(first.path()).into_path_buf();
+        let second_path = PathIdentity::resolve(second.path()).into_path_buf();
+        let first_info = super::super::worktree::RepoInfo::read(&first_path).unwrap();
+        let second_info = super::super::worktree::RepoInfo::read(&second_path).unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(PostUpdate, info);
         app.insert_non_send(GitWatch::test());
         let owner = app.world_mut().spawn(KeyboardOwner).id();
         let mut cache = RepoInfoCache {
-            entries: HashMap::from([(
-                path.clone(),
-                RepoInfoCacheEntry {
-                    info: Some(repo_info),
-                    loaded: true,
-                    dirty: false,
-                    watch_attempted: false,
-                    last_accessed: Instant::now(),
-                    pending: None,
-                },
-            )]),
+            entries: HashMap::from([
+                (
+                    first_path.clone(),
+                    RepoInfoCacheEntry {
+                        info: Some(first_info),
+                        loaded: true,
+                        dirty: false,
+                        watch_attempted: false,
+                        last_accessed: Instant::now(),
+                        pending: None,
+                    },
+                ),
+                (
+                    second_path.clone(),
+                    RepoInfoCacheEntry {
+                        info: Some(second_info),
+                        loaded: true,
+                        dirty: false,
+                        watch_attempted: false,
+                        last_accessed: Instant::now(),
+                        pending: None,
+                    },
+                ),
+            ]),
             canonical: HashMap::new(),
             guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             wake: None,
         };
-        assert!(cache.observe_active(owner, &path).is_some());
+        cache.observe_active_paths(owner, [first_path.clone(), second_path.clone()]);
         app.world_mut().spawn(cache);
 
         app.update();
-        assert!(
-            app.world()
-                .non_send::<GitWatch>()
-                .repo_info_subscriptions
-                .contains_key(&path)
-        );
+        let watch = app.world().non_send::<GitWatch>();
+        assert!(watch.repo_info_subscriptions.contains_key(&first_path));
+        assert!(watch.repo_info_subscriptions.contains_key(&second_path));
 
         app.world_mut().entity_mut(owner).remove::<KeyboardOwner>();
         app.update();

@@ -144,7 +144,14 @@ impl BranchChange {
         else {
             return Self::default();
         };
-        Self::summed(&numstat)
+        let mut change = Self::summed(&numstat);
+        if let Ok((untracked, _, true)) = GitCommand::run(
+            checkout,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+        ) {
+            change.include_untracked(checkout, &untracked);
+        }
+        change
     }
 
     fn summed(numstat: &str) -> Self {
@@ -162,6 +169,44 @@ impl BranchChange {
             total.deletions += removed.parse::<u32>().unwrap_or_default();
         }
         total
+    }
+
+    fn include_untracked(&mut self, checkout: &Path, paths: &str) {
+        const MAX_TEXT_BYTES: u64 = 1024 * 1024;
+        const MAX_TOTAL_TEXT_BYTES: u64 = 8 * MAX_TEXT_BYTES;
+        let mut text_bytes = 0u64;
+        for relative in paths.split('\0').filter(|path| !path.is_empty()) {
+            let path = checkout.join(relative);
+            let Ok(metadata) = path.symlink_metadata() else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            self.changed_files = self.changed_files.saturating_add(1);
+            if metadata.len() > MAX_TEXT_BYTES
+                || text_bytes.saturating_add(metadata.len()) > MAX_TOTAL_TEXT_BYTES
+            {
+                continue;
+            }
+            text_bytes = text_bytes.saturating_add(metadata.len());
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            if bytes.contains(&0) {
+                continue;
+            }
+            let lines = if bytes.is_empty() {
+                0
+            } else if bytes.last() == Some(&b'\n') {
+                bytes.split(|byte| *byte == b'\n').count().saturating_sub(1)
+            } else {
+                bytes.split(|byte| *byte == b'\n').count()
+            };
+            self.insertions = self
+                .insertions
+                .saturating_add(u32::try_from(lines).unwrap_or(u32::MAX));
+        }
     }
 }
 
@@ -1164,6 +1209,19 @@ mod tests {
         assert_eq!(change.insertions, 13);
         assert_eq!(change.deletions, 1);
         assert_eq!(change.changed_files, 3);
+    }
+
+    #[test]
+    fn untracked_text_is_included_in_branch_change_totals() {
+        let checkout = tempfile::tempdir().unwrap();
+        std::fs::write(checkout.path().join("new.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(checkout.path().join("empty.txt"), "").unwrap();
+        let mut change = BranchChange::default();
+
+        change.include_untracked(checkout.path(), "new.txt\0empty.txt\0");
+
+        assert_eq!(change.changed_files, 2);
+        assert_eq!(change.insertions, 2);
     }
 
     #[test]

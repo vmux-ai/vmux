@@ -657,6 +657,9 @@ fn SessionListGroup(
     onselect: EventHandler<String>,
 ) -> Element {
     let mut collapsed = use_signal(|| false);
+    let pager = SessionPager::use_state();
+    let total = sessions.len();
+    let visible = pager.visible(total);
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
@@ -681,13 +684,19 @@ fn SessionListGroup(
             }
             if !collapsed() {
                 div { class: "space-y-px pt-0.5",
-                    for session in sessions {
+                    for session in sessions.into_iter().take(visible) {
                         SessionListRow {
                             key: "{session.id}",
                             repository: repositories.get(&session.id),
                             stage: stage.id.clone(),
                             session,
                             onselect,
+                        }
+                    }
+                    if visible < total {
+                        div {
+                            class: "h-1",
+                            onvisible: move |event| pager.load_more(event, total),
                         }
                     }
                 }
@@ -793,6 +802,9 @@ fn SessionBoardColumn(
     repositories: SessionRepositories,
     onselect: EventHandler<String>,
 ) -> Element {
+    let pager = SessionPager::use_state();
+    let total = sessions.len();
+    let visible = pager.visible(total);
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     rsx! {
         section { class: "flex min-h-0 w-[18rem] shrink-0 flex-col",
@@ -802,12 +814,18 @@ fn SessionBoardColumn(
                 span { class: "ml-auto text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
             }
             div { class: "mt-1 min-h-0 flex-1 space-y-1 overflow-y-auto",
-                for session in sessions {
+                for session in sessions.into_iter().take(visible) {
                     SessionBoardCard {
                         key: "{session.id}",
                         repository: repositories.get(&session.id),
                         session,
                         onselect,
+                    }
+                }
+                if visible < total {
+                    div {
+                        class: "h-1",
+                        onvisible: move |event| pager.load_more(event, total),
                     }
                 }
             }
@@ -1580,6 +1598,33 @@ impl RelativeTime {
             return translate(id);
         }
         translate_with(id, &[("count", TranslationValue::Number(count as i64))])
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SessionPager(Signal<usize>);
+
+impl SessionPager {
+    const PAGE: usize = 40;
+
+    fn use_state() -> Self {
+        Self(use_signal(|| Self::PAGE))
+    }
+
+    fn visible(self, total: usize) -> usize {
+        self.0().min(total)
+    }
+
+    fn load_more(self, event: Event<VisibleData>, total: usize) {
+        if !event.is_intersecting().unwrap_or(false) {
+            return;
+        }
+        let current = self.0();
+        if current >= total {
+            return;
+        }
+        let mut visible = self.0;
+        visible.set(current.saturating_add(Self::PAGE).min(total));
     }
 }
 

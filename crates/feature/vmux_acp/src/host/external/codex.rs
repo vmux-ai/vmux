@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use vmux_session::ProviderSession;
 
-use super::{PromptText, Reader as ProviderReader, Timestamp};
+use super::{BoundedLines, PromptText, Reader as ProviderReader, Timestamp};
 
 pub(super) struct Reader {
     index: PathBuf,
@@ -14,6 +14,10 @@ pub(super) struct Reader {
 }
 
 impl Reader {
+    const MAX_SESSION_DEPTH: usize = 8;
+    const MAX_SESSION_ENTRIES: usize = 100_000;
+    const MAX_SESSION_FILES: usize = 50_000;
+
     pub(super) fn at(root: &Path) -> Self {
         Self {
             index: root.join("session_index.jsonl"),
@@ -30,10 +34,7 @@ impl Reader {
             Err(error) => return Err(error.to_string()),
         };
         let mut indexed = HashMap::<String, CodexIndexed>::new();
-        for line in BufReader::new(file).lines() {
-            let Ok(line) = line else {
-                continue;
-            };
+        for line in BoundedLines::new(BufReader::new(file)) {
             let Ok(entry) = serde_json::from_str::<CodexIndexLine>(&line) else {
                 continue;
             };
@@ -57,46 +58,66 @@ impl Reader {
 
     fn metadata(&self, indexed: &HashMap<String, CodexIndexed>) -> HashMap<String, CodexMeta> {
         let mut metadata = HashMap::new();
-        let mut directories = vec![self.sessions.clone()];
-        while let Some(directory) = directories.pop() {
+        let Ok(root) = self.sessions.canonicalize() else {
+            return metadata;
+        };
+        let mut directories = vec![(root, 0usize)];
+        let mut entries_seen = 0usize;
+        let mut files = 0usize;
+        'walk: while let Some((directory, depth)) = directories.pop() {
             let Ok(entries) = std::fs::read_dir(directory) else {
                 continue;
             };
             for entry in entries.flatten() {
+                entries_seen += 1;
+                if entries_seen > Self::MAX_SESSION_ENTRIES {
+                    break 'walk;
+                }
                 let path = entry.path();
-                if path.is_dir() {
-                    directories.push(path);
-                    continue;
-                }
-                if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
-                    continue;
-                }
-                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                let Ok(kind) = entry.file_type() else {
                     continue;
                 };
-                let Some(id) = indexed.keys().find(|id| name.contains(id.as_str())) else {
+                if kind.is_symlink() {
                     continue;
-                };
+                }
+                if kind.is_dir() {
+                    if depth < Self::MAX_SESSION_DEPTH {
+                        directories.push((path, depth + 1));
+                    }
+                    continue;
+                }
+                if !kind.is_file()
+                    || path.extension().and_then(|extension| extension.to_str()) != Some("jsonl")
+                {
+                    continue;
+                }
+                files += 1;
+                if files > Self::MAX_SESSION_FILES {
+                    break 'walk;
+                }
                 let Ok(file) = File::open(&path) else {
                     continue;
                 };
-                let mut line = String::new();
-                if BufReader::new(file).read_line(&mut line).is_err() {
+                let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
                     continue;
-                }
+                };
                 let Ok(envelope) = serde_json::from_str::<CodexMetaLine>(&line) else {
                     continue;
                 };
-                if envelope.payload.session_id != **id || envelope.payload.cwd.trim().is_empty() {
+                let id = envelope.payload.session_id;
+                if !indexed.contains_key(&id) || envelope.payload.cwd.trim().is_empty() {
                     continue;
                 }
-                metadata.insert(
-                    (*id).clone(),
-                    CodexMeta {
-                        cwd: envelope.payload.cwd,
-                        created_at: Timestamp::parse(&envelope.payload.timestamp),
-                    },
-                );
+                let candidate = CodexMeta {
+                    cwd: envelope.payload.cwd,
+                    created_at: Timestamp::parse(&envelope.payload.timestamp),
+                };
+                match metadata.get(&id) {
+                    Some(current) if current.created_at <= candidate.created_at => {}
+                    _ => {
+                        metadata.insert(id, candidate);
+                    }
+                }
             }
         }
         metadata

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use vmux_session::ProviderSession;
 
-use super::{PromptText, Reader as ProviderReader};
+use super::{BoundedLines, PromptText, Reader as ProviderReader};
 
 pub(super) struct Reader {
     history: PathBuf,
@@ -28,10 +28,7 @@ impl ProviderReader for Reader {
             Err(error) => return Err(error.to_string()),
         };
         let mut indexed = BTreeMap::<String, ClaudeIndexed>::new();
-        for line in BufReader::new(file).lines() {
-            let Ok(line) = line else {
-                continue;
-            };
+        for line in BoundedLines::new(BufReader::new(file)) {
             let Ok(entry) = serde_json::from_str::<ClaudeHistoryLine>(&line) else {
                 continue;
             };

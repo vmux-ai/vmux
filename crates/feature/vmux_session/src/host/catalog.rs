@@ -293,10 +293,25 @@ fn cleanup(
 fn publish(
     catalog: Res<CatalogSnapshot>,
     repositories: Res<SessionRepositories>,
-    targets: Query<Entity, (With<SessionManagerView>, With<PageReady>)>,
+    targets: Query<
+        Entity,
+        (
+            With<SessionManagerView>,
+            With<PageReady>,
+            With<KeyboardOwner>,
+        ),
+    >,
+    claimed: Query<
+        (),
+        (
+            With<SessionManagerView>,
+            With<PageReady>,
+            Added<KeyboardOwner>,
+        ),
+    >,
     mut commands: Commands,
 ) {
-    if !catalog.is_changed() && !repositories.is_changed() {
+    if !catalog.is_changed() && !repositories.is_changed() && claimed.is_empty() {
         return;
     }
     for target in &targets {
@@ -311,12 +326,26 @@ fn publish(
 fn sync_repositories(
     catalog: Res<CatalogSnapshot>,
     mut cache: Option<Single<&mut RepoInfoCache>>,
+    active: Query<Entity, (With<SessionManagerView>, With<KeyboardOwner>)>,
     claimed: Query<(), (With<SessionManagerView>, Added<KeyboardOwner>)>,
     mut repositories: ResMut<SessionRepositories>,
 ) {
     let cache_changed = cache.as_ref().is_some_and(|cache| cache.is_changed());
-    if !catalog.is_changed() && !cache_changed && claimed.is_empty() {
+    let claimed = !claimed.is_empty();
+    if !catalog.is_changed() && !cache_changed && !claimed {
         return;
+    }
+    if let Some(cache) = cache.as_mut() {
+        let cache = cache.bypass_change_detection();
+        let paths = catalog
+            .sessions
+            .iter()
+            .filter(|session| session.managed)
+            .map(|session| PathBuf::from(&session.cwd))
+            .collect::<Vec<_>>();
+        for owner in &active {
+            cache.observe_active_paths(owner, paths.iter().cloned());
+        }
     }
     let mut sessions = Vec::with_capacity(catalog.sessions.len());
     for session in &catalog.sessions {
