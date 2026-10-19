@@ -197,7 +197,7 @@ fn sync_winit_power_mode(
     }
 }
 
-const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(33_333_333);
+const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_millis(100);
 
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -447,10 +447,10 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn startup_installs_the_mouse_wake_monitor_and_activates_the_window() {
+    fn startup_installs_the_input_wake_monitor_and_activates_the_window() {
         let startup = platform_systems(Startup);
         assert!(
-            startup.contains(&"install_mouse_wake_monitor".to_string()),
+            startup.contains(&"install_input_wake_monitor".to_string()),
             "startup systems: {startup:?}"
         );
         assert!(
@@ -484,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn cef_wake_policy_follows_display_refresh_but_not_past_30hz() {
+    fn cef_wake_policy_caps_foreground_pumps_at_10hz() {
         assert_eq!(
             WakePolicy::foreground_cef([Some(60_000)]),
             MIN_FOREGROUND_CEF_WAKE_INTERVAL
@@ -494,10 +494,11 @@ mod tests {
             MIN_FOREGROUND_CEF_WAKE_INTERVAL,
             "a faster panel must not make the app wake faster"
         );
-        assert!(
-            WakePolicy::foreground_cef([Some(20_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL,
-            "a slower panel still wakes less often"
+        assert_eq!(
+            WakePolicy::foreground_cef([Some(20_000)]),
+            MIN_FOREGROUND_CEF_WAKE_INTERVAL
         );
+        assert!(WakePolicy::foreground_cef([Some(5_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL);
         assert_eq!(
             WakePolicy::cef(false, true, true, Duration::from_millis(7)),
             Duration::from_millis(7)

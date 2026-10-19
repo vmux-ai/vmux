@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
+use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use objc2_app_kit::{
     NSAnimatablePropertyContainer, NSAnimationContext, NSApp, NSEvent, NSEventMask, NSEventType,
     NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
@@ -32,7 +33,7 @@ impl Plugin for RuntimePlatformPlugin {
             .add_systems(
                 Startup,
                 (
-                    install_mouse_wake_monitor,
+                    install_input_wake_monitor,
                     install_live_resize_monitor,
                     activate_primary_window,
                 ),
@@ -57,8 +58,9 @@ fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut Sys
 
 const MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
+const INPUT_CEF_WAKE_DURATION: Duration = Duration::from_millis(250);
 
-static MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+static INPUT_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
@@ -393,13 +395,17 @@ impl WindowZoom {
     }
 }
 
-fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_input_wake_monitor(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    cef_wake_policy: Option<Res<MessageLoopWakePolicy>>,
+) {
     let Some(proxy) = proxy else {
         return;
     };
-    if MOUSE_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
+    if INPUT_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
         return;
     }
+    let cef_wake_policy = cef_wake_policy.map(|policy| policy.clone());
     let proxy = (**proxy).clone();
     let wake = wake_throttle("mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
@@ -410,6 +416,9 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let window_zoom = Arc::new(Mutex::new(WindowZoom::default()));
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        if let Some(policy) = cef_wake_policy.as_ref() {
+            policy.begin_interaction(INPUT_CEF_WAKE_DURATION);
+        }
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
         let mut titlebar_gesture = None;
@@ -562,7 +571,11 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
         | NSEventMask::OtherMouseDown
         | NSEventMask::OtherMouseUp
         | NSEventMask::OtherMouseDragged;
-    let local_mask = mouse_mask | NSEventMask::ScrollWheel;
+    let local_mask = mouse_mask
+        | NSEventMask::ScrollWheel
+        | NSEventMask::KeyDown
+        | NSEventMask::KeyUp
+        | NSEventMask::FlagsChanged;
     let global_mask = NSEventMask::LeftMouseDown
         | NSEventMask::LeftMouseUp
         | NSEventMask::RightMouseDown
@@ -574,7 +587,7 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let global_token =
         NSEvent::addGlobalMonitorForEventsMatchingMask_handler(global_mask, &global_block);
     if local_token.is_some() || global_token.is_some() {
-        MOUSE_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+        INPUT_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
         if let Some(token) = local_token {
             std::mem::forget(token);
         }
