@@ -235,8 +235,8 @@ fn shared_texture_enabled(windowed: bool) -> bool {
 
 fn opaque_windowed_background_color(mode: CefColorMode) -> u32 {
     match mode {
-        CefColorMode::Light => 0xFFF2F2F2,
-        CefColorMode::Dark | CefColorMode::System => 0xFF151515,
+        CefColorMode::Light => 0xFFF0F0F0,
+        CefColorMode::Dark | CefColorMode::System => 0xFF141414,
     }
 }
 
@@ -442,15 +442,15 @@ mod tests {
     fn opaque_windowed_background_follows_the_resolved_scheme() {
         assert_eq!(
             opaque_windowed_background_color(CefColorMode::Light),
-            0xFFF2F2F2
+            0xFFF0F0F0
         );
         assert_eq!(
             opaque_windowed_background_color(CefColorMode::Dark),
-            0xFF151515
+            0xFF141414
         );
         assert_eq!(
             opaque_windowed_background_color(CefColorMode::System),
-            0xFF151515
+            0xFF141414
         );
     }
 }

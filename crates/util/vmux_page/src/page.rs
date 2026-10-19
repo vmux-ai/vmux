@@ -103,9 +103,17 @@ impl Page {
         } else {
             String::new()
         };
+        let surface = if self.transparent {
+            ""
+        } else {
+            r#"<style>
+html, body { background: oklch(0.955 0 255); }
+@media (prefers-color-scheme: dark) { html, body { background: oklch(0.19 0 255); } }
+</style>"#
+        };
         let head = format!(
-            "<title>{}</title>\n<base href=\"/\"/>\n<link rel=\"stylesheet\" href=\"{}\"/>\n{favicon}",
-            self.title, self.stylesheet
+            "<title>{}</title>\n<base href=\"/\"/>\n{surface}\n<link rel=\"stylesheet\" href=\"{}\"/>\n{favicon}",
+            self.title, self.stylesheet,
         );
         let html = crate::InterpreterShell::new(self.root_id, self.document_url())
             .with_head(head)

@@ -716,6 +716,8 @@ pub struct TabBoundary {
     pub is_git_repo: bool,
     pub is_worktree: bool,
     pub branch: String,
+    #[serde(default)]
+    pub branches: Vec<vmux_ecs::event::ProjectBranch>,
     pub base_ref: String,
     pub uncommitted: u32,
     pub ahead: u32,

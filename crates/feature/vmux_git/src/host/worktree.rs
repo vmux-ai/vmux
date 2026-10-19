@@ -656,6 +656,7 @@ impl WorktreeStatus {
 pub struct RepoInfo {
     pub name: String,
     pub branch: String,
+    pub branches: Vec<BranchHolder>,
     pub base_ref: String,
     pub is_worktree: bool,
     pub uncommitted: u32,
@@ -835,6 +836,9 @@ impl RepoInfo {
         let git_dir = dirs.next()?;
         let common_dir = dirs.next()?;
         let name = Self::name_at(&repo_root);
+        let branches = CheckoutInfo::try_from(repo_root.as_path())
+            .and_then(|checkout| checkout.branch_holders())
+            .unwrap_or_default();
         let base = BaseRef::resolve(&repo_root);
         let change = if branch.is_empty() {
             BranchChange::default()
@@ -846,6 +850,7 @@ impl RepoInfo {
         Some(Self {
             name,
             branch,
+            branches,
             base_ref: base
                 .map(|base| base.branch().to_string())
                 .unwrap_or_default(),

@@ -879,6 +879,16 @@ fn push_projects_host_emit(
                 row.branch = info.branch.clone();
                 if row.is_active {
                     let repository = info.project_name();
+                    let mut branches = Vec::with_capacity(info.branches.len());
+                    for holder in &info.branches {
+                        branches.push(vmux_ecs::event::ProjectBranch {
+                            branch: holder.branch.clone(),
+                            checkout: holder.checkout_path(),
+                            label: holder.checkout_label(),
+                            insertions: holder.change.insertions,
+                            deletions: holder.change.deletions,
+                        });
+                    }
                     boundary = Some(TabBoundary {
                         effective_dir: row.path.clone(),
                         source: "project".to_string(),
@@ -886,6 +896,7 @@ fn push_projects_host_emit(
                         is_git_repo: true,
                         is_worktree: info.is_worktree,
                         branch: info.branch,
+                        branches,
                         base_ref: info.base_ref,
                         uncommitted: info.uncommitted,
                         ahead: info.ahead,

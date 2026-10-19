@@ -27,7 +27,7 @@ use vmux_page::{
     Outbox as RendererOutbox, Page, PagePlacement, PageRegistration, SiblingOrder,
     Wake as RendererWake, WebView,
 };
-use vmux_setting::{AppSettings, ColorScheme};
+use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
 use vmux_ui::hooks::EventListenerError;
 
 use crate::host::LayoutPointerCapture;
@@ -65,7 +65,7 @@ impl Plugin for MacosBrowserPlugin {
                     apply_metadata,
                     open.after(PageOpenSet::HandleKnownPages),
                     apply_lifecycle,
-                    sync_appearance.run_if(resource_changed::<AppSettings>),
+                    sync_appearance,
                     sync_scale,
                 )
                     .chain(),
@@ -191,7 +191,7 @@ fn open(
     metadata_sender: Query<&PageMetadataSender>,
     lifecycle_sender: Query<&PageLifecycleSender>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    settings: Res<AppSettings>,
+    appearance: Single<&ResolvedColorScheme>,
     mut commands: Commands,
 ) {
     let registered = {
@@ -252,7 +252,7 @@ fn open(
             return;
         }
     };
-    let appearance = appearance_of(settings.appearance.mode);
+    let appearance = appearance_of(appearance.0);
 
     for (entity, registration, _) in wanted {
         let page = registration.page();
@@ -320,6 +320,7 @@ fn open(
                 bounds,
                 embedder.embed(entity, page.url),
                 instance,
+                appearance,
             ))
         });
         match built {
@@ -328,8 +329,6 @@ fn open(
                 return;
             }
             Some(Ok(surface)) => {
-                surface.set_visible(false);
-                surface.set_appearance(appearance);
                 if placement.paints_in_front() {
                     surface.raise_above_layers();
                 }
@@ -377,7 +376,7 @@ fn registration_priority(entity: EntityRef<'_>, registration: PageRegistration) 
 
 fn place(
     renderer: Option<NonSendMut<PageRenderer>>,
-    hosted: Query<(Entity, &HostedSurface, &crate::HostedPageLifecycle), With<HostsPage>>,
+    hosted: Query<(Entity, &HostedSurface), With<HostsPage>>,
     frames: Query<&PaneFrame>,
     rings: Query<&FocusRing>,
     corners: Query<&AllCorners>,
@@ -396,7 +395,7 @@ fn place(
     {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
-    for (entity, page, lifecycle) in &hosted {
+    for (entity, page) in &hosted {
         let Some(surface) = renderer.0.get(&entity) else {
             continue;
         };
@@ -410,16 +409,12 @@ fn place(
         surface.set_corner_radius(settings.layout.radius as f64, all_corners);
         let ring = rings.get(entity).copied().unwrap_or_default();
         surface.set_focus_ring(ring.width as f64, ring.rgb);
-        surface.set_visible(hosted_surface_ready(lifecycle));
+        surface.set_visible(true);
         let window_is_capturing = capturing.iter().any(|host| host.0 == page.window);
         if let Some(order) = page.placement.pointer_order(window_is_capturing) {
             surface.order_among_siblings(order);
         }
     }
-}
-
-fn hosted_surface_ready(lifecycle: &crate::HostedPageLifecycle) -> bool {
-    lifecycle.frames_applied > 0
 }
 
 fn render(renderer: Option<NonSend<PageRenderer>>, lifecycle: Query<&crate::HostedPageLifecycle>) {
@@ -502,11 +497,17 @@ fn forward_host_emit(
     surface.deliver(host_emit.id(), host_emit.payload());
 }
 
-fn sync_appearance(renderer: Option<NonSend<PageRenderer>>, settings: Res<AppSettings>) {
+fn sync_appearance(
+    renderer: Option<NonSend<PageRenderer>>,
+    appearance: Single<Ref<ResolvedColorScheme>>,
+) {
+    if !appearance.is_changed() {
+        return;
+    }
     let Some(renderer) = renderer else {
         return;
     };
-    let appearance = appearance_of(settings.appearance.mode);
+    let appearance = appearance_of(appearance.0);
     info!("browser_platform: colour scheme set to {appearance:?}");
     for surface in renderer.0.values() {
         surface.set_appearance(appearance);
@@ -532,11 +533,10 @@ fn page_scale_of(level: f64) -> f64 {
     1.2f64.powf(level)
 }
 
-fn appearance_of(mode: ColorScheme) -> Appearance {
-    match mode {
-        ColorScheme::Light => Appearance::Light,
-        ColorScheme::Dark => Appearance::Dark,
-        ColorScheme::Device => Appearance::System,
+fn appearance_of(scheme: ResolvedScheme) -> Appearance {
+    match scheme {
+        ResolvedScheme::Light => Appearance::Light,
+        ResolvedScheme::Dark => Appearance::Dark,
     }
 }
 
@@ -1038,7 +1038,7 @@ fn report_waiting(reason: &str) {
 mod tests {
     use super::{
         MacosBrowserPlugin, PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt,
-        SimulatorFrame, SimulatorFrameRequest, hosted_surface_ready,
+        SimulatorFrame, SimulatorFrameRequest,
     };
     use bevy::ecs::schedule::Schedules;
     use bevy::prelude::{App, MinimalPlugins, Update};
@@ -1052,15 +1052,6 @@ mod tests {
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();
         update.initialize(app.world_mut()).unwrap();
-    }
-
-    #[test]
-    fn hosted_surface_waits_for_its_first_applied_frame() {
-        let mut lifecycle = crate::HostedPageLifecycle::default();
-        assert!(!hosted_surface_ready(&lifecycle));
-
-        lifecycle.frames_applied = 1;
-        assert!(hosted_surface_ready(&lifecycle));
     }
 
     #[test]

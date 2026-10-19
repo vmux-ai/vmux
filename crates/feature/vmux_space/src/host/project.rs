@@ -239,9 +239,10 @@ impl SpaceProjects<'_, '_> {
 
     fn rows_of(&self, space_id: &str, space: Option<Entity>) -> Vec<ProjectRow> {
         let listed = self.projects_of(space_id);
-        let Some(expanded) = space.and_then(|space| self.expanded.get(space).ok()) else {
-            return listed;
-        };
+        let fallback = ExpandedProjectDirs::default();
+        let expanded = space
+            .and_then(|space| self.expanded.get(space).ok())
+            .unwrap_or(&fallback);
         let mut rows = Vec::new();
         for mut project in listed {
             let open = !project.missing && (project.is_active || expanded.holds(&project.path));
@@ -543,7 +544,7 @@ mod tests {
     }
 
     #[test]
-    fn project_expansion_is_local_to_the_owning_space_view() {
+    fn active_project_tree_is_visible_without_a_persisted_toggle() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
         std::fs::create_dir_all(project.join("src")).unwrap();
@@ -567,24 +568,24 @@ mod tests {
                 ExpandedProjectDirs(vec![path]),
             ))
             .id();
-        let collapsed_space = app
+        let fresh_space = app
             .world_mut()
             .spawn((Space, SpaceId("work".to_string())))
             .id();
         let expanded_pane = app.world_mut().spawn(ChildOf(expanded_space)).id();
-        let collapsed_pane = app.world_mut().spawn(ChildOf(collapsed_space)).id();
+        let fresh_pane = app.world_mut().spawn(ChildOf(fresh_space)).id();
 
-        let (expanded, collapsed) = app
+        let (expanded, fresh) = app
             .world_mut()
             .run_system_once(move |projects: SpaceProjects| {
-                (projects.rows(expanded_pane), projects.rows(collapsed_pane))
+                (projects.rows(expanded_pane), projects.rows(fresh_pane))
             })
             .unwrap();
 
         assert!(expanded[0].expanded);
         assert!(expanded.len() > 1);
-        assert!(!collapsed[0].expanded);
-        assert_eq!(collapsed.len(), 1);
+        assert!(fresh[0].expanded);
+        assert!(fresh.len() > 1);
     }
 
     #[test]
