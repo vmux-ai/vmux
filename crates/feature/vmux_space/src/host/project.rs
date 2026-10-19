@@ -24,6 +24,7 @@ pub struct SpaceProjectPlugin;
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_repository_roots)
+            .init_resource::<ActiveProjectRows>()
             .register_persisted::<ExpandedProjectDirs>()
             .add_observer(tree_toggle)
             .add_observer(pick)
@@ -31,10 +32,11 @@ impl Plugin for SpaceProjectPlugin {
                 Update,
                 (
                     remember.before(EffectiveStartupSet),
+                    refresh_active_projects.after(remember),
                     publish_roots
                         .in_set(WriteCommandBarSnapshots)
-                        .after(remember),
-                    publish_git_projects.after(remember),
+                        .after(refresh_active_projects),
+                    publish_git_projects.after(refresh_active_projects),
                     finish_picks,
                 ),
             );
@@ -145,17 +147,32 @@ fn finish_picks(mut pending: Query<(Entity, &mut PendingProjectPicker)>, mut com
     }
 }
 
-fn publish_roots(projects: SpaceProjects, mut roots: Single<&mut CommandBarProjectRoots>) {
+#[derive(Resource, Default)]
+struct ActiveProjectRows {
+    space: Option<String>,
+    rows: Vec<ProjectRow>,
+}
+
+fn refresh_active_projects(projects: SpaceProjects, mut active: ResMut<ActiveProjectRows>) {
+    let space = projects.active_space.id().map(str::to_string);
+    if active.space == space && !projects.settings_changed() {
+        return;
+    }
+    active.space = space;
+    active.rows = projects.active_projects();
+}
+
+fn publish_roots(projects: Res<ActiveProjectRows>, mut roots: Single<&mut CommandBarProjectRoots>) {
     let mut next = Vec::new();
     let mut active = None;
-    for project in projects.active_projects() {
+    for project in &projects.rows {
         if project.missing {
             continue;
         }
         if project.is_active {
             active = Some(project.path.clone());
         }
-        next.push(project.path);
+        next.push(project.path.clone());
     }
     let next = CommandBarProjectRoots {
         roots: next,
@@ -170,18 +187,18 @@ fn publish_roots(projects: SpaceProjects, mut roots: Single<&mut CommandBarProje
 struct GitProjectsProjection(Vec<ProjectRow>);
 
 fn publish_git_projects(
-    projects: SpaceProjects,
+    projects: Res<ActiveProjectRows>,
     views: Query<(Entity, &PageMetadata, Option<&GitProjectsProjection>), With<PageReady>>,
     mut commands: Commands,
 ) {
-    let rows = projects.active_projects();
+    let rows = &projects.rows;
     for (entity, page, current) in &views {
         if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
             && page.url != vmux_git::GitPlugin::MANIFEST.url
         {
             continue;
         }
-        if current.is_some_and(|current| current.0 == rows) {
+        if current.is_some_and(|current| current.0.as_slice() == rows.as_slice()) {
             continue;
         }
         commands
@@ -285,6 +302,12 @@ pub struct SpaceProjects<'w, 's> {
 }
 
 impl SpaceProjects<'_, '_> {
+    fn settings_changed(&self) -> bool {
+        self.settings
+            .as_ref()
+            .is_some_and(|settings| settings.is_changed())
+    }
+
     pub fn rows(&self, entity: Entity) -> Vec<ProjectRow> {
         let Some(space) = self.hierarchy.get(entity) else {
             return self.active_rows();

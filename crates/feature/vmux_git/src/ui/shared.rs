@@ -6,7 +6,7 @@ use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::diff::DiffTone;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use crate::event::GitDiffRow;
 use crate::event::*;
@@ -46,7 +46,18 @@ pub(super) fn ProjectKindPill(is_worktree: bool) -> Element {
         false => translate("git-repository"),
     };
     rsx! {
-        span { class: "shrink-0 rounded-full bg-foreground/[0.055] px-1.5 py-0.5 text-[8px] font-medium text-muted-foreground", "{label}" }
+        span {
+            class: "flex shrink-0 items-center gap-1 rounded-full bg-foreground/[0.065] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground",
+            if is_worktree {
+                LineIconView { icon: LineIcon::GitBranch, class: "size-2.5 shrink-0" }
+            } else {
+                GitSymbolView {
+                    symbol: GitSymbol::Repository,
+                    class: "size-2.5 shrink-0".to_string(),
+                }
+            }
+            "{label}"
+        }
     }
 }
 

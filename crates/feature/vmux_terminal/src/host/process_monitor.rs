@@ -487,7 +487,7 @@ fn sample_process_usage(
     let Some(snapshot) = runtime.sampler.refresh(
         time.delta(),
         !claimed.is_empty(),
-        !opened.is_empty(),
+        !opened.is_empty() || !claimed.is_empty(),
         service_roots,
     ) else {
         return;

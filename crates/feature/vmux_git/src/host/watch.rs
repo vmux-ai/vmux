@@ -53,6 +53,7 @@ fn initialize(world: &mut World) {
                 rx: events.receiver,
                 watch_references: HashMap::new(),
                 subscriptions: HashMap::new(),
+                page_subscriptions: HashSet::new(),
                 repo_info_subscriptions: HashMap::new(),
             });
         }
@@ -100,6 +101,7 @@ pub(super) struct GitWatch {
     rx: mpsc::Receiver<GitWatchBatch>,
     watch_references: HashMap<GitWatchTarget, usize>,
     subscriptions: HashMap<Entity, GitSubscription>,
+    page_subscriptions: HashSet<Entity>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
 }
 
@@ -582,7 +584,18 @@ impl GitWatch {
         Ok(repo_root)
     }
 
+    pub(super) fn subscribe_page(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Result<PathBuf, super::repository::GitError> {
+        let repo_root = self.subscribe(entity, path)?;
+        self.page_subscriptions.insert(entity);
+        Ok(repo_root)
+    }
+
     pub(super) fn release_subscription(&mut self, entity: Entity) {
+        self.page_subscriptions.remove(&entity);
         let Some(subscription) = self.subscriptions.remove(&entity) else {
             return;
         };
@@ -712,6 +725,7 @@ impl GitWatch {
             rx,
             watch_references: HashMap::new(),
             subscriptions: HashMap::new(),
+            page_subscriptions: HashSet::new(),
             repo_info_subscriptions: HashMap::new(),
         }
     }
@@ -732,8 +746,8 @@ fn sync_page_subscriptions(
         return;
     };
     let inactive = watch
-        .subscriptions
-        .keys()
+        .page_subscriptions
+        .iter()
         .filter(|entity| pages.get(**entity).map_or(true, |(_, _, active)| !active))
         .copied()
         .collect::<Vec<_>>();
@@ -745,7 +759,7 @@ fn sync_page_subscriptions(
         if path.as_os_str().is_empty() || watch.subscriptions.contains_key(&entity) {
             continue;
         }
-        if let Err(error) = watch.subscribe(entity, path) {
+        if let Err(error) = watch.subscribe_page(entity, path) {
             commands.trigger(super::job_runner::GitJobFailure {
                 webview: entity,
                 message: error.0,
@@ -1252,6 +1266,25 @@ mod tests {
         app.world_mut().entity_mut(page).remove::<KeyboardOwner>();
         app.update();
         assert!(app.world().non_send::<GitWatch>().subscriptions.is_empty());
+    }
+
+    #[test]
+    fn page_cleanup_preserves_editor_file_subscriptions() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_page_subscriptions);
+        app.insert_non_send(GitWatch::test());
+        let editor = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .non_send_mut::<GitWatch>()
+            .subscribe(editor, &file)
+            .unwrap();
+
+        app.update();
+
+        assert!(app.world().non_send::<GitWatch>().has_subscription(editor));
     }
 
     #[test]

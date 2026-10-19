@@ -331,7 +331,7 @@ fn repository_request(
         return;
     }
     let repo_root = if let Some(mut watch) = watch {
-        match watch.subscribe(webview, &path) {
+        match watch.subscribe_page(webview, &path) {
             Ok(repo_root) => repo_root,
             Err(error) => {
                 commands.trigger(GitJobFailure {

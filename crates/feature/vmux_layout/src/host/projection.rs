@@ -368,13 +368,30 @@ struct SessionProjection<'w, 's> {
     >,
     changed_stages:
         Query<'w, 's, (), (With<StageDefinition>, Or<(Changed<StageId>, Changed<Name>)>)>,
+    removed_targets: RemovedComponents<'w, 's, EntityTarget<Session>>,
+    removed_sessions: RemovedComponents<'w, 's, Session>,
+    removed_names: RemovedComponents<'w, 's, Name>,
+    removed_descriptions: RemovedComponents<'w, 's, Description>,
+    removed_stages: RemovedComponents<'w, 's, Stage>,
+    removed_states: RemovedComponents<'w, 's, RunState>,
+    removed_stage_definitions: RemovedComponents<'w, 's, StageDefinition>,
+    removed_stage_ids: RemovedComponents<'w, 's, StageId>,
 }
 
 impl SessionProjection<'_, '_> {
-    fn is_changed(&self) -> bool {
-        !self.changed_targets.is_empty()
+    fn is_changed(&mut self) -> bool {
+        let mut changed = !self.changed_targets.is_empty()
             || !self.changed_sessions.is_empty()
-            || !self.changed_stages.is_empty()
+            || !self.changed_stages.is_empty();
+        changed |= self.removed_targets.read().next().is_some();
+        changed |= self.removed_sessions.read().next().is_some();
+        changed |= self.removed_names.read().next().is_some();
+        changed |= self.removed_descriptions.read().next().is_some();
+        changed |= self.removed_stages.read().next().is_some();
+        changed |= self.removed_states.read().next().is_some();
+        changed |= self.removed_stage_definitions.read().next().is_some();
+        changed |= self.removed_stage_ids.read().next().is_some();
+        changed
     }
 
     fn task(&self, page: &StackNode) -> Option<ActiveTask> {
@@ -560,7 +577,7 @@ fn publish_active_session(
         ),
         With<LayoutCef>,
     >,
-    sessions: SessionProjection,
+    mut sessions: SessionProjection,
     mut last: Local<std::collections::HashMap<Entity, ActiveSessionState>>,
     mut commands: Commands,
 ) {
@@ -762,6 +779,18 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
 
+    #[derive(Resource, Default)]
+    struct SessionProjectionChanges(u32);
+
+    fn count_changes(
+        mut sessions: SessionProjection,
+        mut changes: ResMut<SessionProjectionChanges>,
+    ) {
+        if sessions.is_changed() {
+            changes.0 += 1;
+        }
+    }
+
     #[test]
     fn session_projection_reads_task_stage_and_runtime_from_the_target() {
         let mut world = World::new();
@@ -802,6 +831,52 @@ mod tests {
         assert_eq!(task.stage, "in_review");
         assert_eq!(task.stage_name, "session-stage-in-review");
         assert_eq!(task.runtime, "streaming");
+    }
+
+    #[test]
+    fn session_projection_reacts_to_component_removal() {
+        let mut app = App::new();
+        app.init_resource::<SessionProjectionChanges>()
+            .add_systems(Update, count_changes);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                Name::new("Task"),
+                Description::default(),
+                Stage(StageId("in_progress".into())),
+                RunState::Idle,
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn(EntityTarget::<Session>::new(session))
+            .id();
+        let stage = app
+            .world_mut()
+            .spawn((
+                StageDefinition,
+                StageId("in_progress".into()),
+                Name::new("In progress"),
+            ))
+            .id();
+
+        app.update();
+        let initial = app.world().resource::<SessionProjectionChanges>().0;
+
+        app.world_mut().entity_mut(session).remove::<RunState>();
+        app.update();
+        app.world_mut().despawn(stage);
+        app.update();
+        app.world_mut()
+            .entity_mut(stack)
+            .remove::<EntityTarget<Session>>();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SessionProjectionChanges>().0,
+            initial + 3
+        );
     }
 
     #[test]

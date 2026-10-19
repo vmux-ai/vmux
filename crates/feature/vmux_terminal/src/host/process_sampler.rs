@@ -72,8 +72,10 @@ impl ProcessSampler {
                 continue;
             };
             let name = process.name();
-            if LocalProcess::matches(&name, "") {
-                self.local.insert(pid, MacLocalProcess::read(&process));
+            let executable = process.executable();
+            if LocalProcess::matches(&name, &executable) {
+                self.local
+                    .insert(pid, MacLocalProcess::read(&process, executable));
             }
         }
     }
@@ -141,8 +143,7 @@ struct MacLocalProcess {
 
 #[cfg(target_os = "macos")]
 impl MacLocalProcess {
-    fn read(process: &MacProcess) -> Self {
-        let executable = process.executable();
+    fn read(process: &MacProcess, executable: String) -> Self {
         Self {
             started_at: process.started_at(),
             shell: if executable.is_empty() {

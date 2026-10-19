@@ -94,7 +94,13 @@ impl GitJob {
 pub(super) struct GitJobs(Vec<Entity>);
 
 #[derive(Component)]
-struct GitJobRunning;
+pub(super) struct GitJobRunning;
+
+impl GitJobs {
+    pub(super) fn entities(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.0.iter().copied()
+    }
+}
 
 #[derive(Component)]
 struct GitJobTask<T: Send + Sync + 'static> {

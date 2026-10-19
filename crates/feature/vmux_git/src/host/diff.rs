@@ -9,7 +9,7 @@ use crate::state::{GitPageControllerState, GitPanel};
 
 use super::GitUpdateSet;
 use super::job::{DiffJob, DiffScope};
-use super::job_runner::GitJob;
+use super::job_runner::{GitJob, GitJobRunning, GitJobs};
 use super::repository::GitRepository;
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
@@ -218,6 +218,8 @@ fn start_requests(
         &mut super::state::GitDiffRevealRanges,
     )>,
     mut files: super::status::FileGitStates,
+    queues: Query<&GitJobs>,
+    queued_diffs: Query<(), (With<DiffJob>, Without<GitJobRunning>)>,
     mut commands: Commands,
 ) {
     for (entity, pending, current, source) in &pending {
@@ -244,6 +246,13 @@ fn start_requests(
         let content = source
             .filter(|source| source.dirty)
             .map(|source| source.content.clone());
+        if let Ok(queue) = queues.get(entity) {
+            for job in queue.entities() {
+                if queued_diffs.contains(job) {
+                    commands.entity(job).despawn();
+                }
+            }
+        }
         commands
             .entity(entity)
             .remove::<PendingGitDiff>()
@@ -393,6 +402,52 @@ mod tests {
             hunk: None,
             spans: Vec::<StyledSpan>::new(),
         }
+    }
+
+    #[test]
+    fn a_new_diff_request_replaces_the_queued_request() {
+        let repo = tempfile::tempdir().unwrap();
+        let target = GitDiffTarget {
+            repo_root: repo.path().to_path_buf(),
+            path: PathBuf::new(),
+            path_bytes: Vec::new(),
+            scope: DiffScope::Branch("feature".into()),
+        };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, start_requests);
+        let page = app
+            .world_mut()
+            .spawn((
+                super::super::state::GitState::default(),
+                PendingGitDiff {
+                    target: target.clone(),
+                    file: None,
+                    page_revision: Some(2),
+                },
+            ))
+            .id();
+        let queued = app
+            .world_mut()
+            .spawn((
+                GitJob::new(page),
+                GitRepository::at(repo.path()),
+                DiffJob {
+                    path: PathBuf::new(),
+                    scope: target.scope,
+                    generation: 1,
+                    top_line: 0,
+                    rows: DIFF_WINDOW_ROWS,
+                    content: None,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(!app.world().entities().contains(queued));
+        let mut jobs = app.world_mut().query::<&DiffJob>();
+        assert_eq!(jobs.iter(app.world()).count(), 1);
     }
 
     #[test]
