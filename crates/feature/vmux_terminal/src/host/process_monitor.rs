@@ -258,7 +258,7 @@ struct ProcessMonitor {
 impl Default for ProcessMonitor {
     fn default() -> Self {
         Self {
-            process_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
+            process_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
             sampler: ProcessSampler::default(),
         }
     }
@@ -469,6 +469,7 @@ fn sample_process_usage(
     mut runtime: Query<(Entity, &mut ProcessMonitor)>,
     monitors: Query<(), (With<ProcessMonitorView>, With<KeyboardOwner>)>,
     claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
+    opened: Query<(), Added<ProcessMonitorView>>,
     mut service_processes: Query<(&ProcessPid, &mut Usage), With<ServiceProcess>>,
     local_processes: Query<(Entity, &ProcessPid), With<LocalVmuxProcess>>,
     mut commands: Commands,
@@ -483,10 +484,12 @@ fn sample_process_usage(
         .iter_mut()
         .map(|(pid, _)| pid.0)
         .collect::<Vec<_>>();
-    let Some(snapshot) = runtime
-        .sampler
-        .refresh(time.delta(), !claimed.is_empty(), service_roots)
-    else {
+    let Some(snapshot) = runtime.sampler.refresh(
+        time.delta(),
+        !claimed.is_empty(),
+        !opened.is_empty(),
+        service_roots,
+    ) else {
         return;
     };
 

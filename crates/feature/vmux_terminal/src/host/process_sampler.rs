@@ -33,7 +33,7 @@ pub(super) struct ProcessSampler {
 impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
-            sample_poll: Timer::from_seconds(2.0, TimerMode::Repeating),
+            sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
             discovery_poll: Timer::from_seconds(300.0, TimerMode::Repeating),
             discovered: false,
             local: HashMap::new(),
@@ -48,6 +48,7 @@ impl ProcessSampler {
         &mut self,
         delta: std::time::Duration,
         immediate: bool,
+        rediscover: bool,
         service_roots: impl IntoIterator<Item = u32>,
     ) -> Option<ProcessSnapshot> {
         self.sample_poll.tick(delta);
@@ -55,7 +56,7 @@ impl ProcessSampler {
         if !immediate && !self.sample_poll.just_finished() {
             return None;
         }
-        if immediate || !self.discovered || self.discovery_poll.just_finished() {
+        if rediscover || !self.discovered || self.discovery_poll.just_finished() {
             self.discover();
         }
         self.sample_poll.reset();
@@ -349,7 +350,7 @@ pub(super) struct ProcessSampler {
 impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
-            sample_poll: Timer::from_seconds(2.0, TimerMode::Repeating),
+            sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
             discovery_poll: Timer::from_seconds(300.0, TimerMode::Repeating),
             system: sysinfo::System::new(),
         }
@@ -362,6 +363,7 @@ impl ProcessSampler {
         &mut self,
         delta: std::time::Duration,
         immediate: bool,
+        rediscover: bool,
         service_roots: impl IntoIterator<Item = u32>,
     ) -> Option<ProcessSnapshot> {
         self.sample_poll.tick(delta);
@@ -369,7 +371,7 @@ impl ProcessSampler {
         if !immediate && !self.sample_poll.just_finished() {
             return None;
         }
-        if immediate || self.system.processes().is_empty() || self.discovery_poll.just_finished() {
+        if rediscover || self.system.processes().is_empty() || self.discovery_poll.just_finished() {
             self.discovery_poll.reset();
             self.system.refresh_processes_specifics(
                 sysinfo::ProcessesToUpdate::All,

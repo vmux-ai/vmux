@@ -30,7 +30,7 @@ impl<M: Component + Default> Plugin for HostedUiPlugin<M> {
             )
             .add_systems(
                 Update,
-                mark_hosted_view::<M>.after(PageOpenSet::HandleKnownPages),
+                sync_hosted_view::<M>.after(PageOpenSet::HandleKnownPages),
             );
     }
 }
@@ -50,14 +50,23 @@ impl<M> HostedUiManifest<M> {
     }
 }
 
-fn mark_hosted_view<M: Component + Default>(
+fn sync_hosted_view<M: Component + Default>(
     manifest: Res<HostedUiManifest<M>>,
-    views: Query<(Entity, &PageMetadata), (With<vmux_ecs::page::HostsPage>, Without<M>)>,
+    views: Query<
+        (Entity, &PageMetadata, Has<M>),
+        (With<vmux_ecs::page::HostsPage>, Changed<PageMetadata>),
+    >,
     mut commands: Commands,
 ) {
-    for (entity, page) in &views {
-        if manifest.page.answers_for(&page.url) {
-            commands.entity(entity).try_insert(M::default());
+    for (entity, page, marked) in &views {
+        match (manifest.page.answers_for(&page.url), marked) {
+            (true, false) => {
+                commands.entity(entity).try_insert(M::default());
+            }
+            (false, true) => {
+                commands.entity(entity).remove::<M>();
+            }
+            _ => {}
         }
     }
 }
@@ -111,6 +120,48 @@ mod tests {
 
     use super::*;
     use vmux_ecs::page::HostedPage;
+
+    #[derive(Component, Default)]
+    struct HostedView;
+
+    #[test]
+    fn hosted_marker_tracks_the_page_that_the_view_currently_hosts() {
+        let page = PageManifest {
+            route: "vmux://services/",
+            url: "vmux://services/",
+            asset_host: "services",
+            owns_subtree: false,
+            title: "Services",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: None,
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement::DEFAULT,
+        };
+        let mut app = App::new();
+        app.insert_resource(HostedUiManifest::<HostedView>::new(page))
+            .add_systems(Update, sync_hosted_view::<HostedView>);
+        let view = app
+            .world_mut()
+            .spawn((
+                vmux_ecs::page::HostsPage,
+                PageMetadata {
+                    url: "vmux://services/".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+        assert!(app.world().get::<HostedView>(view).is_some());
+
+        app.world_mut().get_mut::<PageMetadata>(view).unwrap().url = "git://".into();
+        app.update();
+        assert!(app.world().get::<HostedView>(view).is_none());
+    }
 
     #[test]
     fn a_trailing_slash_does_not_decide_which_page_was_asked_for() {

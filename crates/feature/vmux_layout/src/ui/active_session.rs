@@ -41,7 +41,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         page.title.clone()
     };
     rsx! {
-        div { class: "px-2 py-2",
+        div { class: "min-w-0 px-2 py-2",
             div { class: "flex min-w-0 items-center gap-2.5",
                 div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
                     PageIconView {
@@ -64,7 +64,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                     }
                 }
             }
-            div { class: "mt-2 flex flex-col gap-1",
+            div { class: "mt-2 min-w-0 flex flex-col gap-1",
                 if let Some(task) = task {
                     div { class: "flex items-center gap-1.5",
                         Badge {
@@ -171,7 +171,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
         translate("common-expand")
     };
     rsx! {
-        div { class: "relative min-w-0 overflow-visible rounded-md bg-foreground/[0.035]",
+        div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible rounded-md bg-foreground/[0.035]",
             div { class: "flex min-w-0 flex-col gap-0.5 p-1",
                 Dropdown {
                     open: choosing(),
