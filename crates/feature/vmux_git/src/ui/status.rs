@@ -3,6 +3,7 @@
 use dioxus::prelude::*;
 use vmux_api::space::ProjectRow;
 use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
+use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::file_icon::TypeIcon;
@@ -26,7 +27,6 @@ pub(super) fn RepositoryHeader(
 ) -> Element {
     let changed = repository.files.len();
     let clean = changed == 0;
-    let has_head = !repository.commits.is_empty();
     let push_path = repository.repo_root.clone();
     let mut repository_open = use_signal(|| false);
     let mut branch_open = use_signal(|| false);
@@ -40,24 +40,14 @@ pub(super) fn RepositoryHeader(
         .iter()
         .find(|commit| commit.sha == selected_commit)
         .cloned();
-    let branch_head = if repository.branch.is_empty() {
-        "HEAD"
-    } else {
-        repository.branch.as_str()
-    };
-    let branch_range = if repository.base_ref.is_empty() {
-        translate("git-branch-changes")
-    } else {
-        format!("{}…{}", repository.base_ref, branch_head)
-    };
     let revision_label = selected_commit_entry
         .as_ref()
         .map(|commit| commit.short_sha.clone())
-        .unwrap_or_else(|| branch_range.clone());
+        .unwrap_or_default();
     let revision_title = selected_commit_entry
         .as_ref()
         .map(|commit| commit.summary.clone())
-        .unwrap_or_else(|| translate("git-branch-changes"));
+        .unwrap_or_default();
     let project_picker_dir = repository.repo_root.clone();
     let root_projects = projects
         .into_iter()
@@ -192,7 +182,7 @@ pub(super) fn RepositoryHeader(
                         }
                     }
                 }
-                if has_head {
+                if selected_commit_entry.is_some() {
                     BreadcrumbSeparator {}
                     Dropdown {
                         open: commit_open(),
@@ -203,10 +193,7 @@ pub(super) fn RepositoryHeader(
                             class: "flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
                             title: "{revision_title}",
                             onclick: move |_| commit_open.set(!commit_open()),
-                            LineIconView {
-                                icon: if selected_commit.is_empty() { LineIcon::GitBranch } else { LineIcon::GitCommit },
-                                class: "size-3.5 shrink-0",
-                            }
+                            LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
                             span { class: "min-w-0 truncate text-xs font-medium text-foreground/85", "{revision_label}" }
                             LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                         }
@@ -214,23 +201,6 @@ pub(super) fn RepositoryHeader(
                             div {
                                 class: "absolute left-0 top-9 z-40 max-h-80 min-w-80 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
                                 onscroll: move |event| commit_pager.load_more(event, commit_total),
-                                button {
-                                    r#type: "button",
-                                    class: if selected_commit.is_empty() {
-                                        "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
-                                    } else {
-                                        "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-                                    },
-                                    title: translate("git-branch-changes"),
-                                    onclick: move |_| {
-                                        commit_open.set(false);
-                                        let _ = send(&GitBranchDiffSelectRequest);
-                                    },
-                                    LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
-                                    span { class: "min-w-0 flex-1 truncate font-medium", {translate("git-branch-changes")} }
-                                    code { class: "shrink-0 font-mono text-[10px] text-muted-foreground", "{branch_range}" }
-                                }
-                                div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
                                 for commit in repository.commits.iter().take(commit_pager.visible(commit_total)) {
                                     {
                                         let sha = commit.sha.clone();
@@ -329,13 +299,6 @@ pub(super) fn RepositoryHeader(
                 }
             }
         }
-    }
-}
-
-#[component]
-fn BreadcrumbSeparator() -> Element {
-    rsx! {
-        span { class: "shrink-0 text-xs text-muted-foreground/45", "›" }
     }
 }
 
