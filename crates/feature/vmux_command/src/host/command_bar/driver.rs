@@ -59,7 +59,7 @@ impl PaletteDraft {
             return self.with_completions(Vec::new());
         }
         if is_start && query.trim().is_empty() {
-            return PageRows::open_sessions(&state.tabs, &state.pages);
+            return Vec::new();
         }
         if start_prompt_mode {
             return PromptRows::for_query(&state.pages, &state.search_engines, query);
@@ -770,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn the_start_surface_rests_on_open_stacks_and_hides_itself() {
+    fn the_start_surface_stays_empty_until_the_user_types() {
         let mut state = Launcher::with_open_stack();
         state.pages.push(CommandBarPage {
             url: "vmux://start/".into(),
@@ -787,14 +787,7 @@ mod tests {
         });
 
         let resting = PaletteState::start(&state, PaletteDraft::default());
-        assert!(
-            resting
-                .rows
-                .iter()
-                .all(|row| matches!(row, CommandBarResultItem::Stack { .. })),
-            "the empty start surface offers open stacks only: {:?}",
-            resting.rows
-        );
+        assert!(resting.rows.is_empty());
 
         let searched = PaletteState::start(&state, PaletteDraft::typed("vmux://"));
         assert!(
@@ -1410,7 +1403,8 @@ mod tests {
     #[test]
     fn a_highlighted_stack_switches_tab_rather_than_opening_a_url() {
         let state = Launcher::with_open_stack();
-        let palette = PaletteState::start(&state, PaletteDraft::default());
+        let palette =
+            PaletteState::start(&state, PaletteDraft::typed("vmux://sessions/session-codex"));
 
         assert_eq!(
             palette.submit_start(&[]),

@@ -155,7 +155,6 @@ pub fn GitFooter(
     if !has_branch && !always_visible {
         return rsx! {};
     }
-    let can_commit = has_branch && state.staged_count > 0;
     let can_push = has_branch && state.ahead > 0;
 
     rsx! {
@@ -185,31 +184,6 @@ pub fn GitFooter(
             }
 
             div { class: "flex min-w-0 flex-1 items-center gap-3 overflow-hidden",
-                if can_commit {
-                    input {
-                        class: "min-w-0 flex-1 rounded border border-white/15 bg-transparent px-2 py-0.5 text-term-fg outline-none placeholder:text-muted-foreground",
-                        r#type: "text",
-                        placeholder: translate("git-commit-message"),
-                        value: "{state.commit_message}",
-                        oninput: move |event: Event<FormData>| {
-                            let _ = send(&GitCommitDraftRequest {
-                                message: event.value(),
-                            });
-                        },
-                    }
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        class: "h-auto shrink-0 px-2 py-0.5 text-xs hover:bg-foreground/10 disabled:opacity-40",
-                        disabled: state.commit_message.trim().is_empty() || !state.commit_pending.is_empty(),
-                        onclick: move |_| {
-                            let _ = send(&GitCommitSubmitRequest);
-                        },
-                        {translate_with(
-                            "git-commit",
-                            &[("count", TranslationValue::Number(state.staged_count as i64))],
-                        )}
-                    }
-                }
                 if !state.message.is_empty() {
                     span {
                         class: "min-w-0 flex-1 truncate text-ansi-1",

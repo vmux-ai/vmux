@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_ecs::PageMetadata;
 use vmux_ecs::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_ecs::profile::Projects;
+use vmux_ecs::{LastVisitedAt, PageMetadata, Url};
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
@@ -78,6 +78,7 @@ fn handle_file(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children: Query<&Children>,
     mut views: Query<(&FileView, &mut PageMetadata)>,
+    visits: Query<(&PageMetadata, &LastVisitedAt), (With<Url>, Without<FileView>)>,
     focused_space: vmux_layout::space::FocusedSpace,
     projects: Projects,
     mut commands: Commands,
@@ -86,9 +87,14 @@ fn handle_file(
     for (entity, task) in &tasks {
         let project_dir = focused_space.startup_dir();
         let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
-        let Some(target) =
-            FilePageTarget::resolve(&task.url, project_dir, projects.path(), &knowledge_root)
-        else {
+        let knowledge_landing = KnowledgeLanding::select(&knowledge_root, visits.iter());
+        let Some(target) = FilePageTarget::resolve(
+            &task.url,
+            project_dir,
+            projects.path(),
+            &knowledge_root,
+            knowledge_landing.as_deref(),
+        ) else {
             continue;
         };
         let Some(path) = target.path else {
@@ -164,6 +170,7 @@ impl FilePageTarget {
         project_dir: Option<&Path>,
         projects: Result<&Path, String>,
         knowledge_root: &Path,
+        knowledge_landing: Option<&Path>,
     ) -> Option<Self> {
         if url.trim_end_matches('/') == super::ProjectsPage::MANIFEST.url.trim_end_matches('/') {
             if let Some(project_dir) = project_dir {
@@ -182,7 +189,7 @@ impl FilePageTarget {
         }
         if url.trim_end_matches('/') == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/') {
             return Some(Self {
-                path: Some(knowledge_root.to_path_buf()),
+                path: Some(knowledge_landing.unwrap_or(knowledge_root).to_path_buf()),
                 error: String::new(),
             });
         }
@@ -193,6 +200,51 @@ impl FilePageTarget {
             path: vmux_path::FileUrl::parse(url).and_then(|file| file.path()),
             error: format!("malformed file URL '{url}'"),
         })
+    }
+}
+
+struct KnowledgeLanding;
+
+impl KnowledgeLanding {
+    fn select<'a>(
+        root: &Path,
+        visits: impl Iterator<Item = (&'a PageMetadata, &'a LastVisitedAt)>,
+    ) -> Option<PathBuf> {
+        let mut recent = None;
+        for (metadata, visited) in visits {
+            let Some(path) = vmux_path::FileUrl::parse(&metadata.url).and_then(|url| url.path())
+            else {
+                continue;
+            };
+            if !path.starts_with(root) || !path.is_file() || !Self::is_note(&path) {
+                continue;
+            }
+            if recent
+                .as_ref()
+                .is_none_or(|(_, timestamp)| visited.0 > *timestamp)
+            {
+                recent = Some((path, visited.0));
+            }
+        }
+        if let Some((path, _)) = recent {
+            return Some(path);
+        }
+        let welcome = root.join("welcome.md");
+        if welcome.is_file() {
+            return Some(welcome);
+        }
+        ignore::WalkBuilder::new(root)
+            .hidden(true)
+            .build()
+            .filter_map(Result::ok)
+            .map(|entry| entry.into_path())
+            .find(|path| path.is_file() && Self::is_note(path))
+    }
+
+    fn is_note(path: &Path) -> bool {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension, "md" | "markdown" | "mdx"))
     }
 }
 
@@ -381,13 +433,58 @@ mod tests {
     }
 
     #[test]
-    fn knowledge_page_redirects_to_its_directory() {
+    fn knowledge_page_opens_its_landing_note() {
         let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::URL);
         let page = stack.page();
+        let root = vmux_knowledge::KnowledgeVault::user().into_root();
+        let expected = KnowledgeLanding::select(&root, std::iter::empty()).unwrap_or(root);
 
         assert_eq!(
             vmux_path::FileUrl::parse(&stack.url(page)).and_then(|url| url.path()),
-            Some(vmux_knowledge::KnowledgeVault::user().into_root())
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn knowledge_landing_prefers_the_most_recent_note() {
+        let root = tempfile::tempdir().unwrap();
+        let older = root.path().join("older.md");
+        let recent = root.path().join("recent.md");
+        std::fs::write(&older, "older").unwrap();
+        std::fs::write(&recent, "recent").unwrap();
+        let older_metadata = PageMetadata {
+            url: vmux_path::FileUrl::from_path(&older, None, None, None),
+            ..Default::default()
+        };
+        let recent_metadata = PageMetadata {
+            url: vmux_path::FileUrl::from_path(&recent, None, None, None),
+            ..Default::default()
+        };
+        let older_visit = LastVisitedAt(10);
+        let recent_visit = LastVisitedAt(20);
+
+        assert_eq!(
+            KnowledgeLanding::select(
+                root.path(),
+                [
+                    (&older_metadata, &older_visit),
+                    (&recent_metadata, &recent_visit),
+                ]
+                .into_iter(),
+            ),
+            Some(recent)
+        );
+    }
+
+    #[test]
+    fn knowledge_landing_uses_welcome_before_the_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let welcome = root.path().join("welcome.md");
+        std::fs::write(&welcome, "welcome").unwrap();
+
+        assert_eq!(
+            KnowledgeLanding::select(root.path(), std::iter::empty()),
+            Some(welcome)
         );
     }
 

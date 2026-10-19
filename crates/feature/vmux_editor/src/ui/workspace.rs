@@ -828,7 +828,7 @@ pub fn Page() -> Element {
         div {
             id: EditorFocus::CONTAINER_ID,
             tabindex: "0",
-            class: "relative flex h-full min-w-[320px] flex-1 flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] text-foreground font-mono text-sm leading-normal outline-none",
+            class: "relative flex h-full min-w-[320px] flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal outline-none",
             style: "--iw:{indent().width};{cell_dims().vars()}{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
@@ -927,7 +927,7 @@ pub fn Page() -> Element {
             }
 
             div {
-                class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
+                class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.025] px-3 font-sans text-xs text-muted-foreground",
                 ExplorerToggleButton { pane: explorer, mode }
                 EditorTabStrip { tabs: editor_tabs }
                 if find_open() {
@@ -942,7 +942,7 @@ pub fn Page() -> Element {
                 }
                 if mode() == Mode::Text {
                     if is_markdown() || git_has_diff() {
-                        div { class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
+                        div { class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
                             if is_markdown() {
                                 button {
                                     class: file_mode_class(file_view_mode() == FileViewMode::Note),
@@ -975,26 +975,6 @@ pub fn Page() -> Element {
                                     {translate("editor-diff")}
                                 }
                             }
-                        }
-                    }
-                    div {
-                        class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
-                        title: translate("schema-keymap"),
-                        button {
-                            class: file_mode_class(keymap() == KeymapKind::Vscode),
-                            onclick: move |_| {
-                                let next = KeymapKind::Vscode;
-                                let _ = send(&FileKeymapSet { keymap: next });
-                            },
-                            {translate("editor-keymap-standard")}
-                        }
-                        button {
-                            class: file_mode_class(keymap() == KeymapKind::Vim),
-                            onclick: move |_| {
-                                let next = KeymapKind::Vim;
-                                let _ = send(&FileKeymapSet { keymap: next });
-                            },
-                            {translate("editor-keymap-vim")}
                         }
                     }
                 }
@@ -1800,9 +1780,9 @@ pub fn Page() -> Element {
                     }
                 },
                 {
-                    lsp_status().map(|s| {
+                    lsp_status().and_then(|s| (s.state != LspServerState::Ready).then_some(s)).map(|s| {
                         let (dot, label) = match s.state {
-                            LspServerState::Ready => ("text-ansi-2", s.server.clone()),
+                            LspServerState::Ready => unreachable!(),
                             LspServerState::Starting => {
                                 (
                                     "text-ansi-3",
@@ -1832,7 +1812,7 @@ pub fn Page() -> Element {
                         }
                     })
                 }
-                if status_scope.shows_anything() {
+                if keymap() == KeymapKind::Vim && status_scope.shows_anything() {
                     FileStatusInfo {
                         scope: status_scope,
                         line: status_caret.line + 1,
@@ -1859,9 +1839,9 @@ pub(crate) const SCROLL_ID: &str = "file-scroll";
 
 fn file_mode_class(active: bool) -> &'static str {
     if active {
-        "rounded bg-primary/15 px-1.5 py-0.5 text-primary transition-[background-color,color,box-shadow] duration-200 ease-out"
+        "rounded-md bg-foreground/[0.07] px-2 py-1 text-foreground transition-colors duration-150"
     } else {
-        "rounded px-1.5 py-0.5 text-foreground/45 transition-[background-color,color,box-shadow] duration-200 ease-out hover:bg-foreground/[0.06] hover:text-foreground"
+        "rounded-md px-2 py-1 text-foreground/45 transition-colors duration-150 hover:bg-foreground/[0.035] hover:text-foreground"
     }
 }
 

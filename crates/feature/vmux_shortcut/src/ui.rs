@@ -54,56 +54,55 @@ pub fn Page() -> Element {
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
-            div { class: "pointer-events-none absolute inset-0 opacity-50 [background:radial-gradient(circle_at_14%_8%,color-mix(in_oklab,var(--primary)_7%,transparent),transparent_38%)]" }
-            header { class: "relative z-10 shrink-0 bg-foreground/[0.018] px-5 py-4",
-                div { class: "mx-auto flex w-full max-w-6xl items-center gap-4",
+            header { class: "shrink-0 px-5 py-3",
+                div { class: "mx-auto flex w-full max-w-4xl items-center gap-4",
                     div { class: "min-w-0",
-                        h1 { class: "text-xl font-semibold tracking-tight", {translate("shortcuts-title")} }
+                        h1 { class: "text-lg font-semibold tracking-tight", {translate("shortcuts-title")} }
                         p { class: "mt-0.5 text-xs text-muted-foreground", "{subtitle}" }
                     }
                 }
             }
-            div { class: "relative z-10 min-h-0 flex-1 overflow-y-auto px-5 py-5 [scrollbar-gutter:stable]",
-                div { class: "mx-auto w-full max-w-6xl",
+            div { class: "min-h-0 flex-1 overflow-y-auto px-5 pb-5 [scrollbar-gutter:stable]",
+                div { class: "mx-auto w-full max-w-4xl",
                     div {
-                        class: "group relative mb-5 flex min-h-36 w-full items-center justify-center overflow-hidden rounded-lg bg-primary/[0.055] px-20 py-8 text-center",
+                        class: "mb-3 flex min-h-12 w-full items-center gap-3 rounded-lg bg-foreground/[0.035] px-3 py-2",
                         aria_label: translate("shortcuts-try-title"),
-                        span { class: "absolute left-5 top-4 flex items-center gap-2 text-xs font-semibold text-foreground/80",
-                            span { class: "flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary",
+                        span { class: "flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground",
+                            span { class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground/[0.055] text-muted-foreground",
                                 BuiltinIconView {
                                     icon: vmux_api::BuiltinIcon::Keyboard,
                                     class: "h-4 w-4".to_string(),
                                 }
                             }
-                            {translate("shortcuts-try-title")}
+                            span { class: "hidden sm:inline", {translate("shortcuts-try-title")} }
+                        }
+                        div { class: "flex min-w-0 flex-1 items-center justify-center gap-3",
+                            if probe.sequence.is_empty() {
+                                span { class: "truncate text-sm text-foreground/70", {translate("shortcuts-try-hint")} }
+                            } else {
+                                ShortcutSequence { strokes: probe.sequence.clone() }
+                            }
+                            if !probe.sequence.is_empty() {
+                                span { class: "min-w-0 truncate text-xs font-medium {status_tone}", "{status_label}" }
+                            }
                         }
                         if !probe.sequence.is_empty() {
                             button {
                                 r#type: "button",
                                 tabindex: "-1",
-                                class: "absolute right-5 top-4 inline-flex items-center gap-2 rounded-lg px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
+                                class: "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
                                 onpointerdown: move |event| event.prevent_default(),
                                 onclick: move |event| {
                                     event.stop_propagation();
                                     let _ = send(&ShortcutProbeClearRequest);
                                 },
-                                kbd { class: "rounded bg-foreground/[0.065] px-1.5 py-0.5 font-mono text-[10px]", "Esc" }
+                                kbd { class: "font-mono", "Esc" }
                                 {translate("shortcuts-clear")}
-                            }
-                        }
-                        div { class: "flex min-w-0 flex-col items-center gap-4",
-                            if probe.sequence.is_empty() {
-                                span { class: "text-lg font-medium tracking-tight text-foreground/80", {translate("shortcuts-try-hint")} }
-                            } else {
-                                ShortcutSequence { strokes: probe.sequence.clone() }
-                            }
-                            if !probe.sequence.is_empty() {
-                                span { class: "text-sm font-medium {status_tone}", "{status_label}" }
                             }
                         }
                     }
                     if groups.is_empty() {
-                        div { class: "flex min-h-72 items-center justify-center rounded-lg bg-foreground/[0.025] text-sm text-muted-foreground",
+                        div { class: "flex min-h-40 items-center justify-center rounded-lg bg-foreground/[0.025] text-sm text-muted-foreground",
                             if matches!(probe.status, ShortcutProbeStatus::Miss) {
                                 {translate("shortcuts-no-match")}
                             } else {
@@ -111,7 +110,7 @@ pub fn Page() -> Element {
                             }
                         }
                     } else {
-                        div { class: "columns-1 gap-3 md:columns-2 xl:columns-3",
+                        div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
                             for group in groups {
                                 ShortcutGroupView {
                                     key: "{group.name}",
@@ -171,12 +170,11 @@ impl ShortcutStroke {
 #[component]
 fn ShortcutGroupView(group: crate::ShortcutGroup) -> Element {
     rsx! {
-        section { class: "mb-3 inline-block w-full break-inside-avoid overflow-hidden rounded-lg bg-foreground/[0.025]",
-            h2 { class: "flex items-center gap-2 bg-primary/[0.06] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-primary",
-                span { class: "h-1.5 w-1.5 rounded-full bg-primary" }
+        section { class: "w-full border-b border-foreground/[0.055] last:border-b-0",
+            h2 { class: "flex h-8 items-center px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground",
                 "{group.name}"
             }
-            div { class: "divide-y divide-border/45",
+            div {
                 for entry in group.entries {
                     ShortcutEntryView {
                         key: "{entry.id}",
@@ -192,14 +190,14 @@ fn ShortcutGroupView(group: crate::ShortcutGroup) -> Element {
 fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
     let selected = entry.shortcuts.iter().any(|shortcut| shortcut.emphasized);
     let class = if selected {
-        "flex min-h-12 items-center gap-3 bg-primary/[0.09] px-4 py-2.5 ring-1 ring-inset ring-primary/15"
+        "flex min-h-10 items-center gap-3 bg-primary/[0.08] px-3 py-2"
     } else {
-        "flex min-h-12 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-foreground/[0.025]"
+        "flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-foreground/[0.035]"
     };
     rsx! {
         div { class: "{class}",
-            span { class: "min-w-0 flex-1 text-[13px] leading-snug text-foreground", "{entry.name}" }
-            div { class: "flex shrink-0 flex-col items-end gap-1.5",
+            span { class: "min-w-0 flex-1 text-xs leading-snug text-foreground", "{entry.name}" }
+            div { class: "flex max-w-[55%] shrink-0 flex-col items-end gap-1",
                 for (shortcut_index, shortcut) in entry.shortcuts.iter().enumerate() {
                     {
                         rsx! {
@@ -250,13 +248,13 @@ fn probe_presentation(status: &ShortcutProbeStatus) -> (String, &'static str) {
 #[component]
 fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
     rsx! {
-        span { class: "inline-flex items-center gap-2",
+        span { class: "inline-flex items-center gap-1.5",
             for (stroke_index, stroke) in strokes.into_iter().enumerate() {
                 if stroke_index > 0 {
-                    span { class: "px-1 text-lg text-muted-foreground/55", "›" }
+                    span { class: "text-xs text-muted-foreground/55", "›" }
                 }
                 for keycap in stroke.keycaps() {
-                    kbd { class: "inline-flex min-w-11 items-center justify-center rounded-lg bg-primary/10 px-3 py-2.5 font-mono text-lg font-semibold leading-none text-primary", "{keycap}" }
+                    kbd { class: "inline-flex min-w-6 items-center justify-center rounded-md bg-primary/10 px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-primary", "{keycap}" }
                 }
             }
         }

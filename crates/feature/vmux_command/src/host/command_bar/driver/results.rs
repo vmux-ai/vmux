@@ -468,25 +468,6 @@ impl PromptRows {
     }
 }
 
-impl PageRows {
-    pub fn open_sessions(
-        tabs: &[CommandBarTab],
-        pages: &[CommandBarPage],
-    ) -> Vec<CommandBarResultItem> {
-        tabs.iter()
-            .filter(|tab| !tab.is_active)
-            .map(|tab| CommandBarResultItem::Stack {
-                title: tab.title.clone(),
-                url: tab.url.clone(),
-                icon: Self::stack_icon_for(pages, &tab.url),
-                pane_id: tab.pane_id,
-                tab_index: tab.tab_index as usize,
-                location: tab.location.clone(),
-            })
-            .collect()
-    }
-}
-
 impl PromptRows {
     pub fn for_query(
         pages: &[CommandBarPage],
@@ -690,7 +671,7 @@ impl SearchRows {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::command_bar::{CommandBarCommandEntry, CommandBarTab};
+    use vmux_api::command_bar::CommandBarCommandEntry;
 
     fn search_engine(id: &str) -> SearchEngine {
         SearchEngine {
@@ -1174,37 +1155,5 @@ mod tests {
             row,
             CommandBarResultItem::History { url, .. } if url == "https://example.com/main"
         )));
-    }
-
-    #[test]
-    fn open_sessions_are_the_launcher_resting_state() {
-        let tabs = vec![
-            CommandBarTab {
-                title: "Fun terminal demo".into(),
-                url: "vmux://sessions/claude/abc".into(),
-                pane_id: 7,
-                tab_index: 0,
-                is_active: true,
-                location: "space-1 / pane 1".into(),
-            },
-            CommandBarTab {
-                title: "Docs".into(),
-                url: "vmux://sessions/codex/def".into(),
-                pane_id: 8,
-                tab_index: 1,
-                is_active: false,
-                location: "space-1 / pane 2".into(),
-            },
-        ];
-
-        let items = PageRows::open_sessions(&tabs, &[]);
-
-        assert_eq!(items.len(), 1, "the stack already on screen is not offered");
-        assert!(matches!(
-            &items[0],
-            CommandBarResultItem::Stack { title, pane_id, .. }
-                if title == "Docs" && *pane_id == 8
-        ));
-        assert!(PageRows::open_sessions(&[], &[]).is_empty());
     }
 }
