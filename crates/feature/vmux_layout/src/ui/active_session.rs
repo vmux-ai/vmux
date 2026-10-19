@@ -131,7 +131,7 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
                 class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
             }
             span { class: "min-w-0 truncate font-medium text-foreground", title: "{repository}", "{repository}" }
-            LineIconView { icon: LineIcon::ChevronRight, class: "size-3 shrink-0 text-muted-foreground/55".to_string() }
+            span { class: "shrink-0 text-xs text-muted-foreground/45", "›" }
             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
             span { class: "min-w-0 truncate font-mono text-foreground/85", "{boundary.branch}" }
         }
@@ -212,7 +212,7 @@ fn ActiveWorkspaceProjectTree(
                                     choosing.set(false);
                                     let _ = send(&ProjectPickerRequest {
                                         current_dir: picker_root.clone(),
-                                        pane_id,
+                                        pane_id: Some(pane_id),
                                     });
                                 },
                                 LineIconView { icon: LineIcon::Plus, class: "size-3.5 shrink-0".to_string() }
@@ -222,7 +222,7 @@ fn ActiveWorkspaceProjectTree(
                     }
                 }
                 if !current_branch.is_empty() {
-                    LineIconView { icon: LineIcon::ChevronRight, class: "size-3 shrink-0 text-muted-foreground/55".to_string() }
+                    span { class: "shrink-0 text-xs text-muted-foreground/45", "›" }
                     if branch_choices.is_empty() {
                         LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                         span { class: "min-w-0 truncate font-mono text-[10px] text-foreground/85", "{current_branch}" }

@@ -48,7 +48,7 @@ pub(super) fn RepositoryHeader(
                     on_dismiss: move |_| repository_open.set(false),
                     button {
                         r#type: "button",
-                        class: "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm font-semibold tracking-[-0.015em] text-foreground hover:bg-foreground/[0.055]",
+                        class: "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs font-semibold tracking-[-0.015em] text-foreground hover:bg-foreground/[0.055]",
                         title: "{repository.repo_root}",
                         onclick: move |_| repository_open.set(!repository_open()),
                         GitSymbolView {
@@ -180,7 +180,7 @@ pub(super) fn RepositoryHeader(
                             title: translate("git-latest"),
                             onclick: move |_| commit_open.set(!commit_open()),
                             LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
-                            span { class: "shrink-0 text-[10px] font-medium text-foreground/85", {translate("git-latest")} }
+                            span { class: "shrink-0 text-xs font-medium text-foreground/85", {translate("git-latest")} }
                             LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                         }
                         if commit_open() {
@@ -287,7 +287,7 @@ pub(super) fn RepositoryHeader(
 #[component]
 fn BreadcrumbSeparator() -> Element {
     rsx! {
-        span { class: "shrink-0 text-xs text-muted-foreground/45", "/" }
+        span { class: "shrink-0 text-xs text-muted-foreground/45", "›" }
     }
 }
 
