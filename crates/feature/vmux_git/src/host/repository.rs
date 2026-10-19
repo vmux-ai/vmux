@@ -24,12 +24,35 @@ impl GitRepository {
     }
 
     pub fn discover(file: &Path) -> Result<Self, GitError> {
-        let (stdout, stderr, ok) =
-            GitCommand::run(&Self::start_dir(file), &["rev-parse", "--show-toplevel"])?;
+        let (repository, _) = Self::discover_with_worktree(file)?;
+        Ok(repository)
+    }
+
+    fn discover_with_worktree(file: &Path) -> Result<(Self, bool), GitError> {
+        let (stdout, stderr, ok) = GitCommand::run(
+            &Self::start_dir(file),
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-dir",
+                "--git-common-dir",
+            ],
+        )?;
         if !ok {
             return Err(GitError(stderr.trim().to_string()));
         }
-        Ok(Self(PathBuf::from(stdout.trim())))
+        let mut paths = stdout.lines().map(PathBuf::from);
+        let Some(repo_root) = paths.next() else {
+            return Err(GitError("missing repository root".into()));
+        };
+        let Some(git_dir) = paths.next() else {
+            return Err(GitError("missing git directory".into()));
+        };
+        let Some(common_dir) = paths.next() else {
+            return Err(GitError("missing common git directory".into()));
+        };
+        Ok((Self(repo_root), git_dir != common_dir))
     }
 
     pub fn path(&self) -> &Path {
@@ -977,7 +1000,7 @@ impl GitStashEntry {
 impl GitRepositorySnapshot {
     pub fn load(path: &Path) -> Result<Self, GitError> {
         let requested_path = path.to_string_lossy().into_owned();
-        let repository = GitRepository::discover(path)?;
+        let (repository, is_worktree) = GitRepository::discover_with_worktree(path)?;
         let repo_root = repository.path();
         let (stdout, stderr, ok) = GitCommand::read_bytes(
             repo_root,
@@ -1015,6 +1038,7 @@ impl GitRepositorySnapshot {
             path: requested_path,
             repo_root: repo_root.to_string_lossy().to_string(),
             repo_name,
+            is_worktree,
             branch,
             base_ref,
             upstream,
@@ -1169,6 +1193,7 @@ mod tests {
         let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
 
         assert_eq!(repository.branch, "main");
+        assert!(!repository.is_worktree);
         assert!(
             repository
                 .files
@@ -1234,6 +1259,7 @@ mod tests {
             repository.repo_name,
             origin.path().file_name().unwrap().to_string_lossy()
         );
+        assert!(repository.is_worktree);
         assert_eq!(branch.changed_files, 1);
         assert_eq!(branch.insertions, 1);
         assert_eq!(branch.deletions, 0);

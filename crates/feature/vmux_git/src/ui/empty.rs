@@ -2,12 +2,11 @@ use dioxus::prelude::*;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
-use super::shared::ProjectKindPill;
+use super::shared::{ProjectKindIcon, ProjectKindPill};
 use super::state::GitPageState;
 use crate::event::GitRepositoryPickerRequest;
 
@@ -51,11 +50,7 @@ pub(super) fn EmptyRepository() -> Element {
                         r#type: "button",
                         class: "flex h-10 w-full items-center gap-2 rounded-lg bg-foreground/[0.055] px-3 text-left text-ui text-foreground outline-none transition-colors hover:bg-foreground/[0.085] focus-visible:bg-foreground/[0.085]",
                         onclick: move |_| open.set(!open()),
-                        TypeIcon {
-                            path: current_path.clone(),
-                            is_dir: true,
-                            class: "size-4 shrink-0 opacity-80"
-                        }
+                        ProjectKindIcon { is_worktree: current_is_worktree }
                         span { class: "min-w-0 flex-1 truncate font-medium", "{current_label}" }
                         if current.is_some() {
                             ProjectKindPill { is_worktree: current_is_worktree }
@@ -91,7 +86,7 @@ pub(super) fn EmptyRepository() -> Element {
                                                     pane_id: None,
                                                 });
                                             },
-                                            TypeIcon { path, is_dir: true, class: "size-4 shrink-0 opacity-80" }
+                                            ProjectKindIcon { is_worktree: project.is_worktree }
                                             span { class: "min-w-0 flex-1 truncate font-medium", "{project.label}" }
                                             ProjectKindPill { is_worktree: project.is_worktree }
                                             if active {

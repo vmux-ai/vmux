@@ -40,24 +40,35 @@ impl ListPager {
 }
 
 #[component]
+pub(super) fn ProjectKindIcon(is_worktree: bool) -> Element {
+    rsx! {
+        if is_worktree {
+            LineIconView { icon: LineIcon::GitFork, class: "size-4 shrink-0 text-primary" }
+        } else {
+            GitSymbolView {
+                symbol: GitSymbol::Repository,
+                class: "size-4 shrink-0 text-muted-foreground".to_string(),
+            }
+        }
+    }
+}
+
+#[component]
 pub(super) fn ProjectKindPill(is_worktree: bool) -> Element {
     let label = match is_worktree {
         true => translate("layout-worktree"),
         false => translate("git-repository"),
     };
-    rsx! {
-        span {
-            class: "flex shrink-0 items-center gap-1 rounded-full bg-foreground/[0.065] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground",
-            if is_worktree {
-                LineIconView { icon: LineIcon::GitBranch, class: "size-2.5 shrink-0" }
-            } else {
-                GitSymbolView {
-                    symbol: GitSymbol::Repository,
-                    class: "size-2.5 shrink-0".to_string(),
-                }
-            }
-            "{label}"
+    let class = match is_worktree {
+        true => {
+            "flex shrink-0 items-center rounded-full bg-primary/[0.14] px-2 py-0.5 text-[10px] font-semibold text-primary"
         }
+        false => {
+            "flex shrink-0 items-center rounded-full bg-foreground/[0.085] px-2 py-0.5 text-[10px] font-semibold text-foreground/75"
+        }
+    };
+    rsx! {
+        span { class, "{label}" }
     }
 }
 
