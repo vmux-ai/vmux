@@ -42,7 +42,11 @@ impl TabWorkspaceSelection {
             return Err("project path is not a directory".to_string());
         }
         if !checkout.trim().is_empty() {
-            return Self::from_checkout(&project_dir, std::path::Path::new(checkout));
+            return Self::from_checkout(
+                &project_dir,
+                std::path::Path::new(checkout),
+                (!branch.trim().is_empty()).then_some(branch.trim()),
+            );
         }
         if !branch.trim().is_empty() {
             let activation = crate::worktree::TabWorktreeActivation::checkout_branch(
@@ -56,12 +60,13 @@ impl TabWorkspaceSelection {
                 worktree: Some((activation.metadata, activation.ready)),
             });
         }
-        Self::from_checkout(&project_dir, &project_dir)
+        Self::from_checkout(&project_dir, &project_dir, None)
     }
 
     fn from_checkout(
         project_dir: &std::path::Path,
         checkout_dir: &std::path::Path,
+        expected_branch: Option<&str>,
     ) -> Result<Self, String> {
         let project_dir = project_dir
             .canonicalize()
@@ -70,23 +75,31 @@ impl TabWorkspaceSelection {
             .canonicalize()
             .map_err(|error| format!("invalid checkout directory: {error}"))?;
         let Some(info) = vmux_git::worktree::RepoInfo::read(&checkout_dir) else {
+            if expected_branch.is_some() {
+                return Err("branch checkout is no longer available".to_string());
+            }
             return Ok(Self {
                 startup_dir: checkout_dir.to_string_lossy().into_owned(),
                 project_dir: checkout_dir.to_string_lossy().into_owned(),
                 worktree: None,
             });
         };
-        if !info.is_worktree {
-            return Ok(Self {
-                startup_dir: checkout_dir.to_string_lossy().into_owned(),
-                project_dir: checkout_dir.to_string_lossy().into_owned(),
-                worktree: None,
-            });
+        if let Some(expected_branch) = expected_branch
+            && info.branch != expected_branch
+        {
+            return Err(format!(
+                "branch {expected_branch} is no longer checked out at {}",
+                checkout_dir.display()
+            ));
         }
         let source = vmux_git::worktree::CheckoutInfo::try_from(project_dir.as_path())
             .map_err(|error| error.0)?;
+        let relative_dir = project_dir
+            .strip_prefix(&source.root)
+            .map_err(|_| "project directory is outside its checkout".to_string())?;
         let project_dir = info
             .project_root()
+            .join(relative_dir)
             .canonicalize()
             .map_err(|error| format!("invalid project directory: {error}"))?;
         let checkout = vmux_git::worktree::CheckoutInfo::try_from(checkout_dir.as_path())
@@ -94,16 +107,31 @@ impl TabWorkspaceSelection {
         if source.common_dir != checkout.common_dir {
             return Err("worktree belongs to a different repository".to_string());
         }
+        let execution_dir = checkout
+            .root
+            .join(relative_dir)
+            .canonicalize()
+            .map_err(|error| format!("project directory is missing from checkout: {error}"))?;
+        if !execution_dir.is_dir() || !execution_dir.starts_with(&checkout.root) {
+            return Err("project directory escapes checkout".to_string());
+        }
+        let project_dir_text = project_dir.to_string_lossy().into_owned();
+        if !info.is_worktree {
+            return Ok(Self {
+                startup_dir: execution_dir.to_string_lossy().into_owned(),
+                project_dir: project_dir_text,
+                worktree: None,
+            });
+        }
         let metadata = TabWorktree {
-            repo_root: source.root.to_string_lossy().into_owned(),
+            repo_root: info.project_root().to_string_lossy().into_owned(),
             checkout_dir: checkout.root.to_string_lossy().into_owned(),
             branch: info.branch,
             base_ref: info.base_ref,
         };
-        let project_dir_text = project_dir.to_string_lossy().into_owned();
-        let ready = TabWorktreeReady::new(&checkout_dir, &project_dir_text, &metadata, &checkout)?;
+        let ready = TabWorktreeReady::new(&execution_dir, &project_dir_text, &metadata, &checkout)?;
         Ok(Self {
-            startup_dir: checkout_dir.to_string_lossy().into_owned(),
+            startup_dir: execution_dir.to_string_lossy().into_owned(),
             project_dir: project_dir_text,
             worktree: Some((metadata, ready)),
         })
@@ -334,5 +362,65 @@ mod tests {
             expected.to_string_lossy().into_owned()
         );
         assert!(app.world().get::<TabDirDecided>(tab).is_some());
+    }
+
+    #[test]
+    fn branch_checkout_preserves_nested_project_directory() {
+        let repository = tempfile::tempdir().unwrap();
+        let nested = repository.path().join("crates/app");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("main.rs"), "fn main() {}\n").unwrap();
+        let source = vmux_git::worktree::CheckoutInfo::initialize(repository.path()).unwrap();
+        source.ensure_initial_snapshot("Initialize").unwrap();
+        let worktrees = tempfile::tempdir().unwrap();
+        let checkout = worktrees.path().join("feature");
+        source.add_worktree(&checkout, "feature", "HEAD").unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let selection = TabWorkspaceSelection::resolve(
+            nested.to_string_lossy().as_ref(),
+            "feature",
+            checkout.join("crates/app").to_string_lossy().as_ref(),
+            managed_root.path(),
+        )
+        .unwrap();
+
+        let expected_project = nested.canonicalize().unwrap();
+        let expected_checkout = checkout.join("crates/app").canonicalize().unwrap();
+        let (metadata, _) = selection.worktree.unwrap();
+        assert_eq!(selection.project_dir, expected_project.to_string_lossy());
+        assert_eq!(selection.startup_dir, expected_checkout.to_string_lossy());
+        assert_eq!(
+            metadata.repo_root,
+            repository.path().canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            metadata.checkout_dir,
+            checkout.canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(metadata.branch, "feature");
+    }
+
+    #[test]
+    fn branch_checkout_rejects_stale_checkout_ownership() {
+        let repository = tempfile::tempdir().unwrap();
+        std::fs::write(repository.path().join("README.md"), "vmux\n").unwrap();
+        let source = vmux_git::worktree::CheckoutInfo::initialize(repository.path()).unwrap();
+        source.ensure_initial_snapshot("Initialize").unwrap();
+        let worktrees = tempfile::tempdir().unwrap();
+        let checkout = worktrees.path().join("feature");
+        source.add_worktree(&checkout, "feature", "HEAD").unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let error = TabWorkspaceSelection::resolve(
+            repository.path().to_string_lossy().as_ref(),
+            "other",
+            checkout.to_string_lossy().as_ref(),
+            managed_root.path(),
+        )
+        .err()
+        .unwrap();
+
+        assert!(error.contains("no longer checked out"));
     }
 }

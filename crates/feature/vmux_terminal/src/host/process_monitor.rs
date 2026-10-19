@@ -364,34 +364,31 @@ impl Usage {
 }
 
 #[derive(Component, Clone, Debug, PartialEq)]
-struct LocalVmuxProcess {
-    shell: String,
-    cwd: String,
-    uptime_secs: u64,
-}
+struct LocalVmuxProcess(LocalProcess);
 
 impl LocalVmuxProcess {
     fn entry(&self, pid: ProcessPid, usage: Usage, locale: &Locale) -> ProcessEntry {
+        let process = &self.0;
         ProcessEntry {
             id: format!("system:{}", pid.0),
             managed: false,
-            shell: self.shell.clone(),
-            shell_label: self
+            shell: process.shell.clone(),
+            shell_label: process
                 .shell
                 .rsplit('/')
                 .next()
-                .unwrap_or(&self.shell)
+                .unwrap_or(&process.shell)
                 .to_string(),
-            cwd: self.cwd.clone(),
-            cwd_label: match self.cwd.as_str() {
+            cwd: process.cwd.clone(),
+            cwd_label: match process.cwd.as_str() {
                 "" | "/" => None,
                 cwd => Some(cwd.to_string()),
             },
             cols: 0,
             rows: 0,
             pid: pid.0,
-            uptime_secs: self.uptime_secs,
-            uptime_label: ProcessUptime(self.uptime_secs).label(locale),
+            uptime_secs: process.uptime_secs,
+            uptime_label: ProcessUptime(process.uptime_secs).label(locale),
             cpu_percent: usage.cpu_percent,
             cpu_label: format!("{:.1}", usage.cpu_percent),
             mem_bytes: usage.mem_bytes,
@@ -404,11 +401,7 @@ impl LocalVmuxProcess {
 
 impl From<LocalProcess> for LocalVmuxProcess {
     fn from(process: LocalProcess) -> Self {
-        Self {
-            shell: process.shell,
-            cwd: process.cwd,
-            uptime_secs: process.uptime_secs,
-        }
+        Self(process)
     }
 }
 
@@ -966,11 +959,11 @@ mod tests {
     #[test]
     fn local_vmux_process_entry_is_unmanaged() {
         let locale = Locale::from("en-US");
-        let process = LocalVmuxProcess {
+        let process = LocalVmuxProcess(LocalProcess {
             shell: "/Applications/Vmux.app/Contents/MacOS/vmux_desktop".to_string(),
             cwd: "/tmp".to_string(),
             uptime_secs: 10,
-        };
+        });
         let entry = process.entry(
             ProcessPid(42),
             Usage {

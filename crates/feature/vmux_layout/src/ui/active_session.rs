@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ecs::event::{ProjectBranch, ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
+use vmux_ecs::event::{ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
@@ -17,6 +17,7 @@ use vmux_ui::icon::{
 
 use crate::event::{
     ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, TabBoundary,
+    WorkspaceBranch,
 };
 
 #[component]
@@ -93,7 +94,6 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                 if let Some(project) = project {
                     ActiveWorkspaceProjectTree {
                         project,
-                        boundary: boundary.clone().filter(|boundary| boundary.is_git_repo),
                         pane_id,
                     }
                 } else if let Some(boundary) = boundary {
@@ -139,25 +139,24 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
 }
 
 #[component]
-fn ActiveWorkspaceProjectTree(
-    project: ActiveWorkspaceProject,
-    boundary: Option<TabBoundary>,
-    pane_id: u64,
-) -> Element {
-    let root = project.root;
+fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> Element {
+    let ActiveWorkspaceProject {
+        root,
+        children,
+        choices,
+        project_dir,
+        branch: current_branch,
+        branches,
+    } = project;
     let picker_root = root.path.clone();
-    let choices = project.choices;
     let mut choosing = use_signal(|| false);
     let mut choosing_branch = use_signal(|| false);
     let mut expanded = use_signal(|| true);
-    let branches = boundary
-        .as_ref()
-        .map(|boundary| boundary.branches.clone())
-        .unwrap_or_default();
-    let current_branch = boundary
-        .as_ref()
-        .map(|boundary| boundary.branch.clone())
-        .unwrap_or_default();
+    let current_branch_label = if current_branch.is_empty() {
+        "HEAD".to_string()
+    } else {
+        current_branch.clone()
+    };
     let branch_choices = branches
         .into_iter()
         .filter(|branch| branch.branch != current_branch)
@@ -221,7 +220,7 @@ fn ActiveWorkspaceProjectTree(
                         }
                     }
                 }
-                if !current_branch.is_empty() {
+                if !current_branch.is_empty() || !branch_choices.is_empty() {
                     if branch_choices.is_empty() {
                         div { class: "flex h-8 min-w-0 items-center gap-2 rounded px-2",
                             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
@@ -238,7 +237,7 @@ fn ActiveWorkspaceProjectTree(
                                 aria_expanded: choosing_branch(),
                                 onclick: move |_| choosing_branch.set(!choosing_branch()),
                                 LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                                span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch}" }
+                                span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch_label}" }
                                 LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
                             }
                             if choosing_branch() {
@@ -246,7 +245,7 @@ fn ActiveWorkspaceProjectTree(
                                     for branch in branch_choices {
                                         ActiveWorkspaceBranchChoice {
                                             key: "{branch.branch}",
-                                            project_path: root.path.clone(),
+                                            project_path: project_dir.clone(),
                                             branch,
                                             pane_id,
                                             on_pick: move |_| choosing_branch.set(false),
@@ -275,7 +274,7 @@ fn ActiveWorkspaceProjectTree(
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "min-h-0 overflow-hidden pb-1",
-                    for child in project.children {
+                    for child in children {
                         ActiveWorkspaceProjectRow {
                             key: "{child.path}",
                             project: child,
@@ -291,7 +290,7 @@ fn ActiveWorkspaceProjectTree(
 #[component]
 fn ActiveWorkspaceBranchChoice(
     project_path: String,
-    branch: ProjectBranch,
+    branch: WorkspaceBranch,
     pane_id: u64,
     on_pick: EventHandler<()>,
 ) -> Element {

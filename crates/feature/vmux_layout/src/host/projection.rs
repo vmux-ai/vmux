@@ -244,26 +244,42 @@ impl BookmarkUiBuilder {
 }
 
 impl ActiveWorkspaceProject {
-    fn active(projects: &[vmux_ecs::event::ProjectRow]) -> Option<Self> {
+    fn active(projects: &TabBoundaryState) -> Option<Self> {
         let index = projects
+            .projects
             .iter()
             .position(|project| project.depth == 0 && project.is_active)?;
-        let root = projects[index].clone();
+        let root = projects.projects[index].clone();
         let children = projects
+            .projects
             .iter()
             .skip(index + 1)
             .take_while(|project| project.depth > 0)
             .cloned()
             .collect();
         let choices = projects
+            .projects
             .iter()
             .filter(|project| project.depth == 0 && !project.missing)
             .cloned()
             .collect();
+        let boundary = projects
+            .boundary
+            .as_ref()
+            .filter(|boundary| boundary.effective_dir == root.path);
         Some(Self {
             root,
             children,
             choices,
+            project_dir: boundary
+                .map(|boundary| boundary.project_dir.clone())
+                .unwrap_or_default(),
+            branch: boundary
+                .map(|boundary| boundary.branch.clone())
+                .unwrap_or_default(),
+            branches: boundary
+                .map(|_| projects.branches.clone())
+                .unwrap_or_default(),
         })
     }
 }
@@ -287,7 +303,7 @@ impl ActiveSession {
         Some(Self {
             task: None,
             agent: Self::agent_for(&page, &team.members),
-            project: ActiveWorkspaceProject::active(&projects.projects),
+            project: ActiveWorkspaceProject::active(projects),
             boundary: projects.boundary.clone(),
             page,
             pane_id: pane.id,
@@ -335,9 +351,32 @@ struct SessionProjection<'w, 's> {
         With<Session>,
     >,
     stages: Query<'w, 's, (&'static StageId, &'static Name), With<StageDefinition>>,
+    changed_targets: Query<'w, 's, (), Changed<EntityTarget<Session>>>,
+    changed_sessions: Query<
+        'w,
+        's,
+        (),
+        (
+            With<Session>,
+            Or<(
+                Changed<Name>,
+                Changed<Description>,
+                Changed<Stage>,
+                Changed<RunState>,
+            )>,
+        ),
+    >,
+    changed_stages:
+        Query<'w, 's, (), (With<StageDefinition>, Or<(Changed<StageId>, Changed<Name>)>)>,
 }
 
 impl SessionProjection<'_, '_> {
+    fn is_changed(&self) -> bool {
+        !self.changed_targets.is_empty()
+            || !self.changed_sessions.is_empty()
+            || !self.changed_stages.is_empty()
+    }
+
     fn task(&self, page: &StackNode) -> Option<ActiveTask> {
         let stack = Entity::from_bits(page.id);
         let target = self.targets.get(stack).ok()?;
@@ -515,9 +554,9 @@ fn publish_active_session(
     layouts: Query<
         (
             Entity,
-            Option<&PaneTreeProjection>,
-            Option<&ProjectProjection>,
-            Option<&TeamProjection>,
+            Option<Ref<PaneTreeProjection>>,
+            Option<Ref<ProjectProjection>>,
+            Option<Ref<TeamProjection>>,
         ),
         With<LayoutCef>,
     >,
@@ -528,14 +567,26 @@ fn publish_active_session(
     let empty_panes = PaneTreeState::default();
     let empty_projects = TabBoundaryState::default();
     let empty_team = TeamUiState::default();
+    let sessions_changed = sessions.is_changed();
     for (entity, panes, projects, team) in &layouts {
+        let projection_changed = panes.as_ref().is_some_and(|value| value.is_changed())
+            || projects.as_ref().is_some_and(|value| value.is_changed())
+            || team.as_ref().is_some_and(|value| value.is_changed());
+        if last.contains_key(&entity) && !sessions_changed && !projection_changed {
+            continue;
+        }
         let panes = panes
+            .as_deref()
             .map(|projection| &projection.0)
             .unwrap_or(&empty_panes);
         let projects = projects
+            .as_deref()
             .map(|projection| &projection.0)
             .unwrap_or(&empty_projects);
-        let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
+        let team = team
+            .as_deref()
+            .map(|projection| &projection.0)
+            .unwrap_or(&empty_team);
         let session = ActiveSession::from_projections(panes, projects, team).map(|mut active| {
             active.task = sessions.task(&active.page);
             active

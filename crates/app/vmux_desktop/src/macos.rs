@@ -58,7 +58,6 @@ fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut Sys
 
 const MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
-const INPUT_CEF_WAKE_DURATION: Duration = Duration::from_millis(250);
 
 static INPUT_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
@@ -397,7 +396,7 @@ impl WindowZoom {
 
 fn install_input_wake_monitor(
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    cef_wake_policy: Option<Res<MessageLoopWakePolicy>>,
+    cef_wake_policy: Res<MessageLoopWakePolicy>,
 ) {
     let Some(proxy) = proxy else {
         return;
@@ -405,7 +404,7 @@ fn install_input_wake_monitor(
     if INPUT_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
         return;
     }
-    let cef_wake_policy = cef_wake_policy.map(|policy| policy.clone());
+    let cef_wake_policy = cef_wake_policy.clone();
     let proxy = (**proxy).clone();
     let wake = wake_throttle("mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
@@ -416,9 +415,7 @@ fn install_input_wake_monitor(
     let window_zoom = Arc::new(Mutex::new(WindowZoom::default()));
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-        if let Some(policy) = cef_wake_policy.as_ref() {
-            policy.begin_interaction(INPUT_CEF_WAKE_DURATION);
-        }
+        cef_wake_policy.begin_interaction();
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
         let mut titlebar_gesture = None;

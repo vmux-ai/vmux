@@ -197,7 +197,10 @@ fn sync_winit_power_mode(
     }
 }
 
+#[cfg(target_os = "macos")]
 const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(not(target_os = "macos"))]
+const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(33_333_333);
 
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -484,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn cef_wake_policy_caps_foreground_pumps_at_10hz() {
+    fn cef_wake_policy_uses_the_platform_foreground_cap() {
         assert_eq!(
             WakePolicy::foreground_cef([Some(60_000)]),
             MIN_FOREGROUND_CEF_WAKE_INTERVAL

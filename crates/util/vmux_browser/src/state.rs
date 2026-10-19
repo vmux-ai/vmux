@@ -858,10 +858,12 @@ fn push_projects_host_emit(
         .find(|project| project.depth == 0 && project.is_active)
         .map(|project| TabBoundary {
             effective_dir: project.path.clone(),
+            project_dir: project.path.clone(),
             source: "project".to_string(),
             branch: project.branch.clone(),
             ..Default::default()
         });
+    let mut branches = Vec::new();
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
         cache.release(cef_e);
@@ -879,24 +881,32 @@ fn push_projects_host_emit(
                 row.branch = info.branch.clone();
                 if row.is_active {
                     let repository = info.project_name();
-                    let mut branches = Vec::with_capacity(info.branches.len());
-                    for holder in &info.branches {
-                        branches.push(vmux_ecs::event::ProjectBranch {
+                    let path = std::path::Path::new(&row.path);
+                    let Ok(relative) = path.strip_prefix(&info.repo_root) else {
+                        continue;
+                    };
+                    let project_dir = info.project_root().join(relative);
+                    branches.reserve(info.branches.len());
+                    for holder in info.branches.iter() {
+                        let checkout = holder
+                            .checkout
+                            .as_ref()
+                            .map(|checkout| checkout.join(relative).to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        branches.push(vmux_layout::event::WorkspaceBranch {
                             branch: holder.branch.clone(),
-                            checkout: holder.checkout_path(),
+                            checkout,
                             label: holder.checkout_label(),
-                            insertions: holder.change.insertions,
-                            deletions: holder.change.deletions,
                         });
                     }
                     boundary = Some(TabBoundary {
                         effective_dir: row.path.clone(),
+                        project_dir: project_dir.to_string_lossy().into_owned(),
                         source: "project".to_string(),
                         repository,
                         is_git_repo: true,
                         is_worktree: info.is_worktree,
                         branch: info.branch,
-                        branches,
                         base_ref: info.base_ref,
                         uncommitted: info.uncommitted,
                         ahead: info.ahead,
@@ -909,7 +919,11 @@ fn push_projects_host_emit(
             }
         }
     }
-    let payload = TabBoundaryState { boundary, projects };
+    let payload = TabBoundaryState {
+        boundary,
+        projects,
+        branches,
+    };
     projection
         .commands
         .entity(cef_e)

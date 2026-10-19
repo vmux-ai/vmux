@@ -20,6 +20,7 @@ use vmux_layout::projection::SpacesProjection;
 use vmux_layout::space::CurrentSpace;
 use vmux_layout::space::{
     CurrentSpaceSet, EffectiveStartupDir, EffectiveStartupSet, FocusedSpace, Space, SpaceId,
+    SpaceOfPane,
 };
 use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::state::LayoutUiState;
@@ -612,15 +613,23 @@ fn broadcast_spaces_to_views(
 fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
     active: FocusedSpace,
+    space_of_pane: SpaceOfPane,
+    spaces: Query<&SpaceId, With<Space>>,
     settings: Option<ResMut<AppSettings>>,
     mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
-    let (Some(space_id), Some(mut settings)) = (active.id(), settings) else {
+    let pane_id = trigger.event().payload.pane_id;
+    let space = match pane_id {
+        Some(pane_id) => space_of_pane.resolve(&pane_id.to_string()),
+        None => active.entity(),
+    };
+    let space_id = space.and_then(|space| spaces.get(space).ok());
+    let (Some(space_id), Some(mut settings)) = (space_id, settings) else {
         return;
     };
     let changed = settings
         .bypass_change_detection()
-        .activate_space_project(space_id, trigger.event().payload.path.trim());
+        .activate_space_project(&space_id.0, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(SettingsSaveRequest);
@@ -1606,6 +1615,63 @@ mod tests {
         assert_eq!(
             before, after,
             "choosing the space's default must leave every open tab where it was"
+        );
+    }
+
+    #[test]
+    fn project_activation_targets_the_space_that_owns_the_pane() {
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                projects: vec![SpaceProject::at("/repo/work")],
+                active_project: Some("/repo/work".into()),
+                ..Default::default()
+            },
+        );
+        settings.spaces.insert(
+            "other".into(),
+            SpaceOverrides {
+                projects: vec![
+                    SpaceProject::at("/repo/other-a"),
+                    SpaceProject::at("/repo/other-b"),
+                ],
+                active_project: Some("/repo/other-a".into()),
+                ..Default::default()
+            },
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SettingsSaveRequest>()
+            .insert_resource(settings)
+            .add_observer(project_activate);
+        app.world_mut()
+            .spawn((Space, SpaceId("work".into()), CurrentSpace));
+        let other = app.world_mut().spawn((Space, SpaceId("other".into()))).id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(other))).id();
+        let pane = app
+            .world_mut()
+            .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
+            .id();
+
+        run_project_request(
+            &mut app,
+            ProjectActivateRequest {
+                path: "/repo/other-b".into(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: Some(pane.to_bits()),
+            },
+        );
+
+        let settings = app.world().resource::<AppSettings>();
+        assert_eq!(
+            settings.space("work").unwrap().active_project.as_deref(),
+            Some("/repo/work")
+        );
+        assert_eq!(
+            settings.space("other").unwrap().active_project.as_deref(),
+            Some("/repo/other-b")
         );
     }
 

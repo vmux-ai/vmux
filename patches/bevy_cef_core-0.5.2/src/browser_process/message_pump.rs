@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 const MAX_TIMER_DELAY_MS: u64 = 1000 / 30;
 const DEFAULT_WAKE_MIN_INTERVAL: Duration = Duration::from_nanos(8_333_333);
 const INTERACTION_WAKE_MIN_INTERVAL: Duration = Duration::from_millis(16);
+const INTERACTION_WAKE_DURATION: Duration = Duration::from_millis(250);
 
 #[repr(transparent)]
 #[derive(Debug, Deref)]
@@ -77,9 +78,9 @@ impl MessageLoopWakePolicy {
             .store(duration_nanos(interval), Ordering::Relaxed);
     }
 
-    pub fn begin_interaction(&self, duration: Duration) {
+    pub fn begin_interaction(&self) {
         let elapsed = duration_nanos(self.0.started_at.elapsed());
-        let deadline = elapsed.saturating_add(duration_nanos(duration));
+        let deadline = elapsed.saturating_add(duration_nanos(INTERACTION_WAKE_DURATION));
         self.0
             .interaction_until_nanos
             .fetch_max(deadline, Ordering::Relaxed);
@@ -126,7 +127,7 @@ mod tests {
         let policy = MessageLoopWakePolicy::default();
         policy.set_min_wake_interval(Duration::from_millis(100));
 
-        policy.begin_interaction(Duration::from_secs(1));
+        policy.begin_interaction();
 
         assert_eq!(policy.min_wake_interval(), INTERACTION_WAKE_MIN_INTERVAL);
     }

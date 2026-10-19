@@ -102,14 +102,17 @@ fn pick(
         return;
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let initial = ProjectPicker::initial_directory(&event.payload.current_dir);
+    let current_dir = event.payload.current_dir.clone();
     let task = IoTaskPool::get().spawn(async move {
+        let initial = ProjectPicker::initial_directory(&current_dir);
         let selected = rfd::AsyncFileDialog::new()
             .set_title(vmux_ui::i18n::translate("agent-project-choose"))
             .set_directory(initial)
             .pick_folder()
             .await
-            .map(|folder| folder.path().to_path_buf());
+            .map(|folder| folder.path().to_path_buf())
+            .and_then(|path| path.canonicalize().ok())
+            .filter(|path| path.is_dir());
         if let Some(wake) = wake {
             let _ = wake.send_event(WinitUserEvent::WakeUp);
         }
@@ -127,9 +130,7 @@ fn finish_picks(mut pending: Query<(Entity, &mut PendingProjectPicker)>, mut com
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
         };
-        if let Some(path) = selected.and_then(|path| path.canonicalize().ok())
-            && path.is_dir()
-        {
+        if let Some(path) = selected {
             commands.trigger(UiInput {
                 webview: picker.webview,
                 payload: ProjectActivateRequest {

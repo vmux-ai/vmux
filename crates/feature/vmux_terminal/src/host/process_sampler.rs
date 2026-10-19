@@ -13,6 +13,7 @@ pub(super) struct ProcSample {
     pub mem: u64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct LocalProcess {
     pub shell: String,
     pub cwd: String,
@@ -24,7 +25,7 @@ pub(super) struct ProcessSampler {
     sample_poll: Timer,
     discovery_poll: Timer,
     discovered: bool,
-    local_pids: HashSet<u32>,
+    local: HashMap<u32, MacLocalProcess>,
     counters: HashMap<u32, ProcessCounter>,
 }
 
@@ -35,7 +36,7 @@ impl Default for ProcessSampler {
             sample_poll: Timer::from_seconds(2.0, TimerMode::Repeating),
             discovery_poll: Timer::from_seconds(300.0, TimerMode::Repeating),
             discovered: false,
-            local_pids: HashSet::new(),
+            local: HashMap::new(),
             counters: HashMap::new(),
         }
     }
@@ -54,7 +55,7 @@ impl ProcessSampler {
         if !immediate && !self.sample_poll.just_finished() {
             return None;
         }
-        if !self.discovered || self.discovery_poll.just_finished() {
+        if immediate || !self.discovered || self.discovery_poll.just_finished() {
             self.discover();
         }
         self.sample_poll.reset();
@@ -64,21 +65,21 @@ impl ProcessSampler {
     fn discover(&mut self) {
         self.discovered = true;
         self.discovery_poll.reset();
-        self.local_pids.clear();
+        self.local.clear();
         for pid in MacProcess::all() {
             let Some(process) = MacProcess::new(pid) else {
                 continue;
             };
             let name = process.name();
             if LocalProcess::matches(&name, "") {
-                self.local_pids.insert(pid);
+                self.local.insert(pid, MacLocalProcess::read(&process));
             }
         }
     }
 
     #[allow(deprecated)]
     fn snapshot(&mut self, service_roots: impl IntoIterator<Item = u32>) -> ProcessSnapshot {
-        let mut pids = self.local_pids.clone();
+        let mut pids = self.local.keys().copied().collect::<HashSet<_>>();
         pids.extend(service_roots);
         let mut pending = pids.iter().copied().collect::<Vec<_>>();
         while let Some(pid) = pending.pop() {
@@ -92,6 +93,7 @@ impl ProcessSampler {
         let now = unsafe { libc::mach_absolute_time() };
         let mut samples = HashMap::new();
         let mut local = Vec::new();
+        let mut stale = Vec::new();
         for pid in &pids {
             let Some(process) = MacProcess::new(*pid) else {
                 continue;
@@ -113,12 +115,50 @@ impl ProcessSampler {
                     mem: task.pti_resident_size,
                 },
             );
-            if self.local_pids.contains(pid) {
-                local.push((*pid, process.local()));
+            if let Some(details) = self.local.get(pid) {
+                if details.started_at == process.started_at() {
+                    local.push((*pid, details.snapshot()));
+                } else {
+                    stale.push(*pid);
+                }
             }
+        }
+        for pid in stale {
+            self.local.remove(&pid);
         }
         self.counters.retain(|pid, _| pids.contains(pid));
         ProcessSnapshot { samples, local }
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct MacLocalProcess {
+    started_at: u64,
+    shell: String,
+    cwd: String,
+}
+
+#[cfg(target_os = "macos")]
+impl MacLocalProcess {
+    fn read(process: &MacProcess) -> Self {
+        let executable = process.executable();
+        Self {
+            started_at: process.started_at(),
+            shell: if executable.is_empty() {
+                process.name()
+            } else {
+                executable
+            },
+            cwd: process.cwd(),
+        }
+    }
+
+    fn snapshot(&self) -> LocalProcess {
+        LocalProcess {
+            shell: self.shell.clone(),
+            cwd: self.cwd.clone(),
+            uptime_secs: unix_time().saturating_sub(self.started_at),
+        }
     }
 }
 
@@ -280,19 +320,6 @@ impl MacProcess {
         String::from_utf8_lossy(&bytes[..end]).into_owned()
     }
 
-    fn local(&self) -> LocalProcess {
-        let executable = self.executable();
-        LocalProcess {
-            shell: if executable.is_empty() {
-                self.name()
-            } else {
-                executable
-            },
-            cwd: self.cwd(),
-            uptime_secs: unix_time().saturating_sub(self.started_at()),
-        }
-    }
-
     fn c_chars<const N: usize>(value: &[libc::c_char; N]) -> String {
         let bytes = unsafe { std::slice::from_raw_parts(value.as_ptr().cast::<u8>(), N) };
         let end = bytes
@@ -342,7 +369,7 @@ impl ProcessSampler {
         if !immediate && !self.sample_poll.just_finished() {
             return None;
         }
-        if self.system.processes().is_empty() || self.discovery_poll.just_finished() {
+        if immediate || self.system.processes().is_empty() || self.discovery_poll.just_finished() {
             self.discovery_poll.reset();
             self.system.refresh_processes_specifics(
                 sysinfo::ProcessesToUpdate::All,

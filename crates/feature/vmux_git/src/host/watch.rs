@@ -102,6 +102,7 @@ struct RepoInfoCacheEntry {
     info: Option<super::worktree::RepoInfo>,
     loaded: bool,
     dirty: bool,
+    branches_dirty: bool,
     watch_attempted: bool,
     last_accessed: Instant,
     pending: Option<Task<Option<super::worktree::RepoInfo>>>,
@@ -208,6 +209,7 @@ impl RepoInfoCache {
                 info: None,
                 loaded: false,
                 dirty: true,
+                branches_dirty: true,
                 watch_attempted: false,
                 last_accessed: Instant::now(),
                 pending: None,
@@ -254,9 +256,10 @@ impl RepoInfoCache {
         resolved
     }
 
-    fn invalidate(&mut self, path: &Path) {
+    fn invalidate(&mut self, path: &Path, branches_dirty: bool) {
         if let Some(entry) = self.entries.get_mut(path) {
             entry.dirty = true;
+            entry.branches_dirty |= branches_dirty;
         }
     }
 
@@ -408,6 +411,14 @@ impl GitWatchTarget {
             recursive: true,
             kind: GitWatchKind::Metadata,
         });
+        let worktrees = common_dir.join("worktrees");
+        if worktrees.is_dir() {
+            targets.push(Self {
+                path: worktrees,
+                recursive: true,
+                kind: GitWatchKind::Metadata,
+            });
+        }
         Ok((root, targets))
     }
 
@@ -446,6 +457,14 @@ impl GitWatchTarget {
             recursive: true,
             kind: GitWatchKind::Metadata,
         });
+        let worktrees = common_dir.join("worktrees");
+        if worktrees.is_dir() {
+            targets.push(Self {
+                path: worktrees,
+                recursive: true,
+                kind: GitWatchKind::Metadata,
+            });
+        }
         targets
     }
 
@@ -487,6 +506,22 @@ impl GitWatchTarget {
                     })
             }
         }
+    }
+
+    fn branches_changed(&self, changed: &Path) -> bool {
+        if self.kind != GitWatchKind::Metadata || !self.matches(changed) {
+            return false;
+        }
+        if matches!(
+            self.path.file_name().and_then(|name| name.to_str()),
+            Some("refs" | "worktrees")
+        ) {
+            return true;
+        }
+        matches!(
+            changed.file_name().and_then(|name| name.to_str()),
+            Some("HEAD" | "packed-refs" | "refs" | "worktrees")
+        )
     }
 }
 
@@ -723,7 +758,7 @@ fn drain(
             commands.entity(entity).insert(refresh);
         }
     }
-    let affected_repo_info: Vec<PathBuf> = watch
+    let affected_repo_info: Vec<(PathBuf, bool)> = watch
         .repo_info_subscriptions
         .iter()
         .filter(|(_, targets)| {
@@ -732,10 +767,16 @@ fn drain(
                     .iter()
                     .any(|target| changed.iter().any(|path| target.matches(path)))
         })
-        .map(|(path, _)| path.clone())
+        .map(|(path, targets)| {
+            let branches_dirty = overflow
+                || targets
+                    .iter()
+                    .any(|target| changed.iter().any(|path| target.branches_changed(path)));
+            (path.clone(), branches_dirty)
+        })
         .collect();
-    for path in affected_repo_info {
-        repo_info.invalidate(&path);
+    for (path, branches_dirty) in affected_repo_info {
+        repo_info.invalidate(&path, branches_dirty);
     }
 }
 
@@ -749,8 +790,14 @@ fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>) {
         entry.dirty = false;
         let path = path.clone();
         let wake = wake.clone();
+        let cached_branches = if entry.branches_dirty {
+            entry.branches_dirty = false;
+            None
+        } else {
+            entry.info.as_ref().map(|info| info.branches.clone())
+        };
         entry.pending = Some(IoTaskPool::get().spawn(async move {
-            let info = super::worktree::RepoInfo::read(&path);
+            let info = super::worktree::RepoInfo::read_with_branches(&path, cached_branches);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -907,6 +954,11 @@ mod tests {
             recursive: true,
             kind: GitWatchKind::Metadata,
         }));
+        assert!(targets.contains(&GitWatchTarget {
+            path: common.join("worktrees"),
+            recursive: true,
+            kind: GitWatchKind::Metadata,
+        }));
     }
 
     #[test]
@@ -999,6 +1051,7 @@ mod tests {
                         info: Some(active_info.clone()),
                         loaded: true,
                         dirty: false,
+                        branches_dirty: false,
                         watch_attempted: true,
                         last_accessed: Instant::now(),
                         pending: None,
@@ -1010,6 +1063,7 @@ mod tests {
                         info: Some(stale_info.clone()),
                         loaded: true,
                         dirty: false,
+                        branches_dirty: false,
                         watch_attempted: true,
                         last_accessed: Instant::now() - REPO_INFO_IDLE_TTL,
                         pending: None,
@@ -1060,6 +1114,7 @@ mod tests {
                         info: Some(first_info),
                         loaded: true,
                         dirty: false,
+                        branches_dirty: false,
                         watch_attempted: false,
                         last_accessed: Instant::now(),
                         pending: None,
@@ -1071,6 +1126,7 @@ mod tests {
                         info: Some(second_info),
                         loaded: true,
                         dirty: false,
+                        branches_dirty: false,
                         watch_attempted: false,
                         last_accessed: Instant::now(),
                         pending: None,
@@ -1258,7 +1314,7 @@ mod tests {
         app.world_mut()
             .get_mut::<RepoInfoCache>(cache)
             .unwrap()
-            .invalidate(&path);
+            .invalidate(&path, false);
         assert_eq!(wait_for(&mut app, 1).uncommitted, 1);
     }
 
@@ -1335,6 +1391,7 @@ mod tests {
                     info: None,
                     loaded: false,
                     dirty: false,
+                    branches_dirty: false,
                     watch_attempted: false,
                     last_accessed: Instant::now(),
                     pending: Some(IoTaskPool::get().spawn(async move { stale })),
@@ -1349,7 +1406,7 @@ mod tests {
         app.world_mut()
             .get_mut::<RepoInfoCache>(cache)
             .unwrap()
-            .invalidate(&path);
+            .invalidate(&path, false);
         for _ in 0..500 {
             app.update();
             if app

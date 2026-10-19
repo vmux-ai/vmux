@@ -711,13 +711,12 @@ pub struct RemoteRevokeRequest {
 #[vmux_api::contract(Default)]
 pub struct TabBoundary {
     pub effective_dir: String,
+    pub project_dir: String,
     pub source: String,
     pub repository: String,
     pub is_git_repo: bool,
     pub is_worktree: bool,
     pub branch: String,
-    #[serde(default)]
-    pub branches: Vec<vmux_ecs::event::ProjectBranch>,
     pub base_ref: String,
     pub uncommitted: u32,
     pub ahead: u32,
@@ -731,6 +730,15 @@ pub struct TabBoundary {
 pub struct TabBoundaryState {
     pub boundary: Option<TabBoundary>,
     pub projects: Vec<vmux_ecs::event::ProjectRow>,
+    #[serde(default)]
+    pub branches: Vec<WorkspaceBranch>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct WorkspaceBranch {
+    pub branch: String,
+    pub checkout: String,
+    pub label: String,
 }
 
 #[vmux_api::contract(Default)]
@@ -763,6 +771,9 @@ pub struct ActiveWorkspaceProject {
     pub root: vmux_ecs::event::ProjectRow,
     pub children: Vec<vmux_ecs::event::ProjectRow>,
     pub choices: Vec<vmux_ecs::event::ProjectRow>,
+    pub project_dir: String,
+    pub branch: String,
+    pub branches: Vec<WorkspaceBranch>,
 }
 
 #[vmux_api::contract(Default)]

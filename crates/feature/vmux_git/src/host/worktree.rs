@@ -2,6 +2,7 @@ use std::{
     fs::{File, OpenOptions},
     os::fd::AsRawFd,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use crate::host::repository::{GitCommand, GitError};
@@ -583,7 +584,10 @@ impl CheckoutInfo {
         for branch in self.local_branches()? {
             let mut checkout = None;
             for registration in &registrations {
-                if registration.branch.as_deref() == Some(branch.as_str()) {
+                if !registration.prunable
+                    && registration.path.is_dir()
+                    && registration.branch.as_deref() == Some(branch.as_str())
+                {
                     checkout = Some(registration.path.clone());
                     break;
                 }
@@ -656,7 +660,7 @@ impl WorktreeStatus {
 pub struct RepoInfo {
     pub name: String,
     pub branch: String,
-    pub branches: Vec<BranchHolder>,
+    pub branches: Arc<[BranchHolder]>,
     pub base_ref: String,
     pub is_worktree: bool,
     pub uncommitted: u32,
@@ -796,6 +800,13 @@ impl LinkedRepoRoot {
 
 impl RepoInfo {
     pub fn read(dir: &Path) -> Option<Self> {
+        Self::read_with_branches(dir, None)
+    }
+
+    pub(crate) fn read_with_branches(
+        dir: &Path,
+        cached_branches: Option<Arc<[BranchHolder]>>,
+    ) -> Option<Self> {
         let (status, _, ok) =
             GitCommand::read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
         if !ok {
@@ -836,9 +847,13 @@ impl RepoInfo {
         let git_dir = dirs.next()?;
         let common_dir = dirs.next()?;
         let name = Self::name_at(&repo_root);
-        let branches = CheckoutInfo::try_from(repo_root.as_path())
-            .and_then(|checkout| checkout.branch_holders())
-            .unwrap_or_default();
+        let branches = match cached_branches {
+            Some(branches) => branches,
+            None => CheckoutInfo::try_from(repo_root.as_path())
+                .and_then(|checkout| checkout.branch_holders())
+                .unwrap_or_default()
+                .into(),
+        };
         let base = BaseRef::resolve(&repo_root);
         let change = if branch.is_empty() {
             BranchChange::default()
@@ -1205,6 +1220,25 @@ mod tests {
             None,
             "a branch nothing has checked out is free for a new worktree"
         );
+    }
+
+    #[test]
+    fn branch_holders_ignore_deleted_worktree_checkouts() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        let checkout = CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
+        std::fs::remove_dir_all(&wt).unwrap();
+
+        let holder = checkout
+            .branch_holders()
+            .unwrap()
+            .into_iter()
+            .find(|holder| holder.branch == "vmux/feat")
+            .unwrap();
+
+        assert_eq!(holder.checkout, None);
     }
 
     #[test]
