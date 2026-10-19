@@ -26,7 +26,8 @@ pub(super) fn RepositoryHeader(
     can_push: bool,
 ) -> Element {
     let changed = repository.files.len();
-    let clean = changed == 0;
+    let branch_count =
+        repository.branches.len() + repository.remote_branches.len() + repository.tags.len();
     let push_path = repository.repo_root.clone();
     let mut repository_open = use_signal(|| false);
     let mut branch_open = use_signal(|| false);
@@ -184,61 +185,73 @@ pub(super) fn RepositoryHeader(
                 }
                 if selected_commit_entry.is_some() {
                     BreadcrumbSeparator {}
-                    Dropdown {
-                        open: commit_open(),
-                        class: "min-w-0".to_string(),
-                        on_dismiss: move |_| commit_open.set(false),
-                        button {
-                            r#type: "button",
-                            class: "flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
-                            title: "{revision_title}",
-                            onclick: move |_| commit_open.set(!commit_open()),
-                            LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
-                            span { class: "min-w-0 truncate text-xs font-medium text-foreground/85", "{revision_label}" }
-                            LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
-                        }
-                        if commit_open() {
-                            div {
-                                class: "absolute left-0 top-9 z-40 max-h-80 min-w-80 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                                onscroll: move |event| commit_pager.load_more(event, commit_total),
-                                for commit in repository.commits.iter().take(commit_pager.visible(commit_total)) {
-                                    {
-                                        let sha = commit.sha.clone();
-                                        rsx! {
-                                            button {
-                                                key: "header-commit-{sha}",
-                                                r#type: "button",
-                                                class: if selected_commit == commit.sha {
-                                                    "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
-                                                } else {
-                                                    "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-                                                },
-                                                title: "{commit.summary}",
-                                                onclick: move |_| {
-                                                    commit_open.set(false);
-                                                    let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-                                                    let _ = send(&GitCommitSelectRequest { commit: sha.clone() });
-                                                },
-                                                code { class: "shrink-0 font-mono text-[10px] text-sky-400", "{commit.short_sha}" }
-                                                span { class: "min-w-0 flex-1 truncate font-medium", "{commit.summary}" }
-                                                span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
+                    div { class: "flex min-w-0 items-center rounded-md hover:bg-foreground/[0.055]",
+                        Dropdown {
+                            open: commit_open(),
+                            class: "min-w-0".to_string(),
+                            on_dismiss: move |_| commit_open.set(false),
+                            button {
+                                r#type: "button",
+                                class: "flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground",
+                                title: "{revision_title}",
+                                onclick: move |_| commit_open.set(!commit_open()),
+                                LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
+                                span { class: "min-w-0 truncate text-xs font-medium text-foreground/85", "{revision_label}" }
+                                LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
+                            }
+                            if commit_open() {
+                                div {
+                                    class: "absolute left-0 top-9 z-40 max-h-80 min-w-80 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                                    onscroll: move |event| commit_pager.load_more(event, commit_total),
+                                    for commit in repository.commits.iter().take(commit_pager.visible(commit_total)) {
+                                        {
+                                            let sha = commit.sha.clone();
+                                            rsx! {
+                                                button {
+                                                    key: "header-commit-{sha}",
+                                                    r#type: "button",
+                                                    class: if selected_commit == commit.sha {
+                                                        "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
+                                                    } else {
+                                                        "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
+                                                    },
+                                                    title: "{commit.summary}",
+                                                    onclick: move |_| {
+                                                        commit_open.set(false);
+                                                        let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                                                        let _ = send(&GitCommitSelectRequest { commit: sha.clone() });
+                                                    },
+                                                    code { class: "shrink-0 font-mono text-[10px] text-sky-400", "{commit.short_sha}" }
+                                                    span { class: "min-w-0 flex-1 truncate font-medium", "{commit.summary}" }
+                                                    span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                        button {
+                            r#type: "button",
+                            class: "mr-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
+                            title: translate("git-branch-changes"),
+                            aria_label: translate("git-branch-changes"),
+                            onclick: move |_| {
+                                commit_open.set(false);
+                                let _ = send(&GitBranchDiffSelectRequest);
+                            },
+                            LineIconView { icon: LineIcon::X, class: "size-3" }
+                        }
                     }
                 }
-                span { class: if clean {
-                        "hidden shrink-0 items-center gap-1.5 text-[10px] font-medium text-ansi-2 sm:flex"
-                    } else {
-                        "hidden shrink-0 items-center gap-1.5 text-[10px] font-medium text-amber-400 sm:flex"
-                    },
-                    span { class: if clean { "size-1.5 rounded-full bg-ansi-2" } else { "size-1.5 rounded-full bg-amber-400" } }
-                    if clean { {translate("git-status-clean")} } else { "{changed} " {translate("git-changes")} }
-                }
                 div { class: "ml-auto flex shrink-0 items-center gap-2 text-[10px] tabular-nums text-muted-foreground",
+                    ViewPicker {
+                        focused_panel,
+                        changes: changed,
+                        branches: branch_count,
+                        commits: repository.commits.len(),
+                        stashes: repository.stashes.len(),
+                    }
                     if fetching {
                         FetchIndicator {}
                     }
@@ -266,36 +279,47 @@ pub(super) fn RepositoryHeader(
                     }
                 }
             }
-            nav { class: "flex h-10 items-center gap-1 px-4",
-                ViewTab {
-                    panel: GitPanel::Files,
-                    active: focused_panel == GitPanel::Files,
-                    icon: LineIcon::File,
-                    label: translate("git-changes"),
-                    count: repository.files.len(),
+        }
+    }
+}
+
+#[component]
+fn ViewPicker(
+    focused_panel: GitPanel,
+    changes: usize,
+    branches: usize,
+    commits: usize,
+    stashes: usize,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let (icon, label, count) = match focused_panel {
+        GitPanel::Files => (LineIcon::File, translate("git-changes"), changes),
+        GitPanel::Branches => (LineIcon::GitBranch, translate("git-branches"), branches),
+        GitPanel::Commits => (LineIcon::Clock, translate("git-commits"), commits),
+        GitPanel::Stash => (LineIcon::Package, translate("git-stashes"), stashes),
+    };
+    rsx! {
+        Dropdown {
+            open: open(),
+            class: "shrink-0".to_string(),
+            on_dismiss: move |_| open.set(false),
+            button {
+                r#type: "button",
+                class: "flex h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
+                onclick: move |_| open.set(!open()),
+                LineIconView { icon, class: "size-3.5 shrink-0" }
+                span { "{label}" }
+                if count > 0 {
+                    span { class: "text-[9px] tabular-nums", "{count}" }
                 }
-                ViewTab {
-                    panel: GitPanel::Branches,
-                    active: focused_panel == GitPanel::Branches,
-                    icon: LineIcon::GitBranch,
-                    label: translate("git-branches"),
-                    count: repository.branches.len()
-                        + repository.remote_branches.len()
-                        + repository.tags.len(),
-                }
-                ViewTab {
-                    panel: GitPanel::Commits,
-                    active: focused_panel == GitPanel::Commits,
-                    icon: LineIcon::Clock,
-                    label: translate("git-commits"),
-                    count: repository.commits.len(),
-                }
-                ViewTab {
-                    panel: GitPanel::Stash,
-                    active: focused_panel == GitPanel::Stash,
-                    icon: LineIcon::Package,
-                    label: translate("git-stashes"),
-                    count: repository.stashes.len(),
+                LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
+            }
+            if open() {
+                div { class: "absolute right-0 top-9 z-40 min-w-44 rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                    ViewPickerItem { panel: GitPanel::Files, focused_panel, icon: LineIcon::File, label: translate("git-changes"), count: changes, open }
+                    ViewPickerItem { panel: GitPanel::Branches, focused_panel, icon: LineIcon::GitBranch, label: translate("git-branches"), count: branches, open }
+                    ViewPickerItem { panel: GitPanel::Commits, focused_panel, icon: LineIcon::Clock, label: translate("git-commits"), count: commits, open }
+                    ViewPickerItem { panel: GitPanel::Stash, focused_panel, icon: LineIcon::Package, label: translate("git-stashes"), count: stashes, open }
                 }
             }
         }
@@ -303,22 +327,30 @@ pub(super) fn RepositoryHeader(
 }
 
 #[component]
-fn ViewTab(panel: GitPanel, active: bool, icon: LineIcon, label: String, count: usize) -> Element {
+fn ViewPickerItem(
+    panel: GitPanel,
+    focused_panel: GitPanel,
+    icon: LineIcon,
+    label: String,
+    count: usize,
+    mut open: Signal<bool>,
+) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: if active {
-                "flex h-8 items-center gap-1.5 rounded-md bg-foreground/[0.08] px-3 text-[11px] font-medium text-foreground"
+            class: if panel == focused_panel {
+                "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
             } else {
-                "flex h-8 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium text-muted-foreground hover:bg-foreground/[0.045] hover:text-foreground"
+                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
             },
             onclick: move |_| {
+                open.set(false);
                 let _ = send(&GitPanelSelectRequest { panel });
             },
-            LineIconView { icon, class: "size-3.5" }
-            span { "{label}" }
+            LineIconView { icon, class: "size-3.5 shrink-0" }
+            span { class: "min-w-0 flex-1 truncate font-medium", "{label}" }
             if count > 0 {
-                span { class: "text-[9px] tabular-nums text-muted-foreground", "{count}" }
+                span { class: "shrink-0 text-[9px] tabular-nums text-muted-foreground", "{count}" }
             }
         }
     }
