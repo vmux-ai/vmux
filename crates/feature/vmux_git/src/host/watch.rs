@@ -19,7 +19,12 @@ impl Plugin for WatchPlugin {
             .add_systems(Startup, spawn_repo_info_cache)
             .add_systems(
                 Update,
-                (drain, start_repo_info_loads, poll_info)
+                (
+                    sync_page_subscriptions,
+                    drain,
+                    start_repo_info_loads,
+                    poll_info,
+                )
                     .chain()
                     .in_set(GitUpdateSet::Watch),
             )
@@ -577,6 +582,13 @@ impl GitWatch {
         Ok(repo_root)
     }
 
+    pub(super) fn release_subscription(&mut self, entity: Entity) {
+        let Some(subscription) = self.subscriptions.remove(&entity) else {
+            return;
+        };
+        self.release_targets(&subscription.targets);
+    }
+
     fn acquire_targets(&mut self, targets: &[GitWatchTarget]) -> bool {
         let missing = targets
             .iter()
@@ -692,7 +704,7 @@ impl GitWatch {
     }
 
     #[cfg(test)]
-    fn test() -> Self {
+    pub(super) fn test() -> Self {
         let (_, rx) = mpsc::channel();
         let watcher = notify::recommended_watcher(|_| {}).unwrap();
         Self {
@@ -703,6 +715,50 @@ impl GitWatch {
             repo_info_subscriptions: HashMap::new(),
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn has_subscription(&self, entity: Entity) -> bool {
+        self.subscriptions.contains_key(&entity)
+    }
+}
+
+fn sync_page_subscriptions(
+    watch: Option<NonSendMut<GitWatch>>,
+    pages: Query<(Entity, &super::state::GitState, Has<KeyboardOwner>)>,
+    activated: Query<(Entity, &super::state::GitState), Added<KeyboardOwner>>,
+    mut commands: Commands,
+) {
+    let Some(mut watch) = watch else {
+        return;
+    };
+    let inactive = watch
+        .subscriptions
+        .keys()
+        .filter(|entity| pages.get(**entity).map_or(true, |(_, _, active)| !active))
+        .copied()
+        .collect::<Vec<_>>();
+    for entity in inactive {
+        watch.release_subscription(entity);
+    }
+    for (entity, state) in &activated {
+        let path = Path::new(state.workspace());
+        if path.as_os_str().is_empty() || watch.subscriptions.contains_key(&entity) {
+            continue;
+        }
+        if let Err(error) = watch.subscribe(entity, path) {
+            commands.trigger(super::job_runner::GitJobFailure {
+                webview: entity,
+                message: error.0,
+            });
+            continue;
+        }
+        commands.spawn((
+            super::job_runner::GitJob::new(entity),
+            super::job::RepositoryJob {
+                path: path.to_path_buf(),
+            },
+        ));
+    }
 }
 
 fn drain(
@@ -710,6 +766,7 @@ fn drain(
     mut repo_info: Single<&mut RepoInfoCache>,
     mut states: super::state::GitStates,
     mut files: super::status::FileGitStates,
+    active: Query<(), With<KeyboardOwner>>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -742,7 +799,7 @@ fn drain(
                     .iter()
                     .any(|target| changed.iter().any(|path| target.matches(path)))
         })
-        .map(|(entity, _)| *entity)
+        .filter_map(|(entity, _)| active.contains(*entity).then_some(*entity))
         .collect();
     for entity in affected {
         if states.contains(entity) {
@@ -1155,6 +1212,46 @@ mod tests {
                 .repo_info_subscriptions
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn page_watch_subscription_exists_only_while_the_page_is_active() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_page_subscriptions);
+        app.insert_non_send(GitWatch::test());
+        let page = app
+            .world_mut()
+            .spawn((
+                super::super::state::GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        workspace: file.to_string_lossy().into_owned(),
+                        ..Default::default()
+                    },
+                },
+                KeyboardOwner,
+            ))
+            .id();
+
+        app.update();
+        assert!(
+            app.world()
+                .non_send::<GitWatch>()
+                .subscriptions
+                .contains_key(&page)
+        );
+        let mut jobs = app.world_mut().query::<&super::super::job::RepositoryJob>();
+        assert_eq!(jobs.iter(app.world()).count(), 1);
+
+        app.update();
+        let mut jobs = app.world_mut().query::<&super::super::job::RepositoryJob>();
+        assert_eq!(jobs.iter(app.world()).count(), 1);
+
+        app.world_mut().entity_mut(page).remove::<KeyboardOwner>();
+        app.update();
+        assert!(app.world().non_send::<GitWatch>().subscriptions.is_empty());
     }
 
     #[test]

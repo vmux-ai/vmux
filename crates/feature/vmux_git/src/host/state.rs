@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::KeyboardOwner;
 use vmux_ecs::page::PageReady;
 
 use crate::event::GitDiffRow;
@@ -326,7 +327,8 @@ fn page_ready(
 
 fn repository_request(
     trigger: On<UiInput<GitRepositoryRequest>>,
-    watch: Option<NonSendMut<GitWatch>>,
+    mut watch: Option<NonSendMut<GitWatch>>,
+    active: Query<(), With<KeyboardOwner>>,
     mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut states: GitStates,
     mut commands: Commands,
@@ -334,6 +336,12 @@ fn repository_request(
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
     states.start_repository(webview, &path);
+    if !active.contains(webview) {
+        if let Some(watch) = watch.as_deref_mut() {
+            watch.release_subscription(webview);
+        }
+        return;
+    }
     let repo_root = if let Some(mut watch) = watch {
         match watch.subscribe(webview, &path) {
             Ok(repo_root) => repo_root,
@@ -415,6 +423,7 @@ fn publish(views: GitStateQuery, mut commands: Commands) {
 mod tests {
     use super::*;
     use crate::event::DiffLine;
+    use crate::host::repository::test_repo;
 
     fn line(kind: DiffKind, number: u32) -> DiffLine {
         DiffLine {
@@ -523,5 +532,33 @@ mod tests {
         let state = app.world().get::<GitState>(entity).unwrap();
         assert_eq!(state.snapshot.workspace, "/workspace");
         assert!(state.snapshot.loading);
+    }
+
+    #[test]
+    fn inactive_git_page_defers_repository_work_until_activation() {
+        let repo = test_repo::init();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_observer(repository_request);
+        app.insert_non_send(GitWatch::test());
+        let page = app
+            .world_mut()
+            .spawn((vmux_ecs::PageMetadata::default(), GitState::default()))
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GitRepositoryRequest {
+                path: repo.path().to_string_lossy().into_owned(),
+            },
+        });
+        app.update();
+
+        let state = app.world().get::<GitState>(page).unwrap();
+        assert_eq!(state.workspace(), repo.path().to_string_lossy());
+        assert!(state.snapshot.loading);
+        assert!(!app.world().non_send::<GitWatch>().has_subscription(page));
+        let mut jobs = app.world_mut().query::<&RepositoryJob>();
+        assert_eq!(jobs.iter(app.world()).count(), 0);
     }
 }
