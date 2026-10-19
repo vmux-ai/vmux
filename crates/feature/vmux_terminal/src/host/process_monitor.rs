@@ -261,7 +261,7 @@ impl Default for ProcessMonitor {
         Self {
             process_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
             sysinfo_poll: Timer::from_seconds(2.0, TimerMode::Repeating),
-            discovery_poll: Timer::from_seconds(30.0, TimerMode::Repeating),
+            discovery_poll: Timer::from_seconds(300.0, TimerMode::Repeating),
             system: sysinfo::System::new(),
         }
     }
@@ -279,7 +279,7 @@ impl ProcessMonitor {
         if !immediate && !self.sysinfo_poll.just_finished() {
             return None;
         }
-        if immediate || self.system.processes().is_empty() || self.discovery_poll.just_finished() {
+        if self.system.processes().is_empty() || self.discovery_poll.just_finished() {
             self.discovery_poll.reset();
             self.system.refresh_processes_specifics(
                 sysinfo::ProcessesToUpdate::All,
