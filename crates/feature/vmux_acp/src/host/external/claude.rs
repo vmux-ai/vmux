@@ -64,20 +64,25 @@ impl ProviderReader for Reader {
         }
         let sessions = indexed
             .into_iter()
-            .map(|(sid, session)| ProviderSession {
-                kind: "acp:claude".to_string(),
-                sid,
-                agent: "claude".to_string(),
-                agent_name: "Claude Code".to_string(),
-                name: session.title.clone(),
-                description: (session.latest != session.title)
-                    .then_some(session.latest.clone())
-                    .unwrap_or_default(),
-                cwd: session.cwd,
-                created_at: session.created_at,
-                updated_at: session.updated_at,
-                conversation_title: session.title,
-                last_prompt: session.latest,
+            .map(|(sid, session)| {
+                let description = if session.latest != session.title {
+                    session.latest.clone()
+                } else {
+                    String::new()
+                };
+                ProviderSession {
+                    kind: "acp:claude".to_string(),
+                    sid,
+                    agent: "claude".to_string(),
+                    agent_name: "Claude Code".to_string(),
+                    name: session.title.clone(),
+                    description,
+                    cwd: session.cwd,
+                    created_at: session.created_at,
+                    updated_at: session.updated_at,
+                    conversation_title: session.title,
+                    last_prompt: session.latest,
+                }
             })
             .collect();
         Ok(sessions)
