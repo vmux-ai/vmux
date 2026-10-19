@@ -32,6 +32,7 @@ pub(crate) mod pid;
 pub(crate) mod plugin;
 mod process_control;
 pub(crate) mod process_monitor;
+mod process_sampler;
 mod request;
 mod service;
 mod shell_env;

@@ -15,6 +15,7 @@ use vmux_history::LastActivatedAt;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use super::input_queue::TerminalProcessIndex;
+use super::process_sampler::{LocalProcess, ProcSample, ProcessSampler};
 use crate::Terminal;
 use crate::plugin::ReattachedTerminalBundle;
 use vmux_ecs::{KeyboardOwner, Order};
@@ -251,54 +252,15 @@ pub(crate) struct ServiceProcessSnapshot(pub(crate) Vec<vmux_api::protocol::Proc
 #[derive(Component)]
 struct ProcessMonitor {
     process_poll: Timer,
-    sysinfo_poll: Timer,
-    discovery_poll: Timer,
-    system: sysinfo::System,
+    sampler: ProcessSampler,
 }
 
 impl Default for ProcessMonitor {
     fn default() -> Self {
         Self {
             process_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
-            sysinfo_poll: Timer::from_seconds(2.0, TimerMode::Repeating),
-            discovery_poll: Timer::from_seconds(300.0, TimerMode::Repeating),
-            system: sysinfo::System::new(),
+            sampler: ProcessSampler::default(),
         }
-    }
-}
-
-impl ProcessMonitor {
-    fn refresh(
-        &mut self,
-        delta: std::time::Duration,
-        immediate: bool,
-        service_roots: impl IntoIterator<Item = u32>,
-    ) -> Option<MonitoredProcesses> {
-        self.sysinfo_poll.tick(delta);
-        self.discovery_poll.tick(delta);
-        if !immediate && !self.sysinfo_poll.just_finished() {
-            return None;
-        }
-        if self.system.processes().is_empty() || self.discovery_poll.just_finished() {
-            self.discovery_poll.reset();
-            self.system.refresh_processes_specifics(
-                sysinfo::ProcessesToUpdate::All,
-                true,
-                sysinfo::ProcessRefreshKind::nothing(),
-            );
-        }
-        self.sysinfo_poll.reset();
-        let monitored = MonitoredProcesses::new(&self.system, service_roots);
-        self.system.refresh_processes_specifics(
-            sysinfo::ProcessesToUpdate::Some(&monitored.pids),
-            true,
-            sysinfo::ProcessRefreshKind::nothing()
-                .with_memory()
-                .with_cpu()
-                .with_exe(sysinfo::UpdateKind::OnlyIfNotSet)
-                .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet),
-        );
-        Some(monitored)
     }
 }
 
@@ -409,14 +371,6 @@ struct LocalVmuxProcess {
 }
 
 impl LocalVmuxProcess {
-    fn matches(name: &str, executable: &str) -> bool {
-        if name.to_ascii_lowercase().contains("vmux") {
-            return true;
-        }
-        let executable_name = executable.rsplit('/').next().unwrap_or(executable);
-        executable_name.to_ascii_lowercase().contains("vmux")
-    }
-
     fn entry(&self, pid: ProcessPid, usage: Usage, locale: &Locale) -> ProcessEntry {
         ProcessEntry {
             id: format!("system:{}", pid.0),
@@ -448,72 +402,13 @@ impl LocalVmuxProcess {
     }
 }
 
-struct ProcSample {
-    parent: Option<u32>,
-    cpu: f32,
-    mem: u64,
-}
-
-struct MonitoredProcesses {
-    pids: Vec<sysinfo::Pid>,
-}
-
-impl MonitoredProcesses {
-    fn new(system: &sysinfo::System, service_roots: impl IntoIterator<Item = u32>) -> Self {
-        let mut roots = service_roots
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        let mut children = HashMap::<u32, Vec<u32>>::new();
-        for (pid, process) in system.processes() {
-            let pid = pid.as_u32();
-            if let Some(parent) = process.parent() {
-                children.entry(parent.as_u32()).or_default().push(pid);
-            }
-            let name = process.name().to_string_lossy();
-            let executable = process
-                .exe()
-                .map(|path| path.to_string_lossy())
-                .unwrap_or_default();
-            if LocalVmuxProcess::matches(&name, &executable) {
-                roots.insert(pid);
-            }
+impl From<LocalProcess> for LocalVmuxProcess {
+    fn from(process: LocalProcess) -> Self {
+        Self {
+            shell: process.shell,
+            cwd: process.cwd,
+            uptime_secs: process.uptime_secs,
         }
-        let mut selected = roots.clone();
-        let mut pending = roots.into_iter().collect::<Vec<_>>();
-        while let Some(parent) = pending.pop() {
-            let Some(descendants) = children.get(&parent) else {
-                continue;
-            };
-            for child in descendants {
-                if selected.insert(*child) {
-                    pending.push(*child);
-                }
-            }
-        }
-        let mut pids = selected
-            .into_iter()
-            .map(sysinfo::Pid::from_u32)
-            .collect::<Vec<_>>();
-        pids.sort_by_key(|pid| pid.as_u32());
-        Self { pids }
-    }
-
-    fn samples(&self, system: &sysinfo::System) -> HashMap<u32, ProcSample> {
-        let mut samples = HashMap::new();
-        for pid in &self.pids {
-            let Some(process) = system.process(*pid) else {
-                continue;
-            };
-            samples.insert(
-                pid.as_u32(),
-                ProcSample {
-                    parent: process.parent().map(|parent| parent.as_u32()),
-                    cpu: process.cpu_usage(),
-                    mem: process.memory(),
-                },
-            );
-        }
-        samples
     }
 }
 
@@ -595,55 +490,40 @@ fn sample_process_usage(
         .iter_mut()
         .map(|(pid, _)| pid.0)
         .collect::<Vec<_>>();
-    let Some(monitored) = runtime.refresh(time.delta(), !claimed.is_empty(), service_roots) else {
+    let Some(snapshot) = runtime
+        .sampler
+        .refresh(time.delta(), !claimed.is_empty(), service_roots)
+    else {
         return;
     };
-    let samples = monitored.samples(&runtime.system);
 
     for (pid, mut usage) in &mut service_processes {
-        *usage = Usage::subtree(pid.0, &samples);
+        *usage = Usage::subtree(pid.0, &snapshot.samples);
     }
 
     let mut existing = HashMap::new();
     for (entity, pid) in &local_processes {
         existing.insert(pid.0, entity);
     }
-    for pid in &monitored.pids {
-        let Some(process) = runtime.system.process(*pid) else {
-            continue;
-        };
-        let name = process.name().to_string_lossy().into_owned();
-        let executable = process
-            .exe()
-            .map(|path| path.to_string_lossy().into_owned())
+    for (pid, details) in snapshot.local {
+        let pid = ProcessPid(pid);
+        let usage = snapshot
+            .samples
+            .get(&pid.0)
+            .map(|sample| Usage {
+                cpu_percent: sample.cpu,
+                mem_bytes: sample.mem,
+            })
             .unwrap_or_default();
-        if !LocalVmuxProcess::matches(&name, &executable) {
-            continue;
-        }
-        let pid = ProcessPid(pid.as_u32());
-        let details = LocalVmuxProcess {
-            shell: if executable.is_empty() {
-                name
-            } else {
-                executable
-            },
-            cwd: process
-                .cwd()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            uptime_secs: process.run_time(),
-        };
-        let usage = Usage {
-            cpu_percent: process.cpu_usage(),
-            mem_bytes: process.memory(),
-        };
         if let Some(entity) = existing.remove(&pid.0) {
-            commands.entity(entity).insert((details, usage));
+            commands
+                .entity(entity)
+                .insert((LocalVmuxProcess::from(details), usage));
         } else {
             commands.spawn((
                 Name::new(format!("Vmux process {}", pid.0)),
                 pid,
-                details,
+                LocalVmuxProcess::from(details),
                 usage,
             ));
         }
@@ -1103,18 +983,5 @@ mod tests {
         assert_eq!(entry.pid, 42);
         assert_eq!(entry.cpu_percent, 3.0);
         assert_eq!(entry.mem_bytes, 1024);
-    }
-
-    #[test]
-    fn vmux_process_match_uses_process_or_executable_name() {
-        assert!(LocalVmuxProcess::matches("vmux_desktop Helper", ""));
-        assert!(LocalVmuxProcess::matches(
-            "helper",
-            "/Applications/Vmux.app/Contents/MacOS/vmux_service"
-        ));
-        assert!(!LocalVmuxProcess::matches(
-            "codex",
-            "/Users/test/.vmux/projects/repo/codex"
-        ));
     }
 }
