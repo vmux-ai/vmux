@@ -271,9 +271,33 @@ impl GitRepository {
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
+        Ok(self.highlight_diff(&stdout))
+    }
+
+    pub fn branch_diff_lines(&self) -> Result<Vec<DiffLine>, GitError> {
+        let base = crate::host::worktree::BaseRef::resolve(&self.0)
+            .ok_or_else(|| GitError("no base branch found".to_string()))?;
+        let range = format!("{}...HEAD", base.as_str());
+        let (stdout, stderr, ok) = GitCommand::read(
+            &self.0,
+            &[
+                "diff",
+                "--find-renames",
+                "--find-copies",
+                "--unified=100000",
+                &range,
+            ],
+        )?;
+        if !ok {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        Ok(self.highlight_diff(&stdout))
+    }
+
+    fn highlight_diff(&self, stdout: &str) -> Vec<DiffLine> {
         let first_path = stdout.lines().find_map(Self::diff_file_path);
         let mut path = first_path.map(|path| self.0.join(path)).unwrap_or_default();
-        let mut lines = parse::DiffParser::parse(&stdout);
+        let mut lines = parse::DiffParser::parse(stdout);
         for line in &mut lines {
             let text = line
                 .spans
@@ -288,7 +312,7 @@ impl GitRepository {
             }
             line.spans = crate::host::highlight::Highlighter::line(&text, &path);
         }
-        Ok(lines)
+        lines
     }
 
     fn diff_file_path(line: &str) -> Option<&str> {
@@ -1017,6 +1041,9 @@ impl GitRepositorySnapshot {
         let mut files = parsed.into_file_entries();
         files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
         let repo_name = crate::host::worktree::RepoInfo::name_at(repo_root);
+        let base_ref = crate::host::worktree::BaseRef::resolve(repo_root)
+            .map(|reference| reference.branch().to_string())
+            .unwrap_or_default();
         let commits = GitCommitEntry::recent(repo_root)?;
         let branches = GitBranchEntry::local(repo_root, &branch)?;
         let remote_branches = GitBranchEntry::remote(repo_root)?;
@@ -1027,6 +1054,7 @@ impl GitRepositorySnapshot {
             repo_root: repo_root.to_string_lossy().to_string(),
             repo_name,
             branch,
+            base_ref,
             upstream,
             ahead,
             behind,
@@ -1292,6 +1320,32 @@ mod tests {
             colors.len() > 1,
             "Rust commit diff should be syntax highlighted"
         );
+    }
+
+    #[test]
+    fn branch_diff_lines_include_every_commit_since_the_base_branch() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "first.txt", "first\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "first"]);
+        test_repo::write(repo.path(), "second.txt", "second\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "second"]);
+
+        let lines = GitRepository::at(repo.path()).branch_diff_lines().unwrap();
+        let files = lines
+            .iter()
+            .filter(|line| matches!(line.kind, DiffKind::Hunk))
+            .filter_map(|line| line.spans.first())
+            .map(|span| span.text.as_str())
+            .filter(|text| !text.starts_with("@@"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, vec!["first.txt", "second.txt"]);
     }
 
     #[test]

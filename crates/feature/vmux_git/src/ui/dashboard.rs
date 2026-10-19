@@ -39,6 +39,7 @@ pub(super) fn GitDashboard() -> Element {
             repository: repository.clone(),
             projects: projects().rows,
             focused_panel: active_panel,
+            selected_commit: controller_state.selected_commit.clone(),
             fetching: ui.fetching,
             can_push: controller_state.operations.push,
         }

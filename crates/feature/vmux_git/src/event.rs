@@ -103,6 +103,9 @@ pub struct GitCommitSelectRequest {
     pub commit: String,
 }
 
+#[vmux_api::ui_event]
+pub struct GitBranchDiffSelectRequest;
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitStashSelectRequest {
     pub reference: String,
@@ -293,6 +296,7 @@ pub struct GitRepositorySnapshot {
     pub repo_root: String,
     pub repo_name: String,
     pub branch: String,
+    pub base_ref: String,
     pub upstream: String,
     pub ahead: u32,
     pub behind: u32,

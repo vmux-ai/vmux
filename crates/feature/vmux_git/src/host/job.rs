@@ -15,11 +15,18 @@ pub(super) struct BranchLogJob {
 #[derive(Clone, Component)]
 pub(super) struct DiffJob {
     pub(super) path: PathBuf,
-    pub(super) reference: String,
+    pub(super) scope: DiffScope,
     pub(super) generation: u64,
     pub(super) top_line: u32,
     pub(super) rows: u32,
     pub(super) content: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum DiffScope {
+    File,
+    Branch,
+    Commit(String),
 }
 
 #[derive(Clone, Component)]

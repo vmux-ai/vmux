@@ -8,7 +8,7 @@ use crate::event::{DiffKind, DiffLine, GitDiffRevealRequest, GitLineMarker, GitL
 use crate::state::{GitPageControllerState, GitPanel};
 
 use super::GitUpdateSet;
-use super::job::DiffJob;
+use super::job::{DiffJob, DiffScope};
 use super::job_runner::GitJob;
 use super::repository::GitRepository;
 
@@ -61,7 +61,7 @@ struct GitDiffTarget {
     repo_root: PathBuf,
     path: PathBuf,
     path_bytes: Vec<u8>,
-    reference: String,
+    scope: DiffScope,
 }
 
 impl GitDiffTarget {
@@ -69,24 +69,34 @@ impl GitDiffTarget {
         state: &super::state::GitState,
         controller: &GitPageControllerState,
     ) -> Option<Self> {
-        state.repository()?;
+        let repository = state.repository()?;
         let repo_root = PathBuf::from(state.workspace());
         if repo_root.as_os_str().is_empty() {
             return None;
         }
         match controller.focused_panel {
-            GitPanel::Commits if !controller.selected_commit.is_empty() => Some(Self {
+            GitPanel::Commits
+                if controller.selected_commit.is_empty() && !repository.commits.is_empty() =>
+            {
+                Some(Self {
+                    repo_root,
+                    path: PathBuf::new(),
+                    path_bytes: Vec::new(),
+                    scope: DiffScope::Branch,
+                })
+            }
+            GitPanel::Commits => Some(Self {
                 repo_root,
                 path: PathBuf::new(),
                 path_bytes: Vec::new(),
-                reference: controller.selected_commit.clone(),
+                scope: DiffScope::Commit(controller.selected_commit.clone()),
             }),
             GitPanel::Files | GitPanel::Stash if !controller.selected_abs_path.is_empty() => {
                 Some(Self {
                     repo_root,
                     path: PathBuf::from(&controller.selected_abs_path),
                     path_bytes: controller.selected_path_bytes.clone(),
-                    reference: String::new(),
+                    scope: DiffScope::File,
                 })
             }
             _ => None,
@@ -99,7 +109,7 @@ impl GitDiffTarget {
             repo_root,
             path: file.path().into(),
             path_bytes: Vec::new(),
-            reference: String::new(),
+            scope: DiffScope::File,
         })
     }
 }
@@ -252,7 +262,7 @@ fn start_requests(
             GitRepository::at(target.repo_root),
             DiffJob {
                 path: target.path,
-                reference: target.reference,
+                scope: target.scope,
                 generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
@@ -453,7 +463,7 @@ mod tests {
                         repo_root: "/repo".into(),
                         path: "/repo/a.rs".into(),
                         path_bytes: Vec::new(),
-                        reference: String::new(),
+                        scope: DiffScope::File,
                     },
                     file: None,
                     page_revision: None,
@@ -473,7 +483,7 @@ mod tests {
                 repo_root: "/repo".into(),
                 path: "/repo/b.rs".into(),
                 path_bytes: Vec::new(),
-                reference: String::new(),
+                scope: DiffScope::File,
             },
             file: None,
             page_revision: None,
@@ -495,7 +505,7 @@ mod tests {
                 repo_root: "/repo".into(),
                 path: "/repo/a.rs".into(),
                 path_bytes: Vec::new(),
-                reference: String::new(),
+                scope: DiffScope::File,
             },
             generation: 3,
             file: Some(FileDiffIdentity {

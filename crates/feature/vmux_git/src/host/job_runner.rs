@@ -7,9 +7,9 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use super::GitUpdateSet;
 use super::job::{
     AmendJob, BranchLogJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob,
-    DeleteBranchJob, DiffJob, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob, PullJob,
-    PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob,
-    StashPushJob, UnstageJob,
+    DeleteBranchJob, DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob,
+    PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob,
+    StashPopJob, StashPushJob, UnstageJob,
 };
 use super::repository::GitRepository;
 use crate::event::{
@@ -481,13 +481,13 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     error: String::new(),
                 });
             }
-            let result = if job.reference.is_empty() {
-                match job.content.as_deref() {
+            let result = match &job.scope {
+                DiffScope::File => match job.content.as_deref() {
                     Some(content) => repository.diff_lines_with_content(&job.path, content),
                     None => repository.diff_lines(&job.path),
-                }
-            } else {
-                repository.commit_diff_lines(&job.reference)
+                },
+                DiffScope::Branch => repository.branch_diff_lines(),
+                DiffScope::Commit(reference) => repository.commit_diff_lines(reference),
             };
             match result {
                 Ok(all_lines) => {
@@ -932,7 +932,7 @@ mod tests {
             GitRepository::at(repo.path()),
             DiffJob {
                 path: file,
-                reference: String::new(),
+                scope: DiffScope::File,
                 generation: 7,
                 top_line: 0,
                 rows: 50,
@@ -979,7 +979,7 @@ mod tests {
             GitRepository::at(dir.path()),
             DiffJob {
                 path: file,
-                reference: String::new(),
+                scope: DiffScope::File,
                 generation: 7,
                 top_line: 0,
                 rows: 50,

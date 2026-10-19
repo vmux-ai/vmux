@@ -7,15 +7,16 @@ use vmux_ecs::UiStateWrite;
 use vmux_ecs::event::space::ProjectActivateRequest;
 
 use crate::event::{
-    GitAmendRequest, GitBranchCollectionSelectRequest, GitBranchDraftRequest, GitBranchLogRequest,
-    GitBranchPromptCloseRequest, GitBranchPromptOpenRequest, GitBranchSelectRequest,
-    GitBranchSubmitRequest, GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitDraftRequest,
-    GitCommitRequest, GitCommitSelectRequest, GitCommitSubmitRequest, GitCreateBranchRequest,
-    GitDeleteBranchRequest, GitDiscardFileRequest, GitDiscardRequest, GitFastForwardRequest,
-    GitFileSelectRequest, GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest,
-    GitRepositoryRequest, GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest,
-    GitStageAllRequest, GitStageRequest, GitStashDropRequest, GitStashPopRequest,
-    GitStashPushRequest, GitStashSelectRequest, GitUnstageRequest,
+    GitAmendRequest, GitBranchCollectionSelectRequest, GitBranchDiffSelectRequest,
+    GitBranchDraftRequest, GitBranchLogRequest, GitBranchPromptCloseRequest,
+    GitBranchPromptOpenRequest, GitBranchSelectRequest, GitBranchSubmitRequest,
+    GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitDraftRequest, GitCommitRequest,
+    GitCommitSelectRequest, GitCommitSubmitRequest, GitCreateBranchRequest, GitDeleteBranchRequest,
+    GitDiscardFileRequest, GitDiscardRequest, GitFastForwardRequest, GitFileSelectRequest,
+    GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest, GitRepositoryRequest,
+    GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest,
+    GitStageRequest, GitStashDropRequest, GitStashPopRequest, GitStashPushRequest,
+    GitStashSelectRequest, GitUnstageRequest,
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
@@ -37,6 +38,7 @@ impl Plugin for ControllerPlugin {
             GitFileSelectRequest,
             GitBranchCollectionSelectRequest,
             GitBranchSelectRequest,
+            GitBranchDiffSelectRequest,
             GitCommitSelectRequest,
             GitStashSelectRequest,
             GitDiscardFileRequest,
@@ -48,6 +50,7 @@ impl Plugin for ControllerPlugin {
             .add_observer(file_select_request)
             .add_observer(select_branch_collection)
             .add_observer(branch_select_request)
+            .add_observer(branch_diff_select_request)
             .add_observer(commit_select_request)
             .add_observer(stash_select_request)
             .add_observer(discard_file_request)
@@ -161,6 +164,11 @@ impl GitPageControllerState {
         self.focused_panel = GitPanel::Commits;
         self.selected_commit = commit.to_string();
         true
+    }
+
+    fn select_branch_diff(&mut self) {
+        self.focused_panel = GitPanel::Commits;
+        self.selected_commit.clear();
     }
 
     fn select_stash(&mut self, reference: &str, repository: &GitRepositorySnapshot) -> bool {
@@ -533,13 +541,13 @@ fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<
         next.selected_path_bytes = next_file
             .map(|entry| entry.path_bytes.clone())
             .unwrap_or_default();
-        next.selected_commit = repository
+        if !repository
             .commits
             .iter()
-            .find(|entry| entry.sha == next.selected_commit)
-            .or_else(|| repository.commits.first())
-            .map(|entry| entry.sha.clone())
-            .unwrap_or_default();
+            .any(|entry| entry.sha == next.selected_commit)
+        {
+            next.selected_commit.clear();
+        }
         next.selected_branch = next
             .branch_collection
             .selected_reference(repository, &next.selected_branch);
@@ -896,6 +904,16 @@ fn branch_select_request(
         return;
     };
     controller.select_branch(&trigger.event().payload.reference, repository);
+}
+
+fn branch_diff_select_request(
+    trigger: On<UiInput<GitBranchDiffSelectRequest>>,
+    mut pages: Query<&mut GitPageControllerState>,
+) {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller.select_branch_diff();
 }
 
 fn commit_select_request(
