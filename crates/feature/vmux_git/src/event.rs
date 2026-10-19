@@ -155,11 +155,6 @@ pub struct GitConfigEditRequest {
 #[vmux_api::ui_event]
 pub struct GitUpdateCheckRequest;
 #[vmux_api::ui_event(Eq)]
-pub struct GitBranchLogRequest {
-    pub repo_root: String,
-    pub branch: String,
-}
-#[vmux_api::ui_event(Eq)]
 pub struct GitDirectoryOpenRequest {
     pub path: String,
 }
@@ -306,13 +301,6 @@ pub struct GitRepositorySnapshot {
     pub remote_branches: Vec<GitBranchEntry>,
     pub tags: Vec<GitTagEntry>,
     pub stashes: Vec<GitStashEntry>,
-}
-
-#[vmux_api::contract(Eq)]
-pub struct GitBranchLog {
-    pub repo_root: String,
-    pub branch: String,
-    pub commits: Vec<GitCommitEntry>,
 }
 
 #[vmux_api::ui_event_variants(Eq, shared(repo_root: String))]

@@ -528,6 +528,9 @@ impl SpaceOverrides {
         let mut rows = Vec::with_capacity(self.projects.len());
         for project in &self.projects {
             let in_use = project.in_use();
+            if rows.iter().any(|row: &ProjectRow| row.path == in_use) {
+                continue;
+            }
             rows.push(ProjectRow {
                 path: in_use.to_string(),
                 label: project.display_label().to_string(),
@@ -2572,6 +2575,25 @@ mod tests {
         );
         assert_eq!(rows[0].path, "/worktrees/a1b2");
         assert_eq!(rows[0].label, "gone");
+    }
+
+    #[test]
+    fn repositories_sharing_one_checkout_render_as_one_project() {
+        let space = SpaceOverrides {
+            projects: vec![
+                SpaceProject::checked_out("/repo/vmux-cloud", "/worktrees/vmx-226"),
+                SpaceProject::checked_out("/repo/mold-linker", "/worktrees/vmx-226"),
+            ],
+            active_project: Some("/worktrees/vmx-226".to_string()),
+            ..Default::default()
+        };
+
+        let rows = space.project_rows();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "vmux-cloud");
+        assert!(rows[0].is_worktree);
+        assert!(rows[0].is_active);
     }
 
     #[test]

@@ -10,14 +10,14 @@ use crate::event::GitDiffRow;
 #[cfg(test)]
 use crate::event::GitDiffViewport;
 use crate::event::{
-    DiffKind, GitBranchLog, GitBranchLogRequest, GitDiffRevealRequest, GitOperationError,
-    GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
+    DiffKind, GitDiffRevealRequest, GitOperationError, GitOperationResult, GitRepositoryRequest,
+    GitRepositorySnapshot,
 };
 use crate::state::{GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState};
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
 use super::directory::GitDirectoryNavigation;
-use super::job::{BranchLogJob, RepositoryJob};
+use super::job::RepositoryJob;
 use super::job_runner::{GitJob, GitJobFailure};
 use super::repository::GitRepository;
 use super::watch::GitWatch;
@@ -31,15 +31,14 @@ pub(super) struct StatePlugin;
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
-            .add_plugins(UiEventPlugin::<(GitRepositoryRequest, GitBranchLogRequest)>::default())
+            .add_plugins(UiEventPlugin::<(GitRepositoryRequest,)>::default())
             .add_observer(page_ready)
             .add_observer(repository_request)
-            .add_observer(branch_log_request)
             .add_systems(
                 Update,
                 (project_diff, publish)
                     .chain()
-                    .after(super::controller::ControllerSet::BranchLog),
+                    .after(super::controller::ControllerSet::Operations),
             );
     }
 }
@@ -72,10 +71,6 @@ impl GitState {
 
     pub(super) fn repository(&self) -> Option<&GitRepositorySnapshot> {
         self.snapshot.repository.as_ref()
-    }
-
-    pub(super) fn branch_log(&self) -> Option<&GitBranchLog> {
-        self.snapshot.branch_log.as_ref()
     }
 }
 
@@ -147,13 +142,6 @@ impl GitStates<'_, '_> {
         state.snapshot.repository = None;
         state.snapshot.loading = false;
         state.snapshot.message.clear();
-    }
-
-    pub(super) fn set_branch_log(&mut self, entity: Entity, event: GitBranchLog) {
-        let Ok(mut state) = self.states.get_mut(entity) else {
-            return;
-        };
-        state.snapshot.branch_log = Some(event);
     }
 
     pub(super) fn start_fetch(&mut self, entity: Entity) {
@@ -366,23 +354,12 @@ fn repository_request(
         }
     };
     if let Ok(mut page) = pages.get_mut(webview)
-        && let Some(url) = crate::GitUrl::from_path(&repo_root)
+        && let Some(url) = crate::GitUrl::from_path_preserving_commit(&repo_root, &page.url)
         && page.url != url
     {
         page.url = url;
     }
     commands.spawn((GitJob::new(webview), RepositoryJob { path }));
-}
-
-fn branch_log_request(trigger: On<UiInput<GitBranchLogRequest>>, mut commands: Commands) {
-    let request = &trigger.event().payload;
-    commands.spawn((
-        GitJob::new(trigger.event().webview),
-        GitRepository::at(request.repo_root.clone()),
-        BranchLogJob {
-            branch: request.branch.clone(),
-        },
-    ));
 }
 
 type GitStateQuery<'w, 's> = Query<

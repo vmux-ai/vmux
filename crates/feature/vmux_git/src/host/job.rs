@@ -8,11 +8,6 @@ pub(super) struct RepositoryJob {
 }
 
 #[derive(Clone, Component)]
-pub(super) struct BranchLogJob {
-    pub(super) branch: String,
-}
-
-#[derive(Clone, Component)]
 pub(super) struct DiffJob {
     pub(super) path: PathBuf,
     pub(super) scope: DiffScope,
@@ -25,7 +20,7 @@ pub(super) struct DiffJob {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DiffScope {
     File,
-    Branch,
+    Branch(String),
     Commit(String),
 }
 

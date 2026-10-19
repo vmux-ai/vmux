@@ -39,6 +39,17 @@ impl ListPager {
     }
 }
 
+#[component]
+pub(super) fn ProjectKindPill(is_worktree: bool) -> Element {
+    let label = match is_worktree {
+        true => translate("layout-worktree"),
+        false => translate("git-repository"),
+    };
+    rsx! {
+        span { class: "shrink-0 rounded-full bg-foreground/[0.055] px-1.5 py-0.5 text-[8px] font-medium text-muted-foreground", "{label}" }
+    }
+}
+
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
     let mut s = format!("color:rgb({r},{g},{b});");

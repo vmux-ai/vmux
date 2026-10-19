@@ -274,10 +274,10 @@ impl GitRepository {
         Ok(self.highlight_diff(&stdout))
     }
 
-    pub fn branch_diff_lines(&self) -> Result<Vec<DiffLine>, GitError> {
+    pub fn branch_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
         let base = crate::host::worktree::BaseRef::resolve(&self.0)
             .ok_or_else(|| GitError("no base branch found".to_string()))?;
-        let range = format!("{}...HEAD", base.as_str());
+        let range = format!("{}...{reference}", base.as_str());
         let (stdout, stderr, ok) = GitCommand::read(
             &self.0,
             &[
@@ -790,44 +790,6 @@ impl GitCommitEntry {
         }
         Ok(commits)
     }
-
-    pub(crate) fn for_reference(root: &Path, reference: &str) -> Result<Vec<Self>, GitError> {
-        let (stdout, stderr, ok) = GitCommand::read(
-            root,
-            &[
-                "log",
-                "-50",
-                "--date=relative",
-                "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s%x1f%b%x1f%D%x1e",
-                reference,
-                "--",
-            ],
-        )?;
-        if !ok {
-            return Err(GitCommand::error(&stdout, &stderr));
-        }
-        let mut commits = Vec::new();
-        for record in stdout.split('\x1e') {
-            let record = record.trim_matches(['\n', '\r']);
-            if record.is_empty() {
-                continue;
-            }
-            let fields = record.splitn(7, '\x1f').collect::<Vec<_>>();
-            if fields.len() != 7 {
-                continue;
-            }
-            commits.push(Self {
-                sha: fields[0].to_string(),
-                short_sha: fields[1].to_string(),
-                author: fields[2].to_string(),
-                date: fields[3].to_string(),
-                summary: fields[4].to_string(),
-                body: fields[5].trim().to_string(),
-                references: fields[6].trim().to_string(),
-            });
-        }
-        Ok(commits)
-    }
 }
 
 impl GitBranchEntry {
@@ -1336,7 +1298,11 @@ mod tests {
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "second"]);
 
-        let lines = GitRepository::at(repo.path()).branch_diff_lines().unwrap();
+        test_repo::run(repo.path(), &["switch", "-q", "main"]);
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines("feature")
+            .unwrap();
         let files = lines
             .iter()
             .filter(|line| matches!(line.kind, DiffKind::Hunk))

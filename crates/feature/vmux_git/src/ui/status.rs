@@ -14,14 +14,16 @@ use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 use crate::event::*;
 use crate::state::GitPanel;
 
-use super::shared::ListPager;
+use super::shared::{ListPager, ProjectKindPill};
 
 #[component]
 pub(super) fn RepositoryHeader(
     repository: GitRepositorySnapshot,
     projects: Vec<ProjectRow>,
     selected_commit: String,
+    can_push: bool,
 ) -> Element {
+    let push_path = repository.repo_root.clone();
     let mut repository_open = use_signal(|| false);
     let mut branch_open = use_signal(|| false);
     let mut commit_open = use_signal(|| false);
@@ -95,7 +97,10 @@ pub(super) fn RepositoryHeader(
                                             },
                                             TypeIcon { path: project.path.clone(), is_dir: true, class: "size-4 shrink-0" }
                                             div { class: "min-w-0 flex-1",
-                                                div { class: "truncate font-medium", "{label}" }
+                                                div { class: "flex min-w-0 items-center gap-1.5",
+                                                    div { class: "min-w-0 flex-1 truncate font-medium", "{label}" }
+                                                    ProjectKindPill { is_worktree: project.is_worktree }
+                                                }
                                                 div { class: "truncate font-mono text-[10px] text-muted-foreground", "{display_path}" }
                                             }
                                             if active {
@@ -237,6 +242,16 @@ pub(super) fn RepositoryHeader(
                         }
                     }
                 }
+                Button {
+                    variant: ButtonVariant::Primary,
+                    class: "ml-auto h-8 gap-1.5 px-3 text-[11px] font-medium",
+                    disabled: !can_push,
+                    onclick: move |_| {
+                        let _ = send(&GitPushRequest { path: push_path.clone() });
+                    },
+                    LineIconView { icon: LineIcon::Upload, class: "size-4" }
+                    span { {translate("git-push-label")} }
+                }
             }
         }
     }
@@ -246,25 +261,14 @@ pub(super) fn RepositoryHeader(
 pub(super) fn RepositoryPanelHeader(
     repository: GitRepositorySnapshot,
     focused_panel: GitPanel,
-    selected_commit: String,
     fetching: bool,
-    can_push: bool,
 ) -> Element {
     let branch_count =
         repository.branches.len() + repository.remote_branches.len() + repository.tags.len();
-    let push_path = repository.repo_root.clone();
-    let selected_commit_label = repository
-        .commits
-        .iter()
-        .find(|commit| commit.sha == selected_commit)
-        .map(|commit| commit.short_sha.clone())
-        .unwrap_or_default();
     rsx! {
         div { class: "flex h-11 shrink-0 items-center gap-2 px-3 text-[10px] tabular-nums text-muted-foreground",
             ViewPicker {
                 focused_panel,
-                selected_commit: selected_commit.clone(),
-                selected_commit_label,
                 changes: repository.files.len(),
                 branches: branch_count,
                 commits: repository.commits.len(),
@@ -291,16 +295,6 @@ pub(super) fn RepositoryPanelHeader(
                         "{repository.behind}"
                     }
                 }
-                Button {
-                    variant: ButtonVariant::Primary,
-                    class: "h-8 gap-1.5 px-3 text-[11px] font-medium",
-                    disabled: !can_push,
-                    onclick: move |_| {
-                        let _ = send(&GitPushRequest { path: push_path.clone() });
-                    },
-                    LineIconView { icon: LineIcon::Upload, class: "size-4" }
-                    span { {translate("git-push-label")} }
-                }
             }
         }
     }
@@ -309,8 +303,6 @@ pub(super) fn RepositoryPanelHeader(
 #[component]
 fn ViewPicker(
     focused_panel: GitPanel,
-    selected_commit: String,
-    selected_commit_label: String,
     changes: usize,
     branches: usize,
     commits: usize,
@@ -318,16 +310,11 @@ fn ViewPicker(
     first_commit: String,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let (icon, label, count) = match (focused_panel, selected_commit.is_empty()) {
-        (GitPanel::Files, _) => (LineIcon::File, translate("git-changes"), changes),
-        (GitPanel::Branches, _) => (LineIcon::GitBranch, translate("git-branches"), branches),
-        (GitPanel::Commits, true) => (LineIcon::GitPullRequest, translate("git-branch-changes"), 0),
-        (GitPanel::Commits, false) => (
-            LineIcon::GitCommit,
-            format!("{} · {}", translate("git-commits"), selected_commit_label),
-            0,
-        ),
-        (GitPanel::Stash, _) => (LineIcon::Package, translate("git-stashes"), stashes),
+    let (icon, label, count) = match focused_panel {
+        GitPanel::Files => (LineIcon::File, translate("git-changes"), changes),
+        GitPanel::Branches => (LineIcon::GitBranch, translate("git-branches"), branches),
+        GitPanel::Commits => (LineIcon::GitCommit, translate("git-commits"), commits),
+        GitPanel::Stash => (LineIcon::Package, translate("git-stashes"), stashes),
     };
     rsx! {
         Dropdown {
@@ -348,16 +335,6 @@ fn ViewPicker(
             if open() {
                 div { class: "absolute left-0 top-9 z-40 min-w-48 rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
                     ViewPickerItem {
-                        active: focused_panel == GitPanel::Commits && selected_commit.is_empty(),
-                        icon: LineIcon::GitPullRequest,
-                        label: translate("git-branch-changes"),
-                        count: 0,
-                        open,
-                        onselect: move |_| {
-                            let _ = send(&GitBranchDiffSelectRequest);
-                        },
-                    }
-                    ViewPickerItem {
                         active: focused_panel == GitPanel::Files,
                         icon: LineIcon::File,
                         label: translate("git-changes"),
@@ -375,11 +352,11 @@ fn ViewPicker(
                         count: branches,
                         open,
                         onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
+                            let _ = send(&GitBranchDiffSelectRequest);
                         },
                     }
                     ViewPickerItem {
-                        active: focused_panel == GitPanel::Commits && !selected_commit.is_empty(),
+                        active: focused_panel == GitPanel::Commits,
                         icon: LineIcon::GitCommit,
                         label: translate("git-commits"),
                         count: commits,

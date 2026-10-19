@@ -1,9 +1,7 @@
 use bevy_ecs::prelude::Component;
 use vmux_api::space::ProjectRow;
 
-use crate::event::{
-    GitBranchLog, GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot,
-};
+use crate::event::{GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot};
 
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum GitPanel {
@@ -193,7 +191,6 @@ impl Default for GitDirectoryState {
 pub struct GitPageSnapshot {
     pub workspace: String,
     pub repository: Option<GitRepositorySnapshot>,
-    pub branch_log: Option<GitBranchLog>,
     pub diff_viewport: Option<GitDiffViewport>,
     pub diff_rows: Vec<GitDiffRow>,
     pub diff_loading: bool,
@@ -211,7 +208,6 @@ impl Default for GitPageSnapshot {
         Self {
             workspace: String::new(),
             repository: None,
-            branch_log: None,
             diff_viewport: None,
             diff_rows: Vec::new(),
             diff_loading: false,

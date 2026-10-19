@@ -5,7 +5,6 @@ use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
-use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -78,71 +77,6 @@ pub(super) fn BranchPromptDialog() -> Element {
                             let _ = send(&GitBranchSubmitRequest);
                         },
                         {if is_create { translate("common-save") } else { translate("common-delete") }}
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLog>) -> Element {
-    let log = branch_log.filter(|event| event.branch == branch);
-    let commit_count = log.as_ref().map(|event| event.commits.len()).unwrap_or(0);
-    let pager = ListPager::use_state();
-    let visible_count = pager.visible(commit_count);
-
-    rsx! {
-        section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.012] px-3",
-                LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 text-muted-foreground" }
-                span { class: "text-[11px] font-medium text-muted-foreground", {translate("git-log")} }
-                span { class: "min-w-0 truncate font-mono text-[10px] text-foreground/85", "{branch}" }
-            }
-            div {
-                class: "min-h-0 flex-1 overflow-y-auto px-4 py-2",
-                onscroll: move |event| pager.load_more(event, commit_count),
-                if let Some(log) = log {
-                    if log.commits.is_empty() {
-                        div { class: "flex h-full min-h-64 items-center justify-center text-sm text-muted-foreground", {translate("git-no-commits")} }
-                    } else {
-                        for (index, commit) in log.commits.into_iter().take(visible_count).enumerate() {
-                            article { key: "{commit.sha}", class: "relative grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2.5 py-3 first:pt-1",
-                                div { class: "relative flex justify-center",
-                                    if index > 0 {
-                                        span { class: "absolute bottom-1/2 top-0 w-px bg-violet-400/35" }
-                                    }
-                                    if index + 1 < commit_count {
-                                        span { class: "absolute bottom-0 top-1/2 w-px bg-violet-400/35" }
-                                    }
-                                    span { class: if index == 0 {
-                                            "relative mt-1.5 size-2.5 rounded-full border-2 border-violet-300 bg-violet-400 shadow-[0_0_0_3px_color-mix(in_oklab,var(--card)_92%,transparent)]"
-                                        } else {
-                                            "relative mt-1.5 size-2 rounded-full border border-violet-400 bg-card shadow-[0_0_0_3px_color-mix(in_oklab,var(--card)_92%,transparent)]"
-                                        } }
-                                }
-                                div { class: "min-w-0 border-b border-foreground/[0.06] pb-3",
-                                    div { class: "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1",
-                                        code { class: "shrink-0 font-mono text-[11px] font-semibold text-amber-400", "{commit.short_sha}" }
-                                        if !commit.references.is_empty() {
-                                            span { class: "min-w-0 truncate rounded-full border border-ansi-2/20 bg-ansi-2/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-ansi-2", "{commit.references}" }
-                                        }
-                                        span { class: "ml-auto shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
-                                    }
-                                    div { class: "mt-1.5 text-sm font-medium leading-5 text-foreground", "{commit.summary}" }
-                                    div { class: "mt-1 text-[10px] text-muted-foreground", "{commit.author}" }
-                                    if !commit.body.is_empty() {
-                                        pre { class: "mt-3 whitespace-pre-wrap break-words border-l border-ansi-1/45 pl-3 font-sans text-xs leading-5 text-foreground/80", "{commit.body}" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    div { class: "flex h-full min-h-64 flex-col gap-4 p-2",
-                        for width in ["w-10/12", "w-7/12", "w-full", "w-9/12", "w-11/12", "w-6/12"] {
-                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                        }
                     }
                 }
             }

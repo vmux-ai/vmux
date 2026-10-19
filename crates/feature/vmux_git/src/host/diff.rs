@@ -69,22 +69,18 @@ impl GitDiffTarget {
         state: &super::state::GitState,
         controller: &GitPageControllerState,
     ) -> Option<Self> {
-        let repository = state.repository()?;
+        state.repository()?;
         let repo_root = PathBuf::from(state.workspace());
         if repo_root.as_os_str().is_empty() {
             return None;
         }
         match controller.focused_panel {
-            GitPanel::Commits
-                if controller.selected_commit.is_empty() && !repository.commits.is_empty() =>
-            {
-                Some(Self {
-                    repo_root,
-                    path: PathBuf::new(),
-                    path_bytes: Vec::new(),
-                    scope: DiffScope::Branch,
-                })
-            }
+            GitPanel::Branches if !controller.selected_branch.is_empty() => Some(Self {
+                repo_root,
+                path: PathBuf::new(),
+                path_bytes: Vec::new(),
+                scope: DiffScope::Branch(controller.selected_branch.clone()),
+            }),
             GitPanel::Commits => Some(Self {
                 repo_root,
                 path: PathBuf::new(),

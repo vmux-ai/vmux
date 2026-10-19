@@ -6,15 +6,14 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 
 use super::GitUpdateSet;
 use super::job::{
-    AmendJob, BranchLogJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob,
-    DeleteBranchJob, DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob,
-    PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob,
-    StashPopJob, StashPushJob, UnstageJob,
+    AmendJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob, DeleteBranchJob,
+    DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob, PullJob, PushJob,
+    RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob,
+    StashPushJob, UnstageJob,
 };
 use super::repository::GitRepository;
 use crate::event::{
-    GitBranchLog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
-    GitRepositorySnapshot,
+    GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult, GitRepositorySnapshot,
 };
 
 pub(super) struct JobPlugin;
@@ -26,13 +25,11 @@ impl Plugin for JobPlugin {
             (
                 (
                     poll_jobs::<RepositoryOutput>,
-                    poll_jobs::<BranchLogOutput>,
                     poll_jobs::<DiffOutput>,
                     poll_jobs::<OperationOutput>,
                 ),
                 (
                     deliver_repository_outputs,
-                    deliver_branch_log_outputs,
                     deliver_diff_outputs,
                     deliver_operation_outputs,
                     deliver_failure_outputs,
@@ -40,7 +37,6 @@ impl Plugin for JobPlugin {
                 bevy::ecs::schedule::ApplyDeferred,
                 (
                     start_repository_jobs,
-                    start_branch_log_jobs,
                     start_diff_jobs,
                     start_stage_jobs,
                     start_unstage_jobs,
@@ -125,9 +121,6 @@ impl<T: Send + Sync + 'static> GitJobTask<T> {
 
 #[derive(Component)]
 struct RepositoryOutput(Result<GitRepositorySnapshot, GitOperationError>);
-
-#[derive(Component)]
-struct BranchLogOutput(Result<GitBranchLog, GitOperationError>);
 
 #[derive(Component)]
 struct DiffOutput(GitDiffViewport);
@@ -228,7 +221,10 @@ fn deliver_repository_outputs(
         match &output.0 {
             Ok(event) => {
                 if let Ok(mut page) = pages.get_mut(webview) {
-                    if let Some(url) = crate::GitUrl::from_path(Path::new(&event.repo_root)) {
+                    if let Some(url) = crate::GitUrl::from_path_preserving_commit(
+                        Path::new(&event.repo_root),
+                        &page.url,
+                    ) {
                         page.url = url;
                     }
                     page.title = match event.branch.is_empty() {
@@ -241,20 +237,6 @@ fn deliver_repository_outputs(
             Err(error) => {
                 states.apply_error(webview, error);
             }
-        }
-        commands.entity(entity).despawn();
-    }
-}
-
-fn deliver_branch_log_outputs(
-    outputs: Query<(Entity, &GitJob, &BranchLogOutput)>,
-    mut states: super::state::GitStates,
-    mut commands: Commands,
-) {
-    for (entity, job, output) in &outputs {
-        match &output.0 {
-            Ok(event) => states.set_branch_log(job.webview, event.clone()),
-            Err(error) => states.apply_error(job.webview, error),
         }
         commands.entity(entity).despawn();
     }
@@ -448,26 +430,6 @@ fn start_repository_jobs(jobs: PendingGitJobs<RepositoryJob>, mut commands: Comm
     }
 }
 
-fn start_branch_log_jobs(jobs: PendingGitJobs<BranchLogJob>, mut commands: Commands) {
-    for (entity, job, repository, wake) in jobs.ready_with_repository() {
-        let task = GitJobTask::spawn(wake, move || {
-            BranchLogOutput(
-                crate::event::GitCommitEntry::for_reference(repository.path(), &job.branch)
-                    .map(|commits| GitBranchLog {
-                        repo_root: repository.path().to_string_lossy().into_owned(),
-                        branch: job.branch,
-                        commits,
-                    })
-                    .map_err(|error| GitOperationError { message: error.0 }),
-            )
-        });
-        commands
-            .entity(entity)
-            .remove::<BranchLogJob>()
-            .insert((GitJobRunning, task));
-    }
-}
-
 fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
@@ -486,7 +448,7 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     Some(content) => repository.diff_lines_with_content(&job.path, content),
                     None => repository.diff_lines(&job.path),
                 },
-                DiffScope::Branch => repository.branch_diff_lines(),
+                DiffScope::Branch(reference) => repository.branch_diff_lines(reference),
                 DiffScope::Commit(reference) => repository.commit_diff_lines(reference),
             };
             match result {

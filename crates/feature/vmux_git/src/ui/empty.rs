@@ -5,8 +5,9 @@ use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
+use super::shared::ProjectKindPill;
 use super::state::GitPageState;
 use crate::event::GitRepositoryPickerRequest;
 
@@ -35,6 +36,7 @@ pub(super) fn EmptyRepository() -> Element {
         .map(|project| project.path.clone())
         .filter(|path| !path.is_empty())
         .unwrap_or_else(|| workspace.clone());
+    let current_is_worktree = current.as_ref().is_some_and(|project| project.is_worktree);
 
     rsx! {
         main { class: "flex min-h-0 flex-1 items-center justify-center bg-background px-6 py-10 text-foreground",
@@ -55,6 +57,9 @@ pub(super) fn EmptyRepository() -> Element {
                             class: "size-4 shrink-0 opacity-80"
                         }
                         span { class: "min-w-0 flex-1 truncate font-medium", "{current_label}" }
+                        if current.is_some() {
+                            ProjectKindPill { is_worktree: current_is_worktree }
+                        }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 shrink-0 text-muted-foreground" }
                     }
                     if open() {
@@ -88,6 +93,7 @@ pub(super) fn EmptyRepository() -> Element {
                                             },
                                             TypeIcon { path, is_dir: true, class: "size-4 shrink-0 opacity-80" }
                                             span { class: "min-w-0 flex-1 truncate font-medium", "{project.label}" }
+                                            ProjectKindPill { is_worktree: project.is_worktree }
                                             if active {
                                                 LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
                                             }
@@ -122,14 +128,58 @@ pub(super) fn EmptyRepository() -> Element {
 #[component]
 fn GitLoadingSkeleton() -> Element {
     rsx! {
-        main { class: "flex min-h-0 flex-1 items-center justify-center bg-background px-6 py-10 text-foreground",
-            div { class: "flex w-full max-w-sm flex-col items-center text-center",
-                LineIconView { icon: LineIcon::GitBranch, class: "h-7 w-7 text-muted-foreground" }
-                Skeleton { class: "mt-4 h-4 w-48 bg-foreground/[0.07]" }
-                div { class: "mt-5 flex h-10 w-full items-center gap-2 rounded-lg bg-foreground/[0.055] px-3",
-                    Skeleton { class: "size-4 shrink-0 bg-foreground/[0.07]" }
-                    Skeleton { class: "h-3 w-28 bg-foreground/[0.08]" }
-                    LineIconView { icon: LineIcon::ChevronDown, class: "ml-auto size-3.5 shrink-0 text-muted-foreground/60" }
+        header { class: "shrink-0 bg-card/55",
+            div { class: "flex h-14 min-w-0 items-center gap-1 px-4",
+                div { class: "flex h-8 min-w-0 items-center gap-2 px-2",
+                    GitSymbolView {
+                        symbol: GitSymbol::Repository,
+                        class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                    }
+                    Skeleton { class: "h-3 w-24 bg-foreground/[0.07]" }
+                    LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground/60" }
+                }
+                span { class: "px-1 text-muted-foreground/50", "/" }
+                div { class: "flex h-8 min-w-0 items-center gap-1.5 px-2",
+                    LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground" }
+                    Skeleton { class: "h-3 w-40 bg-foreground/[0.07]" }
+                    LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground/60" }
+                }
+                Skeleton { class: "ml-auto h-8 w-20 rounded-md bg-foreground/[0.055]" }
+            }
+        }
+        main { class: "flex min-h-0 flex-1 flex-col bg-background text-foreground",
+            div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] sm:grid-rows-1",
+                aside { class: "flex min-h-0 flex-col overflow-hidden bg-card/55",
+                    div { class: "flex h-11 shrink-0 items-center gap-2 px-3",
+                        div { class: "flex h-8 items-center gap-2 px-2.5",
+                            LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground" }
+                            Skeleton { class: "h-3 w-20 bg-foreground/[0.07]" }
+                            LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground/60" }
+                        }
+                    }
+                    div { class: "flex h-10 shrink-0 items-center justify-end px-3",
+                        Skeleton { class: "size-7 rounded-md bg-foreground/[0.045]" }
+                        Skeleton { class: "ml-1 size-7 rounded-md bg-foreground/[0.045]" }
+                    }
+                    div { class: "flex min-h-0 flex-1 flex-col gap-2 px-4 py-3",
+                        for width in ["w-8/12", "w-11/12", "w-9/12", "w-10/12", "w-7/12", "w-full"] {
+                            div { class: "flex h-9 items-center gap-2",
+                                Skeleton { class: "size-3.5 shrink-0 bg-foreground/[0.05]" }
+                                Skeleton { class: "h-3 {width} bg-foreground/[0.055]" }
+                            }
+                        }
+                    }
+                }
+                section { class: "flex min-h-0 min-w-0 flex-col overflow-hidden bg-background",
+                    div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
+                        LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground" }
+                        Skeleton { class: "h-3 w-40 bg-foreground/[0.06]" }
+                    }
+                    div { class: "flex min-h-0 flex-1 flex-col gap-3 px-5 py-4",
+                        for width in ["w-full", "w-11/12", "w-10/12", "w-full", "w-8/12", "w-11/12", "w-9/12", "w-full"] {
+                            Skeleton { class: "h-3 {width} bg-foreground/[0.045]" }
+                        }
+                    }
                 }
             }
         }

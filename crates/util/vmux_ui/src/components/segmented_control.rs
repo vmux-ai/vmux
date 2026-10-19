@@ -15,7 +15,7 @@ pub fn SegmentedControl(
 ) -> Element {
     rsx! {
         div {
-            class: "inline-flex h-8 shrink-0 items-center rounded-lg bg-foreground/[0.045] p-0.5 {class}",
+            class: "inline-flex h-8 shrink-0 items-center gap-0.5 rounded-lg {class}",
             role: "tablist",
             for item in items {
                 button {

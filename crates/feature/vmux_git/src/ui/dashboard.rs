@@ -2,10 +2,10 @@
 
 use dioxus::prelude::*;
 
-use super::branches::{BranchLogCard, BranchesCard};
+use super::branches::BranchesCard;
 use super::changes::ChangesCard;
 use super::command_log::CommandLogCard;
-use super::diff::{CommitDiffCard, DiffCard};
+use super::diff::{BranchDiffCard, CommitDiffCard, DiffCard};
 use super::history::{HistoryCard, StashCard};
 use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
@@ -32,6 +32,7 @@ pub(super) fn GitDashboard() -> Element {
     let selected_path_bytes = use_memo(move || controller().selected_path_bytes);
     let selected_abs_path = use_memo(move || controller().selected_abs_path);
     let selected_commit = use_memo(move || controller().selected_commit);
+    let selected_branch = use_memo(move || controller().selected_branch);
     let active_panel = controller_state.focused_panel;
 
     rsx! {
@@ -39,6 +40,7 @@ pub(super) fn GitDashboard() -> Element {
             repository: repository.clone(),
             projects: projects().rows,
             selected_commit: controller_state.selected_commit.clone(),
+            can_push: controller_state.operations.push,
         }
         main { class: "flex min-h-0 flex-1 flex-col bg-background",
             div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] sm:grid-rows-1",
@@ -46,9 +48,7 @@ pub(super) fn GitDashboard() -> Element {
                     RepositoryPanelHeader {
                         repository: repository.clone(),
                         focused_panel: active_panel,
-                        selected_commit: controller_state.selected_commit.clone(),
                         fetching: ui.fetching,
-                        can_push: controller_state.operations.push,
                     }
                     div { class: "min-h-0 flex-1 overflow-hidden",
                         if active_panel == GitPanel::Files {
@@ -84,9 +84,13 @@ pub(super) fn GitDashboard() -> Element {
                 }
                 section { class: "min-h-0 min-w-0 overflow-hidden bg-background",
                     if active_panel == GitPanel::Branches {
-                        BranchLogCard {
-                            branch: controller_state.selected_branch.clone(),
-                            branch_log: ui.branch_log.clone(),
+                        BranchDiffCard {
+                            repository: repository.clone(),
+                            repo_root,
+                            selected_branch,
+                            diff_viewport,
+                            diff_rows,
+                            loading: ui.diff_loading,
                         }
                     } else if active_panel == GitPanel::Commits {
                         CommitDiffCard {

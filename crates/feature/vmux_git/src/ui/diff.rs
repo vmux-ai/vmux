@@ -10,6 +10,35 @@ use crate::event::{GitDiffViewport, GitRepositorySnapshot};
 use crate::ui::DiffView;
 
 #[component]
+pub(super) fn BranchDiffCard(
+    repository: GitRepositorySnapshot,
+    repo_root: ReadSignal<String>,
+    selected_branch: ReadSignal<String>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    loading: bool,
+) -> Element {
+    let selected_branch = selected_branch();
+    let title = if repository.base_ref.is_empty() {
+        selected_branch.clone()
+    } else {
+        format!("{}…{}", repository.base_ref, selected_branch)
+    };
+    rsx! {
+        RevisionDiffCard {
+            repo_root,
+            diff_viewport,
+            diff_rows,
+            loading,
+            available: !selected_branch.is_empty(),
+            title,
+            empty: translate("git-no-branches"),
+            icon: LineIcon::GitBranch,
+        }
+    }
+}
+
+#[component]
 pub(super) fn CommitDiffCard(
     repository: GitRepositorySnapshot,
     repo_root: ReadSignal<String>,
@@ -18,45 +47,49 @@ pub(super) fn CommitDiffCard(
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
 ) -> Element {
-    let empty_path = use_signal(String::new);
     let selected_commit = selected_commit();
     let selected = repository
         .commits
         .iter()
         .find(|commit| commit.sha == selected_commit)
         .cloned();
-    let branch_diff = selected_commit.is_empty() && !repository.commits.is_empty();
-    let branch_head = if repository.branch.is_empty() {
-        "HEAD"
-    } else {
-        repository.branch.as_str()
-    };
-    let title = if branch_diff {
-        if repository.base_ref.is_empty() {
-            translate("git-branch-changes")
-        } else {
-            format!("{}…{}", repository.base_ref, branch_head)
+    let title = selected
+        .as_ref()
+        .map(|commit| format!("{}  {}", commit.short_sha, commit.summary))
+        .unwrap_or_default();
+    rsx! {
+        RevisionDiffCard {
+            repo_root,
+            diff_viewport,
+            diff_rows,
+            loading,
+            available: selected.is_some(),
+            title,
+            empty: translate("git-no-commits"),
+            icon: LineIcon::GitCommit,
         }
-    } else {
-        selected
-            .as_ref()
-            .map(|commit| format!("{}  {}", commit.short_sha, commit.summary))
-            .unwrap_or_else(|| translate("git-no-commits"))
-    };
+    }
+}
+
+#[component]
+fn RevisionDiffCard(
+    repo_root: ReadSignal<String>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    loading: bool,
+    available: bool,
+    title: String,
+    empty: String,
+    icon: LineIcon,
+) -> Element {
+    let empty_path = use_signal(String::new);
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
             div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
-                LineIconView {
-                    icon: if branch_diff { LineIcon::GitBranch } else { LineIcon::GitCommit },
-                    class: "size-3.5 shrink-0 text-muted-foreground",
-                }
+                LineIconView { icon, class: "size-3.5 shrink-0 text-muted-foreground" }
                 span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{title}" }
             }
-            if !branch_diff && selected.is_none() {
-                div { class: "flex min-h-64 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground",
-                    {translate("git-no-commits")}
-                }
-            } else {
+            if available {
                 DiffView {
                     repo_root,
                     path: empty_path,
@@ -65,6 +98,8 @@ pub(super) fn CommitDiffCard(
                     loading,
                     visible: true,
                 }
+            } else {
+                div { class: "flex min-h-64 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground", "{empty}" }
             }
         }
     }
