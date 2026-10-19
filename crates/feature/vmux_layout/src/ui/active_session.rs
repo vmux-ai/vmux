@@ -172,7 +172,7 @@ fn ActiveWorkspaceProjectTree(
         translate("common-expand")
     };
     rsx! {
-        div { class: "min-w-0 overflow-hidden rounded-md bg-foreground/[0.035]",
+        div { class: "relative min-w-0 overflow-visible rounded-md bg-foreground/[0.035]",
             div { class: "flex min-w-0 flex-col gap-0.5 p-1",
                 Dropdown {
                     open: choosing(),
@@ -190,10 +190,10 @@ fn ActiveWorkspaceProjectTree(
                             class: "size-3.5 shrink-0".to_string(),
                         }
                         span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{root.label}" }
-                        LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                        LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
                     }
                     if choosing() {
-                        div { class: "absolute left-0 right-0 top-8 z-30 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
+                        div { class: "absolute left-0 right-0 top-8 z-50 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
                             for choice in project_choices.iter() {
                                 ActiveWorkspaceChoice {
                                     key: "{choice.path}",
@@ -239,10 +239,10 @@ fn ActiveWorkspaceProjectTree(
                                 onclick: move |_| choosing_branch.set(!choosing_branch()),
                                 LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                                 span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch}" }
-                                LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                                LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
                             }
                             if choosing_branch() {
-                                div { class: "absolute left-0 right-0 top-8 z-30 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
+                                div { class: "absolute left-0 right-0 top-8 z-50 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
                                     for branch in branch_choices {
                                         ActiveWorkspaceBranchChoice {
                                             key: "{branch.branch}",

@@ -223,7 +223,7 @@ fn SideSheetSpaceCard(
                 } else {
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
-                div { class: "min-h-0 overflow-hidden",
+                div { class: if expanded { "min-h-0 overflow-visible" } else { "min-h-0 overflow-hidden" },
                     if let Some(session) = active_session {
                         ActiveSessionPanel { session }
                     }
