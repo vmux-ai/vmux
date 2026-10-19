@@ -497,9 +497,15 @@ mod tests {
             MIN_FOREGROUND_CEF_WAKE_INTERVAL,
             "a faster panel must not make the app wake faster"
         );
+        #[cfg(target_os = "macos")]
         assert_eq!(
             WakePolicy::foreground_cef([Some(20_000)]),
-            MIN_FOREGROUND_CEF_WAKE_INTERVAL
+            Duration::from_millis(100)
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(
+            WakePolicy::foreground_cef([Some(20_000)]),
+            Duration::from_millis(50)
         );
         assert!(WakePolicy::foreground_cef([Some(5_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL);
         assert_eq!(
