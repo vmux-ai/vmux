@@ -104,7 +104,7 @@ pub fn PromptComposer(
                 PromptPopup {
                     placement: PromptPopupPlacement::Upward,
                     on_dismiss: move |_| add_menu_open.set(false),
-                    style: "width:14rem;",
+                    class: "max-w-56",
                     button {
                         r#type: "button",
                         class: PromptMenuRow::class(false),
