@@ -137,6 +137,12 @@ pub struct ProjectActivateRequest {
     pub pane_id: Option<u64>,
 }
 
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ProjectPickerRequest {
+    pub current_dir: String,
+    pub pane_id: Option<u64>,
+}
+
 #[vmux_api::ui_event(Eq)]
 pub struct ProjectForgetRequest {
     pub path: String,

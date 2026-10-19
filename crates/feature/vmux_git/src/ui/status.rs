@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_api::space::ProjectRow;
-use vmux_ecs::event::space::ProjectActivateRequest;
+use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::file_icon::TypeIcon;
@@ -34,6 +34,7 @@ pub(super) fn RepositoryHeader(
     let commit_pager = ListPager::use_state();
     let branch_total = repository.branches.len();
     let commit_total = repository.commits.len();
+    let project_picker_dir = repository.repo_root.clone();
     let root_projects = projects
         .into_iter()
         .filter(|project| project.depth == 0 && !project.missing)
@@ -95,6 +96,22 @@ pub(super) fn RepositoryHeader(
                                         }
                                     }
                                 }
+                            }
+                            if !root_projects.is_empty() {
+                                div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
+                            }
+                            button {
+                                r#type: "button",
+                                class: "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
+                                onclick: move |_| {
+                                    repository_open.set(false);
+                                    let _ = send(&ProjectPickerRequest {
+                                        current_dir: project_picker_dir.clone(),
+                                        pane_id: None,
+                                    });
+                                },
+                                LineIconView { icon: LineIcon::Plus, class: "size-4 shrink-0" }
+                                span { {translate("common-add")} }
                             }
                         }
                     }

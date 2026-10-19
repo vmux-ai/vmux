@@ -1,6 +1,9 @@
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
+use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
 use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::persistence::PersistenceAppExt;
@@ -23,6 +26,7 @@ impl Plugin for SpaceProjectPlugin {
         app.add_systems(Startup, spawn_repository_roots)
             .register_persisted::<ExpandedProjectDirs>()
             .add_observer(tree_toggle)
+            .add_observer(pick)
             .add_systems(
                 Update,
                 (
@@ -31,6 +35,7 @@ impl Plugin for SpaceProjectPlugin {
                         .in_set(WriteCommandBarSnapshots)
                         .after(remember),
                     publish_git_projects.after(remember),
+                    finish_picks,
                 ),
             );
     }
@@ -61,6 +66,82 @@ fn tree_toggle(
     let mut dirs = ExpandedProjectDirs::default();
     dirs.toggle(path);
     commands.entity(space).insert(dirs);
+}
+
+#[derive(Component)]
+struct PendingProjectPicker {
+    webview: Entity,
+    pane_id: Option<u64>,
+    task: Task<Option<std::path::PathBuf>>,
+}
+
+struct ProjectPicker;
+
+impl ProjectPicker {
+    fn initial_directory(path: &str) -> std::path::PathBuf {
+        let mut current = std::path::PathBuf::from(path.trim());
+        while !current.is_dir() && current.pop() {}
+        if current.is_dir() {
+            return current;
+        }
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .filter(|home| home.is_dir())
+            .unwrap_or_else(|| std::path::PathBuf::from("/"))
+    }
+}
+
+fn pick(
+    trigger: On<UiInput<ProjectPickerRequest>>,
+    pending: Query<&PendingProjectPicker>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    if pending.iter().any(|picker| picker.webview == event.webview) {
+        return;
+    }
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let initial = ProjectPicker::initial_directory(&event.payload.current_dir);
+    let task = IoTaskPool::get().spawn(async move {
+        let selected = rfd::AsyncFileDialog::new()
+            .set_title(vmux_ui::i18n::translate("agent-project-choose"))
+            .set_directory(initial)
+            .pick_folder()
+            .await
+            .map(|folder| folder.path().to_path_buf());
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        selected
+    });
+    commands.spawn(PendingProjectPicker {
+        webview: event.webview,
+        pane_id: event.payload.pane_id,
+        task,
+    });
+}
+
+fn finish_picks(mut pending: Query<(Entity, &mut PendingProjectPicker)>, mut commands: Commands) {
+    for (entity, mut picker) in &mut pending {
+        let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
+            continue;
+        };
+        if let Some(path) = selected.and_then(|path| path.canonicalize().ok())
+            && path.is_dir()
+        {
+            commands.trigger(UiInput {
+                webview: picker.webview,
+                payload: ProjectActivateRequest {
+                    path: path.to_string_lossy().into_owned(),
+                    branch: String::new(),
+                    checkout: String::new(),
+                    pane_id: picker.pane_id,
+                },
+            });
+        }
+        commands.entity(entity).despawn();
+    }
 }
 
 fn publish_roots(projects: SpaceProjects, mut roots: Single<&mut CommandBarProjectRoots>) {
@@ -514,6 +595,19 @@ mod tests {
                 .drain()
                 .count()
         }
+    }
+
+    #[test]
+    fn project_picker_starts_at_the_nearest_existing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let existing = root.path().join("projects");
+        std::fs::create_dir(&existing).unwrap();
+        let missing = existing.join("github.com/vmux-ai/vmux");
+
+        assert_eq!(
+            ProjectPicker::initial_directory(&missing.to_string_lossy()),
+            existing
+        );
     }
 
     #[test]

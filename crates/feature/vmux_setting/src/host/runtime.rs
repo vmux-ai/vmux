@@ -142,27 +142,28 @@ impl AppSettings {
     }
 
     pub fn project_rows(&self, space_id: &str) -> Vec<ProjectRow> {
-        if let Some(overrides) = space_override(self, space_id) {
-            let rows = overrides.project_rows();
-            if !rows.is_empty() {
-                return rows;
+        let mut rows = space_override(self, space_id)
+            .map(SpaceOverrides::project_rows)
+            .unwrap_or_default();
+        for project in &self.projects {
+            let in_use = project.in_use();
+            if rows.iter().any(|row| row.path == in_use) {
+                continue;
             }
-        }
-        self.projects
-            .iter()
-            .map(|project| ProjectRow {
-                path: project.in_use().to_string(),
+            rows.push(ProjectRow {
+                path: in_use.to_string(),
                 label: project.display_label().to_string(),
-                display_path: project.in_use().to_string(),
+                display_path: in_use.to_string(),
                 depth: 0,
                 is_active: false,
                 is_worktree: project.checkout.is_some(),
-                missing: !std::path::Path::new(project.in_use()).is_dir(),
+                missing: !std::path::Path::new(in_use).is_dir(),
                 branch: String::new(),
                 kind: ProjectRowKind::Project,
                 expanded: false,
-            })
-            .collect()
+            });
+        }
+        rows
     }
 
     pub fn workspace_dir(
@@ -2586,6 +2587,32 @@ mod tests {
         assert_eq!(rows[0].path, path);
         assert!(!rows[0].is_active);
         assert!(!rows[0].missing);
+    }
+
+    #[test]
+    fn an_existing_space_offers_known_projects_after_its_own_projects() {
+        let active = tempfile::tempdir().expect("active project");
+        let known = tempfile::tempdir().expect("known project");
+        let active_path = active.path().to_string_lossy().into_owned();
+        let known_path = known.path().to_string_lossy().into_owned();
+        let mut settings = base_settings();
+        settings.spaces.insert(
+            "work".to_string(),
+            SpaceOverrides {
+                projects: vec![SpaceProject::at(active_path.clone())],
+                active_project: Some(active_path.clone()),
+                ..Default::default()
+            },
+        );
+        settings.projects.push(SpaceProject::at(known_path.clone()));
+
+        let rows = settings.project_rows("work");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].path, active_path);
+        assert!(rows[0].is_active);
+        assert_eq!(rows[1].path, known_path);
+        assert!(!rows[1].is_active);
     }
 
     #[test]

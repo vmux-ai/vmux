@@ -37,10 +37,10 @@ use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
-    ProjectActivateRequest, ProjectForgetRequest, SpaceAttachRequest, SpaceCreateRequest,
-    SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest,
-    SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
-    SpacesUiState,
+    ProjectActivateRequest, ProjectForgetRequest, ProjectPickerRequest, SpaceAttachRequest,
+    SpaceCreateRequest, SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest,
+    SpaceFormOpenRequest, SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
+    SpacesListEvent, SpacesUiState,
 };
 use crate::model::SpaceRecord;
 use vmux_api::command_bar::{CommandBarPicker, OpenRequest as CommandBarOpenUrlRequest};
@@ -118,6 +118,7 @@ impl Plugin for SpacePlugin {
                 SpaceFormCloseRequest,
                 ProjectActivateRequest,
                 ProjectForgetRequest,
+                ProjectPickerRequest,
                 vmux_ecs::event::ProjectTreeToggle,
             )>::default(),
         ))

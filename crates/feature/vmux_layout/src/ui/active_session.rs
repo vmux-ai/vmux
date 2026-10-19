@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ecs::event::{ProjectBranch, ProjectRow, ProjectTreeToggle};
+use vmux_ecs::event::{ProjectBranch, ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
@@ -145,6 +145,7 @@ fn ActiveWorkspaceProjectTree(
     pane_id: u64,
 ) -> Element {
     let root = project.root;
+    let picker_root = root.path.clone();
     let choices = project.choices;
     let mut choosing = use_signal(|| false);
     let mut choosing_branch = use_signal(|| false);
@@ -173,42 +174,49 @@ fn ActiveWorkspaceProjectTree(
     rsx! {
         div { class: "min-w-0 overflow-hidden rounded-md bg-foreground/[0.035]",
             div { class: "flex h-8 min-w-0 items-center gap-1 px-2",
-                if project_choices.is_empty() {
-                    TypeIcon {
-                        path: root.path.clone(),
-                        is_dir: true,
-                        class: "size-3.5 shrink-0".to_string(),
-                    }
-                    span { class: "min-w-0 truncate text-[10px] font-medium text-foreground", title: "{root.display_path}", "{root.label}" }
-                } else {
-                    Dropdown {
-                        open: choosing(),
-                        class: "min-w-0".to_string(),
-                        on_dismiss: move |_| choosing.set(false),
-                        button {
-                            r#type: "button",
-                            class: "flex h-7 min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.055]",
-                            title: "{root.display_path}",
-                            aria_expanded: choosing(),
-                            onclick: move |_| choosing.set(!choosing()),
-                            TypeIcon {
-                                path: root.path.clone(),
-                                is_dir: true,
-                                class: "size-3.5 shrink-0".to_string(),
-                            }
-                            span { class: "min-w-0 truncate text-[10px] font-medium", "{root.label}" }
-                            LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                Dropdown {
+                    open: choosing(),
+                    class: "min-w-0".to_string(),
+                    on_dismiss: move |_| choosing.set(false),
+                    button {
+                        r#type: "button",
+                        class: "flex h-7 min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.055]",
+                        title: "{root.display_path}",
+                        aria_expanded: choosing(),
+                        onclick: move |_| choosing.set(!choosing()),
+                        TypeIcon {
+                            path: root.path.clone(),
+                            is_dir: true,
+                            class: "size-3.5 shrink-0".to_string(),
                         }
-                        if choosing() {
-                            div { class: "absolute left-0 top-8 z-30 max-h-64 min-w-56 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
-                                for choice in project_choices {
-                                    ActiveWorkspaceChoice {
-                                        key: "{choice.path}",
-                                        project: choice,
-                                        pane_id,
-                                        on_pick: move |_| choosing.set(false),
-                                    }
+                        span { class: "min-w-0 truncate text-[10px] font-medium", "{root.label}" }
+                        LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                    }
+                    if choosing() {
+                        div { class: "absolute left-0 top-8 z-30 max-h-64 min-w-56 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
+                            for choice in project_choices.iter() {
+                                ActiveWorkspaceChoice {
+                                    key: "{choice.path}",
+                                    project: choice.clone(),
+                                    pane_id,
+                                    on_pick: move |_| choosing.set(false),
                                 }
+                            }
+                            if !project_choices.is_empty() {
+                                div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
+                            }
+                            button {
+                                r#type: "button",
+                                class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+                                onclick: move |_| {
+                                    choosing.set(false);
+                                    let _ = send(&ProjectPickerRequest {
+                                        current_dir: picker_root.clone(),
+                                        pane_id,
+                                    });
+                                },
+                                LineIconView { icon: LineIcon::Plus, class: "size-3.5 shrink-0".to_string() }
+                                span { {translate("common-add")} }
                             }
                         }
                     }
