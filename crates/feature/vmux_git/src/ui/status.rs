@@ -264,6 +264,7 @@ pub(super) fn RepositoryPanelHeader(
     repository: GitRepositorySnapshot,
     focused_panel: GitPanel,
     fetching: bool,
+    can_stage_all: bool,
 ) -> Element {
     let branch_count =
         repository.branches.len() + repository.remote_branches.len() + repository.tags.len();
@@ -280,6 +281,22 @@ pub(super) fn RepositoryPanelHeader(
                     .first()
                     .map(|commit| commit.sha.clone())
                     .unwrap_or_default(),
+            }
+            if focused_panel == GitPanel::Files && repository.files.iter().any(|file| file.unstaged) {
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    class: "h-7 w-7 shrink-0 p-0 text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
+                    title: translate("git-stage-all"),
+                    aria_label: translate("git-stage-all"),
+                    disabled: !can_stage_all,
+                    onclick: {
+                        let path = repository.repo_root.clone();
+                        move |_| {
+                            let _ = send(&GitStageAllRequest { path: path.clone() });
+                        }
+                    },
+                    LineIconView { icon: LineIcon::Plus, class: "size-3.5" }
+                }
             }
             div { class: "ml-auto flex shrink-0 items-center gap-2",
                 if fetching {

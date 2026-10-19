@@ -16,8 +16,8 @@ use vmux_ui::icon::{
 };
 
 use crate::event::{
-    ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, TabBoundary,
-    WorkspaceBranch,
+    ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, SideSheetSectionRequest,
+    TabBoundary, WorkspaceBranch,
 };
 
 #[component]
@@ -147,11 +147,11 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
         project_dir,
         branch: current_branch,
         branches,
+        expanded,
     } = project;
     let picker_root = root.path.clone();
     let mut choosing = use_signal(|| false);
     let mut choosing_branch = use_signal(|| false);
-    let mut expanded = use_signal(|| true);
     let current_branch_label = if current_branch.is_empty() {
         "HEAD".to_string()
     } else {
@@ -165,7 +165,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
         .into_iter()
         .filter(|choice| !choice.is_active)
         .collect::<Vec<_>>();
-    let toggle_label = if expanded() {
+    let toggle_label = if expanded {
         translate("common-collapse")
     } else {
         translate("common-expand")
@@ -179,7 +179,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     on_dismiss: move |_| choosing.set(false),
                     button {
                         r#type: "button",
-                        class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-foreground hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+                        class: "group flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-foreground hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                         title: "{root.display_path}",
                         aria_expanded: choosing(),
                         onclick: move |_| choosing.set(!choosing()),
@@ -189,7 +189,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             class: "size-3.5 shrink-0".to_string(),
                         }
                         span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{root.label}" }
-                        LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                        LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                     }
                     if choosing() {
                         div { class: "absolute left-0 right-0 top-8 z-50 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
@@ -233,13 +233,13 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             on_dismiss: move |_| choosing_branch.set(false),
                             button {
                                 r#type: "button",
-                                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+                                class: "group flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                                 title: "{current_branch_label}",
                                 aria_expanded: choosing_branch(),
                                 onclick: move |_| choosing_branch.set(!choosing_branch()),
                                 LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                                 span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch_label}" }
-                                LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                                LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                             }
                             if choosing_branch() {
                                 div { class: "absolute left-0 right-0 top-8 z-50 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
@@ -263,13 +263,19 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85", {translate("git-files")} }
                 div { class: "shrink-0",
                     SheetHeaderChevron {
-                        expanded: expanded(),
+                        expanded,
                         label: toggle_label,
-                        onclick: move |_| expanded.set(!expanded()),
+                        onclick: move |_| {
+                            let _ = send(&SideSheetSectionRequest::new(
+                                pane_id,
+                                "projects",
+                                !expanded,
+                            ));
+                        },
                     }
                 }
             }
-            div { class: if expanded() {
+            div { class: if expanded {
                     "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 } else {
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"

@@ -774,6 +774,8 @@ pub struct ActiveWorkspaceProject {
     pub project_dir: String,
     pub branch: String,
     pub branches: Vec<WorkspaceBranch>,
+    #[serde(default)]
+    pub expanded: bool,
 }
 
 #[vmux_api::contract(Default)]

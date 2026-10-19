@@ -49,6 +49,7 @@ pub(super) fn GitDashboard() -> Element {
                         repository: repository.clone(),
                         focused_panel: active_panel,
                         fetching: ui.fetching,
+                        can_stage_all: controller_state.operations.stage_all,
                     }
                     div { class: "min-h-0 flex-1 overflow-hidden",
                         if active_panel == GitPanel::Files {

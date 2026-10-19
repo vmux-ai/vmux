@@ -16,6 +16,7 @@ use crate::event::{
     PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
     StackRevealTarget, TabBoundaryState, TabListState, TabStripRow, TabStripState,
 };
+use crate::side_sheet::{SideSheetSections, SideSheetSectionsExpanded};
 use crate::state::LayoutUiState;
 
 pub struct LayoutUiProjectionPlugin;
@@ -280,6 +281,7 @@ impl ActiveWorkspaceProject {
             branches: boundary
                 .map(|_| projects.branches.clone())
                 .unwrap_or_default(),
+            expanded: false,
         })
     }
 }
@@ -596,6 +598,9 @@ fn publish_active_session(
         ),
         With<LayoutCef>,
     >,
+    sections: SideSheetSections,
+    changed_sections: Query<(), Changed<SideSheetSectionsExpanded>>,
+    mut removed_sections: RemovedComponents<SideSheetSectionsExpanded>,
     mut sessions: SessionProjection,
     mut last: Local<std::collections::HashMap<Entity, ActiveSessionState>>,
     mut commands: Commands,
@@ -604,11 +609,16 @@ fn publish_active_session(
     let empty_projects = TabBoundaryState::default();
     let empty_team = TeamUiState::default();
     let sessions_changed = sessions.is_changed();
+    let sections_changed = !changed_sections.is_empty() || removed_sections.read().next().is_some();
     for (entity, panes, projects, team) in &layouts {
         let projection_changed = panes.as_ref().is_some_and(|value| value.is_changed())
             || projects.as_ref().is_some_and(|value| value.is_changed())
             || team.as_ref().is_some_and(|value| value.is_changed());
-        if last.contains_key(&entity) && !sessions_changed && !projection_changed {
+        if last.contains_key(&entity)
+            && !sessions_changed
+            && !projection_changed
+            && !sections_changed
+        {
             continue;
         }
         let panes = panes
@@ -625,6 +635,9 @@ fn publish_active_session(
             .unwrap_or(&empty_team);
         let session = ActiveSession::from_projections(panes, projects, team).map(|mut active| {
             active.task = sessions.task(&active.page);
+            if let Some(project) = active.project.as_mut() {
+                project.expanded = sections.under(Entity::from_bits(active.pane_id)).projects;
+            }
             active
         });
         let event = ActiveSessionState { session };

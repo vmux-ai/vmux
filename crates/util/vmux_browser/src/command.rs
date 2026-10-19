@@ -1276,13 +1276,15 @@ mod tests {
     }
 
     #[test]
-    fn an_expanded_card_stays_expanded_on_another_tab_of_the_same_space() {
+    fn files_start_closed_and_stay_expanded_across_pages() {
         let mut spaces = SideSheetSpaces::start();
-        spaces.expand("bookmarks");
+        let first_pane = spaces.pane_in_first_tab;
+        assert!(!spaces.sections_under(first_pane).projects);
+        spaces.expand("projects");
 
         let second_tab = spaces.second_tab;
         assert!(
-            spaces.sections_under(second_tab).bookmarks,
+            spaces.sections_under(second_tab).projects,
             "a card is expanded for the whole space, so switching tab must not fold it"
         );
     }
