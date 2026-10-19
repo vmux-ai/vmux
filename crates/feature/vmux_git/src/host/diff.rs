@@ -9,7 +9,7 @@ use crate::state::{GitPageControllerState, GitPanel};
 
 use super::GitUpdateSet;
 use super::job::{DiffJob, DiffScope};
-use super::job_runner::{GitJob, GitJobRunning, GitJobs};
+use super::job_runner::{GitJob, QueuedGitJobs};
 use super::repository::GitRepository;
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
@@ -218,8 +218,7 @@ fn start_requests(
         &mut super::state::GitDiffRevealRanges,
     )>,
     mut files: super::status::FileGitStates,
-    queues: Query<&GitJobs>,
-    queued_diffs: Query<(), (With<DiffJob>, Without<GitJobRunning>)>,
+    queued_diffs: QueuedGitJobs<DiffJob>,
     mut commands: Commands,
 ) {
     for (entity, pending, current, source) in &pending {
@@ -246,13 +245,7 @@ fn start_requests(
         let content = source
             .filter(|source| source.dirty)
             .map(|source| source.content.clone());
-        if let Ok(queue) = queues.get(entity) {
-            for job in queue.entities() {
-                if queued_diffs.contains(job) {
-                    commands.entity(job).despawn();
-                }
-            }
-        }
+        queued_diffs.despawn_for(entity, &mut commands);
         commands
             .entity(entity)
             .remove::<PendingGitDiff>()

@@ -872,7 +872,10 @@ fn push_projects_host_emit(
                 continue;
             }
             let path = std::path::Path::new(&row.path);
-            let info = row.is_active.then(|| cache.observe(cef_e, path)).flatten();
+            let info = row
+                .is_active
+                .then(|| cache.observe_active(cef_e, path))
+                .flatten();
             if let Some(info) = info {
                 row.branch = info.branch.clone();
                 if row.is_active {

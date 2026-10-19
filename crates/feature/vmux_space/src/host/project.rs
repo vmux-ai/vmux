@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
@@ -25,6 +27,7 @@ impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_repository_roots)
             .init_resource::<ActiveProjectRows>()
+            .init_resource::<ActiveProjectScan>()
             .register_persisted::<ExpandedProjectDirs>()
             .add_observer(tree_toggle)
             .add_observer(pick)
@@ -153,16 +156,62 @@ struct ActiveProjectRows {
     rows: Vec<ProjectRow>,
 }
 
-fn refresh_active_projects(projects: SpaceProjects, mut active: ResMut<ActiveProjectRows>) {
-    let space = projects.active_space.id().map(str::to_string);
-    if active.space == space && !projects.settings_changed() {
+type ActiveProjectScanResult = (Option<String>, Vec<ProjectRow>);
+
+#[derive(Resource, Default)]
+struct ActiveProjectScan {
+    task: Option<Task<ActiveProjectScanResult>>,
+    requested: bool,
+    scanned_at: Option<Instant>,
+}
+
+const PROJECT_ROWS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+fn refresh_active_projects(
+    projects: SpaceProjects,
+    mut active: ResMut<ActiveProjectRows>,
+    mut scan: ResMut<ActiveProjectScan>,
+) {
+    let space = projects.active_space.id();
+    if let Some(task) = scan.task.as_mut()
+        && let Some((scanned_space, rows)) = future::block_on(future::poll_once(task))
+    {
+        scan.task = None;
+        scan.scanned_at = Some(Instant::now());
+        if scanned_space.as_deref() == space
+            && (active.space != scanned_space || active.rows != rows)
+        {
+            active.space = scanned_space;
+            active.rows = rows;
+        }
+    }
+    let now = Instant::now();
+    let scan_due = scan
+        .scanned_at
+        .as_ref()
+        .is_none_or(|last| now.duration_since(*last) >= PROJECT_ROWS_REFRESH_INTERVAL);
+    scan.requested |= active.space.as_deref() != space
+        || projects.settings_changed()
+        || (scan.task.is_none() && scan_due);
+    if scan.task.is_some() || !scan.requested {
         return;
     }
-    active.space = space;
-    active.rows = projects.active_projects();
+    scan.requested = false;
+    let space = space.map(str::to_string);
+    let settings = projects.settings.as_deref().cloned();
+    scan.task = Some(IoTaskPool::get().spawn(async move {
+        let rows = match (space.as_deref(), settings.as_ref()) {
+            (Some(space), Some(settings)) => settings.project_rows(space),
+            _ => Vec::new(),
+        };
+        (space, rows)
+    }));
 }
 
 fn publish_roots(projects: Res<ActiveProjectRows>, mut roots: Single<&mut CommandBarProjectRoots>) {
+    if !projects.is_changed() {
+        return;
+    }
     let mut next = Vec::new();
     let mut active = None;
     for project in &projects.rows {
@@ -192,10 +241,14 @@ fn publish_git_projects(
     mut commands: Commands,
 ) {
     let rows = &projects.rows;
+    let changed = projects.is_changed();
     for (entity, page, current) in &views {
         if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
             && page.url != vmux_git::GitPlugin::MANIFEST.url
         {
+            continue;
+        }
+        if !changed && current.is_some() {
             continue;
         }
         if current.is_some_and(|current| current.0.as_slice() == rows.as_slice()) {

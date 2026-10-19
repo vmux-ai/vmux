@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use super::GitUpdateSet;
@@ -45,7 +46,7 @@ fn initialize(world: &mut World) {
         let Ok(event) = result else {
             return;
         };
-        let _ = tx.send(event.paths);
+        tx.send(event.paths);
     }) {
         Ok(watcher) => {
             world.insert_non_send(GitWatch {
@@ -53,7 +54,6 @@ fn initialize(world: &mut World) {
                 rx: events.receiver,
                 watch_references: HashMap::new(),
                 subscriptions: HashMap::new(),
-                page_subscriptions: HashSet::new(),
                 repo_info_subscriptions: HashMap::new(),
             });
         }
@@ -89,7 +89,14 @@ enum GitWatchKind {
     Metadata,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GitSubscriptionKind {
+    Page,
+    File,
+}
+
 struct GitSubscription {
+    kind: GitSubscriptionKind,
     path: PathBuf,
     repo_root: PathBuf,
     targets: Vec<GitWatchTarget>,
@@ -101,7 +108,6 @@ pub(super) struct GitWatch {
     rx: mpsc::Receiver<GitWatchBatch>,
     watch_references: HashMap<GitWatchTarget, usize>,
     subscriptions: HashMap<Entity, GitSubscription>,
-    page_subscriptions: HashSet<Entity>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
 }
 
@@ -292,6 +298,8 @@ impl RepoInfoCache {
 }
 
 const WATCH_EVENT_LIMIT: usize = 256;
+const WATCH_INPUT_CAPACITY: usize = 64;
+const WATCH_OUTPUT_CAPACITY: usize = 1;
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
 const WATCH_MAX_LATENCY: Duration = Duration::from_secs(2);
 const WATCH_TARGET_LIMIT: usize = 128;
@@ -321,17 +329,45 @@ impl GitWatchBatch {
     fn is_empty(&self) -> bool {
         !self.overflow && self.paths.is_empty()
     }
+
+    fn mark_overflow(&mut self) {
+        self.paths.clear();
+        self.overflow = true;
+    }
+}
+
+#[derive(Clone)]
+struct GitWatchSender {
+    sender: mpsc::SyncSender<Vec<PathBuf>>,
+    overflow: Arc<AtomicBool>,
+}
+
+impl GitWatchSender {
+    fn send(&self, mut paths: Vec<PathBuf>) {
+        if paths.len() > WATCH_EVENT_LIMIT {
+            paths.clear();
+            self.overflow.store(true, Ordering::Release);
+        }
+        match self.sender.try_send(paths) {
+            Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                self.overflow.store(true, Ordering::Release);
+            }
+        }
+    }
 }
 
 struct GitWatchEvents {
-    sender: mpsc::Sender<Vec<PathBuf>>,
+    sender: GitWatchSender,
     receiver: mpsc::Receiver<GitWatchBatch>,
 }
 
 impl GitWatchEvents {
     fn start(proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
-        let (input_tx, input_rx) = mpsc::channel::<Vec<PathBuf>>();
-        let (output_tx, output_rx) = mpsc::channel::<GitWatchBatch>();
+        let (input_tx, input_rx) = mpsc::sync_channel::<Vec<PathBuf>>(WATCH_INPUT_CAPACITY);
+        let (output_tx, output_rx) = mpsc::sync_channel::<GitWatchBatch>(WATCH_OUTPUT_CAPACITY);
+        let overflow = Arc::new(AtomicBool::new(false));
+        let worker_overflow = Arc::clone(&overflow);
         let worker = std::thread::Builder::new()
             .name("vmux-git-watch-debounce".to_string())
             .spawn(move || {
@@ -339,6 +375,9 @@ impl GitWatchEvents {
                     let started = Instant::now();
                     let mut batch = GitWatchBatch::default();
                     batch.extend(paths);
+                    if worker_overflow.swap(false, Ordering::AcqRel) {
+                        batch.mark_overflow();
+                    }
                     let mut disconnected = false;
                     while let Some(remaining) = WATCH_MAX_LATENCY.checked_sub(started.elapsed()) {
                         let timeout = WATCH_DEBOUNCE.min(remaining);
@@ -350,6 +389,12 @@ impl GitWatchEvents {
                                 break;
                             }
                         }
+                        if worker_overflow.swap(false, Ordering::AcqRel) {
+                            batch.mark_overflow();
+                        }
+                    }
+                    if worker_overflow.swap(false, Ordering::AcqRel) {
+                        batch.mark_overflow();
                     }
                     if !batch.is_empty() {
                         if output_tx.send(batch).is_err() {
@@ -368,7 +413,10 @@ impl GitWatchEvents {
             bevy::log::warn!("git watch debounce init failed: {error}");
         }
         Self {
-            sender: input_tx,
+            sender: GitWatchSender {
+                sender: input_tx,
+                overflow,
+            },
             receiver: output_rx,
         }
     }
@@ -546,17 +594,19 @@ impl GitWatch {
         }
     }
 
-    pub(super) fn subscribe(
+    fn subscribe(
         &mut self,
         entity: Entity,
         path: &Path,
+        kind: GitSubscriptionKind,
     ) -> Result<PathBuf, super::repository::GitError> {
         let path = PathIdentity::resolve(path).into_path_buf();
         if let Some(subscription) = self
             .subscriptions
-            .get(&entity)
+            .get_mut(&entity)
             .filter(|subscription| subscription.path == path && subscription.complete)
         {
+            subscription.kind = kind;
             return Ok(subscription.repo_root.clone());
         }
         let (repo_root, targets) = match GitWatchTarget::for_checkout(&path) {
@@ -572,6 +622,7 @@ impl GitWatch {
         let previous = self.subscriptions.insert(
             entity,
             GitSubscription {
+                kind,
                 path,
                 repo_root: repo_root.clone(),
                 targets,
@@ -584,18 +635,23 @@ impl GitWatch {
         Ok(repo_root)
     }
 
+    pub(super) fn subscribe_file(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Result<PathBuf, super::repository::GitError> {
+        self.subscribe(entity, path, GitSubscriptionKind::File)
+    }
+
     pub(super) fn subscribe_page(
         &mut self,
         entity: Entity,
         path: &Path,
     ) -> Result<PathBuf, super::repository::GitError> {
-        let repo_root = self.subscribe(entity, path)?;
-        self.page_subscriptions.insert(entity);
-        Ok(repo_root)
+        self.subscribe(entity, path, GitSubscriptionKind::Page)
     }
 
     pub(super) fn release_subscription(&mut self, entity: Entity) {
-        self.page_subscriptions.remove(&entity);
         let Some(subscription) = self.subscriptions.remove(&entity) else {
             return;
         };
@@ -725,7 +781,6 @@ impl GitWatch {
             rx,
             watch_references: HashMap::new(),
             subscriptions: HashMap::new(),
-            page_subscriptions: HashSet::new(),
             repo_info_subscriptions: HashMap::new(),
         }
     }
@@ -740,16 +795,31 @@ fn sync_page_subscriptions(
     watch: Option<NonSendMut<GitWatch>>,
     pages: Query<(Entity, &super::state::GitState, Has<KeyboardOwner>)>,
     activated: Query<(Entity, &super::state::GitState), Added<KeyboardOwner>>,
+    files: Query<(), With<super::status::FileGit>>,
+    mut removed_files: RemovedComponents<super::status::FileGit>,
     mut commands: Commands,
 ) {
     let Some(mut watch) = watch else {
         return;
     };
+    for entity in removed_files.read() {
+        if !files.contains(entity)
+            && watch
+                .subscriptions
+                .get(&entity)
+                .is_some_and(|subscription| subscription.kind == GitSubscriptionKind::File)
+        {
+            watch.release_subscription(entity);
+        }
+    }
     let inactive = watch
-        .page_subscriptions
+        .subscriptions
         .iter()
-        .filter(|entity| pages.get(**entity).map_or(true, |(_, _, active)| !active))
-        .copied()
+        .filter_map(|(entity, subscription)| {
+            (subscription.kind == GitSubscriptionKind::Page
+                && pages.get(*entity).map_or(true, |(_, _, active)| !active))
+            .then_some(*entity)
+        })
         .collect::<Vec<_>>();
     for entity in inactive {
         watch.release_subscription(entity);
@@ -1044,7 +1114,7 @@ mod tests {
         let entity = Entity::from_bits(1);
         let mut watch = GitWatch::test();
 
-        watch.subscribe(entity, &first_file).unwrap();
+        watch.subscribe_file(entity, &first_file).unwrap();
         assert!(watch.subscribe_repo_info(first.path(), Some(&first_info)));
         assert!(first_targets.iter().all(|target| {
             watch
@@ -1053,7 +1123,7 @@ mod tests {
                 .is_some_and(|references| *references == 2)
         }));
 
-        watch.subscribe(entity, &second_file).unwrap();
+        watch.subscribe_file(entity, &second_file).unwrap();
 
         assert!(first_targets.iter().all(|target| {
             watch
@@ -1103,6 +1173,22 @@ mod tests {
 
         assert!(batch.overflow);
         assert!(batch.paths.is_empty());
+    }
+
+    #[test]
+    fn bounded_watch_sender_marks_overflow_when_full() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let overflow = Arc::new(AtomicBool::new(false));
+        let watch_sender = GitWatchSender {
+            sender,
+            overflow: Arc::clone(&overflow),
+        };
+
+        watch_sender.send(vec![PathBuf::from("/tmp/first")]);
+        watch_sender.send(vec![PathBuf::from("/tmp/second")]);
+
+        assert_eq!(receiver.recv().unwrap(), vec![PathBuf::from("/tmp/first")]);
+        assert!(overflow.load(Ordering::Acquire));
     }
 
     #[test]
@@ -1276,12 +1362,68 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, sync_page_subscriptions);
         app.insert_non_send(GitWatch::test());
-        let editor = app.world_mut().spawn_empty().id();
+        let editor = app
+            .world_mut()
+            .spawn(super::super::status::FileGit::new(&file, 1))
+            .id();
         app.world_mut()
             .non_send_mut::<GitWatch>()
-            .subscribe(editor, &file)
+            .subscribe_file(editor, &file)
             .unwrap();
 
+        app.update();
+
+        assert!(app.world().non_send::<GitWatch>().has_subscription(editor));
+    }
+
+    #[test]
+    fn file_cleanup_releases_editor_subscription() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_page_subscriptions);
+        app.insert_non_send(GitWatch::test());
+        let editor = app
+            .world_mut()
+            .spawn(super::super::status::FileGit::new(&file, 1))
+            .id();
+        app.world_mut()
+            .non_send_mut::<GitWatch>()
+            .subscribe_file(editor, &file)
+            .unwrap();
+
+        app.update();
+        app.world_mut()
+            .entity_mut(editor)
+            .remove::<super::super::status::FileGit>();
+        app.update();
+
+        assert!(!app.world().non_send::<GitWatch>().has_subscription(editor));
+    }
+
+    #[test]
+    fn file_replacement_keeps_editor_subscription() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_page_subscriptions);
+        app.insert_non_send(GitWatch::test());
+        let editor = app
+            .world_mut()
+            .spawn(super::super::status::FileGit::new(&file, 1))
+            .id();
+        app.world_mut()
+            .non_send_mut::<GitWatch>()
+            .subscribe_file(editor, &file)
+            .unwrap();
+
+        app.update();
+        app.world_mut()
+            .entity_mut(editor)
+            .remove::<super::super::status::FileGit>()
+            .insert(super::super::status::FileGit::new(&file, 2));
         app.update();
 
         assert!(app.world().non_send::<GitWatch>().has_subscription(editor));

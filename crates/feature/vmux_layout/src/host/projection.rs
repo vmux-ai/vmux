@@ -339,6 +339,8 @@ impl ActiveSession {
 #[derive(SystemParam)]
 struct SessionProjection<'w, 's> {
     targets: Query<'w, 's, &'static EntityTarget<Session>>,
+    session_entities: Query<'w, 's, (), With<Session>>,
+    stage_entities: Query<'w, 's, (), With<StageDefinition>>,
     sessions: Query<
         'w,
         's,
@@ -383,14 +385,31 @@ impl SessionProjection<'_, '_> {
         let mut changed = !self.changed_targets.is_empty()
             || !self.changed_sessions.is_empty()
             || !self.changed_stages.is_empty();
-        changed |= self.removed_targets.read().next().is_some();
-        changed |= self.removed_sessions.read().next().is_some();
-        changed |= self.removed_names.read().next().is_some();
-        changed |= self.removed_descriptions.read().next().is_some();
-        changed |= self.removed_stages.read().next().is_some();
-        changed |= self.removed_states.read().next().is_some();
-        changed |= self.removed_stage_definitions.read().next().is_some();
-        changed |= self.removed_stage_ids.read().next().is_some();
+        changed |= Self::drain_removed(&mut self.removed_targets);
+        changed |= Self::drain_removed(&mut self.removed_sessions);
+        changed |= Self::drain_removed(&mut self.removed_stage_definitions);
+        for entity in self.removed_names.read() {
+            changed |=
+                self.session_entities.contains(entity) || self.stage_entities.contains(entity);
+        }
+        for entity in self.removed_descriptions.read() {
+            changed |= self.session_entities.contains(entity);
+        }
+        for entity in self.removed_stages.read() {
+            changed |= self.session_entities.contains(entity);
+        }
+        for entity in self.removed_states.read() {
+            changed |= self.session_entities.contains(entity);
+        }
+        for entity in self.removed_stage_ids.read() {
+            changed |= self.stage_entities.contains(entity);
+        }
+        changed
+    }
+
+    fn drain_removed<T: Component>(removed: &mut RemovedComponents<T>) -> bool {
+        let changed = !removed.is_empty();
+        removed.clear();
         changed
     }
 
@@ -876,6 +895,25 @@ mod tests {
         assert_eq!(
             app.world().resource::<SessionProjectionChanges>().0,
             initial + 3
+        );
+    }
+
+    #[test]
+    fn session_projection_ignores_unrelated_component_removal() {
+        let mut app = App::new();
+        app.init_resource::<SessionProjectionChanges>()
+            .add_systems(Update, count_changes);
+        let unrelated = app.world_mut().spawn(Name::new("Unrelated")).id();
+
+        app.update();
+        let initial = app.world().resource::<SessionProjectionChanges>().0;
+        app.world_mut().despawn(unrelated);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SessionProjectionChanges>().0,
+            initial
         );
     }
 

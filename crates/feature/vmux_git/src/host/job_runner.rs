@@ -94,11 +94,24 @@ impl GitJob {
 pub(super) struct GitJobs(Vec<Entity>);
 
 #[derive(Component)]
-pub(super) struct GitJobRunning;
+struct GitJobRunning;
 
-impl GitJobs {
-    pub(super) fn entities(&self) -> impl Iterator<Item = Entity> + '_ {
-        self.0.iter().copied()
+#[derive(SystemParam)]
+pub(super) struct QueuedGitJobs<'w, 's, J: Component> {
+    queues: Query<'w, 's, &'static GitJobs>,
+    queued: Query<'w, 's, (), (With<J>, Without<GitJobRunning>)>,
+}
+
+impl<J: Component> QueuedGitJobs<'_, '_, J> {
+    pub(super) fn despawn_for(&self, webview: Entity, commands: &mut Commands) {
+        let Ok(queue) = self.queues.get(webview) else {
+            return;
+        };
+        for entity in queue.iter() {
+            if self.queued.contains(entity) {
+                commands.entity(entity).despawn();
+            }
+        }
     }
 }
 

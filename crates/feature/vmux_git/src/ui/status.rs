@@ -45,10 +45,10 @@ pub(super) fn RepositoryHeader(
         .map(|commit| commit.summary.clone())
         .unwrap_or_default();
     let project_picker_dir = repository.repo_root.clone();
-    let current_project = projects
+    let current_is_worktree = projects
         .iter()
         .find(|project| project.path == repository.repo_root)
-        .cloned();
+        .map(|project| project.is_worktree);
     let root_projects = projects
         .into_iter()
         .filter(|project| project.depth == 0 && !project.missing)
@@ -70,8 +70,8 @@ pub(super) fn RepositoryHeader(
                             class: "size-4 shrink-0 text-muted-foreground".to_string(),
                         }
                         span { class: "min-w-0 truncate", "{repository.repo_name}" }
-                        if let Some(project) = current_project.as_ref() {
-                            ProjectKindPill { is_worktree: project.is_worktree }
+                        if let Some(is_worktree) = current_is_worktree {
+                            ProjectKindPill { is_worktree }
                         }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground" }
                     }

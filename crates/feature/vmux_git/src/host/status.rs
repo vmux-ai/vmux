@@ -488,7 +488,7 @@ fn poll_refreshes(
             continue;
         }
         let repo_root = if let Some(watch) = watch.as_deref_mut() {
-            watch.subscribe(entity, &path)
+            watch.subscribe_file(entity, &path)
         } else {
             GitRepository::discover(&path).map(|repository| repository.path().to_path_buf())
         };

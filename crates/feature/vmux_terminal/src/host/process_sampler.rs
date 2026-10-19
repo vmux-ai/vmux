@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 
@@ -20,10 +21,51 @@ pub(super) struct LocalProcess {
     pub uptime_secs: u64,
 }
 
+const DISCOVERY_POLL_INTERVAL_SECONDS: f32 = 300.0;
+const DISCOVERY_REQUEST_MIN_INTERVAL: Duration = Duration::from_secs(2);
+const PROCESS_TREE_LIMIT: usize = 4096;
+
+struct DiscoveryGate {
+    poll: Timer,
+    requested: bool,
+    last: Option<Instant>,
+}
+
+impl Default for DiscoveryGate {
+    fn default() -> Self {
+        Self {
+            poll: Timer::from_seconds(DISCOVERY_POLL_INTERVAL_SECONDS, TimerMode::Repeating),
+            requested: false,
+            last: None,
+        }
+    }
+}
+
+impl DiscoveryGate {
+    fn tick(&mut self, delta: Duration, requested: bool) {
+        self.poll.tick(delta);
+        self.requested |= requested || self.poll.just_finished();
+    }
+
+    fn due(&self, undiscovered: bool) -> bool {
+        undiscovered
+            || (self.requested
+                && self
+                    .last
+                    .is_none_or(|last| last.elapsed() >= DISCOVERY_REQUEST_MIN_INTERVAL))
+    }
+
+    fn finish(&mut self) {
+        self.poll.reset();
+        self.requested = false;
+        self.last = Some(Instant::now());
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub(super) struct ProcessSampler {
     sample_poll: Timer,
-    discovery_poll: Timer,
+    discovery: DiscoveryGate,
     discovered: bool,
     local: HashMap<u32, MacLocalProcess>,
     counters: HashMap<u32, ProcessCounter>,
@@ -34,7 +76,7 @@ impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
             sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
-            discovery_poll: Timer::from_seconds(300.0, TimerMode::Repeating),
+            discovery: DiscoveryGate::default(),
             discovered: false,
             local: HashMap::new(),
             counters: HashMap::new(),
@@ -52,12 +94,13 @@ impl ProcessSampler {
         service_roots: impl IntoIterator<Item = u32>,
     ) -> Option<ProcessSnapshot> {
         self.sample_poll.tick(delta);
-        self.discovery_poll.tick(delta);
+        self.discovery.tick(delta, rediscover);
         if !immediate && !self.sample_poll.just_finished() {
             return None;
         }
-        if rediscover || !self.discovered || self.discovery_poll.just_finished() {
+        if self.discovery.due(!self.discovered) {
             self.discover();
+            self.discovery.finish();
         }
         self.sample_poll.reset();
         Some(self.snapshot(service_roots))
@@ -65,15 +108,15 @@ impl ProcessSampler {
 
     fn discover(&mut self) {
         self.discovered = true;
-        self.discovery_poll.reset();
         self.local.clear();
+        let mut executable_buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
         for pid in MacProcess::all() {
             let Some(process) = MacProcess::new(pid) else {
                 continue;
             };
             let name = process.name();
-            let executable = process.executable();
-            if LocalProcess::matches(&name, &executable) {
+            let executable = process.executable(&mut executable_buffer);
+            if LocalProcess::matches(&name, executable) {
                 self.local
                     .insert(pid, MacLocalProcess::read(&process, executable));
             }
@@ -87,6 +130,10 @@ impl ProcessSampler {
         let mut pending = pids.iter().copied().collect::<Vec<_>>();
         while let Some(pid) = pending.pop() {
             for child in MacProcess::children(pid) {
+                if pids.len() >= PROCESS_TREE_LIMIT {
+                    pending.clear();
+                    break;
+                }
                 if pids.insert(child) {
                     pending.push(child);
                 }
@@ -143,13 +190,13 @@ struct MacLocalProcess {
 
 #[cfg(target_os = "macos")]
 impl MacLocalProcess {
-    fn read(process: &MacProcess, executable: String) -> Self {
+    fn read(process: &MacProcess, executable: &str) -> Self {
         Self {
             started_at: process.started_at(),
             shell: if executable.is_empty() {
                 process.name()
             } else {
-                executable
+                executable.to_string()
             },
             cwd: process.cwd(),
         }
@@ -281,8 +328,7 @@ impl MacProcess {
         }
     }
 
-    fn executable(&self) -> String {
-        let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    fn executable<'a>(&self, buffer: &'a mut [u8]) -> &'a str {
         let read = unsafe {
             libc::proc_pidpath(
                 self.pid as i32,
@@ -291,10 +337,9 @@ impl MacProcess {
             )
         };
         if read <= 0 {
-            return String::new();
+            return "";
         }
-        buffer.truncate(read as usize);
-        String::from_utf8_lossy(&buffer).into_owned()
+        std::str::from_utf8(&buffer[..read as usize]).unwrap_or_default()
     }
 
     fn cwd(&self) -> String {
@@ -343,7 +388,7 @@ fn unix_time() -> u64 {
 #[cfg(not(target_os = "macos"))]
 pub(super) struct ProcessSampler {
     sample_poll: Timer,
-    discovery_poll: Timer,
+    discovery: DiscoveryGate,
     system: sysinfo::System,
 }
 
@@ -352,7 +397,7 @@ impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
             sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
-            discovery_poll: Timer::from_seconds(300.0, TimerMode::Repeating),
+            discovery: DiscoveryGate::default(),
             system: sysinfo::System::new(),
         }
     }
@@ -368,17 +413,17 @@ impl ProcessSampler {
         service_roots: impl IntoIterator<Item = u32>,
     ) -> Option<ProcessSnapshot> {
         self.sample_poll.tick(delta);
-        self.discovery_poll.tick(delta);
+        self.discovery.tick(delta, rediscover);
         if !immediate && !self.sample_poll.just_finished() {
             return None;
         }
-        if rediscover || self.system.processes().is_empty() || self.discovery_poll.just_finished() {
-            self.discovery_poll.reset();
+        if self.discovery.due(self.system.processes().is_empty()) {
             self.system.refresh_processes_specifics(
                 sysinfo::ProcessesToUpdate::All,
                 true,
                 sysinfo::ProcessRefreshKind::nothing(),
             );
+            self.discovery.finish();
         }
         self.sample_poll.reset();
         let monitored = MonitoredProcesses::new(&self.system, service_roots);
@@ -429,6 +474,10 @@ impl MonitoredProcesses {
                 continue;
             };
             for child in descendants {
+                if selected.len() >= PROCESS_TREE_LIMIT {
+                    pending.clear();
+                    break;
+                }
                 if selected.insert(*child) {
                     pending.push(*child);
                 }
@@ -486,17 +535,40 @@ impl MonitoredProcesses {
 
 impl LocalProcess {
     fn matches(name: &str, executable: &str) -> bool {
-        if name.to_ascii_lowercase().contains("vmux") {
-            return true;
-        }
         let executable_name = executable.rsplit('/').next().unwrap_or(executable);
-        executable_name.to_ascii_lowercase().contains("vmux")
+        Self::matches_name(name) || Self::matches_name(executable_name)
+    }
+
+    fn matches_name(name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        matches!(name.as_str(), "vmux" | "vmux_desktop" | "vmux_service")
+            || name.starts_with("vmux_desktop helper")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_discovery_requests_are_throttled() {
+        let mut discovery = DiscoveryGate::default();
+        discovery.finish();
+        discovery.tick(Duration::ZERO, true);
+
+        assert!(!discovery.due(false));
+        discovery.last = Some(Instant::now() - DISCOVERY_REQUEST_MIN_INTERVAL);
+        assert!(discovery.due(false));
+    }
+
+    #[test]
+    fn periodic_discovery_stays_requested_until_sampling() {
+        let mut discovery = DiscoveryGate::default();
+        discovery.tick(Duration::from_secs(300), false);
+        discovery.tick(Duration::ZERO, false);
+
+        assert!(discovery.due(false));
+    }
 
     #[test]
     fn vmux_process_match_uses_process_or_executable_name() {
@@ -509,6 +581,8 @@ mod tests {
             "codex",
             "/Users/test/.vmux/projects/repo/codex"
         ));
+        assert!(!LocalProcess::matches("vmux-lookalike", ""));
+        assert!(!LocalProcess::matches("helper", "/tmp/not-vmux"));
     }
 
     #[cfg(target_os = "macos")]
