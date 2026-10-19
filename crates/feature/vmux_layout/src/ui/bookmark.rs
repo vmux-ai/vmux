@@ -72,8 +72,8 @@ pub(super) fn BookmarksSection(
                 } else {
                     "flex items-center rounded-md"
                 },
-                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
-                    div { class: "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground",
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 @max-[12rem]:gap-1 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground @max-[12rem]:h-6 @max-[12rem]:w-6",
                         Icon { class: "h-3.5 w-3.5",
                             path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
                         }
@@ -81,7 +81,7 @@ pub(super) fn BookmarksSection(
                     if let Some(label) = root_drop_label {
                         span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
                     } else {
-                        span { class: "min-w-0 flex-1 truncate whitespace-nowrap text-ui font-semibold text-foreground", "{bookmarks_title}" }
+                        span { class: "min-w-0 flex-1 truncate whitespace-nowrap text-ui font-semibold text-foreground @max-[12rem]:sr-only", "{bookmarks_title}" }
                         div { class: "shrink-0",
                             SheetHeaderAction {
                                 label: new_folder_title,

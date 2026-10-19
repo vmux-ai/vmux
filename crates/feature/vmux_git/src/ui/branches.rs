@@ -383,13 +383,13 @@ fn BranchMarker(current: bool, upstream: String, worktree: bool, remote: bool) -
         LineIcon::GitBranch
     };
     let tone = if current {
-        "bg-ansi-2/12 text-ansi-2 ring-ansi-2/20"
+        "text-success"
     } else if worktree {
-        "bg-amber-400/10 text-amber-400 ring-amber-400/20"
+        "text-amber-400"
     } else if remote || !upstream.is_empty() {
-        "bg-sky-400/10 text-sky-400 ring-sky-400/20"
+        "text-sky-400"
     } else {
-        "bg-violet-400/10 text-violet-400 ring-violet-400/20"
+        "text-muted-foreground"
     };
     let title = if current {
         translate("common-current")
@@ -404,9 +404,9 @@ fn BranchMarker(current: bool, upstream: String, worktree: bool, remote: bool) -
     };
     rsx! {
         span {
-            class: "flex size-4 shrink-0 items-center justify-center rounded-md ring-1 ring-inset {tone}",
+            class: "flex size-4 shrink-0 items-center justify-center {tone}",
             title,
-            LineIconView { icon, class: "size-2.5" }
+            LineIconView { icon, class: "size-3.5" }
         }
     }
 }

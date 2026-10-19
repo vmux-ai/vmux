@@ -25,7 +25,7 @@ pub fn Page() -> Element {
     rsx! {
         document::Title { {translate("git-title")} }
         div {
-            class: "relative flex h-screen min-w-0 flex-col bg-background text-foreground outline-none",
+            class: "git-page relative flex h-screen min-w-0 flex-col bg-background text-foreground outline-none",
             tabindex: "-1",
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {

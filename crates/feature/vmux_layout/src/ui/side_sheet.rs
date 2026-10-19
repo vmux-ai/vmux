@@ -135,7 +135,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)]",
+            class: "@container pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)]",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
@@ -146,7 +146,7 @@ fn SideSheetContent() -> Element {
             SideSheetGrab { resizing: sheet_resizing }
             div { class: "flex h-full min-h-0 flex-col pt-[var(--vmux-side-sheet-pad-top)]",
                 div {
-                    class: "scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-3 pl-2 pt-2 text-foreground",
+                    class: "scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-3 pl-2 pt-2 text-foreground @max-[12rem]:pl-1 @max-[12rem]:pt-1",
                     ..BookmarkDragState::listeners(drag_state),
                     if let Some(space) = active_space {
                         SideSheetSpaceCard {
@@ -270,7 +270,7 @@ fn SideSheetSpaceRow(
                             disabled: editing,
                             onclick: move |_| on_toggle.call(()),
                         }
-                        div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2",
+                        div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2 @max-[12rem]:gap-1",
                             LineIconView {
                                 icon: LineIcon::Planet,
                                 class: "h-4 w-4 shrink-0".to_string(),
@@ -280,7 +280,7 @@ fn SideSheetSpaceRow(
                             } else {
                                 button {
                                     r#type: "button",
-                                    class: "pointer-events-auto min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055]",
+                                    class: "pointer-events-auto min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055] @max-[12rem]:text-ui-xs",
                                     onclick: move |event| {
                                         event.stop_propagation();
                                         let _ = send(&SpaceFormOpenRequest {
@@ -507,11 +507,11 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
             },
             div {
                 class: "flex h-9 items-center rounded-md",
-                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2",
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2 @max-[12rem]:gap-1 @max-[12rem]:px-1",
                     div { class: if pane.is_active {
-                            "grid h-7 w-7 shrink-0 place-items-center text-primary"
+                            "grid h-7 w-7 shrink-0 place-items-center text-foreground"
                         } else {
-                            "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground"
+                            "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground/55"
                         },
                         Icon { class: "h-3.5 w-3.5",
                             path { d: "M4 6h16M4 12h16M4 18h16" }

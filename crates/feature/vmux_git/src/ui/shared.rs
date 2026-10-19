@@ -88,32 +88,58 @@ fn opt_no(n: Option<u32>) -> String {
     n.map(|v| v.to_string()).unwrap_or_default()
 }
 
-struct DiffPresentation(Option<DiffTone>);
+struct DiffPresentation(DiffKind);
 
 impl From<DiffKind> for DiffPresentation {
     fn from(kind: DiffKind) -> Self {
-        Self(match kind {
-            DiffKind::Add => Some(DiffTone::Added),
-            DiffKind::Remove => Some(DiffTone::Deleted),
-            DiffKind::Staged => Some(DiffTone::Staged),
-            DiffKind::Context | DiffKind::Hunk => None,
-        })
+        Self(kind)
     }
 }
 
 impl DiffPresentation {
     fn sign(&self) -> &'static str {
-        self.0.map(DiffTone::sign).unwrap_or(" ")
+        match self.0 {
+            DiffKind::Add => DiffTone::Added.sign(),
+            DiffKind::Remove => DiffTone::Deleted.sign(),
+            DiffKind::Staged => DiffTone::Staged.sign(),
+            DiffKind::Context | DiffKind::Hunk => " ",
+        }
     }
 
     fn row_class(&self) -> &'static str {
-        self.0.map(DiffTone::row_class).unwrap_or("")
+        match self.0 {
+            DiffKind::Add => {
+                "bg-[#dafbe1] hover:bg-[#aceebb] dark:bg-[#033a16] dark:hover:bg-[#055d20]"
+            }
+            DiffKind::Remove => {
+                "bg-[#ffebe9] hover:bg-[#ffcecb] dark:bg-[#67060c] dark:hover:bg-[#8e1519]"
+            }
+            DiffKind::Staged => {
+                "bg-[#fff8c5] hover:bg-[#fae17d] dark:bg-[#4b3600] dark:hover:bg-[#633c01]"
+            }
+            DiffKind::Hunk => "bg-[#ddf4ff] dark:bg-[#0d2d42]",
+            DiffKind::Context => "hover:bg-foreground/[0.025]",
+        }
     }
 
     fn text_class(&self) -> &'static str {
-        self.0
-            .map(DiffTone::text_class)
-            .unwrap_or("text-muted-foreground")
+        match self.0 {
+            DiffKind::Add => "text-[#1a7f37] dark:text-[#3fb950]",
+            DiffKind::Remove => "text-[#cf222e] dark:text-[#f85149]",
+            DiffKind::Staged => "text-[#9a6700] dark:text-[#d29922]",
+            DiffKind::Hunk => "text-[#0969da] dark:text-[#58a6ff]",
+            DiffKind::Context => "text-muted-foreground",
+        }
+    }
+
+    fn gutter_class(&self) -> &'static str {
+        match self.0 {
+            DiffKind::Add => "bg-[#ccffd8] dark:bg-[#055d20]",
+            DiffKind::Remove => "bg-[#ffd7d5] dark:bg-[#6e1117]",
+            DiffKind::Staged => "bg-[#fae17d] dark:bg-[#633c01]",
+            DiffKind::Hunk => "bg-[#b6e3ff] dark:bg-[#1f3b4d]",
+            DiffKind::Context => "bg-card/70",
+        }
     }
 }
 
@@ -269,7 +295,7 @@ pub fn DiffView(
                         rsx! {
                             div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
                                 div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
-                                    span { class: "flex shrink-0 select-none bg-card/70",
+                                    span { class: "flex shrink-0 select-none {DiffPresentation::from(line.kind).gutter_class()}",
                                         span {
                                             class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
                                             style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",

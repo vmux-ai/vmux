@@ -41,9 +41,9 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         page.title.clone()
     };
     rsx! {
-        div { class: "w-full max-w-full min-w-0 overflow-hidden px-2 py-2",
-            div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden",
-                div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
+        div { class: "w-full max-w-full min-w-0 overflow-hidden px-2 py-2 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
+            div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden @max-[12rem]:gap-1.5",
+                div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055] @max-[12rem]:size-6 @max-[12rem]:rounded-md",
                     PageIconView {
                         icon: page.icon.clone(),
                         url: page.url.clone(),
@@ -172,14 +172,14 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     };
     rsx! {
         div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible rounded-md bg-foreground/[0.035]",
-            div { class: "flex min-w-0 flex-col gap-0.5 p-1",
+            div { class: "flex min-w-0 flex-col gap-0.5 p-1 @max-[12rem]:p-0.5",
                 Dropdown {
                     open: choosing(),
                     class: "w-full min-w-0".to_string(),
                     on_dismiss: move |_| choosing.set(false),
                     button {
                         r#type: "button",
-                        class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-foreground hover:bg-foreground/[0.055]",
+                        class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-foreground hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                         title: "{root.display_path}",
                         aria_expanded: choosing(),
                         onclick: move |_| choosing.set(!choosing()),
@@ -233,7 +233,8 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             on_dismiss: move |_| choosing_branch.set(false),
                             button {
                                 r#type: "button",
-                                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left hover:bg-foreground/[0.055]",
+                                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+                                title: "{current_branch_label}",
                                 aria_expanded: choosing_branch(),
                                 onclick: move |_| choosing_branch.set(!choosing_branch()),
                                 LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
@@ -257,7 +258,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            div { class: "flex h-8 min-w-0 items-center gap-2 bg-foreground/[0.025] px-3",
+            div { class: "flex h-8 min-w-0 items-center gap-2 bg-foreground/[0.025] px-3 @max-[12rem]:gap-1.5 @max-[12rem]:px-1.5",
                 LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85", {translate("git-files")} }
                 div { class: "shrink-0",

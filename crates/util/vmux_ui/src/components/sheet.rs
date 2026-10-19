@@ -3,7 +3,8 @@ use dioxus::prelude::*;
 use crate::components::icon::Icon;
 use crate::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 
-pub const SHEET_SECTION: &str = "mb-2 flex shrink-0 flex-col rounded-lg bg-card p-1";
+pub const SHEET_SECTION: &str =
+    "mb-2 flex shrink-0 flex-col rounded-lg bg-card p-1 @max-[12rem]:rounded-md @max-[12rem]:p-0.5";
 
 #[component]
 pub fn SheetHeaderAction(

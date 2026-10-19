@@ -661,26 +661,37 @@ fn SessionListGroup(
     let total = sessions.len();
     let visible = pager.visible(total);
     let stage_dot = StageVisual::for_id(&stage.id).dot;
+    let archivable = sessions
+        .iter()
+        .filter(|session| session.managed && session.stage != "done")
+        .map(|session| session.id.clone())
+        .collect::<Vec<_>>();
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
-            button {
-                r#type: "button",
+            div {
                 class: "sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.055] px-2.5 text-left backdrop-blur hover:bg-foreground/[0.075]",
-                aria_expanded: !collapsed(),
-                onclick: move |_| collapsed.set(!collapsed()),
-                LineIconView {
-                    icon: LineIcon::ChevronDown,
-                    class: if collapsed() {
-                        "size-3 -rotate-90 text-muted-foreground/65".to_string()
-                    } else {
-                        "size-3 text-muted-foreground/65".to_string()
-                    },
+                button {
+                    r#type: "button",
+                    class: "flex min-w-0 flex-1 items-center gap-2 text-left",
+                    aria_expanded: !collapsed(),
+                    onclick: move |_| collapsed.set(!collapsed()),
+                    LineIconView {
+                        icon: LineIcon::ChevronDown,
+                        class: if collapsed() {
+                            "size-3 -rotate-90 text-muted-foreground/65".to_string()
+                        } else {
+                            "size-3 text-muted-foreground/65".to_string()
+                        },
+                    }
+                    span { class: "flex size-4 shrink-0 items-center justify-center",
+                        span { class: "size-2 rounded-full {stage_dot}" }
+                    }
+                    h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
+                    span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
                 }
-                span { class: "flex size-4 shrink-0 items-center justify-center",
-                    span { class: "size-2 rounded-full {stage_dot}" }
+                if stage.id == "stale" && !archivable.is_empty() {
+                    SessionArchiveAllButton { ids: archivable }
                 }
-                h2 { class: "text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
-                span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
             }
             if !collapsed() {
                 div { class: "space-y-px pt-0.5",
@@ -779,15 +790,17 @@ fn SessionsBoard(
     onselect: EventHandler<String>,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 gap-2 overflow-x-auto p-2",
-            for group in groups {
-                if !group.sessions.is_empty() {
-                    SessionBoardColumn {
-                        key: "{group.stage.id}",
-                        stage: group.stage,
-                        sessions: group.sessions,
-                        repositories: repositories.clone(),
-                        onselect,
+        div { class: "min-h-0 flex-1 overflow-auto p-2",
+            div { class: "flex min-h-full w-max items-start gap-2",
+                for group in groups {
+                    if !group.sessions.is_empty() {
+                        SessionBoardColumn {
+                            key: "{group.stage.id}",
+                            stage: group.stage,
+                            sessions: group.sessions,
+                            repositories: repositories.clone(),
+                            onselect,
+                        }
                     }
                 }
             }
@@ -806,14 +819,24 @@ fn SessionBoardColumn(
     let total = sessions.len();
     let visible = pager.visible(total);
     let stage_dot = StageVisual::for_id(&stage.id).dot;
+    let archivable = sessions
+        .iter()
+        .filter(|session| session.managed && session.stage != "done")
+        .map(|session| session.id.clone())
+        .collect::<Vec<_>>();
     rsx! {
-        section { class: "flex min-h-0 w-[18rem] shrink-0 flex-col",
-            header { class: "flex h-8 shrink-0 items-center gap-2 rounded-md bg-foreground/[0.045] px-2.5",
+        section { class: "w-[18rem] shrink-0",
+            header { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md bg-card/95 px-2.5 backdrop-blur",
                 span { class: "size-2 rounded-full {stage_dot}" }
                 h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
-                span { class: "ml-auto text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
+                span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
+                if stage.id == "stale" && !archivable.is_empty() {
+                    div { class: "ml-auto",
+                        SessionArchiveAllButton { ids: archivable }
+                    }
+                }
             }
-            div { class: "mt-1 min-h-0 flex-1 space-y-1 overflow-y-auto",
+            div { class: "mt-1 space-y-1",
                 for session in sessions.into_iter().take(visible) {
                     SessionBoardCard {
                         key: "{session.id}",
@@ -1265,6 +1288,30 @@ fn SessionArchiveButton(onclick: EventHandler<MouseEvent>) -> Element {
             onclick: move |event| onclick.call(event),
             LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
             span { {translate("sessions-archive")} }
+        }
+    }
+}
+
+#[component]
+fn SessionArchiveAllButton(ids: Vec<String>) -> Element {
+    let count = ids.len();
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
+            title: translate("sessions-archive"),
+            aria_label: translate("sessions-archive"),
+            onclick: move |event| {
+                event.stop_propagation();
+                for id in &ids {
+                    let _ = send(&SessionsStageChange {
+                        id: id.clone(),
+                        stage: "done".to_string(),
+                    });
+                }
+            },
+            LineIconView { icon: LineIcon::Archive, class: "size-3 shrink-0".to_string() }
+            span { "{count}" }
         }
     }
 }

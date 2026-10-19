@@ -557,6 +557,12 @@ fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Elem
         _ => translate("simulator-title"),
     };
     let failed = status == "errored";
+    let progress = match status.as_str() {
+        "booting" => 2,
+        "connecting" => 3,
+        "streaming" => 4,
+        _ => 1,
+    };
     let phase = if failed {
         translate("common-error")
     } else {
@@ -568,6 +574,9 @@ fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Elem
                 span { class: if failed { "size-2 shrink-0 rounded-full bg-destructive" } else { "size-2 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" } }
                 span { class: "truncate font-medium text-foreground", "{target}" }
                 span { class: "shrink-0", "· {phase}" }
+                if !failed {
+                    span { class: "shrink-0 tabular-nums text-muted-foreground/75", "· {progress}/4" }
+                }
             }
             if failed && !error.is_empty() {
                 div {
@@ -585,7 +594,7 @@ fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Elem
                 div {
                     class: "relative overflow-hidden bg-zinc-950 ring-1 ring-foreground/10",
                     style: frame.screen_style(),
-                    SimulatorScreenSkeleton {}
+                    SimulatorScreenSkeleton { progress }
                 }
             }
         }
@@ -593,7 +602,10 @@ fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Elem
 }
 
 #[component]
-fn SimulatorScreenSkeleton(#[props(default)] id: String) -> Element {
+fn SimulatorScreenSkeleton(
+    #[props(default)] id: String,
+    #[props(default = 0)] progress: u8,
+) -> Element {
     rsx! {
         div {
             id,
@@ -618,6 +630,19 @@ fn SimulatorScreenSkeleton(#[props(default)] id: String) -> Element {
                 Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
                 Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
                 Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
+            }
+            if progress > 0 {
+                div { class: "mt-auto flex gap-1.5 pb-[2%]",
+                    for step in 1..=4 {
+                        div {
+                            class: if step <= progress {
+                                "h-1 flex-1 rounded-full bg-primary transition-colors"
+                            } else {
+                                "h-1 flex-1 rounded-full bg-white/[0.09] transition-colors"
+                            }
+                        }
+                    }
+                }
             }
         }
     }

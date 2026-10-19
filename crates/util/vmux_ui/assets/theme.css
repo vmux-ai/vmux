@@ -33,6 +33,13 @@
   --cef-surface-hover: oklch(0.92 var(--surface-chroma) var(--surface-hue) / 0.82);
   --cef-surface-active: oklch(0.88 var(--surface-chroma) var(--surface-hue) / 0.86);
   --cef-surface-border: oklch(0.32 var(--surface-chroma) var(--surface-hue) / 0.12);
+  --github-background: #ffffff;
+  --github-foreground: #1f2328;
+  --github-card: #f6f8fa;
+  --github-muted: #656d76;
+  --github-accent: #0969da;
+  --github-accent-foreground: #ffffff;
+  --github-border: #d0d7de;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -65,7 +72,29 @@
   --cef-surface-hover: oklch(0.32 var(--surface-chroma) var(--surface-hue) / 0.84);
   --cef-surface-active: oklch(0.37 var(--surface-chroma) var(--surface-hue) / 0.88);
   --cef-surface-border: oklch(0.82 var(--surface-chroma) var(--surface-hue) / 0.18);
+  --github-background: #0d1117;
+  --github-foreground: #e6edf3;
+  --github-card: #161b22;
+  --github-muted: #8d96a0;
+  --github-accent: #2f81f7;
+  --github-accent-foreground: #ffffff;
+  --github-border: #30363d;
   }
+}
+
+.git-page {
+  --background: var(--github-background);
+  --foreground: var(--github-foreground);
+  --card: var(--github-card);
+  --muted: var(--github-card);
+  --muted-foreground: var(--github-muted);
+  --accent: color-mix(in srgb, var(--github-accent) 14%, var(--github-background));
+  --accent-foreground: var(--github-foreground);
+  --primary: var(--github-accent);
+  --primary-foreground: var(--github-accent-foreground);
+  --border: var(--github-border);
+  --input: var(--github-border);
+  --ring: var(--github-accent);
 }
 
 @theme inline {

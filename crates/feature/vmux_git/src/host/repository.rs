@@ -300,17 +300,26 @@ impl GitRepository {
     pub fn branch_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
         let base = crate::host::worktree::BaseRef::resolve(&self.0)
             .ok_or_else(|| GitError("no base branch found".to_string()))?;
-        let range = format!("{}...{reference}", base.as_str());
-        let (stdout, stderr, ok) = GitCommand::read(
-            &self.0,
-            &[
-                "diff",
-                "--find-renames",
-                "--find-copies",
-                "--unified=100000",
-                &range,
-            ],
-        )?;
+        let (merge_base, stderr, ok) =
+            GitCommand::read(&self.0, &["merge-base", reference, base.as_str()])?;
+        if !ok {
+            return Err(GitCommand::error(&merge_base, &stderr));
+        }
+        let merge_base = merge_base.trim();
+        let (head, _, head_ok) = GitCommand::read(&self.0, &["rev-parse", "HEAD"])?;
+        let (selected, _, selected_ok) = GitCommand::read(&self.0, &["rev-parse", reference])?;
+        let current = head_ok && selected_ok && head.trim() == selected.trim();
+        let mut args = vec![
+            "diff",
+            "--find-renames",
+            "--find-copies",
+            "--unified=100000",
+            merge_base,
+        ];
+        if !current {
+            args.push(reference);
+        }
+        let (stdout, stderr, ok) = GitCommand::read(&self.0, &args)?;
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
@@ -1338,6 +1347,30 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(files, vec!["first.txt", "second.txt"]);
+    }
+
+    #[test]
+    fn current_branch_diff_includes_uncommitted_work() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "tracked.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "tracked.txt", "branch\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "branch"]);
+        test_repo::write(repo.path(), "tracked.txt", "working\n");
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines("feature")
+            .unwrap();
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert!(text.contains("working"));
     }
 
     #[test]

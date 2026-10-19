@@ -8,7 +8,7 @@ use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use crate::event::*;
 use crate::state::GitPanel;
@@ -60,9 +60,11 @@ pub(super) fn RepositoryHeader(
                         class: "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs font-semibold tracking-[-0.015em] text-foreground hover:bg-foreground/[0.055]",
                         title: "{repository.repo_root}",
                         onclick: move |_| repository_open.set(!repository_open()),
-                        ProjectKindIcon { is_worktree: repository.is_worktree }
+                        GitSymbolView {
+                            symbol: GitSymbol::Repository,
+                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                        }
                         span { class: "min-w-0 truncate", "{repository.repo_name}" }
-                        ProjectKindPill { is_worktree: repository.is_worktree }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground" }
                     }
                     if repository_open() {
@@ -137,6 +139,9 @@ pub(super) fn RepositoryHeader(
                         onclick: move |_| branch_open.set(!branch_open()),
                         LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
                         span { class: "truncate text-foreground/90", "{repository.branch}" }
+                        if repository.is_worktree {
+                            ProjectKindPill { is_worktree: true }
+                        }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                     }
                     if branch_open() {
