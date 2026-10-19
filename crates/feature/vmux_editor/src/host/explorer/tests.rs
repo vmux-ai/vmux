@@ -44,6 +44,33 @@ fn editor_page_allows_explorer_section_toggles() {
 }
 
 #[test]
+#[cfg(ui)]
+fn projects_page_allows_every_shared_editor_action() {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        crate::ui::FilePage::plugin(),
+        crate::ui::ProjectsPage::plugin(),
+    ));
+    app.world_mut().run_schedule(PreStartup);
+    let mut query = app.world_mut().query::<&UiEventPermissions>();
+    let pages = query.iter(app.world()).copied().collect::<Vec<_>>();
+    let file = pages.iter().find(|page| page.url == "file://").unwrap();
+    let projects = pages
+        .iter()
+        .find(|page| page.url == "vmux://projects/")
+        .unwrap();
+
+    assert!(projects.owns_subtree);
+    for permission in file.permissions {
+        assert!(
+            projects.permissions.contains(permission),
+            "Projects page is missing shared editor permission {permission}"
+        );
+    }
+}
+
+#[test]
 fn closing_an_editor_hands_back_the_tab_that_takes_its_place() {
     let mut state = ExplorerState::holding(&["/a", "/b", "/c"]);
     assert_eq!(
