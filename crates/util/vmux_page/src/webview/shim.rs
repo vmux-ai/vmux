@@ -218,6 +218,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       || (data.files && data.files.length > 0);
     if (carriesImage) event.preventDefault();
   }, true);
+  document.addEventListener('contextmenu', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      event.preventDefault();
+      return;
+    }
+    const editable = target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])');
+    if (!editable) event.preventDefault();
+  }, true);
   const pumpEdits = async () => {
     let applied = false;
     for (;;) {
