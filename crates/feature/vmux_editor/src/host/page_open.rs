@@ -87,7 +87,13 @@ fn handle_file(
     for (entity, task) in &tasks {
         let project_dir = focused_space.startup_dir();
         let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
-        let knowledge_landing = KnowledgeLanding::select(&knowledge_root, visits.iter());
+        let knowledge_landing = if task.url.trim_end_matches('/')
+            == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
+        {
+            KnowledgeLanding::select(&knowledge_root, visits.iter())
+        } else {
+            None
+        };
         let Some(target) = FilePageTarget::resolve(
             &task.url,
             project_dir,
@@ -117,7 +123,7 @@ fn handle_file(
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.to_string_lossy().to_string());
             record_writer.write(vmux_ecs::event::RecordVisitRequest {
-                url: clean_url.clone(),
+                url: page_url.clone(),
                 title,
             });
         }
