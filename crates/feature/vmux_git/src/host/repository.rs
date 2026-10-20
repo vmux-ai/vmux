@@ -889,6 +889,7 @@ impl GitBranchEntry {
                 deletions: 0,
             });
         }
+        branches.sort_by_key(|branch| (!branch.current, branch.checkout.is_empty()));
         Ok(branches)
     }
 
@@ -1396,6 +1397,27 @@ mod tests {
                 .iter()
                 .all(|branch| branch.name != "feature")
         );
+    }
+
+    #[test]
+    fn local_branches_put_current_and_checked_out_branches_first() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
+        let checkout = crate::host::worktree::CheckoutInfo::try_from(repo.path()).unwrap();
+        checkout
+            .add_worktree(&repo.path().join(".worktrees/held"), "held", "main")
+            .unwrap();
+        test_repo::run(repo.path(), &["branch", "loose", "main"]);
+
+        let branches = GitBranchEntry::local(repo.path(), "main").unwrap();
+        let names = branches
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, ["main", "held", "loose"]);
     }
 
     #[test]
