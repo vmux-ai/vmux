@@ -268,14 +268,17 @@ fn sync_branch_files(
             .unwrap_or_default()
             .wrapping_add(1)
             .max(1);
-        state.snapshot.branch_files.clear();
+        let reference_changed = state.snapshot.branch_files_reference != controller.selected_branch;
+        if reference_changed {
+            state.snapshot.branch_files.clear();
+            state.snapshot.branch_files_total = 0;
+            state.snapshot.branch_files_has_more = false;
+        }
         state
             .snapshot
             .branch_files_reference
             .clone_from(&controller.selected_branch);
-        state.snapshot.branch_files_total = 0;
         state.snapshot.branch_files_loading = true;
-        state.snapshot.branch_files_has_more = false;
         state.snapshot.branch_files_error.clear();
         commands.entity(entity).insert(GitBranchFilesQuery {
             repository: repo_root.clone(),
@@ -618,6 +621,13 @@ mod tests {
     #[test]
     fn branch_files_reload_when_the_repository_revision_changes() {
         let repo = tempfile::tempdir().unwrap();
+        let existing = crate::event::GitBranchFileEntry {
+            path: "src/lib.rs".to_string(),
+            path_bytes: b"src/lib.rs".to_vec(),
+            previous_path: None,
+            previous_path_bytes: None,
+            change: crate::event::GitPathChange::Modified,
+        };
         let mut app = App::new();
         app.add_systems(Update, sync_branch_files);
         let page = app
@@ -627,6 +637,9 @@ mod tests {
                     snapshot: crate::state::GitPageSnapshot {
                         workspace: repo.path().to_string_lossy().into_owned(),
                         nonce: 1,
+                        branch_files: vec![existing.clone()],
+                        branch_files_reference: "feature".to_string(),
+                        branch_files_total: 1,
                         ..Default::default()
                     },
                 },
@@ -645,6 +658,14 @@ mod tests {
                 .map(|query| (query.generation, query.page_revision)),
             Some((1, 1))
         );
+        assert_eq!(
+            app.world()
+                .get::<super::super::state::GitState>(page)
+                .unwrap()
+                .snapshot
+                .branch_files,
+            vec![existing.clone()]
+        );
 
         app.world_mut()
             .get_mut::<super::super::state::GitState>(page)
@@ -658,6 +679,14 @@ mod tests {
                 .get::<GitBranchFilesQuery>(page)
                 .map(|query| (query.generation, query.page_revision)),
             Some((2, 2))
+        );
+        assert_eq!(
+            app.world()
+                .get::<super::super::state::GitState>(page)
+                .unwrap()
+                .snapshot
+                .branch_files,
+            vec![existing]
         );
     }
 
