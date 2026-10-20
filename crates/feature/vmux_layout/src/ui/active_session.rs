@@ -8,7 +8,6 @@ use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
-use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{
@@ -43,7 +42,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
     rsx! {
         div { class: "w-full max-w-full min-w-0 overflow-hidden px-2 py-2 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
             div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden @max-[12rem]:gap-1.5",
-                div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055] @max-[12rem]:size-6 @max-[12rem]:rounded-md",
+                div { class: "flex size-8 shrink-0 items-center justify-center @max-[12rem]:size-6",
                     PageIconView {
                         icon: page.icon.clone(),
                         url: page.url.clone(),
@@ -80,7 +79,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                     }
                 }
                 if let Some(agent) = agent {
-                    div { class: "flex min-w-0 items-center gap-2 rounded-md bg-foreground/[0.035] px-2 py-1.5",
+                    div { class: "flex min-w-0 items-center gap-2 px-1 py-1.5",
                         AgentThumbnail {
                             src: agent.icon.clone(),
                             seed: agent.name.clone(),
@@ -171,7 +170,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
         translate("common-expand")
     };
     rsx! {
-        div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible rounded-md bg-foreground/[0.035]",
+        div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible",
             div { class: "flex min-w-0 flex-col gap-0.5 p-1 @max-[12rem]:p-0.5",
                 Dropdown {
                     open: choosing(),
@@ -182,10 +181,9 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         class: "group flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left text-foreground hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                         aria_expanded: choosing(),
                         onclick: move |_| choosing.set(!choosing()),
-                        TypeIcon {
-                            path: root.path.clone(),
-                            is_dir: true,
-                            class: "size-3.5 shrink-0".to_string(),
+                        BuiltinIconView {
+                            icon: vmux_api::BuiltinIcon::Project,
+                            class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
                         }
                         span { class: "w-0 min-w-0 flex-1 truncate text-[10px] font-medium", "{root.label}" }
                         LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
@@ -256,7 +254,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            div { class: "flex h-8 min-w-0 items-center gap-2 bg-foreground/[0.025] px-3 @max-[12rem]:gap-1.5 @max-[12rem]:px-1.5",
+            div { class: "flex h-8 min-w-0 items-center gap-2 px-3 @max-[12rem]:gap-1.5 @max-[12rem]:px-1.5",
                 LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85", {translate("git-files")} }
                 div { class: "shrink-0",
@@ -344,10 +342,6 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
                     pane_id: Some(pane_id),
                 });
             },
-            BuiltinIconView {
-                icon: vmux_api::BuiltinIcon::Project,
-                class: "size-3.5 shrink-0".to_string(),
-            }
             div { class: "min-w-0 flex-1",
                 div { class: "truncate text-[10px] font-medium", "{project.label}" }
                 if !project.branch.is_empty() {

@@ -8,12 +8,12 @@ use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 use crate::event::*;
 use crate::state::GitPanel;
 
-use super::shared::{ListPager, ProjectKindIcon, ProjectKindPill};
+use super::shared::{ListPager, ProjectKindPill};
 
 #[component]
 pub(super) fn RepositoryHeader(
@@ -60,8 +60,8 @@ pub(super) fn RepositoryHeader(
                         class: "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs font-semibold tracking-[-0.015em] text-foreground hover:bg-foreground/[0.055]",
                         title: "{repository.repo_root}",
                         onclick: move |_| repository_open.set(!repository_open()),
-                        GitSymbolView {
-                            symbol: GitSymbol::Repository,
+                        BuiltinIconView {
+                            icon: vmux_api::BuiltinIcon::Project,
                             class: "size-4 shrink-0 text-muted-foreground".to_string(),
                         }
                         span { class: "min-w-0 truncate", "{repository.repo_name}" }
@@ -94,7 +94,6 @@ pub(super) fn RepositoryHeader(
                                                     pane_id: None,
                                                 });
                                             },
-                                            ProjectKindIcon { is_worktree: project.is_worktree }
                                             div { class: "min-w-0 flex-1",
                                                 div { class: "flex min-w-0 items-center gap-1.5",
                                                     div { class: "min-w-0 flex-1 truncate font-medium", "{label}" }

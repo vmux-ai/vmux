@@ -188,7 +188,11 @@ fn close_pending(
     mut closer: StackCloser,
     mut commands: Commands,
 ) {
+    let mut closing = std::collections::HashSet::new();
     for request in reader.read() {
+        if !closing.insert(request.stack) {
+            continue;
+        }
         close_stack(*request, &mut closer, &mut commands);
     }
 }
@@ -243,7 +247,7 @@ fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &
     }
 
     let was_active = closer.active_stack(pane) == Some(request.stack);
-    commands.entity(request.stack).despawn();
+    commands.entity(request.stack).try_despawn();
     if !was_active {
         return;
     }
@@ -276,7 +280,7 @@ fn close_last_stack_in_pane(
         _ => None,
     };
     let Some(parent) = split_parent else {
-        commands.entity(stack).despawn();
+        commands.entity(stack).try_despawn();
         let replacement = commands
             .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
@@ -288,7 +292,7 @@ fn close_last_stack_in_pane(
         return;
     };
 
-    commands.entity(stack).despawn();
+    commands.entity(stack).try_despawn();
     let Ok(siblings) = closer.panes.children.get(parent) else {
         return;
     };
@@ -301,7 +305,7 @@ fn close_last_stack_in_pane(
         .collect();
 
     if pane_siblings.len() >= 2 {
-        commands.entity(pane).despawn();
+        commands.entity(pane).try_despawn();
         let new_active_pane = pane_siblings
             .iter()
             .copied()
@@ -344,7 +348,7 @@ fn close_last_stack_in_pane(
             .unwrap_or_default();
         new_active_pane = closer.panes.first_leaf(sibling);
         commands.entity(sibling).remove::<ChildOf>();
-        commands.entity(sibling).despawn();
+        commands.entity(sibling).try_despawn();
         commands.entity(parent).insert(PaneSplit {
             direction: sibling_direction,
         });
@@ -358,10 +362,10 @@ fn close_last_stack_in_pane(
             justify_content: JustifyContent::Stretch,
             ..default()
         });
-        commands.entity(sibling).despawn();
+        commands.entity(sibling).try_despawn();
     }
 
-    commands.entity(pane).despawn();
+    commands.entity(pane).try_despawn();
     commands
         .entity(new_active_pane)
         .insert(LastActivatedAt::now());
@@ -832,6 +836,38 @@ mod tests {
 
         assert!(app.world().get_entity(s1).is_err(), "target despawned");
         assert!(app.world().get_entity(s2).is_ok(), "sibling kept");
+    }
+
+    #[test]
+    fn duplicate_close_requests_despawn_a_stack_once() {
+        let mut app = close_request_app();
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let target = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let sibling = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+
+        let mut requests = app
+            .world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>();
+        requests.write(CloseStackRequest::by_user(target));
+        requests.write(CloseStackRequest::by_user(target));
+        app.update();
+
+        assert!(app.world().get_entity(target).is_err());
+        assert!(app.world().get_entity(sibling).is_ok());
     }
 
     #[test]

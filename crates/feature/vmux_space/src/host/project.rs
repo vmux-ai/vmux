@@ -158,6 +158,70 @@ struct ActiveProjectRows {
 
 type ActiveProjectScanResult = (Option<String>, Vec<ProjectRow>);
 
+struct ProjectCatalog(Vec<ProjectRow>);
+
+impl ProjectCatalog {
+    fn from_rows(rows: &[ProjectRow]) -> Self {
+        let mut candidates = Vec::new();
+        for row in rows {
+            if row.depth != 0
+                || row.kind != ProjectRowKind::Project
+                || row.missing
+                || std::path::Path::new(&row.path)
+                    .components()
+                    .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
+            {
+                continue;
+            }
+            let Ok(checkout) = CheckoutInfo::try_from(std::path::Path::new(&row.path)) else {
+                candidates.push((None, row.clone()));
+                continue;
+            };
+            let identity =
+                LinkedRepoRoot::find(&checkout.root).unwrap_or_else(|| checkout.root.clone());
+            let identity = identity.canonicalize().unwrap_or(identity);
+            let mut projected = row.clone();
+            projected.path = checkout.root.to_string_lossy().into_owned();
+            projected.display_path = vmux_path::DisplayPath::project(&checkout.root);
+            projected.label = identity
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| projected.label.clone());
+            projected.is_worktree = checkout.root != identity;
+            candidates.push((Some(identity), projected));
+        }
+        let mut projected = Vec::<(Option<std::path::PathBuf>, ProjectRow)>::new();
+        for (identity, row) in &candidates {
+            if identity.as_ref().is_some_and(|identity| {
+                candidates.iter().any(|(other, _)| {
+                    other.as_ref().is_some_and(|other| {
+                        identity != other && std::path::Path::new(&row.path).starts_with(other)
+                    })
+                })
+            }) {
+                continue;
+            }
+            if let Some((_, held)) =
+                projected
+                    .iter_mut()
+                    .find(|(held, held_row)| match (held, identity) {
+                        (Some(held), Some(identity)) => held == identity,
+                        (None, None) => held_row.path == row.path,
+                        _ => false,
+                    })
+            {
+                if row.is_active && !held.is_active {
+                    held.clone_from(row);
+                }
+                continue;
+            }
+            projected.push((identity.clone(), row.clone()));
+        }
+        Self(projected.into_iter().map(|(_, row)| row).collect())
+    }
+}
+
 #[derive(Resource, Default)]
 struct ActiveProjectScan {
     task: Option<Task<ActiveProjectScanResult>>,
@@ -201,7 +265,9 @@ fn refresh_active_projects(
     let settings = projects.settings.as_deref().cloned();
     scan.task = Some(IoTaskPool::get().spawn(async move {
         let rows = match (space.as_deref(), settings.as_ref()) {
-            (Some(space), Some(settings)) => settings.project_rows(space),
+            (Some(space), Some(settings)) => {
+                ProjectCatalog::from_rows(&settings.project_rows(space)).0
+            }
             _ => Vec::new(),
         };
         (space, rows)
@@ -238,7 +304,7 @@ struct GitProjectsProjection(Vec<ProjectRow>);
 impl GitProjectsProjection {
     fn from_rows(rows: &[ProjectRow]) -> Self {
         let mut candidates = Vec::new();
-        for row in rows {
+        for row in &ProjectCatalog::from_rows(rows).0 {
             if row.depth != 0
                 || row.kind != ProjectRowKind::Project
                 || row.missing
@@ -818,6 +884,41 @@ mod tests {
         );
         assert!(projection.0[0].is_active);
         assert!(projection.0[0].is_worktree);
+    }
+
+    #[test]
+    fn project_catalog_collapses_internal_and_linked_repository_paths() {
+        let fixture = GitProjectRowsFixture::start();
+        let notes = fixture._root.path().join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        let rows = vec![
+            fixture.row(&fixture.cloud_worktree, true),
+            fixture.row(&fixture.cloud, false),
+            fixture.row(&fixture.cloud.join("client"), false),
+            fixture.row(&fixture.cloud.join(".git/modules"), false),
+            fixture.row(&fixture.dashboard, false),
+            fixture.row(&notes, false),
+        ];
+
+        let catalog = ProjectCatalog::from_rows(&rows);
+
+        assert_eq!(
+            catalog
+                .0
+                .iter()
+                .map(|row| row.label.as_str())
+                .collect::<Vec<_>>(),
+            ["vmux-cloud", "dashboard", "notes"]
+        );
+        assert_eq!(
+            catalog.0[0].path,
+            fixture
+                .cloud_worktree
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+        );
+        assert!(catalog.0[0].is_active);
     }
 
     #[test]

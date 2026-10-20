@@ -6,7 +6,7 @@ use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::diff::DiffTone;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::GitDiffRow;
 use crate::event::*;
@@ -36,20 +36,6 @@ impl ListPager {
         }
         let mut visible = self.0;
         visible.set(current.saturating_add(LIST_PAGE_SIZE).min(total));
-    }
-}
-
-#[component]
-pub(super) fn ProjectKindIcon(is_worktree: bool) -> Element {
-    rsx! {
-        if is_worktree {
-            LineIconView { icon: LineIcon::GitFork, class: "size-4 shrink-0 text-primary" }
-        } else {
-            GitSymbolView {
-                symbol: GitSymbol::Repository,
-                class: "size-4 shrink-0 text-muted-foreground".to_string(),
-            }
-        }
     }
 }
 
