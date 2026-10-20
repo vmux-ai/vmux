@@ -179,8 +179,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     on_dismiss: move |_| choosing.set(false),
                     button {
                         r#type: "button",
-                        class: "group flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-foreground hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
-                        title: "{root.display_path}",
+                        class: "group flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left text-foreground hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                         aria_expanded: choosing(),
                         onclick: move |_| choosing.set(!choosing()),
                         TypeIcon {
@@ -188,7 +187,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             is_dir: true,
                             class: "size-3.5 shrink-0".to_string(),
                         }
-                        span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{root.label}" }
+                        span { class: "w-0 min-w-0 flex-1 truncate text-[10px] font-medium", "{root.label}" }
                         LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                     }
                     if choosing() {
@@ -233,12 +232,11 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             on_dismiss: move |_| choosing_branch.set(false),
                             button {
                                 r#type: "button",
-                                class: "group flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
-                                title: "{current_branch_label}",
+                                class: "group flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                                 aria_expanded: choosing_branch(),
                                 onclick: move |_| choosing_branch.set(!choosing_branch()),
                                 LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                                span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch_label}" }
+                                span { class: "w-0 min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch_label}" }
                                 LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                             }
                             if choosing_branch() {

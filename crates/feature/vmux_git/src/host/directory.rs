@@ -384,7 +384,7 @@ fn load(
             .map(|name| name.to_string_lossy().into_owned())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Git".to_string());
-        page.title = format!("{name} · Git");
+        page.title = format!("Git · {name}");
     }
     let repo_root = listing.repo_root.clone();
     navigation.current = Some(listing);

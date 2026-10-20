@@ -132,7 +132,7 @@ vault-result-connected = Vault · { common-done }
 vault-result-synced = Vault · { common-done }
 
 start-title = Inicio
-start-tagline = Un prompt. Cualquier cosa, hecha.
+start-tagline = Any prompt. Anything, done.
 
 agents-title = Agentes
 agents-search = Buscar agentes ACP y CLI…

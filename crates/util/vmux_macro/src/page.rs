@@ -628,7 +628,7 @@ impl Parse for Args {
             }),
             body_class: body_class.unwrap_or_else(|| {
                 LitStr::new(
-                    "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
+                    "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background p-0 text-foreground antialiased",
                     proc_macro2::Span::call_site(),
                 )
             }),

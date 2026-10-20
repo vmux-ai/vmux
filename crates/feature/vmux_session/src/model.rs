@@ -27,6 +27,9 @@ impl Plugin for EntityPlugin {
         app.register_persisted::<Session>()
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
+            .register_persisted::<ProviderStage>()
+            .register_persisted::<ProviderKind>()
+            .register_persisted::<ProviderSessionId>()
             .register_persisted::<AgentConversationTitle>()
             .register_persisted::<TitlePending>()
             .register_persisted::<LocalTask>()
@@ -69,7 +72,11 @@ impl Plugin for StagePlugin {
             .register_type::<StageId>()
             .register_type::<StageDefinition>()
             .add_message::<StageChangeRequest>()
-            .add_systems(Update, (ensure_stages, change_stage).in_set(MutationSet));
+            .add_message::<ProviderStageChangeRequest>()
+            .add_systems(
+                Update,
+                (ensure_stages, change_stage, change_provider_stage).in_set(MutationSet),
+            );
     }
 }
 
@@ -140,6 +147,28 @@ pub struct StageChangedAt(pub i64);
 #[require(Save)]
 #[type_path = "vmux_session"]
 pub struct LocalTask;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct ProviderStage;
+
+#[derive(
+    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
+)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct ProviderKind(pub String);
+
+#[derive(
+    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
+)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct ProviderSessionId(pub String);
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
@@ -224,6 +253,13 @@ pub struct DescriptionUpdateRequest {
 #[derive(Message, Clone, Debug)]
 pub struct StageChangeRequest {
     pub id: SessionId,
+    pub stage: StageId,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct ProviderStageChangeRequest {
+    pub kind: ProviderKind,
+    pub id: ProviderSessionId,
     pub stage: StageId,
 }
 
@@ -502,6 +538,50 @@ fn change_stage(
 }
 
 #[cfg(host)]
+fn change_provider_stage(
+    mut requests: MessageReader<ProviderStageChangeRequest>,
+    definitions: Query<&StageId, With<StageDefinition>>,
+    mut stages: Query<
+        (
+            &ProviderKind,
+            &ProviderSessionId,
+            &mut Stage,
+            &mut StageChangedAt,
+        ),
+        With<ProviderStage>,
+    >,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        if !definitions.iter().any(|id| id == &request.stage) {
+            continue;
+        }
+        let now = vmux_ecs::UnixMillis::now().0;
+        let mut found = false;
+        for (kind, id, mut stage, mut changed_at) in &mut stages {
+            if kind != &request.kind || id != &request.id {
+                continue;
+            }
+            found = true;
+            if stage.0 != request.stage {
+                stage.0.clone_from(&request.stage);
+                changed_at.0 = now;
+            }
+            break;
+        }
+        if !found {
+            commands.spawn((
+                ProviderStage,
+                request.kind.clone(),
+                request.id.clone(),
+                Stage(request.stage.clone()),
+                StageChangedAt(now),
+            ));
+        }
+    }
+}
+
+#[cfg(host)]
 fn cleanup(
     mut requests: MessageReader<CleanupRequest>,
     sessions: Query<(Entity, &SessionId), With<Session>>,
@@ -674,6 +754,51 @@ mod tests {
     }
 
     #[test]
+    fn provider_stage_change_creates_and_updates_one_durable_override() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, StagePlugin));
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<ProviderStageChangeRequest>>()
+            .write(ProviderStageChangeRequest {
+                kind: ProviderKind("codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId("done".into()),
+            });
+        app.update();
+
+        let mut overrides = app.world_mut().query_filtered::<(
+            Entity,
+            &ProviderKind,
+            &ProviderSessionId,
+            &Stage,
+            &StageChangedAt,
+        ), With<ProviderStage>>();
+        let (entity, kind, id, stage, changed_at) = overrides.single(app.world()).unwrap();
+        assert_eq!(kind.0, "codex");
+        assert_eq!(id.0, "provider-session");
+        assert_eq!(stage.0.0, "done");
+        assert!(changed_at.0 > 0);
+
+        app.world_mut()
+            .resource_mut::<Messages<ProviderStageChangeRequest>>()
+            .write(ProviderStageChangeRequest {
+                kind: ProviderKind("codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId("in_review".into()),
+            });
+        app.update();
+
+        let mut overrides = app
+            .world_mut()
+            .query_filtered::<(Entity, &Stage), With<ProviderStage>>();
+        let (updated, stage) = overrides.single(app.world()).unwrap();
+        assert_eq!(updated, entity);
+        assert_eq!(stage.0.0, "in_review");
+    }
+
+    #[test]
     fn duplicate_creation_requests_create_one_session() {
         let mut app = App::new();
         app.add_plugins((EntityPlugin, StagePlugin));
@@ -724,6 +849,9 @@ mod tests {
         assert!(filter.is_allowed::<Session>());
         assert!(filter.is_allowed::<SessionId>());
         assert!(filter.is_allowed::<AgentId>());
+        assert!(filter.is_allowed::<ProviderStage>());
+        assert!(filter.is_allowed::<ProviderKind>());
+        assert!(filter.is_allowed::<ProviderSessionId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());
         assert!(filter.is_allowed::<TitlePending>());
         assert!(filter.is_allowed::<LocalTask>());

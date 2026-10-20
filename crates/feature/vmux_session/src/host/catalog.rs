@@ -13,7 +13,8 @@ use vmux_ecs::{UiState, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
     AgentId, CatalogSnapshot, CleanupRequest, CreateRequest, Created, DescriptionUpdateRequest,
-    RenameRequest, Route, SessionId, StageChangeRequest, StageId,
+    ProviderKind, ProviderSessionId, ProviderStageChangeRequest, RenameRequest, Route, SessionId,
+    StageChangeRequest, StageId,
 };
 
 use crate::event::{
@@ -47,11 +48,11 @@ impl Plugin for CatalogPlugin {
             .add_observer(change_stage)
             .add_observer(cleanup)
             .add_observer(ready)
-            .add_systems(Update, finish_directory_pickers)
+            .add_systems(Update, (finish_directory_pickers, cleanup_inactive_views))
             .add_systems(
                 PostUpdate,
                 (
-                    sync_repositories.run_if(Activity::<SessionManagerView>::active),
+                    sync_repositories.run_if(Activity::<SessionCatalogView>::active),
                     publish,
                 )
                     .chain(),
@@ -60,10 +61,14 @@ impl Plugin for CatalogPlugin {
 }
 
 #[derive(Component)]
-#[require(SessionManagerUiState)]
+#[require(SessionCatalogView)]
 pub struct SessionManagerView;
 
 type SessionManagerUiState = UiState<ChatUiState>;
+
+#[derive(Component, Default)]
+#[require(SessionManagerUiState)]
+pub struct SessionCatalogView;
 
 #[derive(Resource, Default)]
 struct PendingOpens(HashMap<SessionId, Entity>);
@@ -266,11 +271,20 @@ fn change_stage(
     trigger: On<UiInput<SessionsStageChange>>,
     managers: ManagerViews,
     mut requests: MessageWriter<StageChangeRequest>,
+    mut provider_requests: MessageWriter<ProviderStageChangeRequest>,
 ) {
     if !managers.contains(trigger.event().webview) {
         return;
     }
     let request = &trigger.event().payload;
+    if !request.kind.is_empty() && request.kind != "session" && !request.sid.is_empty() {
+        provider_requests.write(ProviderStageChangeRequest {
+            kind: ProviderKind(request.kind.clone()),
+            id: ProviderSessionId(request.sid.clone()),
+            stage: StageId(request.stage.clone()),
+        });
+        return;
+    }
     requests.write(StageChangeRequest {
         id: SessionId(request.id.clone()),
         stage: StageId(request.stage.clone()),
@@ -296,7 +310,7 @@ fn publish(
     targets: Query<
         Entity,
         (
-            With<SessionManagerView>,
+            With<SessionCatalogView>,
             With<PageReady>,
             With<KeyboardOwner>,
         ),
@@ -304,7 +318,7 @@ fn publish(
     claimed: Query<
         (),
         (
-            With<SessionManagerView>,
+            With<SessionCatalogView>,
             With<PageReady>,
             Added<KeyboardOwner>,
         ),
@@ -326,8 +340,8 @@ fn publish(
 fn sync_repositories(
     catalog: Res<CatalogSnapshot>,
     mut cache: Option<Single<&mut RepoInfoCache>>,
-    active: Query<Entity, (With<SessionManagerView>, With<KeyboardOwner>)>,
-    claimed: Query<(), (With<SessionManagerView>, Added<KeyboardOwner>)>,
+    active: Query<Entity, (With<SessionCatalogView>, With<KeyboardOwner>)>,
+    claimed: Query<(), (With<SessionCatalogView>, Added<KeyboardOwner>)>,
     mut repositories: ResMut<SessionRepositories>,
 ) {
     let cache_changed = cache.as_ref().is_some_and(|cache| cache.is_changed());
@@ -385,17 +399,38 @@ fn sync_repositories(
 fn ready(
     trigger: On<UiInput<PageReady>>,
     managers: ManagerViews,
+    pages: Query<&PageMetadata>,
     catalog: Res<CatalogSnapshot>,
     repositories: Res<SessionRepositories>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    if managers.contains(target) {
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, &*catalog));
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-            target,
-            &*repositories,
-        ));
+    let projects = pages
+        .get(target)
+        .is_ok_and(|page| page.url.trim_end_matches('/') == "vmux://projects");
+    if !managers.contains(target) && !projects {
+        return;
+    }
+    commands.entity(target).insert(SessionCatalogView);
+    commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, &*catalog));
+    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        target,
+        &*repositories,
+    ));
+}
+
+fn cleanup_inactive_views(
+    views: Query<
+        (Entity, &PageMetadata, Has<SessionManagerView>),
+        (With<SessionCatalogView>, Changed<PageMetadata>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, page, manager) in &views {
+        let projects = page.url.trim_end_matches('/') == "vmux://projects";
+        if !manager && !projects {
+            commands.entity(entity).remove::<SessionCatalogView>();
+        }
     }
 }
 

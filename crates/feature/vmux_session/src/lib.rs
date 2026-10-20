@@ -19,8 +19,9 @@ pub use conversation::{
 pub use host::SessionPlugin;
 pub use model::{
     AgentFamily, AgentId, Cleanup, CleanupRequest, CreateRequest, Created,
-    DescriptionUpdateRequest, LocalTask, RenameRequest, Session, Stage, StageChangeRequest,
-    StageChangedAt, StageDefinition, StageId,
+    DescriptionUpdateRequest, LocalTask, ProviderKind, ProviderSessionId, ProviderStage,
+    ProviderStageChangeRequest, RenameRequest, Session, Stage, StageChangeRequest, StageChangedAt,
+    StageDefinition, StageId,
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};

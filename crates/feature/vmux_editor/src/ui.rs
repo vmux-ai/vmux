@@ -16,6 +16,7 @@ mod markdown;
 mod menu;
 mod note;
 mod note_text;
+mod project;
 mod sidebar;
 mod state;
 mod status;
@@ -35,7 +36,7 @@ pub(crate) struct FilePage;
 #[vmux_page::page(
     page = "projects",
     component = Page,
-    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
+    states = ["ThemeUiState", "FileUiState", "ChatUiState", "GitUiState", "KeyClaimsUiState"],
     dom_group = "editor",
     subtree
 )]

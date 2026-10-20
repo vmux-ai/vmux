@@ -10,6 +10,7 @@ use super::input::{EditorFocus, EditorInput, PreeditField};
 use super::key::use_file_keys;
 use super::menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameInput};
 use super::note::{NoteBlankLine, NoteBlockView, NoteBlocks, NoteCursor, NoteProperties};
+use super::project::ProjectDashboard;
 use super::sidebar::{ExplorerPane, ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use super::state::FileUi;
 use super::status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
@@ -38,6 +39,16 @@ use vmux_ui::scroll::ScrollIntoView;
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    let projects = try_consume_context::<vmux_ecs::PageMetadata>()
+        .is_some_and(|metadata| metadata.url.trim_end_matches('/') == "vmux://projects");
+    if projects {
+        return rsx! { ProjectDashboard {} };
+    }
+    rsx! { EditorWorkspace {} }
+}
+
+#[component]
+fn EditorWorkspace() -> Element {
     let ui = FileUi::use_root();
     let mut handled_document_revision = use_signal(|| 0u64);
     let meta_state = ui.use_value(|state| state.document.meta.as_ref());

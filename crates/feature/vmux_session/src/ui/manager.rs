@@ -9,6 +9,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch, ManagerToolbar,
     ManagerView, ManagerViewToggle,
 };
+use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
@@ -663,26 +664,26 @@ fn SessionListGroup(
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     let archivable = sessions
         .iter()
-        .filter(|session| session.managed && session.stage != "done")
-        .map(|session| session.id.clone())
+        .filter(|session| session.stage != "done")
+        .map(ArchiveTarget::from_session)
         .collect::<Vec<_>>();
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
             div {
                 class: "sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.055] px-2.5 text-left backdrop-blur hover:bg-foreground/[0.075]",
+                SheetHeaderChevron {
+                    expanded: !collapsed(),
+                    label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
+                    onclick: move |event: MouseEvent| {
+                        event.stop_propagation();
+                        collapsed.set(!collapsed());
+                    },
+                }
                 button {
                     r#type: "button",
                     class: "flex min-w-0 flex-1 items-center gap-2 text-left",
                     aria_expanded: !collapsed(),
                     onclick: move |_| collapsed.set(!collapsed()),
-                    LineIconView {
-                        icon: LineIcon::ChevronDown,
-                        class: if collapsed() {
-                            "size-3 -rotate-90 text-muted-foreground/65".to_string()
-                        } else {
-                            "size-3 text-muted-foreground/65".to_string()
-                        },
-                    }
                     span { class: "flex size-4 shrink-0 items-center justify-center",
                         span { class: "size-2 rounded-full {stage_dot}" }
                     }
@@ -690,7 +691,7 @@ fn SessionListGroup(
                     span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
                 }
                 if stage.id == "stale" && !archivable.is_empty() {
-                    SessionArchiveAllButton { ids: archivable }
+                    SessionArchiveAllButton { targets: archivable }
                 }
             }
             if !collapsed() {
@@ -725,6 +726,7 @@ fn SessionListRow(
 ) -> Element {
     let context = SessionContext::from(repository);
     let cleanup_id = session.id.clone();
+    let archive_target = ArchiveTarget::from_session(&session);
     let archived = session.stage == "done";
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
@@ -776,6 +778,7 @@ fn SessionListRow(
                 resume,
                 git_url,
                 cleanup_id,
+                archive_target,
                 archived,
                 managed: session.managed,
             }
@@ -815,40 +818,54 @@ fn SessionBoardColumn(
     repositories: SessionRepositories,
     onselect: EventHandler<String>,
 ) -> Element {
+    let mut collapsed = use_signal(|| false);
     let pager = SessionPager::use_state();
     let total = sessions.len();
     let visible = pager.visible(total);
     let stage_dot = StageVisual::for_id(&stage.id).dot;
     let archivable = sessions
         .iter()
-        .filter(|session| session.managed && session.stage != "done")
-        .map(|session| session.id.clone())
+        .filter(|session| session.stage != "done")
+        .map(ArchiveTarget::from_session)
         .collect::<Vec<_>>();
     rsx! {
-        section { class: "w-[18rem] shrink-0",
-            header { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md bg-card/95 px-2.5 backdrop-blur",
+        section { class: "glass w-[18rem] shrink-0 overflow-hidden rounded-lg p-1 backdrop-blur-xl",
+            header { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md px-1.5",
+                SheetHeaderChevron {
+                    expanded: !collapsed(),
+                    label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
+                    onclick: move |_| collapsed.set(!collapsed()),
+                }
                 span { class: "size-2 rounded-full {stage_dot}" }
                 h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
                 span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
                 if stage.id == "stale" && !archivable.is_empty() {
                     div { class: "ml-auto",
-                        SessionArchiveAllButton { ids: archivable }
+                        SessionArchiveAllButton { targets: archivable }
                     }
                 }
             }
-            div { class: "mt-1 space-y-1",
-                for session in sessions.into_iter().take(visible) {
-                    SessionBoardCard {
-                        key: "{session.id}",
-                        repository: repositories.get(&session.id),
-                        session,
-                        onselect,
-                    }
-                }
-                if visible < total {
-                    div {
-                        class: "h-1",
-                        onvisible: move |event| pager.load_more(event, total),
+            div { class: if collapsed() {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "min-h-0 overflow-hidden",
+                    div { class: "mt-1 space-y-1",
+                        for session in sessions.into_iter().take(visible) {
+                            SessionBoardCard {
+                                key: "{session.id}",
+                                repository: repositories.get(&session.id),
+                                session,
+                                onselect,
+                            }
+                        }
+                        if visible < total {
+                            div {
+                                class: "h-1",
+                                onvisible: move |event| pager.load_more(event, total),
+                            }
+                        }
                     }
                 }
             }
@@ -864,6 +881,7 @@ fn SessionBoardCard(
 ) -> Element {
     let context = SessionContext::from(repository);
     let cleanup_id = session.id.clone();
+    let archive_target = ArchiveTarget::from_session(&session);
     let archived = session.stage == "done";
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
@@ -875,7 +893,7 @@ fn SessionBoardCard(
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
         article {
-            class: "group relative cursor-pointer rounded-md bg-foreground/[0.014] px-2.5 py-2.5 transition-colors hover:bg-foreground/[0.03]",
+            class: "glass group relative cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-glass-hover",
             onclick: move |_| onselect.call(select_id.clone()),
             div { class: "flex items-start gap-2",
                 AgentThumbnail {
@@ -895,6 +913,7 @@ fn SessionBoardCard(
                     resume,
                     git_url: git_url.clone(),
                     cleanup_id,
+                    archive_target,
                     archived,
                     managed: session.managed,
                 }
@@ -1192,16 +1211,34 @@ fn EditableDescription(session_id: String, value: String) -> Element {
     }
 }
 
+#[derive(Clone, PartialEq)]
+struct ArchiveTarget {
+    id: String,
+    kind: String,
+    sid: String,
+}
+
+impl ArchiveTarget {
+    fn from_session(session: &SessionSummary) -> Self {
+        Self {
+            id: session.id.clone(),
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+        }
+    }
+}
+
 #[component]
 fn SessionActions(
     resume: ResumeTarget,
     git_url: String,
     cleanup_id: String,
+    archive_target: ArchiveTarget,
     archived: bool,
     managed: bool,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let archive_id = cleanup_id.clone();
+    let archive = archive_target.clone();
     let visibility = if open() {
         "opacity-100"
     } else {
@@ -1239,6 +1276,24 @@ fn SessionActions(
                     }
                 }
             }
+            if !archived {
+                button {
+                    r#type: "button",
+                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
+                    title: translate("sessions-archive"),
+                    aria_label: translate("sessions-archive"),
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        let _ = send(&SessionsStageChange {
+                            id: archive.id.clone(),
+                            kind: archive.kind.clone(),
+                            sid: archive.sid.clone(),
+                            stage: "done".to_string(),
+                        });
+                    },
+                    LineIconView { icon: LineIcon::Archive, class: "size-3.5".to_string() }
+                }
+            }
             if managed {
                 button {
                     r#type: "button",
@@ -1256,17 +1311,6 @@ fn SessionActions(
                 div {
                     class: "absolute right-0 top-7 z-30 w-36 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
                     onclick: move |event| event.stop_propagation(),
-                    if !archived {
-                        SessionArchiveButton {
-                            onclick: move |_| {
-                                open.set(false);
-                                let _ = send(&SessionsStageChange {
-                                    id: archive_id.clone(),
-                                    stage: "done".to_string(),
-                                });
-                            },
-                        }
-                    }
                     SessionDeleteButton {
                         onclick: move |_| {
                             open.set(false);
@@ -1280,38 +1324,23 @@ fn SessionActions(
 }
 
 #[component]
-fn SessionArchiveButton(onclick: EventHandler<MouseEvent>) -> Element {
+fn SessionArchiveAllButton(targets: Vec<ArchiveTarget>) -> Element {
+    let label = format!("{} {}", translate("sessions-archive"), targets.len());
     rsx! {
-        button {
-            r#type: "button",
-            class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
-            onclick: move |event| onclick.call(event),
-            LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
-            span { {translate("sessions-archive")} }
-        }
-    }
-}
-
-#[component]
-fn SessionArchiveAllButton(ids: Vec<String>) -> Element {
-    let count = ids.len();
-    rsx! {
-        button {
-            r#type: "button",
-            class: "flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
-            title: translate("sessions-archive"),
-            aria_label: translate("sessions-archive"),
-            onclick: move |event| {
+        SheetHeaderAction {
+            label,
+            onclick: move |event: MouseEvent| {
                 event.stop_propagation();
-                for id in &ids {
+                for target in &targets {
                     let _ = send(&SessionsStageChange {
-                        id: id.clone(),
+                        id: target.id.clone(),
+                        kind: target.kind.clone(),
+                        sid: target.sid.clone(),
                         stage: "done".to_string(),
                     });
                 }
             },
-            LineIconView { icon: LineIcon::Archive, class: "size-3 shrink-0".to_string() }
-            span { "{count}" }
+            LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
         }
     }
 }
@@ -1399,6 +1428,8 @@ fn StagePickerOption(
                 open.set(false);
                 let _ = send(&SessionsStageChange {
                     id: session_id.clone(),
+                    kind: String::new(),
+                    sid: String::new(),
                     stage: stage_id.clone(),
                 });
             },

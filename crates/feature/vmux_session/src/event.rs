@@ -45,6 +45,8 @@ pub struct SessionsDescriptionUpdate {
 #[vmux_api::ui_event(Default)]
 pub struct SessionsStageChange {
     pub id: String,
+    pub kind: String,
+    pub sid: String,
     pub stage: String,
 }
 

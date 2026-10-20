@@ -247,8 +247,8 @@ fn deliver_repository_outputs(
                         page.url = url;
                     }
                     page.title = match event.branch.is_empty() {
-                        true => event.repo_name.clone(),
-                        false => format!("{} · {}", event.repo_name, event.branch),
+                        true => format!("Git · {}", event.repo_name),
+                        false => format!("Git · {} · {}", event.repo_name, event.branch),
                     };
                 }
                 states.set_repository(webview, event.clone());

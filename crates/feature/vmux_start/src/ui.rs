@@ -18,6 +18,8 @@ pub fn Page() -> Element {
     let state = use_command_bar_ui();
 
     rsx! {
+        document::Title { "Any prompt. Anything, done." }
+        document::Meta { name: "description", content: "Any prompt. Anything, done." }
         main {
             class: "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background px-5 py-8 text-foreground sm:px-8",
             div { class: "m-auto flex w-full max-w-2xl flex-col gap-3",

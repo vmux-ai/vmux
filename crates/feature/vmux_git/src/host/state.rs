@@ -36,7 +36,7 @@ impl Plugin for StatePlugin {
             .add_observer(repository_request)
             .add_systems(
                 Update,
-                (project_diff, publish)
+                (cleanup_inactive_views, project_diff, publish)
                     .chain()
                     .after(super::controller::ControllerSet::Operations),
             );
@@ -304,13 +304,35 @@ fn page_ready(
     let Ok(page) = pages.get(entity) else {
         return;
     };
-    if !page.url.starts_with(crate::GIT_PAGE_URL) && page.url != super::GitPlugin::MANIFEST.url {
+    let projects = page.url.trim_end_matches('/') == "vmux://projects";
+    if !page.url.starts_with(crate::GIT_PAGE_URL)
+        && page.url != super::GitPlugin::MANIFEST.url
+        && !projects
+    {
         return;
     }
     if states.contains(entity) {
         return;
     }
     commands.entity(entity).insert(GitState::default());
+}
+
+fn cleanup_inactive_views(
+    pages: Query<
+        (Entity, &vmux_ecs::PageMetadata),
+        (With<GitState>, Changed<vmux_ecs::PageMetadata>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, page) in &pages {
+        let projects = page.url.trim_end_matches('/') == "vmux://projects";
+        if !page.url.starts_with(crate::GIT_PAGE_URL)
+            && page.url != super::GitPlugin::MANIFEST.url
+            && !projects
+        {
+            commands.entity(entity).remove::<GitState>();
+        }
+    }
 }
 
 fn repository_request(
@@ -354,6 +376,7 @@ fn repository_request(
         }
     };
     if let Ok(mut page) = pages.get_mut(webview)
+        && page.url.starts_with(crate::GIT_PAGE_URL)
         && let Some(url) = crate::GitUrl::from_path_preserving_commit(&repo_root, &page.url)
         && page.url != url
     {

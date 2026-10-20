@@ -63,7 +63,7 @@ impl Page {
             root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
             stylesheet: "./assets/index.css",
             html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
-            body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
+            body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
             permissions: &[],
@@ -162,6 +162,21 @@ mod shell_tests {
 
         assert!(html.contains("vmux://history/assets/favicons/history.svg"));
         assert!(html.contains("<title>History</title>"));
+    }
+
+    #[test]
+    fn the_page_shell_paints_its_surface_before_the_component_mounts() {
+        let html = String::from_utf8(
+            Page::pane("vmux://start/", || unreachable!())
+                .titled("Start")
+                .shell()
+                .into_body(),
+        )
+        .unwrap();
+
+        assert!(html.contains(
+            "<body class=\"m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background"
+        ));
     }
 }
 

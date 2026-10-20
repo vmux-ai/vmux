@@ -147,7 +147,7 @@ vault-result-synced = Vault · { common-done }
 vault-result-github-connected = GitHub · { common-done }
 vault-result-folder-connected = Folder · { common-done }
 start-title = Start
-start-tagline = One prompt. Anything, done.
+start-tagline = Any prompt. Anything, done.
 
 agents-title = Agents
 agents-search = Search ACP and CLI agents…

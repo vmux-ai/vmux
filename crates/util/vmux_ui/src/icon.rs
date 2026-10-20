@@ -341,7 +341,9 @@ mod wasm {
                 path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
             } },
             BuiltinIcon::Project => rsx! { Icon { class: "{class}",
-                path { d: "M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2.5h7.5A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5Z" }
+                rect { x: "3", y: "3", width: "18", height: "18", rx: "4" }
+                path { d: "M8 8h3v3H8zM13 8h3v3h-3zM8 13h3v3H8z" }
+                path { d: "M14.5 14.5h3M16 13v3" }
             } },
             BuiltinIcon::Brain => rsx! { LineIconView {
                 icon: LineIcon::Brain,

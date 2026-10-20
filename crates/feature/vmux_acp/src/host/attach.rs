@@ -114,9 +114,10 @@ fn attach(
             anchor,
             vmux_session::host::ChatView,
         ));
-        commands
-            .entity(view)
-            .remove::<vmux_session::host::SessionManagerView>();
+        commands.entity(view).remove::<(
+            vmux_session::host::SessionManagerView,
+            vmux_session::host::SessionCatalogView,
+        )>();
         if webview.is_some() {
             commands.entity(view).remove::<(
                 vmux_start::StartInlineTransitionView,

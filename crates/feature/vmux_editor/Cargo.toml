@@ -24,6 +24,7 @@ vmux_knowledge = { path = "../vmux_knowledge" }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 vmux_setting = { path = "../vmux_setting" }
+vmux_session = { path = "../vmux_session" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 arboard = "3"

@@ -5,7 +5,7 @@
             title: "Start",
             bookmark: Some(10),
             title_message_id: "start-title",
-            keywords: ["start", "home", "new tab", "launcher"],
+            keywords: ["start", "home", "new tab", "launcher", "any prompt", "anything done"],
             icon: "Sparkles",
             command_bar: true,
             startup: true,

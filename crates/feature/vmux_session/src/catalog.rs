@@ -13,8 +13,9 @@ use vmux_ecs::{CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 
 #[cfg(host)]
 use crate::{
-    AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent, RunState,
-    Session, SessionId, Stage, StageChangedAt, StageDefinition, StageId, Transcripts,
+    AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent, ProviderKind,
+    ProviderSessionId, ProviderStage, RunState, Session, SessionId, Stage, StageChangedAt,
+    StageDefinition, StageId, Transcripts,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -177,6 +178,21 @@ struct CatalogChanges<'w, 's> {
             Or<(Added<ConversationEvent>, Changed<MessageContent>)>,
         ),
     >,
+    provider_stages: Query<
+        'w,
+        's,
+        (),
+        (
+            With<ProviderStage>,
+            Or<(
+                Added<ProviderStage>,
+                Changed<ProviderKind>,
+                Changed<ProviderSessionId>,
+                Changed<Stage>,
+                Changed<StageChangedAt>,
+            )>,
+        ),
+    >,
     removed_sessions: RemovedComponents<'w, 's, Session>,
     removed_ids: RemovedComponents<'w, 's, SessionId>,
     removed_names: RemovedComponents<'w, 's, Name>,
@@ -196,13 +212,18 @@ struct CatalogChanges<'w, 's> {
     removed_titles: RemovedComponents<'w, 's, AgentConversationTitle>,
     removed_events: RemovedComponents<'w, 's, ConversationEvent>,
     removed_messages: RemovedComponents<'w, 's, MessageContent>,
+    removed_provider_stages: RemovedComponents<'w, 's, ProviderStage>,
+    removed_provider_kinds: RemovedComponents<'w, 's, ProviderKind>,
+    removed_provider_ids: RemovedComponents<'w, 's, ProviderSessionId>,
 }
 
 #[cfg(host)]
 impl CatalogChanges<'_, '_> {
     fn any(&mut self) -> bool {
-        let mut any =
-            !self.sessions.is_empty() || !self.stages.is_empty() || !self.events.is_empty();
+        let mut any = !self.sessions.is_empty()
+            || !self.stages.is_empty()
+            || !self.events.is_empty()
+            || !self.provider_stages.is_empty();
         any |= self.removed_sessions.read().count() > 0;
         any |= self.removed_ids.read().count() > 0;
         any |= self.removed_names.read().count() > 0;
@@ -222,6 +243,9 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_titles.read().count() > 0;
         any |= self.removed_events.read().count() > 0;
         any |= self.removed_messages.read().count() > 0;
+        any |= self.removed_provider_stages.read().count() > 0;
+        any |= self.removed_provider_kinds.read().count() > 0;
+        any |= self.removed_provider_ids.read().count() > 0;
         any
     }
 }
@@ -231,6 +255,10 @@ fn project(
     sessions: SessionCatalog,
     stages: Query<(&StageId, &Name, &Order, Has<Terminal>), With<StageDefinition>>,
     providers: Res<ProviderCatalog>,
+    provider_stages: Query<
+        (&ProviderKind, &ProviderSessionId, &Stage, &StageChangedAt),
+        With<ProviderStage>,
+    >,
     transcripts: Transcripts,
     mut changes: CatalogChanges,
     mut catalog: ResMut<CatalogSnapshot>,
@@ -310,6 +338,15 @@ fn project(
         });
     }
     for session in &providers.sessions {
+        let stage_override = provider_stages
+            .iter()
+            .find(|(kind, id, _, _)| kind.0 == session.kind && id.0 == session.sid);
+        let stage = stage_override
+            .map(|(_, _, stage, _)| stage.0.0.clone())
+            .unwrap_or_else(|| default_stage.clone());
+        let stage_changed_at = stage_override
+            .map(|(_, _, _, changed_at)| changed_at.0)
+            .unwrap_or(session.updated_at);
         next.sessions.push(SessionSummary {
             id: session.catalog_id(),
             kind: session.kind.clone(),
@@ -318,10 +355,10 @@ fn project(
             name: session.name.clone(),
             description: session.description.clone(),
             cwd: session.cwd.clone(),
-            stage: default_stage.clone(),
+            stage,
             created_at: session.created_at,
             last_activated_at: session.updated_at,
-            stage_changed_at: session.updated_at,
+            stage_changed_at,
             agent: session.agent.clone(),
             agent_name: AgentFamily::of(&session.agent).name(&session.agent_name),
             runtime: "inactive".to_string(),
@@ -480,6 +517,47 @@ mod tests {
             app.world().resource::<CatalogSnapshot>().sessions[0].conversation_title,
             "Renamed"
         );
+    }
+
+    #[test]
+    fn catalog_applies_provider_stage_override_without_importing_the_session() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex-cli".into(),
+                name: "External task".into(),
+                cwd: "/tmp/project".into(),
+                updated_at: 10,
+                ..Default::default()
+            });
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
+            .write(crate::ProviderStageChangeRequest {
+                kind: ProviderKind("codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId("done".into()),
+            });
+        app.update();
+
+        let catalog = app.world().resource::<CatalogSnapshot>();
+        assert_eq!(catalog.sessions.len(), 1);
+        assert_eq!(catalog.sessions[0].id, "codex:provider-session");
+        assert!(!catalog.sessions[0].managed);
+        assert_eq!(catalog.sessions[0].stage, "done");
+        assert!(catalog.sessions[0].stage_changed_at > 10);
+        let imported = app
+            .world_mut()
+            .query_filtered::<Entity, With<Session>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(imported, 0);
     }
 
     #[test]
