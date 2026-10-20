@@ -26,9 +26,10 @@ pub(super) fn BranchDiffCard(
         format!("{}…{}", repository.base_ref, selected_branch)
     };
     let selected_path = selected_path();
-    let title = match selected_path.is_empty() {
-        true => comparison,
-        false => format!("{selected_path} · {comparison}"),
+    let title = if selected_path.is_empty() {
+        comparison.clone()
+    } else {
+        selected_path.clone()
     };
     let available = !selected_branch.is_empty() && !selected_path.is_empty();
     rsx! {
@@ -39,6 +40,8 @@ pub(super) fn BranchDiffCard(
             loading,
             available,
             title,
+            subtitle: if available { comparison } else { String::new() },
+            file_path: selected_path,
             empty: translate("git-select-file"),
             icon: LineIcon::File,
         }
@@ -72,6 +75,11 @@ pub(super) fn CommitDiffCard(
             loading,
             available: selected.is_some(),
             title,
+            subtitle: selected
+                .as_ref()
+                .map(|commit| format!("{} · {}", commit.author, commit.date))
+                .unwrap_or_default(),
+            file_path: String::new(),
             empty: translate("git-no-commits"),
             icon: LineIcon::GitCommit,
         }
@@ -86,15 +94,29 @@ fn RevisionDiffCard(
     loading: bool,
     available: bool,
     title: String,
+    subtitle: String,
+    file_path: String,
     empty: String,
     icon: LineIcon,
 ) -> Element {
     let empty_path = use_signal(String::new);
     rsx! {
-        section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
-                LineIconView { icon, class: "size-3.5 shrink-0 text-muted-foreground" }
-                span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{title}" }
+        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-card/60 ring-1 ring-inset ring-foreground/[0.10]",
+            div { class: "flex min-h-12 shrink-0 items-center gap-2.5 bg-foreground/[0.025] px-3",
+                if file_path.is_empty() {
+                    LineIconView { icon, class: "size-3.5 shrink-0 text-muted-foreground" }
+                } else {
+                    TypeIcon { path: file_path, is_dir: false, class: "size-4 shrink-0" }
+                }
+                div { class: "min-w-0 flex-1",
+                    div { class: "truncate font-mono text-[11px] font-semibold text-foreground", "{title}" }
+                    if !subtitle.is_empty() {
+                        div { class: "mt-0.5 flex items-center gap-1 truncate text-[9px] text-muted-foreground",
+                            LineIconView { icon: LineIcon::GitBranch, class: "size-2.5 shrink-0" }
+                            span { class: "truncate", "{subtitle}" }
+                        }
+                    }
+                }
             }
             if available {
                 DiffView {
@@ -123,7 +145,7 @@ pub(super) fn DiffCard(
     loading: bool,
 ) -> Element {
     rsx! {
-        section { class: "flex h-full min-h-0 flex-col",
+        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-card/60 ring-1 ring-inset ring-foreground/[0.10]",
             div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
                 TypeIcon { path: selected_path(), is_dir: false, class: "size-3.5 shrink-0" }
                 span { class: "min-w-0 flex-1 truncate font-mono text-[11px] font-medium",

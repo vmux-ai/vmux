@@ -45,7 +45,7 @@ pub(super) fn GitDashboard() -> Element {
         }
         main { class: "flex min-h-0 flex-1 flex-col bg-background",
             div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] sm:grid-rows-1",
-                aside { class: "flex min-h-0 flex-col overflow-hidden bg-card/55",
+                aside { class: "flex min-h-0 flex-col overflow-hidden bg-foreground/[0.018]",
                     RepositoryPanelHeader {
                         repository: repository.clone(),
                         focused_panel: active_panel,
@@ -90,7 +90,7 @@ pub(super) fn GitDashboard() -> Element {
                         }
                     }
                 }
-                section { class: "min-h-0 min-w-0 overflow-hidden bg-background",
+                section { class: "min-h-0 min-w-0 overflow-hidden bg-background p-2.5",
                     if active_panel == GitPanel::Branches {
                         BranchDiffCard {
                             repository: repository.clone(),

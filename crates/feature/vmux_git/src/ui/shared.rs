@@ -76,15 +76,15 @@ impl DiffPresentation {
     fn row_class(&self) -> &'static str {
         match self.0 {
             DiffKind::Add => {
-                "bg-[#2da44e]/[0.08] hover:bg-[#2da44e]/[0.13] dark:bg-[#3fb950]/[0.10] dark:hover:bg-[#3fb950]/[0.16]"
+                "bg-[#dafbe1] hover:bg-[#ccffd8] dark:bg-[#12261e] dark:hover:bg-[#193324]"
             }
             DiffKind::Remove => {
-                "bg-[#cf222e]/[0.08] hover:bg-[#cf222e]/[0.13] dark:bg-[#f85149]/[0.10] dark:hover:bg-[#f85149]/[0.16]"
+                "bg-[#ffebe9] hover:bg-[#ffd7d5] dark:bg-[#2d1717] dark:hover:bg-[#3b1c1c]"
             }
             DiffKind::Staged => {
                 "bg-[#fff8c5] hover:bg-[#fae17d] dark:bg-[#4b3600] dark:hover:bg-[#633c01]"
             }
-            DiffKind::Hunk => "bg-[#ddf4ff] dark:bg-[#0d2d42]",
+            DiffKind::Hunk => "bg-[#ddf4ff] dark:bg-[#10253f]",
             DiffKind::Context => "hover:bg-foreground/[0.025]",
         }
     }
@@ -101,11 +101,11 @@ impl DiffPresentation {
 
     fn gutter_class(&self) -> &'static str {
         match self.0 {
-            DiffKind::Add => "bg-[#2da44e]/[0.14] dark:bg-[#3fb950]/[0.18]",
-            DiffKind::Remove => "bg-[#cf222e]/[0.14] dark:bg-[#f85149]/[0.18]",
+            DiffKind::Add => "bg-[#ccffd8] dark:bg-[#1b4721]",
+            DiffKind::Remove => "bg-[#ffd7d5] dark:bg-[#5c2020]",
             DiffKind::Staged => "bg-[#fae17d] dark:bg-[#633c01]",
             DiffKind::Hunk => "bg-[#b6e3ff] dark:bg-[#1f3b4d]",
-            DiffKind::Context => "bg-card/70",
+            DiffKind::Context => "bg-foreground/[0.025]",
         }
     }
 }
@@ -220,7 +220,7 @@ pub fn DiffView(
 
     rsx! {
         div {
-            class: if visible { "min-h-0 flex-1 overflow-auto bg-background font-mono text-xs leading-6" } else { "hidden" },
+            class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             onscroll: move |event| {
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                 if remaining <= 160 && has_more && !loading {

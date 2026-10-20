@@ -5,6 +5,7 @@ use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::file_icon::TypeIcon;
@@ -105,6 +106,13 @@ pub(super) fn BranchesCard(
     let reference_count = references.len();
     let pager = ListPager::use_state();
     let mut branch_open = use_signal(|| false);
+    let mut file_query = use_signal(String::new);
+    let query = file_query().trim().to_lowercase();
+    let files_empty = files.is_empty();
+    let visible_files = files
+        .into_iter()
+        .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
+        .collect::<Vec<_>>();
     let selected_index = references
         .iter()
         .position(|reference| reference == &selected_branch);
@@ -211,19 +219,27 @@ pub(super) fn BranchesCard(
                     }
                 }
             }
+            div { class: "shrink-0 px-2 pb-1.5",
+                ManagerSearch {
+                    value: file_query(),
+                    placeholder: translate("common-filter"),
+                    onsearch: move |event: FormEvent| file_query.set(event.value()),
+                    onkeydown: None,
+                }
+            }
+            div { class: "flex h-7 shrink-0 items-center justify-between px-3 text-[10px] font-semibold text-muted-foreground",
+                span { {translate("git-files")} }
+                span { class: "tabular-nums", "{files_total}" }
+            }
             div {
-                class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                class: "min-h-0 flex-1 overflow-y-auto px-2 pb-2",
                 onscroll: move |event| {
                     let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                     if remaining <= 96 && files_has_more && !files_loading {
                         let _ = send(&GitBranchFilesNextRequest);
                     }
                 },
-                div { class: "flex h-8 items-center justify-between px-2.5 text-[10px] font-semibold text-muted-foreground",
-                    span { {translate("git-files")} }
-                    span { class: "tabular-nums", "{files_total}" }
-                }
-                if files_loading && files.is_empty() {
+                if files_loading && files_empty {
                     div { class: "flex flex-col gap-2 px-2.5 py-2",
                         for width in ["w-9/12", "w-11/12", "w-8/12", "w-10/12"] {
                             Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
@@ -231,10 +247,10 @@ pub(super) fn BranchesCard(
                     }
                 } else if !files_error.is_empty() {
                     div { class: "px-2.5 py-3 text-xs text-destructive", "{files_error}" }
-                } else if files.is_empty() {
+                } else if visible_files.is_empty() {
                     div { class: "flex min-h-24 items-center justify-center px-3 text-center text-xs text-muted-foreground", {translate("git-no-changes")} }
                 } else {
-                    for (index, entry) in files.into_iter().enumerate() {
+                    for (index, entry) in visible_files.into_iter().enumerate() {
                         BranchFileRow {
                             key: "branch-file-{entry.path_bytes:?}",
                             index,
@@ -266,23 +282,24 @@ fn BranchFileRow(index: usize, entry: GitBranchFileEntry, selected_path_bytes: V
             id: "git-branch-file-row-{index}",
             r#type: "button",
             class: if selected {
-                "flex min-h-10 w-full items-center gap-2 rounded-md bg-primary/[0.10] px-2.5 text-left text-foreground"
+                "flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.085] px-2 text-left text-foreground shadow-[inset_2px_0_0_#58a6ff]"
             } else {
-                "flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 text-left text-foreground hover:bg-foreground/[0.045]"
+                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
                 let _ = send(&GitBranchFileSelectRequest {
                     path_bytes: path_bytes.clone(),
                 });
             },
-            span { class: "w-4 shrink-0 text-center font-mono text-xs font-semibold {status_class}", "{status_code}" }
-            TypeIcon { path: entry.path.clone(), is_dir: false, class: "size-4 shrink-0 opacity-80" }
-            div { class: "min-w-0 flex-1",
-                div { class: "truncate text-[13px]", "{entry.name()}" }
+            TypeIcon { path: entry.path.clone(), is_dir: false, class: "size-3.5 shrink-0 opacity-85" }
+            div { class: "flex min-w-0 flex-1 items-baseline gap-0.5 overflow-hidden text-[11px]",
                 if !entry.parent().is_empty() {
-                    div { class: "truncate text-[10px] text-muted-foreground", "{entry.parent()}" }
+                    span { class: "min-w-0 truncate text-muted-foreground", "{entry.parent()}" }
+                    span { class: "shrink-0 text-muted-foreground/55", "/" }
                 }
+                span { class: "max-w-[65%] shrink-0 truncate font-medium", "{entry.name()}" }
             }
+            span { class: "w-4 shrink-0 text-center font-mono text-[10px] font-semibold {status_class}", "{status_code}" }
         }
     }
 }
