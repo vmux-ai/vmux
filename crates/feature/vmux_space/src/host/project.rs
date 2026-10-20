@@ -182,7 +182,7 @@ impl ProjectCatalog {
             let identity = identity.canonicalize().unwrap_or(identity);
             let mut projected = row.clone();
             projected.path = checkout.root.to_string_lossy().into_owned();
-            projected.display_path = vmux_path::DisplayPath::project(&checkout.root);
+            projected.display_path = vmux_path::DisplayPath::project(&identity);
             projected.label = identity
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -322,7 +322,7 @@ impl GitProjectsProjection {
             let identity = identity.canonicalize().unwrap_or(identity);
             let mut projected = row.clone();
             projected.path = checkout.root.to_string_lossy().into_owned();
-            projected.display_path = vmux_path::DisplayPath::project(&checkout.root);
+            projected.display_path = vmux_path::DisplayPath::project(&identity);
             projected.label = identity
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -884,6 +884,10 @@ mod tests {
         );
         assert!(projection.0[0].is_active);
         assert!(projection.0[0].is_worktree);
+        assert_eq!(
+            projection.0[0].display_path,
+            vmux_path::DisplayPath::project(fixture.cloud.canonicalize().unwrap())
+        );
     }
 
     #[test]

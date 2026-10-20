@@ -6,7 +6,6 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
-use super::shared::ProjectKindPill;
 use super::state::GitPageState;
 use crate::event::GitRepositoryPickerRequest;
 
@@ -35,8 +34,6 @@ pub(super) fn EmptyRepository() -> Element {
         .map(|project| project.path.clone())
         .filter(|path| !path.is_empty())
         .unwrap_or_else(|| workspace.clone());
-    let current_is_worktree = current.as_ref().is_some_and(|project| project.is_worktree);
-
     rsx! {
         main { class: "flex min-h-0 flex-1 items-center justify-center bg-background px-6 py-10 text-foreground",
             div { class: "flex w-full max-w-sm flex-col items-center text-center",
@@ -55,9 +52,6 @@ pub(super) fn EmptyRepository() -> Element {
                             class: "size-4 shrink-0 text-muted-foreground".to_string(),
                         }
                         span { class: "min-w-0 flex-1 truncate font-medium", "{current_label}" }
-                        if current.is_some() {
-                            ProjectKindPill { is_worktree: current_is_worktree }
-                        }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 shrink-0 text-muted-foreground" }
                     }
                     if open() {
@@ -90,7 +84,6 @@ pub(super) fn EmptyRepository() -> Element {
                                                 });
                                             },
                                             span { class: "min-w-0 flex-1 truncate font-medium", "{project.label}" }
-                                            ProjectKindPill { is_worktree: project.is_worktree }
                                             if active {
                                                 LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
                                             }

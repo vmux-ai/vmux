@@ -13,7 +13,7 @@ use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 use crate::event::*;
 use crate::state::GitPanel;
 
-use super::shared::{ListPager, ProjectKindPill};
+use super::shared::ListPager;
 
 #[component]
 pub(super) fn RepositoryHeader(
@@ -95,10 +95,7 @@ pub(super) fn RepositoryHeader(
                                                 });
                                             },
                                             div { class: "min-w-0 flex-1",
-                                                div { class: "flex min-w-0 items-center gap-1.5",
-                                                    div { class: "min-w-0 flex-1 truncate font-medium", "{label}" }
-                                                    ProjectKindPill { is_worktree: project.is_worktree }
-                                                }
+                                                div { class: "min-w-0 flex-1 truncate font-medium", "{label}" }
                                                 div { class: "truncate font-mono text-[10px] text-muted-foreground", "{display_path}" }
                                             }
                                             if active {
@@ -138,9 +135,6 @@ pub(super) fn RepositoryHeader(
                         onclick: move |_| branch_open.set(!branch_open()),
                         LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
                         span { class: "truncate text-foreground/90", "{repository.branch}" }
-                        if repository.is_worktree {
-                            ProjectKindPill { is_worktree: true }
-                        }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                     }
                     if branch_open() {
