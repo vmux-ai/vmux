@@ -10,7 +10,7 @@ use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{PageMetadata, UiStateWrite};
-use vmux_git::worktree::LinkedRepoRoot;
+use vmux_git::worktree::{CheckoutInfo, LinkedRepoRoot};
 #[cfg(test)]
 use vmux_layout::pane::Pane;
 use vmux_layout::space::{
@@ -235,13 +235,64 @@ fn publish_roots(projects: Res<ActiveProjectRows>, mut roots: Single<&mut Comman
 #[derive(Component, Default)]
 struct GitProjectsProjection(Vec<ProjectRow>);
 
+impl GitProjectsProjection {
+    fn from_rows(rows: &[ProjectRow]) -> Self {
+        let mut candidates = Vec::new();
+        for row in rows {
+            if row.depth != 0
+                || row.kind != ProjectRowKind::Project
+                || row.missing
+                || std::path::Path::new(&row.path)
+                    .components()
+                    .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
+            {
+                continue;
+            }
+            let Ok(checkout) = CheckoutInfo::try_from(std::path::Path::new(&row.path)) else {
+                continue;
+            };
+            let identity =
+                LinkedRepoRoot::find(&checkout.root).unwrap_or_else(|| checkout.root.clone());
+            let identity = identity.canonicalize().unwrap_or(identity);
+            let mut projected = row.clone();
+            projected.path = checkout.root.to_string_lossy().into_owned();
+            projected.display_path.clone_from(&projected.path);
+            projected.label = identity
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| projected.label.clone());
+            projected.is_worktree = checkout.root != identity;
+            candidates.push((identity, projected));
+        }
+        let mut rows = Vec::<(std::path::PathBuf, ProjectRow)>::new();
+        for (identity, row) in &candidates {
+            let nested = candidates.iter().any(|(other_identity, _)| {
+                identity != other_identity
+                    && std::path::Path::new(&row.path).starts_with(other_identity)
+            });
+            if nested {
+                continue;
+            }
+            if let Some((_, held)) = rows.iter_mut().find(|(held, _)| held == identity) {
+                if row.is_active && !held.is_active {
+                    held.clone_from(row);
+                }
+                continue;
+            }
+            rows.push((identity.clone(), row.clone()));
+        }
+        Self(rows.into_iter().map(|(_, row)| row).collect())
+    }
+}
+
 fn publish_git_projects(
     projects: Res<ActiveProjectRows>,
     views: Query<(Entity, &PageMetadata, Option<&GitProjectsProjection>), With<PageReady>>,
     mut commands: Commands,
 ) {
-    let rows = &projects.rows;
     let changed = projects.is_changed();
+    let mut projection = None;
     for (entity, page, current) in &views {
         if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
             && page.url != vmux_git::GitPlugin::MANIFEST.url
@@ -251,15 +302,19 @@ fn publish_git_projects(
         if !changed && current.is_some() {
             continue;
         }
-        if current.is_some_and(|current| current.0.as_slice() == rows.as_slice()) {
+        let rows =
+            projection.get_or_insert_with(|| GitProjectsProjection::from_rows(&projects.rows));
+        if current.is_some_and(|current| current.0.as_slice() == rows.0.as_slice()) {
             continue;
         }
         commands
             .entity(entity)
-            .insert(GitProjectsProjection(rows.clone()));
+            .insert(GitProjectsProjection(rows.0.clone()));
         commands.trigger(UiStateWrite::<vmux_git::state::GitUiState>::from_event(
             entity,
-            &vmux_git::state::GitProjects { rows: rows.clone() },
+            &vmux_git::state::GitProjects {
+                rows: rows.0.clone(),
+            },
         ));
     }
 }
@@ -672,6 +727,97 @@ mod tests {
                 .drain()
                 .count()
         }
+    }
+
+    struct GitProjectRowsFixture {
+        _root: tempfile::TempDir,
+        cloud: std::path::PathBuf,
+        cloud_worktree: std::path::PathBuf,
+        dashboard: std::path::PathBuf,
+    }
+
+    impl GitProjectRowsFixture {
+        fn start() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let cloud = root.path().join("vmux-cloud");
+            let dashboard = root.path().join("dashboard");
+            std::fs::create_dir_all(&cloud).unwrap();
+            std::fs::create_dir_all(&dashboard).unwrap();
+            let cloud_checkout = CheckoutInfo::initialize(&cloud).unwrap();
+            cloud_checkout.ensure_initial_snapshot("Initial").unwrap();
+            let branch = cloud_checkout.head_ref().unwrap();
+            let cloud_worktree = root.path().join("vmx-206");
+            cloud_checkout
+                .add_worktree(&cloud_worktree, "vmux/test", &branch)
+                .unwrap();
+            CheckoutInfo::initialize(&dashboard).unwrap();
+            let client = cloud.join("client");
+            std::fs::create_dir_all(&client).unwrap();
+            CheckoutInfo::initialize(&client).unwrap();
+            std::fs::create_dir_all(cloud.join(".git/modules")).unwrap();
+            Self {
+                _root: root,
+                cloud,
+                cloud_worktree,
+                dashboard,
+            }
+        }
+
+        fn row(&self, path: &std::path::Path, active: bool) -> ProjectRow {
+            let path = path.to_string_lossy().into_owned();
+            ProjectRow {
+                label: std::path::Path::new(&path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                display_path: path.clone(),
+                path,
+                depth: 0,
+                is_active: active,
+                is_worktree: false,
+                missing: false,
+                branch: String::new(),
+                kind: ProjectRowKind::Project,
+                expanded: false,
+            }
+        }
+    }
+
+    #[test]
+    fn git_projects_show_top_level_repositories_once() {
+        let fixture = GitProjectRowsFixture::start();
+        let non_repository = fixture._root.path().join("notes");
+        std::fs::create_dir_all(&non_repository).unwrap();
+        let rows = vec![
+            fixture.row(&fixture.cloud_worktree, true),
+            fixture.row(&fixture.cloud, false),
+            fixture.row(&fixture.cloud.join("client"), false),
+            fixture.row(&fixture.cloud.join(".git/modules"), false),
+            fixture.row(&fixture.dashboard, false),
+            fixture.row(&non_repository, false),
+        ];
+
+        let projection = GitProjectsProjection::from_rows(&rows);
+
+        assert_eq!(
+            projection
+                .0
+                .iter()
+                .map(|row| row.label.as_str())
+                .collect::<Vec<_>>(),
+            ["vmux-cloud", "dashboard"]
+        );
+        assert_eq!(
+            projection.0[0].path,
+            fixture
+                .cloud_worktree
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+        );
+        assert!(projection.0[0].is_active);
+        assert!(projection.0[0].is_worktree);
     }
 
     #[test]

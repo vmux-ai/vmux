@@ -266,14 +266,11 @@ pub(super) fn RepositoryPanelHeader(
     fetching: bool,
     can_stage_all: bool,
 ) -> Element {
-    let branch_count =
-        repository.branches.len() + repository.remote_branches.len() + repository.tags.len();
     rsx! {
         div { class: "flex h-11 shrink-0 items-center gap-2 px-3 text-[10px] tabular-nums text-muted-foreground",
             ViewPicker {
                 focused_panel,
                 changes: repository.files.len(),
-                branches: branch_count,
                 commits: repository.commits.len(),
                 stashes: repository.stashes.len(),
                 first_commit: repository
@@ -323,7 +320,6 @@ pub(super) fn RepositoryPanelHeader(
 fn ViewPicker(
     focused_panel: GitPanel,
     changes: usize,
-    branches: usize,
     commits: usize,
     stashes: usize,
     first_commit: String,
@@ -331,7 +327,7 @@ fn ViewPicker(
     let mut open = use_signal(|| false);
     let (icon, label, count) = match focused_panel {
         GitPanel::Files => (LineIcon::File, translate("git-changes"), changes),
-        GitPanel::Branches => (LineIcon::GitBranch, translate("git-branches"), branches),
+        GitPanel::Branches => (LineIcon::GitBranch, translate("git-branch-changes"), 0),
         GitPanel::Commits => (LineIcon::GitCommit, translate("git-commits"), commits),
         GitPanel::Stash => (LineIcon::Package, translate("git-stashes"), stashes),
     };
@@ -367,8 +363,8 @@ fn ViewPicker(
                     ViewPickerItem {
                         active: focused_panel == GitPanel::Branches,
                         icon: LineIcon::GitBranch,
-                        label: translate("git-branches"),
-                        count: branches,
+                        label: translate("git-branch-changes"),
+                        count: 0,
                         open,
                         onselect: move |_| {
                             let _ = send(&GitBranchDiffSelectRequest);

@@ -5,8 +5,8 @@ use crate::event::{GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositor
 
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum GitPanel {
-    #[default]
     Files,
+    #[default]
     Branches,
     Commits,
     Stash,

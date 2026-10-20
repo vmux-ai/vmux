@@ -109,10 +109,10 @@ impl DiffPresentation {
     fn row_class(&self) -> &'static str {
         match self.0 {
             DiffKind::Add => {
-                "bg-[#dafbe1] hover:bg-[#aceebb] dark:bg-[#033a16] dark:hover:bg-[#055d20]"
+                "bg-[#2da44e]/[0.08] hover:bg-[#2da44e]/[0.13] dark:bg-[#3fb950]/[0.10] dark:hover:bg-[#3fb950]/[0.16]"
             }
             DiffKind::Remove => {
-                "bg-[#ffebe9] hover:bg-[#ffcecb] dark:bg-[#67060c] dark:hover:bg-[#8e1519]"
+                "bg-[#cf222e]/[0.08] hover:bg-[#cf222e]/[0.13] dark:bg-[#f85149]/[0.10] dark:hover:bg-[#f85149]/[0.16]"
             }
             DiffKind::Staged => {
                 "bg-[#fff8c5] hover:bg-[#fae17d] dark:bg-[#4b3600] dark:hover:bg-[#633c01]"
@@ -134,8 +134,8 @@ impl DiffPresentation {
 
     fn gutter_class(&self) -> &'static str {
         match self.0 {
-            DiffKind::Add => "bg-[#ccffd8] dark:bg-[#055d20]",
-            DiffKind::Remove => "bg-[#ffd7d5] dark:bg-[#6e1117]",
+            DiffKind::Add => "bg-[#2da44e]/[0.14] dark:bg-[#3fb950]/[0.18]",
+            DiffKind::Remove => "bg-[#cf222e]/[0.14] dark:bg-[#f85149]/[0.18]",
             DiffKind::Staged => "bg-[#fae17d] dark:bg-[#633c01]",
             DiffKind::Hunk => "bg-[#b6e3ff] dark:bg-[#1f3b4d]",
             DiffKind::Context => "bg-card/70",
