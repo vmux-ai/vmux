@@ -270,31 +270,22 @@ fn knowledge_link_open(
     if let Some(line) = request.line {
         commands.entity(entity).insert(NoteRevealLine(line));
     }
-    FileVisit::record(&path, &mut visits);
+    if path.is_file() {
+        let title = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        visits.write(RecordVisitRequest {
+            url: vmux_path::FileUrl::from_path(&path, None, None, None),
+            title,
+        });
+    }
     goto.write(crate::lsp::manager::LspGoto {
         entity,
         path,
         line: request.line.unwrap_or(0),
         utf16_col: 0,
     });
-}
-
-struct FileVisit;
-
-impl FileVisit {
-    fn record(path: &Path, visits: &mut MessageWriter<RecordVisitRequest>) {
-        if !path.is_file() {
-            return;
-        }
-        let title = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string());
-        visits.write(RecordVisitRequest {
-            url: vmux_path::FileUrl::from_path(path, None, None, None),
-            title,
-        });
-    }
 }
 
 #[allow(clippy::type_complexity)]

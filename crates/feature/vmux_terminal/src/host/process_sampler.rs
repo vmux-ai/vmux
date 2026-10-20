@@ -88,7 +88,7 @@ impl Default for ProcessSampler {
 impl ProcessSampler {
     pub fn refresh(
         &mut self,
-        delta: std::time::Duration,
+        delta: Duration,
         immediate: bool,
         rediscover: bool,
         service_roots: impl IntoIterator<Item = u32>,
@@ -407,7 +407,7 @@ impl Default for ProcessSampler {
 impl ProcessSampler {
     pub fn refresh(
         &mut self,
-        delta: std::time::Duration,
+        delta: Duration,
         immediate: bool,
         rediscover: bool,
         service_roots: impl IntoIterator<Item = u32>,
