@@ -20,8 +20,14 @@ pub(super) struct DiffJob {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DiffScope {
     File,
-    Branch(String),
+    BranchFile(String),
     Commit(String),
+}
+
+#[derive(Clone, Component)]
+pub(super) struct BranchFilesJob {
+    pub(super) reference: String,
+    pub(super) generation: u64,
 }
 
 #[derive(Clone, Component)]

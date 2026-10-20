@@ -33,6 +33,7 @@ pub(super) fn GitDashboard() -> Element {
     let selected_abs_path = use_memo(move || controller().selected_abs_path);
     let selected_commit = use_memo(move || controller().selected_commit);
     let selected_branch = use_memo(move || controller().selected_branch);
+    let selected_branch_path = use_memo(move || controller().selected_branch_path);
     let active_panel = controller_state.focused_panel;
 
     rsx! {
@@ -66,6 +67,12 @@ pub(super) fn GitDashboard() -> Element {
                                 repository: repository.clone(),
                                 selected_branch: controller_state.selected_branch.clone(),
                                 branch_collection: controller_state.branch_collection,
+                                files: ui.branch_files.clone(),
+                                files_total: ui.branch_files_total,
+                                files_loading: ui.branch_files_loading,
+                                files_has_more: ui.branch_files_has_more,
+                                files_error: ui.branch_files_error.clone(),
+                                selected_path_bytes: controller_state.selected_branch_path_bytes.clone(),
                                 operations: controller_state.operations.clone(),
                             }
                         } else if active_panel == GitPanel::Commits {
@@ -89,6 +96,7 @@ pub(super) fn GitDashboard() -> Element {
                             repository: repository.clone(),
                             repo_root,
                             selected_branch,
+                            selected_path: selected_branch_path,
                             diff_viewport,
                             diff_rows,
                             loading: ui.diff_loading,

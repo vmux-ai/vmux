@@ -195,6 +195,12 @@ pub fn DiffView(
         .as_ref()
         .map(|viewport| viewport.error.as_str())
         .unwrap_or_default();
+    let has_more = viewport.as_ref().is_some_and(|viewport| {
+        viewport
+            .first_line
+            .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX))
+            < viewport.total_lines
+    });
     let maxno = rows
         .iter()
         .flat_map(|l| [l.old_no, l.new_no])
@@ -215,8 +221,14 @@ pub fn DiffView(
     rsx! {
         div {
             class: if visible { "min-h-0 flex-1 overflow-auto bg-background font-mono text-xs leading-6" } else { "hidden" },
+            onscroll: move |event| {
+                let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                if remaining <= 160 && has_more && !loading {
+                    let _ = send(&GitDiffNextRequest);
+                }
+            },
 
-            if loading {
+            if loading && rows.is_empty() {
                 div { class: "flex flex-col gap-2 p-3",
                     for width in ["w-10/12", "w-full", "w-8/12", "w-11/12", "w-7/12"] {
                         Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
@@ -305,6 +317,13 @@ pub fn DiffView(
                     GitDiffRow::Gap { start, end, .. } => rsx! {
                         DiffGap { key: "gap-{start}-{end}", start, end, total: total_rows }
                     },
+                }
+            }
+            if loading && !rows.is_empty() {
+                div { class: "flex flex-col gap-2 p-3",
+                    for width in ["w-10/12", "w-8/12"] {
+                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                    }
                 }
             }
         }

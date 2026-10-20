@@ -14,26 +14,33 @@ pub(super) fn BranchDiffCard(
     repository: GitRepositorySnapshot,
     repo_root: ReadSignal<String>,
     selected_branch: ReadSignal<String>,
+    selected_path: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
 ) -> Element {
     let selected_branch = selected_branch();
-    let title = if repository.base_ref.is_empty() {
+    let comparison = if repository.base_ref.is_empty() {
         selected_branch.clone()
     } else {
         format!("{}…{}", repository.base_ref, selected_branch)
     };
+    let selected_path = selected_path();
+    let title = match selected_path.is_empty() {
+        true => comparison,
+        false => format!("{selected_path} · {comparison}"),
+    };
+    let available = !selected_branch.is_empty() && !selected_path.is_empty();
     rsx! {
         RevisionDiffCard {
             repo_root,
             diff_viewport,
             diff_rows,
             loading,
-            available: !selected_branch.is_empty(),
+            available,
             title,
-            empty: translate("git-no-branches"),
-            icon: LineIcon::GitBranch,
+            empty: translate("git-select-file"),
+            icon: LineIcon::File,
         }
     }
 }

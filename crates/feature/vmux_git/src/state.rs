@@ -116,6 +116,8 @@ pub struct GitPageControllerState {
     pub selected_abs_path: String,
     pub selected_commit: String,
     pub selected_branch: String,
+    pub selected_branch_path: String,
+    pub selected_branch_path_bytes: Vec<u8>,
     pub branch_collection: GitBranchCollection,
     pub selected_stash: String,
     pub confirm_discard: Vec<u8>,
@@ -194,6 +196,12 @@ pub struct GitPageSnapshot {
     pub diff_viewport: Option<GitDiffViewport>,
     pub diff_rows: Vec<GitDiffRow>,
     pub diff_loading: bool,
+    pub branch_files: Vec<crate::event::GitBranchFileEntry>,
+    pub branch_files_reference: String,
+    pub branch_files_total: u32,
+    pub branch_files_loading: bool,
+    pub branch_files_has_more: bool,
+    pub branch_files_error: String,
     pub command_log: Vec<GitCommandLogEntry>,
     pub result: Option<GitOperationResult>,
     pub result_sequence: u64,
@@ -211,6 +219,12 @@ impl Default for GitPageSnapshot {
             diff_viewport: None,
             diff_rows: Vec::new(),
             diff_loading: false,
+            branch_files: Vec::new(),
+            branch_files_reference: String::new(),
+            branch_files_total: 0,
+            branch_files_loading: false,
+            branch_files_has_more: false,
+            branch_files_error: String::new(),
             command_log: Vec::new(),
             result: None,
             result_sequence: 0,
@@ -219,6 +233,27 @@ impl Default for GitPageSnapshot {
             message: String::new(),
             nonce: 0,
         }
+    }
+}
+
+impl GitPageSnapshot {
+    pub(crate) fn append_diff(&mut self, next: &GitDiffViewport) -> bool {
+        let Some(current) = self.diff_viewport.as_mut() else {
+            return false;
+        };
+        let loaded = current
+            .first_line
+            .saturating_add(u32::try_from(current.lines.len()).unwrap_or(u32::MAX));
+        if next.first_line != loaded {
+            return false;
+        }
+        current.total_lines = next.total_lines;
+        current.lines.extend(next.lines.clone());
+        current.markers.extend(next.markers.clone());
+        current.markers.sort_by_key(|marker| marker.line);
+        current.markers.dedup();
+        current.error.clone_from(&next.error);
+        true
     }
 }
 
@@ -234,7 +269,7 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 4)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 5)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
@@ -279,6 +314,16 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
 mod tests {
     use super::*;
 
+    fn diff_line(number: u32) -> crate::event::DiffLine {
+        crate::event::DiffLine {
+            kind: crate::event::DiffKind::Context,
+            old_no: Some(number),
+            new_no: Some(number),
+            hunk: None,
+            spans: Vec::new(),
+        }
+    }
+
     #[test]
     fn snapshot_round_trips_through_ui_state() {
         let event = <GitUiState as vmux_api::UiState>::from_updates(
@@ -316,5 +361,31 @@ mod tests {
         );
         assert_eq!(decoded.snapshot.workspace, "/tmp/repo");
         assert_eq!(decoded.projects.rows[0].path, "/tmp/repo");
+    }
+
+    #[test]
+    fn diff_pages_append_without_discarding_loaded_lines() {
+        let mut snapshot = GitPageSnapshot {
+            diff_viewport: Some(GitDiffViewport {
+                generation: 3,
+                first_line: 0,
+                total_lines: 4,
+                lines: vec![diff_line(1), diff_line(2)],
+                markers: Vec::new(),
+                error: String::new(),
+            }),
+            ..Default::default()
+        };
+        let next = GitDiffViewport {
+            generation: 3,
+            first_line: 2,
+            total_lines: 4,
+            lines: vec![diff_line(3), diff_line(4)],
+            markers: Vec::new(),
+            error: String::new(),
+        };
+
+        assert!(snapshot.append_diff(&next));
+        assert_eq!(snapshot.diff_viewport.unwrap().lines.len(), 4);
     }
 }

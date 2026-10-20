@@ -8,15 +8,15 @@ use vmux_ecs::event::space::ProjectActivateRequest;
 
 use crate::event::{
     GitAmendRequest, GitBranchCollectionSelectRequest, GitBranchDiffSelectRequest,
-    GitBranchDraftRequest, GitBranchPromptCloseRequest, GitBranchPromptOpenRequest,
-    GitBranchSelectRequest, GitBranchSubmitRequest, GitCheckoutCommitRequest, GitCherryPickRequest,
-    GitCommitDraftRequest, GitCommitRequest, GitCommitSelectRequest, GitCommitSubmitRequest,
-    GitCreateBranchRequest, GitDeleteBranchRequest, GitDiscardFileRequest, GitDiscardRequest,
-    GitFastForwardRequest, GitFileSelectRequest, GitKeyRequest, GitMergeRequest,
-    GitPanelSelectRequest, GitRebaseRequest, GitRepositoryRequest, GitRepositorySnapshot,
-    GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest, GitStageRequest,
-    GitStashDropRequest, GitStashPopRequest, GitStashPushRequest, GitStashSelectRequest,
-    GitUnstageRequest,
+    GitBranchDraftRequest, GitBranchFileSelectRequest, GitBranchPromptCloseRequest,
+    GitBranchPromptOpenRequest, GitBranchSelectRequest, GitBranchSubmitRequest,
+    GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitDraftRequest, GitCommitRequest,
+    GitCommitSelectRequest, GitCommitSubmitRequest, GitCreateBranchRequest, GitDeleteBranchRequest,
+    GitDiscardFileRequest, GitDiscardRequest, GitFastForwardRequest, GitFileSelectRequest,
+    GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest, GitRepositoryRequest,
+    GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest,
+    GitStageRequest, GitStashDropRequest, GitStashPopRequest, GitStashPushRequest,
+    GitStashSelectRequest, GitUnstageRequest,
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
@@ -36,6 +36,7 @@ impl Plugin for ControllerPlugin {
             GitPanelSelectRequest,
             GitShortcutHelpRequest,
             GitFileSelectRequest,
+            GitBranchFileSelectRequest,
             GitBranchCollectionSelectRequest,
             GitBranchSelectRequest,
             GitBranchDiffSelectRequest,
@@ -48,6 +49,7 @@ impl Plugin for ControllerPlugin {
             .add_observer(panel_select_request)
             .add_observer(shortcut_help_request)
             .add_observer(file_select_request)
+            .add_observer(branch_file_select_request)
             .add_observer(select_branch_collection)
             .add_observer(branch_select_request)
             .add_observer(branch_diff_select_request)
@@ -147,6 +149,8 @@ impl GitPageControllerState {
     ) {
         self.branch_collection = collection;
         self.selected_branch = collection.selected_reference(repository, "");
+        self.selected_branch_path.clear();
+        self.selected_branch_path_bytes.clear();
     }
 
     fn select_branch(&mut self, reference: &str, repository: &GitRepositorySnapshot) -> bool {
@@ -160,6 +164,23 @@ impl GitPageControllerState {
         }
         self.select_panel(GitPanel::Branches);
         self.selected_branch = reference.to_string();
+        self.selected_branch_path.clear();
+        self.selected_branch_path_bytes.clear();
+        true
+    }
+
+    fn select_branch_file(
+        &mut self,
+        path_bytes: &[u8],
+        files: &[crate::event::GitBranchFileEntry],
+    ) -> bool {
+        let Some(entry) = files.iter().find(|entry| entry.path_bytes == path_bytes) else {
+            return false;
+        };
+        self.select_panel(GitPanel::Branches);
+        self.selected_branch_path.clone_from(&entry.path);
+        self.selected_branch_path_bytes
+            .clone_from(&entry.path_bytes);
         true
     }
 
@@ -175,6 +196,8 @@ impl GitPageControllerState {
     fn select_branch_diff(&mut self, repository: &GitRepositorySnapshot) {
         self.branch_collection = GitBranchCollection::Local;
         self.selected_branch.clone_from(&repository.branch);
+        self.selected_branch_path.clear();
+        self.selected_branch_path_bytes.clear();
         self.select_panel(GitPanel::Branches);
     }
 
@@ -194,12 +217,15 @@ impl GitPageControllerState {
     fn move_selection(
         &mut self,
         direction: SelectionDirection,
-        repository: &GitRepositorySnapshot,
+        state: &GitState,
         revision: &mut SelectionRevealRevision,
     ) -> Option<GitSelectionReveal> {
+        let repository = state.repository()?;
         let id = match self.focused_panel {
             GitPanel::Files => self.move_file_selection(direction, repository),
-            GitPanel::Branches => self.move_branch_selection(direction, repository),
+            GitPanel::Branches => {
+                self.move_branch_file_selection(direction, &state.snapshot.branch_files)
+            }
             GitPanel::Commits => self.move_commit_selection(direction, repository),
             GitPanel::Stash => self.move_stash_selection(direction, repository),
         }?;
@@ -236,23 +262,24 @@ impl GitPageControllerState {
         Some(format!("git-file-{section}-row-{index}"))
     }
 
-    fn move_branch_selection(
+    fn move_branch_file_selection(
         &mut self,
         direction: SelectionDirection,
-        repository: &GitRepositorySnapshot,
+        files: &[crate::event::GitBranchFileEntry],
     ) -> Option<String> {
-        let references = self.branch_collection.references(repository);
-        let len = references.len();
+        let len = files.len();
         if len == 0 {
             return None;
         }
-        let current = references
+        let current = files
             .iter()
-            .position(|reference| reference == &self.selected_branch)
+            .position(|entry| entry.path_bytes == self.selected_branch_path_bytes)
             .unwrap_or(direction.fallback(len));
         let index = direction.index(current, len);
-        self.selected_branch.clone_from(&references[index]);
-        Some(format!("git-branch-row-{index}"))
+        self.selected_branch_path.clone_from(&files[index].path);
+        self.selected_branch_path_bytes
+            .clone_from(&files[index].path_bytes);
+        Some(format!("git-branch-file-row-{index}"))
     }
 
     fn move_commit_selection(
@@ -339,10 +366,7 @@ fn dispatch_git_key(
     commands: &mut Commands,
 ) {
     if let Some(direction) = SelectionDirection::from_key(request) {
-        let Some(repository) = state.repository() else {
-            return;
-        };
-        if let Some(effect) = controller.move_selection(direction, repository, revision) {
+        if let Some(effect) = controller.move_selection(direction, state, revision) {
             commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
         }
         return;
@@ -558,6 +582,22 @@ fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<
         next.selected_branch = next
             .branch_collection
             .selected_reference(repository, &next.selected_branch);
+        let next_branch_file = if state.snapshot.branch_files_reference == next.selected_branch {
+            state
+                .snapshot
+                .branch_files
+                .iter()
+                .find(|entry| entry.path_bytes == next.selected_branch_path_bytes)
+                .or_else(|| state.snapshot.branch_files.first())
+        } else {
+            None
+        };
+        next.selected_branch_path = next_branch_file
+            .map(|entry| entry.path.clone())
+            .unwrap_or_default();
+        next.selected_branch_path_bytes = next_branch_file
+            .map(|entry| entry.path_bytes.clone())
+            .unwrap_or_default();
         next.selected_stash = repository
             .stashes
             .iter()
@@ -891,6 +931,19 @@ fn file_select_request(
         return;
     };
     controller.select_file(&trigger.event().payload.path_bytes, repository);
+}
+
+fn branch_file_select_request(
+    trigger: On<UiInput<GitBranchFileSelectRequest>>,
+    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
+) {
+    let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller.select_branch_file(
+        &trigger.event().payload.path_bytes,
+        &state.snapshot.branch_files,
+    );
 }
 
 fn select_branch_collection(

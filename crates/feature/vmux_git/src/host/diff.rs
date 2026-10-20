@@ -4,26 +4,35 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::event::{DiffKind, DiffLine, GitDiffRevealRequest, GitLineMarker, GitLineStatus};
+use crate::event::{
+    DiffKind, DiffLine, GitBranchFilesNextRequest, GitDiffNextRequest, GitDiffRevealRequest,
+    GitLineMarker, GitLineStatus,
+};
 use crate::state::{GitPageControllerState, GitPanel};
 
 use super::GitUpdateSet;
-use super::job::{DiffJob, DiffScope};
+use super::job::{BranchFilesJob, DiffJob, DiffScope};
 use super::job_runner::{GitJob, QueuedGitJobs};
-use super::repository::GitRepository;
+use super::repository::{BranchFilesCatalog, BranchFilesPage, GitRepository};
 
-const DIFF_WINDOW_ROWS: u32 = 200_000;
+const DIFF_WINDOW_ROWS: u32 = 800;
 
 pub(super) struct DiffPlugin;
 
 impl Plugin for DiffPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(GitDiffRevealRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(
+            GitDiffRevealRequest,
+            GitDiffNextRequest,
+            GitBranchFilesNextRequest,
+        )>::default())
             .add_observer(file_refresh)
             .add_observer(reveal)
+            .add_observer(load_next)
+            .add_observer(load_next_branch_files)
             .add_systems(
                 Update,
-                (sync_page_targets, start_requests)
+                (sync_branch_files, sync_page_targets, start_requests)
                     .chain()
                     .in_set(GitUpdateSet::Diff),
             );
@@ -75,12 +84,22 @@ impl GitDiffTarget {
             return None;
         }
         match controller.focused_panel {
-            GitPanel::Branches if !controller.selected_branch.is_empty() => Some(Self {
-                repo_root,
-                path: PathBuf::new(),
-                path_bytes: Vec::new(),
-                scope: DiffScope::Branch(controller.selected_branch.clone()),
-            }),
+            GitPanel::Branches
+                if !controller.selected_branch.is_empty()
+                    && !controller.selected_branch_path.is_empty() =>
+            {
+                let path = super::repository::RequestPath::new(
+                    &controller.selected_branch_path,
+                    &controller.selected_branch_path_bytes,
+                )
+                .resolve(&repo_root);
+                Some(Self {
+                    repo_root,
+                    path,
+                    path_bytes: controller.selected_branch_path_bytes.clone(),
+                    scope: DiffScope::BranchFile(controller.selected_branch.clone()),
+                })
+            }
             GitPanel::Commits => Some(Self {
                 repo_root,
                 path: PathBuf::new(),
@@ -129,6 +148,30 @@ pub(super) struct GitDiffQuery {
     generation: u64,
     file: Option<FileDiffIdentity>,
     page_revision: Option<u32>,
+}
+
+#[derive(Component)]
+pub(super) struct GitBranchFilesQuery {
+    reference: String,
+    generation: u64,
+    catalog: BranchFilesCatalog,
+}
+
+impl GitBranchFilesQuery {
+    const PAGE_SIZE: usize = 80;
+
+    pub(super) fn accepts(&self, generation: u64, reference: &str) -> bool {
+        self.generation == generation && self.reference == reference
+    }
+
+    pub(super) fn replace(&mut self, catalog: BranchFilesCatalog) -> BranchFilesPage {
+        self.catalog = catalog;
+        self.catalog.page(0, Self::PAGE_SIZE)
+    }
+
+    fn next(&self, offset: usize) -> BranchFilesPage {
+        self.catalog.page(offset, Self::PAGE_SIZE)
+    }
 }
 
 impl GitDiffQuery {
@@ -185,6 +228,120 @@ fn sync_page_targets(pages: GitDiffPages, mut commands: Commands) {
             page_revision: Some(page_revision),
         });
     }
+}
+
+fn sync_branch_files(
+    mut pages: Query<(
+        Entity,
+        &mut super::state::GitState,
+        &GitPageControllerState,
+        Option<&GitBranchFilesQuery>,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, mut state, controller, current) in &mut pages {
+        if controller.focused_panel != GitPanel::Branches || controller.selected_branch.is_empty() {
+            continue;
+        }
+        if state.snapshot.branch_files_reference == controller.selected_branch {
+            continue;
+        }
+        let repo_root = PathBuf::from(state.workspace());
+        if repo_root.as_os_str().is_empty() {
+            continue;
+        }
+        let generation = current
+            .map(|current| current.generation)
+            .unwrap_or_default()
+            .wrapping_add(1)
+            .max(1);
+        state.snapshot.branch_files.clear();
+        state
+            .snapshot
+            .branch_files_reference
+            .clone_from(&controller.selected_branch);
+        state.snapshot.branch_files_total = 0;
+        state.snapshot.branch_files_loading = true;
+        state.snapshot.branch_files_has_more = false;
+        state.snapshot.branch_files_error.clear();
+        commands.entity(entity).insert(GitBranchFilesQuery {
+            reference: controller.selected_branch.clone(),
+            generation,
+            catalog: BranchFilesCatalog::default(),
+        });
+        commands.spawn((
+            GitJob::new(entity),
+            GitRepository::at(repo_root),
+            BranchFilesJob {
+                reference: controller.selected_branch.clone(),
+                generation,
+            },
+        ));
+    }
+}
+
+fn load_next_branch_files(
+    trigger: On<UiInput<GitBranchFilesNextRequest>>,
+    mut pages: Query<(
+        &mut super::state::GitState,
+        &GitPageControllerState,
+        &mut GitBranchFilesQuery,
+    )>,
+) {
+    let entity = trigger.event().webview;
+    let Ok((mut state, controller, query)) = pages.get_mut(entity) else {
+        return;
+    };
+    if state.snapshot.branch_files_loading
+        || !state.snapshot.branch_files_has_more
+        || query.reference != controller.selected_branch
+    {
+        return;
+    }
+    let offset = state.snapshot.branch_files.len();
+    let page = query.next(offset);
+    state.snapshot.branch_files.extend(page.files);
+    state.snapshot.branch_files_total = page.total;
+    state.snapshot.branch_files_has_more = page.has_more;
+}
+
+fn load_next(
+    trigger: On<UiInput<GitDiffNextRequest>>,
+    mut pages: Query<(&mut super::state::GitState, &GitDiffQuery)>,
+    sources: Query<&GitDiffSource>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok((mut state, query)) = pages.get_mut(entity) else {
+        return;
+    };
+    let Some(viewport) = state.snapshot.diff_viewport.as_ref() else {
+        return;
+    };
+    let loaded = viewport
+        .first_line
+        .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX));
+    if state.snapshot.diff_loading || loaded >= viewport.total_lines {
+        return;
+    }
+    let content = sources
+        .get(entity)
+        .ok()
+        .filter(|source| source.dirty)
+        .map(|source| source.content.clone());
+    state.snapshot.diff_loading = true;
+    commands.spawn((
+        GitJob::new(entity),
+        GitRepository::at(query.target.repo_root.clone()),
+        DiffJob {
+            path: query.target.path.clone(),
+            scope: query.target.scope.clone(),
+            generation: query.generation,
+            top_line: loaded,
+            rows: DIFF_WINDOW_ROWS,
+            content,
+        },
+    ));
 }
 
 fn file_refresh(
@@ -404,7 +561,7 @@ mod tests {
             repo_root: repo.path().to_path_buf(),
             path: PathBuf::new(),
             path_bytes: Vec::new(),
-            scope: DiffScope::Branch("feature".into()),
+            scope: DiffScope::BranchFile("feature".into()),
         };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

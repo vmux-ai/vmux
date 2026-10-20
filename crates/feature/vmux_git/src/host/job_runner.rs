@@ -6,12 +6,12 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 
 use super::GitUpdateSet;
 use super::job::{
-    AmendJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob, DeleteBranchJob,
-    DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob, PullJob, PushJob,
-    RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob,
-    StashPushJob, UnstageJob,
+    AmendJob, BranchFilesJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob,
+    DeleteBranchJob, DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob,
+    PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob,
+    StashPopJob, StashPushJob, UnstageJob,
 };
-use super::repository::GitRepository;
+use super::repository::{BranchFilesCatalog, GitRepository};
 use crate::event::{
     GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult, GitRepositorySnapshot,
 };
@@ -25,11 +25,13 @@ impl Plugin for JobPlugin {
             (
                 (
                     poll_jobs::<RepositoryOutput>,
+                    poll_jobs::<BranchFilesOutput>,
                     poll_jobs::<DiffOutput>,
                     poll_jobs::<OperationOutput>,
                 ),
                 (
                     deliver_repository_outputs,
+                    deliver_branch_files_outputs,
                     deliver_diff_outputs,
                     deliver_operation_outputs,
                     deliver_failure_outputs,
@@ -37,6 +39,7 @@ impl Plugin for JobPlugin {
                 bevy::ecs::schedule::ApplyDeferred,
                 (
                     start_repository_jobs,
+                    start_branch_files_jobs,
                     start_diff_jobs,
                     start_stage_jobs,
                     start_unstage_jobs,
@@ -140,6 +143,13 @@ impl<T: Send + Sync + 'static> GitJobTask<T> {
 
 #[derive(Component)]
 struct RepositoryOutput(Result<GitRepositorySnapshot, GitOperationError>);
+
+#[derive(Component)]
+struct BranchFilesOutput {
+    generation: u64,
+    reference: String,
+    result: Result<BranchFilesCatalog, GitOperationError>,
+}
 
 #[derive(Component)]
 struct DiffOutput(GitDiffViewport);
@@ -281,8 +291,10 @@ fn deliver_diff_outputs(
         if let Ok((mut view, mut revealed)) = views.get_mut(webview) {
             if query.accepts(event.generation) {
                 view.snapshot.diff_loading = false;
-                view.snapshot.diff_viewport = Some(event.clone());
-                revealed.0.clear();
+                if !view.snapshot.append_diff(event) {
+                    view.snapshot.diff_viewport = Some(event.clone());
+                    revealed.0.clear();
+                }
             }
             commands.entity(entity).despawn();
             continue;
@@ -290,6 +302,44 @@ fn deliver_diff_outputs(
         if files.accepts_diff(webview, event.generation, query) {
             files.apply_diff(webview, event.clone());
         }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn deliver_branch_files_outputs(
+    outputs: Query<(Entity, &GitJob, &BranchFilesOutput)>,
+    mut queries: Query<&mut super::diff::GitBranchFilesQuery>,
+    mut states: Query<&mut super::state::GitState>,
+    mut commands: Commands,
+) {
+    for (entity, job, output) in &outputs {
+        let Ok(mut query) = queries.get_mut(job.webview) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if !query.accepts(output.generation, &output.reference) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let Ok(mut state) = states.get_mut(job.webview) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        match &output.result {
+            Ok(catalog) => {
+                let page = query.replace(catalog.clone());
+                state.snapshot.branch_files.clear();
+                state.snapshot.branch_files.extend(page.files.clone());
+                state.snapshot.branch_files_total = page.total;
+                state.snapshot.branch_files_has_more = page.has_more;
+                state.snapshot.branch_files_error.clear();
+            }
+            Err(error) => {
+                state.snapshot.branch_files_has_more = false;
+                state.snapshot.branch_files_error.clone_from(&error.message);
+            }
+        }
+        state.snapshot.branch_files_loading = false;
         commands.entity(entity).despawn();
     }
 }
@@ -449,6 +499,22 @@ fn start_repository_jobs(jobs: PendingGitJobs<RepositoryJob>, mut commands: Comm
     }
 }
 
+fn start_branch_files_jobs(jobs: PendingGitJobs<BranchFilesJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || BranchFilesOutput {
+            generation: job.generation,
+            reference: job.reference.clone(),
+            result: repository
+                .branch_files_catalog(&job.reference)
+                .map_err(|error| GitOperationError { message: error.0 }),
+        });
+        commands
+            .entity(entity)
+            .remove::<BranchFilesJob>()
+            .insert((GitJobRunning, task));
+    }
+}
+
 fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
@@ -462,12 +528,37 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     error: String::new(),
                 });
             }
+            if let DiffScope::BranchFile(reference) = &job.scope {
+                return match repository.branch_file_diff_window(
+                    reference,
+                    &job.path,
+                    job.top_line,
+                    job.rows,
+                ) {
+                    Ok(window) => DiffOutput(GitDiffViewport {
+                        generation: job.generation,
+                        first_line: job.top_line.min(window.total_lines),
+                        total_lines: window.total_lines,
+                        lines: window.lines,
+                        markers: window.markers,
+                        error: String::new(),
+                    }),
+                    Err(error) => DiffOutput(GitDiffViewport {
+                        generation: job.generation,
+                        first_line: job.top_line,
+                        total_lines: 0,
+                        lines: Vec::new(),
+                        markers: Vec::new(),
+                        error: error.0,
+                    }),
+                };
+            }
             let result = match &job.scope {
                 DiffScope::File => match job.content.as_deref() {
                     Some(content) => repository.diff_lines_with_content(&job.path, content),
                     None => repository.diff_lines(&job.path),
                 },
-                DiffScope::Branch(reference) => repository.branch_diff_lines(reference),
+                DiffScope::BranchFile(_) => unreachable!(),
                 DiffScope::Commit(reference) => repository.commit_diff_lines(reference),
             };
             match result {

@@ -78,11 +78,22 @@ pub struct GitFileSelectRequest {
     pub path_bytes: Vec<u8>,
 }
 
+#[vmux_api::ui_event(Eq)]
+pub struct GitBranchFileSelectRequest {
+    pub path_bytes: Vec<u8>,
+}
+
+#[vmux_api::ui_event]
+pub struct GitBranchFilesNextRequest;
+
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct GitDiffRevealRequest {
     pub start: u32,
     pub end: u32,
 }
+
+#[vmux_api::ui_event]
+pub struct GitDiffNextRequest;
 
 impl GitDiffRevealRequest {
     pub const CHUNK: u32 = 20;
@@ -237,6 +248,26 @@ pub struct GitFileEntry {
     pub status: FileStatus,
     pub staged: bool,
     pub unstaged: bool,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitPathChange {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    TypeChanged,
+    Unmerged,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct GitBranchFileEntry {
+    pub path: String,
+    pub path_bytes: Vec<u8>,
+    pub previous_path: Option<String>,
+    pub previous_path_bytes: Option<Vec<u8>>,
+    pub change: GitPathChange,
 }
 
 impl GitFileEntry {

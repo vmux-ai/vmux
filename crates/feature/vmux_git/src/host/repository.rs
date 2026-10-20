@@ -15,6 +15,78 @@ use crate::host::parse;
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
 
+pub(crate) struct BranchFilesPage {
+    pub(crate) files: Vec<GitBranchFileEntry>,
+    pub(crate) total: u32,
+    pub(crate) has_more: bool,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct BranchFilesCatalog(Vec<GitBranchFileEntry>);
+
+impl BranchFilesCatalog {
+    pub(crate) fn page(&self, offset: usize, limit: usize) -> BranchFilesPage {
+        let end = offset.saturating_add(limit).min(self.0.len());
+        BranchFilesPage {
+            files: self.0.get(offset..end).unwrap_or_default().to_vec(),
+            total: u32::try_from(self.0.len()).unwrap_or(u32::MAX),
+            has_more: end < self.0.len(),
+        }
+    }
+}
+
+pub(crate) struct DiffWindow {
+    pub(crate) total_lines: u32,
+    pub(crate) lines: Vec<DiffLine>,
+    pub(crate) markers: Vec<GitLineMarker>,
+}
+
+impl DiffWindow {
+    fn from_lines(lines: Vec<DiffLine>, file: &Path, top_line: u32, rows: u32) -> Self {
+        let markers = super::diff::GitDiffMarkers::from_lines(&lines).into_inner();
+        let (total_lines, mut lines) = parse::DiffParser::window(&lines, top_line, rows);
+        for line in &mut lines {
+            if matches!(line.kind, DiffKind::Hunk) {
+                continue;
+            }
+            let text = line
+                .spans
+                .first()
+                .map(|span| span.text.as_str())
+                .unwrap_or_default();
+            line.spans = crate::host::highlight::Highlighter::line(text, file);
+        }
+        Self {
+            total_lines,
+            lines,
+            markers,
+        }
+    }
+
+    fn from_diff(diff: &str, file: &Path, top_line: u32, rows: u32) -> Self {
+        Self::from_lines(parse::DiffParser::parse(diff), file, top_line, rows)
+    }
+
+    fn from_added_content(content: &str, file: &Path, top_line: u32, rows: u32) -> Self {
+        let mut lines = Vec::new();
+        for (index, text) in content.lines().enumerate() {
+            lines.push(DiffLine {
+                kind: DiffKind::Add,
+                old_no: None,
+                new_no: Some(u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1)),
+                hunk: None,
+                spans: vec![StyledSpan {
+                    text: text.to_string(),
+                    fg: [0, 0, 0],
+                    bold: false,
+                    italic: false,
+                }],
+            });
+        }
+        Self::from_lines(lines, file, top_line, rows)
+    }
+}
+
 #[derive(Clone, Component, Debug)]
 pub struct GitRepository(PathBuf);
 
@@ -366,12 +438,42 @@ impl GitRepository {
         Ok(self.highlight_diff(&stdout))
     }
 
-    fn branch_diff_text(
+    pub(crate) fn branch_file_diff_window(
         &self,
         reference: &str,
-        context: u32,
+        file: &Path,
+        top_line: u32,
+        rows: u32,
+    ) -> Result<DiffWindow, GitError> {
+        let target = self.relative_path(file);
+        let stdout = self.branch_diff_text_for(reference, 3, Path::new(""), Some(&target))?;
+        if stdout.trim().is_empty()
+            && file.is_file()
+            && self.status(file)?.file_status == FileStatus::Untracked
+        {
+            let content = std::fs::read_to_string(file).unwrap_or_default();
+            return Ok(DiffWindow::from_added_content(
+                &content, file, top_line, rows,
+            ));
+        }
+        Ok(DiffWindow::from_diff(&stdout, file, top_line, rows))
+    }
+
+    pub(crate) fn branch_files_catalog(
+        &self,
+        reference: &str,
+    ) -> Result<BranchFilesCatalog, GitError> {
+        let mut files = self.branch_files(reference, Path::new(""))?;
+        files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
+        files.dedup_by(|left, right| left.path_bytes == right.path_bytes);
+        Ok(BranchFilesCatalog(files))
+    }
+
+    fn branch_files(
+        &self,
+        reference: &str,
         prefix: &Path,
-    ) -> Result<String, GitError> {
+    ) -> Result<Vec<GitBranchFileEntry>, GitError> {
         let base = crate::host::worktree::BaseRef::resolve(&self.0)
             .ok_or_else(|| GitError("no base branch found".to_string()))?;
         let (merge_base, stderr, ok) =
@@ -388,21 +490,15 @@ impl GitRepository {
         } else {
             Vec::new()
         };
-        let unified = format!("--unified={context}");
         let mut command = GitCommand::command(&self.0);
         command
+            .env("GIT_OPTIONAL_LOCKS", "0")
             .arg("diff")
+            .arg("--name-status")
+            .arg("-z")
             .arg("--find-renames")
             .arg("--find-copies")
-            .arg("--submodule=diff")
-            .arg(&unified);
-        if !prefix.as_os_str().is_empty() {
-            let prefix = prefix.to_string_lossy();
-            command
-                .arg(format!("--src-prefix=a/{prefix}/"))
-                .arg(format!("--dst-prefix=b/{prefix}/"));
-        }
-        command.arg(merge_base);
+            .arg(merge_base);
         if !current {
             command.arg(reference);
         }
@@ -421,10 +517,123 @@ impl GitRepository {
                 &String::from_utf8_lossy(&output.stderr),
             ));
         }
+        let mut files = GitBranchFileEntries::parse(&output.stdout, prefix);
+        if current {
+            let (untracked, stderr, ok) = GitCommand::read_bytes(
+                &self.0,
+                &["ls-files", "--others", "--exclude-standard", "-z"],
+            )?;
+            if !ok {
+                return Err(GitCommand::error(
+                    &String::from_utf8_lossy(&untracked),
+                    &stderr,
+                ));
+            }
+            for path in untracked
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+            {
+                files.push(GitBranchFileEntries::entry(
+                    prefix,
+                    path,
+                    None,
+                    GitPathChange::Added,
+                ));
+            }
+            for (path, repository, branch) in submodules {
+                files.extend(repository.branch_files(&branch, &prefix.join(path))?);
+            }
+        }
+        Ok(files)
+    }
+
+    fn branch_diff_text(
+        &self,
+        reference: &str,
+        context: u32,
+        prefix: &Path,
+    ) -> Result<String, GitError> {
+        self.branch_diff_text_for(reference, context, prefix, None)
+    }
+
+    fn branch_diff_text_for(
+        &self,
+        reference: &str,
+        context: u32,
+        prefix: &Path,
+        target: Option<&Path>,
+    ) -> Result<String, GitError> {
+        let base = crate::host::worktree::BaseRef::resolve(&self.0)
+            .ok_or_else(|| GitError("no base branch found".to_string()))?;
+        let (merge_base, stderr, ok) =
+            GitCommand::read(&self.0, &["merge-base", reference, base.as_str()])?;
+        if !ok {
+            return Err(GitCommand::error(&merge_base, &stderr));
+        }
+        let merge_base = merge_base.trim();
+        let (head, _, head_ok) = GitCommand::read(&self.0, &["rev-parse", "HEAD"])?;
+        let (selected, _, selected_ok) = GitCommand::read(&self.0, &["rev-parse", reference])?;
+        let current = head_ok && selected_ok && head.trim() == selected.trim();
+        let submodules = if current {
+            self.branch_submodules()
+        } else {
+            Vec::new()
+        };
+        if let Some(target) = target {
+            for (path, repository, branch) in &submodules {
+                let Ok(nested_target) = target.strip_prefix(path) else {
+                    continue;
+                };
+                return repository.branch_diff_text_for(
+                    branch,
+                    context,
+                    &prefix.join(path),
+                    Some(nested_target),
+                );
+            }
+        }
+        let unified = format!("--unified={context}");
+        let mut command = GitCommand::command(&self.0);
+        command
+            .arg("diff")
+            .arg("--find-renames")
+            .arg("--find-copies")
+            .arg("--submodule=diff")
+            .arg(&unified);
+        if !prefix.as_os_str().is_empty() {
+            let prefix = prefix.to_string_lossy();
+            command
+                .arg(format!("--src-prefix=a/{prefix}/"))
+                .arg(format!("--dst-prefix=b/{prefix}/"));
+        }
+        command.arg(merge_base);
+        if !current {
+            command.arg(reference);
+        }
+        if let Some(target) = target {
+            command.arg("--").arg(target);
+        } else if !submodules.is_empty() {
+            command.arg("--").arg(".");
+            for (path, _, _) in &submodules {
+                command.arg(format!(":(exclude,literal){}", path.to_string_lossy()));
+            }
+        }
+        let output = command
+            .output()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        if !output.status.success() {
+            return Err(GitCommand::error(
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+            ));
+        }
         let mut stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         for (path, repository, branch) in submodules {
+            if target.is_some() {
+                break;
+            }
             let nested_prefix = prefix.join(path);
-            let nested = repository.branch_diff_text(&branch, context, &nested_prefix)?;
+            let nested = repository.branch_diff_text_for(&branch, context, &nested_prefix, None)?;
             if nested.trim().is_empty() {
                 continue;
             }
@@ -897,6 +1106,69 @@ fn path_from_bytes(bytes: &[u8]) -> PathBuf {
 pub(crate) struct RequestPath<'a> {
     display: &'a str,
     bytes: &'a [u8],
+}
+
+struct GitBranchFileEntries;
+
+impl GitBranchFileEntries {
+    fn parse(output: &[u8], prefix: &Path) -> Vec<GitBranchFileEntry> {
+        let fields = output
+            .split(|byte| *byte == 0)
+            .filter(|field| !field.is_empty())
+            .collect::<Vec<_>>();
+        let mut entries = Vec::new();
+        let mut index = 0;
+        while index < fields.len() {
+            let status = fields[index];
+            let Some(change) = Self::change(status.first().copied()) else {
+                index += 1;
+                continue;
+            };
+            let moved = matches!(change, GitPathChange::Renamed | GitPathChange::Copied);
+            let needed = if moved { 3 } else { 2 };
+            if index + needed > fields.len() {
+                break;
+            }
+            let previous = moved.then_some(fields[index + 1]);
+            let path = fields[index + needed - 1];
+            entries.push(Self::entry(prefix, path, previous, change));
+            index += needed;
+        }
+        entries
+    }
+
+    fn change(status: Option<u8>) -> Option<GitPathChange> {
+        match status? {
+            b'A' => Some(GitPathChange::Added),
+            b'M' => Some(GitPathChange::Modified),
+            b'D' => Some(GitPathChange::Deleted),
+            b'R' => Some(GitPathChange::Renamed),
+            b'C' => Some(GitPathChange::Copied),
+            b'T' => Some(GitPathChange::TypeChanged),
+            b'U' => Some(GitPathChange::Unmerged),
+            _ => None,
+        }
+    }
+
+    fn entry(
+        prefix: &Path,
+        path: &[u8],
+        previous: Option<&[u8]>,
+        change: GitPathChange,
+    ) -> GitBranchFileEntry {
+        let path = prefix.join(path_from_bytes(path));
+        let encoded_path = path_bytes(&path);
+        let previous = previous.map(|previous| prefix.join(path_from_bytes(previous)));
+        GitBranchFileEntry {
+            path: path.to_string_lossy().into_owned(),
+            path_bytes: encoded_path,
+            previous_path: previous
+                .as_ref()
+                .map(|previous| previous.to_string_lossy().into_owned()),
+            previous_path_bytes: previous.as_ref().map(|previous| path_bytes(previous)),
+            change,
+        }
+    }
 }
 
 impl<'a> RequestPath<'a> {
@@ -1511,6 +1783,80 @@ mod tests {
     }
 
     #[test]
+    fn branch_file_pages_report_total_and_only_return_the_requested_page() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            test_repo::write(repo.path(), name, name);
+        }
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "files"]);
+
+        let repository = GitRepository::at(repo.path());
+        let catalog = repository.branch_files_catalog("feature").unwrap();
+        let first = catalog.page(0, 2);
+        let second = catalog.page(2, 2);
+
+        assert_eq!(first.total, 3);
+        assert_eq!(first.files.len(), 2);
+        assert!(first.has_more);
+        assert_eq!(second.total, 3);
+        assert_eq!(second.files.len(), 1);
+        assert!(!second.has_more);
+        assert_eq!(second.files[0].path, "c.txt");
+    }
+
+    #[test]
+    fn branch_file_entries_preserve_rename_paths() {
+        let entries =
+            GitBranchFileEntries::parse(b"R100\0src/old.rs\0src/new.rs\0", Path::new("client"));
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].change, GitPathChange::Renamed);
+        assert_eq!(entries[0].path, "client/src/new.rs");
+        assert_eq!(
+            entries[0].previous_path.as_deref(),
+            Some("client/src/old.rs")
+        );
+    }
+
+    #[test]
+    fn branch_file_diff_window_only_returns_the_selected_file_page() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "a.rs", "fn base_a() {}\n");
+        test_repo::write(repo.path(), "b.rs", "fn base_b() {}\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(
+            repo.path(),
+            "a.rs",
+            "fn changed_a_1() {}\nfn changed_a_2() {}\nfn changed_a_3() {}\n",
+        );
+        test_repo::write(repo.path(), "b.rs", "fn changed_b() {}\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "change"]);
+
+        let window = GitRepository::at(repo.path())
+            .branch_file_diff_window("feature", &repo.path().join("a.rs"), 0, 2)
+            .unwrap();
+        let text = window
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(window.lines.len(), 2);
+        assert!(window.total_lines > 2);
+        assert!(text.contains("base_a") || text.contains("changed_a"));
+        assert!(!text.contains("changed_b"));
+    }
+
+    #[test]
     fn current_branch_diff_includes_uncommitted_work() {
         let repo = test_repo::init();
         test_repo::write(repo.path(), "tracked.txt", "base\n");
@@ -1569,6 +1915,10 @@ mod tests {
 
         let repository = GitRepository::at(parent.path());
         let branch_lines = repository.branch_diff_lines("feature").unwrap();
+        let branch_files = repository
+            .branch_files_catalog("feature")
+            .unwrap()
+            .page(0, 80);
         let file_lines = repository.diff_lines(&checkout).unwrap();
         let snapshot = GitRepositorySnapshot::load(parent.path()).unwrap();
         let branch = snapshot
@@ -1590,6 +1940,14 @@ mod tests {
             .collect::<String>();
 
         assert_eq!(files, ["client/inside.rs", "client/other.rs"]);
+        assert_eq!(
+            branch_files
+                .files
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["client/inside.rs", "client/other.rs"]
+        );
         assert!(file_text.contains("fn old() {}"));
         assert!(file_text.contains("fn new() {}"));
         assert!(!file_text.contains("Subproject commit"));

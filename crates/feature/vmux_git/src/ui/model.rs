@@ -2,7 +2,7 @@ use std::path::Path;
 
 use vmux_ui::i18n::translate;
 
-use crate::event::{FileStatus, GitFileEntry};
+use crate::event::{FileStatus, GitBranchFileEntry, GitFileEntry, GitPathChange};
 
 pub(super) trait FileStatusView {
     fn label(self) -> String;
@@ -56,6 +56,46 @@ impl GitFileEntry {
             .to_string()
     }
 
+    pub(super) fn name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
+
+    pub(super) fn parent(&self) -> &str {
+        self.path
+            .rsplit_once('/')
+            .map(|(parent, _)| parent)
+            .unwrap_or("")
+    }
+}
+
+pub(super) trait GitPathChangeView {
+    fn code(self) -> &'static str;
+    fn class(self) -> &'static str;
+}
+
+impl GitPathChangeView for GitPathChange {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Added => "A",
+            Self::Modified => "M",
+            Self::Deleted => "D",
+            Self::Renamed => "R",
+            Self::Copied => "C",
+            Self::TypeChanged => "T",
+            Self::Unmerged => "!",
+        }
+    }
+
+    fn class(self) -> &'static str {
+        match self {
+            Self::Added | Self::Copied => "text-success",
+            Self::Deleted | Self::Unmerged => "text-destructive",
+            Self::Modified | Self::Renamed | Self::TypeChanged => "text-ansi-3",
+        }
+    }
+}
+
+impl GitBranchFileEntry {
     pub(super) fn name(&self) -> &str {
         self.path.rsplit('/').next().unwrap_or(&self.path)
     }
