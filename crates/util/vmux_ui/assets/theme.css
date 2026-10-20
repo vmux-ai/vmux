@@ -1,4 +1,4 @@
-@custom-variant dark (@media (prefers-color-scheme: dark));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
   --radius: 0.625rem;
@@ -20,6 +20,31 @@
   /* Paired with the background of its own scheme, not carried across from the other one. */
   --success: oklch(0.52 0.13 156);
   --success-foreground: oklch(0.985 0 0);
+  --git-selection-accent: #0969da;
+  --git-reference: #0969da;
+  --git-ahead: #0969da;
+  --git-behind: #8250df;
+  --git-tag: #8250df;
+  --git-worktree: #9a6700;
+  --git-added: #dafbe1;
+  --git-added-hover: #ccffd8;
+  --git-added-gutter: #ccffd8;
+  --git-added-foreground: #1a7f37;
+  --git-removed: #ffebe9;
+  --git-removed-hover: #ffd7d5;
+  --git-removed-gutter: #ffd7d5;
+  --git-removed-foreground: #cf222e;
+  --git-staged: #fff8c5;
+  --git-staged-hover: #fae17d;
+  --git-staged-gutter: #fae17d;
+  --git-staged-foreground: #9a6700;
+  --git-hunk: #ddf4ff;
+  --git-hunk-gutter: #b6e3ff;
+  --git-hunk-foreground: #0969da;
+  --primary-action-foreground: #6366f1;
+  --primary-action-start: #6366f1;
+  --primary-action-middle: #a855f7;
+  --primary-action-end: #ec4899;
   --border: oklch(0.86 var(--surface-chroma) var(--surface-hue));
   --input: oklch(0.86 var(--surface-chroma) var(--surface-hue));
   --ring: oklch(0.62 var(--surface-chroma) var(--surface-hue));
@@ -35,8 +60,7 @@
   --cef-surface-border: oklch(0.32 var(--surface-chroma) var(--surface-hue) / 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme="dark"] {
   --background: oklch(0.19 var(--surface-chroma) var(--surface-hue));
   --foreground: oklch(0.94 var(--surface-chroma) var(--surface-hue));
   --card: oklch(0.235 var(--surface-chroma) var(--surface-hue));
@@ -52,6 +76,28 @@
   --destructive-foreground: oklch(0.205 0 0);
   --success: oklch(0.76 0.15 158);
   --success-foreground: oklch(0.205 0 0);
+  --git-selection-accent: #58a6ff;
+  --git-reference: #58a6ff;
+  --git-ahead: #58a6ff;
+  --git-behind: #a371f7;
+  --git-tag: #a371f7;
+  --git-worktree: #d29922;
+  --git-added: #12261e;
+  --git-added-hover: #193324;
+  --git-added-gutter: #1b4721;
+  --git-added-foreground: #3fb950;
+  --git-removed: #2d1717;
+  --git-removed-hover: #3b1c1c;
+  --git-removed-gutter: #5c2020;
+  --git-removed-foreground: #f85149;
+  --git-staged: #4b3600;
+  --git-staged-hover: #633c01;
+  --git-staged-gutter: #633c01;
+  --git-staged-foreground: #d29922;
+  --git-hunk: #10253f;
+  --git-hunk-gutter: #1f3b4d;
+  --git-hunk-foreground: #58a6ff;
+  --primary-action-foreground: #818cf8;
   --border: oklch(0.78 var(--surface-chroma) var(--surface-hue) / 0.13);
   --input: oklch(0.78 var(--surface-chroma) var(--surface-hue) / 0.17);
   --ring: oklch(0.64 var(--surface-chroma) var(--surface-hue));
@@ -65,7 +111,6 @@
   --cef-surface-hover: oklch(0.32 var(--surface-chroma) var(--surface-hue) / 0.84);
   --cef-surface-active: oklch(0.37 var(--surface-chroma) var(--surface-hue) / 0.88);
   --cef-surface-border: oklch(0.82 var(--surface-chroma) var(--surface-hue) / 0.18);
-  }
 }
 
 @theme inline {
@@ -96,6 +141,28 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+
+  --color-git-selection-accent: var(--git-selection-accent);
+  --color-git-reference: var(--git-reference);
+  --color-git-ahead: var(--git-ahead);
+  --color-git-behind: var(--git-behind);
+  --color-git-tag: var(--git-tag);
+  --color-git-worktree: var(--git-worktree);
+  --color-git-added: var(--git-added);
+  --color-git-added-hover: var(--git-added-hover);
+  --color-git-added-gutter: var(--git-added-gutter);
+  --color-git-added-foreground: var(--git-added-foreground);
+  --color-git-removed: var(--git-removed);
+  --color-git-removed-hover: var(--git-removed-hover);
+  --color-git-removed-gutter: var(--git-removed-gutter);
+  --color-git-removed-foreground: var(--git-removed-foreground);
+  --color-git-staged: var(--git-staged);
+  --color-git-staged-hover: var(--git-staged-hover);
+  --color-git-staged-gutter: var(--git-staged-gutter);
+  --color-git-staged-foreground: var(--git-staged-foreground);
+  --color-git-hunk: var(--git-hunk);
+  --color-git-hunk-gutter: var(--git-hunk-gutter);
+  --color-git-hunk-foreground: var(--git-hunk-foreground);
 
   --color-card: var(--card);
 
@@ -259,6 +326,14 @@
   content: "\200E";
 }
 
+.syntax-token {
+  color: var(--syntax-light);
+}
+
+:root[data-theme="dark"] .syntax-token {
+  color: var(--syntax-dark);
+}
+
 .scrollbar-hidden {
   scrollbar-width: none;
 }
@@ -270,7 +345,7 @@
 .vmux-primary-action {
   position: relative;
   background: transparent;
-  color: #818cf8;
+  color: var(--primary-action-foreground);
 }
 
 .vmux-primary-action:hover {
@@ -287,7 +362,12 @@
   inset: 0;
   border-radius: inherit;
   padding: 1.5px;
-  background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
+  background: linear-gradient(
+    135deg,
+    var(--primary-action-start),
+    var(--primary-action-middle),
+    var(--primary-action-end)
+  );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);

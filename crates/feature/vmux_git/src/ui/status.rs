@@ -214,7 +214,7 @@ pub(super) fn RepositoryHeader(
                                                         let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
                                                         let _ = send(&GitCommitSelectRequest { commit: sha.clone() });
                                                     },
-                                                    code { class: "shrink-0 font-mono text-[10px] text-sky-400", "{commit.short_sha}" }
+                                                    code { class: "shrink-0 font-mono text-[10px] text-git-reference", "{commit.short_sha}" }
                                                     span { class: "min-w-0 flex-1 truncate font-medium", "{commit.summary}" }
                                                     span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
                                                 }
@@ -429,7 +429,7 @@ fn ViewPickerItem(
 fn FetchIndicator() -> Element {
     rsx! {
         span {
-            class: "inline-flex items-center gap-1 text-sky-400",
+            class: "inline-flex items-center gap-1 text-git-reference",
             role: "status",
             aria_live: "polite",
             LineIconView { icon: LineIcon::RefreshCw, class: "size-3 animate-spin" }

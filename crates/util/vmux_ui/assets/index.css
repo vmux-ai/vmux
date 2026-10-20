@@ -78,7 +78,11 @@
 
   html {
     height: 100%;
-    color-scheme: light dark;
+    color-scheme: light;
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
   }
 
   html,

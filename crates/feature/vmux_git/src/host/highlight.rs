@@ -35,44 +35,64 @@ pub(crate) struct Highlighter;
 impl Highlighter {
     pub(crate) fn file(content: &str, path: &Path) -> Vec<Vec<StyledSpan>> {
         let assets = Assets::shared();
-        let mut highlighter = HighlightLines::new(
+        let syntax = assets.syntax(path);
+        let mut light = HighlightLines::new(syntax, &assets.themes.themes["base16-ocean.light"]);
+        let mut dark = HighlightLines::new(
             assets.syntax(path),
             &assets.themes.themes["base16-ocean.dark"],
         );
         LinesWithEndings::from(content)
             .map(|line| {
-                highlighter
+                let light = light
                     .highlight_line(line, &assets.syntaxes)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(style, text)| Self::span(style, text))
-                    .filter(|span| !span.text.is_empty())
-                    .collect()
+                    .unwrap_or_default();
+                let dark = dark
+                    .highlight_line(line, &assets.syntaxes)
+                    .unwrap_or_default();
+                Self::spans(light, dark)
             })
             .collect()
     }
 
     pub(crate) fn line(text: &str, path: &Path) -> Vec<StyledSpan> {
         let assets = Assets::shared();
-        let mut highlighter = HighlightLines::new(
-            assets.syntax(path),
-            &assets.themes.themes["base16-ocean.dark"],
-        );
-        highlighter
+        let syntax = assets.syntax(path);
+        let mut light = HighlightLines::new(syntax, &assets.themes.themes["base16-ocean.light"]);
+        let mut dark = HighlightLines::new(syntax, &assets.themes.themes["base16-ocean.dark"]);
+        let light = light
             .highlight_line(text, &assets.syntaxes)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let dark = dark
+            .highlight_line(text, &assets.syntaxes)
+            .unwrap_or_default();
+        Self::spans(light, dark)
+    }
+
+    fn spans(light: Vec<(Style, &str)>, dark: Vec<(Style, &str)>) -> Vec<StyledSpan> {
+        light
             .into_iter()
-            .map(|(style, text)| Self::span(style, text))
+            .zip(dark)
+            .map(|((light, light_text), (dark, dark_text))| {
+                let text = if light_text == dark_text {
+                    light_text
+                } else {
+                    dark_text
+                };
+                Self::span(light, dark, text)
+            })
             .filter(|span| !span.text.is_empty())
             .collect()
     }
 
-    fn span(style: Style, text: &str) -> StyledSpan {
+    fn span(light: Style, dark: Style, text: &str) -> StyledSpan {
         StyledSpan {
             text: text.trim_end_matches(['\n', '\r']).to_string(),
-            fg: [style.foreground.r, style.foreground.g, style.foreground.b],
-            bold: style.font_style.contains(FontStyle::BOLD),
-            italic: style.font_style.contains(FontStyle::ITALIC),
+            light_fg: [light.foreground.r, light.foreground.g, light.foreground.b],
+            dark_fg: [dark.foreground.r, dark.foreground.g, dark.foreground.b],
+            bold: light.font_style.contains(FontStyle::BOLD)
+                || dark.font_style.contains(FontStyle::BOLD),
+            italic: light.font_style.contains(FontStyle::ITALIC)
+                || dark.font_style.contains(FontStyle::ITALIC),
         }
     }
 }
@@ -85,7 +105,8 @@ mod tests {
     fn highlights_per_line_with_colors() {
         let lines = Highlighter::file("fn main() {}\n", Path::new("a.rs"));
         assert_eq!(lines.len(), 1);
-        let colors: std::collections::HashSet<_> = lines[0].iter().map(|s| s.fg).collect();
+        let colors: std::collections::HashSet<_> =
+            lines[0].iter().map(|span| span.dark_fg).collect();
         assert!(colors.len() > 1, "expected multiple colors");
     }
 

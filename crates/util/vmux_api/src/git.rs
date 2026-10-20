@@ -1,7 +1,8 @@
 #[vmux_api::contract(Eq)]
 pub struct StyledSpan {
     pub text: String,
-    pub fg: [u8; 3],
+    pub light_fg: [u8; 3],
+    pub dark_fg: [u8; 3],
     pub bold: bool,
     pub italic: bool,
 }
@@ -129,7 +130,8 @@ mod tests {
             hunk: Some(2),
             spans: vec![StyledSpan {
                 text: "x".into(),
-                fg: [1, 2, 3],
+                light_fg: [1, 2, 3],
+                dark_fg: [4, 5, 6],
                 bold: false,
                 italic: false,
             }],

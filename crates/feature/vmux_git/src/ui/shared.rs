@@ -40,8 +40,9 @@ impl ListPager {
 }
 
 fn span_style(span: &StyledSpan) -> String {
-    let [r, g, b] = span.fg;
-    let mut s = format!("color:rgb({r},{g},{b});");
+    let [lr, lg, lb] = span.light_fg;
+    let [dr, dg, db] = span.dark_fg;
+    let mut s = format!("--syntax-light:rgb({lr},{lg},{lb});--syntax-dark:rgb({dr},{dg},{db});");
     if span.bold {
         s.push_str("font-weight:700;");
     }
@@ -75,36 +76,30 @@ impl DiffPresentation {
 
     fn row_class(&self) -> &'static str {
         match self.0 {
-            DiffKind::Add => {
-                "bg-[#dafbe1] hover:bg-[#ccffd8] dark:bg-[#12261e] dark:hover:bg-[#193324]"
-            }
-            DiffKind::Remove => {
-                "bg-[#ffebe9] hover:bg-[#ffd7d5] dark:bg-[#2d1717] dark:hover:bg-[#3b1c1c]"
-            }
-            DiffKind::Staged => {
-                "bg-[#fff8c5] hover:bg-[#fae17d] dark:bg-[#4b3600] dark:hover:bg-[#633c01]"
-            }
-            DiffKind::Hunk => "bg-[#ddf4ff] dark:bg-[#10253f]",
+            DiffKind::Add => "bg-git-added hover:bg-git-added-hover",
+            DiffKind::Remove => "bg-git-removed hover:bg-git-removed-hover",
+            DiffKind::Staged => "bg-git-staged hover:bg-git-staged-hover",
+            DiffKind::Hunk => "bg-git-hunk",
             DiffKind::Context => "hover:bg-foreground/[0.025]",
         }
     }
 
     fn text_class(&self) -> &'static str {
         match self.0 {
-            DiffKind::Add => "text-[#1a7f37] dark:text-[#3fb950]",
-            DiffKind::Remove => "text-[#cf222e] dark:text-[#f85149]",
-            DiffKind::Staged => "text-[#9a6700] dark:text-[#d29922]",
-            DiffKind::Hunk => "text-[#0969da] dark:text-[#58a6ff]",
+            DiffKind::Add => "text-git-added-foreground",
+            DiffKind::Remove => "text-git-removed-foreground",
+            DiffKind::Staged => "text-git-staged-foreground",
+            DiffKind::Hunk => "text-git-hunk-foreground",
             DiffKind::Context => "text-muted-foreground",
         }
     }
 
     fn gutter_class(&self) -> &'static str {
         match self.0 {
-            DiffKind::Add => "bg-[#ccffd8] dark:bg-[#1b4721]",
-            DiffKind::Remove => "bg-[#ffd7d5] dark:bg-[#5c2020]",
-            DiffKind::Staged => "bg-[#fae17d] dark:bg-[#633c01]",
-            DiffKind::Hunk => "bg-[#b6e3ff] dark:bg-[#1f3b4d]",
+            DiffKind::Add => "bg-git-added-gutter",
+            DiffKind::Remove => "bg-git-removed-gutter",
+            DiffKind::Staged => "bg-git-staged-gutter",
+            DiffKind::Hunk => "bg-git-hunk-gutter",
             DiffKind::Context => "bg-foreground/[0.025]",
         }
     }
@@ -181,6 +176,7 @@ pub fn DiffView(
     repo_root: ReadSignal<String>,
     path: ReadSignal<String>,
     #[props(default)] path_bytes: Vec<u8>,
+    #[props(default)] identity: String,
     viewport: ReadSignal<Option<GitDiffViewport>>,
     display_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
@@ -220,10 +216,12 @@ pub fn DiffView(
 
     rsx! {
         div {
+            key: "{identity}",
             class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             onscroll: move |event| {
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                if remaining <= 160 && has_more && !loading {
+                let preload_distance = event.client_height().saturating_mul(2).max(640);
+                if remaining <= preload_distance && has_more && !loading {
                     let _ = send(&GitDiffNextRequest);
                 }
             },
@@ -266,7 +264,7 @@ pub fn DiffView(
                                     }
                                     span { class: "min-w-0 px-2 pr-8",
                                         for (j, styled) in line.spans.iter().enumerate() {
-                                            span { key: "{j}", style: "{span_style(styled)}", "{styled.text}" }
+                                            span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
                                         }
                                     }
                                 }

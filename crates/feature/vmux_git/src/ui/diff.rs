@@ -100,6 +100,7 @@ fn RevisionDiffCard(
     icon: LineIcon,
 ) -> Element {
     let empty_path = use_signal(String::new);
+    let identity = title.clone();
     rsx! {
         section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-card/60 ring-1 ring-inset ring-foreground/[0.10]",
             div { class: "flex min-h-12 shrink-0 items-center gap-2.5 bg-foreground/[0.025] px-3",
@@ -122,6 +123,7 @@ fn RevisionDiffCard(
                 DiffView {
                     repo_root,
                     path: empty_path,
+                    identity,
                     viewport: diff_viewport,
                     display_rows: diff_rows,
                     loading,
@@ -157,7 +159,7 @@ pub(super) fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), viewport: diff_viewport, display_rows: diff_rows, loading, visible: true }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, loading, visible: true }
             }
         }
     }

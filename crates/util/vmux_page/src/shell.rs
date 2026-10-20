@@ -58,6 +58,7 @@ impl InterpreterShell {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width">
+<script>document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';</script>
 {head}
 </head>
 <body class="{body_class}">
@@ -124,6 +125,7 @@ mod tests {
         assert!(shell.contains(r#"<base href="/">"#));
         assert!(shell.contains("./assets/index.css"));
         assert!(shell.contains(r#"<html class="h-full">"#));
+        assert!(shell.contains("document.documentElement.dataset.theme=matchMedia"));
         assert!(shell.contains(r#"<body class="flex h-full">"#));
         assert!(
             shell.contains(r#"<div id="main" class="flex flex-1"></div>"#),

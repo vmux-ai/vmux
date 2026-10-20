@@ -235,7 +235,8 @@ pub(super) fn BranchesCard(
                 class: "min-h-0 flex-1 overflow-y-auto px-2 pb-2",
                 onscroll: move |event| {
                     let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                    if remaining <= 96 && files_has_more && !files_loading {
+                    let preload_distance = event.client_height().saturating_mul(2).max(480);
+                    if remaining <= preload_distance && files_has_more && !files_loading {
                         let _ = send(&GitBranchFilesNextRequest);
                     }
                 },
@@ -282,7 +283,7 @@ fn BranchFileRow(index: usize, entry: GitBranchFileEntry, selected_path_bytes: V
             id: "git-branch-file-row-{index}",
             r#type: "button",
             class: if selected {
-                "flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.085] px-2 text-left text-foreground shadow-[inset_2px_0_0_#58a6ff]"
+                "flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.085] px-2 text-left text-foreground shadow-[inset_2px_0_0_var(--git-selection-accent)]"
             } else {
                 "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-foreground hover:bg-foreground/[0.045]"
             },
@@ -515,10 +516,10 @@ fn BranchRow(
             div { class: "flex min-w-0 flex-1 items-center gap-1.5",
                 span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{branch.name}" }
                 if branch.ahead > 0 {
-                    span { class: "shrink-0 rounded-full bg-sky-400/10 px-1.5 font-mono text-[8px] text-sky-400", "↑{branch.ahead}" }
+                    span { class: "shrink-0 rounded-full bg-git-ahead/10 px-1.5 font-mono text-[8px] text-git-ahead", "↑{branch.ahead}" }
                 }
                 if branch.behind > 0 {
-                    span { class: "shrink-0 rounded-full bg-violet-400/10 px-1.5 font-mono text-[8px] text-violet-400", "↓{branch.behind}" }
+                    span { class: "shrink-0 rounded-full bg-git-behind/10 px-1.5 font-mono text-[8px] text-git-behind", "↓{branch.behind}" }
                 }
                 if branch.changed_files > 0 {
                     span {
@@ -564,7 +565,7 @@ fn TagRow(
                 });
                 onselected.call(());
             },
-            LineIconView { icon: LineIcon::Tag, class: "size-3 shrink-0 text-violet-400/75" }
+            LineIconView { icon: LineIcon::Tag, class: "size-3 shrink-0 text-git-tag/75" }
             span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{tag.name}" }
             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{tag.short_sha}" }
             span { class: "shrink-0 text-[8px] text-muted-foreground", "{tag.date}" }
@@ -582,9 +583,9 @@ fn BranchMarker(current: bool, upstream: String, worktree: bool, remote: bool) -
     let tone = if current {
         "text-success"
     } else if worktree {
-        "text-amber-400"
+        "text-git-worktree"
     } else if remote || !upstream.is_empty() {
-        "text-sky-400"
+        "text-git-reference"
     } else {
         "text-muted-foreground"
     };

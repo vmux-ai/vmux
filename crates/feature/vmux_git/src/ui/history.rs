@@ -105,8 +105,8 @@ pub(super) fn HistoryCard(
                                 });
                             }
                         },
-                        LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3 shrink-0 text-sky-400/70" }
-                        code { class: "shrink-0 font-mono text-[9px] text-sky-400", "{commit.short_sha}" }
+                        LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3 shrink-0 text-git-reference/70" }
+                        code { class: "shrink-0 font-mono text-[9px] text-git-reference", "{commit.short_sha}" }
                         span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{commit.summary}" }
                         span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
                     }

@@ -215,7 +215,8 @@ impl DiffParser {
     fn spans(text: &str, fg: [u8; 3]) -> Vec<StyledSpan> {
         vec![StyledSpan {
             text: text.to_string(),
-            fg,
+            light_fg: fg,
+            dark_fg: fg,
             bold: false,
             italic: false,
         }]

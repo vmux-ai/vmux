@@ -62,7 +62,7 @@ impl Page {
             root_id: "main",
             root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
             stylesheet: "./assets/index.css",
-            html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+            html_attributes: r#"lang="en" class="h-full""#,
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-background p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
@@ -107,8 +107,7 @@ impl Page {
             ""
         } else {
             r#"<style>
-html, body { background: oklch(0.955 0 255); }
-@media (prefers-color-scheme: dark) { html, body { background: oklch(0.19 0 255); } }
+html, body { background: var(--background); }
 </style>"#
         };
         let head = format!(

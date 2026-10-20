@@ -77,7 +77,8 @@ impl DiffWindow {
                 hunk: None,
                 spans: vec![StyledSpan {
                     text: text.to_string(),
-                    fg: [0, 0, 0],
+                    light_fg: [0, 0, 0],
+                    dark_fg: [255, 255, 255],
                     bold: false,
                     italic: false,
                 }],
@@ -1743,7 +1744,7 @@ mod tests {
         let colors = lines
             .iter()
             .filter(|line| !matches!(line.kind, DiffKind::Hunk))
-            .flat_map(|line| line.spans.iter().map(|span| span.fg))
+            .flat_map(|line| line.spans.iter().map(|span| span.dark_fg))
             .collect::<std::collections::HashSet<_>>();
 
         assert!(

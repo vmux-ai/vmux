@@ -622,7 +622,7 @@ impl Parse for Args {
             }),
             html_attributes: html_attributes.unwrap_or_else(|| {
                 LitStr::new(
-                    r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+                    r#"lang="en" class="h-full""#,
                     proc_macro2::Span::call_site(),
                 )
             }),

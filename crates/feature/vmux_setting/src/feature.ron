@@ -423,7 +423,7 @@
                 hint: Some("schema-mode-detail"),
                 widget: Some(Select),
                 options: [
-                    (value: "device", label: "schema-device"),
+                    (value: "device", label: "schema-system"),
                     (value: "light", label: "schema-light"),
                     (value: "dark", label: "schema-dark"),
                 ],
