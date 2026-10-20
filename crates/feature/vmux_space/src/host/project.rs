@@ -256,7 +256,7 @@ impl GitProjectsProjection {
             let identity = identity.canonicalize().unwrap_or(identity);
             let mut projected = row.clone();
             projected.path = checkout.root.to_string_lossy().into_owned();
-            projected.display_path.clone_from(&projected.path);
+            projected.display_path = vmux_path::DisplayPath::project(&checkout.root);
             projected.label = identity
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())

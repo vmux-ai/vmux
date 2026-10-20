@@ -825,21 +825,6 @@ fn push_pane_tree_emit(
         .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
-fn abbreviate_project_path(path: &std::path::Path) -> String {
-    let path = path.to_string_lossy();
-    let Some(home) = std::env::var_os("HOME") else {
-        return path.into_owned();
-    };
-    let home = home.to_string_lossy();
-    if home.is_empty() {
-        return path.into_owned();
-    }
-    let Some(rest) = path.strip_prefix(home.as_ref()) else {
-        return path.into_owned();
-    };
-    format!("~{rest}")
-}
-
 fn push_projects_host_emit(
     mut projection: LayoutProjection,
     space_projects: SpaceProjects,
@@ -851,7 +836,7 @@ fn push_projects_host_emit(
     let cef_e = target.entity;
     let mut projects = space_projects.active_rows();
     for row in &mut projects {
-        row.display_path = abbreviate_project_path(std::path::Path::new(&row.path));
+        row.display_path = vmux_path::DisplayPath::project(&row.path);
     }
     let mut boundary = projects
         .iter()

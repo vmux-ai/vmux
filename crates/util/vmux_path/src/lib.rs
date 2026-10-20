@@ -10,6 +10,30 @@ mod executable;
 mod file_url;
 mod navigation;
 
+pub struct DisplayPath;
+
+impl DisplayPath {
+    pub fn project(path: impl AsRef<Path>) -> String {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        Self::project_with_home(path.as_ref(), home.as_deref())
+    }
+
+    fn project_with_home(path: &Path, home: Option<&Path>) -> String {
+        let Some(home) = home else {
+            return path.to_string_lossy().into_owned();
+        };
+        let projects = home.join(".vmux/projects");
+        if let Ok(relative) = path.strip_prefix(&projects) {
+            let relative = relative.strip_prefix("github.com").unwrap_or(relative);
+            return relative.to_string_lossy().into_owned();
+        }
+        if let Ok(relative) = path.strip_prefix(home) {
+            return Path::new("~").join(relative).to_string_lossy().into_owned();
+        }
+        path.to_string_lossy().into_owned()
+    }
+}
+
 pub struct AtomicFile;
 
 impl AtomicFile {
@@ -243,6 +267,30 @@ mod tests {
         assert_eq!(
             PathIdentity::normalize(Path::new("../../a")),
             Path::new("../../a")
+        );
+    }
+
+    #[test]
+    fn project_display_paths_remove_managed_prefixes() {
+        let home = Path::new("/Users/me");
+
+        assert_eq!(
+            DisplayPath::project_with_home(
+                Path::new("/Users/me/.vmux/projects/github.com/vmux-ai/vmux-cloud/.worktrees/one"),
+                Some(home),
+            ),
+            "vmux-ai/vmux-cloud/.worktrees/one"
+        );
+        assert_eq!(
+            DisplayPath::project_with_home(
+                Path::new("/Users/me/.vmux/projects/gitlab.com/team/project"),
+                Some(home),
+            ),
+            "gitlab.com/team/project"
+        );
+        assert_eq!(
+            DisplayPath::project_with_home(Path::new("/Users/me/Projects/local"), Some(home)),
+            "~/Projects/local"
         );
     }
 
