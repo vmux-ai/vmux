@@ -38,7 +38,8 @@ pub(crate) struct FilePage;
     component = Page,
     states = ["ThemeUiState", "FileUiState", "ChatUiState", "GitUiState", "KeyClaimsUiState"],
     dom_group = "editor",
-    subtree
+    subtree,
+    takes = vmux_ecs::PageMetadata
 )]
 pub(crate) struct ProjectsPage;
 

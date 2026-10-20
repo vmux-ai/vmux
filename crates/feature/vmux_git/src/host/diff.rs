@@ -6,7 +6,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{
     DiffKind, DiffLine, GitBranchFilesNextRequest, GitDiffNextRequest, GitDiffRevealRequest,
-    GitLineMarker, GitLineStatus,
+    GitDiffSeekRequest, GitLineMarker, GitLineStatus,
 };
 use crate::state::{GitPageControllerState, GitPanel};
 
@@ -24,15 +24,22 @@ impl Plugin for DiffPlugin {
         app.add_plugins(UiEventPlugin::<(
             GitDiffRevealRequest,
             GitDiffNextRequest,
+            GitDiffSeekRequest,
             GitBranchFilesNextRequest,
         )>::default())
             .add_observer(file_refresh)
             .add_observer(reveal)
             .add_observer(load_next)
+            .add_observer(queue_seek)
             .add_observer(load_next_branch_files)
             .add_systems(
                 Update,
-                (sync_branch_files, sync_page_targets, start_requests)
+                (
+                    sync_branch_files,
+                    sync_page_targets,
+                    start_requests,
+                    start_pending_seek,
+                )
                     .chain()
                     .in_set(GitUpdateSet::Diff),
             );
@@ -84,22 +91,12 @@ impl GitDiffTarget {
             return None;
         }
         match controller.focused_panel {
-            GitPanel::Branches
-                if !controller.selected_branch.is_empty()
-                    && !controller.selected_branch_path.is_empty() =>
-            {
-                let path = super::repository::RequestPath::new(
-                    &controller.selected_branch_path,
-                    &controller.selected_branch_path_bytes,
-                )
-                .resolve(&repo_root);
-                Some(Self {
-                    repo_root,
-                    path,
-                    path_bytes: controller.selected_branch_path_bytes.clone(),
-                    scope: DiffScope::BranchFile(controller.selected_branch.clone()),
-                })
-            }
+            GitPanel::Branches if !controller.selected_branch.is_empty() => Some(Self {
+                repo_root,
+                path: PathBuf::new(),
+                path_bytes: Vec::new(),
+                scope: DiffScope::Branch(controller.selected_branch.clone()),
+            }),
             GitPanel::Commits => Some(Self {
                 repo_root,
                 path: PathBuf::new(),
@@ -135,6 +132,9 @@ struct PendingGitDiff {
     file: Option<FileDiffIdentity>,
     page_revision: Option<u32>,
 }
+
+#[derive(Component)]
+struct PendingGitDiffSeek(String);
 
 #[derive(Clone, Copy)]
 struct FileDiffIdentity {
@@ -219,7 +219,9 @@ fn sync_page_targets(pages: GitDiffPages, mut commands: Commands) {
             continue;
         }
         let Some(target) = GitDiffTarget::for_page(&state, &controller) else {
-            commands.entity(entity).remove::<PendingGitDiff>();
+            commands
+                .entity(entity)
+                .remove::<(PendingGitDiff, PendingGitDiffSeek)>();
             continue;
         };
         let page_revision = state.diff_revision();
@@ -357,9 +359,75 @@ fn load_next(
             generation: query.generation,
             top_line: loaded,
             rows: DIFF_WINDOW_ROWS,
+            seek_path: None,
             content,
         },
     ));
+}
+
+fn queue_seek(trigger: On<UiInput<GitDiffSeekRequest>>, mut commands: Commands) {
+    commands
+        .entity(trigger.event().webview)
+        .insert(PendingGitDiffSeek(trigger.event().payload.path.clone()));
+}
+
+fn start_pending_seek(
+    mut pages: Query<(
+        Entity,
+        &mut super::state::GitState,
+        &GitDiffQuery,
+        &PendingGitDiffSeek,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, mut state, query, pending) in &mut pages {
+        if state.snapshot.diff_loading || !matches!(query.target.scope, DiffScope::Branch(_)) {
+            continue;
+        }
+        let loaded = state
+            .snapshot
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| {
+                viewport
+                    .first_line
+                    .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX))
+            })
+            .unwrap_or_default();
+        let found = state
+            .snapshot
+            .diff_viewport
+            .as_ref()
+            .is_some_and(|viewport| {
+                viewport
+                    .lines
+                    .iter()
+                    .any(|line| line.file_path() == Some(&pending.0))
+            });
+        let complete = state
+            .snapshot
+            .diff_viewport
+            .as_ref()
+            .is_some_and(|viewport| loaded >= viewport.total_lines);
+        commands.entity(entity).remove::<PendingGitDiffSeek>();
+        if found || complete {
+            continue;
+        }
+        state.snapshot.diff_loading = true;
+        commands.spawn((
+            GitJob::new(entity),
+            GitRepository::at(query.target.repo_root.clone()),
+            DiffJob {
+                path: query.target.path.clone(),
+                scope: query.target.scope.clone(),
+                generation: query.generation,
+                top_line: loaded,
+                rows: DIFF_WINDOW_ROWS,
+                seek_path: Some(pending.0.clone()),
+                content: None,
+            },
+        ));
+    }
 }
 
 fn file_refresh(
@@ -439,6 +507,7 @@ fn start_requests(
                 generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
+                seek_path: None,
                 content,
             },
         ));
@@ -579,7 +648,7 @@ mod tests {
             repo_root: repo.path().to_path_buf(),
             path: PathBuf::new(),
             path_bytes: Vec::new(),
-            scope: DiffScope::BranchFile("feature".into()),
+            scope: DiffScope::Branch("feature".into()),
         };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -606,6 +675,7 @@ mod tests {
                     generation: 1,
                     top_line: 0,
                     rows: DIFF_WINDOW_ROWS,
+                    seek_path: None,
                     content: None,
                 },
             ))

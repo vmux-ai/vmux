@@ -235,6 +235,14 @@ impl DiffParser {
     }
 
     pub fn parse(diff: &str) -> Vec<DiffLine> {
+        Self::parse_with_file_headers(diff, false)
+    }
+
+    pub fn parse_review(diff: &str) -> Vec<DiffLine> {
+        Self::parse_with_file_headers(diff, true)
+    }
+
+    fn parse_with_file_headers(diff: &str, include_single_file: bool) -> Vec<DiffLine> {
         const ADD: [u8; 3] = [80, 200, 120];
         const REM: [u8; 3] = [220, 80, 80];
         const CTX: [u8; 3] = [200, 200, 200];
@@ -244,11 +252,12 @@ impl DiffParser {
         let mut old_no = 0u32;
         let mut new_no = 0u32;
         let mut saw_hunk = false;
-        let multi_file = diff
-            .lines()
-            .filter(|line| line.starts_with("diff --git"))
-            .count()
-            > 1;
+        let show_file_headers = include_single_file
+            || diff
+                .lines()
+                .filter(|line| line.starts_with("diff --git"))
+                .count()
+                > 1;
 
         for raw in diff.lines() {
             if raw.starts_with("\\ No newline") {
@@ -260,7 +269,7 @@ impl DiffParser {
                 saw_hunk = false;
                 old_no = 0;
                 new_no = 0;
-                if multi_file {
+                if show_file_headers {
                     lines.push(DiffLine {
                         kind: DiffKind::Hunk,
                         old_no: None,
@@ -468,6 +477,12 @@ mod diff_tests {
                 .first()
                 .is_some_and(|span| span.text.starts_with("index "))
         }));
+    }
+
+    #[test]
+    fn review_diff_identifies_its_only_file() {
+        let lines = DiffParser::parse_review(DIFF);
+        assert_eq!(lines[0].file_path(), Some("f.rs"));
     }
 }
 

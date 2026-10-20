@@ -528,44 +528,32 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     error: String::new(),
                 });
             }
-            if let DiffScope::BranchFile(reference) = &job.scope {
-                return match repository.branch_file_diff_window(
-                    reference,
-                    &job.path,
-                    job.top_line,
-                    job.rows,
-                ) {
-                    Ok(window) => DiffOutput(GitDiffViewport {
-                        generation: job.generation,
-                        first_line: job.top_line.min(window.total_lines),
-                        total_lines: window.total_lines,
-                        lines: window.lines,
-                        markers: window.markers,
-                        error: String::new(),
-                    }),
-                    Err(error) => DiffOutput(GitDiffViewport {
-                        generation: job.generation,
-                        first_line: job.top_line,
-                        total_lines: 0,
-                        lines: Vec::new(),
-                        markers: Vec::new(),
-                        error: error.0,
-                    }),
-                };
-            }
             let result = match &job.scope {
                 DiffScope::File => match job.content.as_deref() {
                     Some(content) => repository.diff_lines_with_content(&job.path, content),
                     None => repository.diff_lines(&job.path),
                 },
-                DiffScope::BranchFile(_) => unreachable!(),
+                DiffScope::Branch(reference) => repository.branch_diff_lines(reference),
                 DiffScope::Commit(reference) => repository.commit_diff_lines(reference),
             };
             match result {
                 Ok(all_lines) => {
                     let markers = super::diff::GitDiffMarkers::from_lines(&all_lines).into_inner();
+                    let rows = job.seek_path.as_deref().map_or(job.rows, |path| {
+                        let Some(target) = all_lines
+                            .iter()
+                            .position(|line| line.file_path() == Some(path))
+                        else {
+                            return job.rows;
+                        };
+                        let target = u32::try_from(target).unwrap_or(u32::MAX);
+                        if target < job.top_line {
+                            return 0;
+                        }
+                        target.saturating_sub(job.top_line).saturating_add(job.rows)
+                    });
                     let (total_lines, lines) =
-                        super::parse::DiffParser::window(&all_lines, job.top_line, job.rows);
+                        super::parse::DiffParser::window(&all_lines, job.top_line, rows);
                     DiffOutput(GitDiffViewport {
                         generation: job.generation,
                         first_line: job.top_line.min(total_lines),
@@ -1009,6 +997,7 @@ mod tests {
                 generation: 7,
                 top_line: 0,
                 rows: 50,
+                seek_path: None,
                 content: None,
             },
         ));
@@ -1056,6 +1045,7 @@ mod tests {
                 generation: 7,
                 top_line: 0,
                 rows: 50,
+                seek_path: None,
                 content: None,
             },
         ));

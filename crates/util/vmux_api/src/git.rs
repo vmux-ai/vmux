@@ -16,6 +16,16 @@ pub struct DiffLine {
     pub spans: Vec<StyledSpan>,
 }
 
+impl DiffLine {
+    pub fn file_path(&self) -> Option<&str> {
+        if self.kind != DiffKind::Hunk || self.hunk.is_some() {
+            return None;
+        }
+        let text = self.spans.first()?.text.as_str();
+        (!text.starts_with("@@")).then_some(text)
+    }
+}
+
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum FileStatus {
     #[default]

@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::GitDiffRow;
 use crate::event::{GitDiffViewport, GitRepositorySnapshot};
@@ -26,12 +27,17 @@ pub(super) fn BranchDiffCard(
         format!("{}…{}", repository.base_ref, selected_branch)
     };
     let selected_path = selected_path();
-    let title = if selected_path.is_empty() {
-        comparison.clone()
-    } else {
-        selected_path.clone()
-    };
-    let available = !selected_branch.is_empty() && !selected_path.is_empty();
+    let loaded_lines = diff_viewport()
+        .as_ref()
+        .map(|viewport| viewport.lines.len())
+        .unwrap_or_default();
+    use_effect(move || {
+        if selected_path.is_empty() || loaded_lines == 0 {
+            return;
+        }
+        ScrollIntoView::nearest(&format!("git-diff-file-{selected_path}"));
+    });
+    let available = !selected_branch.is_empty();
     rsx! {
         RevisionDiffCard {
             repo_root,
@@ -39,9 +45,9 @@ pub(super) fn BranchDiffCard(
             diff_rows,
             loading,
             available,
-            title,
-            subtitle: if available { comparison } else { String::new() },
-            file_path: selected_path,
+            title: comparison,
+            subtitle: String::new(),
+            file_path: String::new(),
             empty: translate("git-select-file"),
             icon: LineIcon::File,
         }

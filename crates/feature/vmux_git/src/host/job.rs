@@ -14,13 +14,14 @@ pub(super) struct DiffJob {
     pub(super) generation: u64,
     pub(super) top_line: u32,
     pub(super) rows: u32,
+    pub(super) seek_path: Option<String>,
     pub(super) content: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DiffScope {
     File,
-    BranchFile(String),
+    Branch(String),
     Commit(String),
 }
 

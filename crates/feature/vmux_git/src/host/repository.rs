@@ -35,59 +35,6 @@ impl BranchFilesCatalog {
     }
 }
 
-pub(crate) struct DiffWindow {
-    pub(crate) total_lines: u32,
-    pub(crate) lines: Vec<DiffLine>,
-    pub(crate) markers: Vec<GitLineMarker>,
-}
-
-impl DiffWindow {
-    fn from_lines(lines: Vec<DiffLine>, file: &Path, top_line: u32, rows: u32) -> Self {
-        let markers = super::diff::GitDiffMarkers::from_lines(&lines).into_inner();
-        let (total_lines, mut lines) = parse::DiffParser::window(&lines, top_line, rows);
-        for line in &mut lines {
-            if matches!(line.kind, DiffKind::Hunk) {
-                continue;
-            }
-            let text = line
-                .spans
-                .first()
-                .map(|span| span.text.as_str())
-                .unwrap_or_default();
-            line.spans = crate::host::highlight::Highlighter::line(text, file);
-        }
-        Self {
-            total_lines,
-            lines,
-            markers,
-        }
-    }
-
-    fn from_diff(diff: &str, file: &Path, top_line: u32, rows: u32) -> Self {
-        Self::from_lines(parse::DiffParser::parse(diff), file, top_line, rows)
-    }
-
-    fn from_added_content(content: &str, file: &Path, top_line: u32, rows: u32) -> Self {
-        let mut lines = Vec::new();
-        for (index, text) in content.lines().enumerate() {
-            lines.push(DiffLine {
-                kind: DiffKind::Add,
-                old_no: None,
-                new_no: Some(u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1)),
-                hunk: None,
-                spans: vec![StyledSpan {
-                    text: text.to_string(),
-                    light_fg: [0, 0, 0],
-                    dark_fg: [255, 255, 255],
-                    bold: false,
-                    italic: false,
-                }],
-            });
-        }
-        Self::from_lines(lines, file, top_line, rows)
-    }
-}
-
 #[derive(Clone, Component, Debug)]
 pub struct GitRepository(PathBuf);
 
@@ -439,27 +386,6 @@ impl GitRepository {
         Ok(self.highlight_diff(&stdout))
     }
 
-    pub(crate) fn branch_file_diff_window(
-        &self,
-        reference: &str,
-        file: &Path,
-        top_line: u32,
-        rows: u32,
-    ) -> Result<DiffWindow, GitError> {
-        let target = self.relative_path(file);
-        let stdout = self.branch_diff_text_for(reference, 3, Path::new(""), Some(&target))?;
-        if stdout.trim().is_empty()
-            && file.is_file()
-            && self.status(file)?.file_status == FileStatus::Untracked
-        {
-            let content = std::fs::read_to_string(file).unwrap_or_default();
-            return Ok(DiffWindow::from_added_content(
-                &content, file, top_line, rows,
-            ));
-        }
-        Ok(DiffWindow::from_diff(&stdout, file, top_line, rows))
-    }
-
     pub(crate) fn branch_files_catalog(
         &self,
         reference: &str,
@@ -662,7 +588,7 @@ impl GitRepository {
     fn highlight_diff(&self, stdout: &str) -> Vec<DiffLine> {
         let first_path = stdout.lines().find_map(Self::diff_file_path);
         let mut path = first_path.map(|path| self.0.join(path)).unwrap_or_default();
-        let mut lines = parse::DiffParser::parse(stdout);
+        let mut lines = parse::DiffParser::parse_review(stdout);
         for line in &mut lines {
             let text = line
                 .spans
@@ -1822,39 +1748,6 @@ mod tests {
             entries[0].previous_path.as_deref(),
             Some("client/src/old.rs")
         );
-    }
-
-    #[test]
-    fn branch_file_diff_window_only_returns_the_selected_file_page() {
-        let repo = test_repo::init();
-        test_repo::write(repo.path(), "a.rs", "fn base_a() {}\n");
-        test_repo::write(repo.path(), "b.rs", "fn base_b() {}\n");
-        test_repo::run(repo.path(), &["add", "."]);
-        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
-        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
-        test_repo::write(
-            repo.path(),
-            "a.rs",
-            "fn changed_a_1() {}\nfn changed_a_2() {}\nfn changed_a_3() {}\n",
-        );
-        test_repo::write(repo.path(), "b.rs", "fn changed_b() {}\n");
-        test_repo::run(repo.path(), &["add", "."]);
-        test_repo::run(repo.path(), &["commit", "-qm", "change"]);
-
-        let window = GitRepository::at(repo.path())
-            .branch_file_diff_window("feature", &repo.path().join("a.rs"), 0, 2)
-            .unwrap();
-        let text = window
-            .lines
-            .iter()
-            .flat_map(|line| line.spans.iter())
-            .map(|span| span.text.as_str())
-            .collect::<String>();
-
-        assert_eq!(window.lines.len(), 2);
-        assert!(window.total_lines > 2);
-        assert!(text.contains("base_a") || text.contains("changed_a"));
-        assert!(!text.contains("changed_b"));
     }
 
     #[test]

@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::diff::DiffTone;
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -243,67 +244,80 @@ pub fn DiffView(
                     GitDiffRow::Line(index) => {
                         let index = index as usize;
                         let line = &rows[index];
+                        let file_path = line.file_path().map(str::to_string);
                         rsx! {
-                            div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
-                                div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
-                                    span { class: "flex shrink-0 select-none {DiffPresentation::from(line.kind).gutter_class()}",
-                                        span {
-                                            class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
-                                            style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
-                                            "{opt_no(line.old_no)}"
-                                        }
-                                        span {
-                                            class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
-                                            style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
-                                            "{opt_no(line.new_no)}"
-                                        }
-                                        span {
-                                            class: "flex w-6 shrink-0 items-center justify-center font-semibold {DiffPresentation::from(line.kind).text_class()}",
-                                            "{DiffPresentation::from(line.kind).sign()}"
-                                        }
-                                    }
-                                    span { class: "min-w-0 px-2 pr-8",
-                                        for (j, styled) in line.spans.iter().enumerate() {
-                                            span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
-                                        }
-                                    }
+                            if let Some(file_path) = file_path {
+                                div {
+                                    key: "file-{file_path}",
+                                    id: "git-diff-file-{file_path}",
+                                    class: "sticky top-0 z-10 mt-3 flex h-9 min-w-full scroll-mt-2 items-center gap-2 rounded-t-md bg-card px-3 font-sans text-[11px] font-semibold text-foreground ring-1 ring-inset ring-foreground/[0.10] first:mt-0",
+                                    TypeIcon { path: file_path.clone(), is_dir: false, class: "size-3.5 shrink-0" }
+                                    span { class: "truncate font-mono", "{file_path}" }
                                 }
-                                if let Some(h) = ends[index] {
-                                    {
-                                        let accept_path_bytes = path_bytes.clone();
-                                        let reject_path_bytes = path_bytes.clone();
-                                        rsx! {
-                                            div {
-                                                class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
-                                                Button {
-                                                    variant: ButtonVariant::Ghost,
-                                                    class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
-                                                    onclick: move |_| {
-                                                        let _ = send(&GitHunkRequest {
-                                                            repo_root: repo_root(),
-                                                            path: path(),
-                                                            path_bytes: accept_path_bytes.clone(),
-                                                            hunk: h,
-                                                            accept: true,
-                                                        });
-                                                    },
-                                                    LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
-                                                    {translate("git-stage")}
-                                                }
-                                                Button {
-                                                    variant: ButtonVariant::Ghost,
-                                                    class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
-                                                    onclick: move |_| {
-                                                        let _ = send(&GitHunkRequest {
-                                                            repo_root: repo_root(),
-                                                            path: path(),
-                                                            path_bytes: reject_path_bytes.clone(),
-                                                            hunk: h,
-                                                            accept: false,
-                                                        });
-                                                    },
-                                                    LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
-                                                    {translate("git-revert")}
+                            } else {
+                                div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
+                                    div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
+                                        span { class: "flex shrink-0 select-none {DiffPresentation::from(line.kind).gutter_class()}",
+                                            span {
+                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
+                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                                "{opt_no(line.old_no)}"
+                                            }
+                                            span {
+                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
+                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                                "{opt_no(line.new_no)}"
+                                            }
+                                            span {
+                                                class: "flex w-6 shrink-0 items-center justify-center font-semibold {DiffPresentation::from(line.kind).text_class()}",
+                                                "{DiffPresentation::from(line.kind).sign()}"
+                                            }
+                                        }
+                                        span { class: "min-w-0 px-2 pr-8",
+                                            for (j, styled) in line.spans.iter().enumerate() {
+                                                span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
+                                            }
+                                        }
+                                    }
+                                    if !path().is_empty() {
+                                        if let Some(h) = ends[index] {
+                                            {
+                                                let accept_path_bytes = path_bytes.clone();
+                                                let reject_path_bytes = path_bytes.clone();
+                                                rsx! {
+                                                    div {
+                                                        class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
+                                                        Button {
+                                                            variant: ButtonVariant::Ghost,
+                                                            class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
+                                                            onclick: move |_| {
+                                                                let _ = send(&GitHunkRequest {
+                                                                    repo_root: repo_root(),
+                                                                    path: path(),
+                                                                    path_bytes: accept_path_bytes.clone(),
+                                                                    hunk: h,
+                                                                    accept: true,
+                                                                });
+                                                            },
+                                                            LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
+                                                            {translate("git-stage")}
+                                                        }
+                                                        Button {
+                                                            variant: ButtonVariant::Ghost,
+                                                            class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
+                                                            onclick: move |_| {
+                                                                let _ = send(&GitHunkRequest {
+                                                                    repo_root: repo_root(),
+                                                                    path: path(),
+                                                                    path_bytes: reject_path_bytes.clone(),
+                                                                    hunk: h,
+                                                                    accept: false,
+                                                                });
+                                                            },
+                                                            LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
+                                                            {translate("git-revert")}
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }

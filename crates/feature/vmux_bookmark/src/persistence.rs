@@ -12,7 +12,7 @@ use vmux_shortcut::ShortcutUrl;
 
 use crate::persistence_driver::{BookmarkFilter, BookmarkPersistencePath};
 
-const BOOKMARK_PIN_ORDER_REVISION: u32 = 2;
+const BOOKMARK_PIN_ORDER_REVISION: u32 = 3;
 const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
 
 pub(super) struct BookmarkPersistencePlugin;

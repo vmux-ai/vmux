@@ -276,6 +276,7 @@ pub(super) fn BranchesCard(
 fn BranchFileRow(index: usize, entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Element {
     let selected = selected_path_bytes == entry.path_bytes;
     let path_bytes = entry.path_bytes.clone();
+    let seek_path = entry.path.clone();
     let status_code = entry.change.code();
     let status_class = entry.change.class();
     rsx! {
@@ -290,6 +291,9 @@ fn BranchFileRow(index: usize, entry: GitBranchFileEntry, selected_path_bytes: V
             onclick: move |_| {
                 let _ = send(&GitBranchFileSelectRequest {
                     path_bytes: path_bytes.clone(),
+                });
+                let _ = send(&GitDiffSeekRequest {
+                    path: seek_path.clone(),
                 });
             },
             TypeIcon { path: entry.path.clone(), is_dir: false, class: "size-3.5 shrink-0 opacity-85" }
