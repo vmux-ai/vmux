@@ -146,6 +146,59 @@ impl GitRepository {
         Ok(parse::ParsedStatuses::changed_paths(&stdout))
     }
 
+    pub(crate) fn has_unignored_changes<'a>(
+        &self,
+        paths: impl IntoIterator<Item = &'a Path>,
+    ) -> bool {
+        let mut candidates = Vec::new();
+        for path in paths {
+            let Ok(relative) = path.strip_prefix(&self.0) else {
+                return true;
+            };
+            if relative.as_os_str().is_empty() {
+                return true;
+            }
+            candidates.push(path_bytes(relative));
+        }
+        if candidates.is_empty() {
+            return false;
+        }
+        let mut child = match GitCommand::command(&self.0)
+            .args(["check-ignore", "--stdin", "-z"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => return true,
+        };
+        let Some(mut stdin) = child.stdin.take() else {
+            return true;
+        };
+        for candidate in &candidates {
+            if stdin.write_all(candidate).is_err() || stdin.write_all(&[0]).is_err() {
+                return true;
+            }
+        }
+        drop(stdin);
+        let Ok(output) = child.wait_with_output() else {
+            return true;
+        };
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return true;
+        }
+        let ignored = output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<HashSet<_>>();
+        candidates
+            .iter()
+            .any(|candidate| !ignored.contains(candidate))
+    }
+
     pub(crate) fn config_path(&self) -> Result<PathBuf, GitError> {
         let (stdout, stderr, ok) = GitCommand::read(
             &self.0,
@@ -298,7 +351,7 @@ impl GitRepository {
                 "--find-renames",
                 "--find-copies",
                 "--submodule=diff",
-                "--unified=100000",
+                "--unified=3",
                 reference,
             ],
         )?;
@@ -309,7 +362,7 @@ impl GitRepository {
     }
 
     pub fn branch_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
-        let stdout = self.branch_diff_text(reference, 100_000, Path::new(""))?;
+        let stdout = self.branch_diff_text(reference, 3, Path::new(""))?;
         Ok(self.highlight_diff(&stdout))
     }
 
@@ -625,7 +678,7 @@ impl GitRepository {
         target: &Path,
         staged: &HashSet<u32>,
     ) -> Result<Vec<DiffLine>, GitError> {
-        if self.diff_text(target, true, 100_000)?.trim().is_empty() {
+        if self.diff_text(target, true, 0)?.trim().is_empty() {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(file).unwrap_or_default();
@@ -900,8 +953,14 @@ impl GitCommitEntry {
 impl GitBranchEntry {
     fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
         let checkout = crate::host::worktree::CheckoutInfo::try_from(root)?;
-        let holders = checkout
-            .branch_holders_with_changes()?
+        let mut holders = checkout.branch_holders()?;
+        if let Some(holder) = holders.iter_mut().find(|holder| holder.branch == current)
+            && let Some(path) = holder.checkout.as_ref()
+        {
+            holder.change =
+                crate::host::worktree::BranchChange::for_branch(root, path, holder.branch.as_str());
+        }
+        let holders = holders
             .into_iter()
             .map(|holder| (holder.branch.clone(), holder))
             .collect::<HashMap<_, _>>();
@@ -1256,6 +1315,34 @@ mod tests {
         assert!(set.contains("mod.txt"));
         assert!(set.contains("new.txt"));
         assert!(!set.contains("clean.txt"));
+    }
+
+    #[test]
+    fn ignored_watch_paths_do_not_refresh_the_repository() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), ".gitignore", "target/\n");
+        std::fs::create_dir_all(repo.path().join("target")).unwrap();
+        std::fs::create_dir_all(repo.path().join("src")).unwrap();
+        let ignored = test_repo::write(repo.path(), "target/out.bin", "generated");
+        let source = test_repo::write(repo.path(), "src/lib.rs", "fn main() {}\n");
+        let repository = GitRepository::at(repo.path());
+
+        assert!(!repository.has_unignored_changes([ignored.as_path()]));
+        assert!(repository.has_unignored_changes([source.as_path()]));
+    }
+
+    #[test]
+    fn tracked_paths_remain_relevant_when_an_ignore_pattern_matches() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), ".gitignore", "target/\n");
+        std::fs::create_dir_all(repo.path().join("target")).unwrap();
+        let tracked = test_repo::write(repo.path(), "target/tracked.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "-f", "target/tracked.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "tracked"]);
+        test_repo::write(repo.path(), "target/tracked.txt", "two\n");
+        let repository = GitRepository::at(repo.path());
+
+        assert!(repository.has_unignored_changes([tracked.as_path()]));
     }
 
     #[test]

@@ -844,13 +844,14 @@ mod tests {
     }
 
     fn captured(app: &mut App) -> CapturedOutputs {
-        for _ in 0..10_000 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             app.update();
             let mut captured = app.world_mut().resource_mut::<CapturedOutputs>();
             if !captured.diffs.is_empty() || !captured.operations.is_empty() {
                 return std::mem::take(&mut *captured);
             }
-            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         panic!("git job did not finish");
     }

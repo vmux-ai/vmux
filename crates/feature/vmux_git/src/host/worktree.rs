@@ -168,36 +168,11 @@ pub struct BranchChange {
 }
 
 impl BranchChange {
-    const WORKERS: usize = 8;
-
-    fn fill(root: &Path, holders: &mut [BranchHolder]) {
+    pub(crate) fn for_branch(root: &Path, checkout: &Path, branch: &str) -> Self {
         let Some(base) = BaseRef::resolve(root) else {
-            return;
+            return Self::default();
         };
-        let mut measured = Vec::new();
-        for holder in holders.iter_mut() {
-            if holder.checkout.is_some() {
-                measured.push(holder);
-            }
-        }
-        if measured.is_empty() {
-            return;
-        }
-        let base = &base;
-        let per_worker = measured.len().div_ceil(Self::WORKERS);
-        std::thread::scope(|scope| {
-            for chunk in measured.chunks_mut(per_worker) {
-                scope.spawn(move || {
-                    for holder in chunk {
-                        let Some(checkout) = holder.checkout.clone() else {
-                            continue;
-                        };
-                        let change = Self::against(root, base, &checkout, &holder.branch);
-                        holder.change = change;
-                    }
-                });
-            }
-        });
+        Self::against(root, &base, checkout, branch)
     }
 
     fn against(root: &Path, base: &BaseRef, checkout: &Path, branch: &str) -> Self {
@@ -239,12 +214,6 @@ impl BranchChange {
             change.insertions = change.insertions.saturating_add(nested.insertions);
             change.deletions = change.deletions.saturating_add(nested.deletions);
         }
-        if let Ok((untracked, _, true)) = GitCommand::run(
-            checkout,
-            &["ls-files", "--others", "--exclude-standard", "-z"],
-        ) {
-            change.include_untracked(checkout, &untracked);
-        }
         change
     }
 
@@ -263,44 +232,6 @@ impl BranchChange {
             total.deletions += removed.parse::<u32>().unwrap_or_default();
         }
         total
-    }
-
-    fn include_untracked(&mut self, checkout: &Path, paths: &str) {
-        const MAX_TEXT_BYTES: u64 = 1024 * 1024;
-        const MAX_TOTAL_TEXT_BYTES: u64 = 8 * MAX_TEXT_BYTES;
-        let mut text_bytes = 0u64;
-        for relative in paths.split('\0').filter(|path| !path.is_empty()) {
-            let path = checkout.join(relative);
-            let Ok(metadata) = path.symlink_metadata() else {
-                continue;
-            };
-            if !metadata.is_file() {
-                continue;
-            }
-            self.changed_files = self.changed_files.saturating_add(1);
-            if metadata.len() > MAX_TEXT_BYTES
-                || text_bytes.saturating_add(metadata.len()) > MAX_TOTAL_TEXT_BYTES
-            {
-                continue;
-            }
-            text_bytes = text_bytes.saturating_add(metadata.len());
-            let Ok(bytes) = std::fs::read(path) else {
-                continue;
-            };
-            if bytes.contains(&0) {
-                continue;
-            }
-            let lines = if bytes.is_empty() {
-                0
-            } else if bytes.last() == Some(&b'\n') {
-                bytes.split(|byte| *byte == b'\n').count().saturating_sub(1)
-            } else {
-                bytes.split(|byte| *byte == b'\n').count()
-            };
-            self.insertions = self
-                .insertions
-                .saturating_add(u32::try_from(lines).unwrap_or(u32::MAX));
-        }
     }
 }
 
@@ -694,12 +625,6 @@ impl CheckoutInfo {
         Ok(holders)
     }
 
-    pub fn branch_holders_with_changes(&self) -> Result<Vec<BranchHolder>, GitError> {
-        let mut holders = self.branch_holders()?;
-        BranchChange::fill(&self.root, &mut holders);
-        Ok(holders)
-    }
-
     pub fn validate_branch_name(&self, branch: &str) -> Result<(), GitError> {
         if branch.is_empty() || branch.trim() != branch {
             return Err(GitError(
@@ -948,13 +873,6 @@ impl RepoInfo {
                 .into(),
         };
         let base = BaseRef::resolve(&repo_root);
-        let change = if branch.is_empty() {
-            BranchChange::default()
-        } else {
-            base.as_ref()
-                .map(|base| BranchChange::against(&repo_root, base, &repo_root, &branch))
-                .unwrap_or_default()
-        };
         Some(Self {
             name,
             branch,
@@ -965,9 +883,9 @@ impl RepoInfo {
             is_worktree: git_dir != common_dir,
             uncommitted,
             ahead,
-            changed_files: change.changed_files,
-            insertions: change.insertions,
-            deletions: change.deletions,
+            changed_files: 0,
+            insertions: 0,
+            deletions: 0,
             repo_root,
             git_dir,
             common_dir,
@@ -1344,19 +1262,6 @@ mod tests {
     }
 
     #[test]
-    fn untracked_text_is_included_in_branch_change_totals() {
-        let checkout = tempfile::tempdir().unwrap();
-        std::fs::write(checkout.path().join("new.txt"), "one\ntwo\n").unwrap();
-        std::fs::write(checkout.path().join("empty.txt"), "").unwrap();
-        let mut change = BranchChange::default();
-
-        change.include_untracked(checkout.path(), "new.txt\0empty.txt\0");
-
-        assert_eq!(change.changed_files, 2);
-        assert_eq!(change.insertions, 2);
-    }
-
-    #[test]
     fn a_held_branch_reports_what_it_changed_since_the_base() {
         let repo = test_repo::init();
         commit_initial(repo.path());
@@ -1374,21 +1279,12 @@ mod tests {
             repo.path().file_name().unwrap().to_string_lossy()
         );
         assert_eq!(info.base_ref, "main");
-        assert_eq!(info.changed_files, 2);
-        assert_eq!(info.insertions, 3);
-        assert_eq!(info.deletions, 1);
-
-        let holders = checkout.branch_holders_with_changes().unwrap();
-        let change = |branch: &str| {
-            holders
-                .iter()
-                .find(|holder| holder.branch == branch)
-                .unwrap_or_else(|| panic!("{branch} listed"))
-                .change
-        };
+        assert_eq!(info.changed_files, 0);
+        assert_eq!(info.insertions, 0);
+        assert_eq!(info.deletions, 0);
 
         assert_eq!(
-            change("vmux/feat"),
+            BranchChange::for_branch(repo.path(), &wt, "vmux/feat"),
             BranchChange {
                 changed_files: 2,
                 insertions: 3,
@@ -1397,7 +1293,7 @@ mod tests {
             "a worktree branch is measured from where it left the base, in that direction"
         );
         assert_eq!(
-            change("main"),
+            BranchChange::for_branch(repo.path(), repo.path(), "main"),
             BranchChange::default(),
             "the base branch has nothing to report against itself"
         );
@@ -1412,14 +1308,8 @@ mod tests {
         checkout.add_worktree(&wt, "vmux/feat", "main").unwrap();
         test_repo::write(&wt, "seed.txt", "seed\nscratch\n");
 
-        let holders = checkout.branch_holders_with_changes().unwrap();
-        let feat = holders
-            .iter()
-            .find(|holder| holder.branch == "vmux/feat")
-            .expect("vmux/feat listed");
-
         assert_eq!(
-            feat.change,
+            BranchChange::for_branch(repo.path(), &wt, "vmux/feat"),
             BranchChange {
                 changed_files: 1,
                 insertions: 1,

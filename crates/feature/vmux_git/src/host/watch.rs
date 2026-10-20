@@ -297,7 +297,7 @@ impl RepoInfoCache {
     }
 }
 
-const WATCH_EVENT_LIMIT: usize = 256;
+const WATCH_EVENT_LIMIT: usize = 8192;
 const WATCH_INPUT_CAPACITY: usize = 64;
 const WATCH_OUTPUT_CAPACITY: usize = 1;
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -594,6 +594,35 @@ impl GitWatch {
         }
     }
 
+    fn changes_match(
+        targets: &[GitWatchTarget],
+        changed: &HashSet<PathBuf>,
+        worktree_relevance: &mut HashMap<PathBuf, bool>,
+    ) -> bool {
+        for target in targets {
+            let mut matching = changed
+                .iter()
+                .filter(|path| target.matches(path.as_path()))
+                .peekable();
+            if matching.peek().is_none() {
+                continue;
+            }
+            if target.kind == GitWatchKind::Metadata {
+                return true;
+            }
+            let relevant = *worktree_relevance
+                .entry(target.path.clone())
+                .or_insert_with(|| {
+                    super::repository::GitRepository::at(&target.path)
+                        .has_unignored_changes(matching.map(PathBuf::as_path))
+                });
+            if relevant {
+                return true;
+            }
+        }
+        false
+    }
+
     fn subscribe(
         &mut self,
         entity: Entity,
@@ -873,15 +902,13 @@ fn drain(
     if changed.is_empty() && !overflow {
         return;
     }
+    let mut worktree_relevance = HashMap::new();
     let affected: Vec<Entity> = watch
         .subscriptions
         .iter()
         .filter(|(_, subscription)| {
             overflow
-                || subscription
-                    .targets
-                    .iter()
-                    .any(|target| changed.iter().any(|path| target.matches(path)))
+                || GitWatch::changes_match(&subscription.targets, &changed, &mut worktree_relevance)
         })
         .filter_map(|(entity, _)| active.contains(*entity).then_some(*entity))
         .collect();
@@ -903,10 +930,7 @@ fn drain(
         .repo_info_subscriptions
         .iter()
         .filter(|(_, targets)| {
-            overflow
-                || targets
-                    .iter()
-                    .any(|target| changed.iter().any(|path| target.matches(path)))
+            overflow || GitWatch::changes_match(targets, &changed, &mut worktree_relevance)
         })
         .map(|(path, targets)| {
             let branches_dirty = overflow
