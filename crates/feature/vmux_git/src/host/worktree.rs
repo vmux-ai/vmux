@@ -1,6 +1,8 @@
 use std::{
+    ffi::OsString,
     fs::{File, OpenOptions},
     os::fd::AsRawFd,
+    os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -25,6 +27,71 @@ pub struct WorktreeStatus {
 pub struct CheckoutInfo {
     pub root: PathBuf,
     pub common_dir: PathBuf,
+}
+
+pub(crate) struct SubmoduleCheckout {
+    relative: PathBuf,
+    root: PathBuf,
+    branch: String,
+    base: BaseRef,
+}
+
+impl SubmoduleCheckout {
+    pub(crate) fn list(checkout: &Path) -> Vec<Self> {
+        let Ok((output, _, true)) =
+            GitCommand::read_bytes(checkout, &["ls-files", "--stage", "-z"])
+        else {
+            return Vec::new();
+        };
+        let mut submodules = Vec::new();
+        for record in output.split(|byte| *byte == 0) {
+            let Some(record) = record.strip_prefix(b"160000 ") else {
+                continue;
+            };
+            let Some(separator) = record.iter().position(|byte| *byte == b'\t') else {
+                continue;
+            };
+            let relative = PathBuf::from(OsString::from_vec(record[separator + 1..].to_vec()));
+            let root = checkout.join(&relative);
+            if CheckoutInfo::try_from(root.as_path()).is_err() {
+                continue;
+            }
+            let Ok((branch, _, true)) =
+                GitCommand::run(&root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+            else {
+                continue;
+            };
+            let branch = branch.trim();
+            let Some(base) = BaseRef::resolve(&root) else {
+                continue;
+            };
+            if !branch.is_empty() {
+                submodules.push(Self {
+                    relative,
+                    root,
+                    branch: branch.to_string(),
+                    base,
+                });
+            }
+        }
+        submodules
+    }
+
+    pub(crate) fn relative(&self) -> &Path {
+        &self.relative
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub(crate) fn branch(&self) -> &str {
+        &self.branch
+    }
+
+    fn base(&self) -> &BaseRef {
+        &self.base
+    }
 }
 
 impl TryFrom<&Path> for CheckoutInfo {
@@ -140,12 +207,38 @@ impl BranchChange {
         else {
             return Self::default();
         };
-        let Ok((numstat, _, true)) =
-            GitCommand::run(checkout, &["diff", "--numstat", merge_base.trim()])
-        else {
+        let submodules = SubmoduleCheckout::list(checkout);
+        let mut args = vec![
+            "diff".to_string(),
+            "--numstat".to_string(),
+            merge_base.trim().to_string(),
+        ];
+        if !submodules.is_empty() {
+            args.push("--".to_string());
+            args.push(".".to_string());
+            for submodule in &submodules {
+                args.push(format!(
+                    ":(exclude,literal){}",
+                    submodule.relative().to_string_lossy()
+                ));
+            }
+        }
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let Ok((numstat, _, true)) = GitCommand::run(checkout, &args) else {
             return Self::default();
         };
         let mut change = Self::summed(&numstat);
+        for submodule in submodules {
+            let nested = Self::against(
+                submodule.root(),
+                submodule.base(),
+                submodule.root(),
+                submodule.branch(),
+            );
+            change.changed_files = change.changed_files.saturating_add(nested.changed_files);
+            change.insertions = change.insertions.saturating_add(nested.insertions);
+            change.deletions = change.deletions.saturating_add(nested.deletions);
+        }
         if let Ok((untracked, _, true)) = GitCommand::run(
             checkout,
             &["ls-files", "--others", "--exclude-standard", "-z"],

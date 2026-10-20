@@ -234,6 +234,16 @@ impl GitRepository {
 
     pub fn diff_lines(&self, file: &Path) -> Result<Vec<DiffLine>, GitError> {
         let target = self.relative_path(file);
+        if let Some((_, repository, branch)) = self
+            .branch_submodules()
+            .into_iter()
+            .find(|(path, _, _)| path == &target)
+        {
+            let diff = repository.branch_diff_text(&branch, 100_000, &target)?;
+            if !diff.trim().is_empty() {
+                return Ok(self.highlight_diff(&diff));
+            }
+        }
         let staged = self.staged_lines(&target);
 
         let unstaged = self.diff_text(&target, false, 100_000)?;
@@ -287,6 +297,7 @@ impl GitRepository {
                 "--format=",
                 "--find-renames",
                 "--find-copies",
+                "--submodule=diff",
                 "--unified=100000",
                 reference,
             ],
@@ -298,6 +309,16 @@ impl GitRepository {
     }
 
     pub fn branch_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
+        let stdout = self.branch_diff_text(reference, 100_000, Path::new(""))?;
+        Ok(self.highlight_diff(&stdout))
+    }
+
+    fn branch_diff_text(
+        &self,
+        reference: &str,
+        context: u32,
+        prefix: &Path,
+    ) -> Result<String, GitError> {
         let base = crate::host::worktree::BaseRef::resolve(&self.0)
             .ok_or_else(|| GitError("no base branch found".to_string()))?;
         let (merge_base, stderr, ok) =
@@ -309,21 +330,70 @@ impl GitRepository {
         let (head, _, head_ok) = GitCommand::read(&self.0, &["rev-parse", "HEAD"])?;
         let (selected, _, selected_ok) = GitCommand::read(&self.0, &["rev-parse", reference])?;
         let current = head_ok && selected_ok && head.trim() == selected.trim();
-        let mut args = vec![
-            "diff",
-            "--find-renames",
-            "--find-copies",
-            "--unified=100000",
-            merge_base,
-        ];
+        let submodules = if current {
+            self.branch_submodules()
+        } else {
+            Vec::new()
+        };
+        let unified = format!("--unified={context}");
+        let mut command = GitCommand::command(&self.0);
+        command
+            .arg("diff")
+            .arg("--find-renames")
+            .arg("--find-copies")
+            .arg("--submodule=diff")
+            .arg(&unified);
+        if !prefix.as_os_str().is_empty() {
+            let prefix = prefix.to_string_lossy();
+            command
+                .arg(format!("--src-prefix=a/{prefix}/"))
+                .arg(format!("--dst-prefix=b/{prefix}/"));
+        }
+        command.arg(merge_base);
         if !current {
-            args.push(reference);
+            command.arg(reference);
         }
-        let (stdout, stderr, ok) = GitCommand::read(&self.0, &args)?;
-        if !ok {
-            return Err(GitCommand::error(&stdout, &stderr));
+        if !submodules.is_empty() {
+            command.arg("--").arg(".");
+            for (path, _, _) in &submodules {
+                command.arg(format!(":(exclude,literal){}", path.to_string_lossy()));
+            }
         }
-        Ok(self.highlight_diff(&stdout))
+        let output = command
+            .output()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        if !output.status.success() {
+            return Err(GitCommand::error(
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+            ));
+        }
+        let mut stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        for (path, repository, branch) in submodules {
+            let nested_prefix = prefix.join(path);
+            let nested = repository.branch_diff_text(&branch, context, &nested_prefix)?;
+            if nested.trim().is_empty() {
+                continue;
+            }
+            if !stdout.is_empty() && !stdout.ends_with('\n') {
+                stdout.push('\n');
+            }
+            stdout.push_str(&nested);
+        }
+        Ok(stdout)
+    }
+
+    fn branch_submodules(&self) -> Vec<(PathBuf, Self, String)> {
+        crate::host::worktree::SubmoduleCheckout::list(&self.0)
+            .into_iter()
+            .map(|submodule| {
+                (
+                    submodule.relative().to_path_buf(),
+                    Self::at(submodule.root()),
+                    submodule.branch().to_string(),
+                )
+            })
+            .collect()
     }
 
     fn highlight_diff(&self, stdout: &str) -> Vec<DiffLine> {
@@ -725,7 +795,10 @@ impl GitCommand {
         Ok((String::from_utf8_lossy(&stdout).into_owned(), stderr, ok))
     }
 
-    fn read_bytes(root: &Path, args: &[&str]) -> Result<(Vec<u8>, String, bool), GitError> {
+    pub(super) fn read_bytes(
+        root: &Path,
+        args: &[&str],
+    ) -> Result<(Vec<u8>, String, bool), GitError> {
         let output = Self::command(root)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .args(args)
@@ -1372,6 +1445,70 @@ mod tests {
             .collect::<String>();
 
         assert!(text.contains("working"));
+    }
+
+    #[test]
+    fn current_branch_diff_expands_submodule_branch_changes() {
+        let child = test_repo::init();
+        test_repo::write(child.path(), "inside.rs", "fn old() {}\n");
+        test_repo::write(child.path(), "other.rs", "fn before() {}\n");
+        test_repo::run(child.path(), &["add", "."]);
+        test_repo::run(child.path(), &["commit", "-qm", "base"]);
+
+        let parent = test_repo::init();
+        test_repo::run(
+            parent.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                child.path().to_str().unwrap(),
+                "client",
+            ],
+        );
+        test_repo::run(parent.path(), &["commit", "-qam", "base"]);
+        test_repo::run(parent.path(), &["switch", "-qc", "feature"]);
+
+        let checkout = parent.path().join("client");
+        test_repo::run(&checkout, &["config", "user.email", "t@example.com"]);
+        test_repo::run(&checkout, &["config", "user.name", "Test"]);
+        test_repo::run(&checkout, &["switch", "-qc", "feature"]);
+        test_repo::write(&checkout, "inside.rs", "fn new() {}\n");
+        test_repo::write(&checkout, "other.rs", "fn after() {}\n");
+        test_repo::run(&checkout, &["add", "."]);
+        test_repo::run(&checkout, &["commit", "-qm", "feature"]);
+
+        let repository = GitRepository::at(parent.path());
+        let branch_lines = repository.branch_diff_lines("feature").unwrap();
+        let file_lines = repository.diff_lines(&checkout).unwrap();
+        let snapshot = GitRepositorySnapshot::load(parent.path()).unwrap();
+        let branch = snapshot
+            .branches
+            .iter()
+            .find(|branch| branch.name == "feature")
+            .unwrap();
+        let files = branch_lines
+            .iter()
+            .filter(|line| matches!(line.kind, DiffKind::Hunk))
+            .filter_map(|line| line.spans.first())
+            .map(|span| span.text.as_str())
+            .filter(|text| !text.starts_with("@@"))
+            .collect::<Vec<_>>();
+        let file_text = file_lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(files, ["client/inside.rs", "client/other.rs"]);
+        assert!(file_text.contains("fn old() {}"));
+        assert!(file_text.contains("fn new() {}"));
+        assert!(!file_text.contains("Subproject commit"));
+        assert_eq!(branch.changed_files, 2);
+        assert_eq!(branch.insertions, 2);
+        assert_eq!(branch.deletions, 2);
     }
 
     #[test]
