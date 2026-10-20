@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -152,8 +152,10 @@ pub(super) struct GitDiffQuery {
 
 #[derive(Component)]
 pub(super) struct GitBranchFilesQuery {
+    repository: PathBuf,
     reference: String,
     generation: u64,
+    page_revision: u32,
     catalog: BranchFilesCatalog,
 }
 
@@ -162,6 +164,12 @@ impl GitBranchFilesQuery {
 
     pub(super) fn accepts(&self, generation: u64, reference: &str) -> bool {
         self.generation == generation && self.reference == reference
+    }
+
+    fn current(&self, repository: &Path, reference: &str, page_revision: u32) -> bool {
+        self.repository == repository
+            && self.reference == reference
+            && self.page_revision == page_revision
     }
 
     pub(super) fn replace(&mut self, catalog: BranchFilesCatalog) -> BranchFilesPage {
@@ -243,11 +251,16 @@ fn sync_branch_files(
         if controller.focused_panel != GitPanel::Branches || controller.selected_branch.is_empty() {
             continue;
         }
-        if state.snapshot.branch_files_reference == controller.selected_branch {
-            continue;
-        }
         let repo_root = PathBuf::from(state.workspace());
         if repo_root.as_os_str().is_empty() {
+            continue;
+        }
+        let page_revision = state.diff_revision();
+        if state.snapshot.branch_files_reference == controller.selected_branch
+            && current.is_some_and(|current| {
+                current.current(&repo_root, &controller.selected_branch, page_revision)
+            })
+        {
             continue;
         }
         let generation = current
@@ -265,8 +278,10 @@ fn sync_branch_files(
         state.snapshot.branch_files_has_more = false;
         state.snapshot.branch_files_error.clear();
         commands.entity(entity).insert(GitBranchFilesQuery {
+            repository: repo_root.clone(),
             reference: controller.selected_branch.clone(),
             generation,
+            page_revision,
             catalog: BranchFilesCatalog::default(),
         });
         commands.spawn((
@@ -598,6 +613,52 @@ mod tests {
         assert!(!app.world().entities().contains(queued));
         let mut jobs = app.world_mut().query::<&DiffJob>();
         assert_eq!(jobs.iter(app.world()).count(), 1);
+    }
+
+    #[test]
+    fn branch_files_reload_when_the_repository_revision_changes() {
+        let repo = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_systems(Update, sync_branch_files);
+        let page = app
+            .world_mut()
+            .spawn((
+                super::super::state::GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        workspace: repo.path().to_string_lossy().into_owned(),
+                        nonce: 1,
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState {
+                    focused_panel: GitPanel::Branches,
+                    selected_branch: "feature".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<GitBranchFilesQuery>(page)
+                .map(|query| (query.generation, query.page_revision)),
+            Some((1, 1))
+        );
+
+        app.world_mut()
+            .get_mut::<super::super::state::GitState>(page)
+            .unwrap()
+            .snapshot
+            .nonce = 2;
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<GitBranchFilesQuery>(page)
+                .map(|query| (query.generation, query.page_revision)),
+            Some((2, 2))
+        );
     }
 
     #[test]
