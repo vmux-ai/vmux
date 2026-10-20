@@ -23,6 +23,19 @@ impl Plugin for PageOpenPlugin {
 }
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+type RecentVisits<'w, 's> =
+    Query<'w, 's, (&'static PageMetadata, &'static LastVisitedAt), (With<Url>, Without<FileView>)>;
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct FileOpenContext<'w, 's> {
+    children: Query<'w, 's, &'static Children>,
+    views: Query<'w, 's, (&'static FileView, &'static mut PageMetadata)>,
+    visits: RecentVisits<'w, 's>,
+    focused_space: vmux_layout::space::FocusedSpace<'w, 's>,
+    projects: Projects<'w, 's>,
+    commands: Commands<'w, 's>,
+    record_writer: MessageWriter<'w, vmux_ecs::event::RecordVisitRequest>,
+}
 
 fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     let title = if url.starts_with("vmux://") {
@@ -76,35 +89,29 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
 
 fn handle_file(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    children: Query<&Children>,
-    mut views: Query<(&FileView, &mut PageMetadata)>,
-    visits: Query<(&PageMetadata, &LastVisitedAt), (With<Url>, Without<FileView>)>,
-    focused_space: vmux_layout::space::FocusedSpace,
-    projects: Projects,
-    mut commands: Commands,
-    mut record_writer: MessageWriter<vmux_ecs::event::RecordVisitRequest>,
+    mut context: FileOpenContext,
 ) {
     for (entity, task) in &tasks {
-        let project_dir = focused_space.startup_dir();
+        let project_dir = context.focused_space.startup_dir();
         let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
         let knowledge_landing = if task.url.trim_end_matches('/')
             == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
         {
-            KnowledgeLanding::select(&knowledge_root, visits.iter())
+            KnowledgeLanding::select(&knowledge_root, context.visits.iter())
         } else {
             None
         };
         let Some(target) = FilePageTarget::resolve(
             &task.url,
             project_dir,
-            projects.path(),
+            context.projects.path(),
             &knowledge_root,
             knowledge_landing.as_deref(),
         ) else {
             continue;
         };
         let Some(path) = target.path else {
-            commands.entity(entity).insert(PageOpenError {
+            context.commands.entity(entity).insert(PageOpenError {
                 message: target.error,
             });
             continue;
@@ -122,19 +129,22 @@ fn handle_file(
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.to_string_lossy().to_string());
-            record_writer.write(vmux_ecs::event::RecordVisitRequest {
-                url: page_url.clone(),
-                title,
-            });
+            context
+                .record_writer
+                .write(vmux_ecs::event::RecordVisitRequest {
+                    url: page_url.clone(),
+                    title,
+                });
         }
         let pending = PendingGoto::from_url(&task.url);
-        let view = match children
+        let view = match context
+            .children
             .get(task.stack)
             .ok()
-            .and_then(|children| children.iter().find(|&child| views.contains(child)))
+            .and_then(|children| children.iter().find(|&child| context.views.contains(child)))
         {
             Some(view) => {
-                if let Ok((file_view, mut metadata)) = views.get_mut(view) {
+                if let Ok((file_view, mut metadata)) = context.views.get_mut(view) {
                     if file_view.path != path {
                         let request = FileNavigateRequest::new(view, path, 0);
                         let request = if page_url.starts_with("vmux://") {
@@ -142,7 +152,7 @@ fn handle_file(
                         } else {
                             request
                         };
-                        commands.trigger(request);
+                        context.commands.trigger(request);
                     } else if page_url.starts_with("vmux://") {
                         metadata.title.clone_from(&page_url);
                         metadata.url = page_url.clone();
@@ -152,16 +162,17 @@ fn handle_file(
                 view
             }
             None => {
-                commands.entity(task.stack).despawn_children();
-                commands
+                context.commands.entity(task.stack).despawn_children();
+                context
+                    .commands
                     .spawn((new_file_view_bundle(&page_url, path), ChildOf(task.stack)))
                     .id()
             }
         };
         if let Some(pending) = pending {
-            commands.entity(view).insert(pending);
+            context.commands.entity(view).insert(pending);
         }
-        commands.entity(entity).insert(PageOpenHandled);
+        context.commands.entity(entity).insert(PageOpenHandled);
     }
 }
 

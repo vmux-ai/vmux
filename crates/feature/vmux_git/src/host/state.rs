@@ -317,13 +317,14 @@ fn page_ready(
     commands.entity(entity).insert(GitState::default());
 }
 
-fn cleanup_inactive_views(
-    pages: Query<
-        (Entity, &vmux_ecs::PageMetadata),
-        (With<GitState>, Changed<vmux_ecs::PageMetadata>),
-    >,
-    mut commands: Commands,
-) {
+type ChangedGitPages<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static vmux_ecs::PageMetadata),
+    (With<GitState>, Changed<vmux_ecs::PageMetadata>),
+>;
+
+fn cleanup_inactive_views(pages: ChangedGitPages, mut commands: Commands) {
     for (entity, page) in &pages {
         let projects = page.url.trim_end_matches('/') == "vmux://projects";
         if !page.url.starts_with(crate::GIT_PAGE_URL)
