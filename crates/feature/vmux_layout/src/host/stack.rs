@@ -462,11 +462,21 @@ pub struct LayoutFocus<'w, 's> {
     pane_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    stack_metadata: Query<'w, 's, &'static vmux_ecs::PageMetadata, With<Stack>>,
     parents: Query<'w, 's, &'static ChildOf>,
     tabs: Query<'w, 's, (), With<Tab>>,
 }
 
 impl LayoutFocus<'_, '_> {
+    fn is_only_startup_stack(&self, stack: Entity, startup_url: &str) -> bool {
+        if self.stack_activity.iter().count() != 1 {
+            return false;
+        }
+        self.stack_metadata.get(stack).is_ok_and(|metadata| {
+            metadata.url.trim_end_matches('/') == startup_url.trim_end_matches('/')
+        })
+    }
+
     fn collect_leaf_panes(&self, root: Entity, result: &mut Vec<Entity>) {
         if self.leaf_panes.contains(root) {
             result.push(root);
@@ -588,6 +598,7 @@ fn close(
     mut reader: MessageReader<CloseRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
+    focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<CloseStackRequest>,
 ) {
     for _ in reader.read() {
@@ -595,6 +606,9 @@ fn close(
         let Some(active_stack) = active_stack else {
             continue;
         };
+        if focus.is_only_startup_stack(active_stack, &focused_space.resolved_startup_url()) {
+            continue;
+        }
         requests.write(CloseStackRequest::by_user(active_stack));
     }
 }
@@ -1616,6 +1630,34 @@ mod tests {
                 .get::<ChildOf>(original_stack)
                 .map(Relationship::get),
             Some(pane)
+        );
+    }
+
+    #[test]
+    fn closing_only_start_page_keeps_the_existing_stack() {
+        let mut app = build_app_with_collector();
+        let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(vmux_ecs::PageMetadata {
+                title: "Start".to_string(),
+                url: "vmux://start/".to_string(),
+                ..Default::default()
+            });
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+
+        app.update();
+
+        assert!(app.world().get_entity(stack).is_ok());
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<CloseTabRequest>>()
+                .drain()
+                .next()
+                .is_none()
         );
     }
 
