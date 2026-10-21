@@ -53,7 +53,6 @@ impl Plugin for StatePlugin {
 )]
 pub(super) struct GitState {
     pub(super) snapshot: GitPageSnapshot,
-    pub(super) catalog_fingerprint: [u8; 32],
 }
 
 #[derive(Component, Default)]
@@ -70,6 +69,36 @@ impl GitState {
 
     pub(super) fn repository(&self) -> Option<&GitRepositorySnapshot> {
         self.snapshot.repository.as_ref()
+    }
+
+    fn replace_repository(
+        &mut self,
+        mut repository: GitRepositorySnapshot,
+        refresh_catalogs: bool,
+    ) {
+        let mut preserve_catalogs = false;
+        if let Some(previous) = self.snapshot.repository.take()
+            && previous.repo_root == repository.repo_root
+        {
+            preserve_catalogs = !refresh_catalogs;
+            repository.commits = previous.commits;
+            repository.branches = previous.branches;
+            repository.remote_branches = previous.remote_branches;
+            repository.tags = previous.tags;
+            repository.stashes = previous.stashes;
+        }
+        self.snapshot.workspace.clone_from(&repository.repo_root);
+        self.snapshot.repository = Some(repository);
+        if !preserve_catalogs {
+            self.snapshot.local_branches = GitCatalogProgress::default();
+            self.snapshot.remote_branches = GitCatalogProgress::default();
+            self.snapshot.tags = GitCatalogProgress::default();
+            self.snapshot.commits = GitCatalogProgress::default();
+            self.snapshot.stashes = GitCatalogProgress::default();
+        }
+        self.snapshot.nonce = self.snapshot.nonce.wrapping_add(1).max(1);
+        self.snapshot.loading = false;
+        self.snapshot.message.clear();
     }
 }
 
@@ -104,7 +133,6 @@ impl GitStates<'_, '_> {
             loading: true,
             ..Default::default()
         };
-        state.catalog_fingerprint = [0; 32];
     }
 
     pub(super) fn start_repository(&mut self, entity: Entity, path: &Path) {
@@ -119,40 +147,13 @@ impl GitStates<'_, '_> {
     pub(super) fn set_repository(
         &mut self,
         entity: Entity,
-        mut event: GitRepositorySnapshot,
-        catalog_fingerprint: Option<[u8; 32]>,
+        repository: GitRepositorySnapshot,
+        refresh_catalogs: bool,
     ) {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return;
         };
-        let mut preserve_catalogs = false;
-        if let Some(previous) = state.snapshot.repository.take()
-            && previous.repo_root == event.repo_root
-        {
-            preserve_catalogs = catalog_fingerprint
-                .as_ref()
-                .is_none_or(|fingerprint| state.catalog_fingerprint == *fingerprint);
-            event.commits = previous.commits;
-            event.branches = previous.branches;
-            event.remote_branches = previous.remote_branches;
-            event.tags = previous.tags;
-            event.stashes = previous.stashes;
-        }
-        if let Some(catalog_fingerprint) = catalog_fingerprint {
-            state.catalog_fingerprint = catalog_fingerprint;
-        }
-        state.snapshot.workspace.clone_from(&event.repo_root);
-        state.snapshot.repository = Some(event);
-        if !preserve_catalogs {
-            state.snapshot.local_branches = GitCatalogProgress::default();
-            state.snapshot.remote_branches = GitCatalogProgress::default();
-            state.snapshot.tags = GitCatalogProgress::default();
-            state.snapshot.commits = GitCatalogProgress::default();
-            state.snapshot.stashes = GitCatalogProgress::default();
-        }
-        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
-        state.snapshot.loading = false;
-        state.snapshot.message.clear();
+        state.replace_repository(repository, refresh_catalogs);
     }
 
     pub(super) fn start_directory(&mut self, entity: Entity, path: &Path) {
@@ -169,7 +170,6 @@ impl GitStates<'_, '_> {
             return;
         };
         state.snapshot.repository = None;
-        state.catalog_fingerprint = [0; 32];
         state.snapshot.loading = false;
         state.snapshot.message.clear();
     }
@@ -548,5 +548,57 @@ mod tests {
         assert!(!app.world().non_send::<GitWatch>().has_subscription(page));
         let mut jobs = app.world_mut().query::<&RepositoryJob>();
         assert_eq!(jobs.iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn repository_status_refresh_preserves_loaded_catalogs() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "file.txt", "content\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        let repository = GitRepositorySnapshot::load_summary(repo.path(), false)
+            .unwrap()
+            .snapshot;
+        let mut state = GitState {
+            snapshot: GitPageSnapshot {
+                repository: Some(repository),
+                local_branches: GitCatalogProgress {
+                    loaded: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        };
+        let next = GitRepositorySnapshot::load_summary(repo.path(), false).unwrap();
+
+        state.replace_repository(next.snapshot, next.refresh_catalogs);
+
+        assert!(state.snapshot.local_branches.loaded);
+    }
+
+    #[test]
+    fn repository_ref_refresh_invalidates_loaded_catalogs() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "file.txt", "content\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        let repository = GitRepositorySnapshot::load_summary(repo.path(), false)
+            .unwrap()
+            .snapshot;
+        let mut state = GitState {
+            snapshot: GitPageSnapshot {
+                repository: Some(repository),
+                local_branches: GitCatalogProgress {
+                    loaded: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        };
+        let next = GitRepositorySnapshot::load_summary(repo.path(), true).unwrap();
+
+        state.replace_repository(next.snapshot, next.refresh_catalogs);
+
+        assert!(!state.snapshot.local_branches.loaded);
     }
 }

@@ -9,15 +9,12 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use bevy::prelude::Component;
-use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
 
 use crate::event::*;
 use crate::host::parse;
 
 const MAX_DIFF_FILE_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_CATALOG_REF_BYTES: usize = 8 * 1024 * 1024;
-const MAX_CATALOG_REFS: usize = 100_000;
 
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
@@ -36,7 +33,7 @@ struct BranchDiffContext {
 
 pub(crate) struct RepositorySummary {
     pub(crate) snapshot: GitRepositorySnapshot,
-    pub(crate) catalog_fingerprint: Option<[u8; 32]>,
+    pub(crate) refresh_catalogs: bool,
 }
 
 pub(crate) enum GitCatalogPage {
@@ -123,60 +120,6 @@ impl GitRepository {
 
     pub fn path(&self) -> &Path {
         &self.0
-    }
-
-    fn catalog_fingerprint(&self, oid: &str, branch: &str) -> Result<[u8; 32], GitError> {
-        let mut child = GitCommand::command(&self.0)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .arg("for-each-ref")
-            .arg("--format=%(refname)%00%(objectname)%00")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| GitError("failed to read git refs".to_string()))?;
-        let mut digest = Sha256::new();
-        digest.update(oid.as_bytes());
-        digest.update([0]);
-        digest.update(branch.as_bytes());
-        digest.update([0]);
-        let mut bytes = 0usize;
-        let mut refs = 0usize;
-        let mut buffer = [0u8; 8192];
-        loop {
-            let read = match stdout.read(&mut buffer) {
-                Ok(read) => read,
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(GitError(format!("failed to read git refs: {error}")));
-                }
-            };
-            if read == 0 {
-                break;
-            }
-            bytes = bytes.saturating_add(read);
-            refs =
-                refs.saturating_add(buffer[..read].iter().filter(|byte| **byte == b'\n').count());
-            if bytes > MAX_CATALOG_REF_BYTES || refs > MAX_CATALOG_REFS {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(GitError(
-                    "git ref catalog exceeds the safe limit".to_string(),
-                ));
-            }
-            digest.update(&buffer[..read]);
-        }
-        let status = child
-            .wait()
-            .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
-        if !status.success() {
-            return Err(GitError("failed to read git refs".to_string()));
-        }
-        Ok(digest.finalize().into())
     }
 
     pub(crate) fn catalog_page(
@@ -1713,11 +1656,7 @@ impl GitRepositorySnapshot {
             ));
         }
         let parsed = parse::ParsedStatuses::parse(&stdout);
-        let head = parsed.oid.clone();
         let branch = parsed.branch.clone();
-        let catalog_fingerprint = refresh_catalogs
-            .then(|| repository.catalog_fingerprint(&head, &branch))
-            .transpose()?;
         let upstream = parsed.upstream.clone();
         let ahead = parsed.ahead;
         let behind = parsed.behind;
@@ -1745,7 +1684,7 @@ impl GitRepositorySnapshot {
                 tags: Vec::new(),
                 stashes: Vec::new(),
             },
-            catalog_fingerprint,
+            refresh_catalogs,
         })
     }
 }
@@ -2206,24 +2145,6 @@ mod tests {
             entries[0].previous_path.as_deref(),
             Some("client/src/old.rs")
         );
-    }
-
-    #[test]
-    fn repository_catalog_fingerprint_changes_when_refs_change() {
-        let repo = test_repo::init();
-        test_repo::write(repo.path(), "file.txt", "content\n");
-        test_repo::run(repo.path(), &["add", "."]);
-        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
-        let before = GitRepositorySnapshot::load_summary(repo.path(), true)
-            .unwrap()
-            .catalog_fingerprint;
-
-        test_repo::run(repo.path(), &["tag", "v1"]);
-        let after = GitRepositorySnapshot::load_summary(repo.path(), true)
-            .unwrap()
-            .catalog_fingerprint;
-
-        assert_ne!(before, after);
     }
 
     #[test]

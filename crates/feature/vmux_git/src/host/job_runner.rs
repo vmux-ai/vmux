@@ -283,7 +283,7 @@ fn deliver_repository_outputs(
                         ),
                     };
                 }
-                states.set_repository(webview, event.snapshot.clone(), event.catalog_fingerprint);
+                states.set_repository(webview, event.snapshot.clone(), event.refresh_catalogs);
             }
             Err(error) => {
                 states.apply_error(webview, error);

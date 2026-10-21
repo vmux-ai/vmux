@@ -83,7 +83,7 @@ pub(super) fn EmptyRepository() -> Element {
                                                     pane_id: None,
                                                 });
                                             },
-                                            span { class: "min-w-0 flex-1 truncate font-medium", "{project.label}" }
+                                            span { class: "min-w-0 flex-1 truncate text-left font-medium", "{project.label}" }
                                             if active {
                                                 LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
                                             }
