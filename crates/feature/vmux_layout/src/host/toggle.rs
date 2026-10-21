@@ -186,9 +186,11 @@ fn animate(
     settings: Res<LayoutSettings>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut transitions: Query<(Entity, &mut LayoutTransition), With<Window>>,
-    mut headers: Query<(Entity, &mut Node), With<Header>>,
-    mut side_sheets: Query<(Entity, &SideSheetPosition, &mut Node), With<SideSheet>>,
-    mut roots: Query<(&HostWindow, &mut Node), With<VmuxWindow>>,
+    mut layout: ParamSet<(
+        Query<(Entity, &mut Node), With<Header>>,
+        Query<(Entity, &SideSheetPosition, &mut Node), With<SideSheet>>,
+        Query<(&HostWindow, &mut Node), With<VmuxWindow>>,
+    )>,
     hierarchy: crate::window::WindowHierarchy,
     mut commands: Commands,
 ) {
@@ -214,49 +216,65 @@ fn animate(
         } else {
             0.0
         };
-        for (entity, mut node) in &mut headers {
-            if hierarchy.get(entity) == Some(window) {
-                node.height = Val::Px(LayoutTransition::value(
-                    transition.header_start,
-                    header_end,
-                    progress,
-                ));
+        {
+            let mut headers = layout.p0();
+            for (entity, mut node) in &mut headers {
+                if hierarchy.get(entity) == Some(window) {
+                    node.height = Val::Px(LayoutTransition::value(
+                        transition.header_start,
+                        header_end,
+                        progress,
+                    ));
+                }
             }
         }
-        for (entity, position, mut node) in &mut side_sheets {
-            if *position == SideSheetPosition::Left && hierarchy.get(entity) == Some(window) {
-                node.width = Val::Px(LayoutTransition::value(
-                    transition.side_sheet_start,
-                    side_sheet_end,
-                    progress,
-                ));
+        {
+            let mut side_sheets = layout.p1();
+            for (entity, position, mut node) in &mut side_sheets {
+                if *position == SideSheetPosition::Left && hierarchy.get(entity) == Some(window) {
+                    node.width = Val::Px(LayoutTransition::value(
+                        transition.side_sheet_start,
+                        side_sheet_end,
+                        progress,
+                    ));
+                }
             }
         }
-        for (host, mut node) in &mut roots {
-            if host.0 == window {
-                node.padding.top = Val::Px(LayoutTransition::value(
-                    transition.pad_top_start,
-                    pad_top_end,
-                    progress,
-                ));
-                node.padding.left = Val::Px(LayoutTransition::value(
-                    transition.pad_left_start,
-                    pad_left_end,
-                    progress,
-                ));
+        {
+            let mut roots = layout.p2();
+            for (host, mut node) in &mut roots {
+                if host.0 == window {
+                    node.padding.top = Val::Px(LayoutTransition::value(
+                        transition.pad_top_start,
+                        pad_top_end,
+                        progress,
+                    ));
+                    node.padding.left = Val::Px(LayoutTransition::value(
+                        transition.pad_left_start,
+                        pad_left_end,
+                        progress,
+                    ));
+                }
             }
         }
         if transition.complete() {
             if transition.hide {
-                for (entity, _) in &mut headers {
-                    if hierarchy.get(entity) == Some(window) {
-                        commands.entity(entity).remove::<Open>();
+                {
+                    let mut headers = layout.p0();
+                    for (entity, _) in &mut headers {
+                        if hierarchy.get(entity) == Some(window) {
+                            commands.entity(entity).remove::<Open>();
+                        }
                     }
                 }
-                for (entity, position, _) in &mut side_sheets {
-                    if *position == SideSheetPosition::Left && hierarchy.get(entity) == Some(window)
-                    {
-                        commands.entity(entity).remove::<Open>();
+                {
+                    let mut side_sheets = layout.p1();
+                    for (entity, position, _) in &mut side_sheets {
+                        if *position == SideSheetPosition::Left
+                            && hierarchy.get(entity) == Some(window)
+                        {
+                            commands.entity(entity).remove::<Open>();
+                        }
                     }
                 }
             }
@@ -395,7 +413,14 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ToggleLayoutRequest>()
-            .add_systems(Update, handle_visibility_requests);
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings { padding: 16.0 },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            })
+            .add_systems(Update, (handle_visibility_requests, animate).chain());
         let first_window = app.world_mut().spawn(Window::default()).id();
         let second_window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
