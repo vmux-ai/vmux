@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine;
-use vmux_api::conversation::{ClientOpId, Message, RemoteMediaEntry, RemoteSession};
 use vmux_api::protocol::{
     AgentAttachment, AgentCommandResult, AgentListAgents, AgentListModels, AgentListTeam,
     AgentNewChat, AgentRequest, AgentRequestId, AgentSelectModel, AgentSetEffort, ServiceMessage,
     SharedEvent, SharedFailure, SharedMessage, SharedResponse,
 };
+use vmux_api::session::{ClientOpId, Message, RemoteMediaEntry, RemoteSession};
 use vmux_transport::service::{RemoteDriver, RemoteFuture, RemoteOperationStore};
 
 use crate::acp::{AcpInput, AcpSessions};

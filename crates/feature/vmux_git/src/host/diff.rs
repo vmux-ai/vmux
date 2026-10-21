@@ -6,7 +6,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{
     DiffKind, DiffLine, GitBranchFilesNextRequest, GitBranchFilesRetryRequest, GitDiffNextRequest,
-    GitDiffRevealRequest, GitLineMarker, GitLineStatus,
+    GitDiffRetryRequest, GitDiffRevealRequest, GitLineMarker, GitLineStatus,
 };
 use crate::state::{GitPageControllerState, GitPanel};
 
@@ -24,12 +24,14 @@ impl Plugin for DiffPlugin {
         app.add_plugins(UiEventPlugin::<(
             GitDiffRevealRequest,
             GitDiffNextRequest,
+            GitDiffRetryRequest,
             GitBranchFilesNextRequest,
             GitBranchFilesRetryRequest,
         )>::default())
             .add_observer(file_refresh)
             .add_observer(reveal)
             .add_observer(load_next)
+            .add_observer(retry_diff)
             .add_observer(load_next_branch_files)
             .add_observer(retry_branch_files)
             .add_systems(
@@ -162,7 +164,7 @@ struct BranchDiffProgress {
 }
 
 impl BranchDiffProgress {
-    const PAGE_SIZE: usize = 8;
+    const PAGE_SIZE: usize = 2;
 
     fn new(paths: Vec<Vec<u8>>) -> Self {
         Self {
@@ -520,6 +522,30 @@ fn load_next(
     ));
 }
 
+fn retry_diff(
+    trigger: On<UiInput<GitDiffRetryRequest>>,
+    mut pages: Query<(
+        &mut super::state::GitState,
+        &GitDiffQuery,
+        &mut super::state::GitDiffRevealRanges,
+    )>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok((mut state, query, mut revealed)) = pages.get_mut(entity) else {
+        return;
+    };
+    state.snapshot.diff_loading = true;
+    state.snapshot.diff_viewport = None;
+    state.snapshot.diff_rows.clear();
+    revealed.0.clear();
+    commands.entity(entity).insert(PendingGitDiff {
+        target: query.target.clone(),
+        file: query.file,
+        page_revision: query.page_revision,
+    });
+}
+
 fn start_pending_seek(
     mut pages: Query<(
         Entity,
@@ -858,8 +884,8 @@ mod tests {
         assert!(progress.seek(b"file-9.rs").is_none());
         let (second, second_has_more) = progress.next();
 
-        assert_eq!(second, [b"file-8.rs".to_vec()]);
-        assert!(!second_has_more);
+        assert_eq!(second, [b"file-2.rs".to_vec(), b"file-3.rs".to_vec()]);
+        assert!(second_has_more);
     }
 
     #[test]
@@ -901,7 +927,6 @@ mod tests {
                         branch_files_total: 1,
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
                 GitPageControllerState {
                     focused_panel: GitPanel::Branches,

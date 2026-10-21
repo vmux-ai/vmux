@@ -3,7 +3,7 @@ use super::presentation::ChatPresentation;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::chat::ChatItem;
-use vmux_api::conversation::{
+use vmux_api::session::{
     AssistantBlock, ConversationEvent, Message as ConversationMessage, RemoteAgent, RemoteApproval,
     RemoteEvent, RemoteSession, RemoteStatus, SessionId,
 };

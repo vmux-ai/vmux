@@ -44,24 +44,28 @@ pub(super) fn GitDashboard() -> Element {
         RepositoryHeader {
             repository: repository.clone(),
             projects: projects().rows,
+            focused_panel: active_panel,
+            selected_branch: controller_state.selected_branch.clone(),
+            branch_collection: controller_state.branch_collection,
             selected_commit: controller_state.selected_commit.clone(),
             can_push: controller_state.operations.push,
             branches_progress: ui.local_branches,
+            selected_branches_progress: ui.catalog(controller_state.branch_collection.into()),
             commits_progress: ui.commits,
         }
         main { class: "flex min-h-0 flex-1 flex-col bg-background",
             div {
                 id: "git-dashboard-split",
-                class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,var(--git-list-width))_0.5rem_minmax(0,1fr)] sm:grid-rows-1",
+                class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(18rem,var(--git-list-width))_0.5rem_minmax(0,1fr)] sm:grid-rows-1",
                 style: "{split_style}",
-                aside { class: "flex min-h-0 flex-col overflow-hidden bg-foreground/[0.018]",
+                aside { class: "relative z-20 flex min-h-0 flex-col overflow-visible bg-foreground/[0.018]",
                     RepositoryPanelHeader {
                         repository: repository.clone(),
                         focused_panel: active_panel,
                         fetching: ui.fetching,
                         can_stage_all: controller_state.operations.stage_all,
                     }
-                    div { class: "min-h-0 flex-1 overflow-hidden",
+                    div { class: "min-h-0 flex-1",
                         if active_panel == GitPanel::Files {
                             ChangesCard {
                                 repository: repository.clone(),
@@ -75,7 +79,6 @@ pub(super) fn GitDashboard() -> Element {
                             BranchesCard {
                                 repository: repository.clone(),
                                 selected_branch: controller_state.selected_branch.clone(),
-                                branch_collection: controller_state.branch_collection,
                                 files: ui.branch_files.clone(),
                                 files_total: ui.branch_files_total,
                                 files_loading: ui.branch_files_loading,
@@ -83,7 +86,6 @@ pub(super) fn GitDashboard() -> Element {
                                 files_error: ui.branch_files_error.clone(),
                                 selected_path_bytes: controller_state.selected_branch_path_bytes.clone(),
                                 operations: controller_state.operations.clone(),
-                                catalog_progress: ui.catalog(controller_state.branch_collection.into()),
                             }
                         } else if active_panel == GitPanel::Commits {
                             HistoryCard {

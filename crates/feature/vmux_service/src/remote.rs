@@ -1,4 +1,4 @@
-pub use vmux_api::conversation::{
+pub use vmux_api::session::{
     ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteApproval,
     RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus, SessionId,
 };

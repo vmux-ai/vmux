@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -38,7 +38,7 @@ pub(super) fn BranchDiffCard(
         if path.is_empty() || loaded_lines == 0 {
             return;
         }
-        ScrollIntoView::nearest(&format!("git-diff-file-{path}"));
+        ScrollIntoView::nearest_vertical(&format!("git-diff-file-{path}"));
     });
     let available = !selected_branch_value.is_empty();
     rsx! {
@@ -132,16 +132,12 @@ fn RevisionDiffCard(
                 }
             }
             if !error.is_empty() {
-                div { class: "flex flex-1 flex-col items-start justify-center gap-2 p-6 text-xs text-destructive",
-                    span { "{error}" }
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Xs,
-                        onclick: move |_| {
-                            let _ = send(&crate::event::GitBranchFilesRetryRequest);
-                        },
-                        {translate("common-retry")}
-                    }
+                ErrorState {
+                    class: "flex-1".to_string(),
+                    message: error,
+                    on_retry: move |_| {
+                        let _ = send(&crate::event::GitBranchFilesRetryRequest);
+                    },
                 }
             } else if available {
                 DiffView {

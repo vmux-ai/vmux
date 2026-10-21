@@ -1,12 +1,12 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use vmux_api::conversation::{
+use vmux_api::protocol::{SharedMessage, SharedResponse};
+use vmux_api::session::{
     ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteAgent,
     RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
     SessionId,
 };
-use vmux_api::protocol::{SharedMessage, SharedResponse};
 use vmux_ui::i18n::translate;
 
 use crate::quic::QuicError;

@@ -122,7 +122,7 @@ impl MenuSelection {
         self.activate(index);
     }
 
-    pub(super) fn model(self, models: &[vmux_api::conversation::ModelOptionEntry], id: &str) {
+    pub(super) fn model(self, models: &[vmux_api::session::ModelOptionEntry], id: &str) {
         let Some(index) = models.iter().position(|model| model.id == id) else {
             return;
         };

@@ -94,7 +94,8 @@ pub fn Dropdown(
     on_dismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
-    let root_class = cn(["relative", class.as_str()]);
+    let layer = if open { "z-[100]" } else { "z-auto" };
+    let root_class = cn(["relative", layer, class.as_str()]);
     rsx! {
         div {
             class: root_class,
@@ -105,7 +106,6 @@ pub fn Dropdown(
                     event.prevent_default();
                     event.stop_propagation();
                     on_dismiss.call(());
-                    return;
                 }
             },
             if open {

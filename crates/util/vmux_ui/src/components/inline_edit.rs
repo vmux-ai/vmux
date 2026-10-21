@@ -13,7 +13,11 @@ pub fn EditableText(
     input_class: String,
     title: String,
     #[props(default)] placeholder: String,
+    #[props(default)] empty_display: String,
     #[props(default = true)] caret_at_end: bool,
+    #[props(default)] multiline: bool,
+    #[props(default)] allow_empty: bool,
+    #[props(default = true)] trim: bool,
     #[props(default)] on_active_change: Option<EventHandler<bool>>,
     on_commit: EventHandler<String>,
 ) -> Element {
@@ -59,7 +63,52 @@ pub fn EditableText(
     let accessible_label = format!("{title}: {display_value}");
     if editing() {
         let cancel_value = display_value.clone();
-        let committed_value = display_value.trim().to_string();
+        let committed_value = if trim {
+            display_value.trim().to_string()
+        } else {
+            display_value.clone()
+        };
+        if multiline {
+            return rsx! {
+                InlineTextarea {
+                    draft,
+                    class: input_class,
+                    placeholder,
+                    aria_label: accessible_label,
+                    allow_empty,
+                    trim,
+                    on_active_change,
+                    restore_focus_id: trigger_id.clone(),
+                    on_commit: move |value: String| {
+                        editing.set(false);
+                        if value != committed_value {
+                            let generation = *optimistic_generation.peek() + 1;
+                            optimistic_generation.set(generation);
+                            optimistic.set(Some(OptimisticText {
+                                expected: value.clone(),
+                                baseline: committed_value.clone(),
+                                generation,
+                            }));
+                            spawn(async move {
+                                Platform::sleep(1_500).await;
+                                if optimistic
+                                    .peek()
+                                    .as_ref()
+                                    .is_some_and(|pending| pending.generation == generation)
+                                {
+                                    optimistic.set(None);
+                                }
+                            });
+                            on_commit.call(value);
+                        }
+                    },
+                    on_cancel: move |_| {
+                        draft.set(cancel_value.clone());
+                        editing.set(false);
+                    },
+                }
+            };
+        }
         return rsx! {
             InlineEdit {
                 draft,
@@ -67,6 +116,8 @@ pub fn EditableText(
                 placeholder,
                 aria_label: accessible_label,
                 caret_at_end,
+                allow_empty,
+                trim,
                 on_active_change,
                 restore_focus_id: trigger_id.clone(),
                 on_commit: move |value: String| {
@@ -101,6 +152,11 @@ pub fn EditableText(
     }
     let edit_value = display_value.clone();
     let keyboard_value = display_value.clone();
+    let rendered_value = if display_value.is_empty() {
+        empty_display
+    } else {
+        display_value.clone()
+    };
     rsx! {
         button {
             id: "{trigger_id}",
@@ -129,7 +185,7 @@ pub fn EditableText(
                 editing.set(true);
             },
             onpointerdown: move |event| event.stop_propagation(),
-            "{display_value}"
+            "{rendered_value}"
         }
     }
 }
@@ -149,6 +205,7 @@ pub fn InlineEdit(
     aria_label: String,
     #[props(default = true)] caret_at_end: bool,
     #[props(default)] allow_empty: bool,
+    #[props(default = true)] trim: bool,
     #[props(default)] on_active_change: Option<EventHandler<bool>>,
     #[props(default)] restore_focus_id: Option<String>,
     on_commit: EventHandler<String>,
@@ -212,7 +269,11 @@ pub fn InlineEdit(
                 match event.key() {
                     Key::Enter => {
                         event.prevent_default();
-                        let name = draft().trim().to_string();
+                        let name = if trim {
+                            draft().trim().to_string()
+                        } else {
+                            draft()
+                        };
                         if !finished() {
                             finished.set(true);
                             if name.is_empty() && !allow_empty {
@@ -239,11 +300,103 @@ pub fn InlineEdit(
                     return;
                 }
                 finished.set(true);
-                let name = draft().trim().to_string();
+                let name = if trim {
+                    draft().trim().to_string()
+                } else {
+                    draft()
+                };
                 if name.is_empty() && !allow_empty {
                     on_cancel.call(());
                 } else {
                     on_commit.call(name);
+                }
+            },
+        }
+    }
+}
+
+#[component]
+pub fn InlineTextarea(
+    draft: Signal<String>,
+    class: String,
+    #[props(default)] placeholder: String,
+    aria_label: String,
+    #[props(default)] allow_empty: bool,
+    #[props(default = true)] trim: bool,
+    #[props(default)] on_active_change: Option<EventHandler<bool>>,
+    #[props(default)] restore_focus_id: Option<String>,
+    on_commit: EventHandler<String>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    let mut draft = draft;
+    let mut finished = use_signal(|| false);
+    let ime = use_ime_guard();
+    let focus_return = FocusReturn(restore_focus_id);
+    let id = use_hook(|| {
+        format!(
+            "vmux-inline-edit-{}",
+            NEXT_INLINE_EDIT_ID.fetch_add(1, Ordering::Relaxed)
+        )
+    });
+    let dropped = on_active_change;
+    use_drop(move || {
+        if let Some(callback) = dropped {
+            callback.call(false);
+        }
+    });
+
+    rsx! {
+        textarea {
+            id: "{id}",
+            class,
+            placeholder,
+            aria_label,
+            value: "{draft}",
+            autofocus: true,
+            autocomplete: "off",
+            autocapitalize: "off",
+            autocorrect: "off",
+            spellcheck: "false",
+            onclick: move |event: Event<MouseData>| event.stop_propagation(),
+            onpointerdown: move |event: Event<PointerData>| event.stop_propagation(),
+            oncontextmenu: move |event: Event<MouseData>| event.stop_propagation(),
+            onmounted: move |event: Event<MountedData>| {
+                if let Some(callback) = on_active_change {
+                    callback.call(true);
+                }
+                spawn(async move {
+                    let _ = event.data().set_focus(true).await;
+                });
+            },
+            oninput: move |event| draft.set(event.value()),
+            oncompositionstart: move |_| ime.start(),
+            oncompositionend: move |_| ime.commit(),
+            onkeydown: move |event: Event<KeyboardData>| {
+                event.stop_propagation();
+                if ime.swallows(&event) || event.key() != Key::Escape {
+                    return;
+                }
+                event.prevent_default();
+                if !finished() {
+                    finished.set(true);
+                    on_cancel.call(());
+                    focus_return.request();
+                }
+            },
+            onblur: move |_| {
+                if finished() {
+                    return;
+                }
+                finished.set(true);
+                let value = if trim {
+                    draft().trim().to_string()
+                } else {
+                    draft()
+                };
+                if value.is_empty() && !allow_empty {
+                    on_cancel.call(());
+                } else {
+                    on_commit.call(value);
                 }
             },
         }

@@ -5,8 +5,8 @@ use vmux_api::command_bar::{
 };
 use vmux_api::page::UiStateEmit;
 
-use vmux_api::conversation::{RemoteAgent, RemoteSession};
 use vmux_api::icon::PageIcon;
+use vmux_api::session::{RemoteAgent, RemoteSession};
 
 pub struct Plugin;
 
@@ -140,7 +140,7 @@ impl Launcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::conversation::{RemoteStatus, SessionId};
+    use vmux_api::session::{RemoteStatus, SessionId};
 
     impl Roster {
         fn one() -> Self {

@@ -11,15 +11,21 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 use crate::event::*;
-use crate::state::{GitCatalogProgress, GitPanel};
+use crate::state::{GitBranchCollection, GitCatalogProgress, GitPanel};
+
+use super::branches::{BranchCollectionTabs, BranchRow, TagRow};
 
 #[component]
 pub(super) fn RepositoryHeader(
     repository: GitRepositorySnapshot,
     projects: Vec<ProjectRow>,
+    focused_panel: GitPanel,
+    selected_branch: String,
+    branch_collection: GitBranchCollection,
     selected_commit: String,
     can_push: bool,
     branches_progress: GitCatalogProgress,
+    selected_branches_progress: GitCatalogProgress,
     commits_progress: GitCatalogProgress,
 ) -> Element {
     let push_path = repository.repo_root.clone();
@@ -39,13 +45,25 @@ pub(super) fn RepositoryHeader(
         .as_ref()
         .map(|commit| commit.summary.clone())
         .unwrap_or_default();
+    let branch_label = if focused_panel == GitPanel::Branches {
+        selected_branch.clone()
+    } else {
+        repository.branch.clone()
+    };
+    let selected_reference_count = branch_collection.references(&repository).len();
+    let selected_catalog = GitCatalog::from(branch_collection);
+    let first_commit = repository
+        .commits
+        .first()
+        .map(|commit| commit.sha.clone())
+        .unwrap_or_default();
     let project_picker_dir = repository.repo_root.clone();
     let root_projects = projects
         .into_iter()
         .filter(|project| project.depth == 0 && !project.missing)
         .collect::<Vec<_>>();
     rsx! {
-        header { class: "shrink-0 bg-card/55",
+        header { class: "relative z-40 shrink-0 overflow-visible bg-card/55",
             div { class: "flex h-14 min-w-0 items-center gap-1 px-4",
                 Dropdown {
                     open: repository_open(),
@@ -130,58 +148,138 @@ pub(super) fn RepositoryHeader(
                         class: "flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
                         onclick: move |_| branch_open.set(!branch_open()),
                         LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
-                        span { class: "truncate text-foreground/90", "{repository.branch}" }
+                        span { class: "truncate text-foreground/90", "{branch_label}" }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                     }
                     if branch_open() {
                         div {
-                            class: "absolute left-0 top-9 z-40 max-h-80 min-w-72 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                            onscroll: move |event: Event<ScrollData>| {
-                                let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                                if remaining <= 192 && branches_progress.has_more && !branches_progress.loading {
-                                    let _ = send(&GitCatalogNextRequest {
-                                        catalog: GitCatalog::LocalBranches,
-                                    });
+                            class: "absolute left-0 top-9 z-40 flex max-h-96 min-w-80 flex-col overflow-hidden rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                            if focused_panel == GitPanel::Branches {
+                                div { class: "flex shrink-0 items-center gap-2 px-1 pb-1.5",
+                                    BranchCollectionTabs { branch_collection }
+                                    span { class: "text-[9px] tabular-nums text-muted-foreground", "{selected_reference_count}" }
                                 }
-                            },
-                            for branch in repository.branches.iter() {
-                                {
-                                    let repo_root = repository.repo_root.clone();
-                                    let name = branch.name.clone();
-                                    let checkout = branch.checkout.clone();
-                                    rsx! {
-                                        button {
-                                            key: "header-branch-{name}",
-                                            r#type: "button",
-                                            class: if branch.current {
-                                                "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
-                                            } else {
-                                                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-                                            },
-                                            onclick: move |_| {
-                                                branch_open.set(false);
-                                                let _ = send(&ProjectActivateRequest {
-                                                    path: repo_root.clone(),
-                                                    branch: name.clone(),
-                                                    checkout: checkout.clone(),
-                                                    pane_id: None,
-                                                });
-                                            },
-                                            LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
-                                            span { class: "min-w-0 flex-1 truncate font-medium", "{branch.name}" }
-                                            if branch.current {
-                                                LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
+                                div {
+                                    class: "min-h-0 overflow-y-auto",
+                                    onscroll: move |event: Event<ScrollData>| {
+                                        let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                                        if remaining <= 192 && selected_branches_progress.has_more && !selected_branches_progress.loading {
+                                            let _ = send(&GitCatalogNextRequest { catalog: selected_catalog });
+                                        }
+                                    },
+                                    match branch_collection {
+                                        GitBranchCollection::Local => rsx! {
+                                            for (index, branch) in repository.branches.iter().cloned().enumerate() {
+                                                BranchRow {
+                                                    key: "header-local-{branch.name}",
+                                                    branch,
+                                                    index,
+                                                    remote: false,
+                                                    selected_branch: selected_branch.clone(),
+                                                    onselected: move |_| branch_open.set(false),
+                                                }
+                                            }
+                                        },
+                                        GitBranchCollection::Remote => rsx! {
+                                            for (index, branch) in repository.remote_branches.iter().cloned().enumerate() {
+                                                BranchRow {
+                                                    key: "header-remote-{branch.name}",
+                                                    branch,
+                                                    index,
+                                                    remote: true,
+                                                    selected_branch: selected_branch.clone(),
+                                                    onselected: move |_| branch_open.set(false),
+                                                }
+                                            }
+                                        },
+                                        GitBranchCollection::Tags => rsx! {
+                                            for (index, tag) in repository.tags.iter().cloned().enumerate() {
+                                                TagRow {
+                                                    key: "header-tag-{tag.name}",
+                                                    tag,
+                                                    index,
+                                                    selected_branch: selected_branch.clone(),
+                                                    onselected: move |_| branch_open.set(false),
+                                                }
+                                            }
+                                        },
+                                    }
+                                    if selected_branches_progress.loading {
+                                        div { class: "flex flex-col gap-2 px-2.5 py-2",
+                                            for width in ["w-9/12", "w-11/12", "w-8/12"] {
+                                                vmux_ui::components::skeleton::Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div {
+                                    class: "min-h-0 overflow-y-auto",
+                                    onscroll: move |event: Event<ScrollData>| {
+                                        let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                                        if remaining <= 192 && branches_progress.has_more && !branches_progress.loading {
+                                            let _ = send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
+                                        }
+                                    },
+                                    for branch in repository.branches.iter() {
+                                        {
+                                            let repo_root = repository.repo_root.clone();
+                                            let name = branch.name.clone();
+                                            let checkout = branch.checkout.clone();
+                                            rsx! {
+                                                button {
+                                                    key: "header-branch-{name}",
+                                                    r#type: "button",
+                                                    class: if branch.current {
+                                                        "flex w-full items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
+                                                    } else {
+                                                        "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
+                                                    },
+                                                    onclick: move |_| {
+                                                        branch_open.set(false);
+                                                        let _ = send(&ProjectActivateRequest {
+                                                            path: repo_root.clone(),
+                                                            branch: name.clone(),
+                                                            checkout: checkout.clone(),
+                                                            pane_id: None,
+                                                        });
+                                                    },
+                                                    LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
+                                                    span { class: "min-w-0 flex-1 truncate font-medium", "{branch.name}" }
+                                                    if branch.current {
+                                                        LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                            if repository.branches.is_empty() && branch_collection == GitBranchCollection::Local {
+                                if branches_progress.loading || selected_branches_progress.loading {
+                                    div { class: "flex flex-col gap-2 px-2.5 py-2",
+                                        for width in ["w-9/12", "w-11/12", "w-8/12"] {
+                                            vmux_ui::components::skeleton::Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                                        }
+                                    }
+                                } else {
+                                    div { class: "px-2 py-3 text-xs text-muted-foreground", {translate("git-no-branches")} }
+                                }
+                            }
                         }
                     }
                 }
-                if selected_commit_entry.is_some() {
-                    BreadcrumbSeparator {}
+                BreadcrumbSeparator {}
+                ViewPicker {
+                    focused_panel,
+                    changes: repository.files.len(),
+                    commits: repository.commits.len(),
+                    stashes: repository.stashes.len(),
+                    first_commit,
+                }
+                if focused_panel == GitPanel::Commits && selected_commit_entry.is_some() {
                     div { class: "flex min-w-0 items-center rounded-md hover:bg-foreground/[0.055]",
+                        BreadcrumbSeparator {}
                         Dropdown {
                             open: commit_open(),
                             class: "min-w-0".to_string(),
@@ -271,17 +369,6 @@ pub(super) fn RepositoryPanelHeader(
 ) -> Element {
     rsx! {
         div { class: "flex h-11 shrink-0 items-center gap-2 px-3 text-[10px] tabular-nums text-muted-foreground",
-            ViewPicker {
-                focused_panel,
-                changes: repository.files.len(),
-                commits: repository.commits.len(),
-                stashes: repository.stashes.len(),
-                first_commit: repository
-                    .commits
-                    .first()
-                    .map(|commit| commit.sha.clone())
-                    .unwrap_or_default(),
-            }
             if focused_panel == GitPanel::Files && repository.files.iter().any(|file| file.unstaged) {
                 Button {
                     variant: ButtonVariant::Ghost,

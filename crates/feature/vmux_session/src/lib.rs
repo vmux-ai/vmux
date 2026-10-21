@@ -30,7 +30,7 @@ pub use session::{
     TranscriptLoading,
 };
 pub use title::ConversationTitle;
-pub use vmux_api::conversation::SessionId;
+pub use vmux_api::session::SessionId;
 
 #[cfg(all(host, feature = "app"))]
 pub(crate) struct Feature;

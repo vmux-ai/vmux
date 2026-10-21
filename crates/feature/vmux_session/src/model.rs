@@ -8,7 +8,7 @@ use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 #[cfg(host)]
 use std::collections::HashSet;
-use vmux_api::conversation::SessionId;
+use vmux_api::session::SessionId;
 #[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 #[cfg(host)]

@@ -1216,7 +1216,6 @@ mod tests {
                         }),
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
                 GitPageControllerState {
                     selected_commit: "abc123".to_string(),
@@ -1285,7 +1284,6 @@ mod tests {
                         }),
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
                 GitPageControllerState::default(),
                 vmux_ecs::PageMetadata {

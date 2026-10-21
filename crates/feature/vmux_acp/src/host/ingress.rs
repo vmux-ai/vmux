@@ -5,8 +5,8 @@ use crate::host::event::{
     AgentToolCallRequest, CommandOrigin,
 };
 use bevy::prelude::*;
-use vmux_api::conversation::{AssistantBlock, Message};
 use vmux_api::protocol::{AgentRunStatus, ClientMessage, JsonValue};
+use vmux_api::session::{AssistantBlock, Message};
 use vmux_ecs::agent::AgentCommandResponse;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,

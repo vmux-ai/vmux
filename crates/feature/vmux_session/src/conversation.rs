@@ -6,7 +6,7 @@ use bevy_ecs::system::SystemParam;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
-use vmux_api::conversation::{
+use vmux_api::session::{
     ClientOpId, ConversationEvent as SerializedEvent, EventId, MemberId, MemberKind, MemberRole,
     Message,
 };
@@ -446,7 +446,7 @@ impl EventMaterializer<'_, '_> {
 mod tests {
     use super::*;
     use bevy_ecs::system::RunSystemOnce;
-    use vmux_api::conversation::AssistantBlock;
+    use vmux_api::session::AssistantBlock;
 
     #[test]
     fn snapshot_materializes_ordered_events_under_session() {

@@ -40,6 +40,8 @@ fn SessionDetail(session_id: String) -> Element {
     use_context_provider(|| keys);
     let accent = chat.accent();
     let details = chat.session_details(&session_id);
+    let details_available = details.is_some();
+    let mut details_open = use_signal(|| false);
 
     rsx! {
         main {
@@ -50,13 +52,20 @@ fn SessionDetail(session_id: String) -> Element {
             style { dangerous_inner_html: MD_CSS }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 section { class: "flex min-w-0 flex-1 flex-col",
-                    ChatHeader { chat }
+                    ChatHeader {
+                        chat,
+                        details_available,
+                        details_open: details_open(),
+                        on_details_toggle: move |_| details_open.set(!details_open()),
+                    }
                     ChatTranscript { chat }
                     ChatApprovalDock { chat }
                     ChatDock { chat }
                 }
-                if let Some((session, repository, stages)) = details {
-                    manager::SessionMetaPanel { session, repository, stages }
+                if details_open() {
+                    if let Some((session, repository, stages)) = details {
+                        manager::SessionMetaPanel { session, repository, stages }
+                    }
                 }
             }
         }
@@ -70,6 +79,7 @@ mod error;
 mod item;
 mod keys;
 mod manager;
+mod manager_model;
 mod scroll;
 mod state;
 mod transcript;

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_api::conversation::ClientOpId;
+use vmux_api::session::ClientOpId;
 
 pub(crate) use super::client_operation_driver::ClientOperations;
 use super::client_operation_driver::{

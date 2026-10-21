@@ -114,6 +114,9 @@ pub struct GitDiffRevealRequest {
 #[vmux_api::ui_event]
 pub struct GitDiffNextRequest;
 
+#[vmux_api::ui_event]
+pub struct GitDiffRetryRequest;
+
 impl GitDiffRevealRequest {
     pub const CHUNK: u32 = 20;
 }

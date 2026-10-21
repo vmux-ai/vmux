@@ -303,6 +303,12 @@ impl PageHost for SurfaceHost {
         });
     }
 
+    fn scroll_element_into_view_vertical(&self, element_id: &str) {
+        self.request(DomRequest::ScrollIntoViewVertical {
+            element: element_id.to_string(),
+        });
+    }
+
     fn scroll_element_to(&self, element_id: &str, top: f64) {
         self.request(DomRequest::ScrollTo {
             element: element_id.to_string(),

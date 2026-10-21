@@ -211,7 +211,7 @@ pub struct McpServerConfig {
 pub struct StackSessionHandoff {
     pub source_agent: String,
     pub source_sid: String,
-    pub messages: Vec<vmux_api::conversation::Message>,
+    pub messages: Vec<vmux_api::session::Message>,
     pub context: String,
     pub truncated: bool,
 }

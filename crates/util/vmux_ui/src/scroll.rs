@@ -5,6 +5,10 @@ impl ScrollIntoView {
         crate::transport::Host::scroll_item_into_view(element_id)
     }
 
+    pub fn nearest_vertical(element_id: &str) -> bool {
+        crate::transport::Host::scroll_item_into_view_vertical(element_id)
+    }
+
     pub fn element_to(element_id: &str, top: f64) {
         crate::transport::Host::scroll_element_to(element_id, top.max(0.0));
     }

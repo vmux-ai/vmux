@@ -42,8 +42,8 @@ pub fn Page() -> Element {
     let project_url = try_consume_context::<vmux_ecs::PageMetadata>()
         .map(|metadata| metadata.url)
         .filter(|url| crate::project::ProjectRoute::is_page(url));
-    if let Some(project_url) = project_url {
-        return rsx! { ProjectPage { initial_detail: !crate::project::ProjectRoute::is_root(&project_url) } };
+    if project_url.is_some() {
+        return rsx! { ProjectPage {} };
     }
     rsx! { EditorWorkspace {} }
 }

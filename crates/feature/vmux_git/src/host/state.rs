@@ -443,7 +443,6 @@ mod tests {
                         }),
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
                 GitDiffRevealRanges::default(),
             ))
@@ -506,7 +505,6 @@ mod tests {
                         loading: true,
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
             ))
             .id();

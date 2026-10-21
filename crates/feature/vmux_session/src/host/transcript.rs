@@ -301,7 +301,7 @@ impl ChatProjection {
     #[allow(clippy::too_many_arguments)]
     fn new(
         agent_id: &AgentId,
-        messages: &[vmux_api::conversation::Message],
+        messages: &[vmux_api::session::Message],
         message_times: &[u64],
         state: &RunState,
         turn_meta: Option<&AgentTurnMeta>,
@@ -659,16 +659,16 @@ mod tests {
             source_agent: "Codex".into(),
             source_sid: "codex-1".into(),
             messages: vec![
-                vmux_api::conversation::Message::user("one"),
-                vmux_api::conversation::Message::Assistant {
-                    blocks: vec![vmux_api::conversation::AssistantBlock::ToolUse {
+                vmux_api::session::Message::user("one"),
+                vmux_api::session::Message::Assistant {
+                    blocks: vec![vmux_api::session::AssistantBlock::ToolUse {
                         call_id: "call-1".into(),
                         name: "run".into(),
                         args: "{}".into(),
                         parent_call_id: None,
                     }],
                 },
-                vmux_api::conversation::Message::ToolResult {
+                vmux_api::session::Message::ToolResult {
                     call_id: "call-1".into(),
                     content: "two".into(),
                     is_error: false,

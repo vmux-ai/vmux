@@ -2,12 +2,19 @@ use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::back::BackButton;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::favicon::FaviconSource;
-use vmux_ui::i18n::{TranslationValue, translate_with};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[component]
-pub(super) fn ChatHeader(chat: Chat) -> Element {
+pub(super) fn ChatHeader(
+    chat: Chat,
+    details_available: bool,
+    details_open: bool,
+    on_details_toggle: EventHandler<MouseEvent>,
+) -> Element {
     let name = chat.header_name();
     let title = chat.title();
     let subtitle = translate_with(
@@ -38,6 +45,21 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
                 div { class: "flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground",
                     StatusDot { status: chat.status(), size_class: "h-2 w-2" }
                     span { class: "truncate", "{subtitle}" }
+                }
+            }
+            if details_available {
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Icon,
+                    class: if details_open {
+                        "hidden bg-foreground/[0.08] text-foreground lg:inline-flex"
+                    } else {
+                        "hidden lg:inline-flex"
+                    },
+                    aria_label: translate("agent-details"),
+                    title: translate("agent-details"),
+                    onclick: move |event| on_details_toggle.call(event),
+                    LineIconView { icon: LineIcon::Layout, class: "size-4" }
                 }
             }
         }

@@ -174,7 +174,7 @@ pub struct AgentModels {
     pub agent_key: String,
     pub url: String,
     pub selected: String,
-    pub models: Vec<crate::conversation::ModelOptionEntry>,
+    pub models: Vec<crate::session::ModelOptionEntry>,
 }
 
 #[vmux_api::contract(Default)]

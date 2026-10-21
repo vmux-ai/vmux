@@ -396,10 +396,10 @@ mod tests {
         CommandBarPickRow, CommandBarPromptContext, CommandBarTab, ExRequest, OpenRequest,
         PickRequest, PromptRequest, SearchEngine, SwitchTabRequest,
     };
-    use vmux_api::conversation::ModelOptionEntry;
     use vmux_api::open_target::OpenTarget;
     use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
     use vmux_api::protocol::AcpModeOption;
+    use vmux_api::session::ModelOptionEntry;
     use vmux_api::space::ProjectRow;
 
     fn search_engine(id: &str) -> SearchEngine {

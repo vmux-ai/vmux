@@ -178,6 +178,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       case 'scrollIntoView':
         el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         break;
+      case 'scrollIntoViewVertical': {
+        const horizontal = [];
+        for (let node = el.parentElement; node; node = node.parentElement) {
+          if (node.scrollWidth > node.clientWidth) horizontal.push([node, node.scrollLeft]);
+        }
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        for (const [node, left] of horizontal) node.scrollLeft = left;
+        break;
+      }
       case 'scrollTo':
         el.scrollTo({ top: request.top, behavior: 'instant' });
         break;

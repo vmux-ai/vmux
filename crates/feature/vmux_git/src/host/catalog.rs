@@ -237,7 +237,6 @@ mod tests {
                         },
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
                 GitPageControllerState {
                     focused_panel: GitPanel::Files,
@@ -338,7 +337,6 @@ mod tests {
                         },
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
                 controller.clone(),
                 CatalogContext::from_controller(&controller),

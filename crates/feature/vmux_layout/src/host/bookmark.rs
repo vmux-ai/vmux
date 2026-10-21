@@ -25,7 +25,10 @@ use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageManifest;
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
+use vmux_ecs::{
+    Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, PageOpenRequest, PageOpenTarget, Pin,
+    UiStateWrite, Uuid,
+};
 
 use super::{command::LayoutRequestSet, stack::OpenRequest};
 
@@ -1067,11 +1070,25 @@ fn request_toggle(
 
 fn request_open(
     trigger: On<UiInput<BookmarkOpenRequest>>,
+    focused: crate::active_pane::FocusedStack,
+    stacks: Query<&PageMetadata, With<Stack>>,
     mut requests: MessageWriter<OpenRequest>,
+    mut page_open: MessageWriter<PageOpenRequest>,
 ) {
-    requests.write(OpenRequest {
-        url: Some(trigger.event().payload.url.clone()),
-    });
+    let url = trigger.event().payload.url.clone();
+    if let Some(stack) = focused.stack
+        && stacks
+            .get(stack)
+            .is_ok_and(|metadata| metadata.url.trim_end_matches('/') == "vmux://start")
+    {
+        page_open.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
+        return;
+    }
+    requests.write(OpenRequest { url: Some(url) });
 }
 
 fn request_menu<R>(trigger: On<UiInput<R>>, mut menu_req: MessageWriter<ShowBookmarkMenuRequest>)
@@ -1440,6 +1457,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<OpenRequest>()
+            .add_message::<PageOpenRequest>()
             .add_observer(request_open);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
@@ -1458,6 +1476,56 @@ mod tests {
             vec![OpenRequest {
                 url: Some("https://a.test".into()),
             }]
+        );
+    }
+
+    #[test]
+    fn bookmark_replaces_the_focused_start_page() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_observer(request_open);
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "vmux://start/".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.world_mut().spawn(
+            crate::active_pane::ActiveStack {
+                stack: Some(stack),
+                ..Default::default()
+            }
+            .local_bundle(),
+        );
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
+            webview,
+            payload: BookmarkOpenRequest {
+                url: "vmux://git/".to_string(),
+            },
+        });
+
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opens.len(), 1);
+        assert!(matches!(opens[0].target, PageOpenTarget::Stack(target) if target == stack));
+        assert_eq!(opens[0].url, "vmux://git/");
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<OpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
         );
     }
 

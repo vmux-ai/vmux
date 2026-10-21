@@ -31,6 +31,35 @@ struct BranchDiffContext {
     submodules: Vec<(PathBuf, GitRepository, String)>,
 }
 
+enum DiffFileContent {
+    Text(String),
+    TooLarge(u64),
+}
+
+impl DiffFileContent {
+    fn text(self) -> Option<String> {
+        match self {
+            Self::Text(content) => Some(content),
+            Self::TooLarge(_) => None,
+        }
+    }
+
+    fn unavailable_line(&self, file: &Path) -> Option<DiffLine> {
+        let Self::TooLarge(bytes) = self else {
+            return None;
+        };
+        let megabytes = *bytes as f64 / (1024.0 * 1024.0);
+        let text = format!("Preview unavailable for this {megabytes:.1} MB file");
+        Some(DiffLine {
+            kind: DiffKind::Context,
+            old_no: None,
+            new_no: None,
+            hunk: None,
+            spans: crate::host::highlight::Highlighter::line(&text, file),
+        })
+    }
+}
+
 pub(crate) struct RepositorySummary {
     pub(crate) snapshot: GitRepositorySnapshot,
     pub(crate) refresh_catalogs: bool,
@@ -402,7 +431,10 @@ impl GitRepository {
         if unstaged.trim().is_empty() {
             if self.status(file)?.file_status == FileStatus::Untracked {
                 let content = self.read_diff_file(&target)?;
-                return self.diff_lines_with_content(file, &content);
+                if let Some(line) = content.unavailable_line(file) {
+                    return Ok(vec![line]);
+                }
+                return self.diff_lines_with_content(file, &content.text().unwrap_or_default());
             }
             return self.staged_only_lines(file, &target, &staged);
         }
@@ -410,6 +442,8 @@ impl GitRepository {
 
         let new_spans = self
             .read_diff_file(&target)
+            .ok()
+            .and_then(DiffFileContent::text)
             .map(|content| crate::host::highlight::Highlighter::file(&content, file))
             .unwrap_or_default();
 
@@ -761,6 +795,11 @@ impl GitRepository {
             hunk: None,
             spans: crate::host::highlight::Highlighter::line(&display.to_string_lossy(), &absolute),
         }];
+        if let Some(line) = content.unavailable_line(&absolute) {
+            lines.push(line);
+            return Ok(lines);
+        }
+        let content = content.text().unwrap_or_default();
         let spans = crate::host::highlight::Highlighter::file(&content, &absolute);
         for (index, text) in content.lines().enumerate() {
             lines.push(DiffLine {
@@ -777,7 +816,7 @@ impl GitRepository {
         Ok(lines)
     }
 
-    fn read_diff_file(&self, path: &Path) -> Result<String, GitError> {
+    fn read_diff_file(&self, path: &Path) -> Result<DiffFileContent, GitError> {
         if !Self::safe_relative_path(path) {
             return Err(GitError("invalid branch diff path".to_string()));
         }
@@ -800,7 +839,7 @@ impl GitRepository {
             return Err(GitError("branch diff only reads regular files".to_string()));
         }
         if metadata.len() > MAX_DIFF_FILE_BYTES {
-            return Err(GitError("branch diff file is too large".to_string()));
+            return Ok(DiffFileContent::TooLarge(metadata.len()));
         }
         let mut file = OpenOptions::new()
             .read(true)
@@ -810,10 +849,11 @@ impl GitRepository {
         let opened = file
             .metadata()
             .map_err(|error| GitError(format!("failed to inspect opened diff file: {error}")))?;
-        if !opened.file_type().is_file() || opened.len() > MAX_DIFF_FILE_BYTES {
-            return Err(GitError(
-                "branch diff only reads bounded regular files".to_string(),
-            ));
+        if !opened.file_type().is_file() {
+            return Err(GitError("branch diff only reads regular files".to_string()));
+        }
+        if opened.len() > MAX_DIFF_FILE_BYTES {
+            return Ok(DiffFileContent::TooLarge(opened.len()));
         }
         let mut bytes = Vec::with_capacity(opened.len() as usize);
         Read::by_ref(&mut file)
@@ -821,9 +861,11 @@ impl GitRepository {
             .read_to_end(&mut bytes)
             .map_err(|error| GitError(format!("failed to read diff file: {error}")))?;
         if bytes.len() as u64 > MAX_DIFF_FILE_BYTES {
-            return Err(GitError("branch diff file is too large".to_string()));
+            return Ok(DiffFileContent::TooLarge(bytes.len() as u64));
         }
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        Ok(DiffFileContent::Text(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ))
     }
 
     fn safe_relative_path(path: &Path) -> bool {
@@ -1082,7 +1124,11 @@ impl GitRepository {
         if staged_diff.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let Ok(content) = self.read_diff_file(target) else {
+        let Some(content) = self
+            .read_diff_file(target)
+            .ok()
+            .and_then(DiffFileContent::text)
+        else {
             return Ok(self.highlight_diff(&staged_diff));
         };
         let spans = crate::host::highlight::Highlighter::file(&content, file);
@@ -2117,7 +2163,7 @@ mod tests {
     }
 
     #[test]
-    fn current_branch_diff_rejects_oversized_untracked_file() {
+    fn current_branch_diff_describes_oversized_untracked_file_without_reading_it() {
         let repo = test_repo::init();
         test_repo::write(repo.path(), "base.txt", "base\n");
         test_repo::run(repo.path(), &["add", "."]);
@@ -2126,11 +2172,17 @@ mod tests {
         let file = std::fs::File::create(repo.path().join("large.bin")).unwrap();
         file.set_len(MAX_DIFF_FILE_BYTES + 1).unwrap();
 
-        let error = GitRepository::at(repo.path())
+        let lines = GitRepository::at(repo.path())
             .branch_diff_lines_for_paths("feature", &[b"large.bin".to_vec()])
-            .unwrap_err();
+            .unwrap();
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
 
-        assert!(error.0.contains("too large"));
+        assert!(text.contains("Preview unavailable"));
+        assert!(text.contains("large.bin"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use super::CommandBarPicker;
 use crate::PageIcon;
-use crate::conversation::ModelOptionEntry;
 use crate::protocol::AcpModeOption;
+use crate::session::ModelOptionEntry;
 use crate::space::ProjectRow;
 
 #[vmux_api::contract(Default, Eq)]

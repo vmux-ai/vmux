@@ -11,7 +11,7 @@ use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::{Commands, NonSendMut, Query, Single};
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
-use vmux_api::conversation::{NewChatRequest, RemoteEvent, RemoteSession};
+use vmux_api::session::{NewChatRequest, RemoteEvent, RemoteSession};
 use vmux_session::host::{ChatRuntime, Conversation, LiveTurn, Log, Reported};
 
 use crate::pairing::ConnectionState;

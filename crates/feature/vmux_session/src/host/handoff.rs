@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
-use vmux_api::conversation::Message;
+use vmux_api::session::Message;
 
 #[derive(Component, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ImportedConversation {

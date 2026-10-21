@@ -11,6 +11,8 @@ use vmux_session::event::ResumeSession;
 use vmux_session::state::ChatUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
+use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
@@ -20,23 +22,30 @@ use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use super::state::FileUi;
-use crate::project::ProjectUiState;
+use crate::project::{
+    ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectImportRequest,
+    ProjectUiState, ProjectView,
+};
 
 #[component]
-pub(super) fn ProjectPage(initial_detail: bool) -> Element {
+pub(super) fn ProjectPage() -> Element {
     let state = use_ui_state::<ProjectUiState>().state;
     let snapshot = state();
-    if snapshot.detail || !snapshot.loaded && initial_detail {
-        return rsx! { ProjectDashboard {} };
+    match snapshot.view {
+        ProjectView::Detail => rsx! { ProjectDashboard {} },
+        ProjectView::Loading => rsx! { ProjectList { view: None } },
+        ProjectView::Catalog(view) => rsx! { ProjectList { view: Some(view) } },
+        ProjectView::Error(error) => rsx! { ProjectList { error } },
     }
-    rsx! { ProjectList {} }
 }
 
 #[component]
-pub(super) fn ProjectList() -> Element {
-    let state = use_ui_state::<ProjectUiState>().state;
-    let snapshot = state();
-    let count = snapshot.entries.len();
+pub(super) fn ProjectList(
+    #[props(default)] view: Option<ProjectCatalogView>,
+    #[props(default)] error: String,
+) -> Element {
+    let count = view.as_ref().map_or(0, |view| view.entries.len());
+    let pending = view.as_ref().is_some_and(|view| view.operation_pending);
     rsx! {
         PageShell {
             PageHeader {
@@ -48,26 +57,39 @@ pub(super) fn ProjectList() -> Element {
                     }
                 }
                 h1 { class: "min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.015em]", {translate("layout-projects")} }
-                if snapshot.loaded && count > 0 {
+                if count > 0 {
                     span { class: "rounded-full bg-foreground/[0.055] px-2 py-1 text-[10px] tabular-nums text-muted-foreground", "{count}" }
                 }
+                ProjectAdd { pending }
                 }
             }
             PageContent {
                 div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
-                        if !snapshot.loaded || snapshot.loading {
+                        if view.is_none() && error.is_empty() {
                             for width in ["w-28", "w-36", "w-24"] {
                                 div { class: "flex h-14 items-center gap-3 px-3",
                                     Skeleton { class: "size-8 rounded-lg bg-foreground/[0.055]" }
                                     Skeleton { class: "h-3 {width} bg-foreground/[0.06]" }
                                 }
                             }
-                        } else if !snapshot.error.is_empty() {
-                            div { class: "flex min-h-28 items-center justify-center px-5 text-center text-xs text-muted-foreground", "{snapshot.error}" }
-                        } else if snapshot.entries.is_empty() {
-                            div { class: "flex min-h-28 items-center justify-center px-5 text-center text-xs text-muted-foreground", {translate("agent-project-none")} }
+                        } else if !error.is_empty() {
+                            div { class: "flex min-h-28 items-center justify-center px-5 text-center text-xs text-muted-foreground", "{error}" }
+                        } else if view.as_ref().is_some_and(|view| view.entries.is_empty()) {
+                            div { class: "flex min-h-56 flex-col items-center justify-center gap-3 px-5 text-center",
+                                div { class: "flex size-10 items-center justify-center rounded-lg bg-foreground/[0.055]",
+                                    BuiltinIconView {
+                                        icon: vmux_api::BuiltinIcon::Project,
+                                        class: "size-5 text-muted-foreground".to_string(),
+                                    }
+                                }
+                                div {
+                                    div { class: "text-sm font-medium text-foreground", {translate("agent-project-none")} }
+                                    div { class: "mt-1 text-xs text-muted-foreground", {translate("project-empty-description")} }
+                                }
+                                ProjectAdd { pending }
+                            }
                         } else {
-                            for entry in snapshot.entries.iter() {
+                            for entry in view.as_ref().into_iter().flat_map(|view| view.entries.iter()) {
                                 {
                                     let url = entry.url.clone();
                                     rsx! {
@@ -93,6 +115,152 @@ pub(super) fn ProjectList() -> Element {
                             }
                         }
                 }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ProjectPrompt {
+    New,
+    Clone,
+}
+
+#[component]
+fn ProjectAdd(pending: bool) -> Element {
+    let mut open = use_signal(|| false);
+    let mut prompt = use_signal(|| None::<ProjectPrompt>);
+    let mut draft = use_signal(String::new);
+    let ready = !draft().trim().is_empty();
+    rsx! {
+        Dropdown {
+            open: open(),
+            class: "shrink-0".to_string(),
+            on_dismiss: move |_| open.set(false),
+            Button {
+                variant: ButtonVariant::Primary,
+                size: ButtonSize::Sm,
+                class: "h-8 gap-1.5 text-xs".to_string(),
+                disabled: pending,
+                onclick: move |_| open.set(!open()),
+                LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                span { {translate("project-add")} }
+            }
+            if open() {
+                div { class: "absolute right-0 top-9 z-50 w-72 rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                    ProjectAddItem {
+                        icon: LineIcon::Plus,
+                        title: translate("project-new"),
+                        description: translate("project-new-description"),
+                        onclick: move |_| {
+                            open.set(false);
+                            draft.set(String::new());
+                            prompt.set(Some(ProjectPrompt::New));
+                        },
+                    }
+                    ProjectAddItem {
+                        icon: LineIcon::FileOutput,
+                        title: translate("project-import"),
+                        description: translate("project-import-description"),
+                        onclick: move |_| {
+                            open.set(false);
+                            let _ = send(&ProjectImportRequest);
+                        },
+                    }
+                    ProjectAddItem {
+                        icon: LineIcon::GitFork,
+                        title: translate("project-clone"),
+                        description: translate("project-clone-description"),
+                        onclick: move |_| {
+                            open.set(false);
+                            draft.set(String::new());
+                            prompt.set(Some(ProjectPrompt::Clone));
+                        },
+                    }
+                }
+            }
+        }
+        if let Some(kind) = prompt() {
+            DialogRoot {
+                open: true,
+                on_open_change: move |next: bool| {
+                    if !next {
+                        prompt.set(None);
+                    }
+                },
+                attributes: vec![],
+                DialogContent { class: "max-w-[420px] p-4", attributes: vec![],
+                    DialogTitle { attributes: vec![],
+                        {translate(if kind == ProjectPrompt::New { "project-new" } else { "project-clone" })}
+                    }
+                    input {
+                        class: "w-full rounded-md bg-foreground/[0.045] px-3 py-2 text-sm text-foreground outline-none focus:bg-foreground/[0.065]",
+                        autofocus: true,
+                        value: "{draft}",
+                        placeholder: translate(if kind == ProjectPrompt::New { "project-name-placeholder" } else { "project-repository-placeholder" }),
+                        oninput: move |event: Event<FormData>| draft.set(event.value()),
+                        onkeydown: move |event: KeyboardEvent| {
+                            event.stop_propagation();
+                            if event.key() == Key::Enter && ready {
+                                event.prevent_default();
+                                ProjectPrompt::submit(kind, draft());
+                                prompt.set(None);
+                            }
+                        },
+                    }
+                    div { class: "flex justify-end gap-2",
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Xs,
+                            onclick: move |_| prompt.set(None),
+                            {translate("common-cancel")}
+                        }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Xs,
+                            disabled: !ready,
+                            onclick: move |_| {
+                                ProjectPrompt::submit(kind, draft());
+                                prompt.set(None);
+                            },
+                            {translate(if kind == ProjectPrompt::New { "project-create" } else { "project-clone" })}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl ProjectPrompt {
+    fn submit(self, draft: String) {
+        match self {
+            Self::New => {
+                let _ = send(&ProjectCreateRequest { name: draft });
+            }
+            Self::Clone => {
+                let _ = send(&ProjectCloneRequest { repository: draft });
+            }
+        }
+    }
+}
+
+#[component]
+fn ProjectAddItem(
+    icon: LineIcon,
+    title: String,
+    description: String,
+    onclick: EventHandler<()>,
+) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex w-full items-start gap-3 rounded-md px-2.5 py-2.5 text-left hover:bg-foreground/[0.055]",
+            onclick: move |_| onclick.call(()),
+            LineIconView { icon, class: "mt-0.5 size-4 shrink-0 text-muted-foreground".to_string() }
+            div { class: "min-w-0 flex-1",
+                div { class: "text-xs font-medium text-foreground", "{title}" }
+                div { class: "mt-0.5 text-[10px] leading-4 text-muted-foreground", "{description}" }
             }
         }
     }

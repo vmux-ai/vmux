@@ -7,7 +7,7 @@ use bevy_ecs::prelude::*;
 #[cfg(host)]
 use bevy_ecs::system::SystemParam;
 #[cfg(host)]
-use vmux_api::conversation::{AssistantBlock, Message};
+use vmux_api::session::{AssistantBlock, Message};
 #[cfg(host)]
 use vmux_ecs::{CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 

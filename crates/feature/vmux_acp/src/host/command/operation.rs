@@ -135,7 +135,7 @@ fn list_agents(
             if !agent.is_installed() {
                 continue;
             }
-            agents.push(vmux_api::conversation::RemoteAgent {
+            agents.push(vmux_api::session::RemoteAgent {
                 id: agent.id.clone(),
                 name: agent.name.clone(),
                 url: SessionRoute::manager_for_agent(&vmux_session::AgentId(agent.id.clone())),

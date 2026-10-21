@@ -24,11 +24,11 @@ use vmux_api::command_bar::{
     OpenRequest as CommandBarOpenRequest, PickRequest as CommandBarPickRequest,
     PromptRequest as CommandBarPromptRequest, SwitchTabRequest,
 };
-use vmux_api::conversation::{
+use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
+use vmux_api::session::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
-use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
 use vmux_api::team::TeamUiState;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};

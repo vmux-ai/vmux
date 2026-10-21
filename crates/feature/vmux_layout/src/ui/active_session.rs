@@ -40,7 +40,7 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         page.title.clone()
     };
     rsx! {
-        div { class: "w-full max-w-full min-w-0 overflow-hidden px-2 py-2 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
+        div { class: "relative w-full max-w-full min-w-0 overflow-visible px-2 py-2 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
             div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden @max-[12rem]:gap-1.5",
                 div { class: "flex size-8 shrink-0 items-center justify-center @max-[12rem]:size-6",
                     PageIconView {

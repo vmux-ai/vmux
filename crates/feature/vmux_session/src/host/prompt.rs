@@ -3,10 +3,10 @@ use bevy_app::{App, Plugin, Update};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
 use std::collections::HashMap;
-use vmux_api::conversation::RemoteMediaEntry;
 use vmux_api::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntry};
 #[cfg(host)]
 use vmux_api::protocol::{AgentAttachment, ClientMessage, SharedMessage};
+use vmux_api::session::RemoteMediaEntry;
 #[cfg(host)]
 use vmux_ecs::service::ServiceRequest;
 #[cfg(host)]

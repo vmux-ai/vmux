@@ -9,11 +9,11 @@ use crate::host::model_selection::{
 use crate::host::runtime::{AcpSessionConfigState, PendingAcpSessionConfig};
 use vmux_api::command_bar::{AgentModels, AgentModes};
 use vmux_api::command_bar::{StartSelectMode, StartSelectModel};
-use vmux_api::conversation::RemoteModelState;
 use vmux_api::protocol::{
     AcpModeOption, AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort,
     ClientMessage,
 };
+use vmux_api::session::RemoteModelState;
 use vmux_command::{ContributedAgentModels, ContributedAgentModes};
 use vmux_ecs::EntityTarget;
 use vmux_ecs::page::PageReady;

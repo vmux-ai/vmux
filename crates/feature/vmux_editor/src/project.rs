@@ -5,13 +5,47 @@ pub struct ProjectEntry {
     pub url: String,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct ProjectCatalogView {
+    pub entries: Vec<ProjectEntry>,
+    pub operation_pending: bool,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub enum ProjectView {
+    #[default]
+    Loading,
+    Catalog(ProjectCatalogView),
+    Detail,
+    Error(String),
+}
+
 #[vmux_api::ui_state(Default, Eq)]
 pub struct ProjectUiState {
-    pub entries: Vec<ProjectEntry>,
-    pub detail: bool,
-    pub loading: bool,
-    pub loaded: bool,
-    pub error: String,
+    pub view: ProjectView,
+}
+
+#[cfg(host)]
+impl ProjectUiState {
+    pub(crate) fn pending(mut self) -> Self {
+        if let ProjectView::Catalog(catalog) = &mut self.view {
+            catalog.operation_pending = true;
+        }
+        self
+    }
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectCreateRequest {
+    pub name: String,
+}
+
+#[vmux_api::ui_event]
+pub struct ProjectImportRequest;
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectCloneRequest {
+    pub repository: String,
 }
 
 pub struct ProjectRoute;
@@ -97,10 +131,8 @@ impl ProjectRoute {
                 return Some(Err(format!("project is unavailable: {error}")));
             }
         };
-        if !canonical.starts_with(&root) || !canonical.is_dir() {
-            return Some(Err(
-                "project path is outside the projects directory".to_string()
-            ));
+        if !path.starts_with(&root) || !path.is_dir() || !canonical.is_dir() {
+            return Some(Err("project is unavailable".to_string()));
         }
         Some(Ok(canonical))
     }

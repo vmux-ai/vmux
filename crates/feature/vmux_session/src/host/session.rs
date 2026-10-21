@@ -480,7 +480,7 @@ fn report_tab_identity(
 }
 
 fn tab_activity_icon(
-    messages: &[vmux_api::conversation::Message],
+    messages: &[vmux_api::session::Message],
     state: &RunState,
     profile: Option<&Profile>,
     agent_id: &AgentId,

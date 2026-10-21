@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use chrono::{Duration, Local, NaiveDate, TimeZone};
 use dioxus::prelude::*;
 use vmux_session::{SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
+use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch, ManagerToolbar,
     ManagerView, ManagerViewToggle,
@@ -13,7 +13,7 @@ use vmux_ui::components::manager::{
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::{OptimisticMap, send, use_optimistic_map, use_theme, use_ui_state};
-use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
+use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use crate::event::{
@@ -21,6 +21,8 @@ use crate::event::{
     SessionsDescriptionUpdate, SessionsStageChange,
 };
 use crate::state::ChatUiState;
+
+use super::manager_model::*;
 
 #[component]
 pub fn SessionsManager() -> Element {
@@ -32,7 +34,7 @@ pub fn SessionsManager() -> Element {
     let mut filter_step = use_signal(|| SessionFilterStep::Field);
     let mut filter_value = use_signal(String::new);
     let state = ui.state.read();
-    let mut snapshot = state.sessions.clone();
+    let snapshot = state.sessions.clone();
     let repositories = state.session_repositories.clone();
     drop(state);
     let observed_stages = snapshot
@@ -41,37 +43,30 @@ pub fn SessionsManager() -> Element {
         .map(|session| (session.id.clone(), session.stage.clone()))
         .collect::<HashMap<_, _>>();
     let optimistic_stages = use_optimistic_map(observed_stages);
-    for session in &mut snapshot.sessions {
-        session.stage = optimistic_stages.value(&session.id, &session.stage);
-    }
     let mutations = SessionStageMutations {
         optimistic: optimistic_stages,
         leaving: use_signal(HashSet::new),
     };
     use_context_provider(|| mutations);
-    let filter_requested = query().starts_with('#');
-    let filter_needle = query()
-        .strip_prefix('#')
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    let search = if filter_requested {
-        String::new()
-    } else {
-        query().trim().to_ascii_lowercase()
-    };
-    let category_groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
     let applied_filters = filters();
-    let filtered_groups =
-        StageGroup::filtered(&category_groups, applied_filters.as_slice(), &repositories);
-    let groups = if applied_filters.stage().is_none() {
-        StageGroup::inbox(&filtered_groups)
-    } else {
-        filtered_groups
-    };
-    let visible_sessions = groups.iter().any(|group| !group.sessions.is_empty());
-    let stages = snapshot.stages.clone();
-    let selected_filters = applied_filters.presentations(&stages);
+    let presentation = ManagerPresentation::new(
+        snapshot,
+        repositories,
+        &query(),
+        &applied_filters,
+        |id, stage| optimistic_stages.value(id, stage),
+    );
+    let ManagerPresentation {
+        snapshot,
+        repositories,
+        category_groups,
+        groups,
+        selected_filters,
+        selected_stage,
+        filter_requested,
+        filter_needle,
+        visible_sessions,
+    } = presentation;
     rsx! {
         ManagerPage {
             ManagerToolbar {
@@ -166,7 +161,7 @@ pub fn SessionsManager() -> Element {
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
                 SessionCategories {
                     groups: category_groups.clone(),
-                    selected: applied_filters.stage().map(str::to_string),
+                    selected: selected_stage,
                     onselect: move |selected| {
                         filters.write().set_stage(selected);
                         query.set(String::new());
@@ -287,243 +282,6 @@ fn SessionCategory(
     }
 }
 
-#[derive(Clone, PartialEq)]
-enum SessionFilter {
-    Stage(String),
-    Agent(String),
-    Project(String),
-    Updated(UpdatedFilter),
-}
-
-impl SessionFilter {
-    fn presentation(&self, stages: &[StageSummary]) -> SessionFilterPresentation {
-        match self {
-            Self::Stage(id) => {
-                let name = stages
-                    .iter()
-                    .find(|stage| stage.id == *id)
-                    .map(|stage| translate_humanized(&stage.name))
-                    .unwrap_or_else(|| {
-                        if id == "stale" {
-                            translate("sessions-stale")
-                        } else {
-                            translate_humanized(id)
-                        }
-                    });
-                SessionFilterPresentation {
-                    label: format!("{} · {name}", translate("common-status")),
-                    dot: StageVisual::for_id(id).dot.to_string(),
-                }
-            }
-            Self::Agent(agent) => SessionFilterPresentation {
-                label: format!("{} · {agent}", translate("resume-column-agent")),
-                dot: String::new(),
-            },
-            Self::Project(project) => SessionFilterPresentation {
-                label: format!("{} · {project}", translate("resume-column-project")),
-                dot: String::new(),
-            },
-            Self::Updated(updated) => SessionFilterPresentation {
-                label: format!(
-                    "{} · {} · {}",
-                    translate("common-updated"),
-                    updated.comparison.label(),
-                    updated.value_label
-                ),
-                dot: String::new(),
-            },
-        }
-    }
-
-    fn matches(&self, session: &SessionSummary, repositories: &SessionRepositories) -> bool {
-        match self {
-            Self::Stage(_) => true,
-            Self::Agent(agent) => SessionFilterValue::agent(session) == *agent,
-            Self::Project(project) => repositories
-                .get(&session.id)
-                .is_some_and(|repository| repository.project == *project),
-            Self::Updated(updated) => updated.matches(session.last_activated_at),
-        }
-    }
-}
-
-struct SessionFilterValue;
-
-impl SessionFilterValue {
-    fn agent(session: &SessionSummary) -> String {
-        if session.agent_name.is_empty() {
-            session.agent.clone()
-        } else {
-            session.agent_name.clone()
-        }
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct SessionFilterPresentation {
-    label: String,
-    dot: String,
-}
-
-#[derive(Clone, Default, PartialEq)]
-struct SessionFilters(Vec<SessionFilter>);
-
-impl SessionFilters {
-    fn as_slice(&self) -> &[SessionFilter] {
-        &self.0
-    }
-
-    fn presentations(&self, stages: &[StageSummary]) -> Vec<SessionFilterPresentation> {
-        self.0
-            .iter()
-            .map(|filter| filter.presentation(stages))
-            .collect()
-    }
-
-    fn stage(&self) -> Option<&str> {
-        self.0.iter().find_map(|filter| match filter {
-            SessionFilter::Stage(id) => Some(id.as_str()),
-            SessionFilter::Agent(_) | SessionFilter::Project(_) | SessionFilter::Updated(_) => None,
-        })
-    }
-
-    fn set_stage(&mut self, stage: Option<String>) {
-        self.0
-            .retain(|filter| !matches!(filter, SessionFilter::Stage(_)));
-        if let Some(stage) = stage {
-            self.0.insert(0, SessionFilter::Stage(stage));
-        }
-    }
-
-    fn upsert(&mut self, selected: SessionFilter) {
-        match selected {
-            SessionFilter::Stage(stage) => self.set_stage(Some(stage)),
-            SessionFilter::Agent(agent) => {
-                self.0
-                    .retain(|filter| !matches!(filter, SessionFilter::Agent(_)));
-                self.0.push(SessionFilter::Agent(agent));
-            }
-            SessionFilter::Project(project) => {
-                self.0
-                    .retain(|filter| !matches!(filter, SessionFilter::Project(_)));
-                self.0.push(SessionFilter::Project(project));
-            }
-            SessionFilter::Updated(updated) => {
-                self.0
-                    .retain(|filter| !matches!(filter, SessionFilter::Updated(_)));
-                self.0.push(SessionFilter::Updated(updated));
-            }
-        }
-    }
-
-    fn remove(&mut self, index: usize) {
-        if index < self.0.len() {
-            self.0.remove(index);
-        }
-    }
-
-    fn pop(&mut self) {
-        self.0.pop();
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum SessionFilterStep {
-    Field,
-    Status,
-    Agent,
-    Project,
-    Updated,
-    Date(UpdatedComparison),
-    Within,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum UpdatedComparison {
-    Before,
-    OnOrBefore,
-    After,
-    OnOrAfter,
-    Within,
-}
-
-impl UpdatedComparison {
-    fn label(self) -> String {
-        translate(match self {
-            Self::Before => "common-before",
-            Self::OnOrBefore => "common-on-or-before",
-            Self::After => "common-after",
-            Self::OnOrAfter => "common-on-or-after",
-            Self::Within => "common-within",
-        })
-    }
-
-    fn detail(self) -> String {
-        match self {
-            Self::Before => "<",
-            Self::OnOrBefore => "≤",
-            Self::After => ">",
-            Self::OnOrAfter => "≥",
-            Self::Within => "",
-        }
-        .to_string()
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct UpdatedFilter {
-    comparison: UpdatedComparison,
-    threshold: i64,
-    value_label: String,
-}
-
-impl UpdatedFilter {
-    fn from_date(comparison: UpdatedComparison, value: &str) -> Option<Self> {
-        let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
-        let start = Self::day_start(date)?;
-        let next = Self::day_start(date.succ_opt()?)?;
-        let threshold = match comparison {
-            UpdatedComparison::Before | UpdatedComparison::OnOrAfter => start,
-            UpdatedComparison::OnOrBefore | UpdatedComparison::After => next,
-            UpdatedComparison::Within => return None,
-        };
-        Some(Self {
-            comparison,
-            threshold,
-            value_label: value.to_string(),
-        })
-    }
-
-    fn within(days: u64) -> Option<Self> {
-        if days == 0 {
-            return None;
-        }
-        let duration = Duration::try_days(days.try_into().ok()?)?;
-        Some(Self {
-            comparison: UpdatedComparison::Within,
-            threshold: vmux_ecs::UnixMillis::now().0 - duration.num_milliseconds(),
-            value_label: translate_with(
-                "common-days-value",
-                &[("count", TranslationValue::Number(days as i64))],
-            ),
-        })
-    }
-
-    fn day_start(date: NaiveDate) -> Option<i64> {
-        let local = Local.from_local_datetime(&date.and_hms_opt(0, 0, 0)?);
-        local.earliest().map(|date| date.timestamp_millis())
-    }
-
-    fn matches(&self, timestamp: i64) -> bool {
-        match self.comparison {
-            UpdatedComparison::Before | UpdatedComparison::OnOrBefore => timestamp < self.threshold,
-            UpdatedComparison::After | UpdatedComparison::OnOrAfter | UpdatedComparison::Within => {
-                timestamp >= self.threshold
-            }
-        }
-    }
-}
-
 #[component]
 fn SessionFilterMenu(
     groups: Vec<StageGroup>,
@@ -536,198 +294,214 @@ fn SessionFilterMenu(
     onvalue: EventHandler<String>,
     onselect: EventHandler<SessionFilter>,
 ) -> Element {
-    let mut agents = HashMap::<String, usize>::new();
-    let mut projects = HashMap::<String, usize>::new();
-    for session in &sessions {
-        let agent = SessionFilterValue::agent(session);
-        if !agent.is_empty() {
-            *agents.entry(agent).or_default() += 1;
-        }
-        if let Some(repository) = repositories.get(&session.id)
-            && !repository.project.is_empty()
-        {
-            *projects.entry(repository.project).or_default() += 1;
-        }
-    }
-    let mut agents = agents.into_iter().collect::<Vec<_>>();
-    agents.sort_by_key(|left| left.0.to_lowercase());
-    let mut projects = projects.into_iter().collect::<Vec<_>>();
-    projects.sort_by_key(|left| left.0.to_lowercase());
-    let date_filter = match step {
-        SessionFilterStep::Date(comparison) => UpdatedFilter::from_date(comparison, &value),
-        _ => None,
-    };
-    let within_filter = if step == SessionFilterStep::Within {
-        value.parse().ok().and_then(UpdatedFilter::within)
-    } else {
-        None
-    };
+    let SessionFilterMenuPresentation {
+        agents,
+        projects,
+        date_filter,
+        within_filter,
+    } = SessionFilterMenuPresentation::new(&sessions, &repositories, step, &value);
     match step {
-        SessionFilterStep::Field => rsx! {
-            FilterMenu { title: translate("common-filter"),
-                if needle.is_empty() || translate("common-status").to_ascii_lowercase().contains(&needle) {
-                    FilterOption {
-                        label: translate("common-status"),
-                        prefix: "#".to_string(),
-                        next: true,
-                        onclick: move |_| onstep.call(SessionFilterStep::Status),
-                    }
-                }
-                if needle.is_empty() || translate("resume-column-agent").to_ascii_lowercase().contains(&needle) {
-                    FilterOption {
-                        label: translate("resume-column-agent"),
-                        prefix: "#".to_string(),
-                        next: true,
-                        onclick: move |_| onstep.call(SessionFilterStep::Agent),
-                    }
-                }
-                if needle.is_empty() || translate("resume-column-project").to_ascii_lowercase().contains(&needle) {
-                    FilterOption {
-                        label: translate("resume-column-project"),
-                        prefix: "#".to_string(),
-                        next: true,
-                        onclick: move |_| onstep.call(SessionFilterStep::Project),
-                    }
-                }
-                if needle.is_empty() || translate("common-updated").to_ascii_lowercase().contains(&needle) {
-                    FilterOption {
-                        label: translate("common-updated"),
-                        prefix: "#".to_string(),
-                        next: true,
-                        onclick: move |_| onstep.call(SessionFilterStep::Updated),
-                    }
-                }
-            }
-        },
-        SessionFilterStep::Status => rsx! {
-            FilterMenu {
-                title: translate("common-status"),
-                onback: move |_| onstep.call(SessionFilterStep::Field),
-                for group in groups {
-                    if needle.is_empty() || translate_humanized(&group.stage.name).to_ascii_lowercase().contains(&needle) {
-                        FilterOption {
-                            key: "filter-{group.stage.id}",
-                            label: translate_humanized(&group.stage.name),
-                            dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
-                            trailing: group.sessions.len().to_string(),
-                            onclick: move |_| onselect.call(SessionFilter::Stage(group.stage.id.clone())),
-                        }
-                    }
-                }
-            }
-        },
+        SessionFilterStep::Field => rsx! { SessionFilterFields { needle, onstep } },
+        SessionFilterStep::Status => {
+            rsx! { SessionStatusFilters { groups, needle, onstep, onselect } }
+        }
         SessionFilterStep::Agent => rsx! {
-            FilterMenu {
+            SessionValueFilters {
                 title: translate("resume-column-agent"),
-                onback: move |_| onstep.call(SessionFilterStep::Field),
-                for (agent, count) in agents {
-                    if needle.is_empty() || agent.to_ascii_lowercase().contains(&needle) {
-                        FilterOption {
-                            key: "agent-{agent}",
-                            label: agent.clone(),
-                            trailing: count.to_string(),
-                            onclick: move |_| onselect.call(SessionFilter::Agent(agent.clone())),
-                        }
-                    }
-                }
+                kind: SessionFilterValueKind::Agent,
+                values: agents,
+                needle,
+                onstep,
+                onselect,
             }
         },
         SessionFilterStep::Project => rsx! {
-            FilterMenu {
+            SessionValueFilters {
                 title: translate("resume-column-project"),
-                onback: move |_| onstep.call(SessionFilterStep::Field),
-                for (project, count) in projects {
-                    if needle.is_empty() || project.to_ascii_lowercase().contains(&needle) {
-                        FilterOption {
-                            key: "project-{project}",
-                            label: project.clone(),
-                            trailing: count.to_string(),
-                            onclick: move |_| onselect.call(SessionFilter::Project(project.clone())),
-                        }
-                    }
-                }
+                kind: SessionFilterValueKind::Project,
+                values: projects,
+                needle,
+                onstep,
+                onselect,
             }
         },
-        SessionFilterStep::Updated => rsx! {
-            FilterMenu {
-                title: translate("common-updated"),
-                onback: move |_| onstep.call(SessionFilterStep::Field),
-                for comparison in [
-                    UpdatedComparison::Before,
-                    UpdatedComparison::OnOrBefore,
-                    UpdatedComparison::After,
-                    UpdatedComparison::OnOrAfter,
-                ] {
-                    FilterOption {
-                        key: "updated-{comparison:?}",
-                        label: comparison.label(),
-                        detail: comparison.detail(),
-                        next: true,
-                        onclick: move |_| onstep.call(SessionFilterStep::Date(comparison)),
-                    }
-                }
-                FilterOption {
-                    label: UpdatedComparison::Within.label(),
-                    detail: UpdatedComparison::Within.detail(),
-                    next: true,
-                    onclick: move |_| onstep.call(SessionFilterStep::Within),
-                }
-            }
-        },
+        SessionFilterStep::Updated => rsx! { SessionUpdatedFilters { onstep } },
         SessionFilterStep::Date(comparison) => rsx! {
-            FilterMenu {
+            SessionUpdatedFilterInput {
                 title: format!("{} · {}", translate("common-updated"), comparison.label()),
-                onback: move |_| onstep.call(SessionFilterStep::Updated),
-                div { class: "flex items-center gap-2 p-1",
-                    input {
-                        r#type: "date",
-                        class: "h-8 min-w-0 flex-1 rounded-md bg-foreground/[0.035] px-2 text-[11px] text-foreground outline-none ring-1 ring-inset ring-foreground/[0.09] focus:ring-foreground/[0.18]",
-                        value: value,
-                        oninput: move |event| onvalue.call(event.value()),
-                    }
-                    button {
-                        r#type: "button",
-                        class: "vmux-primary-action h-8 shrink-0 rounded-md px-3 text-[11px] font-medium disabled:cursor-default disabled:opacity-35",
-                        disabled: date_filter.is_none(),
-                        onclick: move |_| {
-                            if let Some(updated) = date_filter.clone() {
-                                onselect.call(SessionFilter::Updated(updated));
-                            }
-                        },
-                        {translate("common-apply")}
-                    }
-                }
+                input_type: "date".to_string(),
+                value,
+                candidate: date_filter,
+                onstep,
+                onvalue,
+                onselect,
             }
         },
         SessionFilterStep::Within => rsx! {
-            FilterMenu {
+            SessionUpdatedFilterInput {
                 title: format!("{} · {}", translate("common-updated"), UpdatedComparison::Within.label()),
-                onback: move |_| onstep.call(SessionFilterStep::Updated),
-                div { class: "flex items-center gap-2 p-1",
-                    div { class: "flex h-8 min-w-0 flex-1 items-center rounded-md bg-foreground/[0.035] ring-1 ring-inset ring-foreground/[0.09] focus-within:ring-foreground/[0.18]",
-                        input {
-                            r#type: "number",
-                            min: "1",
-                            class: "h-full min-w-0 flex-1 bg-transparent px-2 text-[11px] text-foreground outline-none",
-                            value,
-                            oninput: move |event| onvalue.call(event.value()),
-                        }
-                        span { class: "shrink-0 pr-2 text-[10px] text-muted-foreground", {translate("common-days")} }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "vmux-primary-action h-8 shrink-0 rounded-md px-3 text-[11px] font-medium disabled:cursor-default disabled:opacity-35",
-                        disabled: within_filter.is_none(),
-                        onclick: move |_| {
-                            if let Some(updated) = within_filter.clone() {
-                                onselect.call(SessionFilter::Updated(updated));
-                            }
-                        },
-                        {translate("common-apply")}
+                input_type: "number".to_string(),
+                suffix: translate("common-days"),
+                value,
+                candidate: within_filter,
+                onstep,
+                onvalue,
+                onselect,
+            }
+        },
+    }
+}
+
+#[component]
+fn SessionFilterFields(needle: String, onstep: EventHandler<SessionFilterStep>) -> Element {
+    let options = [
+        ("common-status", SessionFilterStep::Status),
+        ("resume-column-agent", SessionFilterStep::Agent),
+        ("resume-column-project", SessionFilterStep::Project),
+        ("common-updated", SessionFilterStep::Updated),
+    ];
+    rsx! {
+        FilterMenu { title: translate("common-filter"),
+            for (label_id, step) in options {
+                if needle.is_empty() || translate(label_id).to_ascii_lowercase().contains(&needle) {
+                    FilterOption {
+                        key: "field-{label_id}",
+                        label: translate(label_id),
+                        prefix: "#".to_string(),
+                        next: true,
+                        onclick: move |_| onstep.call(step),
                     }
                 }
             }
-        },
+        }
+    }
+}
+
+#[component]
+fn SessionStatusFilters(
+    groups: Vec<StageGroup>,
+    needle: String,
+    onstep: EventHandler<SessionFilterStep>,
+    onselect: EventHandler<SessionFilter>,
+) -> Element {
+    rsx! {
+        FilterMenu { title: translate("common-status"), onback: move |_| onstep.call(SessionFilterStep::Field),
+            for group in groups {
+                if needle.is_empty() || translate_humanized(&group.stage.name).to_ascii_lowercase().contains(&needle) {
+                    FilterOption {
+                        key: "filter-{group.stage.id}",
+                        label: translate_humanized(&group.stage.name),
+                        dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
+                        trailing: group.sessions.len().to_string(),
+                        onclick: move |_| onselect.call(SessionFilter::Stage(group.stage.id.clone())),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SessionFilterValueKind {
+    Agent,
+    Project,
+}
+
+impl SessionFilterValueKind {
+    fn filter(self, value: String) -> SessionFilter {
+        match self {
+            Self::Agent => SessionFilter::Agent(value),
+            Self::Project => SessionFilter::Project(value),
+        }
+    }
+}
+
+#[component]
+fn SessionValueFilters(
+    title: String,
+    kind: SessionFilterValueKind,
+    values: Vec<(String, usize)>,
+    needle: String,
+    onstep: EventHandler<SessionFilterStep>,
+    onselect: EventHandler<SessionFilter>,
+) -> Element {
+    rsx! {
+        FilterMenu { title, onback: move |_| onstep.call(SessionFilterStep::Field),
+            for (value, count) in values {
+                if needle.is_empty() || value.to_ascii_lowercase().contains(&needle) {
+                    FilterOption {
+                        key: "value-{value}",
+                        label: value.clone(),
+                        trailing: count.to_string(),
+                        onclick: move |_| onselect.call(kind.filter(value.clone())),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionUpdatedFilters(onstep: EventHandler<SessionFilterStep>) -> Element {
+    rsx! {
+        FilterMenu { title: translate("common-updated"), onback: move |_| onstep.call(SessionFilterStep::Field),
+            for comparison in [UpdatedComparison::Before, UpdatedComparison::OnOrBefore, UpdatedComparison::After, UpdatedComparison::OnOrAfter] {
+                FilterOption {
+                    key: "updated-{comparison:?}",
+                    label: comparison.label(),
+                    detail: comparison.detail(),
+                    next: true,
+                    onclick: move |_| onstep.call(SessionFilterStep::Date(comparison)),
+                }
+            }
+            FilterOption {
+                label: UpdatedComparison::Within.label(),
+                next: true,
+                onclick: move |_| onstep.call(SessionFilterStep::Within),
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionUpdatedFilterInput(
+    title: String,
+    input_type: String,
+    #[props(default)] suffix: String,
+    value: String,
+    candidate: Option<UpdatedFilter>,
+    onstep: EventHandler<SessionFilterStep>,
+    onvalue: EventHandler<String>,
+    onselect: EventHandler<SessionFilter>,
+) -> Element {
+    rsx! {
+        FilterMenu { title, onback: move |_| onstep.call(SessionFilterStep::Updated),
+            div { class: "flex items-center gap-2 p-1",
+                div { class: "flex h-8 min-w-0 flex-1 items-center rounded-md bg-foreground/[0.035] ring-1 ring-inset ring-foreground/[0.09] focus-within:ring-foreground/[0.18]",
+                    input {
+                        r#type: input_type,
+                        min: "1",
+                        class: "h-full min-w-0 flex-1 bg-transparent px-2 text-[11px] text-foreground outline-none",
+                        value,
+                        oninput: move |event| onvalue.call(event.value()),
+                    }
+                    if !suffix.is_empty() {
+                        span { class: "shrink-0 pr-2 text-[10px] text-muted-foreground", "{suffix}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "vmux-primary-action h-8 shrink-0 rounded-md px-3 text-[11px] font-medium disabled:cursor-default disabled:opacity-35",
+                    disabled: candidate.is_none(),
+                    onclick: move |_| {
+                        if let Some(updated) = candidate.clone() {
+                            onselect.call(SessionFilter::Updated(updated));
+                        }
+                    },
+                    {translate("common-apply")}
+                }
+            }
+        }
     }
 }
 
@@ -761,12 +535,7 @@ fn SessionListGroup(
     let pager = SessionPager::use_state();
     let total = sessions.len();
     let visible = pager.visible(total);
-    let stage_dot = StageVisual::for_id(&stage.id).dot;
-    let archivable = sessions
-        .iter()
-        .filter(|session| session.stage != "done")
-        .map(StageTarget::from_session)
-        .collect::<Vec<_>>();
+    let group = StageGroupPresentation::new(&stage, &sessions);
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
             div {
@@ -785,13 +554,13 @@ fn SessionListGroup(
                     aria_expanded: !collapsed(),
                     onclick: move |_| collapsed.set(!collapsed()),
                     span { class: "flex size-4 shrink-0 items-center justify-center",
-                        span { class: "size-2 rounded-full {stage_dot}" }
+                        span { class: "size-2 rounded-full {group.dot}" }
                     }
                     h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
                     span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
                 }
-                if stage.id == "stale" && !archivable.is_empty() {
-                    SessionArchiveAllButton { targets: archivable }
+                if stage.id == "stale" && !group.archivable.is_empty() {
+                    SessionArchiveAllButton { targets: group.archivable }
                 }
             }
             if !collapsed() {
@@ -823,20 +592,11 @@ fn SessionListRow(
     stage: String,
 ) -> Element {
     let leaving = use_context::<SessionStageMutations>().is_leaving(&session.id);
-    let context = SessionContext::from(repository);
+    let presentation = SessionPresentation::new(&session, repository, &stage);
     let cleanup_id = session.id.clone();
-    let stage_target = StageTarget::from_session(&session);
-    let archived = session.stage == "done";
-    let runtime = RuntimeVisual::for_id(&session.runtime);
-    let agent = AgentPresentation::from_session(&session);
-    let stage_dot = StageVisual::for_id(&stage).dot;
-    let title = session.display_title();
-    let preview = session.preview();
-    let compact_id = SessionIdentity::new(&session.sid).compact();
-    let git_url = context.git_url.clone();
+    let git_url = presentation.context.git_url.clone();
     let resume = ResumeTarget::from(&session);
     let open_session = resume.clone();
-    let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
         Collapse { leaving,
           div {
@@ -844,38 +604,38 @@ fn SessionListRow(
             onclick: move |_| open_session.open(),
             span { class: "size-3 shrink-0" }
             AgentThumbnail {
-                src: agent.icon.clone(),
-                seed: agent.id.clone(),
-                background: agent.color.clone(),
-                alt: agent.name.clone(),
+                src: presentation.agent.icon.clone(),
+                seed: presentation.agent.id.clone(),
+                background: presentation.agent.color.clone(),
+                alt: presentation.agent.name.clone(),
                 class: "size-4 shrink-0 text-[5px]".to_string(),
             }
-            SessionIdPill { label: compact_id, title: session.sid.clone() }
+            SessionIdPill { label: presentation.compact_id, title: session.sid.clone() }
             span { class: "flex size-4 shrink-0 items-center justify-center",
-                span { class: "size-2 rounded-full {stage_dot}" }
+                span { class: "size-2 rounded-full {presentation.stage_dot}" }
             }
             div { class: "min-w-0 flex-1",
-                div { class: "truncate font-medium text-foreground/90", "{title}" }
-                if !preview.is_empty() {
-                    div { class: "truncate text-[10px] leading-4 text-muted-foreground/60", "{preview}" }
+                div { class: "truncate font-medium text-foreground/90", "{presentation.title}" }
+                if !presentation.preview.is_empty() {
+                    div { class: "truncate text-[10px] leading-4 text-muted-foreground/60", "{presentation.preview}" }
                 }
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
-                SessionContextView { context: context.clone() }
-                if runtime.visible {
+                SessionContextView { context: presentation.context.clone() }
+                if presentation.runtime.visible {
                     MetadataPill {
-                        dot: runtime.dot.to_string(),
+                        dot: presentation.runtime.dot.to_string(),
                         label: runtime_label(&session.runtime),
                     }
                 }
-                time { class: "w-10 text-right text-[10px] tabular-nums text-muted-foreground/65", "{updated}" }
+                time { class: "w-10 text-right text-[10px] tabular-nums text-muted-foreground/65", "{presentation.updated}" }
             }
             SessionActions {
                 resume,
                 git_url,
                 cleanup_id,
-                stage_target,
-                archived,
+                stage_target: presentation.stage_target,
+                archived: presentation.archived,
                 managed: session.managed,
             }
           }
@@ -913,12 +673,7 @@ fn SessionBoardColumn(
     let pager = SessionPager::use_state();
     let total = sessions.len();
     let visible = pager.visible(total);
-    let stage_dot = StageVisual::for_id(&stage.id).dot;
-    let archivable = sessions
-        .iter()
-        .filter(|session| session.stage != "done")
-        .map(StageTarget::from_session)
-        .collect::<Vec<_>>();
+    let group = StageGroupPresentation::new(&stage, &sessions);
     rsx! {
         section { class: "glass w-[18rem] shrink-0 overflow-hidden rounded-lg p-1 backdrop-blur-xl",
             header { class: "glass sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md px-1.5 backdrop-blur-xl",
@@ -927,12 +682,12 @@ fn SessionBoardColumn(
                     label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
                     onclick: move |_| collapsed.set(!collapsed()),
                 }
-                span { class: "size-2 rounded-full {stage_dot}" }
+                span { class: "size-2 rounded-full {group.dot}" }
                 h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
                 span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
-                if stage.id == "stale" && !archivable.is_empty() {
+                if stage.id == "stale" && !group.archivable.is_empty() {
                     div { class: "ml-auto",
-                        SessionArchiveAllButton { targets: archivable }
+                        SessionArchiveAllButton { targets: group.archivable }
                     }
                 }
             }
@@ -966,18 +721,11 @@ fn SessionBoardColumn(
 #[component]
 fn SessionBoardCard(session: SessionSummary, repository: Option<SessionRepository>) -> Element {
     let leaving = use_context::<SessionStageMutations>().is_leaving(&session.id);
-    let context = SessionContext::from(repository);
+    let presentation = SessionPresentation::new(&session, repository, &session.stage);
     let cleanup_id = session.id.clone();
-    let stage_target = StageTarget::from_session(&session);
-    let archived = session.stage == "done";
-    let runtime = RuntimeVisual::for_id(&session.runtime);
-    let git_url = context.git_url.clone();
+    let git_url = presentation.context.git_url.clone();
     let resume = ResumeTarget::from(&session);
     let open_session = resume.clone();
-    let agent = AgentPresentation::from_session(&session);
-    let title = session.display_title();
-    let preview = session.preview();
-    let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
         Collapse { leaving,
           article {
@@ -985,38 +733,38 @@ fn SessionBoardCard(session: SessionSummary, repository: Option<SessionRepositor
             onclick: move |_| open_session.open(),
             div { class: "flex items-start gap-2",
                 AgentThumbnail {
-                    src: agent.icon.clone(),
-                    seed: agent.id.clone(),
-                    background: agent.color.clone(),
-                    alt: agent.name.clone(),
+                    src: presentation.agent.icon.clone(),
+                    seed: presentation.agent.id.clone(),
+                    background: presentation.agent.color.clone(),
+                    alt: presentation.agent.name.clone(),
                     class: "size-5 text-[6px]".to_string(),
                 }
                 div { class: "min-w-0 flex-1",
-                    div { class: "truncate text-xs font-medium text-foreground/90", "{title}" }
-                    if !agent.name.is_empty() {
-                        div { class: "truncate text-[10px] text-muted-foreground/65", "{agent.name}" }
+                    div { class: "truncate text-xs font-medium text-foreground/90", "{presentation.title}" }
+                    if !presentation.agent.name.is_empty() {
+                        div { class: "truncate text-[10px] text-muted-foreground/65", "{presentation.agent.name}" }
                     }
                 }
                 SessionActions {
                     resume,
                     git_url: git_url.clone(),
                     cleanup_id,
-                    stage_target,
-                    archived,
+                    stage_target: presentation.stage_target,
+                    archived: presentation.archived,
                     managed: session.managed,
                 }
             }
-            if !preview.is_empty() {
-                p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/65", "{preview}" }
+            if !presentation.preview.is_empty() {
+                p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/65", "{presentation.preview}" }
             }
             div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
-                if runtime.visible {
-                    MetadataPill { dot: runtime.dot.to_string(), label: runtime_label(&session.runtime) }
+                if presentation.runtime.visible {
+                    MetadataPill { dot: presentation.runtime.dot.to_string(), label: runtime_label(&session.runtime) }
                 }
-                SessionContextView { context: context.clone() }
+                SessionContextView { context: presentation.context.clone() }
             }
             div { class: "mt-3 flex items-center gap-1.5 pt-1 text-[10px] text-muted-foreground/70",
-                time { class: "tabular-nums", "{updated}" }
+                time { class: "tabular-nums", "{presentation.updated}" }
                 div { class: "flex-1" }
             }
           }
@@ -1030,11 +778,15 @@ pub(super) fn SessionMetaPanel(
     repository: Option<SessionRepository>,
     stages: Vec<StageSummary>,
 ) -> Element {
-    let context = SessionContext::from(repository);
-    let runtime_dot = RuntimeVisual::for_id(&session.runtime).dot;
-    let updated = RelativeTime::from_millis(session.last_activated_at).label();
-    let agent = AgentPresentation::from_session(&session);
-    let compact_id = SessionIdentity::new(&session.sid).compact();
+    let SessionPresentation {
+        context,
+        stage_target,
+        runtime,
+        agent,
+        compact_id,
+        updated,
+        ..
+    } = SessionPresentation::new(&session, repository, &session.stage);
     rsx! {
         aside { class: "hidden min-h-0 w-[19rem] shrink-0 flex-col bg-foreground/[0.018] lg:flex",
             header { class: "flex h-11 shrink-0 items-center px-4",
@@ -1053,7 +805,7 @@ pub(super) fn SessionMetaPanel(
                     SessionDetailField { label: translate("sessions-stage"),
                         if session.managed {
                             StagePicker {
-                                target: StageTarget::from_session(&session),
+                                target: stage_target,
                                 selected: session.stage.clone(),
                                 stages,
                             }
@@ -1080,7 +832,7 @@ pub(super) fn SessionMetaPanel(
                     }
                     SessionDetailField { label: translate("common-status"),
                         MetadataPill {
-                            dot: runtime_dot.to_string(),
+                            dot: runtime.dot.to_string(),
                             label: runtime_label(&session.runtime),
                         }
                     }
@@ -1143,86 +895,33 @@ fn SessionDetailText(label: String, value: String, #[props(default)] mono: bool)
 
 #[component]
 fn EditableDescription(session_id: String, value: String) -> Element {
-    let mut editing = use_signal(|| false);
-    let mut draft = use_signal(|| value.clone());
-    let mut canceled = use_signal(|| false);
-    let display = if value.is_empty() {
-        translate("sessions-description-placeholder")
+    let editing = use_signal(|| false);
+    let draft = use_signal(|| value.clone());
+    let empty = value.is_empty();
+    let display_class = if empty {
+        "mb-4 block w-full rounded-lg px-3 py-2.5 text-left text-xs leading-5 text-muted-foreground/50 hover:bg-foreground/[0.035]"
     } else {
-        value.clone()
+        "mb-4 block w-full whitespace-pre-wrap rounded-lg px-3 py-2.5 text-left text-xs leading-5 text-foreground/65 hover:bg-foreground/[0.035]"
     };
-    if editing() {
-        let current = value.clone();
-        return rsx! {
-            textarea {
-                class: "mb-4 min-h-20 w-full resize-y rounded-lg bg-foreground/[0.035] px-3 py-2.5 text-xs leading-5 text-foreground outline-none ring-1 ring-inset ring-primary/35",
-                value: draft(),
-                placeholder: translate("sessions-description-placeholder"),
-                aria_label: translate("sessions-description"),
-                autofocus: true,
-                oninput: move |event| draft.set(event.value()),
-                onkeydown: move |event| {
-                    if event.key() != Key::Escape {
-                        return;
-                    }
-                    event.prevent_default();
-                    canceled.set(true);
-                    draft.set(current.clone());
-                    editing.set(false);
-                },
-                onblur: move |_| {
-                    if canceled() {
-                        canceled.set(false);
-                        return;
-                    }
-                    editing.set(false);
-                    let description = draft();
-                    if description == value {
-                        return;
-                    }
-                    let _ = send(&SessionsDescriptionUpdate {
-                        id: session_id.clone(),
-                        description,
-                    });
-                },
-            }
-        };
-    }
-    let edit_value = value.clone();
     rsx! {
-        button {
-            r#type: "button",
-            class: if value.is_empty() {
-                "mb-4 block w-full rounded-lg px-3 py-2.5 text-left text-xs leading-5 text-muted-foreground/50 hover:bg-foreground/[0.035]"
-            } else {
-                "mb-4 block w-full whitespace-pre-wrap rounded-lg px-3 py-2.5 text-left text-xs leading-5 text-foreground/65 hover:bg-foreground/[0.035]"
-            },
+        EditableText {
+            value,
+            editing,
+            draft,
+            display_class: display_class.to_string(),
+            input_class: "mb-4 min-h-20 w-full resize-y rounded-lg bg-foreground/[0.035] px-3 py-2.5 text-xs leading-5 text-foreground outline-none ring-1 ring-inset ring-primary/35".to_string(),
             title: translate("sessions-description"),
-            onclick: move |_| {
-                canceled.set(false);
-                draft.set(edit_value.clone());
-                editing.set(true);
+            placeholder: translate("sessions-description-placeholder"),
+            empty_display: translate("sessions-description-placeholder"),
+            multiline: true,
+            allow_empty: true,
+            trim: false,
+            on_commit: move |description| {
+                let _ = send(&SessionsDescriptionUpdate {
+                    id: session_id.clone(),
+                    description,
+                });
             },
-            "{display}"
-        }
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct StageTarget {
-    id: String,
-    kind: String,
-    sid: String,
-    stage: String,
-}
-
-impl StageTarget {
-    fn from_session(session: &SessionSummary) -> Self {
-        Self {
-            id: session.id.clone(),
-            kind: session.kind.clone(),
-            sid: session.sid.clone(),
-            stage: session.stage.clone(),
         }
     }
 }
@@ -1569,26 +1268,6 @@ fn SessionIdPill(label: String, title: String) -> Element {
     }
 }
 
-struct SessionIdentity<'a>(&'a str);
-
-impl<'a> SessionIdentity<'a> {
-    fn new(id: &'a str) -> Self {
-        Self(id)
-    }
-
-    fn compact(&self) -> String {
-        let characters = self.0.chars().collect::<Vec<_>>();
-        if characters.len() <= 13 {
-            return self.0.to_string();
-        }
-        let start = characters[..6].iter().collect::<String>();
-        let end = characters[characters.len() - 4..]
-            .iter()
-            .collect::<String>();
-        format!("{start}…{end}")
-    }
-}
-
 #[derive(Clone, PartialEq)]
 struct ResumeTarget {
     kind: String,
@@ -1613,147 +1292,6 @@ impl ResumeTarget {
             sid: self.sid.clone(),
             cwd: self.cwd.clone(),
         });
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct SessionContext {
-    project: String,
-    branch: String,
-    git_url: String,
-}
-
-#[derive(Clone, PartialEq)]
-struct AgentPresentation {
-    id: String,
-    name: String,
-    icon: Option<String>,
-    color: String,
-}
-
-impl AgentPresentation {
-    fn from_session(session: &SessionSummary) -> Self {
-        Self {
-            id: session.agent.clone(),
-            name: if session.agent_name.is_empty() {
-                session.agent.clone()
-            } else {
-                session.agent_name.clone()
-            },
-            icon: (!session.agent_icon.is_empty()).then(|| session.agent_icon.clone()),
-            color: session.agent_color.clone(),
-        }
-    }
-}
-
-impl SessionContext {
-    fn from(repository: Option<SessionRepository>) -> Self {
-        match repository {
-            Some(repository) => Self {
-                project: repository.project,
-                branch: repository.branch,
-                git_url: repository.url,
-            },
-            None => Self {
-                project: String::new(),
-                branch: String::new(),
-                git_url: String::new(),
-            },
-        }
-    }
-}
-
-struct StageVisual {
-    dot: &'static str,
-}
-
-impl StageVisual {
-    fn for_id(id: &str) -> Self {
-        let dot = match id {
-            "in_progress" => "bg-amber-400",
-            "stale" => "bg-muted-foreground/55",
-            "in_review" => "bg-violet-400",
-            "done" => "bg-success",
-            "canceled" => "bg-muted-foreground/45",
-            _ => "bg-primary/75",
-        };
-        Self { dot }
-    }
-}
-
-struct RuntimeVisual {
-    dot: &'static str,
-    visible: bool,
-}
-
-struct SessionFreshness;
-
-impl SessionFreshness {
-    const STALE_AFTER: u64 = 3 * RelativeTime::DAY;
-
-    fn is_stale(session: &SessionSummary, terminal: bool) -> bool {
-        let age = RelativeTime::from_millis(session.last_activated_at);
-        Self::from_age(age, &session.runtime, terminal)
-    }
-
-    fn from_age(age: RelativeTime, runtime: &str, terminal: bool) -> bool {
-        !terminal && !RuntimeVisual::for_id(runtime).visible && age.0 >= Self::STALE_AFTER
-    }
-}
-
-impl RuntimeVisual {
-    fn for_id(id: &str) -> Self {
-        let dot = match id {
-            "streaming" => "bg-success",
-            "awaiting" => "bg-amber-400",
-            "installing" => "bg-sky-400",
-            "errored" => "bg-ansi-1",
-            "idle" => "bg-primary/65",
-            _ => "bg-muted-foreground/35",
-        };
-        let visible = matches!(id, "streaming" | "awaiting" | "installing" | "errored");
-        Self { dot, visible }
-    }
-}
-
-struct RelativeTime(u64);
-
-impl RelativeTime {
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * Self::MINUTE;
-    const DAY: u64 = 24 * Self::HOUR;
-    const WEEK: u64 = 7 * Self::DAY;
-    const MONTH: u64 = 30 * Self::DAY;
-    const YEAR: u64 = 365 * Self::DAY;
-
-    fn from_millis(timestamp: i64) -> Self {
-        if timestamp <= 0 {
-            return Self(0);
-        }
-        let now = vmux_ecs::UnixMillis::now().0;
-        Self(now.saturating_sub(timestamp).max(0) as u64 / 1_000)
-    }
-
-    fn label(self) -> String {
-        let (id, count) = if self.0 < Self::MINUTE {
-            ("resume-age-now", 0)
-        } else if self.0 < Self::HOUR {
-            ("resume-age-minutes", self.0 / Self::MINUTE)
-        } else if self.0 < Self::DAY {
-            ("resume-age-hours", self.0 / Self::HOUR)
-        } else if self.0 < Self::WEEK {
-            ("resume-age-days", self.0 / Self::DAY)
-        } else if self.0 < Self::MONTH {
-            ("resume-age-weeks", self.0 / Self::WEEK)
-        } else if self.0 < Self::YEAR {
-            ("resume-age-months", self.0 / Self::MONTH)
-        } else {
-            ("resume-age-years", self.0 / Self::YEAR)
-        };
-        if count == 0 {
-            return translate(id);
-        }
-        translate_with(id, &[("count", TranslationValue::Number(count as i64))])
     }
 }
 
@@ -1782,167 +1320,6 @@ impl SessionPager {
         let mut visible = self.0;
         visible.set(current.saturating_add(Self::PAGE).min(total));
     }
-}
-
-#[derive(Clone, PartialEq)]
-struct StageGroup {
-    stage: StageSummary,
-    sessions: Vec<SessionSummary>,
-}
-
-impl StageGroup {
-    fn inbox(groups: &[Self]) -> Vec<Self> {
-        groups
-            .iter()
-            .filter(|group| !group.stage.terminal)
-            .cloned()
-            .collect()
-    }
-
-    fn filtered(
-        groups: &[Self],
-        filters: &[SessionFilter],
-        repositories: &SessionRepositories,
-    ) -> Vec<Self> {
-        let selected_stage = filters.iter().find_map(|filter| match filter {
-            SessionFilter::Stage(id) => Some(id.as_str()),
-            SessionFilter::Agent(_) | SessionFilter::Project(_) | SessionFilter::Updated(_) => None,
-        });
-        let mut filtered = Vec::new();
-        for group in groups {
-            if selected_stage.is_some_and(|stage| stage != group.stage.id.as_str()) {
-                continue;
-            }
-            let mut group = group.clone();
-            group.sessions.retain(|session| {
-                filters
-                    .iter()
-                    .all(|filter| filter.matches(session, repositories))
-            });
-            filtered.push(group);
-        }
-        filtered
-    }
-
-    fn from_catalog(
-        stages: &[StageSummary],
-        sessions: &[SessionSummary],
-        search: &str,
-    ) -> Vec<Self> {
-        let mut groups = stages
-            .iter()
-            .cloned()
-            .map(|stage| Self {
-                stage,
-                sessions: Vec::new(),
-            })
-            .collect::<Vec<_>>();
-        for session in sessions {
-            if !session.matches(search) {
-                continue;
-            }
-            let terminal = stages
-                .iter()
-                .find(|stage| stage.id == session.stage)
-                .is_some_and(|stage| stage.terminal);
-            if SessionFreshness::is_stale(session, terminal) {
-                let stale_index = match groups.iter().position(|group| group.stage.id == "stale") {
-                    Some(index) => index,
-                    None => {
-                        let index = groups
-                            .iter()
-                            .position(|group| !group.stage.terminal)
-                            .map(|index| index + 1)
-                            .unwrap_or(groups.len());
-                        groups.insert(
-                            index,
-                            Self {
-                                stage: StageSummary {
-                                    id: "stale".into(),
-                                    name: "sessions-stale".into(),
-                                    order: 0,
-                                    terminal: false,
-                                },
-                                sessions: Vec::new(),
-                            },
-                        );
-                        index
-                    }
-                };
-                if let Some(group) = groups.get_mut(stale_index) {
-                    group.sessions.push(session.clone());
-                }
-                continue;
-            }
-            if let Some(group) = groups
-                .iter_mut()
-                .find(|group| group.stage.id == session.stage)
-            {
-                group.sessions.push(session.clone());
-                continue;
-            }
-            groups.push(Self {
-                stage: StageSummary {
-                    id: session.stage.clone(),
-                    name: session.stage.clone(),
-                    order: u32::MAX,
-                    terminal: false,
-                },
-                sessions: vec![session.clone()],
-            });
-        }
-
-        groups
-    }
-}
-
-trait SessionSummaryExt {
-    fn matches(&self, query: &str) -> bool;
-    fn display_title(&self) -> String;
-    fn preview(&self) -> String;
-}
-
-impl SessionSummaryExt for SessionSummary {
-    fn matches(&self, query: &str) -> bool {
-        query.is_empty()
-            || self.name.to_ascii_lowercase().contains(query)
-            || self.description.to_ascii_lowercase().contains(query)
-            || self.cwd.to_ascii_lowercase().contains(query)
-            || self.agent.to_ascii_lowercase().contains(query)
-            || self.agent_name.to_ascii_lowercase().contains(query)
-            || self.conversation_title.to_ascii_lowercase().contains(query)
-            || self.last_prompt.to_ascii_lowercase().contains(query)
-            || self.last_message.to_ascii_lowercase().contains(query)
-    }
-
-    fn display_title(&self) -> String {
-        if self.conversation_title.is_empty() {
-            return self.name.clone();
-        }
-        self.conversation_title.clone()
-    }
-
-    fn preview(&self) -> String {
-        if !self.last_prompt.is_empty() && self.last_prompt != self.display_title() {
-            return self.last_prompt.clone();
-        }
-        if !self.last_message.is_empty() && self.last_message != self.display_title() {
-            return self.last_message.clone();
-        }
-        String::new()
-    }
-}
-
-fn runtime_label(runtime: &str) -> String {
-    let id = match runtime {
-        "idle" => "session-runtime-idle",
-        "installing" => "session-runtime-installing",
-        "streaming" => "session-runtime-streaming",
-        "awaiting" => "session-runtime-awaiting",
-        "errored" => "session-runtime-errored",
-        _ => "session-runtime-inactive",
-    };
-    translate(id)
 }
 
 #[cfg(test)]

@@ -591,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn page_ready_republishes_catalog_only_to_manager_views() {
+    fn page_ready_republishes_catalog_to_session_views() {
         let mut app = App::new();
         app.init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
@@ -611,7 +611,10 @@ mod tests {
         });
         app.world_mut().flush();
 
-        assert_eq!(app.world().resource::<Published>().0, vec![manager]);
+        assert_eq!(
+            app.world().resource::<Published>().0,
+            vec![session, manager]
+        );
     }
 
     #[test]

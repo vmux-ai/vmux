@@ -1368,7 +1368,6 @@ mod tests {
                         workspace: file.to_string_lossy().into_owned(),
                         ..Default::default()
                     },
-                    ..Default::default()
                 },
                 KeyboardOwner,
             ))

@@ -5,6 +5,7 @@ use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
@@ -14,9 +15,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
-use crate::state::{
-    GitBranchCollection, GitBranchPrompt, GitCatalogProgress, GitOperationEligibility,
-};
+use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility};
 
 use super::model::GitPathChangeView;
 
@@ -93,7 +92,6 @@ pub(super) fn BranchPromptDialog() -> Element {
 pub(super) fn BranchesCard(
     repository: GitRepositorySnapshot,
     selected_branch: String,
-    branch_collection: GitBranchCollection,
     files: Vec<GitBranchFileEntry>,
     files_total: u32,
     files_loading: bool,
@@ -101,13 +99,7 @@ pub(super) fn BranchesCard(
     files_error: String,
     selected_path_bytes: Vec<u8>,
     operations: GitOperationEligibility,
-    catalog_progress: GitCatalogProgress,
 ) -> Element {
-    let collection = branch_collection;
-    let catalog = GitCatalog::from(collection);
-    let references = collection.references(&repository);
-    let reference_count = references.len();
-    let mut branch_open = use_signal(|| false);
     let mut file_query = use_signal(String::new);
     let query = file_query().trim().to_lowercase();
     let files_empty = files.is_empty();
@@ -115,93 +107,16 @@ pub(super) fn BranchesCard(
         .into_iter()
         .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
         .collect::<Vec<_>>();
-    let selected = if collection == GitBranchCollection::Local {
-        repository
-            .branches
-            .iter()
-            .find(|entry| entry.name == selected_branch)
-            .cloned()
-    } else {
-        None
-    };
+    let visible_file_count = visible_files.len();
+    let selected = repository
+        .branches
+        .iter()
+        .find(|entry| entry.name == selected_branch)
+        .cloned();
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-10 shrink-0 items-center gap-1 px-3",
-                Dropdown {
-                    open: branch_open(),
-                    class: "min-w-0 flex-1".to_string(),
-                    on_dismiss: move |_| branch_open.set(false),
-                    button {
-                        r#type: "button",
-                        class: "flex h-8 min-w-0 max-w-full items-center gap-2 rounded-md px-2 text-left text-xs font-medium text-foreground hover:bg-foreground/[0.055]",
-                        onclick: move |_| branch_open.set(!branch_open()),
-                        LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground" }
-                        span { class: "min-w-0 flex-1 truncate", "{selected_branch}" }
-                        LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground" }
-                    }
-                    if branch_open() {
-                        div { class: "absolute left-0 top-9 z-40 flex max-h-96 min-w-80 flex-col overflow-hidden rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                            div { class: "flex shrink-0 items-center gap-2 px-1 pb-1.5",
-                                BranchCollectionTabs { branch_collection }
-                                span { class: "text-[9px] tabular-nums text-muted-foreground", "{reference_count}" }
-                            }
-                            div {
-                                class: "min-h-0 overflow-y-auto",
-                                onscroll: move |event: Event<ScrollData>| {
-                                    let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                                    if remaining <= 192 && catalog_progress.has_more && !catalog_progress.loading {
-                                        let _ = send(&GitCatalogNextRequest { catalog });
-                                    }
-                                },
-                                match collection {
-                                    GitBranchCollection::Local => rsx! {
-                                        for (index, branch) in repository.branches.iter().cloned().enumerate() {
-                                            BranchRow {
-                                                key: "local-{branch.name}",
-                                                branch,
-                                                index,
-                                                remote: false,
-                                                selected_branch: selected_branch.clone(),
-                                                onselected: move |_| branch_open.set(false),
-                                            }
-                                        }
-                                    },
-                                    GitBranchCollection::Remote => rsx! {
-                                        for (index, branch) in repository.remote_branches.iter().cloned().enumerate() {
-                                            BranchRow {
-                                                key: "remote-{branch.name}",
-                                                branch,
-                                                index,
-                                                remote: true,
-                                                selected_branch: selected_branch.clone(),
-                                                onselected: move |_| branch_open.set(false),
-                                            }
-                                        }
-                                    },
-                                    GitBranchCollection::Tags => rsx! {
-                                        for (index, tag) in repository.tags.iter().cloned().enumerate() {
-                                            TagRow {
-                                                key: "tag-{tag.name}",
-                                                tag,
-                                                index,
-                                                selected_branch: selected_branch.clone(),
-                                                onselected: move |_| branch_open.set(false),
-                                            }
-                                        }
-                                    }
-                                }
-                                if catalog_progress.loading {
-                                    div { class: "flex flex-col gap-2 px-2.5 py-2",
-                                        for width in ["w-9/12", "w-11/12"] {
-                                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                div { class: "ml-auto flex shrink-0 items-center gap-1",
+            div { class: "flex h-10 shrink-0 items-center justify-end gap-1 px-3",
+                div { class: "flex shrink-0 items-center gap-1",
                     if let Some(branch) = selected {
                         Button {
                             size: ButtonSize::Xs,
@@ -255,16 +170,12 @@ pub(super) fn BranchesCard(
                         }
                     }
                 } else if !files_error.is_empty() {
-                    div { class: "flex flex-col items-start gap-2 px-2.5 py-3 text-xs text-destructive",
-                        span { "{files_error}" }
-                        Button {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Xs,
-                            onclick: move |_| {
-                                let _ = send(&GitBranchFilesRetryRequest);
-                            },
-                            {translate("common-retry")}
-                        }
+                    ErrorState {
+                        class: "min-h-40".to_string(),
+                        message: files_error,
+                        on_retry: move |_| {
+                            let _ = send(&GitBranchFilesRetryRequest);
+                        },
                     }
                 } else if visible_files.is_empty() {
                     div { class: "flex min-h-24 items-center justify-center px-3 text-center text-xs text-muted-foreground", {translate("git-no-changes")} }
@@ -294,14 +205,15 @@ pub(super) fn BranchesCard(
                             }
                         }
                     } else if files_has_more {
-                        Button {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Xs,
-                            class: "mt-1 w-full".to_string(),
-                            onclick: move |_| {
+                        div {
+                            key: "branch-files-next-{visible_file_count}",
+                            class: "flex flex-col gap-2 px-2.5 py-2",
+                            onvisible: move |_| {
                                 let _ = send(&GitBranchFilesNextRequest);
                             },
-                            {translate("common-expand")}
+                            for width in ["w-10/12", "w-8/12", "w-11/12"] {
+                                Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                            }
                         }
                     }
                 }
@@ -485,7 +397,7 @@ fn BranchActionItem(
 }
 
 #[component]
-fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
+pub(super) fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
     let active = match branch_collection {
         GitBranchCollection::Local => "local",
         GitBranchCollection::Remote => "remote",
@@ -522,7 +434,7 @@ fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
 }
 
 #[component]
-fn BranchRow(
+pub(super) fn BranchRow(
     branch: GitBranchEntry,
     index: usize,
     remote: bool,
@@ -581,7 +493,7 @@ fn BranchRow(
 }
 
 #[component]
-fn TagRow(
+pub(super) fn TagRow(
     tag: GitTagEntry,
     index: usize,
     selected_branch: String,

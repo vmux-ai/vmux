@@ -70,7 +70,7 @@ pub struct PendingHandoff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::conversation::{AssistantBlock, Message};
+    use vmux_api::session::{AssistantBlock, Message};
 
     fn user(text: &str) -> Message {
         Message::user(text)

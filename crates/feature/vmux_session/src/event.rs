@@ -5,13 +5,13 @@ pub use vmux_api::chat::{
     ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession, SlashCommand,
     SlashCommandEntry, SlashCommands,
 };
-pub use vmux_api::conversation::ModelOptionEntry;
 use vmux_api::json::JsonValue;
 pub use vmux_api::prompt_media::{
     ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
     ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
 };
 pub use vmux_api::protocol::ApprovalDecision;
+pub use vmux_api::session::ModelOptionEntry;
 pub use vmux_ecs::event::ProjectBranch as ChatBranch;
 
 pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;

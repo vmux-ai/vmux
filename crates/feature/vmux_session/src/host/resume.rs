@@ -214,7 +214,7 @@ fn prompt_history(
     let mut prompts = Vec::new();
     for (_, session) in matching {
         for message in transcripts.get(session).messages {
-            let vmux_api::conversation::Message::User { text, .. } = message else {
+            let vmux_api::session::Message::User { text, .. } = message else {
                 continue;
             };
             if !text.trim().is_empty() {
@@ -358,13 +358,13 @@ mod tests {
         app.world_mut().spawn((
             vmux_session::ConversationEvent,
             vmux_session::EventIdentity {
-                event_id: vmux_api::conversation::EventId::new("event-1"),
-                actor_id: vmux_api::conversation::MemberId::local(&session_id),
+                event_id: vmux_api::session::EventId::new("event-1"),
+                actor_id: vmux_api::session::MemberId::local(&session_id),
                 client_op_id: None,
                 sequence: 1,
                 reply_to: None,
             },
-            vmux_session::MessageContent(vmux_api::conversation::Message::user("First prompt")),
+            vmux_session::MessageContent(vmux_api::session::Message::user("First prompt")),
             vmux_ecs::CreatedAt(3),
             ChildOf(session),
         ));

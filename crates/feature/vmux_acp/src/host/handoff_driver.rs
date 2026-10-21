@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use bevy::prelude::Component;
-use vmux_api::conversation::Message;
 use vmux_api::protocol::AgentPromptEnvelope;
+use vmux_api::session::Message;
 use vmux_session::host::ImportedConversation;
 
 #[derive(Component)]

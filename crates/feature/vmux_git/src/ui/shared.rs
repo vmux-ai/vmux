@@ -1,9 +1,12 @@
 #![allow(non_snake_case)]
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
-use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::button::{Button, ButtonVariant};
+use vmux_ui::components::checkbox::Checkbox;
+use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::diff::DiffTone;
@@ -187,6 +190,8 @@ pub fn DiffView(
     visible: bool,
 ) -> Element {
     let mut collapsed_files = use_signal(HashSet::<String>::new);
+    let mut viewed_files = use_signal(HashSet::<String>::new);
+    let mut scroll_container = use_signal(|| None::<Rc<MountedData>>);
     let viewport = viewport();
     let rows = viewport
         .as_ref()
@@ -216,11 +221,33 @@ pub fn DiffView(
     let rendered_rows = display_rows();
     let sections = DiffSection::group(rows, &rendered_rows);
     let collapsed_snapshot = collapsed_files();
+    let viewed_snapshot = viewed_files();
+    let row_count = rows.len();
+    use_effect(move || {
+        if loading || !has_more || row_count == 0 {
+            return;
+        }
+        spawn(async move {
+            let Some(container) = scroll_container.peek().clone() else {
+                return;
+            };
+            let Ok(size) = container.get_scroll_size().await else {
+                return;
+            };
+            let Ok(rect) = container.get_client_rect().await else {
+                return;
+            };
+            if size.height <= rect.size.height * 2.0 {
+                let _ = send(&GitDiffNextRequest);
+            }
+        });
+    });
 
     rsx! {
         div {
             key: "{identity}",
             id: "git-diff-viewport",
+            onmounted: move |event: Event<MountedData>| scroll_container.set(Some(event.data())),
             class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             onscroll: move |event| {
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
@@ -237,18 +264,12 @@ pub fn DiffView(
                     }
                 }
             } else if !error.is_empty() {
-                div { class: "flex flex-col items-start gap-2 p-3 font-sans text-xs text-ansi-1",
-                    span { "{error}" }
-                    if has_more {
-                        Button {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Xs,
-                            onclick: move |_| {
-                                let _ = send(&GitDiffNextRequest);
-                            },
-                            {translate("common-retry")}
-                        }
-                    }
+                ErrorState {
+                    class: "min-h-64 font-sans".to_string(),
+                    message: error.to_string(),
+                    on_retry: move |_| {
+                        let _ = send(&GitDiffRetryRequest);
+                    },
                 }
             } else if rows.is_empty() {
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
@@ -263,6 +284,10 @@ pub fn DiffView(
                     let collapsed = collapse_key
                         .as_ref()
                         .is_some_and(|key| collapsed_snapshot.contains(key));
+                    let viewed = collapse_key
+                        .as_ref()
+                        .is_some_and(|key| viewed_snapshot.contains(key));
+                    let viewed_key = collapse_key.clone();
                     let section_class = if file_path.is_some() {
                         "mt-3 min-w-max overflow-hidden rounded-lg bg-card first:mt-0"
                     } else {
@@ -276,6 +301,27 @@ pub fn DiffView(
                                     class: "sticky top-0 z-10 flex h-9 min-w-full scroll-mt-2 items-center gap-2 bg-card px-3 font-sans text-[11px] font-semibold text-foreground",
                                     TypeIcon { path: file_path.clone(), is_dir: false, class: "size-3.5 shrink-0" }
                                     span { class: "min-w-0 flex-1 truncate font-mono", "{file_path}" }
+                                    label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
+                                        Checkbox {
+                                            checked: viewed,
+                                            aria_label: translate("git-viewed"),
+                                            on_checked_change: move |checked| {
+                                                let Some(key) = viewed_key.as_ref() else {
+                                                    return;
+                                                };
+                                                let mut viewed = viewed_files.write();
+                                                let mut collapsed = collapsed_files.write();
+                                                if checked {
+                                                    viewed.insert(key.clone());
+                                                    collapsed.insert(key.clone());
+                                                } else {
+                                                    viewed.remove(key);
+                                                    collapsed.remove(key);
+                                                }
+                                            },
+                                        }
+                                        {translate("git-viewed")}
+                                    }
                                     SheetHeaderChevron {
                                         expanded: !collapsed,
                                         label: translate(if collapsed { "common-expand" } else { "common-collapse" }),
@@ -378,22 +424,18 @@ pub fn DiffView(
                     }
                 }
             }
-            if loading && !rows.is_empty() {
-                div { class: "flex flex-col gap-2 p-3",
-                    for width in ["w-10/12", "w-8/12"] {
-                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                    }
-                }
-            }
-            if has_more && !loading && error.is_empty() {
-                div { class: "flex justify-center p-2 font-sans",
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Xs,
-                        onclick: move |_| {
+            if (loading || has_more) && !rows.is_empty() && error.is_empty() {
+                div {
+                    key: "diff-next-{rows.len()}",
+                    class: "flex flex-col gap-2 p-3",
+                    onvisible: move |_| {
+                        if has_more && !loading {
                             let _ = send(&GitDiffNextRequest);
-                        },
-                        {translate("common-expand")}
+                        }
+                    },
+                    div { class: "h-8 rounded-md bg-card/70" }
+                    for width in ["w-11/12", "w-9/12", "w-10/12", "w-7/12"] {
+                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
                     }
                 }
             }

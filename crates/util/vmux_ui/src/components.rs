@@ -12,6 +12,7 @@ pub mod context_menu;
 pub mod dialog;
 pub mod dropdown;
 pub mod effort_menu;
+pub mod error_state;
 pub mod filter;
 pub mod icon;
 pub mod inline_edit;
