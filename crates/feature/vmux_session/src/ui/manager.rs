@@ -88,6 +88,7 @@ pub fn SessionsManager() -> Element {
                 Dropdown {
                     open: filter_requested,
                     class: "min-w-0 flex-1".to_string(),
+                    keyboard_navigation: true,
                     on_dismiss: move |_| {
                         query.set(String::new());
                         filter_step.set(SessionFilterStep::Field);
@@ -1460,7 +1461,7 @@ fn SessionActions(
     let visibility = if open() {
         "opacity-100"
     } else {
-        "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+        "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
     };
     rsx! {
         Dropdown {
