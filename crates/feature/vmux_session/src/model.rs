@@ -143,6 +143,12 @@ pub struct Stage(pub StageId);
 #[type_path = "vmux_session"]
 pub struct StageChangedAt(pub i64);
 
+impl StageChangedAt {
+    fn record_transition(&mut self, now: i64) {
+        self.0 = now.max(self.0.saturating_add(1));
+    }
+}
+
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
@@ -539,7 +545,7 @@ fn change_stage(
         for (id, mut stage, mut changed_at) in &mut sessions {
             if id == &request.id && stage.0 != request.stage {
                 stage.0.clone_from(&request.stage);
-                changed_at.0 = vmux_ecs::UnixMillis::now().0;
+                changed_at.record_transition(vmux_ecs::UnixMillis::now().0);
             }
         }
     }
@@ -575,7 +581,7 @@ fn change_provider_stage(
             if stage.0 != request.stage {
                 stage.0.clone_from(&request.stage);
             }
-            changed_at.0 = now;
+            changed_at.record_transition(now);
             source_updated_at.0 = request.source_updated_at;
             break;
         }
