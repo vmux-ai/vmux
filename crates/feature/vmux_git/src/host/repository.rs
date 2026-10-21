@@ -586,9 +586,11 @@ impl GitRepository {
         Ok(BranchDiffContext {
             merge_base: merge_base.trim().to_string(),
             selected: (!current).then(|| reference.to_string()),
-            submodules: current
-                .then(|| self.branch_submodules())
-                .unwrap_or_default(),
+            submodules: if current {
+                self.branch_submodules()
+            } else {
+                Vec::new()
+            },
         })
     }
 
