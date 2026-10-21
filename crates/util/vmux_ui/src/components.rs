@@ -20,6 +20,7 @@ pub mod manager;
 pub mod mcp_menu;
 pub mod model_menu;
 pub mod motion;
+pub mod page;
 pub mod permission_menu;
 pub mod progress;
 pub mod project_picker;

@@ -1,5 +1,6 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
+use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
 use crate::icon::{LineIcon, LineIconView};
 use dioxus::prelude::*;
@@ -66,10 +67,7 @@ impl ManagerButtonVariant {
 #[component]
 pub fn ManagerPage(children: Element) -> Element {
     rsx! {
-        main {
-            class: "flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-sans text-sm",
-            {children}
-        }
+        PageShell { {children} }
     }
 }
 
@@ -135,8 +133,8 @@ pub fn ManagerHeader(
         content_class
     };
     rsx! {
-        header { class: "shrink-0 bg-foreground/[0.018] px-5 py-3",
-            div { class: "{content_class}",
+        PageHeader { content_class,
+            div {
                 div { class: "flex items-center gap-3",
                     h1 { class: "text-base font-semibold tracking-tight", "{title}" }
                     span { class: "text-xs tabular-nums text-muted-foreground/70", "{count}" }
@@ -257,9 +255,7 @@ pub fn ManagerList(children: Element, #[props(default)] class: String) -> Elemen
         class
     };
     rsx! {
-        div { class: "min-h-0 flex-1 overflow-auto px-5 py-5",
-            div { class: "{content_class}", {children} }
-        }
+        PageContent { content_class, {children} }
     }
 }
 

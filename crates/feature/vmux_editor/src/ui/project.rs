@@ -11,6 +11,7 @@ use vmux_session::event::ResumeSession;
 use vmux_session::state::ChatUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
+use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::file_icon::TypeIcon;
@@ -37,8 +38,9 @@ pub(super) fn ProjectList() -> Element {
     let snapshot = state();
     let count = snapshot.entries.len();
     rsx! {
-        main { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground",
-            header { class: "flex min-h-16 shrink-0 items-center gap-3 bg-foreground/[0.025] px-5 py-3",
+        PageShell {
+            PageHeader {
+                div { class: "flex min-h-10 items-center gap-3",
                 div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
                     BuiltinIconView {
                         icon: vmux_api::BuiltinIcon::Project,
@@ -49,10 +51,10 @@ pub(super) fn ProjectList() -> Element {
                 if snapshot.loaded && count > 0 {
                     span { class: "rounded-full bg-foreground/[0.055] px-2 py-1 text-[10px] tabular-nums text-muted-foreground", "{count}" }
                 }
+                }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto",
-                div { class: "mx-auto w-full max-w-5xl px-5 py-5",
-                    div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
+            PageContent {
+                div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
                         if !snapshot.loaded || snapshot.loading {
                             for width in ["w-28", "w-36", "w-24"] {
                                 div { class: "flex h-14 items-center gap-3 px-3",
@@ -90,7 +92,6 @@ pub(super) fn ProjectList() -> Element {
                                 }
                             }
                         }
-                    }
                 }
             }
         }
@@ -164,8 +165,9 @@ pub(super) fn ProjectDashboard() -> Element {
     let start_url = "vmux://start/".to_string();
 
     rsx! {
-        main { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground",
-            header { class: "flex min-h-16 shrink-0 items-center gap-3 bg-foreground/[0.025] px-5 py-3",
+        PageShell {
+            PageHeader {
+                div { class: "flex min-h-10 items-center gap-3",
                 div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
                     TypeIcon { path: root(), is_dir: true, class: "size-5".to_string() }
                 }
@@ -183,16 +185,15 @@ pub(super) fn ProjectDashboard() -> Element {
                     LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
                     span { {translate("sessions-start")} }
                 }
-            }
-            div { class: "min-h-0 flex-1 overflow-y-auto",
-                div { class: "mx-auto flex w-full max-w-5xl flex-col gap-5 px-5 py-5",
-                    ProjectSessions { sessions: related_sessions }
-                    ProjectGit { root: root(), repository, loading: git_loading }
-                    if !recent_files.is_empty() {
-                        ProjectRecentFiles { files: recent_files }
-                    }
-                    ProjectFiles { entries: entries() }
                 }
+            }
+            PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
+                ProjectSessions { sessions: related_sessions }
+                ProjectGit { root: root(), repository, loading: git_loading }
+                if !recent_files.is_empty() {
+                    ProjectRecentFiles { files: recent_files }
+                }
+                ProjectFiles { entries: entries() }
             }
         }
     }
