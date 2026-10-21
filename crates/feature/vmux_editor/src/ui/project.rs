@@ -16,9 +16,86 @@ use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_ui_state};
 use vmux_ui::i18n::{translate, translate_humanized};
-use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use super::state::FileUi;
+use crate::project::ProjectUiState;
+
+#[component]
+pub(super) fn ProjectPage(initial_detail: bool) -> Element {
+    let state = use_ui_state::<ProjectUiState>().state;
+    let snapshot = state();
+    if snapshot.detail || !snapshot.loaded && initial_detail {
+        return rsx! { ProjectDashboard {} };
+    }
+    rsx! { ProjectList {} }
+}
+
+#[component]
+pub(super) fn ProjectList() -> Element {
+    let state = use_ui_state::<ProjectUiState>().state;
+    let snapshot = state();
+    let count = snapshot.entries.len();
+    rsx! {
+        main { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground",
+            header { class: "flex min-h-16 shrink-0 items-center gap-3 bg-foreground/[0.025] px-5 py-3",
+                div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
+                    BuiltinIconView {
+                        icon: vmux_api::BuiltinIcon::Project,
+                        class: "size-5 text-muted-foreground".to_string(),
+                    }
+                }
+                h1 { class: "min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.015em]", {translate("layout-projects")} }
+                if snapshot.loaded && count > 0 {
+                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-1 text-[10px] tabular-nums text-muted-foreground", "{count}" }
+                }
+            }
+            div { class: "min-h-0 flex-1 overflow-y-auto",
+                div { class: "mx-auto w-full max-w-5xl px-5 py-5",
+                    div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
+                        if !snapshot.loaded || snapshot.loading {
+                            for width in ["w-28", "w-36", "w-24"] {
+                                div { class: "flex h-14 items-center gap-3 px-3",
+                                    Skeleton { class: "size-8 rounded-lg bg-foreground/[0.055]" }
+                                    Skeleton { class: "h-3 {width} bg-foreground/[0.06]" }
+                                }
+                            }
+                        } else if !snapshot.error.is_empty() {
+                            div { class: "flex min-h-28 items-center justify-center px-5 text-center text-xs text-muted-foreground", "{snapshot.error}" }
+                        } else if snapshot.entries.is_empty() {
+                            div { class: "flex min-h-28 items-center justify-center px-5 text-center text-xs text-muted-foreground", {translate("agent-project-none")} }
+                        } else {
+                            for entry in snapshot.entries.iter() {
+                                {
+                                    let url = entry.url.clone();
+                                    rsx! {
+                                        button {
+                                            key: "project-{entry.path}",
+                                            r#type: "button",
+                                            class: "group flex h-14 w-full min-w-0 items-center gap-3 px-3 text-left hover:bg-foreground/[0.04]",
+                                            title: "{entry.path}",
+                                            onclick: move |_| {
+                                                let _ = send(&OpenRequest {
+                                                    value: url.clone(),
+                                                    open: Some(OpenTarget::InPlace),
+                                                });
+                                            },
+                                            div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
+                                                TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-4".to_string() }
+                                            }
+                                            span { class: "min-w-0 flex-1 truncate text-sm font-medium", "{entry.name}" }
+                                            LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 -rotate-90 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100".to_string() }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[component]
 pub(super) fn ProjectDashboard() -> Element {
@@ -92,13 +169,7 @@ pub(super) fn ProjectDashboard() -> Element {
                 div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
                     TypeIcon { path: root(), is_dir: true, class: "size-5".to_string() }
                 }
-                div { class: "min-w-0 flex-1",
-                    h1 { class: "truncate text-sm font-semibold tracking-[-0.015em]", "{project_name}" }
-                    div { class: "flex min-w-0 items-center gap-2",
-                        span { class: "truncate font-mono text-[10px] text-muted-foreground", "{root}" }
-                        span { class: "hidden shrink-0 text-[10px] text-muted-foreground/55 sm:inline", {translate("start-tagline")} }
-                    }
-                }
+                h1 { class: "min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.015em]", title: "{root}", "{project_name}" }
                 Button {
                     variant: ButtonVariant::Primary,
                     size: ButtonSize::Sm,

@@ -30,6 +30,7 @@ impl Plugin for EditorPlugin {
         .add_plugins(panel::PanelPlugin)
         .add_plugins((
             page_open::PageOpenPlugin,
+            project::ProjectPagePlugin,
             file_lifecycle::FileLifecyclePlugin,
             workspace_edit::WorkspaceEditPlugin,
             feedback::Plugin,
@@ -89,6 +90,7 @@ pub(crate) mod page_open;
 pub(crate) mod panel;
 pub(crate) mod picker_driver;
 pub(crate) mod preview;
+pub(crate) mod project;
 pub(crate) mod search;
 pub(crate) mod status;
 pub(crate) mod viewport;

@@ -10,7 +10,7 @@ use super::input::{EditorFocus, EditorInput, PreeditField};
 use super::key::use_file_keys;
 use super::menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameInput};
 use super::note::{NoteBlankLine, NoteBlockView, NoteBlocks, NoteCursor, NoteProperties};
-use super::project::ProjectDashboard;
+use super::project::ProjectPage;
 use super::sidebar::{ExplorerPane, ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use super::state::FileUi;
 use super::status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
@@ -39,10 +39,11 @@ use vmux_ui::scroll::ScrollIntoView;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let projects = try_consume_context::<vmux_ecs::PageMetadata>()
-        .is_some_and(|metadata| metadata.url.trim_end_matches('/') == "vmux://projects");
-    if projects {
-        return rsx! { ProjectDashboard {} };
+    let project_url = try_consume_context::<vmux_ecs::PageMetadata>()
+        .map(|metadata| metadata.url)
+        .filter(|url| crate::project::ProjectRoute::is_page(url));
+    if let Some(project_url) = project_url {
+        return rsx! { ProjectPage { initial_detail: !crate::project::ProjectRoute::is_root(&project_url) } };
     }
     rsx! { EditorWorkspace {} }
 }

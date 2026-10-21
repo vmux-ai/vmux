@@ -8,6 +8,8 @@ use vmux_ecs::{LastVisitedAt, PageMetadata, Url};
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
+use crate::project::ProjectRoute;
+
 use super::editor::{FileNavigateRequest, FileView};
 use super::explorer::ExplorerState;
 use super::navigation::PendingGoto;
@@ -31,7 +33,6 @@ struct FileOpenContext<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     views: Query<'w, 's, (&'static FileView, &'static mut PageMetadata)>,
     visits: RecentVisits<'w, 's>,
-    focused_space: vmux_layout::space::FocusedSpace<'w, 's>,
     projects: Projects<'w, 's>,
     commands: Commands<'w, 's>,
     record_writer: MessageWriter<'w, vmux_ecs::event::RecordVisitRequest>,
@@ -92,7 +93,6 @@ fn handle_file(
     mut context: FileOpenContext,
 ) {
     for (entity, task) in &tasks {
-        let project_dir = context.focused_space.startup_dir();
         let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
         let knowledge_landing = if task.url.trim_end_matches('/')
             == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
@@ -103,7 +103,6 @@ fn handle_file(
         };
         let Some(target) = FilePageTarget::resolve(
             &task.url,
-            project_dir,
             context.projects.path(),
             &knowledge_root,
             knowledge_landing.as_deref(),
@@ -184,22 +183,19 @@ struct FilePageTarget {
 impl FilePageTarget {
     fn resolve(
         url: &str,
-        project_dir: Option<&Path>,
         projects: Result<&Path, String>,
         knowledge_root: &Path,
         knowledge_landing: Option<&Path>,
     ) -> Option<Self> {
-        if url.trim_end_matches('/') == super::ProjectsPage::MANIFEST.url.trim_end_matches('/') {
-            if let Some(project_dir) = project_dir {
-                return Some(Self {
-                    path: Some(project_dir.to_path_buf()),
-                    error: String::new(),
-                });
-            }
+        if ProjectRoute::is_page(url) {
             return Some(match projects {
-                Ok(projects) => Self {
-                    path: Some(projects.to_path_buf()),
-                    error: String::new(),
+                Ok(projects) => match ProjectRoute::resolve(url, projects) {
+                    Some(Ok(path)) => Self {
+                        path: Some(path),
+                        error: String::new(),
+                    },
+                    Some(Err(error)) => Self { path: None, error },
+                    None => return None,
                 },
                 Err(error) => Self { path: None, error },
             });

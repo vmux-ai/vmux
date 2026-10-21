@@ -15,6 +15,7 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 
 pub(crate) mod event;
 mod picker;
+pub(crate) mod project;
 mod text;
 
 #[cfg(ui)]
