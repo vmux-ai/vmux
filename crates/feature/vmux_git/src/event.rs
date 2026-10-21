@@ -88,6 +88,9 @@ pub struct GitBranchFileSelectRequest {
 #[vmux_api::ui_event]
 pub struct GitBranchFilesNextRequest;
 
+#[vmux_api::ui_event]
+pub struct GitBranchFilesRetryRequest;
+
 #[vmux_api::contract(Copy, Eq)]
 pub enum GitCatalog {
     LocalBranches,
@@ -110,12 +113,6 @@ pub struct GitDiffRevealRequest {
 
 #[vmux_api::ui_event]
 pub struct GitDiffNextRequest;
-
-#[vmux_api::ui_event(Eq)]
-pub struct GitDiffSeekRequest {
-    pub path: String,
-    pub path_bytes: Vec<u8>,
-}
 
 impl GitDiffRevealRequest {
     pub const CHUNK: u32 = 20;
@@ -354,6 +351,7 @@ pub struct GitRepositorySnapshot {
     pub repo_root: String,
     pub repo_name: String,
     pub is_worktree: bool,
+    pub head: String,
     pub branch: String,
     pub base_ref: String,
     pub upstream: String,

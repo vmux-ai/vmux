@@ -27,7 +27,7 @@ type ChangedCatalogPages<'w, 's> = Query<
     (
         Entity,
         &'static mut super::state::GitState,
-        &'static GitPageControllerState,
+        Ref<'static, GitPageControllerState>,
     ),
     Or<(
         Changed<super::state::GitState>,
@@ -37,15 +37,60 @@ type ChangedCatalogPages<'w, 's> = Query<
 
 fn sync_catalogs(mut pages: ChangedCatalogPages, mut commands: Commands) {
     for (entity, mut state, controller) in &mut pages {
-        let Some(repository) = state.snapshot.repository.as_ref() else {
-            continue;
+        let (current_branch, repo_root, commit_offset, selected_commit_missing, has_staged) = {
+            let Some(repository) = state.snapshot.repository.as_ref() else {
+                continue;
+            };
+            (
+                repository.branch.clone(),
+                repository.repo_root.clone(),
+                repository.commits.len(),
+                !controller.selected_commit.is_empty()
+                    && !repository
+                        .commits
+                        .iter()
+                        .any(|entry| entry.sha == controller.selected_commit),
+                repository.files.iter().any(|entry| entry.staged),
+            )
         };
-        let current_branch = repository.branch.clone();
-        let repo_root = repository.repo_root.clone();
-        let mut catalogs = vec![GitCatalog::LocalBranches];
-        if !controller.selected_commit.is_empty()
-            || repository.files.iter().any(|entry| entry.staged)
+        if controller.is_changed() {
+            let mut retries = vec![GitCatalog::LocalBranches];
+            match controller.focused_panel {
+                GitPanel::Branches => retries.push(controller.branch_collection.into()),
+                GitPanel::Commits => retries.push(GitCatalog::Commits),
+                GitPanel::Stash => retries.push(GitCatalog::Stashes),
+                GitPanel::Files => {}
+            }
+            retries.dedup();
+            for catalog in retries {
+                let progress = state.snapshot.catalog_mut(catalog);
+                if progress.failed {
+                    *progress = Default::default();
+                }
+            }
+        }
+        let commits = state.snapshot.commits;
+        if selected_commit_missing
+            && commits.loaded
+            && commits.has_more
+            && !commits.loading
+            && !commits.failed
         {
+            state.snapshot.commits.loading = true;
+            commands.spawn((
+                GitJob::new(entity),
+                GitRepository::at(repo_root.clone()),
+                CatalogJob {
+                    catalog: GitCatalog::Commits,
+                    current_branch: current_branch.clone(),
+                    offset: commit_offset,
+                    limit: CATALOG_PAGE_SIZE,
+                    revision: state.snapshot.nonce,
+                },
+            ));
+        }
+        let mut catalogs = vec![GitCatalog::LocalBranches];
+        if !controller.selected_commit.is_empty() || has_staged {
             catalogs.push(GitCatalog::Commits);
         }
         match controller.focused_panel {

@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{
-    DiffKind, DiffLine, GitBranchFilesNextRequest, GitDiffNextRequest, GitDiffRevealRequest,
-    GitDiffSeekRequest, GitLineMarker, GitLineStatus,
+    DiffKind, DiffLine, GitBranchFilesNextRequest, GitBranchFilesRetryRequest, GitDiffNextRequest,
+    GitDiffRevealRequest, GitLineMarker, GitLineStatus,
 };
 use crate::state::{GitPageControllerState, GitPanel};
 
@@ -24,14 +24,14 @@ impl Plugin for DiffPlugin {
         app.add_plugins(UiEventPlugin::<(
             GitDiffRevealRequest,
             GitDiffNextRequest,
-            GitDiffSeekRequest,
             GitBranchFilesNextRequest,
+            GitBranchFilesRetryRequest,
         )>::default())
             .add_observer(file_refresh)
             .add_observer(reveal)
             .add_observer(load_next)
-            .add_observer(queue_seek)
             .add_observer(load_next_branch_files)
+            .add_observer(retry_branch_files)
             .add_systems(
                 Update,
                 (
@@ -157,6 +157,7 @@ pub(super) struct GitDiffQuery {
 struct BranchDiffProgress {
     paths: Vec<Vec<u8>>,
     loaded: HashSet<Vec<u8>>,
+    in_flight: HashSet<Vec<u8>>,
     next: usize,
 }
 
@@ -167,6 +168,7 @@ impl BranchDiffProgress {
         Self {
             paths,
             loaded: HashSet::new(),
+            in_flight: HashSet::new(),
             next: 0,
         }
     }
@@ -176,7 +178,7 @@ impl BranchDiffProgress {
         while self.next < self.paths.len() && paths.len() < Self::PAGE_SIZE {
             let path = self.paths[self.next].clone();
             self.next += 1;
-            if self.loaded.insert(path.clone()) {
+            if !self.loaded.contains(&path) && self.in_flight.insert(path.clone()) {
                 paths.push(path);
             }
         }
@@ -185,24 +187,43 @@ impl BranchDiffProgress {
     }
 
     fn seek(&mut self, path: &[u8]) -> Option<(Vec<Vec<u8>>, bool)> {
-        if !self.loaded.insert(path.to_vec()) {
+        if !self.paths.iter().any(|candidate| candidate == path)
+            || self.loaded.contains(path)
+            || !self.in_flight.insert(path.to_vec())
+        {
             return None;
         }
         Some((vec![path.to_vec()], self.has_more()))
     }
 
     fn contains(&self, path: &[u8]) -> bool {
-        self.loaded.contains(path)
+        self.loaded.contains(path) || self.in_flight.contains(path)
+    }
+
+    fn complete(&mut self, paths: &[Vec<u8>], succeeded: bool) {
+        for path in paths {
+            self.in_flight.remove(path);
+            if succeeded {
+                self.loaded.insert(path.clone());
+            }
+        }
+        if !succeeded {
+            self.next = 0;
+        }
+        self.advance();
     }
 
     fn has_more(&self) -> bool {
         self.paths[self.next.min(self.paths.len())..]
             .iter()
-            .any(|path| !self.loaded.contains(path))
+            .any(|path| !self.loaded.contains(path) && !self.in_flight.contains(path))
     }
 
     fn advance(&mut self) {
-        while self.next < self.paths.len() && self.loaded.contains(&self.paths[self.next]) {
+        while self.next < self.paths.len()
+            && (self.loaded.contains(&self.paths[self.next])
+                || self.in_flight.contains(&self.paths[self.next]))
+        {
             self.next += 1;
         }
     }
@@ -266,6 +287,14 @@ impl GitDiffQuery {
         self.branch
             .as_ref()
             .is_some_and(|branch| branch.contains(path))
+    }
+
+    pub(super) fn complete_branch(&mut self, paths: &[Vec<u8>], succeeded: bool) -> bool {
+        let Some(branch) = self.branch.as_mut() else {
+            return false;
+        };
+        branch.complete(paths, succeeded);
+        branch.has_more()
     }
 }
 
@@ -429,6 +458,26 @@ fn load_next_branch_files(
     state.snapshot.branch_files_has_more = page.has_more;
 }
 
+fn retry_branch_files(
+    trigger: On<UiInput<GitBranchFilesRetryRequest>>,
+    mut states: Query<&mut super::state::GitState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(mut state) = states.get_mut(entity) else {
+        return;
+    };
+    if state.snapshot.branch_files_error.is_empty() {
+        return;
+    }
+    state.snapshot.branch_files_error.clear();
+    state.snapshot.branch_files_loading = false;
+    state.snapshot.diff_loading = true;
+    state.snapshot.diff_viewport = None;
+    state.snapshot.diff_rows.clear();
+    commands.entity(entity).remove::<GitBranchFilesQuery>();
+}
+
 fn load_next(
     trigger: On<UiInput<GitDiffNextRequest>>,
     mut pages: Query<(&mut super::state::GitState, &mut GitDiffQuery)>,
@@ -469,14 +518,6 @@ fn load_next(
             content,
         },
     ));
-}
-
-fn queue_seek(trigger: On<UiInput<GitDiffSeekRequest>>, mut commands: Commands) {
-    commands
-        .entity(trigger.event().webview)
-        .insert(PendingGitDiffSeek {
-            path_bytes: trigger.event().payload.path_bytes.clone(),
-        });
 }
 
 fn start_pending_seek(
@@ -819,6 +860,21 @@ mod tests {
 
         assert_eq!(second, [b"file-8.rs".to_vec()]);
         assert!(!second_has_more);
+    }
+
+    #[test]
+    fn failed_branch_diff_page_remains_retryable() {
+        let paths = (0..10)
+            .map(|index| format!("file-{index}.rs").into_bytes())
+            .collect();
+        let mut progress = BranchDiffProgress::new(paths);
+
+        let (first, _) = progress.next();
+        progress.complete(&first, false);
+        let (retry, has_more) = progress.next();
+
+        assert_eq!(retry, first);
+        assert!(has_more);
     }
 
     #[test]

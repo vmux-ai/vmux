@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::io::Write;
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -12,6 +14,8 @@ use similar::{ChangeTag, TextDiff};
 use crate::event::*;
 use crate::host::parse;
 
+const MAX_DIFF_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
 
@@ -19,6 +23,12 @@ pub(crate) struct BranchFilesPage {
     pub(crate) files: Vec<GitBranchFileEntry>,
     pub(crate) total: u32,
     pub(crate) has_more: bool,
+}
+
+struct BranchDiffContext {
+    merge_base: String,
+    selected: Option<String>,
+    submodules: Vec<(PathBuf, GitRepository, String)>,
 }
 
 pub(crate) enum GitCatalogPage {
@@ -386,14 +396,15 @@ impl GitRepository {
         let unstaged = self.diff_text(&target, false, 100_000)?;
         if unstaged.trim().is_empty() {
             if self.status(file)?.file_status == FileStatus::Untracked {
-                let content = std::fs::read_to_string(file).unwrap_or_default();
+                let content = self.read_diff_file(&target)?;
                 return self.diff_lines_with_content(file, &content);
             }
             return self.staged_only_lines(file, &target, &staged);
         }
         let ranges = parse::HunkRange::parse_all(&self.diff_text(&target, false, 0)?);
 
-        let new_spans = std::fs::read_to_string(file)
+        let new_spans = self
+            .read_diff_file(&target)
             .map(|content| crate::host::highlight::Highlighter::file(&content, file))
             .unwrap_or_default();
 
@@ -455,32 +466,11 @@ impl GitRepository {
         reference: &str,
         paths: &[Vec<u8>],
     ) -> Result<Vec<DiffLine>, GitError> {
-        let mut lines = Vec::new();
-        for path in paths {
-            let path = PathBuf::from(OsString::from_vec(path.clone()));
-            let stdout = self.branch_diff_text_for(reference, 3, Path::new(""), Some(&path))?;
-            if !stdout.trim().is_empty() {
-                lines.extend(self.highlight_diff(&stdout));
-                continue;
-            }
-            let absolute = self.0.join(&path);
-            if self.status(&absolute)?.file_status != FileStatus::Untracked {
-                continue;
-            }
-            lines.push(DiffLine {
-                kind: DiffKind::Hunk,
-                old_no: None,
-                new_no: None,
-                hunk: None,
-                spans: crate::host::highlight::Highlighter::line(
-                    &path.to_string_lossy(),
-                    &absolute,
-                ),
-            });
-            let content = std::fs::read_to_string(&absolute).unwrap_or_default();
-            lines.extend(self.diff_lines_with_content(&absolute, &content)?);
-        }
-        Ok(lines)
+        let paths = paths
+            .iter()
+            .map(|path| PathBuf::from(OsString::from_vec(path.clone())))
+            .collect::<Vec<_>>();
+        self.branch_diff_lines_for_paths_at(reference, Path::new(""), &paths)
     }
 
     pub(crate) fn branch_files_catalog(
@@ -577,16 +567,11 @@ impl GitRepository {
         context: u32,
         prefix: &Path,
     ) -> Result<String, GitError> {
-        self.branch_diff_text_for(reference, context, prefix, None)
+        let branch = self.branch_diff_context(reference)?;
+        self.branch_diff_text_with(&branch, context, prefix, &[])
     }
 
-    fn branch_diff_text_for(
-        &self,
-        reference: &str,
-        context: u32,
-        prefix: &Path,
-        target: Option<&Path>,
-    ) -> Result<String, GitError> {
+    fn branch_diff_context(&self, reference: &str) -> Result<BranchDiffContext, GitError> {
         let base = crate::host::worktree::BaseRef::resolve(&self.0)
             .ok_or_else(|| GitError("no base branch found".to_string()))?;
         let (merge_base, stderr, ok) =
@@ -598,24 +583,22 @@ impl GitRepository {
         let (head, _, head_ok) = GitCommand::read(&self.0, &["rev-parse", "HEAD"])?;
         let (selected, _, selected_ok) = GitCommand::read(&self.0, &["rev-parse", reference])?;
         let current = head_ok && selected_ok && head.trim() == selected.trim();
-        let submodules = if current {
-            self.branch_submodules()
-        } else {
-            Vec::new()
-        };
-        if let Some(target) = target {
-            for (path, repository, branch) in &submodules {
-                let Ok(nested_target) = target.strip_prefix(path) else {
-                    continue;
-                };
-                return repository.branch_diff_text_for(
-                    branch,
-                    context,
-                    &prefix.join(path),
-                    Some(nested_target),
-                );
-            }
-        }
+        Ok(BranchDiffContext {
+            merge_base: merge_base.trim().to_string(),
+            selected: (!current).then(|| reference.to_string()),
+            submodules: current
+                .then(|| self.branch_submodules())
+                .unwrap_or_default(),
+        })
+    }
+
+    fn branch_diff_text_with(
+        &self,
+        branch: &BranchDiffContext,
+        context: u32,
+        prefix: &Path,
+        targets: &[PathBuf],
+    ) -> Result<String, GitError> {
         let unified = format!("--unified={context}");
         let mut command = GitCommand::command(&self.0);
         command
@@ -630,15 +613,18 @@ impl GitRepository {
                 .arg(format!("--src-prefix=a/{prefix}/"))
                 .arg(format!("--dst-prefix=b/{prefix}/"));
         }
-        command.arg(merge_base);
-        if !current {
-            command.arg(reference);
+        command.arg(&branch.merge_base);
+        if let Some(selected) = &branch.selected {
+            command.arg(selected);
         }
-        if let Some(target) = target {
-            command.arg("--").arg(target);
-        } else if !submodules.is_empty() {
+        if !targets.is_empty() {
+            command.env("GIT_LITERAL_PATHSPECS", "1").arg("--");
+            for target in targets {
+                command.arg(target);
+            }
+        } else if !branch.submodules.is_empty() {
             command.arg("--").arg(".");
-            for (path, _, _) in &submodules {
+            for (path, _, _) in &branch.submodules {
                 command.arg(format!(":(exclude,literal){}", path.to_string_lossy()));
             }
         }
@@ -652,12 +638,12 @@ impl GitRepository {
             ));
         }
         let mut stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        for (path, repository, branch) in submodules {
-            if target.is_some() {
-                break;
-            }
+        if !targets.is_empty() {
+            return Ok(stdout);
+        }
+        for (path, repository, reference) in &branch.submodules {
             let nested_prefix = prefix.join(path);
-            let nested = repository.branch_diff_text_for(&branch, context, &nested_prefix, None)?;
+            let nested = repository.branch_diff_text(reference, context, &nested_prefix)?;
             if nested.trim().is_empty() {
                 continue;
             }
@@ -667,6 +653,166 @@ impl GitRepository {
             stdout.push_str(&nested);
         }
         Ok(stdout)
+    }
+
+    fn branch_diff_lines_for_paths_at(
+        &self,
+        reference: &str,
+        prefix: &Path,
+        paths: &[PathBuf],
+    ) -> Result<Vec<DiffLine>, GitError> {
+        let branch = self.branch_diff_context(reference)?;
+        let mut root_paths = Vec::new();
+        let mut nested_paths = vec![Vec::new(); branch.submodules.len()];
+        for path in paths {
+            if !Self::safe_relative_path(path) {
+                return Err(GitError("invalid branch diff path".to_string()));
+            }
+            let mut nested = false;
+            for (index, (submodule, _, _)) in branch.submodules.iter().enumerate() {
+                let Ok(path) = path.strip_prefix(submodule) else {
+                    continue;
+                };
+                if path.as_os_str().is_empty() {
+                    continue;
+                }
+                nested_paths[index].push(path.to_path_buf());
+                nested = true;
+                break;
+            }
+            if !nested {
+                root_paths.push(path.clone());
+            }
+        }
+        let mut lines = if root_paths.is_empty() {
+            Vec::new()
+        } else {
+            let stdout = self.branch_diff_text_with(&branch, 3, prefix, &root_paths)?;
+            self.highlight_diff(&stdout)
+        };
+        if branch.selected.is_none() && !root_paths.is_empty() {
+            let untracked = self.untracked_paths()?;
+            for path in &root_paths {
+                if untracked.contains(&path_bytes(path)) {
+                    lines.extend(self.untracked_diff_lines(prefix, path)?);
+                }
+            }
+        }
+        for (index, (path, repository, reference)) in branch.submodules.iter().enumerate() {
+            if nested_paths[index].is_empty() {
+                continue;
+            }
+            lines.extend(repository.branch_diff_lines_for_paths_at(
+                reference,
+                &prefix.join(path),
+                &nested_paths[index],
+            )?);
+        }
+        Ok(lines)
+    }
+
+    fn untracked_paths(&self) -> Result<HashSet<Vec<u8>>, GitError> {
+        let (stdout, stderr, ok) = GitCommand::read_bytes(
+            &self.0,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+        )?;
+        if !ok {
+            return Err(GitCommand::error(
+                &String::from_utf8_lossy(&stdout),
+                &stderr,
+            ));
+        }
+        Ok(stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .map(<[u8]>::to_vec)
+            .collect())
+    }
+
+    fn untracked_diff_lines(&self, prefix: &Path, path: &Path) -> Result<Vec<DiffLine>, GitError> {
+        let absolute = self.0.join(path);
+        let content = self.read_diff_file(path)?;
+        let display = prefix.join(path);
+        let mut lines = vec![DiffLine {
+            kind: DiffKind::Hunk,
+            old_no: None,
+            new_no: None,
+            hunk: None,
+            spans: crate::host::highlight::Highlighter::line(&display.to_string_lossy(), &absolute),
+        }];
+        let spans = crate::host::highlight::Highlighter::file(&content, &absolute);
+        for (index, text) in content.lines().enumerate() {
+            lines.push(DiffLine {
+                kind: DiffKind::Add,
+                old_no: None,
+                new_no: Some(u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1)),
+                hunk: None,
+                spans: spans
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| crate::host::highlight::Highlighter::line(text, &absolute)),
+            });
+        }
+        Ok(lines)
+    }
+
+    fn read_diff_file(&self, path: &Path) -> Result<String, GitError> {
+        if !Self::safe_relative_path(path) {
+            return Err(GitError("invalid branch diff path".to_string()));
+        }
+        let root = self
+            .0
+            .canonicalize()
+            .map_err(|error| GitError(format!("failed to resolve repository: {error}")))?;
+        let absolute = self.0.join(path);
+        let parent = absolute
+            .parent()
+            .ok_or_else(|| GitError("invalid branch diff path".to_string()))?
+            .canonicalize()
+            .map_err(|error| GitError(format!("failed to resolve file parent: {error}")))?;
+        if !parent.starts_with(&root) {
+            return Err(GitError("branch diff path escapes repository".to_string()));
+        }
+        let metadata = std::fs::symlink_metadata(&absolute)
+            .map_err(|error| GitError(format!("failed to inspect diff file: {error}")))?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(GitError("branch diff only reads regular files".to_string()));
+        }
+        if metadata.len() > MAX_DIFF_FILE_BYTES {
+            return Err(GitError("branch diff file is too large".to_string()));
+        }
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&absolute)
+            .map_err(|error| GitError(format!("failed to open diff file: {error}")))?;
+        let opened = file
+            .metadata()
+            .map_err(|error| GitError(format!("failed to inspect opened diff file: {error}")))?;
+        if !opened.file_type().is_file() || opened.len() > MAX_DIFF_FILE_BYTES {
+            return Err(GitError(
+                "branch diff only reads bounded regular files".to_string(),
+            ));
+        }
+        let mut bytes = Vec::with_capacity(opened.len() as usize);
+        Read::by_ref(&mut file)
+            .take(MAX_DIFF_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| GitError(format!("failed to read diff file: {error}")))?;
+        if bytes.len() as u64 > MAX_DIFF_FILE_BYTES {
+            return Err(GitError("branch diff file is too large".to_string()));
+        }
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    fn safe_relative_path(path: &Path) -> bool {
+        !path.as_os_str().is_empty()
+            && path.components().all(|component| {
+                matches!(
+                    component,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            })
     }
 
     fn branch_submodules(&self) -> Vec<(PathBuf, Self, String)> {
@@ -914,7 +1060,7 @@ impl GitRepository {
         if self.diff_text(target, true, 0)?.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let content = std::fs::read_to_string(file).unwrap_or_default();
+        let content = self.read_diff_file(target).unwrap_or_default();
         let spans = crate::host::highlight::Highlighter::file(&content, file);
         let lines = content
             .lines()
@@ -1483,6 +1629,7 @@ impl GitRepositorySnapshot {
             ));
         }
         let parsed = parse::ParsedStatuses::parse(&stdout);
+        let head = parsed.oid.clone();
         let branch = parsed.branch.clone();
         let upstream = parsed.upstream.clone();
         let ahead = parsed.ahead;
@@ -1498,6 +1645,7 @@ impl GitRepositorySnapshot {
             repo_root: repo_root.to_string_lossy().to_string(),
             repo_name,
             is_worktree,
+            head,
             branch,
             base_ref,
             upstream,
@@ -1550,6 +1698,8 @@ mod tests {
 
     use std::ffi::OsStr;
     use std::fs::{FileTimes, OpenOptions};
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -1878,6 +2028,30 @@ mod tests {
     }
 
     #[test]
+    fn branch_diff_paths_are_literal_git_pathspecs() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), ":(glob)**", "literal\n");
+        test_repo::write(repo.path(), "other.txt", "other\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "files"]);
+        test_repo::run(repo.path(), &["switch", "-q", "main"]);
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b":(glob)**".to_vec()])
+            .unwrap();
+        let files = lines
+            .iter()
+            .filter_map(DiffLine::file_path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, [":(glob)**"]);
+    }
+
+    #[test]
     fn current_branch_diff_page_includes_untracked_file() {
         let repo = test_repo::init();
         test_repo::write(repo.path(), "base.txt", "base\n");
@@ -1892,6 +2066,43 @@ mod tests {
 
         assert_eq!(lines.first().and_then(DiffLine::file_path), Some("new.txt"));
         assert!(lines.iter().any(|line| matches!(line.kind, DiffKind::Add)));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn current_branch_diff_rejects_untracked_symlink() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        let secret = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(secret.path(), "private").unwrap();
+        symlink(secret.path(), repo.path().join("linked.txt")).unwrap();
+
+        let error = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"linked.txt".to_vec()])
+            .unwrap_err();
+
+        assert!(error.0.contains("regular files"));
+        assert!(!error.0.contains("private"));
+    }
+
+    #[test]
+    fn current_branch_diff_rejects_oversized_untracked_file() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        let file = std::fs::File::create(repo.path().join("large.bin")).unwrap();
+        file.set_len(MAX_DIFF_FILE_BYTES + 1).unwrap();
+
+        let error = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"large.bin".to_vec()])
+            .unwrap_err();
+
+        assert!(error.0.contains("too large"));
     }
 
     #[test]

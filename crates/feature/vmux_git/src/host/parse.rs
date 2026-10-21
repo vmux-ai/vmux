@@ -13,6 +13,7 @@ pub struct ParsedStatus {
 }
 
 pub struct ParsedStatuses {
+    pub oid: String,
     pub branch: String,
     pub upstream: String,
     pub ahead: u32,
@@ -75,6 +76,7 @@ impl ParsedStatuses {
     }
 
     pub fn parse(out: &[u8]) -> Self {
+        let mut oid = String::new();
         let mut branch = String::new();
         let mut upstream = String::new();
         let mut ahead = 0u32;
@@ -86,7 +88,9 @@ impl ParsedStatuses {
 
         let mut records = out.split(|byte| *byte == 0);
         while let Some(record) = records.next() {
-            if let Some(rest) = record.strip_prefix(b"# branch.head ") {
+            if let Some(rest) = record.strip_prefix(b"# branch.oid ") {
+                oid = String::from_utf8_lossy(rest).trim().to_string();
+            } else if let Some(rest) = record.strip_prefix(b"# branch.head ") {
                 branch = String::from_utf8_lossy(rest).trim().to_string();
             } else if let Some(rest) = record.strip_prefix(b"# branch.upstream ") {
                 upstream = String::from_utf8_lossy(rest).trim().to_string();
@@ -177,6 +181,7 @@ impl ParsedStatuses {
         }
 
         Self {
+            oid,
             branch,
             upstream,
             ahead,

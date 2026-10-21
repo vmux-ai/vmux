@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use dioxus::prelude::*;
-use vmux_ui::components::button::{Button, ButtonVariant};
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::diff::DiffTone;
@@ -205,6 +205,30 @@ pub fn DiffView(
         .unwrap_or(0);
     let gw = maxno.max(1).to_string().len().max(3);
     let total_rows = u32::try_from(rows.len()).unwrap_or(u32::MAX);
+    let has_error = !error.is_empty();
+    use_effect(use_reactive!(|(
+        has_more,
+        loading,
+        total_rows,
+        has_error,
+    )| {
+        let _ = total_rows;
+        if !has_more || loading || has_error {
+            return;
+        }
+        spawn(async move {
+            let mut eval = document::eval(
+                "requestAnimationFrame(() => { const element = document.getElementById('git-diff-viewport'); dioxus.send(Boolean(element && element.scrollHeight <= element.clientHeight + 1)); });",
+            );
+            if eval
+                .recv::<bool>()
+                .await
+                .is_ok_and(|underfilled| underfilled)
+            {
+                let _ = send(&GitDiffNextRequest);
+            }
+        });
+    }));
     let ends: Vec<Option<u32>> = rows
         .iter()
         .enumerate()
@@ -220,6 +244,7 @@ pub fn DiffView(
     rsx! {
         div {
             key: "{identity}",
+            id: "git-diff-viewport",
             class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             onscroll: move |event| {
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
@@ -236,7 +261,19 @@ pub fn DiffView(
                     }
                 }
             } else if !error.is_empty() {
-                div { class: "p-3 font-sans text-xs text-ansi-1", "{error}" }
+                div { class: "flex flex-col items-start gap-2 p-3 font-sans text-xs text-ansi-1",
+                    span { "{error}" }
+                    if has_more {
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Xs,
+                            onclick: move |_| {
+                                let _ = send(&GitDiffNextRequest);
+                            },
+                            {translate("common-retry")}
+                        }
+                    }
+                }
             } else if rows.is_empty() {
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
             }

@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+use chrono::{Datelike, Duration, Utc};
 use serde::Deserialize;
 use vmux_session::ProviderSession;
 
@@ -75,6 +76,9 @@ impl Reader {
             let Some(previous) = self.previous.get(id) else {
                 continue;
             };
+            if !self.cached_rollout_exists(id, previous) {
+                continue;
+            }
             metadata.insert(
                 id.clone(),
                 CodexMeta {
@@ -159,6 +163,38 @@ impl Reader {
             }
         }
         metadata
+    }
+
+    fn cached_rollout_exists(&self, id: &str, previous: &ProviderSession) -> bool {
+        let Some(created_at) = chrono::DateTime::<Utc>::from_timestamp_millis(previous.created_at)
+        else {
+            return false;
+        };
+        for offset in [-1, 0, 1] {
+            let date = created_at.date_naive() + Duration::days(offset);
+            let directory = self
+                .sessions
+                .join(format!("{:04}", date.year()))
+                .join(format!("{:02}", date.month()))
+                .join(format!("{:02}", date.day()));
+            let Ok(entries) = std::fs::read_dir(directory) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                if !kind.is_file() || kind.is_symlink() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.ends_with(&format!("-{id}.jsonl")) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -267,17 +303,21 @@ mod tests {
     }
 
     #[test]
-    fn codex_reader_reuses_known_metadata_without_rollout_scan() {
+    fn codex_reader_reuses_known_metadata_when_rollout_still_exists() {
         let fixture = Fixture::new();
         fixture.write(
             "session_index.jsonl",
             r#"{"id":"01a14fcc-f46a-7c12-b000-779be98d72ae","thread_name":"Updated title","updated_at":"2026-10-21T03:00:00Z"}
 "#,
         );
+        fixture.write(
+            "sessions/2026/10/21/rollout-2026-10-21T02-59-50-01a14fcc-f46a-7c12-b000-779be98d72ae.jsonl",
+            "not read while cached\n",
+        );
         let previous = ProviderSession {
             sid: "01a14fcc-f46a-7c12-b000-779be98d72ae".into(),
             cwd: "/work/vmux".into(),
-            created_at: 10,
+            created_at: Timestamp::parse("2026-10-21T02:59:50Z"),
             ..Default::default()
         };
 
@@ -289,6 +329,29 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].cwd, "/work/vmux");
         assert_eq!(sessions[0].name, "Updated title");
+    }
+
+    #[test]
+    fn codex_reader_drops_cached_metadata_after_rollout_removal() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "session_index.jsonl",
+            r#"{"id":"01a14fcc-f46a-7c12-b000-779be98d72ae","thread_name":"Removed","updated_at":"2026-10-21T03:00:00Z"}
+"#,
+        );
+        let previous = ProviderSession {
+            sid: "01a14fcc-f46a-7c12-b000-779be98d72ae".into(),
+            cwd: "/work/vmux".into(),
+            created_at: Timestamp::parse("2026-10-21T02:59:50Z"),
+            ..Default::default()
+        };
+
+        let sessions = Reader::at(fixture.path())
+            .with_previous(&[previous])
+            .read()
+            .unwrap();
+
+        assert!(sessions.is_empty());
     }
 
     #[test]

@@ -6,12 +6,10 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::page::PageReady;
 
-use crate::event::GitDiffRow;
 #[cfg(test)]
 use crate::event::GitDiffViewport;
 use crate::event::{
-    DiffKind, GitDiffRevealRequest, GitOperationError, GitOperationResult, GitRepositoryRequest,
-    GitRepositorySnapshot,
+    GitOperationError, GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
 };
 use crate::state::{
     GitCatalogProgress, GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState,
@@ -122,9 +120,11 @@ impl GitStates<'_, '_> {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return;
         };
+        let mut preserve_catalogs = false;
         if let Some(previous) = state.snapshot.repository.take()
             && previous.repo_root == event.repo_root
         {
+            preserve_catalogs = previous.head == event.head;
             event.commits = previous.commits;
             event.branches = previous.branches;
             event.remote_branches = previous.remote_branches;
@@ -133,11 +133,13 @@ impl GitStates<'_, '_> {
         }
         state.snapshot.workspace.clone_from(&event.repo_root);
         state.snapshot.repository = Some(event);
-        state.snapshot.local_branches = GitCatalogProgress::default();
-        state.snapshot.remote_branches = GitCatalogProgress::default();
-        state.snapshot.tags = GitCatalogProgress::default();
-        state.snapshot.commits = GitCatalogProgress::default();
-        state.snapshot.stashes = GitCatalogProgress::default();
+        if !preserve_catalogs {
+            state.snapshot.local_branches = GitCatalogProgress::default();
+            state.snapshot.remote_branches = GitCatalogProgress::default();
+            state.snapshot.tags = GitCatalogProgress::default();
+            state.snapshot.commits = GitCatalogProgress::default();
+            state.snapshot.stashes = GitCatalogProgress::default();
+        }
         state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
         state.snapshot.loading = false;
         state.snapshot.message.clear();
@@ -189,6 +191,12 @@ impl GitStates<'_, '_> {
         }
         if event.ok {
             state.snapshot.message.clear();
+            if !matches!(
+                event.operation.as_str(),
+                "stage" | "unstage" | "discard" | "stage all" | "hunk"
+            ) {
+                state.snapshot.invalidate_catalogs();
+            }
         } else {
             state.snapshot.message.clone_from(&event.message);
         }
@@ -253,61 +261,9 @@ fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
         if !state.is_changed() && !revealed.is_changed() {
             continue;
         }
-        let Some(viewport) = state.snapshot.diff_viewport.as_ref() else {
-            if !state.snapshot.diff_rows.is_empty() {
-                state.snapshot.diff_rows.clear();
-            }
-            continue;
-        };
-        let lines = &viewport.lines;
-        let mut visible = vec![false; lines.len()];
-        for (index, line) in lines.iter().enumerate() {
-            if matches!(line.kind, DiffKind::Context) {
-                continue;
-            }
-            let start = index.saturating_sub(DIFF_CONTEXT_LINES);
-            let end = (index + DIFF_CONTEXT_LINES + 1).min(lines.len());
-            visible[start..end].fill(true);
-        }
-        for (start, end) in &revealed.0 {
-            let start = (*start).min(lines.len());
-            let end = (*end).min(lines.len());
-            if start < end {
-                visible[start..end].fill(true);
-            }
-        }
-
-        let mut rows = Vec::new();
-        let mut index = 0;
-        while index < lines.len() {
-            if visible[index] {
-                rows.push(GitDiffRow::Line(index as u32));
-                index += 1;
-                continue;
-            }
-            let start = index;
-            while index < lines.len() && !visible[index] {
-                index += 1;
-            }
-            let hidden = index - start;
-            let chunk = GitDiffRevealRequest::CHUNK as usize;
-            let (reveal_start, reveal_end) = if hidden <= chunk {
-                (start, index)
-            } else if start == 0 {
-                (index - chunk, index)
-            } else {
-                (start, start + chunk)
-            };
-            rows.push(GitDiffRow::Gap {
-                start: start as u32,
-                end: index as u32,
-                reveal_start: reveal_start as u32,
-                reveal_end: reveal_end as u32,
-            });
-        }
-        if state.snapshot.diff_rows != rows {
-            state.snapshot.diff_rows = rows;
-        }
+        state
+            .snapshot
+            .project_diff_rows(&revealed.0, DIFF_CONTEXT_LINES);
     }
 }
 
@@ -434,7 +390,7 @@ fn publish(views: GitStateQuery, mut commands: Commands) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::DiffLine;
+    use crate::event::{DiffKind, DiffLine, GitDiffRevealRequest, GitDiffRow};
     use crate::host::repository::test_repo;
 
     fn line(kind: DiffKind, number: u32) -> DiffLine {

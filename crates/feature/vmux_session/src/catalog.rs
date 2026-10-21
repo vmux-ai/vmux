@@ -347,13 +347,14 @@ fn project(
         });
     }
     for session in &providers.sessions {
-        let stage_override = provider_stages
-            .iter()
-            .find(|(kind, id, _, _, source_updated_at)| {
-                kind.0 == session.kind
-                    && id.0 == session.sid
-                    && source_updated_at.0 >= session.updated_at
-            });
+        let stage_override =
+            provider_stages
+                .iter()
+                .find(|(kind, id, _, changed_at, source_updated_at)| {
+                    kind.0 == session.kind
+                        && id.0 == session.sid
+                        && source_updated_at.0.max(changed_at.0) >= session.updated_at
+                });
         let stage = stage_override
             .map(|(_, _, stage, _, _)| stage.0.0.clone())
             .unwrap_or_else(|| default_stage.clone());
@@ -621,6 +622,44 @@ mod tests {
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
         assert_eq!(session.stage, "done");
         assert!(session.stage_changed_at > archived_at);
+    }
+
+    #[test]
+    fn legacy_provider_stage_uses_transition_time_as_source_fallback() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "External task".into(),
+                cwd: "/tmp/project".into(),
+                updated_at: 10,
+                ..Default::default()
+            });
+        app.world_mut().spawn((
+            ProviderStage,
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-session".into()),
+            Stage(StageId("done".into())),
+            StageChangedAt(20),
+            SourceUpdatedAt(0),
+        ));
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "done");
+        assert_eq!(session.stage_changed_at, 20);
+
+        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 21;
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "in_progress");
+        assert_eq!(session.stage_changed_at, 21);
     }
 
     #[test]

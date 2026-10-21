@@ -111,15 +111,22 @@ pub(super) fn BranchesCard(
     let mut file_query = use_signal(String::new);
     let query = file_query().trim().to_lowercase();
     let files_empty = files.is_empty();
+    let files_loaded = files.len();
     let visible_files = files
         .into_iter()
         .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
         .collect::<Vec<_>>();
-    use_effect(move || {
+    use_effect(use_reactive!(|(
+        query,
+        files_has_more,
+        files_loading,
+        files_loaded,
+    )| {
+        let _ = files_loaded;
         if !query.is_empty() && files_has_more && !files_loading {
             let _ = send(&GitBranchFilesNextRequest);
         }
-    });
+    }));
     let selected = if collection == GitBranchCollection::Local {
         repository
             .branches
@@ -260,7 +267,17 @@ pub(super) fn BranchesCard(
                         }
                     }
                 } else if !files_error.is_empty() {
-                    div { class: "px-2.5 py-3 text-xs text-destructive", "{files_error}" }
+                    div { class: "flex flex-col items-start gap-2 px-2.5 py-3 text-xs text-destructive",
+                        span { "{files_error}" }
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Xs,
+                            onclick: move |_| {
+                                let _ = send(&GitBranchFilesRetryRequest);
+                            },
+                            {translate("common-retry")}
+                        }
+                    }
                 } else if visible_files.is_empty() {
                     div { class: "flex min-h-24 items-center justify-center px-3 text-center text-xs text-muted-foreground", {translate("git-no-changes")} }
                 } else {
@@ -288,7 +305,6 @@ pub(super) fn BranchesCard(
 fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Element {
     let selected = selected_path_bytes == entry.path_bytes;
     let path_bytes = entry.path_bytes.clone();
-    let seek_path = entry.path.clone();
     let row_id = entry.row_id();
     let status_code = entry.change.code();
     let status_class = entry.change.class();
@@ -303,10 +319,6 @@ fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Ele
             },
             onclick: move |_| {
                 let _ = send(&GitBranchFileSelectRequest {
-                    path_bytes: path_bytes.clone(),
-                });
-                let _ = send(&GitDiffSeekRequest {
-                    path: seek_path.clone(),
                     path_bytes: path_bytes.clone(),
                 });
             },

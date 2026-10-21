@@ -16,6 +16,9 @@ use crate::event::{
     GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
     GitRepositorySnapshot,
 };
+use crate::state::{GitDiffAppend, GitUiState};
+
+const DIFF_CONTEXT_LINES: usize = 3;
 
 pub(super) struct JobPlugin;
 
@@ -165,7 +168,10 @@ struct BranchFilesOutput {
 }
 
 #[derive(Component)]
-struct DiffOutput(GitDiffViewport);
+struct DiffOutput {
+    viewport: GitDiffViewport,
+    branch_paths: Vec<Vec<u8>>,
+}
 
 #[derive(Component, Clone, Debug)]
 struct OperationOutput {
@@ -374,29 +380,49 @@ fn deliver_diff_outputs(
         &mut super::state::GitDiffRevealRanges,
     )>,
     mut files: super::status::FileGitStates,
-    diffs: Query<&super::diff::GitDiffQuery>,
+    mut diffs: Query<&mut super::diff::GitDiffQuery>,
     mut commands: Commands,
 ) {
     for (entity, job, output) in &outputs {
         let webview = job.webview;
-        let event = &output.0;
-        let Ok(query) = diffs.get(webview) else {
+        let Ok(mut query) = diffs.get_mut(webview) else {
             commands.entity(entity).despawn();
             continue;
         };
+        let succeeded = output.viewport.error.is_empty();
+        let mut event = output.viewport.clone();
+        if !query.accepts(event.generation) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let branch_has_more = query.complete_branch(&output.branch_paths, succeeded);
+        if !succeeded && !output.branch_paths.is_empty() {
+            event.total_lines = event.first_line;
+            event.has_more = branch_has_more;
+        }
         if let Ok((mut view, mut revealed)) = views.get_mut(webview) {
-            if query.accepts(event.generation) {
+            if view.snapshot.can_append_diff(&event) {
+                let snapshot = &mut view.bypass_change_detection().snapshot;
+                snapshot.diff_loading = false;
+                snapshot.append_diff(&event);
+                snapshot.project_diff_rows(&revealed.0, DIFF_CONTEXT_LINES);
+                commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                    webview,
+                    &GitDiffAppend {
+                        viewport: event,
+                        rows: snapshot.diff_rows.clone(),
+                    },
+                ));
+            } else {
                 view.snapshot.diff_loading = false;
-                if !view.snapshot.append_diff(event) {
-                    view.snapshot.diff_viewport = Some(event.clone());
-                    revealed.0.clear();
-                }
+                view.snapshot.diff_viewport = Some(event);
+                revealed.0.clear();
             }
             commands.entity(entity).despawn();
             continue;
         }
-        if files.accepts_diff(webview, event.generation, query) {
-            files.apply_diff(webview, event.clone());
+        if files.accepts_diff(webview, event.generation, &query) {
+            files.apply_diff(webview, event);
         }
         commands.entity(entity).despawn();
     }
@@ -433,6 +459,17 @@ fn deliver_branch_files_outputs(
             Err(error) => {
                 state.snapshot.branch_files_has_more = false;
                 state.snapshot.branch_files_error.clone_from(&error.message);
+                state.snapshot.diff_loading = false;
+                state.snapshot.diff_rows.clear();
+                state.snapshot.diff_viewport = Some(GitDiffViewport {
+                    generation: output.generation,
+                    first_line: 0,
+                    total_lines: 0,
+                    has_more: false,
+                    lines: Vec::new(),
+                    markers: Vec::new(),
+                    error: error.message.clone(),
+                });
             }
         }
         state.snapshot.branch_files_loading = false;
@@ -634,15 +671,18 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
             if !GitRepository::has_repository(repository.path()) {
-                return DiffOutput(GitDiffViewport {
-                    generation: job.generation,
-                    first_line: job.top_line,
-                    total_lines: 0,
-                    has_more: false,
-                    lines: Vec::new(),
-                    markers: Vec::new(),
-                    error: String::new(),
-                });
+                return DiffOutput {
+                    viewport: GitDiffViewport {
+                        generation: job.generation,
+                        first_line: job.top_line,
+                        total_lines: 0,
+                        has_more: false,
+                        lines: Vec::new(),
+                        markers: Vec::new(),
+                        error: String::new(),
+                    },
+                    branch_paths: job.branch_paths,
+                };
             }
             let result = match &job.scope {
                 DiffScope::File => match job.content.as_deref() {
@@ -682,25 +722,31 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                                 lines,
                             )
                         };
-                    DiffOutput(GitDiffViewport {
-                        generation: job.generation,
-                        first_line,
-                        total_lines,
-                        has_more,
-                        lines,
-                        markers,
-                        error: String::new(),
-                    })
+                    DiffOutput {
+                        viewport: GitDiffViewport {
+                            generation: job.generation,
+                            first_line,
+                            total_lines,
+                            has_more,
+                            lines,
+                            markers,
+                            error: String::new(),
+                        },
+                        branch_paths: job.branch_paths,
+                    }
                 }
-                Err(error) => DiffOutput(GitDiffViewport {
-                    generation: job.generation,
-                    first_line: job.top_line,
-                    total_lines: 0,
-                    has_more: false,
-                    lines: Vec::new(),
-                    markers: Vec::new(),
-                    error: error.0,
-                }),
+                Err(error) => DiffOutput {
+                    viewport: GitDiffViewport {
+                        generation: job.generation,
+                        first_line: job.top_line,
+                        total_lines: 0,
+                        has_more: false,
+                        lines: Vec::new(),
+                        markers: Vec::new(),
+                        error: error.0,
+                    },
+                    branch_paths: job.branch_paths,
+                },
             }
         });
         commands
@@ -1030,7 +1076,7 @@ mod tests {
         mut captured: ResMut<CapturedOutputs>,
     ) {
         for output in &diffs {
-            captured.diffs.push(output.0.clone());
+            captured.diffs.push(output.viewport.clone());
         }
         for output in &operations {
             captured.operations.push(output.clone());
