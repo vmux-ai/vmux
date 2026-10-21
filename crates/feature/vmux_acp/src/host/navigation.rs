@@ -24,7 +24,6 @@ use super::navigation_driver::{AcpCatalog, AgentPageOpenWorkspace, PageOpener};
 use crate::AcpSessionId;
 #[cfg(test)]
 use crate::host::acp::registry::RegistryAgent;
-use vmux_terminal::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
@@ -192,13 +191,11 @@ fn prepare(
             continue;
         }
         if metadata.is_none()
-            && AgentCwd::from_tab(tab.startup_dir.as_deref())
-                .stored()
+            && vmux_space::WorkspaceCwd::from_tab(tab.startup_dir.as_deref())
                 .ok()
                 .flatten()
                 .is_none()
-            && AgentCwd::from_tab(Some(&workspace.project_dir))
-                .stored()
+            && vmux_space::WorkspaceCwd::from_tab(Some(&workspace.project_dir))
                 .ok()
                 .flatten()
                 .is_none()
@@ -301,7 +298,7 @@ fn open(
             if let Some(cwd) = restored_cwd {
                 cwd
             } else {
-                match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
+                match vmux_space::WorkspaceCwd::from_tab(tab_dir.as_deref()) {
                     Ok(Some(path)) => path,
                     Ok(None) => match space_startup_dir {
                         Some(dir) => dir.path,

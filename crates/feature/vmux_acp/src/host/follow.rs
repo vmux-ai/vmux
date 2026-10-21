@@ -242,8 +242,11 @@ mod tests {
     use crate::host::test_support::test_settings;
     use vmux_api::protocol::{AgentFileSearch, AgentFileTouched, AgentRequestId, ProcessId};
     use vmux_layout::pane::PaneSplit;
-    use vmux_terminal::AgentCwd;
-    use vmux_terminal::{AgentRun, PlacementMode};
+
+    #[vmux_api::agent]
+    struct AgentRunProbe {
+        anchor: ProcessId,
+    }
 
     #[test]
     fn file_touch_url_builds_goto_fragment() {
@@ -756,11 +759,10 @@ mod tests {
             mut captured: ResMut<CapturedRunCwd>,
         ) {
             for request in reader.read() {
-                if matches!(request.decode::<AgentRun>(), Ok(Some(_))) {
+                if matches!(request.decode::<AgentRunProbe>(), Ok(Some(_))) {
                     let tab = tabs.get(run_tab.0).unwrap();
-                    captured.0 = AgentCwd::from_tab(tab.startup_dir.as_deref())
-                        .or_agent_launch(None)
-                        .ok();
+                    captured.0 =
+                        vmux_space::WorkspaceCwd::resolve(tab.startup_dir.as_deref(), None).ok();
                 }
             }
         }
@@ -835,17 +837,7 @@ mod tests {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                request: AgentRequest::encode(&AgentRun {
-                    anchor,
-                    command: "pwd".into(),
-                    direction: vmux_layout::AgentPaneDirection::Right,
-                    focus: false,
-                    beside: None,
-                    mode: PlacementMode::Auto,
-                    terminal: None,
-                    done_marker: None,
-                })
-                .unwrap(),
+                request: AgentRequest::encode(&AgentRunProbe { anchor }).unwrap(),
             });
 
         app.update();

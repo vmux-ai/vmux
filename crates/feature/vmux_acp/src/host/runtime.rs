@@ -5,13 +5,10 @@ use vmux_ecs::ProcessId;
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::team::Profile;
-use vmux_ecs::{Cwd, EntityTarget, LastActivatedAt, PageMetadata, ProcessAnchor};
+use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
 use vmux_git::worktree::ValidatedLinkedWorkspace;
-use vmux_layout::pane::PanePlacement;
-use vmux_layout::stack::Stack;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::TabWorktreeReady;
-use vmux_terminal::ReattachedTerminalBundle;
 
 use super::handoff::PendingHandoff;
 #[cfg(test)]
@@ -53,7 +50,7 @@ pub(super) fn add(app: &mut App) {
                     workspace,
                     (config.in_set(AcpSessionConfigSet), selection).chain(),
                     session,
-                    terminal,
+                    present_process,
                 )
                     .after(ServiceMessageSet),
             ),
@@ -332,14 +329,11 @@ fn session(
     }
 }
 
-fn terminal(
+fn present_process(
     mut reader: MessageReader<AcpTerminalCreated>,
     sessions: Query<(Entity, &SessionId), With<Session>>,
-    stacks: Query<(Entity, &EntityTarget<Session>)>,
-    mut ctx: PanePlacement,
     mut commands: Commands,
 ) {
-    let mut split_batch = std::collections::HashSet::new();
     for ev in reader.read() {
         let Some(session_entity) = sessions
             .iter()
@@ -348,30 +342,10 @@ fn terminal(
         else {
             continue;
         };
-        let Some(stack) = stacks
-            .iter()
-            .find(|(_, target)| target.entity() == session_entity)
-            .map(|(stack, _)| stack)
-        else {
-            continue;
-        };
-        let Ok(agent_pane) = ctx.child_of_q.get(stack).map(|child_of| child_of.parent()) else {
-            continue;
-        };
-        let target_pane = ctx.resolve_spiral(
-            agent_pane,
-            vmux_terminal::TerminalPlugin::URL,
-            false,
-            &mut split_batch,
-        );
-        let tab = commands
-            .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
-            .id();
-        commands.spawn((
-            ReattachedTerminalBundle::new(ev.process_id),
-            vmux_terminal::RetainOnProcessExit,
-            ChildOf(tab),
-        ));
+        commands.trigger(ProcessPresentationRequest {
+            owner: session_entity,
+            process_id: ev.process_id,
+        });
     }
 }
 
@@ -466,7 +440,6 @@ fn close_on_remove(
 mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use vmux_api::protocol::AcpSessionConfigValue;
-    use vmux_layout::pane::Pane;
 
     use super::*;
 
@@ -986,61 +959,6 @@ mod tests {
         let model = state.category("model").unwrap();
         assert_eq!(model.current_value, "fable");
         assert!(state.pending.is_empty());
-    }
-
-    #[test]
-    fn acp_terminal_stack_does_not_take_focus_from_agent() {
-        let mut app = App::new();
-        app.add_message::<AcpTerminalCreated>()
-            .add_systems(Update, terminal);
-        let tab = app.world_mut().spawn(Tab::bundle()).id();
-        let pane = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
-        let session = app
-            .world_mut()
-            .spawn(TestSession::bundle("claude", "s1", "/tmp"))
-            .id();
-        let agent = app
-            .world_mut()
-            .spawn((
-                Stack::bundle(),
-                LastActivatedAt(10),
-                ChildOf(pane),
-                EntityTarget::<Session>::new(session),
-            ))
-            .id();
-        app.world_mut().entity_mut(agent).insert(PageMetadata {
-            url: "vmux://sessions/claude".into(),
-            ..default()
-        });
-        app.world_mut().write_message(AcpTerminalCreated {
-            sid: "s1".into(),
-            process_id: ProcessId::new(),
-        });
-
-        app.update();
-
-        let stack_times = {
-            let world = app.world_mut();
-            let mut query = world.query_filtered::<(Entity, &LastActivatedAt), With<Stack>>();
-            query
-                .iter(world)
-                .map(|(entity, activated)| (entity, activated.0))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            stack_times
-                .iter()
-                .find(|(entity, _)| *entity == agent)
-                .map(|(_, activated)| *activated),
-            Some(10)
-        );
-        assert_eq!(
-            stack_times
-                .iter()
-                .find(|(entity, _)| *entity != agent)
-                .map(|(_, activated)| *activated),
-            Some(0)
-        );
     }
 
     #[test]

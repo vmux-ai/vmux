@@ -103,6 +103,7 @@ impl Plugin for TerminalPlugin {
         .add_observer(open)
         .add_observer(contribute)
         .add_observer(activate)
+        .add_observer(super::presentation::present)
         .register_persisted::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
         .add_message::<TerminalStackSpawnRequest>()
@@ -280,7 +281,7 @@ impl Plugin for TerminalInputPlugin {
 }
 
 fn prewarm(settings: Res<AppSettings>) {
-    super::LoginShellEnvironment::prewarm(TerminalBundle::default_shell(&settings));
+    vmux_process::LoginShellEnvironment::prewarm(TerminalBundle::default_shell(&settings));
 }
 
 fn initialize_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
@@ -920,7 +921,7 @@ fn send_service_requests(
     for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         let mut env = launch.env.clone();
         if agent_run {
-            super::LoginShellEnvironment::merge(
+            vmux_process::LoginShellEnvironment::merge(
                 &mut env,
                 &TerminalBundle::default_shell(&settings),
             );
@@ -1773,7 +1774,10 @@ fn restart_pty(
         }
     };
     if agent_run {
-        super::LoginShellEnvironment::merge(&mut env, &TerminalBundle::default_shell(&settings));
+        vmux_process::LoginShellEnvironment::merge(
+            &mut env,
+            &TerminalBundle::default_shell(&settings),
+        );
     }
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));

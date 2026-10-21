@@ -53,11 +53,11 @@ app = [
     "dep:vmux_layout",
     "dep:vmux_mcp",
     "dep:vmux_path",
+    "dep:vmux_process",
     "dep:vmux_session",
     "dep:vmux_setting",
     "dep:vmux_space",
     "dep:vmux_start",
-    "dep:vmux_terminal",
     "dep:vmux_team",
     "dep:vmux_tool",
     "dep:vmux_ui",
@@ -110,7 +110,6 @@ vmux_transport = { path = "../../util/vmux_transport", optional = true }
 vmux_session = { path = "../vmux_session", default-features = false, optional = true }
 vmux_setting = { path = "../vmux_setting", optional = true }
 vmux_space = { path = "../vmux_space", optional = true }
-vmux_terminal = { path = "../vmux_terminal", optional = true }
 vmux_team = { path = "../vmux_team", optional = true }
 vmux_tool = { path = "../vmux_tool", optional = true }
 

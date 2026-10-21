@@ -25,7 +25,7 @@ fn start(
     let Some(agents) = profile.paths().map(|paths| paths.agents()) else {
         return;
     };
-    let shell = vmux_terminal::AgentTerminalShell::configured(&settings).into_string();
+    let shell = settings.shell();
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let mut active_jobs: Vec<(AcpInstallKey, Entity)> = jobs
         .iter()

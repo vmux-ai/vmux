@@ -120,6 +120,13 @@ pub enum UpdateChannel {
 }
 
 impl AppSettings {
+    pub fn shell(&self) -> String {
+        self.terminal
+            .as_ref()
+            .map(|terminal| terminal.resolve_theme(&terminal.default_theme).shell)
+            .unwrap_or_else(TerminalTheme::default_shell)
+    }
+
     pub fn space(&self, space_id: &str) -> Option<&SpaceOverrides> {
         space_override(self, space_id)
     }

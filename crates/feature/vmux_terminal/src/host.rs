@@ -1,7 +1,5 @@
 pub use agent::{AgentNewTerminalTab, AgentRunShell, AgentShellMode, AgentTerminalSend};
-pub use agent_run::{
-    AgentCwd, AgentRun, AgentRunWithPlacementOverride, AgentTerminalShell, PlacementMode,
-};
+pub use agent_run::{AgentRun, AgentRunWithPlacementOverride, PlacementMode};
 pub use component::{
     AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal,
     TerminalUiStateUpdates,
@@ -15,7 +13,6 @@ pub use plugin::{
 };
 pub use process_control::TerminalGridSize;
 pub use request::{RunShellRequest, ShellMode, TerminalRequestPlugin, TerminalSendRequest};
-pub use shell_env::LoginShellEnvironment;
 pub use theme::{TerminalFontSizeCommand, TerminalThemePlugin};
 pub use tool::TerminalToolPlugin;
 
@@ -30,12 +27,12 @@ mod loading;
 mod mouse;
 pub(crate) mod pid;
 pub(crate) mod plugin;
+mod presentation;
 mod process_control;
 pub(crate) mod process_monitor;
 mod process_sampler;
 mod request;
 mod service;
-mod shell_env;
 pub(crate) mod snapshot;
 mod state;
 pub(crate) mod theme;

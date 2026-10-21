@@ -32,6 +32,8 @@ pub use page_open::{
 pub use primitives::PrimitivesPlugin;
 pub use process_id::ProcessId;
 #[cfg(all(host, feature = "host"))]
+pub use process_id::ProcessPresentationRequest;
+#[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStatePlugin, UiStateWrite};
 #[cfg(all(host, feature = "host"))]
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};

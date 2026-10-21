@@ -123,7 +123,7 @@ fn resolve_acp_install(
         .as_ref()
         .map(|resolved| resolved.package_added)
         .unwrap_or(false);
-    let login_env = vmux_terminal::LoginShellEnvironment::get(&request.shell);
+    let login_env = vmux_process::LoginShellEnvironment::get(&request.shell);
     let launch = match resolved {
         Ok(resolved) => Ok(AcpLaunch {
             command: resolved.command,
@@ -182,7 +182,7 @@ impl AcpLaunch {
         settings: Option<&AppSettings>,
     ) -> ClientMessage {
         let shell = settings
-            .map(|settings| vmux_terminal::AgentTerminalShell::configured(settings).into_string())
+            .map(AppSettings::shell)
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
         let mcp = crate::mcp_driver::McpLaunchSpec::acp(&cwd.0, anchor.0, &shell)
             .resolve()

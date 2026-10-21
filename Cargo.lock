@@ -10191,7 +10191,6 @@ dependencies = [
  "vmux_space",
  "vmux_start",
  "vmux_team",
- "vmux_terminal",
  "vmux_tool",
  "vmux_transport",
  "vmux_ui",
