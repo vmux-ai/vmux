@@ -84,7 +84,7 @@ struct PendingImport {
 
 #[derive(Component)]
 struct Runtime {
-    changes: Mutex<mpsc::Receiver<HashSet<SourceKind>>>,
+    changes: Mutex<mpsc::Receiver<SourceChanges>>,
     watcher: Option<RecommendedWatcher>,
     watched: HashMap<PathBuf, bool>,
 }
@@ -334,27 +334,26 @@ impl<R: BufRead> Iterator for BoundedLines<R> {
 }
 
 struct SourceWatchEvents {
-    sender: mpsc::Sender<SourceKind>,
-    receiver: mpsc::Receiver<HashSet<SourceKind>>,
+    sender: mpsc::Sender<SourceChange>,
+    receiver: mpsc::Receiver<SourceChanges>,
 }
 
 impl SourceWatchEvents {
     fn start(proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
-        let (input_tx, input_rx) = mpsc::channel::<SourceKind>();
-        let (output_tx, output_rx) = mpsc::channel::<HashSet<SourceKind>>();
+        let (input_tx, input_rx) = mpsc::channel::<SourceChange>();
+        let (output_tx, output_rx) = mpsc::channel::<SourceChanges>();
         let worker = std::thread::Builder::new()
             .name("vmux-acp-session-watch-debounce".to_string())
             .spawn(move || {
-                while let Ok(source) = input_rx.recv() {
+                while let Ok(change) = input_rx.recv() {
                     let started = Instant::now();
-                    let mut sources = HashSet::from([source]);
+                    let mut changes = SourceChanges::default();
+                    changes.insert(change);
                     let mut disconnected = false;
                     while let Some(remaining) = SCAN_MAX_LATENCY.checked_sub(started.elapsed()) {
                         let timeout = SCAN_DEBOUNCE.min(remaining);
                         match input_rx.recv_timeout(timeout) {
-                            Ok(source) => {
-                                sources.insert(source);
-                            }
+                            Ok(change) => changes.insert(change),
                             Err(mpsc::RecvTimeoutError::Timeout) => break,
                             Err(mpsc::RecvTimeoutError::Disconnected) => {
                                 disconnected = true;
@@ -362,7 +361,7 @@ impl SourceWatchEvents {
                             }
                         }
                     }
-                    if output_tx.send(sources).is_err() {
+                    if output_tx.send(changes).is_err() {
                         break;
                     }
                     if let Some(proxy) = proxy.as_ref() {
@@ -380,6 +379,39 @@ impl SourceWatchEvents {
             sender: input_tx,
             receiver: output_rx,
         }
+    }
+}
+
+enum SourceChange {
+    Scan(SourceKind),
+    CodexActivity(PathBuf),
+}
+
+#[derive(Default)]
+struct SourceChanges {
+    scans: HashSet<SourceKind>,
+    codex_activity: HashSet<PathBuf>,
+}
+
+impl SourceChanges {
+    fn insert(&mut self, change: SourceChange) {
+        match change {
+            SourceChange::Scan(source) => {
+                self.scans.insert(source);
+            }
+            SourceChange::CodexActivity(path) => {
+                self.codex_activity.insert(path);
+            }
+        }
+    }
+
+    fn extend(&mut self, changes: Self) {
+        self.scans.extend(changes.scans);
+        self.codex_activity.extend(changes.codex_activity);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.scans.is_empty() && self.codex_activity.is_empty()
     }
 }
 
@@ -407,9 +439,12 @@ fn start(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
                     .all(|path| path.starts_with(watched_paths.codex.join("sessions")))
             {
                 sources.remove(&SourceKind::Codex);
+                for path in event.paths {
+                    let _ = sender.send(SourceChange::CodexActivity(path));
+                }
             }
             for source in sources {
-                let _ = sender.send(source);
+                let _ = sender.send(SourceChange::Scan(source));
             }
         });
     let mut runtime = Runtime {
@@ -429,26 +464,42 @@ fn start(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
 fn watch(
     runtime: Single<(Entity, &mut Runtime, &SourcePaths)>,
     mut requested: Query<&mut ScanRequested>,
+    mut snapshot: ResMut<SourceSnapshot>,
     mut commands: Commands,
 ) {
     let (entity, mut runtime, paths) = runtime.into_inner();
-    let mut changed = HashSet::new();
+    let mut changes = SourceChanges::default();
     {
-        let Ok(changes) = runtime.changes.lock() else {
+        let Ok(receiver) = runtime.changes.lock() else {
             return;
         };
-        while let Ok(sources) = changes.try_recv() {
-            changed.extend(sources);
+        while let Ok(received) = receiver.try_recv() {
+            changes.extend(received);
         }
     }
-    if changed.is_empty() {
+    if changes.is_empty() {
         return;
     }
     runtime.ensure_watches(paths);
+    for path in changes.codex_activity {
+        let Some(activity) = codex::RolloutActivity::read(&path) else {
+            continue;
+        };
+        let Some(sessions) = snapshot.0.get_mut(&SourceKind::Codex) else {
+            changes.scans.insert(SourceKind::Codex);
+            continue;
+        };
+        if !activity.refresh(sessions) {
+            changes.scans.insert(SourceKind::Codex);
+        }
+    }
+    if changes.scans.is_empty() {
+        return;
+    }
     if let Ok(mut requested) = requested.get_mut(entity) {
-        requested.0.extend(changed);
+        requested.0.extend(changes.scans);
     } else {
-        commands.entity(entity).insert(ScanRequested(changed));
+        commands.entity(entity).insert(ScanRequested(changes.scans));
     }
 }
 

@@ -72,19 +72,20 @@ impl Reader {
     ) -> Result<HashMap<String, CodexMeta>, String> {
         let mut metadata = HashMap::new();
         let mut missing = indexed.keys().cloned().collect::<HashSet<_>>();
-        let cached_rollouts = self.cached_rollout_ids(indexed)?;
+        let cached_rollouts = self.cached_rollouts(indexed)?;
         for id in indexed.keys() {
             let Some(previous) = self.previous.get(id) else {
                 continue;
             };
-            if !cached_rollouts.contains(id) {
+            let Some(updated_at) = cached_rollouts.get(id) else {
                 continue;
-            }
+            };
             metadata.insert(
                 id.clone(),
                 CodexMeta {
                     cwd: previous.cwd.clone(),
                     created_at: previous.created_at,
+                    updated_at: *updated_at,
                 },
             );
             missing.remove(id);
@@ -129,14 +130,12 @@ impl Reader {
                 if files > Self::MAX_SESSION_FILES {
                     break 'walk;
                 }
-                let known_id = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .and_then(|stem| stem.get(stem.len().saturating_sub(36)..))
-                    .filter(|id| missing.contains(*id));
-                let Some(known_id) = known_id else {
+                let Some(activity) = RolloutActivity::read(&path) else {
                     continue;
                 };
+                if !missing.contains(&activity.sid) {
+                    continue;
+                }
                 let Ok(file) = File::open(&path) else {
                     continue;
                 };
@@ -146,18 +145,20 @@ impl Reader {
                 let Ok(envelope) = serde_json::from_str::<CodexMetaLine>(&line) else {
                     continue;
                 };
-                if envelope.payload.session_id != known_id || envelope.payload.cwd.trim().is_empty()
+                if envelope.payload.session_id != activity.sid
+                    || envelope.payload.cwd.trim().is_empty()
                 {
                     continue;
                 }
                 metadata.insert(
-                    known_id.to_string(),
+                    activity.sid.clone(),
                     CodexMeta {
                         cwd: envelope.payload.cwd,
                         created_at: Timestamp::parse(&envelope.payload.timestamp),
+                        updated_at: activity.updated_at,
                     },
                 );
-                missing.remove(known_id);
+                missing.remove(&activity.sid);
                 if missing.is_empty() {
                     break 'walk;
                 }
@@ -166,10 +167,10 @@ impl Reader {
         Ok(metadata)
     }
 
-    fn cached_rollout_ids(
+    fn cached_rollouts(
         &self,
         indexed: &HashMap<String, CodexIndexed>,
-    ) -> Result<HashSet<String>, String> {
+    ) -> Result<HashMap<String, i64>, String> {
         let mut directories = HashMap::<PathBuf, HashSet<String>>::new();
         let mut unresolved = HashSet::new();
         for id in indexed.keys() {
@@ -192,7 +193,7 @@ impl Reader {
                 directories.entry(directory).or_default().insert(id.clone());
             }
         }
-        let mut found = HashSet::new();
+        let mut found = HashMap::new();
         let mut entries_seen = 0usize;
         let mut files = 0usize;
         'walk: for (directory, expected) in directories {
@@ -233,18 +234,14 @@ impl Reader {
                 if files > Self::MAX_SESSION_FILES {
                     break 'walk;
                 }
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                let Some(stem) = name.strip_suffix(".jsonl") else {
+                let path = entry.path();
+                let Some(activity) = RolloutActivity::read(&path) else {
                     continue;
                 };
-                let Some(id) = stem.get(stem.len().saturating_sub(36)..) else {
-                    continue;
-                };
-                if expected.contains(id) {
-                    let id = id.to_string();
+                if expected.contains(&activity.sid) {
+                    let id = activity.sid;
                     if unresolved.remove(&id) {
-                        found.insert(id);
+                        found.insert(id, activity.updated_at);
                         remaining -= 1;
                         if unresolved.is_empty() {
                             break 'walk;
@@ -277,13 +274,46 @@ impl ProviderReader for Reader {
                 name: indexed.title.clone(),
                 cwd: metadata.cwd.clone(),
                 created_at: metadata.created_at,
-                updated_at: indexed.updated_at,
+                updated_at: indexed.updated_at.max(metadata.updated_at),
                 conversation_title: indexed.title.clone(),
                 last_prompt: indexed.title,
                 ..Default::default()
             });
         }
         Ok(sessions)
+    }
+}
+
+pub(super) struct RolloutActivity {
+    sid: String,
+    updated_at: i64,
+}
+
+impl RolloutActivity {
+    pub(super) fn read(path: &Path) -> Option<Self> {
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return None;
+        }
+        let stem = path.file_stem()?.to_str()?;
+        let start = stem.len().checked_sub(36)?;
+        let sid = stem.get(start..)?.to_string();
+        let updated_at = metadata
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_millis()
+            .min(i64::MAX as u128) as i64;
+        Some(Self { sid, updated_at })
+    }
+
+    pub(super) fn refresh(&self, sessions: &mut [ProviderSession]) -> bool {
+        let Some(session) = sessions.iter_mut().find(|session| session.sid == self.sid) else {
+            return false;
+        };
+        session.updated_at = session.updated_at.max(self.updated_at);
+        true
     }
 }
 
@@ -314,6 +344,7 @@ struct CodexMetaPayload {
 struct CodexMeta {
     cwd: String,
     created_at: i64,
+    updated_at: i64,
 }
 
 #[cfg(test)]
@@ -364,6 +395,26 @@ mod tests {
         assert_eq!(sessions[0].sid, "01a14fcc-f46a-7c12-b000-779be98d72ae");
         assert_eq!(sessions[0].cwd, "/work/vmux");
         assert_eq!(sessions[0].name, "Casual greeting");
+    }
+
+    #[test]
+    fn codex_reader_uses_rollout_activity_after_the_index_timestamp() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "session_index.jsonl",
+            r#"{"id":"01a14fcc-f46a-7c12-b000-779be98d72ae","thread_name":"Resumed task","updated_at":"1970-01-01T00:00:01Z"}
+"#,
+        );
+        fixture.write(
+            "sessions/2026/10/02/rollout-2026-10-02T12-44-37-01a14fcc-f46a-7c12-b000-779be98d72ae.jsonl",
+            r#"{"type":"session_meta","payload":{"session_id":"01a14fcc-f46a-7c12-b000-779be98d72ae","timestamp":"2026-10-02T10:44:37.930Z","cwd":"/work/vmux"}}
+"#,
+        );
+
+        let sessions = Reader::at(fixture.path()).read().unwrap();
+
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions[0].updated_at > Timestamp::parse("1970-01-01T00:00:01Z"));
     }
 
     #[test]
