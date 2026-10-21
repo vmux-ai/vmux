@@ -6,6 +6,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_
 
 use crate::event::{SessionRepositories, SessionRepository};
 
+#[derive(Clone, PartialEq)]
 pub(super) struct ManagerPresentation {
     pub snapshot: CatalogSnapshot,
     pub repositories: SessionRepositories,
@@ -19,6 +20,14 @@ pub(super) struct ManagerPresentation {
 }
 
 impl ManagerPresentation {
+    pub fn stage_observations(snapshot: &CatalogSnapshot) -> HashMap<String, String> {
+        snapshot
+            .sessions
+            .iter()
+            .map(|session| (session.id.clone(), session.stage.clone()))
+            .collect()
+    }
+
     pub fn new(
         mut snapshot: CatalogSnapshot,
         repositories: SessionRepositories,
@@ -545,6 +554,7 @@ impl AgentPresentation {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub(super) struct SessionPresentation {
     pub context: SessionContext,
     pub stage_target: StageTarget,
@@ -579,6 +589,7 @@ impl SessionPresentation {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub(super) struct StageVisual {
     pub dot: &'static str,
 }
@@ -597,6 +608,7 @@ impl StageVisual {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub(super) struct RuntimeVisual {
     pub dot: &'static str,
     pub visible: bool,

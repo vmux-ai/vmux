@@ -9,7 +9,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::{KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenTarget};
-use vmux_ecs::{UiState, UiStateWrite};
+use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
     AgentId, CatalogSnapshot, CleanupRequest, CreateRequest, Created, DescriptionUpdateRequest,
@@ -23,7 +23,7 @@ use crate::event::{
     SessionsCleanup, SessionsCreate, SessionsDescriptionUpdate, SessionsRename,
     SessionsStageChange,
 };
-use crate::state::ChatUiState;
+use crate::state::{ChatUiState, SessionCatalogUiState};
 
 pub(super) struct CatalogPlugin;
 
@@ -33,6 +33,7 @@ impl Plugin for CatalogPlugin {
             .init_resource::<DirectoryRevision>()
             .init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
+            .add_plugins(UiStatePlugin::<SessionCatalogUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 SessionsCreate,
                 SessionsChooseDirectory,
@@ -65,10 +66,10 @@ impl Plugin for CatalogPlugin {
 #[require(SessionCatalogView)]
 pub struct SessionManagerView;
 
-type SessionManagerUiState = UiState<ChatUiState>;
+type SessionCatalogUiStateComponent = UiState<SessionCatalogUiState>;
 
 #[derive(Component, Default)]
-#[require(SessionManagerUiState)]
+#[require(SessionCatalogUiStateComponent)]
 pub struct SessionCatalogView;
 
 #[derive(Resource, Default)]
@@ -341,8 +342,10 @@ fn publish(
         return;
     }
     for target in &targets {
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, &*catalog));
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+            target, &*catalog,
+        ));
+        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
             target,
             &*repositories,
         ));
@@ -424,8 +427,10 @@ fn ready(
         return;
     }
     commands.entity(target).insert(SessionCatalogView);
-    commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, &*catalog));
-    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+    commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+        target, &*catalog,
+    ));
+    commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
         target,
         &*repositories,
     ));
@@ -467,8 +472,11 @@ mod tests {
     struct Published(Vec<Entity>);
 
     impl Published {
-        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut published: ResMut<Published>) {
-            if trigger.event().update().sessions.is_some() {
+        fn record(
+            trigger: On<UiStateWrite<SessionCatalogUiState>>,
+            mut published: ResMut<Published>,
+        ) {
+            if trigger.event().update().catalog.is_some() {
                 published.0.push(trigger.event().webview());
             }
         }

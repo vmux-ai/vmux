@@ -17,6 +17,7 @@
                 "PageReady",
                 "ThemeUiState",
                 "ChatUiState",
+                "SessionCatalogUiState",
                 "SelectMode",
                 "ChatHistoryMoreRequest",
                 "ChatSubmit",

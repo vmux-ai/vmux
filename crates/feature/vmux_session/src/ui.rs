@@ -14,7 +14,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ChatUiState", "KeyClaimsUiState"],
+    states = ["ThemeUiState", "ChatUiState", "SessionCatalogUiState", "KeyClaimsUiState"],
     subtree,
     preserve_title,
     no_favicon,
@@ -36,10 +36,11 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
+    let catalog = vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();
-    let details = chat.session_details(&session_id);
+    let details = catalog.state.read().session_details(&session_id);
     let details_available = details.is_some();
     let mut details_open = use_signal(|| false);
 
@@ -79,6 +80,7 @@ mod error;
 mod item;
 mod keys;
 mod manager;
+mod manager_controller;
 mod manager_model;
 mod scroll;
 mod state;

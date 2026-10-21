@@ -219,7 +219,7 @@
                 "ThemeUiState",
                 "FileUiState",
                 "ProjectUiState",
-                "ChatUiState",
+                "SessionCatalogUiState",
                 "GitUiState",
                 "GitRepositoryRequest",
                 "OpenRequest",

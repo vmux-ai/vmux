@@ -8,7 +8,7 @@ use vmux_git::event::GitRepositoryRequest;
 use vmux_git::state::GitUiState;
 use vmux_session::SessionSummary;
 use vmux_session::event::ResumeSession;
-use vmux_session::state::ChatUiState;
+use vmux_session::state::SessionCatalogUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
@@ -269,7 +269,8 @@ fn ProjectAddItem(
 #[component]
 pub(super) fn ProjectDashboard() -> Element {
     let files = FileUi::use_root();
-    let sessions = use_ui_state::<ChatUiState>();
+    let sessions = use_ui_state::<SessionCatalogUiState>();
+    let session_catalog = sessions.use_selector(|state| state.catalog.clone());
     let git = use_ui_state::<GitUiState>();
     let directory = files.use_value(|state| state.document.directory.as_ref());
     let open_editors = files.use_value(|state| state.explorer.open_editors.as_ref());
@@ -298,16 +299,13 @@ pub(super) fn ProjectDashboard() -> Element {
         let _ = send(&GitRepositoryRequest { path: root });
     });
 
-    let session_state = sessions.state.read();
-    let related_sessions = session_state
-        .sessions
+    let related_sessions = session_catalog()
         .sessions
         .iter()
         .filter(|session| ProjectPath::contains(&root(), &session.cwd))
         .take(8)
         .cloned()
         .collect::<Vec<_>>();
-    drop(session_state);
     let recent_files = open_editors
         .read()
         .as_ref()

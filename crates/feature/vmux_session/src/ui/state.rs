@@ -1,6 +1,5 @@
 use super::format::{ImportedMessages, ResumeMenuState};
 use super::scroll;
-use crate::event::SessionRepository;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachments, ChatBranchesState, ChatComposerEffect,
     ChatComposerMenuKind, ChatComposerMenuRequest, ChatComposerMenuState, ChatDraftChanged,
@@ -14,7 +13,6 @@ use crate::state::ChatUiState;
 use crate::tab::Accent;
 use dioxus::prelude::*;
 use vmux_api::mcp::McpServersUiState;
-use vmux_session::{SessionSummary, StageSummary};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
 use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state};
@@ -245,21 +243,6 @@ impl ChatMenu {
 }
 
 impl Chat {
-    pub fn session_details(
-        &self,
-        id: &str,
-    ) -> Option<(SessionSummary, Option<SessionRepository>, Vec<StageSummary>)> {
-        let state = self.root.read();
-        let session = state
-            .sessions
-            .sessions
-            .iter()
-            .find(|session| session.id == id)?
-            .clone();
-        let repository = state.session_repositories.get(id);
-        Some((session, repository, state.sessions.stages.clone()))
-    }
-
     pub fn agent(&self) -> String {
         self.identity.id()
     }

@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use dioxus::prelude::*;
 use vmux_session::{SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
@@ -12,188 +10,162 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
-use vmux_ui::hooks::{OptimisticMap, send, use_optimistic_map, use_theme, use_ui_state};
+use vmux_ui::hooks::{send, use_optimistic_map, use_theme, use_ui_state};
 use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use crate::event::{
-    ChatOpenPage, ResumeSession, SessionRepositories, SessionRepository, SessionsCleanup,
-    SessionsDescriptionUpdate, SessionsStageChange,
+    ChatOpenPage, SessionRepositories, SessionRepository, SessionsDescriptionUpdate,
+    SessionsStageChange,
 };
-use crate::state::ChatUiState;
+use crate::state::SessionCatalogUiState;
 
+use super::manager_controller::*;
 use super::manager_model::*;
 
 #[component]
 pub fn SessionsManager() -> Element {
     use_theme();
-    let ui = use_ui_state::<ChatUiState>();
-    let mut query = use_signal(String::new);
-    let mut view = use_signal(ManagerView::default);
-    let mut filters = use_signal(SessionFilters::default);
-    let mut filter_step = use_signal(|| SessionFilterStep::Field);
-    let mut filter_value = use_signal(String::new);
-    let state = ui.state.read();
-    let snapshot = state.sessions.clone();
-    let repositories = state.session_repositories.clone();
-    drop(state);
-    let observed_stages = snapshot
-        .sessions
-        .iter()
-        .map(|session| (session.id.clone(), session.stage.clone()))
-        .collect::<HashMap<_, _>>();
-    let optimistic_stages = use_optimistic_map(observed_stages);
-    let mutations = SessionStageMutations {
-        optimistic: optimistic_stages,
-        leaving: use_signal(HashSet::new),
-    };
+    let ui = use_ui_state::<SessionCatalogUiState>();
+    let controls = ManagerControls::use_state();
+    let catalog = ui.use_selector(|state| state.catalog.clone());
+    let repositories = ui.use_selector(|state| state.repositories.clone());
+    let snapshot = catalog();
+    let repositories = repositories();
+    let optimistic_stages = use_optimistic_map(ManagerPresentation::stage_observations(&snapshot));
+    let mutations = SessionStageMutations::new(optimistic_stages);
     use_context_provider(|| mutations);
-    let applied_filters = filters();
+    let filters = controls.filters();
     let presentation = ManagerPresentation::new(
         snapshot,
         repositories,
-        &query(),
-        &applied_filters,
+        &controls.query(),
+        &filters,
         |id, stage| optimistic_stages.value(id, stage),
     );
-    let ManagerPresentation {
-        snapshot,
-        repositories,
-        category_groups,
-        groups,
-        selected_filters,
-        selected_stage,
-        filter_requested,
-        filter_needle,
-        visible_sessions,
-    } = presentation;
     rsx! {
         ManagerPage {
-            ManagerToolbar {
-                Dropdown {
-                    open: filter_requested,
-                    class: "min-w-0 flex-1".to_string(),
-                    keyboard_navigation: true,
-                    on_dismiss: move |_| {
-                        query.set(String::new());
-                        filter_step.set(SessionFilterStep::Field);
-                        filter_value.set(String::new());
-                    },
-                    ManagerSearch {
-                        value: query(),
-                        placeholder: translate("sessions-search"),
-                        onsearch: move |event: FormEvent| query.set(event.value()),
-                        onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
-                            if event.key() == Key::Backspace && query().is_empty() {
-                                filters.write().pop();
-                            }
-                        })),
-                        prefix: rsx! {
-                            for (index, presentation) in selected_filters.iter().cloned().enumerate() {
-                                FilterPill {
-                                    key: "filter-pill-{index}",
-                                    label: presentation.label,
-                                    dot: presentation.dot,
-                                    clear_label: translate("common-remove-filter"),
-                                    onclear: move |_| filters.write().remove(index),
-                                }
-                            }
-                        },
-                        suffix: rsx! {
-                            FilterTrigger {
-                                active: filter_requested,
-                                label: translate("common-filter"),
-                                onclick: move |_| {
-                                    if filter_requested {
-                                        query.set(String::new());
-                                    } else {
-                                        query.set("#".to_string());
-                                    }
-                                    filter_step.set(SessionFilterStep::Field);
-                                    filter_value.set(String::new());
-                                },
-                            }
-                        },
-                    }
-                    if filter_requested {
-                        SessionFilterMenu {
-                            groups: category_groups.clone(),
-                            sessions: snapshot.sessions.clone(),
-                            repositories: repositories.clone(),
-                            needle: filter_needle,
-                            step: filter_step(),
-                            value: filter_value(),
-                            onstep: move |step| {
-                                filter_step.set(step);
-                                filter_value.set(String::new());
-                                query.set("#".to_string());
-                            },
-                            onvalue: move |value| filter_value.set(value),
-                            onselect: move |selected| {
-                                filters.write().upsert(selected);
-                                query.set(String::new());
-                                filter_step.set(SessionFilterStep::Field);
-                                filter_value.set(String::new());
-                            },
+            SessionsManagerToolbar { controls, presentation: presentation.clone() }
+            SessionsManagerContent { controls, presentation }
+        }
+    }
+}
+
+#[component]
+fn SessionsManagerToolbar(controls: ManagerControls, presentation: ManagerPresentation) -> Element {
+    rsx! {
+        ManagerToolbar {
+            Dropdown {
+                open: presentation.filter_requested,
+                class: "min-w-0 flex-1".to_string(),
+                keyboard_navigation: true,
+                on_dismiss: move |_| controls.dismiss_filter(),
+                ManagerSearch {
+                    value: controls.query(),
+                    placeholder: translate("sessions-search"),
+                    onsearch: move |event: FormEvent| controls.set_query(event.value()),
+                    onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                        if event.key() == Key::Backspace && controls.query().is_empty() {
+                            controls.pop_filter();
                         }
-                    }
-                }
-                ManagerViewToggle {
-                    view: view(),
-                    list_label: translate("sessions-view-list"),
-                    grid_label: translate("sessions-view-board"),
-                    grid_icon: LineIcon::Columns3,
-                    onchange: move |selected| view.set(selected),
-                }
-                ManagerButton {
-                    variant: ManagerButtonVariant::Primary,
-                    onclick: move |_| {
-                        let _ = send(&ChatOpenPage {
-                            url: "vmux://start/".to_string(),
-                        });
+                    })),
+                    prefix: rsx! {
+                        for (index, filter) in presentation.selected_filters.iter().cloned().enumerate() {
+                            FilterPill {
+                                key: "filter-pill-{index}",
+                                label: filter.label,
+                                dot: filter.dot,
+                                clear_label: translate("common-remove-filter"),
+                                onclear: move |_| controls.remove_filter(index),
+                            }
+                        }
                     },
-                    span { class: "inline-flex items-center gap-1.5",
-                        LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                        span { {translate("sessions-start")} }
+                    suffix: rsx! {
+                        FilterTrigger {
+                            active: presentation.filter_requested,
+                            label: translate("common-filter"),
+                            onclick: move |_| controls.toggle_filter(),
+                        }
+                    },
+                }
+                if presentation.filter_requested {
+                    SessionFilterMenu {
+                        groups: presentation.category_groups,
+                        sessions: presentation.snapshot.sessions,
+                        repositories: presentation.repositories,
+                        needle: presentation.filter_needle,
+                        step: controls.filter_step(),
+                        value: controls.filter_value(),
+                        onstep: move |step| controls.select_filter_step(step),
+                        onvalue: move |value| controls.set_filter_value(value),
+                        onselect: move |filter| controls.apply_filter(filter),
                     }
                 }
             }
-            div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
-                SessionCategories {
-                    groups: category_groups.clone(),
-                    selected: selected_stage,
-                    onselect: move |selected| {
-                        filters.write().set_stage(selected);
-                        query.set(String::new());
-                    },
+            ManagerViewToggle {
+                view: controls.view(),
+                list_label: translate("sessions-view-list"),
+                grid_label: translate("sessions-view-board"),
+                grid_icon: LineIcon::Columns3,
+                onchange: move |view| controls.set_view(view),
+            }
+            ManagerButton {
+                variant: ManagerButtonVariant::Primary,
+                onclick: move |_| StartPage::open(),
+                span { class: "inline-flex items-center gap-1.5",
+                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                    span { {translate("sessions-start")} }
                 }
-                div { class: "flex min-w-0 flex-1 overflow-hidden",
-                    if snapshot.sessions.is_empty() {
-                        ManagerEmpty {
-                            title: translate("sessions-empty"),
-                            detail: translate("sessions-empty-detail"),
-                            actions: rsx! { StartSessionButton {} },
-                        }
-                    } else if !visible_sessions {
-                        ManagerEmpty {
-                            title: translate("sessions-inbox-empty"),
-                            detail: translate("sessions-inbox-empty-detail"),
-                            actions: rsx! { StartSessionButton {} },
-                        }
-                    } else if view() == ManagerView::List {
-                        SessionsList {
-                            groups: groups.clone(),
-                            repositories: repositories.clone(),
-                        }
-                    } else {
-                        SessionsBoard {
-                            groups: groups.clone(),
-                            repositories: repositories.clone(),
-                        }
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionsManagerContent(controls: ManagerControls, presentation: ManagerPresentation) -> Element {
+    rsx! {
+        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
+            SessionCategories {
+                groups: presentation.category_groups,
+                selected: presentation.selected_stage,
+                onselect: move |stage| controls.select_stage(stage),
+            }
+            div { class: "flex min-w-0 flex-1 overflow-hidden",
+                if presentation.snapshot.sessions.is_empty() {
+                    ManagerEmpty {
+                        title: translate("sessions-empty"),
+                        detail: translate("sessions-empty-detail"),
+                        actions: rsx! { StartSessionButton {} },
+                    }
+                } else if !presentation.visible_sessions {
+                    ManagerEmpty {
+                        title: translate("sessions-inbox-empty"),
+                        detail: translate("sessions-inbox-empty-detail"),
+                        actions: rsx! { StartSessionButton {} },
+                    }
+                } else if controls.view() == ManagerView::List {
+                    SessionsList {
+                        groups: presentation.groups,
+                        repositories: presentation.repositories,
+                    }
+                } else {
+                    SessionsBoard {
+                        groups: presentation.groups,
+                        repositories: presentation.repositories,
                     }
                 }
             }
         }
+    }
+}
+
+struct StartPage;
+
+impl StartPage {
+    fn open() {
+        let _ = send(&ChatOpenPage {
+            url: "vmux://start/".to_string(),
+        });
     }
 }
 
@@ -203,11 +175,7 @@ fn StartSessionButton() -> Element {
         button {
             r#type: "button",
             class: "vmux-primary-action mt-2 inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium",
-            onclick: move |_| {
-                let _ = send(&ChatOpenPage {
-                    url: "vmux://start/".to_string(),
-                });
-            },
+            onclick: move |_| StartPage::open(),
             LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
             span { {translate("sessions-start")} }
         }
@@ -512,8 +480,9 @@ fn SessionsList(groups: Vec<StageGroup>, repositories: SessionRepositories) -> E
             div { class: "w-full min-w-[44rem] space-y-2 p-2",
                 for group in groups {
                     if !group.sessions.is_empty() {
-                        SessionListGroup {
+                        SessionGroup {
                             key: "{group.stage.id}",
+                            view: ManagerView::List,
                             stage: group.stage,
                             sessions: group.sessions,
                             repositories: repositories.clone(),
@@ -526,7 +495,29 @@ fn SessionsList(groups: Vec<StageGroup>, repositories: SessionRepositories) -> E
 }
 
 #[component]
-fn SessionListGroup(
+fn SessionsBoard(groups: Vec<StageGroup>, repositories: SessionRepositories) -> Element {
+    rsx! {
+        div { class: "min-h-0 flex-1 overflow-auto p-2",
+            div { class: "flex min-h-full w-max items-start gap-2",
+                for group in groups {
+                    if !group.sessions.is_empty() {
+                        SessionGroup {
+                            key: "{group.stage.id}",
+                            view: ManagerView::Grid,
+                            stage: group.stage,
+                            sessions: group.sessions,
+                            repositories: repositories.clone(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionGroup(
+    view: ManagerView,
     stage: StageSummary,
     sessions: Vec<SessionSummary>,
     repositories: SessionRepositories,
@@ -536,10 +527,14 @@ fn SessionListGroup(
     let total = sessions.len();
     let visible = pager.visible(total);
     let group = StageGroupPresentation::new(&stage, &sessions);
+    let section_class = if view == ManagerView::List {
+        "rounded-lg bg-foreground/[0.014] p-1"
+    } else {
+        "glass w-[18rem] shrink-0 overflow-hidden rounded-lg p-1 backdrop-blur-xl"
+    };
     rsx! {
-        section { class: "rounded-lg bg-foreground/[0.014] p-1",
-            div {
-                class: "glass sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left backdrop-blur-xl transition-colors hover:bg-glass-hover",
+        section { class: "{section_class}",
+            header { class: "glass sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md px-2 text-left backdrop-blur-xl transition-colors hover:bg-glass-hover",
                 SheetHeaderChevron {
                     expanded: !collapsed(),
                     label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
@@ -560,24 +555,61 @@ fn SessionListGroup(
                     span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
                 }
                 if stage.id == "stale" && !group.archivable.is_empty() {
-                    SessionArchiveAllButton { targets: group.archivable }
+                    div { class: "ml-auto",
+                        SessionArchiveAllButton { targets: group.archivable }
+                    }
                 }
             }
-            if !collapsed() {
-                div { class: "space-y-px pt-0.5",
+            SessionGroupContents {
+                view,
+                collapsed: collapsed(),
+                stage: stage.id,
+                sessions,
+                repositories,
+                visible,
+                total,
+                on_more: move |event| pager.load_more(event, total),
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionGroupContents(
+    view: ManagerView,
+    collapsed: bool,
+    stage: String,
+    sessions: Vec<SessionSummary>,
+    repositories: SessionRepositories,
+    visible: usize,
+    total: usize,
+    on_more: EventHandler<Event<VisibleData>>,
+) -> Element {
+    let items_class = if view == ManagerView::List {
+        "space-y-px pt-0.5"
+    } else {
+        "mt-1 space-y-1"
+    };
+    let collapse_class = if collapsed {
+        "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+    } else {
+        "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+    };
+    rsx! {
+        div { class: "{collapse_class}",
+            div { class: "min-h-0 overflow-hidden",
+                div { class: "{items_class}",
                     for session in sessions.into_iter().take(visible) {
-                        SessionListRow {
+                        SessionItem {
                             key: "{session.id}",
+                            view,
                             repository: repositories.get(&session.id),
-                            stage: stage.id.clone(),
+                            stage: stage.clone(),
                             session,
                         }
                     }
                     if visible < total {
-                        div {
-                            class: "h-1",
-                            onvisible: move |event| pager.load_more(event, total),
-                        }
+                        div { class: "h-1", onvisible: move |event| on_more.call(event) }
                     }
                 }
             }
@@ -586,20 +618,35 @@ fn SessionListGroup(
 }
 
 #[component]
-fn SessionListRow(
+fn SessionItem(
+    view: ManagerView,
     session: SessionSummary,
     repository: Option<SessionRepository>,
     stage: String,
 ) -> Element {
     let leaving = use_context::<SessionStageMutations>().is_leaving(&session.id);
     let presentation = SessionPresentation::new(&session, repository, &stage);
-    let cleanup_id = session.id.clone();
-    let git_url = presentation.context.git_url.clone();
     let resume = ResumeTarget::from(&session);
-    let open_session = resume.clone();
     rsx! {
         Collapse { leaving,
-          div {
+            if view == ManagerView::List {
+                SessionListItem { session, presentation, resume }
+            } else {
+                SessionBoardItem { session, presentation, resume }
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionListItem(
+    session: SessionSummary,
+    presentation: SessionPresentation,
+    resume: ResumeTarget,
+) -> Element {
+    let open_session = resume.clone();
+    rsx! {
+        div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| open_session.open(),
             span { class: "size-3 shrink-0" }
@@ -610,7 +657,7 @@ fn SessionListRow(
                 alt: presentation.agent.name.clone(),
                 class: "size-4 shrink-0 text-[5px]".to_string(),
             }
-            SessionIdPill { label: presentation.compact_id, title: session.sid.clone() }
+            SessionIdPill { label: presentation.compact_id.clone(), title: session.sid.clone() }
             span { class: "flex size-4 shrink-0 items-center justify-center",
                 span { class: "size-2 rounded-full {presentation.stage_dot}" }
             }
@@ -632,103 +679,25 @@ fn SessionListRow(
             }
             SessionActions {
                 resume,
-                git_url,
-                cleanup_id,
+                git_url: presentation.context.git_url,
+                cleanup_id: session.id,
                 stage_target: presentation.stage_target,
                 archived: presentation.archived,
                 managed: session.managed,
             }
-          }
         }
     }
 }
 
 #[component]
-fn SessionsBoard(groups: Vec<StageGroup>, repositories: SessionRepositories) -> Element {
-    rsx! {
-        div { class: "min-h-0 flex-1 overflow-auto p-2",
-            div { class: "flex min-h-full w-max items-start gap-2",
-                for group in groups {
-                    if !group.sessions.is_empty() {
-                        SessionBoardColumn {
-                            key: "{group.stage.id}",
-                            stage: group.stage,
-                            sessions: group.sessions,
-                            repositories: repositories.clone(),
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn SessionBoardColumn(
-    stage: StageSummary,
-    sessions: Vec<SessionSummary>,
-    repositories: SessionRepositories,
+fn SessionBoardItem(
+    session: SessionSummary,
+    presentation: SessionPresentation,
+    resume: ResumeTarget,
 ) -> Element {
-    let mut collapsed = use_signal(|| false);
-    let pager = SessionPager::use_state();
-    let total = sessions.len();
-    let visible = pager.visible(total);
-    let group = StageGroupPresentation::new(&stage, &sessions);
-    rsx! {
-        section { class: "glass w-[18rem] shrink-0 overflow-hidden rounded-lg p-1 backdrop-blur-xl",
-            header { class: "glass sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md px-1.5 backdrop-blur-xl",
-                SheetHeaderChevron {
-                    expanded: !collapsed(),
-                    label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
-                    onclick: move |_| collapsed.set(!collapsed()),
-                }
-                span { class: "size-2 rounded-full {group.dot}" }
-                h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
-                span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
-                if stage.id == "stale" && !group.archivable.is_empty() {
-                    div { class: "ml-auto",
-                        SessionArchiveAllButton { targets: group.archivable }
-                    }
-                }
-            }
-            div { class: if collapsed() {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                },
-                div { class: "min-h-0 overflow-hidden",
-                    div { class: "mt-1 space-y-1",
-                        for session in sessions.into_iter().take(visible) {
-                            SessionBoardCard {
-                                key: "{session.id}",
-                                repository: repositories.get(&session.id),
-                                session,
-                            }
-                        }
-                        if visible < total {
-                            div {
-                                class: "h-1",
-                                onvisible: move |event| pager.load_more(event, total),
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn SessionBoardCard(session: SessionSummary, repository: Option<SessionRepository>) -> Element {
-    let leaving = use_context::<SessionStageMutations>().is_leaving(&session.id);
-    let presentation = SessionPresentation::new(&session, repository, &session.stage);
-    let cleanup_id = session.id.clone();
-    let git_url = presentation.context.git_url.clone();
-    let resume = ResumeTarget::from(&session);
     let open_session = resume.clone();
     rsx! {
-        Collapse { leaving,
-          article {
+        article {
             class: "glass group relative cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-glass-hover",
             onclick: move |_| open_session.open(),
             div { class: "flex items-start gap-2",
@@ -747,8 +716,8 @@ fn SessionBoardCard(session: SessionSummary, repository: Option<SessionRepositor
                 }
                 SessionActions {
                     resume,
-                    git_url: git_url.clone(),
-                    cleanup_id,
+                    git_url: presentation.context.git_url.clone(),
+                    cleanup_id: session.id,
                     stage_target: presentation.stage_target,
                     archived: presentation.archived,
                     managed: session.managed,
@@ -767,7 +736,6 @@ fn SessionBoardCard(session: SessionSummary, repository: Option<SessionRepositor
                 time { class: "tabular-nums", "{presentation.updated}" }
                 div { class: "flex-1" }
             }
-          }
         }
     }
 }
@@ -778,6 +746,40 @@ pub(super) fn SessionMetaPanel(
     repository: Option<SessionRepository>,
     stages: Vec<StageSummary>,
 ) -> Element {
+    let presentation = SessionPresentation::new(&session, repository, &session.stage);
+    rsx! {
+        aside { class: "hidden min-h-0 w-[19rem] shrink-0 flex-col bg-foreground/[0.018] lg:flex",
+            header { class: "flex h-11 shrink-0 items-center px-4",
+                h2 { class: "text-xs font-semibold text-foreground/90", {translate("editor-properties")} }
+            }
+            div { class: "min-h-0 flex-1 overflow-y-auto px-4 pb-4",
+                SessionDescription { session: session.clone() }
+                SessionProperties { session, presentation, stages }
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionDescription(session: SessionSummary) -> Element {
+    rsx! {
+        if session.managed {
+            EditableDescription {
+                session_id: session.id,
+                value: session.description,
+            }
+        } else if !session.description.trim().is_empty() {
+            p { class: "mb-4 px-1 text-xs leading-5 text-muted-foreground", "{session.description}" }
+        }
+    }
+}
+
+#[component]
+fn SessionProperties(
+    session: SessionSummary,
+    presentation: SessionPresentation,
+    stages: Vec<StageSummary>,
+) -> Element {
     let SessionPresentation {
         context,
         stage_target,
@@ -786,83 +788,68 @@ pub(super) fn SessionMetaPanel(
         compact_id,
         updated,
         ..
-    } = SessionPresentation::new(&session, repository, &session.stage);
+    } = presentation;
     rsx! {
-        aside { class: "hidden min-h-0 w-[19rem] shrink-0 flex-col bg-foreground/[0.018] lg:flex",
-            header { class: "flex h-11 shrink-0 items-center px-4",
-                h2 { class: "text-xs font-semibold text-foreground/90", {translate("editor-properties")} }
-            }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-4 pb-4",
+        div { class: "grid gap-3",
+            SessionDetailField { label: translate("sessions-stage"),
                 if session.managed {
-                    EditableDescription {
-                        session_id: session.id.clone(),
-                        value: session.description.clone(),
+                    StagePicker {
+                        target: stage_target,
+                        selected: session.stage.clone(),
+                        stages,
                     }
-                } else if !session.description.trim().is_empty() {
-                    p { class: "mb-4 px-1 text-xs leading-5 text-muted-foreground", "{session.description}" }
+                } else {
+                    MetadataPill {
+                        dot: StageVisual::for_id(&session.stage).dot.to_string(),
+                        label: translate_humanized(&session.stage),
+                    }
                 }
-                div { class: "grid gap-3",
-                    SessionDetailField { label: translate("sessions-stage"),
-                        if session.managed {
-                            StagePicker {
-                                target: stage_target,
-                                selected: session.stage.clone(),
-                                stages,
-                            }
-                        } else {
-                            MetadataPill {
-                                dot: StageVisual::for_id(&session.stage).dot.to_string(),
-                                label: translate_humanized(&session.stage),
-                            }
+            }
+            if !agent.name.is_empty() {
+                SessionDetailField { label: translate("resume-column-agent"),
+                    div { class: "flex min-w-0 items-center gap-1.5",
+                        AgentThumbnail {
+                            src: agent.icon.clone(),
+                            seed: agent.id.clone(),
+                            background: agent.color.clone(),
+                            alt: agent.name.clone(),
+                            class: "size-4 shrink-0 text-[5px]".to_string(),
                         }
+                        span { class: "truncate text-[10px] text-foreground/75", "{agent.name}" }
                     }
-                    if !agent.name.is_empty() {
-                        SessionDetailField { label: translate("resume-column-agent"),
-                            div { class: "flex min-w-0 items-center gap-1.5",
-                                AgentThumbnail {
-                                    src: agent.icon.clone(),
-                                    seed: agent.id.clone(),
-                                    background: agent.color.clone(),
-                                    alt: agent.name.clone(),
-                                    class: "size-4 shrink-0 text-[5px]".to_string(),
-                                }
-                                span { class: "truncate text-[10px] text-foreground/75", "{agent.name}" }
-                            }
-                        }
-                    }
-                    SessionDetailField { label: translate("common-status"),
-                        MetadataPill {
-                            dot: runtime.dot.to_string(),
-                            label: runtime_label(&session.runtime),
-                        }
-                    }
-                    if !context.project.is_empty() {
-                        SessionDetailField { label: translate("resume-column-project"),
-                            MetadataPill { label: context.project.clone(), icon: Some(LineIcon::Package) }
-                        }
-                    }
-                    if !context.branch.is_empty() {
-                        SessionDetailField { label: translate("resume-column-branch"),
-                            MetadataPill { label: context.branch.clone(), icon: Some(LineIcon::GitBranch), mono: true }
-                        }
-                    }
-                    SessionDetailField { label: translate("resume-column-updated"),
-                        MetadataPill { label: updated }
-                    }
-                    SessionDetailField { label: translate("schema-id"),
-                        MetadataPill {
-                            label: compact_id,
-                            title: session.sid.clone(),
-                            mono: true,
-                        }
-                    }
-                    if !session.cwd.is_empty() {
-                        SessionDetailText {
-                            label: translate("sessions-directory"),
-                            value: session.cwd.clone(),
-                            mono: true,
-                        }
-                    }
+                }
+            }
+            SessionDetailField { label: translate("common-status"),
+                MetadataPill {
+                    dot: runtime.dot.to_string(),
+                    label: runtime_label(&session.runtime),
+                }
+            }
+            if !context.project.is_empty() {
+                SessionDetailField { label: translate("resume-column-project"),
+                    MetadataPill { label: context.project.clone(), icon: Some(LineIcon::Package) }
+                }
+            }
+            if !context.branch.is_empty() {
+                SessionDetailField { label: translate("resume-column-branch"),
+                    MetadataPill { label: context.branch.clone(), icon: Some(LineIcon::GitBranch), mono: true }
+                }
+            }
+            SessionDetailField { label: translate("resume-column-updated"),
+                MetadataPill { label: updated }
+            }
+            SessionDetailField { label: translate("schema-id"),
+                MetadataPill {
+                    label: compact_id,
+                    title: session.sid.clone(),
+                    mono: true,
+                }
+            }
+            if !session.cwd.is_empty() {
+                SessionDetailText {
+                    label: translate("sessions-directory"),
+                    value: session.cwd,
+                    mono: true,
                 }
             }
         }
@@ -926,90 +913,6 @@ fn EditableDescription(session_id: String, value: String) -> Element {
     }
 }
 
-#[derive(Clone, Copy)]
-struct SessionStageMutations {
-    optimistic: OptimisticMap<String, String>,
-    leaving: Signal<HashSet<String>>,
-}
-
-impl SessionStageMutations {
-    fn change(self, target: StageTarget, stage: String) {
-        if target.stage == stage {
-            return;
-        }
-        self.optimistic
-            .set(target.id.clone(), target.stage.clone(), stage.clone());
-        let id = target.id.clone();
-        if send(&SessionsStageChange {
-            id: target.id,
-            kind: target.kind,
-            sid: target.sid,
-            stage,
-        })
-        .is_err()
-        {
-            self.optimistic.clear(&id);
-        }
-    }
-
-    fn archive(mut self, targets: Vec<StageTarget>) {
-        let leaving = self.leaving.read();
-        let targets = targets
-            .into_iter()
-            .filter(|target| target.stage != "done" && !leaving.contains(&target.id))
-            .collect::<Vec<_>>();
-        drop(leaving);
-        if targets.is_empty() {
-            return;
-        }
-        self.leaving
-            .write()
-            .extend(targets.iter().map(|target| target.id.clone()));
-        for target in &targets {
-            self.optimistic
-                .set(target.id.clone(), target.stage.clone(), "done".to_string());
-            if send(&SessionsStageChange {
-                id: target.id.clone(),
-                kind: target.kind.clone(),
-                sid: target.sid.clone(),
-                stage: "done".to_string(),
-            })
-            .is_err()
-            {
-                self.optimistic.clear(&target.id);
-                self.leaving.write().remove(&target.id);
-            }
-        }
-        spawn(async move {
-            vmux_ui::platform::Platform::sleep(200).await;
-            let ids = targets
-                .iter()
-                .map(|target| target.id.as_str())
-                .collect::<HashSet<_>>();
-            self.leaving.write().retain(|id| !ids.contains(id.as_str()));
-        });
-    }
-
-    fn is_leaving(self, id: &str) -> bool {
-        self.leaving.read().contains(id)
-    }
-
-    fn cleanup(mut self, id: String) {
-        if self.leaving.read().contains(&id) {
-            return;
-        }
-        self.leaving.write().insert(id.clone());
-        if send(&SessionsCleanup { id: id.clone() }).is_err() {
-            self.leaving.write().remove(&id);
-            return;
-        }
-        spawn(async move {
-            vmux_ui::platform::Platform::sleep(1_500).await;
-            self.leaving.write().remove(&id);
-        });
-    }
-}
-
 #[component]
 fn SessionActions(
     resume: ResumeTarget,
@@ -1032,24 +935,20 @@ fn SessionActions(
             open: open(),
             class: "flex w-[5.5rem] shrink-0 justify-end gap-0.5".to_string(),
             on_dismiss: move |_| open.set(false),
-            button {
-                r#type: "button",
-                class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
-                title: translate("sessions-open-chat"),
-                aria_label: translate("sessions-open-chat"),
-                onclick: move |event| {
+            SessionActionButton {
+                label: translate("sessions-open-chat"),
+                visibility: visibility.to_string(),
+                onclick: move |event: MouseEvent| {
                     event.stop_propagation();
                     resume.open();
                 },
                 LineIconView { icon: LineIcon::MessagesRound, class: "size-3.5".to_string() }
             }
             if !git_url.is_empty() {
-                button {
-                    r#type: "button",
-                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
-                    title: translate("git-title"),
-                    aria_label: translate("git-title"),
-                    onclick: move |event| {
+                SessionActionButton {
+                    label: translate("git-title"),
+                    visibility: visibility.to_string(),
+                    onclick: move |event: MouseEvent| {
                         event.stop_propagation();
                         let _ = send(&ChatOpenPage { url: git_url.clone() });
                     },
@@ -1060,12 +959,10 @@ fn SessionActions(
                 }
             }
             if !archived {
-                button {
-                    r#type: "button",
-                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
-                    title: translate("sessions-archive"),
-                    aria_label: translate("sessions-archive"),
-                    onclick: move |event| {
+                SessionActionButton {
+                    label: translate("sessions-archive"),
+                    visibility: visibility.to_string(),
+                    onclick: move |event: MouseEvent| {
                         event.stop_propagation();
                         mutations.archive(vec![archive.clone()]);
                     },
@@ -1073,12 +970,10 @@ fn SessionActions(
                 }
             }
             if managed {
-                button {
-                    r#type: "button",
-                    class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
-                    title: translate("sessions-actions"),
-                    aria_label: translate("sessions-actions"),
-                    onclick: move |event| {
+                SessionActionButton {
+                    label: translate("sessions-actions"),
+                    visibility: visibility.to_string(),
+                    onclick: move |event: MouseEvent| {
                         event.stop_propagation();
                         open.set(!open());
                     },
@@ -1097,6 +992,25 @@ fn SessionActions(
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn SessionActionButton(
+    label: String,
+    visibility: String,
+    onclick: EventHandler<MouseEvent>,
+    children: Element,
+) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-foreground/[0.08] hover:text-foreground {visibility}",
+            title: label.clone(),
+            aria_label: label,
+            onclick: move |event| onclick.call(event),
+            {children}
         }
     }
 }
@@ -1265,60 +1179,6 @@ fn SessionIdPill(label: String, title: String) -> Element {
             title,
             "{label}"
         }
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct ResumeTarget {
-    kind: String,
-    sid: String,
-    cwd: String,
-}
-
-impl From<&SessionSummary> for ResumeTarget {
-    fn from(session: &SessionSummary) -> Self {
-        Self {
-            kind: session.kind.clone(),
-            sid: session.sid.clone(),
-            cwd: session.cwd.clone(),
-        }
-    }
-}
-
-impl ResumeTarget {
-    fn open(&self) {
-        let _ = send(&ResumeSession {
-            kind: self.kind.clone(),
-            sid: self.sid.clone(),
-            cwd: self.cwd.clone(),
-        });
-    }
-}
-
-#[derive(Clone, Copy)]
-struct SessionPager(Signal<usize>);
-
-impl SessionPager {
-    const PAGE: usize = 40;
-
-    fn use_state() -> Self {
-        Self(use_signal(|| Self::PAGE))
-    }
-
-    fn visible(self, total: usize) -> usize {
-        self.0().min(total)
-    }
-
-    fn load_more(self, event: Event<VisibleData>, total: usize) {
-        if !event.is_intersecting().unwrap_or(false) {
-            return;
-        }
-        let current = self.0();
-        if current >= total {
-            return;
-        }
-        let mut visible = self.0;
-        visible.set(current.saturating_add(Self::PAGE).min(total));
     }
 }
 
