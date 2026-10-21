@@ -181,8 +181,9 @@ impl AppSettings {
         let mut value_json =
             serde_json::to_value(&*self).map_err(|e| format!("settings to JSON failed: {e}"))?;
         set_at_path(&mut value_json, path, value)?;
-        let new_settings: AppSettings = serde_json::from_value(value_json)
+        let mut new_settings: AppSettings = serde_json::from_value(value_json)
             .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
+        new_settings.agent.normalize();
         *self = new_settings;
         Ok(())
     }
@@ -585,6 +586,12 @@ impl AgentSettings {
             .map(|level| level.trim())
             .filter(|level| !level.is_empty())
     }
+
+    fn normalize(&mut self) {
+        for config in &mut self.acp {
+            config.normalize();
+        }
+    }
 }
 
 impl Default for AgentSettings {
@@ -625,6 +632,16 @@ pub struct AcpAgentConfig {
     pub version: Option<String>,
 }
 
+impl AcpAgentConfig {
+    fn normalize(&mut self) {
+        for arg in &mut self.args {
+            if arg == "@zed-industries/codex-acp@latest" {
+                *arg = "@agentclientprotocol/codex-acp@latest".to_string();
+            }
+        }
+    }
+}
+
 fn default_acp_agents() -> Vec<AcpAgentConfig> {
     vec![
         AcpAgentConfig {
@@ -645,7 +662,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             command: "npx".to_string(),
             args: vec![
                 "-y".to_string(),
-                "@zed-industries/codex-acp@latest".to_string(),
+                "@agentclientprotocol/codex-acp@latest".to_string(),
             ],
             env: vec![],
             cwd: None,
@@ -1130,6 +1147,7 @@ impl PartialAppSettings {
         if let Some(agent) = &self.agent {
             settings.agent.clone_from(agent);
         }
+        settings.agent.normalize();
         if let Some(spaces) = &self.spaces {
             settings.spaces.clone_from(spaces);
         }
@@ -1846,6 +1864,57 @@ mod tests {
                 "missing acp agent {id}"
             );
         }
+        let codex = agent
+            .acp
+            .iter()
+            .find(|config| config.id == "codex")
+            .unwrap();
+        assert!(
+            codex
+                .args
+                .contains(&"@agentclientprotocol/codex-acp@latest".to_string())
+        );
+    }
+
+    #[test]
+    fn deprecated_codex_acp_package_is_migrated() {
+        let settings = parse_settings(
+            r#"(
+                agent: (
+                    acp: [(
+                        id: "codex",
+                        name: "Codex",
+                        command: "npx",
+                        args: ["-y", "@zed-industries/codex-acp@latest"],
+                    )],
+                ),
+            )"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.agent.acp[0].args,
+            ["-y", "@agentclientprotocol/codex-acp@latest"]
+        );
+    }
+
+    #[test]
+    fn custom_codex_acp_package_is_preserved() {
+        let settings = parse_settings(
+            r#"(
+                agent: (
+                    acp: [(
+                        id: "codex",
+                        name: "Codex",
+                        command: "npx",
+                        args: ["-y", "custom-codex-acp"],
+                    )],
+                ),
+            )"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.agent.acp[0].args, ["-y", "custom-codex-acp"]);
     }
 
     #[test]
