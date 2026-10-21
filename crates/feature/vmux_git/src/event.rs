@@ -351,7 +351,6 @@ pub struct GitRepositorySnapshot {
     pub repo_root: String,
     pub repo_name: String,
     pub is_worktree: bool,
-    pub head: String,
     pub branch: String,
     pub base_ref: String,
     pub upstream: String,

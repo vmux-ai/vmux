@@ -869,6 +869,7 @@ fn sync_page_subscriptions(
             super::job_runner::GitJob::new(entity),
             super::job::RepositoryJob {
                 path: path.to_path_buf(),
+                refresh_catalogs: true,
             },
         ));
     }
@@ -903,21 +904,34 @@ fn drain(
         return;
     }
     let mut worktree_relevance = HashMap::new();
-    let affected: Vec<Entity> = watch
+    let affected: Vec<(Entity, bool)> = watch
         .subscriptions
         .iter()
         .filter(|(_, subscription)| {
             overflow
                 || GitWatch::changes_match(&subscription.targets, &changed, &mut worktree_relevance)
         })
-        .filter_map(|(entity, _)| active.contains(*entity).then_some(*entity))
+        .filter_map(|(entity, subscription)| {
+            if !active.contains(*entity) {
+                return None;
+            }
+            let refresh_catalogs = overflow
+                || subscription
+                    .targets
+                    .iter()
+                    .any(|target| changed.iter().any(|path| target.branches_changed(path)));
+            Some((*entity, refresh_catalogs))
+        })
         .collect();
-    for entity in affected {
+    for (entity, refresh_catalogs) in affected {
         if states.contains(entity) {
             if let Some(path) = states.mark_changed(entity) {
                 commands.spawn((
                     super::job_runner::GitJob::new(entity),
-                    super::job::RepositoryJob { path: path.into() },
+                    super::job::RepositoryJob {
+                        path: path.into(),
+                        refresh_catalogs,
+                    },
                 ));
             }
         } else if let Some(refresh) =
@@ -1354,6 +1368,7 @@ mod tests {
                         workspace: file.to_string_lossy().into_owned(),
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
                 KeyboardOwner,
             ))

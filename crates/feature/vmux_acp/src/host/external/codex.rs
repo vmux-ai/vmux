@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -66,17 +66,18 @@ impl Reader {
         Ok(indexed)
     }
 
-    fn metadata(&self, indexed: &HashMap<String, CodexIndexed>) -> HashMap<String, CodexMeta> {
+    fn metadata(
+        &self,
+        indexed: &HashMap<String, CodexIndexed>,
+    ) -> Result<HashMap<String, CodexMeta>, String> {
         let mut metadata = HashMap::new();
-        let mut missing = indexed
-            .keys()
-            .cloned()
-            .collect::<std::collections::HashSet<_>>();
+        let mut missing = indexed.keys().cloned().collect::<HashSet<_>>();
+        let cached_rollouts = self.cached_rollout_ids(indexed)?;
         for id in indexed.keys() {
             let Some(previous) = self.previous.get(id) else {
                 continue;
             };
-            if !self.cached_rollout_exists(id, previous) {
+            if !cached_rollouts.contains(id) {
                 continue;
             }
             metadata.insert(
@@ -89,10 +90,10 @@ impl Reader {
             missing.remove(id);
         }
         if missing.is_empty() {
-            return metadata;
+            return Ok(metadata);
         }
         let Ok(root) = self.sessions.canonicalize() else {
-            return metadata;
+            return Ok(metadata);
         };
         let mut directories = vec![(root, 0usize)];
         let mut entries_seen = 0usize;
@@ -162,46 +163,107 @@ impl Reader {
                 }
             }
         }
-        metadata
+        Ok(metadata)
     }
 
-    fn cached_rollout_exists(&self, id: &str, previous: &ProviderSession) -> bool {
-        let Some(created_at) = chrono::DateTime::<Utc>::from_timestamp_millis(previous.created_at)
-        else {
-            return false;
-        };
-        for offset in [-1, 0, 1] {
-            let date = created_at.date_naive() + Duration::days(offset);
-            let directory = self
-                .sessions
-                .join(format!("{:04}", date.year()))
-                .join(format!("{:02}", date.month()))
-                .join(format!("{:02}", date.day()));
-            let Ok(entries) = std::fs::read_dir(directory) else {
+    fn cached_rollout_ids(
+        &self,
+        indexed: &HashMap<String, CodexIndexed>,
+    ) -> Result<HashSet<String>, String> {
+        let mut directories = HashMap::<PathBuf, HashSet<String>>::new();
+        let mut unresolved = HashSet::new();
+        for id in indexed.keys() {
+            let Some(previous) = self.previous.get(id) else {
                 continue;
             };
-            for entry in entries.flatten() {
-                let Ok(kind) = entry.file_type() else {
-                    continue;
-                };
+            let Some(created_at) =
+                chrono::DateTime::<Utc>::from_timestamp_millis(previous.created_at)
+            else {
+                continue;
+            };
+            unresolved.insert(id.clone());
+            for offset in [-1, 0, 1] {
+                let date = created_at.date_naive() + Duration::days(offset);
+                let directory = self
+                    .sessions
+                    .join(format!("{:04}", date.year()))
+                    .join(format!("{:02}", date.month()))
+                    .join(format!("{:02}", date.day()));
+                directories.entry(directory).or_default().insert(id.clone());
+            }
+        }
+        let mut found = HashSet::new();
+        let mut entries_seen = 0usize;
+        let mut files = 0usize;
+        'walk: for (directory, expected) in directories {
+            let mut remaining = expected
+                .iter()
+                .filter(|id| unresolved.contains(*id))
+                .count();
+            if remaining == 0 {
+                continue;
+            }
+            let metadata = match std::fs::symlink_metadata(&directory) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.to_string()),
+            };
+            if metadata.file_type().is_symlink() {
+                return Err("Codex rollout directory is a symlink".to_string());
+            }
+            if !metadata.file_type().is_dir() {
+                continue;
+            }
+            let entries = match std::fs::read_dir(directory) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.to_string()),
+            };
+            for entry in entries {
+                let entry = entry.map_err(|error| error.to_string())?;
+                entries_seen += 1;
+                if entries_seen > Self::MAX_SESSION_ENTRIES {
+                    break 'walk;
+                }
+                let kind = entry.file_type().map_err(|error| error.to_string())?;
                 if !kind.is_file() || kind.is_symlink() {
                     continue;
                 }
+                files += 1;
+                if files > Self::MAX_SESSION_FILES {
+                    break 'walk;
+                }
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
-                if name.ends_with(&format!("-{id}.jsonl")) {
-                    return true;
+                let Some(stem) = name.strip_suffix(".jsonl") else {
+                    continue;
+                };
+                let Some(id) = stem.get(stem.len().saturating_sub(36)..) else {
+                    continue;
+                };
+                if expected.contains(id) {
+                    let id = id.to_string();
+                    if unresolved.remove(&id) {
+                        found.insert(id);
+                        remaining -= 1;
+                        if unresolved.is_empty() {
+                            break 'walk;
+                        }
+                        if remaining == 0 {
+                            break;
+                        }
+                    }
                 }
             }
         }
-        false
+        Ok(found)
     }
 }
 
 impl ProviderReader for Reader {
     fn read(&self) -> Result<Vec<ProviderSession>, String> {
         let indexed = self.indexed()?;
-        let metadata = self.metadata(&indexed);
+        let metadata = self.metadata(&indexed)?;
         let mut sessions = Vec::new();
         for (id, indexed) in indexed {
             let Some(metadata) = metadata.get(&id) else {
@@ -257,6 +319,8 @@ struct CodexMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
 
     struct Fixture {
         root: tempfile::TempDir,
@@ -352,6 +416,32 @@ mod tests {
             .unwrap();
 
         assert!(sessions.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_reader_rejects_a_symlinked_cached_rollout_directory() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "session_index.jsonl",
+            r#"{"id":"01a14fcc-f46a-7c12-b000-779be98d72ae","thread_name":"Task","updated_at":"2026-10-21T03:00:00Z"}
+"#,
+        );
+        let target = fixture.path().join("rollouts");
+        std::fs::create_dir_all(&target).unwrap();
+        let date_parent = fixture.path().join("sessions/2026/10");
+        std::fs::create_dir_all(&date_parent).unwrap();
+        symlink(target, date_parent.join("21")).unwrap();
+        let previous = ProviderSession {
+            sid: "01a14fcc-f46a-7c12-b000-779be98d72ae".into(),
+            cwd: "/work/vmux".into(),
+            created_at: Timestamp::parse("2026-10-21T02:59:50Z"),
+            ..Default::default()
+        };
+
+        let result = Reader::at(fixture.path()).with_previous(&[previous]).read();
+
+        assert!(result.is_err());
     }
 
     #[test]

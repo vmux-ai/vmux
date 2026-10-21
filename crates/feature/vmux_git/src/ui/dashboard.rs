@@ -121,6 +121,7 @@ pub(super) fn GitDashboard() -> Element {
                             diff_viewport,
                             diff_rows,
                             loading: ui.diff_loading,
+                            error: ui.branch_files_error.clone(),
                         }
                     } else if active_panel == GitPanel::Commits {
                         CommitDiffCard {

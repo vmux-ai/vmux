@@ -10577,6 +10577,7 @@ dependencies = [
  "rfd 0.15.4",
  "rkyv",
  "serde",
+ "sha2",
  "similar",
  "syntect",
  "tempfile",

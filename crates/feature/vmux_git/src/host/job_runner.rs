@@ -11,14 +11,12 @@ use super::job::{
     HunkJob, MergeJob, PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob,
     StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
 };
-use super::repository::{BranchFilesCatalog, GitCatalogPage, GitRepository};
+use super::repository::{BranchFilesCatalog, GitCatalogPage, GitRepository, RepositorySummary};
 use crate::event::{
     GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
     GitRepositorySnapshot,
 };
-use crate::state::{GitDiffAppend, GitUiState};
-
-const DIFF_CONTEXT_LINES: usize = 3;
+use crate::state::GitUiState;
 
 pub(super) struct JobPlugin;
 
@@ -149,7 +147,7 @@ impl<T: Send + Sync + 'static> GitJobTask<T> {
 }
 
 #[derive(Component)]
-struct RepositoryOutput(Result<GitRepositorySnapshot, GitOperationError>);
+struct RepositoryOutput(Result<RepositorySummary, GitOperationError>);
 
 #[derive(Component)]
 struct CatalogOutput {
@@ -272,17 +270,20 @@ fn deliver_repository_outputs(
                     && crate::GitUrl::is_page(&page.url)
                 {
                     if let Some(url) = crate::GitUrl::from_path_preserving_commit(
-                        Path::new(&event.repo_root),
+                        Path::new(&event.snapshot.repo_root),
                         &page.url,
                     ) {
                         page.url = url;
                     }
-                    page.title = match event.branch.is_empty() {
-                        true => format!("Git · {}", event.repo_name),
-                        false => format!("Git · {} · {}", event.repo_name, event.branch),
+                    page.title = match event.snapshot.branch.is_empty() {
+                        true => format!("Git · {}", event.snapshot.repo_name),
+                        false => format!(
+                            "Git · {} · {}",
+                            event.snapshot.repo_name, event.snapshot.branch
+                        ),
                     };
                 }
-                states.set_repository(webview, event.clone());
+                states.set_repository(webview, event.snapshot.clone(), event.catalog_fingerprint);
             }
             Err(error) => {
                 states.apply_error(webview, error);
@@ -403,15 +404,11 @@ fn deliver_diff_outputs(
         if let Ok((mut view, mut revealed)) = views.get_mut(webview) {
             if view.snapshot.can_append_diff(&event) {
                 let snapshot = &mut view.bypass_change_detection().snapshot;
-                snapshot.diff_loading = false;
-                snapshot.append_diff(&event);
-                snapshot.project_diff_rows(&revealed.0, DIFF_CONTEXT_LINES);
+                let append = snapshot
+                    .append_diff_patch(event, &revealed.0)
+                    .expect("appendability was checked");
                 commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
-                    webview,
-                    &GitDiffAppend {
-                        viewport: event,
-                        rows: snapshot.diff_rows.clone(),
-                    },
+                    webview, &append,
                 ));
             } else {
                 view.snapshot.diff_loading = false;
@@ -431,7 +428,10 @@ fn deliver_diff_outputs(
 fn deliver_branch_files_outputs(
     outputs: Query<(Entity, &GitJob, &BranchFilesOutput)>,
     mut queries: Query<&mut super::diff::GitBranchFilesQuery>,
-    mut states: Query<&mut super::state::GitState>,
+    mut states: Query<(
+        &mut super::state::GitState,
+        &crate::state::GitPageControllerState,
+    )>,
     mut commands: Commands,
 ) {
     for (entity, job, output) in &outputs {
@@ -443,7 +443,7 @@ fn deliver_branch_files_outputs(
             commands.entity(entity).despawn();
             continue;
         }
-        let Ok(mut state) = states.get_mut(job.webview) else {
+        let Ok((mut state, controller)) = states.get_mut(job.webview) else {
             commands.entity(entity).despawn();
             continue;
         };
@@ -459,17 +459,13 @@ fn deliver_branch_files_outputs(
             Err(error) => {
                 state.snapshot.branch_files_has_more = false;
                 state.snapshot.branch_files_error.clone_from(&error.message);
-                state.snapshot.diff_loading = false;
-                state.snapshot.diff_rows.clear();
-                state.snapshot.diff_viewport = Some(GitDiffViewport {
-                    generation: output.generation,
-                    first_line: 0,
-                    total_lines: 0,
-                    has_more: false,
-                    lines: Vec::new(),
-                    markers: Vec::new(),
-                    error: error.message.clone(),
-                });
+                if controller.focused_panel == crate::state::GitPanel::Branches
+                    && controller.selected_branch == output.reference
+                {
+                    state.snapshot.diff_loading = false;
+                    state.snapshot.diff_rows.clear();
+                    state.snapshot.diff_viewport = None;
+                }
             }
         }
         state.snapshot.branch_files_loading = false;
@@ -520,6 +516,7 @@ fn deliver_operation_outputs(
                     GitJob::new(webview),
                     RepositoryJob {
                         path: workspace.into(),
+                        refresh_catalogs: true,
                     },
                 ));
             }
@@ -621,7 +618,7 @@ fn start_repository_jobs(jobs: PendingGitJobs<RepositoryJob>, mut commands: Comm
     for (entity, job, wake) in jobs.ready() {
         let task = GitJobTask::spawn(wake, move || {
             RepositoryOutput(
-                GitRepositorySnapshot::load_summary(&job.path)
+                GitRepositorySnapshot::load_summary(&job.path, job.refresh_catalogs)
                     .map_err(|error| GitOperationError { message: error.0 }),
             )
         });
@@ -1131,6 +1128,7 @@ mod tests {
                 GitJob::new(webview),
                 RepositoryJob {
                     path: root.path().join("first"),
+                    refresh_catalogs: true,
                 },
             ))
             .id();
@@ -1140,6 +1138,7 @@ mod tests {
                 GitJob::new(webview),
                 RepositoryJob {
                     path: root.path().join("second"),
+                    refresh_catalogs: true,
                 },
             ))
             .id();

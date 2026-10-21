@@ -1,7 +1,9 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::scroll::ScrollIntoView;
@@ -19,6 +21,7 @@ pub(super) fn BranchDiffCard(
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
+    error: String,
 ) -> Element {
     let selected_branch_value = selected_branch();
     let comparison = if repository.base_ref.is_empty() {
@@ -50,6 +53,7 @@ pub(super) fn BranchDiffCard(
             file_path: String::new(),
             empty: translate("git-select-file"),
             icon: LineIcon::File,
+            error,
         }
     }
 }
@@ -88,6 +92,7 @@ pub(super) fn CommitDiffCard(
             file_path: String::new(),
             empty: translate("git-no-commits"),
             icon: LineIcon::GitCommit,
+            error: String::new(),
         }
     }
 }
@@ -104,6 +109,7 @@ fn RevisionDiffCard(
     file_path: String,
     empty: String,
     icon: LineIcon,
+    error: String,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let identity = title.clone();
@@ -125,7 +131,19 @@ fn RevisionDiffCard(
                     }
                 }
             }
-            if available {
+            if !error.is_empty() {
+                div { class: "flex flex-1 flex-col items-start justify-center gap-2 p-6 text-xs text-destructive",
+                    span { "{error}" }
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Xs,
+                        onclick: move |_| {
+                            let _ = send(&crate::event::GitBranchFilesRetryRequest);
+                        },
+                        {translate("common-retry")}
+                    }
+                }
+            } else if available {
                 DiffView {
                     repo_root,
                     path: empty_path,

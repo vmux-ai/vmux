@@ -24,8 +24,6 @@ use super::watch::GitWatch;
 
 type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
 
-const DIFF_CONTEXT_LINES: usize = 3;
-
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
@@ -55,6 +53,7 @@ impl Plugin for StatePlugin {
 )]
 pub(super) struct GitState {
     pub(super) snapshot: GitPageSnapshot,
+    pub(super) catalog_fingerprint: [u8; 32],
 }
 
 #[derive(Component, Default)]
@@ -105,6 +104,7 @@ impl GitStates<'_, '_> {
             loading: true,
             ..Default::default()
         };
+        state.catalog_fingerprint = [0; 32];
     }
 
     pub(super) fn start_repository(&mut self, entity: Entity, path: &Path) {
@@ -116,7 +116,12 @@ impl GitStates<'_, '_> {
         state.snapshot.message.clear();
     }
 
-    pub(super) fn set_repository(&mut self, entity: Entity, mut event: GitRepositorySnapshot) {
+    pub(super) fn set_repository(
+        &mut self,
+        entity: Entity,
+        mut event: GitRepositorySnapshot,
+        catalog_fingerprint: Option<[u8; 32]>,
+    ) {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return;
         };
@@ -124,12 +129,17 @@ impl GitStates<'_, '_> {
         if let Some(previous) = state.snapshot.repository.take()
             && previous.repo_root == event.repo_root
         {
-            preserve_catalogs = previous.head == event.head;
+            preserve_catalogs = catalog_fingerprint
+                .as_ref()
+                .is_none_or(|fingerprint| state.catalog_fingerprint == *fingerprint);
             event.commits = previous.commits;
             event.branches = previous.branches;
             event.remote_branches = previous.remote_branches;
             event.tags = previous.tags;
             event.stashes = previous.stashes;
+        }
+        if let Some(catalog_fingerprint) = catalog_fingerprint {
+            state.catalog_fingerprint = catalog_fingerprint;
         }
         state.snapshot.workspace.clone_from(&event.repo_root);
         state.snapshot.repository = Some(event);
@@ -159,6 +169,7 @@ impl GitStates<'_, '_> {
             return;
         };
         state.snapshot.repository = None;
+        state.catalog_fingerprint = [0; 32];
         state.snapshot.loading = false;
         state.snapshot.message.clear();
     }
@@ -263,7 +274,7 @@ fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
         }
         state
             .snapshot
-            .project_diff_rows(&revealed.0, DIFF_CONTEXT_LINES);
+            .project_diff_rows(&revealed.0, GitPageSnapshot::DIFF_CONTEXT_LINES);
     }
 }
 
@@ -350,7 +361,13 @@ fn repository_request(
     {
         page.url = url;
     }
-    commands.spawn((GitJob::new(webview), RepositoryJob { path }));
+    commands.spawn((
+        GitJob::new(webview),
+        RepositoryJob {
+            path,
+            refresh_catalogs: true,
+        },
+    ));
 }
 
 type GitStateQuery<'w, 's> = Query<
@@ -426,6 +443,7 @@ mod tests {
                         }),
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
                 GitDiffRevealRanges::default(),
             ))
@@ -488,6 +506,7 @@ mod tests {
                         loading: true,
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
             ))
             .id();

@@ -111,22 +111,10 @@ pub(super) fn BranchesCard(
     let mut file_query = use_signal(String::new);
     let query = file_query().trim().to_lowercase();
     let files_empty = files.is_empty();
-    let files_loaded = files.len();
     let visible_files = files
         .into_iter()
         .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
         .collect::<Vec<_>>();
-    use_effect(use_reactive!(|(
-        query,
-        files_has_more,
-        files_loading,
-        files_loaded,
-    )| {
-        let _ = files_loaded;
-        if !query.is_empty() && files_has_more && !files_loading {
-            let _ = send(&GitBranchFilesNextRequest);
-        }
-    }));
     let selected = if collection == GitBranchCollection::Local {
         repository
             .branches
@@ -280,6 +268,17 @@ pub(super) fn BranchesCard(
                     }
                 } else if visible_files.is_empty() {
                     div { class: "flex min-h-24 items-center justify-center px-3 text-center text-xs text-muted-foreground", {translate("git-no-changes")} }
+                    if files_has_more {
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Xs,
+                            class: "w-full".to_string(),
+                            onclick: move |_| {
+                                let _ = send(&GitBranchFilesNextRequest);
+                            },
+                            {translate("common-expand")}
+                        }
+                    }
                 } else {
                     for entry in visible_files {
                         BranchFileRow {
@@ -293,6 +292,16 @@ pub(super) fn BranchesCard(
                             for width in ["w-10/12", "w-8/12"] {
                                 Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
                             }
+                        }
+                    } else if files_has_more {
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Xs,
+                            class: "mt-1 w-full".to_string(),
+                            onclick: move |_| {
+                                let _ = send(&GitBranchFilesNextRequest);
+                            },
+                            {translate("common-expand")}
                         }
                     }
                 }

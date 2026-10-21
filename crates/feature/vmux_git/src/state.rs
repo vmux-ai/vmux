@@ -270,6 +270,8 @@ impl Default for GitPageSnapshot {
 }
 
 impl GitPageSnapshot {
+    pub(crate) const DIFF_CONTEXT_LINES: usize = 3;
+
     pub(crate) fn catalog(&self, catalog: GitCatalog) -> GitCatalogProgress {
         match catalog {
             GitCatalog::LocalBranches => self.local_branches,
@@ -298,6 +300,18 @@ impl GitPageSnapshot {
         self.stashes = GitCatalogProgress::default();
     }
 
+    pub(crate) fn has_failed_catalog(&self) -> bool {
+        [
+            self.local_branches,
+            self.remote_branches,
+            self.tags,
+            self.commits,
+            self.stashes,
+        ]
+        .into_iter()
+        .any(|progress| progress.failed)
+    }
+
     pub(crate) fn append_diff(&mut self, next: &GitDiffViewport) -> bool {
         if !self.can_append_diff(next) {
             return false;
@@ -318,7 +332,23 @@ impl GitPageSnapshot {
             let loaded = current
                 .first_line
                 .saturating_add(u32::try_from(current.lines.len()).unwrap_or(u32::MAX));
-            next.first_line == loaded
+            current.generation == next.generation && next.first_line == loaded
+        })
+    }
+
+    pub(crate) fn append_diff_patch(
+        &mut self,
+        next: GitDiffViewport,
+        revealed: &[(usize, usize)],
+    ) -> Option<GitDiffAppend> {
+        if !self.append_diff(&next) {
+            return None;
+        }
+        self.diff_loading = false;
+        self.project_diff_rows(revealed, Self::DIFF_CONTEXT_LINES);
+        Some(GitDiffAppend {
+            viewport: next,
+            rows: self.diff_rows.clone(),
         })
     }
 
@@ -424,11 +454,10 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;
         }
-        if let Some(diff_append) = patch.diff_append {
+        if let Some(diff_append) = patch.diff_append
+            && self.snapshot.append_diff(&diff_append.viewport)
+        {
             self.snapshot.diff_loading = false;
-            if !self.snapshot.append_diff(&diff_append.viewport) {
-                self.snapshot.diff_viewport = Some(diff_append.viewport);
-            }
             self.snapshot.diff_rows = diff_append.rows;
         }
         if let Some(directory) = patch.directory {
@@ -564,5 +593,48 @@ mod tests {
         assert!(!decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 4);
         assert_eq!(decoded.snapshot.diff_rows.len(), 2);
+    }
+
+    #[test]
+    fn stale_diff_append_patch_keeps_the_consistent_viewport() {
+        let first = GitPageSnapshot {
+            diff_loading: true,
+            diff_viewport: Some(GitDiffViewport {
+                generation: 4,
+                first_line: 0,
+                total_lines: 4,
+                has_more: true,
+                lines: vec![diff_line(1), diff_line(2)],
+                markers: Vec::new(),
+                error: String::new(),
+            }),
+            diff_rows: vec![GitDiffRow::Line(0)],
+            ..Default::default()
+        };
+        let event = <GitUiState as vmux_api::UiState>::from_updates(
+            None,
+            vec![
+                first.into(),
+                GitDiffAppend {
+                    viewport: GitDiffViewport {
+                        generation: 3,
+                        first_line: 2,
+                        total_lines: 4,
+                        has_more: false,
+                        lines: vec![diff_line(3), diff_line(4)],
+                        markers: Vec::new(),
+                        error: String::new(),
+                    },
+                    rows: vec![GitDiffRow::Line(3)],
+                }
+                .into(),
+            ],
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
+        let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert!(decoded.snapshot.diff_loading);
+        assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);
+        assert_eq!(decoded.snapshot.diff_rows, [GitDiffRow::Line(0)]);
     }
 }

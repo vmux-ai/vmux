@@ -351,9 +351,14 @@ fn project(
             provider_stages
                 .iter()
                 .find(|(kind, id, _, changed_at, source_updated_at)| {
+                    let source_updated_at = if source_updated_at.0 == 0 {
+                        changed_at.0
+                    } else {
+                        source_updated_at.0
+                    };
                     kind.0 == session.kind
                         && id.0 == session.sid
-                        && source_updated_at.0.max(changed_at.0) >= session.updated_at
+                        && source_updated_at >= session.updated_at
                 });
         let stage = stage_override
             .map(|(_, _, stage, _, _)| stage.0.0.clone())
@@ -660,6 +665,37 @@ mod tests {
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
         assert_eq!(session.stage, "in_progress");
         assert_eq!(session.stage_changed_at, 21);
+    }
+
+    #[test]
+    fn provider_source_timestamp_remains_authoritative() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "External task".into(),
+                cwd: "/tmp/project".into(),
+                updated_at: 150,
+                ..Default::default()
+            });
+        app.world_mut().spawn((
+            ProviderStage,
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-session".into()),
+            Stage(StageId("done".into())),
+            StageChangedAt(200),
+            SourceUpdatedAt(100),
+        ));
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "in_progress");
+        assert_eq!(session.stage_changed_at, 150);
     }
 
     #[test]

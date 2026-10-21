@@ -119,6 +119,14 @@ impl GitPageControllerState {
         self.focused_panel = GitPanel::Commits;
     }
 
+    pub(super) fn selected_commit_is_object_id(&self) -> bool {
+        matches!(self.selected_commit.len(), 40 | 64)
+            && self
+                .selected_commit
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+    }
+
     fn open_branch_prompt(&mut self, prompt: GitBranchPrompt) {
         self.branch_prompt = Some(prompt);
         self.branch_draft.clear();
@@ -1167,6 +1175,20 @@ mod tests {
     }
 
     #[test]
+    fn automatic_commit_lookup_requires_a_complete_object_id() {
+        let mut controller = GitPageControllerState::default();
+
+        controller.apply_url_commit(Some("abc123".to_string()));
+        assert!(!controller.selected_commit_is_object_id());
+
+        controller.apply_url_commit(Some("a".repeat(40)));
+        assert!(controller.selected_commit_is_object_id());
+
+        controller.apply_url_commit(Some("g".repeat(40)));
+        assert!(!controller.selected_commit_is_object_id());
+    }
+
+    #[test]
     fn repository_summary_preserves_url_commit_until_catalog_loads() {
         let mut app = App::new();
         app.add_systems(Update, reconcile);
@@ -1180,7 +1202,6 @@ mod tests {
                             repo_root: "/tmp/repository".to_string(),
                             repo_name: "repository".to_string(),
                             is_worktree: false,
-                            head: String::new(),
                             branch: "main".to_string(),
                             base_ref: String::new(),
                             upstream: String::new(),
@@ -1195,6 +1216,7 @@ mod tests {
                         }),
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
                 GitPageControllerState {
                     selected_commit: "abc123".to_string(),
@@ -1249,7 +1271,6 @@ mod tests {
                             repo_root: "/tmp/repository".to_string(),
                             repo_name: "repository".to_string(),
                             is_worktree: false,
-                            head: String::new(),
                             branch: "main".to_string(),
                             base_ref: String::new(),
                             upstream: String::new(),
@@ -1264,6 +1285,7 @@ mod tests {
                         }),
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
                 GitPageControllerState::default(),
                 vmux_ecs::PageMetadata {

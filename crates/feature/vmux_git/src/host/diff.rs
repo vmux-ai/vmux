@@ -901,6 +901,7 @@ mod tests {
                         branch_files_total: 1,
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
                 GitPageControllerState {
                     focused_panel: GitPanel::Branches,

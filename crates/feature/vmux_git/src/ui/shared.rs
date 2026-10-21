@@ -205,30 +205,6 @@ pub fn DiffView(
         .unwrap_or(0);
     let gw = maxno.max(1).to_string().len().max(3);
     let total_rows = u32::try_from(rows.len()).unwrap_or(u32::MAX);
-    let has_error = !error.is_empty();
-    use_effect(use_reactive!(|(
-        has_more,
-        loading,
-        total_rows,
-        has_error,
-    )| {
-        let _ = total_rows;
-        if !has_more || loading || has_error {
-            return;
-        }
-        spawn(async move {
-            let mut eval = document::eval(
-                "requestAnimationFrame(() => { const element = document.getElementById('git-diff-viewport'); dioxus.send(Boolean(element && element.scrollHeight <= element.clientHeight + 1)); });",
-            );
-            if eval
-                .recv::<bool>()
-                .await
-                .is_ok_and(|underfilled| underfilled)
-            {
-                let _ = send(&GitDiffNextRequest);
-            }
-        });
-    }));
     let ends: Vec<Option<u32>> = rows
         .iter()
         .enumerate()
@@ -406,6 +382,18 @@ pub fn DiffView(
                 div { class: "flex flex-col gap-2 p-3",
                     for width in ["w-10/12", "w-8/12"] {
                         Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                    }
+                }
+            }
+            if has_more && !loading && error.is_empty() {
+                div { class: "flex justify-center p-2 font-sans",
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Xs,
+                        onclick: move |_| {
+                            let _ = send(&GitDiffNextRequest);
+                        },
+                        {translate("common-expand")}
                     }
                 }
             }
