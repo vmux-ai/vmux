@@ -90,7 +90,7 @@ pub fn FilterOption(
         button {
             r#type: "button",
             "data-vmux-dropdown-option": "",
-            class: "flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground outline-none hover:bg-foreground/[0.05] hover:text-foreground focus:bg-foreground/[0.05] focus:text-foreground",
+            class: "flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground outline-none hover:bg-foreground/[0.05] hover:text-foreground focus:bg-foreground/[0.05] focus:text-foreground data-[vmux-dropdown-active=true]:bg-foreground/[0.08] data-[vmux-dropdown-active=true]:text-foreground",
             onclick: move |event| onclick.call(event),
             if !prefix.is_empty() {
                 span { class: "w-3.5 shrink-0 text-center text-muted-foreground/60", "{prefix}" }
