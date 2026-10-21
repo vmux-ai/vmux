@@ -17,6 +17,7 @@ use vmux_session::{
     StageChangeRequest, StageId,
 };
 
+use super::session::ChatView;
 use crate::event::{
     SessionDirectorySelection, SessionRepositories, SessionRepository, SessionsChooseDirectory,
     SessionsCleanup, SessionsCreate, SessionsDescriptionUpdate, SessionsRename,
@@ -116,17 +117,22 @@ impl DirectoryPicker {
 }
 
 #[derive(SystemParam)]
-struct ManagerViews<'w, 's> {
-    views: Query<'w, 's, Option<&'static PageMetadata>, With<SessionManagerView>>,
+struct CatalogViews<'w, 's> {
+    managers: Query<'w, 's, Option<&'static PageMetadata>, With<SessionManagerView>>,
+    chats: Query<'w, 's, (), With<ChatView>>,
 }
 
-impl ManagerViews<'_, '_> {
+impl CatalogViews<'_, '_> {
     fn contains(&self, entity: Entity) -> bool {
-        self.views.contains(entity)
+        self.managers.contains(entity) || self.chats.contains(entity)
+    }
+
+    fn manager_contains(&self, entity: Entity) -> bool {
+        self.managers.contains(entity)
     }
 
     fn agent(&self, entity: Entity) -> Option<AgentId> {
-        self.views
+        self.managers
             .get(entity)
             .ok()
             .flatten()
@@ -137,11 +143,11 @@ impl ManagerViews<'_, '_> {
 fn create(
     trigger: On<UiInput<SessionsCreate>>,
     parents: Query<&ChildOf>,
-    managers: ManagerViews,
+    views: CatalogViews,
     mut pending: ResMut<PendingOpens>,
     mut requests: MessageWriter<CreateRequest>,
 ) {
-    if !managers.contains(trigger.event().webview) {
+    if !views.manager_contains(trigger.event().webview) {
         return;
     }
     let Ok(parent) = parents.get(trigger.event().webview) else {
@@ -158,7 +164,7 @@ fn create(
         request.name.clone(),
         request.description.clone(),
         cwd,
-        managers.agent(trigger.event().webview),
+        views.agent(trigger.event().webview),
     );
     pending.0.insert(request.id().clone(), parent.parent());
     requests.write(request);
@@ -166,14 +172,14 @@ fn create(
 
 fn choose_directory(
     trigger: On<UiInput<SessionsChooseDirectory>>,
-    managers: ManagerViews,
+    views: CatalogViews,
     pending: Query<&PendingDirectoryPicker>,
     projects: vmux_ecs::profile::Projects,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if !managers.contains(webview) || pending.iter().any(|picker| picker.webview == webview) {
+    if !views.manager_contains(webview) || pending.iter().any(|picker| picker.webview == webview) {
         return;
     }
     let project_root = projects.path().ok().map(Path::to_path_buf);
@@ -239,10 +245,10 @@ fn open_created(
 
 fn rename(
     trigger: On<UiInput<SessionsRename>>,
-    managers: ManagerViews,
+    views: CatalogViews,
     mut requests: MessageWriter<RenameRequest>,
 ) {
-    if !managers.contains(trigger.event().webview) {
+    if !views.contains(trigger.event().webview) {
         return;
     }
     let request = &trigger.event().payload;
@@ -254,10 +260,10 @@ fn rename(
 
 fn update_description(
     trigger: On<UiInput<SessionsDescriptionUpdate>>,
-    managers: ManagerViews,
+    views: CatalogViews,
     mut requests: MessageWriter<DescriptionUpdateRequest>,
 ) {
-    if !managers.contains(trigger.event().webview) {
+    if !views.contains(trigger.event().webview) {
         return;
     }
     let request = &trigger.event().payload;
@@ -269,12 +275,12 @@ fn update_description(
 
 fn change_stage(
     trigger: On<UiInput<SessionsStageChange>>,
-    managers: ManagerViews,
+    views: CatalogViews,
     providers: Res<vmux_session::ProviderCatalog>,
     mut requests: MessageWriter<StageChangeRequest>,
     mut provider_requests: MessageWriter<ProviderStageChangeRequest>,
 ) {
-    if !managers.contains(trigger.event().webview) {
+    if !views.contains(trigger.event().webview) {
         return;
     }
     let request = &trigger.event().payload;
@@ -299,10 +305,10 @@ fn change_stage(
 
 fn cleanup(
     trigger: On<UiInput<SessionsCleanup>>,
-    managers: ManagerViews,
+    views: CatalogViews,
     mut requests: MessageWriter<CleanupRequest>,
 ) {
-    if !managers.contains(trigger.event().webview) {
+    if !views.contains(trigger.event().webview) {
         return;
     }
     requests.write(CleanupRequest {
@@ -404,7 +410,7 @@ fn sync_repositories(
 
 fn ready(
     trigger: On<UiInput<PageReady>>,
-    managers: ManagerViews,
+    views: CatalogViews,
     pages: Query<&PageMetadata>,
     catalog: Res<CatalogSnapshot>,
     repositories: Res<SessionRepositories>,
@@ -414,7 +420,7 @@ fn ready(
     let projects = pages
         .get(target)
         .is_ok_and(|page| page.url.trim_end_matches('/') == "vmux://projects");
-    if !managers.contains(target) && !projects {
+    if !views.contains(target) && !projects {
         return;
     }
     commands.entity(target).insert(SessionCatalogView);
@@ -427,14 +433,19 @@ fn ready(
 
 fn cleanup_inactive_views(
     views: Query<
-        (Entity, &PageMetadata, Has<SessionManagerView>),
+        (
+            Entity,
+            &PageMetadata,
+            Has<SessionManagerView>,
+            Has<ChatView>,
+        ),
         (With<SessionCatalogView>, Changed<PageMetadata>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, page, manager) in &views {
+    for (entity, page, manager, chat) in &views {
         let projects = page.url.trim_end_matches('/') == "vmux://projects";
-        if !manager && !projects {
+        if !manager && !chat && !projects {
             commands.entity(entity).remove::<SessionCatalogView>();
         }
     }

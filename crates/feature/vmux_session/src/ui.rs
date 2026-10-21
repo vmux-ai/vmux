@@ -26,18 +26,20 @@ pub(crate) struct ChatPage;
 pub fn Page() -> Element {
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| vmux_session::Route::parse(&metadata.url));
-    if matches!(route, Some(vmux_session::Route::Manager)) {
-        return rsx! { manager::SessionsManager {} };
+    match route {
+        Some(vmux_session::Route::Manager) => rsx! { manager::SessionsManager {} },
+        Some(vmux_session::Route::Session(id)) => rsx! { SessionDetail { session_id: id.0 } },
+        None => rsx! { SessionDetail { session_id: String::new() } },
     }
-    rsx! { SessionDetail {} }
 }
 
 #[component]
-fn SessionDetail() -> Element {
+fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();
+    let details = chat.session_details(&session_id);
 
     rsx! {
         main {
@@ -46,10 +48,17 @@ fn SessionDetail() -> Element {
             tabindex: "-1",
             onkeydown: move |event| keys.on_root_keydown(event),
             style { dangerous_inner_html: MD_CSS }
-            ChatHeader { chat }
-            ChatTranscript { chat }
-            ChatApprovalDock { chat }
-            ChatDock { chat }
+            div { class: "flex min-h-0 flex-1 overflow-hidden",
+                section { class: "flex min-w-0 flex-1 flex-col",
+                    ChatHeader { chat }
+                    ChatTranscript { chat }
+                    ChatApprovalDock { chat }
+                    ChatDock { chat }
+                }
+                if let Some((session, repository, stages)) = details {
+                    manager::SessionMetaPanel { session, repository, stages }
+                }
+            }
         }
     }
 }

@@ -10,7 +10,7 @@ use vmux_ecs::{
 };
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::Tab;
-use vmux_session::host::{ChatView, SessionCatalogView, SessionManagerView};
+use vmux_session::host::{ChatView, SessionManagerView};
 use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
@@ -316,9 +316,7 @@ impl PageOpener<'_, '_> {
             ChatView,
             anchor,
         ));
-        self.commands
-            .entity(view)
-            .remove::<(SessionManagerView, SessionCatalogView)>();
+        self.commands.entity(view).remove::<SessionManagerView>();
         self.commands
             .entity(stack)
             .insert(EntityTarget::<Session>::new(session));
