@@ -134,7 +134,9 @@ struct PendingGitDiff {
 }
 
 #[derive(Component)]
-struct PendingGitDiffSeek(String);
+struct PendingGitDiffSeek {
+    path_bytes: Vec<u8>,
+}
 
 #[derive(Clone, Copy)]
 struct FileDiffIdentity {
@@ -148,6 +150,62 @@ pub(super) struct GitDiffQuery {
     generation: u64,
     file: Option<FileDiffIdentity>,
     page_revision: Option<u32>,
+    branch: Option<BranchDiffProgress>,
+}
+
+#[derive(Clone)]
+struct BranchDiffProgress {
+    paths: Vec<Vec<u8>>,
+    loaded: HashSet<Vec<u8>>,
+    next: usize,
+}
+
+impl BranchDiffProgress {
+    const PAGE_SIZE: usize = 8;
+
+    fn new(paths: Vec<Vec<u8>>) -> Self {
+        Self {
+            paths,
+            loaded: HashSet::new(),
+            next: 0,
+        }
+    }
+
+    fn next(&mut self) -> (Vec<Vec<u8>>, bool) {
+        let mut paths = Vec::new();
+        while self.next < self.paths.len() && paths.len() < Self::PAGE_SIZE {
+            let path = self.paths[self.next].clone();
+            self.next += 1;
+            if self.loaded.insert(path.clone()) {
+                paths.push(path);
+            }
+        }
+        self.advance();
+        (paths, self.next < self.paths.len())
+    }
+
+    fn seek(&mut self, path: &[u8]) -> Option<(Vec<Vec<u8>>, bool)> {
+        if !self.loaded.insert(path.to_vec()) {
+            return None;
+        }
+        Some((vec![path.to_vec()], self.has_more()))
+    }
+
+    fn contains(&self, path: &[u8]) -> bool {
+        self.loaded.contains(path)
+    }
+
+    fn has_more(&self) -> bool {
+        self.paths[self.next.min(self.paths.len())..]
+            .iter()
+            .any(|path| !self.loaded.contains(path))
+    }
+
+    fn advance(&mut self) {
+        while self.next < self.paths.len() && self.loaded.contains(&self.paths[self.next]) {
+            self.next += 1;
+        }
+    }
 }
 
 #[derive(Component)]
@@ -157,6 +215,7 @@ pub(super) struct GitBranchFilesQuery {
     generation: u64,
     page_revision: u32,
     catalog: BranchFilesCatalog,
+    ready: bool,
 }
 
 impl GitBranchFilesQuery {
@@ -174,6 +233,7 @@ impl GitBranchFilesQuery {
 
     pub(super) fn replace(&mut self, catalog: BranchFilesCatalog) -> BranchFilesPage {
         self.catalog = catalog;
+        self.ready = true;
         self.catalog.page(0, Self::PAGE_SIZE)
     }
 
@@ -193,6 +253,20 @@ impl GitDiffQuery {
                 .file
                 .is_some_and(|identity| file.accepts(identity.document, identity.refresh))
     }
+
+    fn next_branch(&mut self) -> Option<(Vec<Vec<u8>>, bool)> {
+        self.branch.as_mut().map(BranchDiffProgress::next)
+    }
+
+    fn seek_branch(&mut self, path: &[u8]) -> Option<(Vec<Vec<u8>>, bool)> {
+        self.branch.as_mut()?.seek(path)
+    }
+
+    fn contains_branch_path(&self, path: &[u8]) -> bool {
+        self.branch
+            .as_ref()
+            .is_some_and(|branch| branch.contains(path))
+    }
 }
 
 #[derive(EntityEvent)]
@@ -206,16 +280,26 @@ type GitDiffPages<'w, 's> = Query<
     's,
     (
         Entity,
+        &'static vmux_ecs::PageMetadata,
         Ref<'static, super::state::GitState>,
         Ref<'static, GitPageControllerState>,
+        Option<Ref<'static, GitBranchFilesQuery>>,
         Option<&'static PendingGitDiff>,
         Option<&'static GitDiffQuery>,
     ),
 >;
 
 fn sync_page_targets(pages: GitDiffPages, mut commands: Commands) {
-    for (entity, state, controller, pending, current) in &pages {
-        if !state.is_changed() && !controller.is_changed() {
+    for (entity, page, state, controller, branch_files, pending, current) in &pages {
+        if !crate::GitUrl::is_page(&page.url) {
+            continue;
+        }
+        if !state.is_changed()
+            && !controller.is_changed()
+            && branch_files
+                .as_ref()
+                .is_none_or(|query| !query.is_changed())
+        {
             continue;
         }
         let Some(target) = GitDiffTarget::for_page(&state, &controller) else {
@@ -225,11 +309,27 @@ fn sync_page_targets(pages: GitDiffPages, mut commands: Commands) {
             continue;
         };
         let page_revision = state.diff_revision();
+        if let DiffScope::Branch(reference) = &target.scope
+            && branch_files.as_ref().is_none_or(|query| {
+                !query.ready || !query.current(&target.repo_root, reference, page_revision)
+            })
+        {
+            continue;
+        }
         if pending.is_some_and(|pending| {
             pending.target == target && pending.page_revision == Some(page_revision)
         }) || current.is_some_and(|current| {
             current.target == target && current.page_revision == Some(page_revision)
         }) {
+            if !controller.selected_branch_path_bytes.is_empty()
+                && current.is_some_and(|current| {
+                    !current.contains_branch_path(&controller.selected_branch_path_bytes)
+                })
+            {
+                commands.entity(entity).insert(PendingGitDiffSeek {
+                    path_bytes: controller.selected_branch_path_bytes.clone(),
+                });
+            }
             continue;
         }
         commands.entity(entity).insert(PendingGitDiff {
@@ -275,6 +375,9 @@ fn sync_branch_files(
             state.snapshot.branch_files.clear();
             state.snapshot.branch_files_total = 0;
             state.snapshot.branch_files_has_more = false;
+            state.snapshot.diff_viewport = None;
+            state.snapshot.diff_rows.clear();
+            state.snapshot.diff_loading = true;
         }
         state
             .snapshot
@@ -288,6 +391,7 @@ fn sync_branch_files(
             generation,
             page_revision,
             catalog: BranchFilesCatalog::default(),
+            ready: false,
         });
         commands.spawn((
             GitJob::new(entity),
@@ -327,12 +431,12 @@ fn load_next_branch_files(
 
 fn load_next(
     trigger: On<UiInput<GitDiffNextRequest>>,
-    mut pages: Query<(&mut super::state::GitState, &GitDiffQuery)>,
+    mut pages: Query<(&mut super::state::GitState, &mut GitDiffQuery)>,
     sources: Query<&GitDiffSource>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok((mut state, query)) = pages.get_mut(entity) else {
+    let Ok((mut state, mut query)) = pages.get_mut(entity) else {
         return;
     };
     let Some(viewport) = state.snapshot.diff_viewport.as_ref() else {
@@ -341,7 +445,7 @@ fn load_next(
     let loaded = viewport
         .first_line
         .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX));
-    if state.snapshot.diff_loading || loaded >= viewport.total_lines {
+    if state.snapshot.diff_loading || !viewport.has_more {
         return;
     }
     let content = sources
@@ -350,16 +454,18 @@ fn load_next(
         .filter(|source| source.dirty)
         .map(|source| source.content.clone());
     state.snapshot.diff_loading = true;
+    let (branch_paths, branch_has_more) = query.next_branch().unwrap_or_default();
     commands.spawn((
         GitJob::new(entity),
         GitRepository::at(query.target.repo_root.clone()),
         DiffJob {
             path: query.target.path.clone(),
             scope: query.target.scope.clone(),
+            branch_paths,
+            branch_has_more,
             generation: query.generation,
             top_line: loaded,
             rows: DIFF_WINDOW_ROWS,
-            seek_path: None,
             content,
         },
     ));
@@ -368,19 +474,21 @@ fn load_next(
 fn queue_seek(trigger: On<UiInput<GitDiffSeekRequest>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
-        .insert(PendingGitDiffSeek(trigger.event().payload.path.clone()));
+        .insert(PendingGitDiffSeek {
+            path_bytes: trigger.event().payload.path_bytes.clone(),
+        });
 }
 
 fn start_pending_seek(
     mut pages: Query<(
         Entity,
         &mut super::state::GitState,
-        &GitDiffQuery,
+        &mut GitDiffQuery,
         &PendingGitDiffSeek,
     )>,
     mut commands: Commands,
 ) {
-    for (entity, mut state, query, pending) in &mut pages {
+    for (entity, mut state, mut query, pending) in &mut pages {
         if state.snapshot.diff_loading || !matches!(query.target.scope, DiffScope::Branch(_)) {
             continue;
         }
@@ -394,25 +502,11 @@ fn start_pending_seek(
                     .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX))
             })
             .unwrap_or_default();
-        let found = state
-            .snapshot
-            .diff_viewport
-            .as_ref()
-            .is_some_and(|viewport| {
-                viewport
-                    .lines
-                    .iter()
-                    .any(|line| line.file_path() == Some(&pending.0))
-            });
-        let complete = state
-            .snapshot
-            .diff_viewport
-            .as_ref()
-            .is_some_and(|viewport| loaded >= viewport.total_lines);
+        let batch = query.seek_branch(&pending.path_bytes);
         commands.entity(entity).remove::<PendingGitDiffSeek>();
-        if found || complete {
+        let Some((branch_paths, branch_has_more)) = batch else {
             continue;
-        }
+        };
         state.snapshot.diff_loading = true;
         commands.spawn((
             GitJob::new(entity),
@@ -420,10 +514,11 @@ fn start_pending_seek(
             DiffJob {
                 path: query.target.path.clone(),
                 scope: query.target.scope.clone(),
+                branch_paths,
+                branch_has_more,
                 generation: query.generation,
                 top_line: loaded,
                 rows: DIFF_WINDOW_ROWS,
-                seek_path: Some(pending.0.clone()),
                 content: None,
             },
         ));
@@ -449,13 +544,20 @@ fn file_refresh(
     });
 }
 
-fn start_requests(
-    pending: Query<(
+type PendingDiffRequests<'w, 's> = Query<
+    'w,
+    's,
+    (
         Entity,
-        &PendingGitDiff,
-        Option<&GitDiffQuery>,
-        Option<&GitDiffSource>,
-    )>,
+        &'static PendingGitDiff,
+        Option<&'static GitDiffQuery>,
+        Option<&'static GitDiffSource>,
+        Option<&'static GitBranchFilesQuery>,
+    ),
+>;
+
+fn start_requests(
+    pending: PendingDiffRequests,
     mut pages: Query<(
         &mut super::state::GitState,
         &mut super::state::GitDiffRevealRanges,
@@ -464,7 +566,7 @@ fn start_requests(
     queued_diffs: QueuedGitJobs<DiffJob>,
     mut commands: Commands,
 ) {
-    for (entity, pending, current, source) in &pending {
+    for (entity, pending, current, source, branch_files) in &pending {
         let target_changed = current.is_none_or(|current| current.target != pending.target);
         let generation = current
             .map(|current| current.generation)
@@ -489,25 +591,37 @@ fn start_requests(
             .filter(|source| source.dirty)
             .map(|source| source.content.clone());
         queued_diffs.despawn_for(entity, &mut commands);
+        let branch = match &target.scope {
+            DiffScope::Branch(_) => Some(BranchDiffProgress::new(
+                branch_files
+                    .map(|query| query.catalog.paths())
+                    .unwrap_or_default(),
+            )),
+            DiffScope::File | DiffScope::Commit(_) => None,
+        };
+        let mut query = GitDiffQuery {
+            target: target.clone(),
+            generation,
+            file: pending.file,
+            page_revision: pending.page_revision,
+            branch,
+        };
+        let (branch_paths, branch_has_more) = query.next_branch().unwrap_or_default();
         commands
             .entity(entity)
             .remove::<PendingGitDiff>()
-            .insert(GitDiffQuery {
-                target: target.clone(),
-                generation,
-                file: pending.file,
-                page_revision: pending.page_revision,
-            });
+            .insert(query);
         commands.spawn((
             GitJob::new(entity),
             GitRepository::at(target.repo_root),
             DiffJob {
                 path: target.path,
                 scope: target.scope,
+                branch_paths,
+                branch_has_more,
                 generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
-                seek_path: None,
                 content,
             },
         ));
@@ -672,10 +786,11 @@ mod tests {
                 DiffJob {
                     path: PathBuf::new(),
                     scope: target.scope,
+                    branch_paths: Vec::new(),
+                    branch_has_more: false,
                     generation: 1,
                     top_line: 0,
                     rows: DIFF_WINDOW_ROWS,
-                    seek_path: None,
                     content: None,
                 },
             ))
@@ -686,6 +801,24 @@ mod tests {
         assert!(!app.world().entities().contains(queued));
         let mut jobs = app.world_mut().query::<&DiffJob>();
         assert_eq!(jobs.iter(app.world()).count(), 1);
+    }
+
+    #[test]
+    fn branch_diff_progress_loads_files_in_pages_without_repeating_a_seek() {
+        let paths = (0..10)
+            .map(|index| format!("file-{index}.rs").into_bytes())
+            .collect();
+        let mut progress = BranchDiffProgress::new(paths);
+
+        let (first, first_has_more) = progress.next();
+        assert_eq!(first.len(), BranchDiffProgress::PAGE_SIZE);
+        assert!(first_has_more);
+        assert!(progress.seek(b"file-9.rs").is_some());
+        assert!(progress.seek(b"file-9.rs").is_none());
+        let (second, second_has_more) = progress.next();
+
+        assert_eq!(second, [b"file-8.rs".to_vec()]);
+        assert!(!second_has_more);
     }
 
     #[test]
@@ -874,6 +1007,7 @@ mod tests {
                 refresh: 0,
             }),
             page_revision: None,
+            branch: None,
         };
 
         assert!(query.accepts_file(3, &file));

@@ -772,6 +772,7 @@ mod tests {
             generation: 1,
             first_line: 0,
             total_lines: 20,
+            has_more: false,
             lines,
             markers: Vec::new(),
             error: String::new(),

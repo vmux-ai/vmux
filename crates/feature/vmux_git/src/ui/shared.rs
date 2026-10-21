@@ -196,12 +196,7 @@ pub fn DiffView(
         .as_ref()
         .map(|viewport| viewport.error.as_str())
         .unwrap_or_default();
-    let has_more = viewport.as_ref().is_some_and(|viewport| {
-        viewport
-            .first_line
-            .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX))
-            < viewport.total_lines
-    });
+    let has_more = viewport.as_ref().is_some_and(|viewport| viewport.has_more);
     let maxno = rows
         .iter()
         .flat_map(|l| [l.old_no, l.new_no])

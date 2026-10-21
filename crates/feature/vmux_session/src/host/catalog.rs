@@ -270,6 +270,7 @@ fn update_description(
 fn change_stage(
     trigger: On<UiInput<SessionsStageChange>>,
     managers: ManagerViews,
+    providers: Res<vmux_session::ProviderCatalog>,
     mut requests: MessageWriter<StageChangeRequest>,
     mut provider_requests: MessageWriter<ProviderStageChangeRequest>,
 ) {
@@ -278,10 +279,15 @@ fn change_stage(
     }
     let request = &trigger.event().payload;
     if !request.kind.is_empty() && request.kind != "session" && !request.sid.is_empty() {
+        let source_updated_at = providers
+            .get(&request.kind, &request.sid)
+            .map(|session| session.updated_at)
+            .unwrap_or_default();
         provider_requests.write(ProviderStageChangeRequest {
             kind: ProviderKind(request.kind.clone()),
             id: ProviderSessionId(request.sid.clone()),
             stage: StageId(request.stage.clone()),
+            source_updated_at,
         });
         return;
     }

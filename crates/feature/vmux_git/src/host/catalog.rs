@@ -43,6 +43,11 @@ fn sync_catalogs(mut pages: ChangedCatalogPages, mut commands: Commands) {
         let current_branch = repository.branch.clone();
         let repo_root = repository.repo_root.clone();
         let mut catalogs = vec![GitCatalog::LocalBranches];
+        if !controller.selected_commit.is_empty()
+            || repository.files.iter().any(|entry| entry.staged)
+        {
+            catalogs.push(GitCatalog::Commits);
+        }
         match controller.focused_panel {
             GitPanel::Branches => catalogs.push(controller.branch_collection.into()),
             GitPanel::Commits => catalogs.push(GitCatalog::Commits),
@@ -52,7 +57,7 @@ fn sync_catalogs(mut pages: ChangedCatalogPages, mut commands: Commands) {
         catalogs.dedup();
         for catalog in catalogs {
             let progress = state.snapshot.catalog(catalog);
-            if progress.loaded || progress.loading {
+            if progress.loaded || progress.loading || progress.failed {
                 continue;
             }
             state.snapshot.catalog_mut(catalog).loading = true;

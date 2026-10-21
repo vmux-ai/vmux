@@ -28,6 +28,7 @@ impl Plugin for EntityPlugin {
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
             .register_persisted::<ProviderStage>()
+            .register_persisted::<SourceUpdatedAt>()
             .register_persisted::<ProviderKind>()
             .register_persisted::<ProviderSessionId>()
             .register_persisted::<AgentConversationTitle>()
@@ -150,9 +151,15 @@ pub struct LocalTask;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
-#[require(Save)]
+#[require(Save, SourceUpdatedAt)]
 #[type_path = "vmux_session"]
 pub struct ProviderStage;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub(crate) struct SourceUpdatedAt(pub i64);
 
 #[derive(
     Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
@@ -261,6 +268,7 @@ pub struct ProviderStageChangeRequest {
     pub kind: ProviderKind,
     pub id: ProviderSessionId,
     pub stage: StageId,
+    pub source_updated_at: i64,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -547,6 +555,7 @@ fn change_provider_stage(
             &ProviderSessionId,
             &mut Stage,
             &mut StageChangedAt,
+            &mut SourceUpdatedAt,
         ),
         With<ProviderStage>,
     >,
@@ -558,15 +567,16 @@ fn change_provider_stage(
         }
         let now = vmux_ecs::UnixMillis::now().0;
         let mut found = false;
-        for (kind, id, mut stage, mut changed_at) in &mut stages {
+        for (kind, id, mut stage, mut changed_at, mut source_updated_at) in &mut stages {
             if kind != &request.kind || id != &request.id {
                 continue;
             }
             found = true;
             if stage.0 != request.stage {
                 stage.0.clone_from(&request.stage);
-                changed_at.0 = now;
             }
+            changed_at.0 = now;
+            source_updated_at.0 = request.source_updated_at;
             break;
         }
         if !found {
@@ -576,6 +586,7 @@ fn change_provider_stage(
                 request.id.clone(),
                 Stage(request.stage.clone()),
                 StageChangedAt(now),
+                SourceUpdatedAt(request.source_updated_at),
             ));
         }
     }
@@ -765,6 +776,7 @@ mod tests {
                 kind: ProviderKind("codex".into()),
                 id: ProviderSessionId("provider-session".into()),
                 stage: StageId("done".into()),
+                source_updated_at: 10,
             });
         app.update();
 
@@ -787,6 +799,7 @@ mod tests {
                 kind: ProviderKind("codex".into()),
                 id: ProviderSessionId("provider-session".into()),
                 stage: StageId("in_review".into()),
+                source_updated_at: 20,
             });
         app.update();
 
@@ -796,6 +809,19 @@ mod tests {
         let (updated, stage) = overrides.single(app.world()).unwrap();
         assert_eq!(updated, entity);
         assert_eq!(stage.0.0, "in_review");
+
+        app.world_mut().get_mut::<StageChangedAt>(entity).unwrap().0 = 1;
+        app.world_mut()
+            .resource_mut::<Messages<ProviderStageChangeRequest>>()
+            .write(ProviderStageChangeRequest {
+                kind: ProviderKind("codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId("in_review".into()),
+                source_updated_at: 30,
+            });
+        app.update();
+
+        assert!(app.world().get::<StageChangedAt>(entity).unwrap().0 > 1);
     }
 
     #[test]

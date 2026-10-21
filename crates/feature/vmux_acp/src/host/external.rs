@@ -94,6 +94,16 @@ impl Runtime {
         let Some(watcher) = self.watcher.as_mut() else {
             return;
         };
+        let stale = self
+            .watched
+            .keys()
+            .filter(|path| !path.exists())
+            .cloned()
+            .collect::<Vec<_>>();
+        for path in stale {
+            self.watched.remove(&path);
+            let _ = watcher.unwatch(&path);
+        }
         for (target, recursive) in paths.watches() {
             let mut path = target.clone();
             while !path.exists() && path.pop() {}
@@ -389,7 +399,16 @@ fn start(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
             if !event.kind.is_create() && !event.kind.is_modify() && !event.kind.is_remove() {
                 return;
             }
-            for source in watched_paths.sources(&event.paths) {
+            let mut sources = watched_paths.sources(&event.paths);
+            if event.kind.is_modify()
+                && event
+                    .paths
+                    .iter()
+                    .all(|path| path.starts_with(watched_paths.codex.join("sessions")))
+            {
+                sources.remove(&SourceKind::Codex);
+            }
+            for source in sources {
                 let _ = sender.send(source);
             }
         });
@@ -693,6 +712,39 @@ mod tests {
         std::fs::create_dir_all(&paths.codex).unwrap();
         runtime.ensure_watches(&paths);
         assert_eq!(runtime.watched.get(&paths.codex), Some(&false));
+    }
+
+    #[test]
+    fn recreated_provider_directory_replaces_the_stale_watch() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = SourcePaths {
+            codex: home.path().join(".codex"),
+            claude: home.path().join(".claude"),
+            vibe: home.path().join(".vibe"),
+        };
+        std::fs::create_dir_all(paths.codex.join("sessions")).unwrap();
+        let (_, receiver) = mpsc::channel();
+        let mut runtime = Runtime {
+            changes: Mutex::new(receiver),
+            watcher: notify::recommended_watcher(|_| {}).ok(),
+            watched: HashMap::new(),
+        };
+
+        runtime.ensure_watches(&paths);
+        assert_eq!(
+            runtime.watched.get(&paths.codex.join("sessions")),
+            Some(&true)
+        );
+        std::fs::remove_dir(paths.codex.join("sessions")).unwrap();
+        runtime.ensure_watches(&paths);
+        assert!(!runtime.watched.contains_key(&paths.codex.join("sessions")));
+        std::fs::create_dir(paths.codex.join("sessions")).unwrap();
+        runtime.ensure_watches(&paths);
+
+        assert_eq!(
+            runtime.watched.get(&paths.codex.join("sessions")),
+            Some(&true)
+        );
     }
 
     #[test]

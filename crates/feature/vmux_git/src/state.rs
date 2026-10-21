@@ -236,6 +236,7 @@ pub struct GitCatalogProgress {
     pub loaded: bool,
     pub loading: bool,
     pub has_more: bool,
+    pub failed: bool,
 }
 
 impl Default for GitPageSnapshot {
@@ -300,6 +301,7 @@ impl GitPageSnapshot {
             return false;
         }
         current.total_lines = next.total_lines;
+        current.has_more = next.has_more;
         current.lines.extend(next.lines.clone());
         current.markers.extend(next.markers.clone());
         current.markers.sort_by_key(|marker| marker.line);
@@ -422,6 +424,7 @@ mod tests {
                 generation: 3,
                 first_line: 0,
                 total_lines: 4,
+                has_more: true,
                 lines: vec![diff_line(1), diff_line(2)],
                 markers: Vec::new(),
                 error: String::new(),
@@ -432,6 +435,7 @@ mod tests {
             generation: 3,
             first_line: 2,
             total_lines: 4,
+            has_more: false,
             lines: vec![diff_line(3), diff_line(4)],
             markers: Vec::new(),
             error: String::new(),

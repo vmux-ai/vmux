@@ -37,6 +37,7 @@ pub(super) fn GitDashboard() -> Element {
     let active_panel = controller_state.focused_panel;
     let mut list_width = use_signal(|| 336.0_f64);
     let mut resizing = use_signal(|| false);
+    let mut resize_origin = use_signal(|| None::<(f64, f64)>);
     let split_style = format!("--git-list-width:{}px;", list_width());
 
     rsx! {
@@ -50,6 +51,7 @@ pub(super) fn GitDashboard() -> Element {
         }
         main { class: "flex min-h-0 flex-1 flex-col bg-background",
             div {
+                id: "git-dashboard-split",
                 class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,var(--git-list-width))_0.5rem_minmax(0,1fr)] sm:grid-rows-1",
                 style: "{split_style}",
                 aside { class: "flex min-h-0 flex-col overflow-hidden bg-foreground/[0.018]",
@@ -104,6 +106,7 @@ pub(super) fn GitDashboard() -> Element {
                     class: "group relative z-20 hidden h-full cursor-col-resize items-center justify-center sm:flex",
                     onmousedown: move |event: Event<MouseData>| {
                         event.prevent_default();
+                        resize_origin.set(Some((event.client_coordinates().x, list_width())));
                         resizing.set(true);
                     },
                     div { class: "pointer-events-none h-10 w-1 rounded-full bg-foreground/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100" }
@@ -149,9 +152,23 @@ pub(super) fn GitDashboard() -> Element {
             div {
                 class: "fixed inset-0 z-[900] cursor-col-resize",
                 onmousemove: move |event: Event<MouseData>| {
-                    list_width.set(event.client_coordinates().x.clamp(288.0, 640.0));
+                    let Some((start, width)) = resize_origin() else {
+                        return;
+                    };
+                    let width = (width + event.client_coordinates().x - start).clamp(288.0, 640.0);
+                    let _ = document::eval(&format!(
+                        "document.getElementById('git-dashboard-split')?.style.setProperty('--git-list-width','{width}px')"
+                    ));
                 },
-                onmouseup: move |_| resizing.set(false),
+                onmouseup: move |event: Event<MouseData>| {
+                    if let Some((start, width)) = resize_origin() {
+                        list_width.set(
+                            (width + event.client_coordinates().x - start).clamp(288.0, 640.0),
+                        );
+                    }
+                    resize_origin.set(None);
+                    resizing.set(false);
+                },
             }
         }
         if controller_state.shortcut_help_visible {

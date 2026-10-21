@@ -54,6 +54,13 @@ impl BranchFilesCatalog {
             has_more: end < self.0.len(),
         }
     }
+
+    pub(crate) fn paths(&self) -> Vec<Vec<u8>> {
+        self.0
+            .iter()
+            .map(|entry| entry.path_bytes.clone())
+            .collect()
+    }
 }
 
 #[derive(Clone, Component, Debug)]
@@ -441,6 +448,39 @@ impl GitRepository {
     pub fn branch_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
         let stdout = self.branch_diff_text(reference, 3, Path::new(""))?;
         Ok(self.highlight_diff(&stdout))
+    }
+
+    pub(crate) fn branch_diff_lines_for_paths(
+        &self,
+        reference: &str,
+        paths: &[Vec<u8>],
+    ) -> Result<Vec<DiffLine>, GitError> {
+        let mut lines = Vec::new();
+        for path in paths {
+            let path = PathBuf::from(OsString::from_vec(path.clone()));
+            let stdout = self.branch_diff_text_for(reference, 3, Path::new(""), Some(&path))?;
+            if !stdout.trim().is_empty() {
+                lines.extend(self.highlight_diff(&stdout));
+                continue;
+            }
+            let absolute = self.0.join(&path);
+            if self.status(&absolute)?.file_status != FileStatus::Untracked {
+                continue;
+            }
+            lines.push(DiffLine {
+                kind: DiffKind::Hunk,
+                old_no: None,
+                new_no: None,
+                hunk: None,
+                spans: crate::host::highlight::Highlighter::line(
+                    &path.to_string_lossy(),
+                    &absolute,
+                ),
+            });
+            let content = std::fs::read_to_string(&absolute).unwrap_or_default();
+            lines.extend(self.diff_lines_with_content(&absolute, &content)?);
+        }
+        Ok(lines)
     }
 
     pub(crate) fn branch_files_catalog(
@@ -1812,6 +1852,46 @@ mod tests {
         assert_eq!(second.files.len(), 1);
         assert!(!second.has_more);
         assert_eq!(second.files[0].path, "c.txt");
+    }
+
+    #[test]
+    fn branch_diff_page_loads_only_requested_files() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "first.txt", "first\n");
+        test_repo::write(repo.path(), "second.txt", "second\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "files"]);
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"second.txt".to_vec()])
+            .unwrap();
+        let files = lines
+            .iter()
+            .filter_map(DiffLine::file_path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, ["second.txt"]);
+    }
+
+    #[test]
+    fn current_branch_diff_page_includes_untracked_file() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), "base.txt", "base\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "base"]);
+        test_repo::run(repo.path(), &["switch", "-qc", "feature"]);
+        test_repo::write(repo.path(), "new.txt", "new\n");
+
+        let lines = GitRepository::at(repo.path())
+            .branch_diff_lines_for_paths("feature", &[b"new.txt".to_vec()])
+            .unwrap();
+
+        assert_eq!(lines.first().and_then(DiffLine::file_path), Some("new.txt"));
+        assert!(lines.iter().any(|line| matches!(line.kind, DiffKind::Add)));
     }
 
     #[test]

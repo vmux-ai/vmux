@@ -352,12 +352,14 @@ fn deliver_catalog_outputs(
                 progress.loaded = true;
                 progress.loading = false;
                 progress.has_more = has_more;
+                progress.failed = false;
             }
             Err(error) => {
                 let progress = state.snapshot.catalog_mut(output.catalog);
-                progress.loaded = true;
+                progress.loaded = false;
                 progress.loading = false;
                 progress.has_more = false;
+                progress.failed = true;
                 state.snapshot.message.clone_from(&error.message);
             }
         }
@@ -636,6 +638,7 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     generation: job.generation,
                     first_line: job.top_line,
                     total_lines: 0,
+                    has_more: false,
                     lines: Vec::new(),
                     markers: Vec::new(),
                     error: String::new(),
@@ -646,31 +649,44 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     Some(content) => repository.diff_lines_with_content(&job.path, content),
                     None => repository.diff_lines(&job.path),
                 },
-                DiffScope::Branch(reference) => repository.branch_diff_lines(reference),
+                DiffScope::Branch(reference) => {
+                    repository.branch_diff_lines_for_paths(reference, &job.branch_paths)
+                }
                 DiffScope::Commit(reference) => repository.commit_diff_lines(reference),
             };
             match result {
                 Ok(all_lines) => {
                     let markers = super::diff::GitDiffMarkers::from_lines(&all_lines).into_inner();
-                    let rows = job.seek_path.as_deref().map_or(job.rows, |path| {
-                        let Some(target) = all_lines
-                            .iter()
-                            .position(|line| line.file_path() == Some(path))
-                        else {
-                            return job.rows;
+                    let (first_line, total_lines, has_more, lines) =
+                        if matches!(job.scope, DiffScope::Branch(_)) {
+                            let page_lines = u32::try_from(all_lines.len()).unwrap_or(u32::MAX);
+                            (
+                                job.top_line,
+                                job.top_line.saturating_add(page_lines),
+                                job.branch_has_more,
+                                all_lines,
+                            )
+                        } else {
+                            let (total_lines, lines) = super::parse::DiffParser::window(
+                                &all_lines,
+                                job.top_line,
+                                job.rows,
+                            );
+                            let loaded = job
+                                .top_line
+                                .saturating_add(u32::try_from(lines.len()).unwrap_or(u32::MAX));
+                            (
+                                job.top_line.min(total_lines),
+                                total_lines,
+                                loaded < total_lines,
+                                lines,
+                            )
                         };
-                        let target = u32::try_from(target).unwrap_or(u32::MAX);
-                        if target < job.top_line {
-                            return 0;
-                        }
-                        target.saturating_sub(job.top_line).saturating_add(job.rows)
-                    });
-                    let (total_lines, lines) =
-                        super::parse::DiffParser::window(&all_lines, job.top_line, rows);
                     DiffOutput(GitDiffViewport {
                         generation: job.generation,
-                        first_line: job.top_line.min(total_lines),
+                        first_line,
                         total_lines,
+                        has_more,
                         lines,
                         markers,
                         error: String::new(),
@@ -680,6 +696,7 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     generation: job.generation,
                     first_line: job.top_line,
                     total_lines: 0,
+                    has_more: false,
                     lines: Vec::new(),
                     markers: Vec::new(),
                     error: error.0,
@@ -1107,10 +1124,11 @@ mod tests {
             DiffJob {
                 path: file,
                 scope: DiffScope::File,
+                branch_paths: Vec::new(),
+                branch_has_more: false,
                 generation: 7,
                 top_line: 0,
                 rows: 50,
-                seek_path: None,
                 content: None,
             },
         ));
@@ -1155,10 +1173,11 @@ mod tests {
             DiffJob {
                 path: file,
                 scope: DiffScope::File,
+                branch_paths: Vec::new(),
+                branch_has_more: false,
                 generation: 7,
                 top_line: 0,
                 rows: 50,
-                seek_path: None,
                 content: None,
             },
         ));

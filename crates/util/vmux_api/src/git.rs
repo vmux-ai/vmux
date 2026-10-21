@@ -79,6 +79,7 @@ pub struct GitDiffViewport {
     pub generation: u64,
     pub first_line: u32,
     pub total_lines: u32,
+    pub has_more: bool,
     pub lines: Vec<DiffLine>,
     pub markers: Vec<GitLineMarker>,
     pub error: String,

@@ -115,6 +115,11 @@ pub(super) fn BranchesCard(
         .into_iter()
         .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
         .collect::<Vec<_>>();
+    use_effect(move || {
+        if !query.is_empty() && files_has_more && !files_loading {
+            let _ = send(&GitBranchFilesNextRequest);
+        }
+    });
     let selected = if collection == GitBranchCollection::Local {
         repository
             .branches
@@ -259,10 +264,9 @@ pub(super) fn BranchesCard(
                 } else if visible_files.is_empty() {
                     div { class: "flex min-h-24 items-center justify-center px-3 text-center text-xs text-muted-foreground", {translate("git-no-changes")} }
                 } else {
-                    for (index, entry) in visible_files.into_iter().enumerate() {
+                    for entry in visible_files {
                         BranchFileRow {
                             key: "branch-file-{entry.path_bytes:?}",
-                            index,
                             entry,
                             selected_path_bytes: selected_path_bytes.clone(),
                         }
@@ -281,15 +285,16 @@ pub(super) fn BranchesCard(
 }
 
 #[component]
-fn BranchFileRow(index: usize, entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Element {
+fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Element {
     let selected = selected_path_bytes == entry.path_bytes;
     let path_bytes = entry.path_bytes.clone();
     let seek_path = entry.path.clone();
+    let row_id = entry.row_id();
     let status_code = entry.change.code();
     let status_class = entry.change.class();
     rsx! {
         button {
-            id: "git-branch-file-row-{index}",
+            id: "{row_id}",
             r#type: "button",
             class: if selected {
                 "flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.085] px-2 text-left text-foreground shadow-[inset_2px_0_0_var(--git-selection-accent)]"
@@ -302,6 +307,7 @@ fn BranchFileRow(index: usize, entry: GitBranchFileEntry, selected_path_bytes: V
                 });
                 let _ = send(&GitDiffSeekRequest {
                     path: seek_path.clone(),
+                    path_bytes: path_bytes.clone(),
                 });
             },
             TypeIcon { path: entry.path.clone(), is_dir: false, class: "size-3.5 shrink-0 opacity-85" }

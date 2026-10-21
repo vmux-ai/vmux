@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 pub use vmux_api::git::{
     DiffKind, DiffLine, FileGitState, FileStatus, GitDiffRow, GitDiffViewport, GitFileStatus,
     GitLineMarker, GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
@@ -112,6 +114,7 @@ pub struct GitDiffNextRequest;
 #[vmux_api::ui_event(Eq)]
 pub struct GitDiffSeekRequest {
     pub path: String,
+    pub path_bytes: Vec<u8>,
 }
 
 impl GitDiffRevealRequest {
@@ -287,6 +290,16 @@ pub struct GitBranchFileEntry {
     pub previous_path: Option<String>,
     pub previous_path_bytes: Option<Vec<u8>>,
     pub change: GitPathChange,
+}
+
+impl GitBranchFileEntry {
+    pub fn row_id(&self) -> String {
+        let mut id = String::from("git-branch-file-row-");
+        for byte in &self.path_bytes {
+            let _ = write!(id, "{byte:02x}");
+        }
+        id
+    }
 }
 
 impl GitFileEntry {

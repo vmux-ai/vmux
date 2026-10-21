@@ -1260,6 +1260,7 @@ mod tests {
 
     #[test]
     fn reconcile_recovers_missing_worktree_without_dropping_metadata() {
+        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
         let activation =
@@ -1282,7 +1283,7 @@ mod tests {
             ))
             .id();
 
-        for _ in 0..200 {
+        for _ in 0..1000 {
             app.update();
             if app.world().get::<TabWorktreeReady>(tab).is_some()
                 || app.world().get::<TabWorktreeUnavailable>(tab).is_some()
@@ -1452,7 +1453,7 @@ mod tests {
             ));
         }
 
-        for _ in 0..200 {
+        for _ in 0..1000 {
             app.update();
             let ready = app
                 .world()
@@ -1472,7 +1473,7 @@ mod tests {
             1
         );
 
-        for _ in 0..200 {
+        for _ in 0..1000 {
             app.update();
             let ready = app
                 .world()

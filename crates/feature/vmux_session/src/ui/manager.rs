@@ -1400,22 +1400,23 @@ impl SessionStageMutations {
         self.leaving
             .write()
             .extend(targets.iter().map(|target| target.id.clone()));
+        for target in &targets {
+            self.optimistic
+                .set(target.id.clone(), target.stage.clone(), "done".to_string());
+            if send(&SessionsStageChange {
+                id: target.id.clone(),
+                kind: target.kind.clone(),
+                sid: target.sid.clone(),
+                stage: "done".to_string(),
+            })
+            .is_err()
+            {
+                self.optimistic.clear(&target.id);
+                self.leaving.write().remove(&target.id);
+            }
+        }
         spawn(async move {
             vmux_ui::platform::Platform::sleep(200).await;
-            for target in &targets {
-                self.optimistic
-                    .set(target.id.clone(), target.stage.clone(), "done".to_string());
-                if send(&SessionsStageChange {
-                    id: target.id.clone(),
-                    kind: target.kind.clone(),
-                    sid: target.sid.clone(),
-                    stage: "done".to_string(),
-                })
-                .is_err()
-                {
-                    self.optimistic.clear(&target.id);
-                }
-            }
             let ids = targets
                 .iter()
                 .map(|target| target.id.as_str())
@@ -1433,12 +1434,11 @@ impl SessionStageMutations {
             return;
         }
         self.leaving.write().insert(id.clone());
+        if send(&SessionsCleanup { id: id.clone() }).is_err() {
+            self.leaving.write().remove(&id);
+            return;
+        }
         spawn(async move {
-            vmux_ui::platform::Platform::sleep(200).await;
-            if send(&SessionsCleanup { id: id.clone() }).is_err() {
-                self.leaving.write().remove(&id);
-                return;
-            }
             vmux_ui::platform::Platform::sleep(1_500).await;
             self.leaving.write().remove(&id);
         });

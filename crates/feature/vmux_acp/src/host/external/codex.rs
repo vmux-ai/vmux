@@ -67,6 +67,26 @@ impl Reader {
 
     fn metadata(&self, indexed: &HashMap<String, CodexIndexed>) -> HashMap<String, CodexMeta> {
         let mut metadata = HashMap::new();
+        let mut missing = indexed
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        for id in indexed.keys() {
+            let Some(previous) = self.previous.get(id) else {
+                continue;
+            };
+            metadata.insert(
+                id.clone(),
+                CodexMeta {
+                    cwd: previous.cwd.clone(),
+                    created_at: previous.created_at,
+                },
+            );
+            missing.remove(id);
+        }
+        if missing.is_empty() {
+            return metadata;
+        }
         let Ok(root) = self.sessions.canonicalize() else {
             return metadata;
         };
@@ -104,56 +124,37 @@ impl Reader {
                 if files > Self::MAX_SESSION_FILES {
                     break 'walk;
                 }
-                let updated_at = entry
-                    .metadata()
-                    .ok()
-                    .and_then(|metadata| metadata.modified().ok())
-                    .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|elapsed| elapsed.as_millis() as i64)
-                    .unwrap_or_default();
                 let known_id = path
                     .file_stem()
                     .and_then(|stem| stem.to_str())
                     .and_then(|stem| stem.get(stem.len().saturating_sub(36)..))
-                    .filter(|id| indexed.contains_key(*id));
-                let candidate = match known_id.and_then(|id| self.previous.get(id)) {
-                    Some(previous) => CodexMeta {
-                        id: previous.sid.clone(),
-                        cwd: previous.cwd.clone(),
-                        created_at: previous.created_at,
-                        updated_at,
-                    },
-                    None => {
-                        let Ok(file) = File::open(&path) else {
-                            continue;
-                        };
-                        let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
-                            continue;
-                        };
-                        let Ok(envelope) = serde_json::from_str::<CodexMetaLine>(&line) else {
-                            continue;
-                        };
-                        if !indexed.contains_key(&envelope.payload.session_id)
-                            || envelope.payload.cwd.trim().is_empty()
-                        {
-                            continue;
-                        }
-                        CodexMeta {
-                            id: envelope.payload.session_id,
-                            cwd: envelope.payload.cwd,
-                            created_at: Timestamp::parse(&envelope.payload.timestamp),
-                            updated_at,
-                        }
-                    }
+                    .filter(|id| missing.contains(*id));
+                let Some(known_id) = known_id else {
+                    continue;
                 };
-                if let Some(current) = metadata.get_mut(&candidate.id) {
-                    current.updated_at = current.updated_at.max(candidate.updated_at);
-                    if candidate.created_at < current.created_at {
-                        current.cwd = candidate.cwd;
-                        current.created_at = candidate.created_at;
-                    }
-                } else {
-                    metadata.insert(candidate.id.clone(), candidate);
+                let Ok(file) = File::open(&path) else {
+                    continue;
+                };
+                let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
+                    continue;
+                };
+                let Ok(envelope) = serde_json::from_str::<CodexMetaLine>(&line) else {
+                    continue;
+                };
+                if envelope.payload.session_id != known_id || envelope.payload.cwd.trim().is_empty()
+                {
+                    continue;
+                }
+                metadata.insert(
+                    known_id.to_string(),
+                    CodexMeta {
+                        cwd: envelope.payload.cwd,
+                        created_at: Timestamp::parse(&envelope.payload.timestamp),
+                    },
+                );
+                missing.remove(known_id);
+                if missing.is_empty() {
+                    break 'walk;
                 }
             }
         }
@@ -178,7 +179,7 @@ impl ProviderReader for Reader {
                 name: indexed.title.clone(),
                 cwd: metadata.cwd.clone(),
                 created_at: metadata.created_at,
-                updated_at: indexed.updated_at.max(metadata.updated_at),
+                updated_at: indexed.updated_at,
                 conversation_title: indexed.title.clone(),
                 last_prompt: indexed.title,
                 ..Default::default()
@@ -213,10 +214,8 @@ struct CodexMetaPayload {
 }
 
 struct CodexMeta {
-    id: String,
     cwd: String,
     created_at: i64,
-    updated_at: i64,
 }
 
 #[cfg(test)]
@@ -265,5 +264,49 @@ mod tests {
         assert_eq!(sessions[0].sid, "01a14fcc-f46a-7c12-b000-779be98d72ae");
         assert_eq!(sessions[0].cwd, "/work/vmux");
         assert_eq!(sessions[0].name, "Casual greeting");
+    }
+
+    #[test]
+    fn codex_reader_reuses_known_metadata_without_rollout_scan() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "session_index.jsonl",
+            r#"{"id":"01a14fcc-f46a-7c12-b000-779be98d72ae","thread_name":"Updated title","updated_at":"2026-10-21T03:00:00Z"}
+"#,
+        );
+        let previous = ProviderSession {
+            sid: "01a14fcc-f46a-7c12-b000-779be98d72ae".into(),
+            cwd: "/work/vmux".into(),
+            created_at: 10,
+            ..Default::default()
+        };
+
+        let sessions = Reader::at(fixture.path())
+            .with_previous(&[previous])
+            .read()
+            .unwrap();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].cwd, "/work/vmux");
+        assert_eq!(sessions[0].name, "Updated title");
+    }
+
+    #[test]
+    fn codex_reader_rejects_filename_identity_spoofing() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "session_index.jsonl",
+            r#"{"id":"01a14fcc-f46a-7c12-b000-779be98d72ae","thread_name":"Task","updated_at":"2026-10-21T03:00:00Z"}
+"#,
+        );
+        fixture.write(
+            "sessions/rollout-01a14fcc-f46a-7c12-b000-779be98d72ae.jsonl",
+            r#"{"type":"session_meta","payload":{"session_id":"01a14fcc-f46a-7c12-b000-000000000000","timestamp":"2026-10-21T02:00:00Z","cwd":"/spoofed"}}
+"#,
+        );
+
+        let sessions = Reader::at(fixture.path()).read().unwrap();
+
+        assert!(sessions.is_empty());
     }
 }

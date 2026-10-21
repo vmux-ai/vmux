@@ -463,6 +463,7 @@ mod tests {
                             generation: 1,
                             first_line: 0,
                             total_lines: line_count,
+                            has_more: false,
                             lines,
                             markers: Vec::new(),
                             error: String::new(),

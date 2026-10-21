@@ -12,6 +12,8 @@ use vmux_api::conversation::{AssistantBlock, Message};
 use vmux_ecs::{CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 
 #[cfg(host)]
+use crate::model::SourceUpdatedAt;
+#[cfg(host)]
 use crate::{
     AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent, ProviderKind,
     ProviderSessionId, ProviderStage, RunState, Session, SessionId, Stage, StageChangedAt,
@@ -190,6 +192,7 @@ struct CatalogChanges<'w, 's> {
                 Changed<ProviderSessionId>,
                 Changed<Stage>,
                 Changed<StageChangedAt>,
+                Changed<SourceUpdatedAt>,
             )>,
         ),
     >,
@@ -256,7 +259,13 @@ fn project(
     stages: Query<(&StageId, &Name, &Order, Has<Terminal>), With<StageDefinition>>,
     providers: Res<ProviderCatalog>,
     provider_stages: Query<
-        (&ProviderKind, &ProviderSessionId, &Stage, &StageChangedAt),
+        (
+            &ProviderKind,
+            &ProviderSessionId,
+            &Stage,
+            &StageChangedAt,
+            &SourceUpdatedAt,
+        ),
         With<ProviderStage>,
     >,
     transcripts: Transcripts,
@@ -338,14 +347,18 @@ fn project(
         });
     }
     for session in &providers.sessions {
-        let stage_override = provider_stages.iter().find(|(kind, id, _, changed_at)| {
-            kind.0 == session.kind && id.0 == session.sid && changed_at.0 >= session.updated_at
-        });
+        let stage_override = provider_stages
+            .iter()
+            .find(|(kind, id, _, _, source_updated_at)| {
+                kind.0 == session.kind
+                    && id.0 == session.sid
+                    && source_updated_at.0 >= session.updated_at
+            });
         let stage = stage_override
-            .map(|(_, _, stage, _)| stage.0.0.clone())
+            .map(|(_, _, stage, _, _)| stage.0.0.clone())
             .unwrap_or_else(|| default_stage.clone());
         let stage_changed_at = stage_override
-            .map(|(_, _, _, changed_at)| changed_at.0)
+            .map(|(_, _, _, changed_at, _)| changed_at.0)
             .unwrap_or(session.updated_at);
         next.sessions.push(SessionSummary {
             id: session.catalog_id(),
@@ -543,6 +556,7 @@ mod tests {
                 kind: ProviderKind("codex".into()),
                 id: ProviderSessionId("provider-session".into()),
                 stage: StageId("done".into()),
+                source_updated_at: 10,
             });
         app.update();
 
@@ -583,6 +597,7 @@ mod tests {
                 kind: ProviderKind("acp:codex".into()),
                 id: ProviderSessionId("provider-session".into()),
                 stage: StageId("done".into()),
+                source_updated_at: 10,
             });
         app.update();
         let archived_at = app.world().resource::<CatalogSnapshot>().sessions[0].stage_changed_at;
@@ -592,6 +607,20 @@ mod tests {
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
         assert_eq!(session.stage, "in_progress");
         assert_eq!(session.stage_changed_at, archived_at + 1);
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
+            .write(crate::ProviderStageChangeRequest {
+                kind: ProviderKind("acp:codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId("done".into()),
+                source_updated_at: archived_at + 1,
+            });
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "done");
+        assert!(session.stage_changed_at > archived_at);
     }
 
     #[test]

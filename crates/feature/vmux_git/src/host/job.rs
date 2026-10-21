@@ -22,10 +22,11 @@ pub(super) struct CatalogJob {
 pub(super) struct DiffJob {
     pub(super) path: PathBuf,
     pub(super) scope: DiffScope,
+    pub(super) branch_paths: Vec<Vec<u8>>,
+    pub(super) branch_has_more: bool,
     pub(super) generation: u64,
     pub(super) top_line: u32,
     pub(super) rows: u32,
-    pub(super) seek_path: Option<String>,
     pub(super) content: Option<String>,
 }
 

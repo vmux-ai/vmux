@@ -25,9 +25,12 @@ impl Plugin for TogglePlugin {
         app.add_message::<ToggleLayoutRequest>()
             .add_systems(
                 Update,
-                handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+                (
+                    handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+                    animate,
+                )
+                    .chain(),
             )
-            .add_systems(Update, animate)
             .add_systems(
                 PostUpdate,
                 sync_window_padding.before(LayoutSystems::Layout),

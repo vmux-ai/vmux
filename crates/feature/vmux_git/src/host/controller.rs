@@ -279,7 +279,7 @@ impl GitPageControllerState {
         self.selected_branch_path.clone_from(&files[index].path);
         self.selected_branch_path_bytes
             .clone_from(&files[index].path_bytes);
-        Some(format!("git-branch-file-row-{index}"))
+        Some(files[index].row_id())
     }
 
     fn move_commit_selection(
@@ -572,10 +572,12 @@ fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<
         next.selected_path_bytes = next_file
             .map(|entry| entry.path_bytes.clone())
             .unwrap_or_default();
-        if !repository
-            .commits
-            .iter()
-            .any(|entry| entry.sha == next.selected_commit)
+        if state.snapshot.commits.loaded
+            && !state.snapshot.commits.has_more
+            && !repository
+                .commits
+                .iter()
+                .any(|entry| entry.sha == next.selected_commit)
         {
             next.selected_commit.clear();
         }
@@ -598,13 +600,15 @@ fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<
         next.selected_branch_path_bytes = next_branch_file
             .map(|entry| entry.path_bytes.clone())
             .unwrap_or_default();
-        next.selected_stash = repository
-            .stashes
-            .iter()
-            .find(|entry| entry.reference == next.selected_stash)
-            .or_else(|| repository.stashes.first())
-            .map(|entry| entry.reference.clone())
-            .unwrap_or_default();
+        if state.snapshot.stashes.loaded {
+            next.selected_stash = repository
+                .stashes
+                .iter()
+                .find(|entry| entry.reference == next.selected_stash)
+                .or_else(|| repository.stashes.first())
+                .map(|entry| entry.reference.clone())
+                .unwrap_or_default();
+        }
         if !repository
             .files
             .iter()
@@ -659,7 +663,9 @@ fn operations(mut pages: OperationPages) {
             .files
             .iter()
             .find(|entry| entry.path_bytes == controller.selected_path_bytes);
-        let branch = if controller.branch_collection == GitBranchCollection::Local {
+        let branch = if controller.branch_collection == GitBranchCollection::Local
+            && state.snapshot.local_branches.loaded
+        {
             repository
                 .branches
                 .iter()
@@ -667,14 +673,16 @@ fn operations(mut pages: OperationPages) {
         } else {
             None
         };
-        let commit = repository
-            .commits
-            .iter()
-            .any(|entry| entry.sha == controller.selected_commit);
-        let stash = repository
-            .stashes
-            .iter()
-            .any(|entry| entry.reference == controller.selected_stash);
+        let commit = state.snapshot.commits.loaded
+            && repository
+                .commits
+                .iter()
+                .any(|entry| entry.sha == controller.selected_commit);
+        let stash = state.snapshot.stashes.loaded
+            && repository
+                .stashes
+                .iter()
+                .any(|entry| entry.reference == controller.selected_stash);
         let staged = repository.files.iter().any(|entry| entry.staged);
         let branch_selected = branch.is_some();
         let branch_mutable = branch.is_some_and(|branch| !branch.current);
@@ -1156,6 +1164,54 @@ mod tests {
         controller.apply_url_commit(None);
         assert_eq!(controller.focused_panel, GitPanel::Files);
         assert!(controller.selected_commit.is_empty());
+    }
+
+    #[test]
+    fn repository_summary_preserves_url_commit_until_catalog_loads() {
+        let mut app = App::new();
+        app.add_systems(Update, reconcile);
+        let entity = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        repository: Some(GitRepositorySnapshot {
+                            path: "/tmp/repository".to_string(),
+                            repo_root: "/tmp/repository".to_string(),
+                            repo_name: "repository".to_string(),
+                            is_worktree: false,
+                            branch: "main".to_string(),
+                            base_ref: String::new(),
+                            upstream: String::new(),
+                            ahead: 0,
+                            behind: 0,
+                            files: Vec::new(),
+                            commits: Vec::new(),
+                            branches: Vec::new(),
+                            remote_branches: Vec::new(),
+                            tags: Vec::new(),
+                            stashes: Vec::new(),
+                        }),
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState {
+                    selected_commit: "abc123".to_string(),
+                    focused_panel: GitPanel::Commits,
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<GitPageControllerState>(entity)
+                .unwrap()
+                .selected_commit,
+            "abc123"
+        );
     }
 
     #[test]
