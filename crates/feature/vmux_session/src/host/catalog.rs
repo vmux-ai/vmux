@@ -417,10 +417,10 @@ fn ready(
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    let projects = pages
+    let project_detail = pages
         .get(target)
-        .is_ok_and(|page| page.url.trim_end_matches('/') == "vmux://projects");
-    if !views.contains(target) && !projects {
+        .is_ok_and(|page| ProjectCatalogRoute::is_detail(&page.url));
+    if !views.contains(target) && !project_detail {
         return;
     }
     commands.entity(target).insert(SessionCatalogView);
@@ -444,10 +444,18 @@ fn cleanup_inactive_views(
     mut commands: Commands,
 ) {
     for (entity, page, manager, chat) in &views {
-        let projects = page.url.trim_end_matches('/') == "vmux://projects";
-        if !manager && !chat && !projects {
+        if !manager && !chat && !ProjectCatalogRoute::is_detail(&page.url) {
             commands.entity(entity).remove::<SessionCatalogView>();
         }
+    }
+}
+
+struct ProjectCatalogRoute;
+
+impl ProjectCatalogRoute {
+    fn is_detail(url: &str) -> bool {
+        url.strip_prefix("vmux://projects/")
+            .is_some_and(|path| !path.is_empty())
     }
 }
 
@@ -604,6 +612,42 @@ mod tests {
         app.world_mut().flush();
 
         assert_eq!(app.world().resource::<Published>().0, vec![manager]);
+    }
+
+    #[test]
+    fn project_detail_receives_catalog_without_publishing_to_project_index() {
+        let mut app = App::new();
+        app.init_resource::<CatalogSnapshot>()
+            .init_resource::<SessionRepositories>()
+            .init_resource::<Published>()
+            .add_observer(Published::record)
+            .add_observer(ready);
+        let index = app
+            .world_mut()
+            .spawn(PageMetadata {
+                url: "vmux://projects/".to_string(),
+                ..Default::default()
+            })
+            .id();
+        let detail = app
+            .world_mut()
+            .spawn(PageMetadata {
+                url: "vmux://projects/github.com/vmux-ai/vmux".to_string(),
+                ..Default::default()
+            })
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview: index,
+            payload: PageReady {},
+        });
+        app.world_mut().trigger(UiInput {
+            webview: detail,
+            payload: PageReady {},
+        });
+        app.world_mut().flush();
+
+        assert_eq!(app.world().resource::<Published>().0, vec![detail]);
     }
 
     #[test]

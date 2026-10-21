@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::PageMetadata;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ecs::page::PageReady;
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
@@ -187,7 +188,7 @@ impl WorkspaceWriter<'_, '_> {
 fn git_page_ready(
     trigger: On<UiInput<PageReady>>,
     tabs: TabHierarchy,
-    pages: Query<&vmux_ecs::PageMetadata>,
+    pages: Query<&PageMetadata>,
     focused_space: FocusedSpace,
     mut commands: Commands,
 ) {
@@ -223,7 +224,7 @@ fn project_activate(
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
-    pages: Query<Entity, With<vmux_ecs::PageMetadata>>,
+    pages: Query<(Entity, &PageMetadata)>,
     managed_root: Res<ManagedWorktreeRoot>,
     mut writer: WorkspaceWriter,
 ) {
@@ -270,7 +271,10 @@ fn project_activate(
         );
         return;
     };
-    for page in &pages {
+    for (page, metadata) in &pages {
+        if !vmux_git::GitUrl::is_page(&metadata.url) {
+            continue;
+        }
         let mut current = page;
         loop {
             if current == tab_entity {
@@ -294,12 +298,24 @@ mod tests {
     #[derive(Resource, Default)]
     struct ContextWrites(Vec<GitPageContext>);
 
+    #[derive(Resource, Default)]
+    struct WorkspaceWrites(Vec<Entity>);
+
     fn capture_context(
         trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
         mut writes: ResMut<ContextWrites>,
     ) {
         if let Some(context) = &trigger.event().update().context {
             writes.0.push(context.clone());
+        }
+    }
+
+    fn capture_workspace(
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        mut writes: ResMut<WorkspaceWrites>,
+    ) {
+        if trigger.event().update().workspace.is_some() {
+            writes.0.push(trigger.event().webview());
         }
     }
 
@@ -311,7 +327,7 @@ mod tests {
             .add_observer(capture_context);
         let webview = app
             .world_mut()
-            .spawn(vmux_ecs::PageMetadata {
+            .spawn(PageMetadata {
                 url: "git://tmp/repo".to_string(),
                 ..Default::default()
             })
@@ -362,6 +378,59 @@ mod tests {
             expected.to_string_lossy().into_owned()
         );
         assert!(app.world().get::<TabDirDecided>(tab).is_some());
+    }
+
+    #[test]
+    fn project_activation_notifies_only_git_pages_in_the_tab() {
+        let project = tempfile::tempdir().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
+            .init_resource::<WorkspaceWrites>()
+            .add_observer(project_activate)
+            .add_observer(capture_workspace);
+        let tab = app.world_mut().spawn(Tab::default()).id();
+        let requester = app
+            .world_mut()
+            .spawn((
+                ChildOf(tab),
+                PageMetadata {
+                    url: "vmux://projects/".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        let git = app
+            .world_mut()
+            .spawn((
+                ChildOf(tab),
+                PageMetadata {
+                    url: "git://tmp/repo".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            ChildOf(tab),
+            PageMetadata {
+                url: "vmux://sessions/".to_string(),
+                ..Default::default()
+            },
+        ));
+
+        app.world_mut().trigger(UiInput {
+            webview: requester,
+            payload: ProjectActivateRequest {
+                path: project.path().to_string_lossy().into_owned(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<WorkspaceWrites>().0, vec![git]);
     }
 
     #[test]
