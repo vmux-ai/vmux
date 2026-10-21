@@ -533,6 +533,11 @@ corrupt another's panes.
 State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar hard-resets
 on an incompatible version rather than loading a broken store.
 
+World persistence uses named type-registry domains. A persisted component or resource registers
+once with its domain; that metadata produces the component and resource allowlists used by saves.
+The workspace domain also installs ordinary change tracking, while specialized domains such as
+bookmarks keep their own entity scope, dirty policy, path, migration, and seeding lifecycle.
+
 ---
 
 ## How it paints
