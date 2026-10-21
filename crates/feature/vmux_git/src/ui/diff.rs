@@ -20,24 +20,24 @@ pub(super) fn BranchDiffCard(
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
 ) -> Element {
-    let selected_branch = selected_branch();
+    let selected_branch_value = selected_branch();
     let comparison = if repository.base_ref.is_empty() {
-        selected_branch.clone()
+        selected_branch_value.clone()
     } else {
-        format!("{}…{}", repository.base_ref, selected_branch)
+        format!("{}…{}", repository.base_ref, selected_branch_value)
     };
-    let selected_path = selected_path();
-    let loaded_lines = diff_viewport()
-        .as_ref()
-        .map(|viewport| viewport.lines.len())
-        .unwrap_or_default();
     use_effect(move || {
-        if selected_path.is_empty() || loaded_lines == 0 {
+        let path = selected_path();
+        let loaded_lines = diff_viewport()
+            .as_ref()
+            .map(|viewport| viewport.lines.len())
+            .unwrap_or_default();
+        if path.is_empty() || loaded_lines == 0 {
             return;
         }
-        ScrollIntoView::nearest(&format!("git-diff-file-{selected_path}"));
+        ScrollIntoView::nearest(&format!("git-diff-file-{path}"));
     });
-    let available = !selected_branch.is_empty();
+    let available = !selected_branch_value.is_empty();
     rsx! {
         RevisionDiffCard {
             repo_root,

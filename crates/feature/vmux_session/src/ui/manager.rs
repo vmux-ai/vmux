@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use chrono::{Duration, Local, NaiveDate, TimeZone};
 use dioxus::prelude::*;
 use vmux_session::{SessionSummary, StageSummary};
@@ -9,8 +11,9 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch, ManagerToolbar,
     ManagerView, ManagerViewToggle,
 };
+use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{OptimisticMap, send, use_optimistic_map, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
@@ -31,9 +34,23 @@ pub fn SessionsManager() -> Element {
     let mut filter_value = use_signal(String::new);
     let mut selected = use_signal(|| None::<String>);
     let state = ui.state.read();
-    let snapshot = state.sessions.clone();
+    let mut snapshot = state.sessions.clone();
     let repositories = state.session_repositories.clone();
     drop(state);
+    let observed_stages = snapshot
+        .sessions
+        .iter()
+        .map(|session| (session.id.clone(), session.stage.clone()))
+        .collect::<HashMap<_, _>>();
+    let optimistic_stages = use_optimistic_map(observed_stages);
+    for session in &mut snapshot.sessions {
+        session.stage = optimistic_stages.value(&session.id, &session.stage);
+    }
+    let mutations = SessionStageMutations {
+        optimistic: optimistic_stages,
+        leaving: use_signal(HashSet::new),
+    };
+    use_context_provider(|| mutations);
     let filter_requested = query().starts_with('#');
     let filter_needle = query()
         .strip_prefix('#')
@@ -47,7 +64,8 @@ pub fn SessionsManager() -> Element {
     };
     let category_groups = StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
     let applied_filters = filters();
-    let filtered_groups = StageGroup::filtered(&category_groups, applied_filters.as_slice());
+    let filtered_groups =
+        StageGroup::filtered(&category_groups, applied_filters.as_slice(), &repositories);
     let groups = if applied_filters.stage().is_none() {
         StageGroup::inbox(&filtered_groups)
     } else {
@@ -114,6 +132,8 @@ pub fn SessionsManager() -> Element {
                     if filter_requested {
                         SessionFilterMenu {
                             groups: category_groups.clone(),
+                            sessions: snapshot.sessions.clone(),
+                            repositories: repositories.clone(),
                             needle: filter_needle,
                             step: filter_step(),
                             value: filter_value(),
@@ -289,6 +309,8 @@ fn SessionCategory(
 #[derive(Clone, PartialEq)]
 enum SessionFilter {
     Stage(String),
+    Agent(String),
+    Project(String),
     Updated(UpdatedFilter),
 }
 
@@ -312,6 +334,14 @@ impl SessionFilter {
                     dot: StageVisual::for_id(id).dot.to_string(),
                 }
             }
+            Self::Agent(agent) => SessionFilterPresentation {
+                label: format!("{} · {agent}", translate("resume-column-agent")),
+                dot: String::new(),
+            },
+            Self::Project(project) => SessionFilterPresentation {
+                label: format!("{} · {project}", translate("resume-column-project")),
+                dot: String::new(),
+            },
             Self::Updated(updated) => SessionFilterPresentation {
                 label: format!(
                     "{} · {} · {}",
@@ -324,10 +354,26 @@ impl SessionFilter {
         }
     }
 
-    fn matches(&self, session: &SessionSummary) -> bool {
+    fn matches(&self, session: &SessionSummary, repositories: &SessionRepositories) -> bool {
         match self {
             Self::Stage(_) => true,
+            Self::Agent(agent) => SessionFilterValue::agent(session) == *agent,
+            Self::Project(project) => repositories
+                .get(&session.id)
+                .is_some_and(|repository| repository.project == *project),
             Self::Updated(updated) => updated.matches(session.last_activated_at),
+        }
+    }
+}
+
+struct SessionFilterValue;
+
+impl SessionFilterValue {
+    fn agent(session: &SessionSummary) -> String {
+        if session.agent_name.is_empty() {
+            session.agent.clone()
+        } else {
+            session.agent_name.clone()
         }
     }
 }
@@ -356,7 +402,7 @@ impl SessionFilters {
     fn stage(&self) -> Option<&str> {
         self.0.iter().find_map(|filter| match filter {
             SessionFilter::Stage(id) => Some(id.as_str()),
-            SessionFilter::Updated(_) => None,
+            SessionFilter::Agent(_) | SessionFilter::Project(_) | SessionFilter::Updated(_) => None,
         })
     }
 
@@ -371,6 +417,16 @@ impl SessionFilters {
     fn upsert(&mut self, selected: SessionFilter) {
         match selected {
             SessionFilter::Stage(stage) => self.set_stage(Some(stage)),
+            SessionFilter::Agent(agent) => {
+                self.0
+                    .retain(|filter| !matches!(filter, SessionFilter::Agent(_)));
+                self.0.push(SessionFilter::Agent(agent));
+            }
+            SessionFilter::Project(project) => {
+                self.0
+                    .retain(|filter| !matches!(filter, SessionFilter::Project(_)));
+                self.0.push(SessionFilter::Project(project));
+            }
             SessionFilter::Updated(updated) => {
                 self.0
                     .retain(|filter| !matches!(filter, SessionFilter::Updated(_)));
@@ -394,6 +450,8 @@ impl SessionFilters {
 enum SessionFilterStep {
     Field,
     Status,
+    Agent,
+    Project,
     Updated,
     Date(UpdatedComparison),
     Within,
@@ -488,6 +546,8 @@ impl UpdatedFilter {
 #[component]
 fn SessionFilterMenu(
     groups: Vec<StageGroup>,
+    sessions: Vec<SessionSummary>,
+    repositories: SessionRepositories,
     needle: String,
     step: SessionFilterStep,
     value: String,
@@ -495,6 +555,23 @@ fn SessionFilterMenu(
     onvalue: EventHandler<String>,
     onselect: EventHandler<SessionFilter>,
 ) -> Element {
+    let mut agents = HashMap::<String, usize>::new();
+    let mut projects = HashMap::<String, usize>::new();
+    for session in &sessions {
+        let agent = SessionFilterValue::agent(session);
+        if !agent.is_empty() {
+            *agents.entry(agent).or_default() += 1;
+        }
+        if let Some(repository) = repositories.get(&session.id)
+            && !repository.project.is_empty()
+        {
+            *projects.entry(repository.project).or_default() += 1;
+        }
+    }
+    let mut agents = agents.into_iter().collect::<Vec<_>>();
+    agents.sort_by_key(|left| left.0.to_lowercase());
+    let mut projects = projects.into_iter().collect::<Vec<_>>();
+    projects.sort_by_key(|left| left.0.to_lowercase());
     let date_filter = match step {
         SessionFilterStep::Date(comparison) => UpdatedFilter::from_date(comparison, &value),
         _ => None,
@@ -513,6 +590,22 @@ fn SessionFilterMenu(
                         prefix: "#".to_string(),
                         next: true,
                         onclick: move |_| onstep.call(SessionFilterStep::Status),
+                    }
+                }
+                if needle.is_empty() || translate("resume-column-agent").to_ascii_lowercase().contains(&needle) {
+                    FilterOption {
+                        label: translate("resume-column-agent"),
+                        prefix: "#".to_string(),
+                        next: true,
+                        onclick: move |_| onstep.call(SessionFilterStep::Agent),
+                    }
+                }
+                if needle.is_empty() || translate("resume-column-project").to_ascii_lowercase().contains(&needle) {
+                    FilterOption {
+                        label: translate("resume-column-project"),
+                        prefix: "#".to_string(),
+                        next: true,
+                        onclick: move |_| onstep.call(SessionFilterStep::Project),
                     }
                 }
                 if needle.is_empty() || translate("common-updated").to_ascii_lowercase().contains(&needle) {
@@ -537,6 +630,38 @@ fn SessionFilterMenu(
                             dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
                             trailing: group.sessions.len().to_string(),
                             onclick: move |_| onselect.call(SessionFilter::Stage(group.stage.id.clone())),
+                        }
+                    }
+                }
+            }
+        },
+        SessionFilterStep::Agent => rsx! {
+            FilterMenu {
+                title: translate("resume-column-agent"),
+                onback: move |_| onstep.call(SessionFilterStep::Field),
+                for (agent, count) in agents {
+                    if needle.is_empty() || agent.to_ascii_lowercase().contains(&needle) {
+                        FilterOption {
+                            key: "agent-{agent}",
+                            label: agent.clone(),
+                            trailing: count.to_string(),
+                            onclick: move |_| onselect.call(SessionFilter::Agent(agent.clone())),
+                        }
+                    }
+                }
+            }
+        },
+        SessionFilterStep::Project => rsx! {
+            FilterMenu {
+                title: translate("resume-column-project"),
+                onback: move |_| onstep.call(SessionFilterStep::Field),
+                for (project, count) in projects {
+                    if needle.is_empty() || project.to_ascii_lowercase().contains(&needle) {
+                        FilterOption {
+                            key: "project-{project}",
+                            label: project.clone(),
+                            trailing: count.to_string(),
+                            onclick: move |_| onselect.call(SessionFilter::Project(project.clone())),
                         }
                     }
                 }
@@ -665,12 +790,12 @@ fn SessionListGroup(
     let archivable = sessions
         .iter()
         .filter(|session| session.stage != "done")
-        .map(ArchiveTarget::from_session)
+        .map(StageTarget::from_session)
         .collect::<Vec<_>>();
     rsx! {
         section { class: "rounded-lg bg-foreground/[0.014] p-1",
             div {
-                class: "sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.055] px-2.5 text-left backdrop-blur hover:bg-foreground/[0.075]",
+                class: "glass sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left backdrop-blur-xl transition-colors hover:bg-glass-hover",
                 SheetHeaderChevron {
                     expanded: !collapsed(),
                     label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
@@ -724,9 +849,10 @@ fn SessionListRow(
     stage: String,
     onselect: EventHandler<String>,
 ) -> Element {
+    let leaving = use_context::<SessionStageMutations>().is_leaving(&session.id);
     let context = SessionContext::from(repository);
     let cleanup_id = session.id.clone();
-    let archive_target = ArchiveTarget::from_session(&session);
+    let stage_target = StageTarget::from_session(&session);
     let archived = session.stage == "done";
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
@@ -740,7 +866,8 @@ fn SessionListRow(
     let doubleclick_resume = resume.clone();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
-        div {
+        Collapse { leaving,
+          div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| onselect.call(select_id.clone()),
             ondoubleclick: move |_| {
@@ -778,10 +905,11 @@ fn SessionListRow(
                 resume,
                 git_url,
                 cleanup_id,
-                archive_target,
+                stage_target,
                 archived,
                 managed: session.managed,
             }
+          }
         }
     }
 }
@@ -826,11 +954,11 @@ fn SessionBoardColumn(
     let archivable = sessions
         .iter()
         .filter(|session| session.stage != "done")
-        .map(ArchiveTarget::from_session)
+        .map(StageTarget::from_session)
         .collect::<Vec<_>>();
     rsx! {
         section { class: "glass w-[18rem] shrink-0 overflow-hidden rounded-lg p-1 backdrop-blur-xl",
-            header { class: "sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md px-1.5",
+            header { class: "glass sticky top-0 z-10 flex h-8 items-center gap-2 rounded-md px-1.5 backdrop-blur-xl",
                 SheetHeaderChevron {
                     expanded: !collapsed(),
                     label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
@@ -879,9 +1007,10 @@ fn SessionBoardCard(
     repository: Option<SessionRepository>,
     onselect: EventHandler<String>,
 ) -> Element {
+    let leaving = use_context::<SessionStageMutations>().is_leaving(&session.id);
     let context = SessionContext::from(repository);
     let cleanup_id = session.id.clone();
-    let archive_target = ArchiveTarget::from_session(&session);
+    let stage_target = StageTarget::from_session(&session);
     let archived = session.stage == "done";
     let select_id = session.id.clone();
     let runtime = RuntimeVisual::for_id(&session.runtime);
@@ -892,7 +1021,8 @@ fn SessionBoardCard(
     let preview = session.preview();
     let updated = RelativeTime::from_millis(session.last_activated_at).label();
     rsx! {
-        article {
+        Collapse { leaving,
+          article {
             class: "glass group relative cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-glass-hover",
             onclick: move |_| onselect.call(select_id.clone()),
             div { class: "flex items-start gap-2",
@@ -913,7 +1043,7 @@ fn SessionBoardCard(
                     resume,
                     git_url: git_url.clone(),
                     cleanup_id,
-                    archive_target,
+                    stage_target,
                     archived,
                     managed: session.managed,
                 }
@@ -931,6 +1061,7 @@ fn SessionBoardCard(
                 time { class: "tabular-nums", "{updated}" }
                 div { class: "flex-1" }
             }
+          }
         }
     }
 }
@@ -1019,7 +1150,7 @@ fn SessionDetails(
                         SessionDetailField { label: translate("sessions-stage"),
                             if session.managed {
                                 StagePicker {
-                                    session_id: session.id.clone(),
+                                    target: StageTarget::from_session(&session),
                                     selected: session.stage.clone(),
                                     stages,
                                 }
@@ -1212,19 +1343,105 @@ fn EditableDescription(session_id: String, value: String) -> Element {
 }
 
 #[derive(Clone, PartialEq)]
-struct ArchiveTarget {
+struct StageTarget {
     id: String,
     kind: String,
     sid: String,
+    stage: String,
 }
 
-impl ArchiveTarget {
+impl StageTarget {
     fn from_session(session: &SessionSummary) -> Self {
         Self {
             id: session.id.clone(),
             kind: session.kind.clone(),
             sid: session.sid.clone(),
+            stage: session.stage.clone(),
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SessionStageMutations {
+    optimistic: OptimisticMap<String, String>,
+    leaving: Signal<HashSet<String>>,
+}
+
+impl SessionStageMutations {
+    fn change(self, target: StageTarget, stage: String) {
+        if target.stage == stage {
+            return;
+        }
+        self.optimistic
+            .set(target.id.clone(), target.stage.clone(), stage.clone());
+        let id = target.id.clone();
+        if send(&SessionsStageChange {
+            id: target.id,
+            kind: target.kind,
+            sid: target.sid,
+            stage,
+        })
+        .is_err()
+        {
+            self.optimistic.clear(&id);
+        }
+    }
+
+    fn archive(mut self, targets: Vec<StageTarget>) {
+        let leaving = self.leaving.read();
+        let targets = targets
+            .into_iter()
+            .filter(|target| target.stage != "done" && !leaving.contains(&target.id))
+            .collect::<Vec<_>>();
+        drop(leaving);
+        if targets.is_empty() {
+            return;
+        }
+        self.leaving
+            .write()
+            .extend(targets.iter().map(|target| target.id.clone()));
+        spawn(async move {
+            vmux_ui::platform::Platform::sleep(200).await;
+            for target in &targets {
+                self.optimistic
+                    .set(target.id.clone(), target.stage.clone(), "done".to_string());
+                if send(&SessionsStageChange {
+                    id: target.id.clone(),
+                    kind: target.kind.clone(),
+                    sid: target.sid.clone(),
+                    stage: "done".to_string(),
+                })
+                .is_err()
+                {
+                    self.optimistic.clear(&target.id);
+                }
+            }
+            let ids = targets
+                .iter()
+                .map(|target| target.id.as_str())
+                .collect::<HashSet<_>>();
+            self.leaving.write().retain(|id| !ids.contains(id.as_str()));
+        });
+    }
+
+    fn is_leaving(self, id: &str) -> bool {
+        self.leaving.read().contains(id)
+    }
+
+    fn cleanup(mut self, id: String) {
+        if self.leaving.read().contains(&id) {
+            return;
+        }
+        self.leaving.write().insert(id.clone());
+        spawn(async move {
+            vmux_ui::platform::Platform::sleep(200).await;
+            if send(&SessionsCleanup { id: id.clone() }).is_err() {
+                self.leaving.write().remove(&id);
+                return;
+            }
+            vmux_ui::platform::Platform::sleep(1_500).await;
+            self.leaving.write().remove(&id);
+        });
     }
 }
 
@@ -1233,12 +1450,13 @@ fn SessionActions(
     resume: ResumeTarget,
     git_url: String,
     cleanup_id: String,
-    archive_target: ArchiveTarget,
+    stage_target: StageTarget,
     archived: bool,
     managed: bool,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let archive = archive_target.clone();
+    let archive = stage_target.clone();
+    let mutations = use_context::<SessionStageMutations>();
     let visibility = if open() {
         "opacity-100"
     } else {
@@ -1284,12 +1502,7 @@ fn SessionActions(
                     aria_label: translate("sessions-archive"),
                     onclick: move |event| {
                         event.stop_propagation();
-                        let _ = send(&SessionsStageChange {
-                            id: archive.id.clone(),
-                            kind: archive.kind.clone(),
-                            sid: archive.sid.clone(),
-                            stage: "done".to_string(),
-                        });
+                        mutations.archive(vec![archive.clone()]);
                     },
                     LineIconView { icon: LineIcon::Archive, class: "size-3.5".to_string() }
                 }
@@ -1314,7 +1527,7 @@ fn SessionActions(
                     SessionDeleteButton {
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&SessionsCleanup { id: cleanup_id.clone() });
+                            mutations.cleanup(cleanup_id.clone());
                         },
                     }
                 }
@@ -1324,21 +1537,15 @@ fn SessionActions(
 }
 
 #[component]
-fn SessionArchiveAllButton(targets: Vec<ArchiveTarget>) -> Element {
+fn SessionArchiveAllButton(targets: Vec<StageTarget>) -> Element {
     let label = format!("{} {}", translate("sessions-archive"), targets.len());
+    let mutations = use_context::<SessionStageMutations>();
     rsx! {
         SheetHeaderAction {
             label,
             onclick: move |event: MouseEvent| {
                 event.stop_propagation();
-                for target in &targets {
-                    let _ = send(&SessionsStageChange {
-                        id: target.id.clone(),
-                        kind: target.kind.clone(),
-                        sid: target.sid.clone(),
-                        stage: "done".to_string(),
-                    });
-                }
+                mutations.archive(targets.clone());
             },
             LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
         }
@@ -1359,7 +1566,7 @@ fn SessionDeleteButton(onclick: EventHandler<MouseEvent>) -> Element {
 }
 
 #[component]
-fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) -> Element {
+fn StagePicker(target: StageTarget, selected: String, stages: Vec<StageSummary>) -> Element {
     let mut open = use_signal(|| false);
     let stage_dot = StageVisual::for_id(&selected).dot;
     let selected_name = stages
@@ -1393,7 +1600,7 @@ fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) 
                 div { class: "absolute left-0 top-7 z-30 min-w-full rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
                     for stage in stages {
                         StagePickerOption {
-                            session_id: session_id.clone(),
+                            target: target.clone(),
                             selected_id: selected.clone(),
                             stage,
                             open,
@@ -1407,7 +1614,7 @@ fn StagePicker(session_id: String, selected: String, stages: Vec<StageSummary>) 
 
 #[component]
 fn StagePickerOption(
-    session_id: String,
+    target: StageTarget,
     selected_id: String,
     stage: StageSummary,
     mut open: Signal<bool>,
@@ -1416,6 +1623,7 @@ fn StagePickerOption(
     let stage_id = stage.id.clone();
     let dot = StageVisual::for_id(&stage.id).dot;
     let name = translate_humanized(&stage.name);
+    let mutations = use_context::<SessionStageMutations>();
     rsx! {
         button {
             r#type: "button",
@@ -1426,12 +1634,7 @@ fn StagePickerOption(
             },
             onclick: move |_| {
                 open.set(false);
-                let _ = send(&SessionsStageChange {
-                    id: session_id.clone(),
-                    kind: String::new(),
-                    sid: String::new(),
-                    stage: stage_id.clone(),
-                });
+                mutations.change(target.clone(), stage_id.clone());
             },
             span { class: "size-1.5 shrink-0 rounded-full {dot}" }
             span { class: "whitespace-nowrap", "{name}" }
@@ -1721,10 +1924,14 @@ impl StageGroup {
             .collect()
     }
 
-    fn filtered(groups: &[Self], filters: &[SessionFilter]) -> Vec<Self> {
+    fn filtered(
+        groups: &[Self],
+        filters: &[SessionFilter],
+        repositories: &SessionRepositories,
+    ) -> Vec<Self> {
         let selected_stage = filters.iter().find_map(|filter| match filter {
             SessionFilter::Stage(id) => Some(id.as_str()),
-            SessionFilter::Updated(_) => None,
+            SessionFilter::Agent(_) | SessionFilter::Project(_) | SessionFilter::Updated(_) => None,
         });
         let mut filtered = Vec::new();
         for group in groups {
@@ -1732,9 +1939,11 @@ impl StageGroup {
                 continue;
             }
             let mut group = group.clone();
-            group
-                .sessions
-                .retain(|session| filters.iter().all(|filter| filter.matches(session)));
+            group.sessions.retain(|session| {
+                filters
+                    .iter()
+                    .all(|filter| filter.matches(session, repositories))
+            });
             filtered.push(group);
         }
         filtered
@@ -1990,10 +2199,48 @@ mod tests {
             }),
         ];
 
-        let filtered = StageGroup::filtered(&groups, &filters);
+        let filtered = StageGroup::filtered(&groups, &filters, &SessionRepositories::default());
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].sessions, vec![recent]);
+    }
+
+    #[test]
+    fn agent_and_project_filters_compose() {
+        let codex = SessionSummary {
+            id: "codex".into(),
+            stage: "in_progress".into(),
+            agent_name: "Codex".into(),
+            ..Default::default()
+        };
+        let claude = SessionSummary {
+            id: "claude".into(),
+            stage: "in_progress".into(),
+            agent_name: "Claude".into(),
+            ..Default::default()
+        };
+        let groups = vec![StageGroup {
+            stage: StageSummary {
+                id: "in_progress".into(),
+                ..Default::default()
+            },
+            sessions: vec![codex.clone(), claude],
+        }];
+        let filters = vec![
+            SessionFilter::Agent("Codex".into()),
+            SessionFilter::Project("vmux".into()),
+        ];
+        let repositories = SessionRepositories {
+            sessions: vec![SessionRepository {
+                id: "codex".into(),
+                project: "vmux".into(),
+                ..Default::default()
+            }],
+        };
+
+        let filtered = StageGroup::filtered(&groups, &filters, &repositories);
+
+        assert_eq!(filtered[0].sessions, vec![codex]);
     }
 
     #[test]

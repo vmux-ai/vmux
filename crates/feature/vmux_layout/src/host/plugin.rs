@@ -11,7 +11,6 @@ use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
 use crate::contract::LayoutContractPlugin;
-use crate::event::CEF_RESERVED_HEIGHT_PX;
 use crate::host::webview_reveal::WebviewRevealPlugin;
 use crate::hosted_page::HostedPagePlugin;
 use crate::overlay::LayoutOverlayPlugin;
@@ -118,7 +117,6 @@ fn sync_header_visibility(
         if let Ok((mut visibility, mut node)) = headers.get_mut(entity) {
             *visibility = Visibility::Visible;
             node.display = Display::Flex;
-            node.height = Val::Px(CEF_RESERVED_HEIGHT_PX);
         }
     }
 

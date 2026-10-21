@@ -41,10 +41,15 @@ pub(crate) fn HeaderView() -> Element {
         state.header_height,
         state.tab_row_pad_left(),
     );
+    let motion = if state.zen {
+        "-translate-y-2 opacity-0"
+    } else {
+        "translate-y-0 opacity-100"
+    };
 
     rsx! {
         div {
-            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] {motion} transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
             style: "{header_vars}",
             HeaderContent {}
         }

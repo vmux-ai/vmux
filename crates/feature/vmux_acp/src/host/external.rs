@@ -167,14 +167,22 @@ impl SourcePaths {
         })
     }
 
-    fn readers(&self, sources: &HashSet<SourceKind>) -> Readers {
+    fn readers(&self, sources: &HashSet<SourceKind>, snapshot: &SourceSnapshot) -> Readers {
         let mut readers = Vec::<(SourceKind, Box<dyn Reader>)>::new();
         for source in SourceKind::ALL {
             if !sources.contains(&source) {
                 continue;
             }
             let reader: Box<dyn Reader> = match source {
-                SourceKind::Codex => Box::new(codex::Reader::at(&self.codex)),
+                SourceKind::Codex => Box::new(
+                    codex::Reader::at(&self.codex).with_previous(
+                        snapshot
+                            .0
+                            .get(&source)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default(),
+                    ),
+                ),
                 SourceKind::Claude => Box::new(claude::Reader::at(&self.claude)),
                 SourceKind::Vibe => Box::new(vibe::Reader::at(&self.vibe)),
             };
@@ -186,6 +194,7 @@ impl SourcePaths {
     fn watches(&self) -> Vec<(PathBuf, bool)> {
         vec![
             (self.codex.clone(), false),
+            (self.codex.join("sessions"), true),
             (self.claude.clone(), false),
             (self.vibe.join("logs/session"), true),
         ]
@@ -193,12 +202,15 @@ impl SourcePaths {
 
     fn sources(&self, paths: &[PathBuf]) -> HashSet<SourceKind> {
         let codex = self.codex.join("session_index.jsonl");
+        let codex_sessions = self.codex.join("sessions");
         let claude = self.claude.join("history.jsonl");
         let vibe = self.vibe.join("logs/session");
         let mut sources = HashSet::new();
         for path in paths {
             if path == &self.codex
                 || path == &codex
+                || path == &codex_sessions
+                || path.starts_with(&codex_sessions)
                 || path.parent() == Some(self.codex.as_path())
                 || self.codex.starts_with(path)
             {
@@ -423,11 +435,12 @@ fn watch(
 
 fn scan(
     runtime: Single<(Entity, &SourcePaths, &ScanRequested), (With<Runtime>, Without<ScanTask>)>,
+    snapshot: Res<SourceSnapshot>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let (entity, paths, requested) = *runtime;
-    let readers = paths.readers(&requested.0);
+    let readers = paths.readers(&requested.0, &snapshot);
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let task = IoTaskPool::get().spawn(async move {
         let reads = readers.read();

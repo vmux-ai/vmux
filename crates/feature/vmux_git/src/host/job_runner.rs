@@ -6,14 +6,15 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 
 use super::GitUpdateSet;
 use super::job::{
-    AmendJob, BranchFilesJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob,
-    DeleteBranchJob, DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob,
-    PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob,
-    StashPopJob, StashPushJob, UnstageJob,
+    AmendJob, BranchFilesJob, CatalogJob, CheckoutCommitJob, CherryPickJob, CommitJob,
+    CreateBranchJob, DeleteBranchJob, DiffJob, DiffScope, DiscardJob, FastForwardJob, FetchJob,
+    HunkJob, MergeJob, PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob,
+    StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
 };
-use super::repository::{BranchFilesCatalog, GitRepository};
+use super::repository::{BranchFilesCatalog, GitCatalogPage, GitRepository};
 use crate::event::{
-    GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult, GitRepositorySnapshot,
+    GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
+    GitRepositorySnapshot,
 };
 
 pub(super) struct JobPlugin;
@@ -25,12 +26,14 @@ impl Plugin for JobPlugin {
             (
                 (
                     poll_jobs::<RepositoryOutput>,
+                    poll_jobs::<CatalogOutput>,
                     poll_jobs::<BranchFilesOutput>,
                     poll_jobs::<DiffOutput>,
                     poll_jobs::<OperationOutput>,
                 ),
                 (
                     deliver_repository_outputs,
+                    deliver_catalog_outputs,
                     deliver_branch_files_outputs,
                     deliver_diff_outputs,
                     deliver_operation_outputs,
@@ -39,6 +42,7 @@ impl Plugin for JobPlugin {
                 bevy::ecs::schedule::ApplyDeferred,
                 (
                     start_repository_jobs,
+                    start_catalog_jobs,
                     start_branch_files_jobs,
                     start_diff_jobs,
                     start_stage_jobs,
@@ -145,6 +149,15 @@ impl<T: Send + Sync + 'static> GitJobTask<T> {
 struct RepositoryOutput(Result<GitRepositorySnapshot, GitOperationError>);
 
 #[derive(Component)]
+struct CatalogOutput {
+    catalog: GitCatalog,
+    repo_root: String,
+    offset: usize,
+    revision: u32,
+    result: Result<GitCatalogPage, GitOperationError>,
+}
+
+#[derive(Component)]
 struct BranchFilesOutput {
     generation: u64,
     reference: String,
@@ -249,7 +262,9 @@ fn deliver_repository_outputs(
         let webview = job.webview;
         match &output.0 {
             Ok(event) => {
-                if let Ok(mut page) = pages.get_mut(webview) {
+                if let Ok(mut page) = pages.get_mut(webview)
+                    && crate::GitUrl::is_page(&page.url)
+                {
                     if let Some(url) = crate::GitUrl::from_path_preserving_commit(
                         Path::new(&event.repo_root),
                         &page.url,
@@ -265,6 +280,85 @@ fn deliver_repository_outputs(
             }
             Err(error) => {
                 states.apply_error(webview, error);
+            }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn deliver_catalog_outputs(
+    outputs: Query<(Entity, &GitJob, &CatalogOutput)>,
+    mut states: Query<&mut super::state::GitState>,
+    mut commands: Commands,
+) {
+    for (entity, job, output) in &outputs {
+        let Ok(mut state) = states.get_mut(job.webview) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if state.snapshot.workspace != output.repo_root || state.snapshot.nonce != output.revision {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        match &output.result {
+            Ok(page) => {
+                let Some(repository) = state.snapshot.repository.as_mut() else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                let has_more = match page {
+                    GitCatalogPage::LocalBranches(entries, has_more) => {
+                        if output.offset == 0 {
+                            repository.branches.clone_from(entries);
+                        } else {
+                            repository.branches.extend(entries.clone());
+                        }
+                        *has_more
+                    }
+                    GitCatalogPage::RemoteBranches(entries, has_more) => {
+                        if output.offset == 0 {
+                            repository.remote_branches.clone_from(entries);
+                        } else {
+                            repository.remote_branches.extend(entries.clone());
+                        }
+                        *has_more
+                    }
+                    GitCatalogPage::Tags(entries, has_more) => {
+                        if output.offset == 0 {
+                            repository.tags.clone_from(entries);
+                        } else {
+                            repository.tags.extend(entries.clone());
+                        }
+                        *has_more
+                    }
+                    GitCatalogPage::Commits(entries, has_more) => {
+                        if output.offset == 0 {
+                            repository.commits.clone_from(entries);
+                        } else {
+                            repository.commits.extend(entries.clone());
+                        }
+                        *has_more
+                    }
+                    GitCatalogPage::Stashes(entries, has_more) => {
+                        if output.offset == 0 {
+                            repository.stashes.clone_from(entries);
+                        } else {
+                            repository.stashes.extend(entries.clone());
+                        }
+                        *has_more
+                    }
+                };
+                let progress = state.snapshot.catalog_mut(output.catalog);
+                progress.loaded = true;
+                progress.loading = false;
+                progress.has_more = has_more;
+            }
+            Err(error) => {
+                let progress = state.snapshot.catalog_mut(output.catalog);
+                progress.loaded = true;
+                progress.loading = false;
+                progress.has_more = false;
+                state.snapshot.message.clone_from(&error.message);
             }
         }
         commands.entity(entity).despawn();
@@ -488,13 +582,32 @@ fn start_repository_jobs(jobs: PendingGitJobs<RepositoryJob>, mut commands: Comm
     for (entity, job, wake) in jobs.ready() {
         let task = GitJobTask::spawn(wake, move || {
             RepositoryOutput(
-                GitRepositorySnapshot::load(&job.path)
+                GitRepositorySnapshot::load_summary(&job.path)
                     .map_err(|error| GitOperationError { message: error.0 }),
             )
         });
         commands
             .entity(entity)
             .remove::<RepositoryJob>()
+            .insert((GitJobRunning, task));
+    }
+}
+
+fn start_catalog_jobs(jobs: PendingGitJobs<CatalogJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let repo_root = repository.path().to_string_lossy().into_owned();
+        let task = GitJobTask::spawn(wake, move || CatalogOutput {
+            catalog: job.catalog,
+            repo_root,
+            offset: job.offset,
+            revision: job.revision,
+            result: repository
+                .catalog_page(job.catalog, &job.current_branch, job.offset, job.limit)
+                .map_err(|error| GitOperationError { message: error.0 }),
+        });
+        commands
+            .entity(entity)
+            .remove::<CatalogJob>()
             .insert((GitJobRunning, task));
     }
 }

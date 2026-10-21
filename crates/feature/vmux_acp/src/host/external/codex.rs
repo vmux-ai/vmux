@@ -11,6 +11,7 @@ use super::{BoundedLines, PromptText, Reader as ProviderReader, Timestamp};
 pub(super) struct Reader {
     index: PathBuf,
     sessions: PathBuf,
+    previous: HashMap<String, ProviderSession>,
 }
 
 impl Reader {
@@ -22,7 +23,15 @@ impl Reader {
         Self {
             index: root.join("session_index.jsonl"),
             sessions: root.join("sessions"),
+            previous: HashMap::new(),
         }
+    }
+
+    pub(super) fn with_previous(mut self, sessions: &[ProviderSession]) -> Self {
+        for session in sessions {
+            self.previous.insert(session.sid.clone(), session.clone());
+        }
+        self
     }
 
     fn indexed(&self) -> Result<HashMap<String, CodexIndexed>, String> {
@@ -95,28 +104,56 @@ impl Reader {
                 if files > Self::MAX_SESSION_FILES {
                     break 'walk;
                 }
-                let Ok(file) = File::open(&path) else {
-                    continue;
-                };
-                let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
-                    continue;
-                };
-                let Ok(envelope) = serde_json::from_str::<CodexMetaLine>(&line) else {
-                    continue;
-                };
-                let id = envelope.payload.session_id;
-                if !indexed.contains_key(&id) || envelope.payload.cwd.trim().is_empty() {
-                    continue;
-                }
-                let candidate = CodexMeta {
-                    cwd: envelope.payload.cwd,
-                    created_at: Timestamp::parse(&envelope.payload.timestamp),
-                };
-                match metadata.get(&id) {
-                    Some(current) if current.created_at <= candidate.created_at => {}
-                    _ => {
-                        metadata.insert(id, candidate);
+                let updated_at = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|elapsed| elapsed.as_millis() as i64)
+                    .unwrap_or_default();
+                let known_id = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .and_then(|stem| stem.get(stem.len().saturating_sub(36)..))
+                    .filter(|id| indexed.contains_key(*id));
+                let candidate = match known_id.and_then(|id| self.previous.get(id)) {
+                    Some(previous) => CodexMeta {
+                        id: previous.sid.clone(),
+                        cwd: previous.cwd.clone(),
+                        created_at: previous.created_at,
+                        updated_at,
+                    },
+                    None => {
+                        let Ok(file) = File::open(&path) else {
+                            continue;
+                        };
+                        let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
+                            continue;
+                        };
+                        let Ok(envelope) = serde_json::from_str::<CodexMetaLine>(&line) else {
+                            continue;
+                        };
+                        if !indexed.contains_key(&envelope.payload.session_id)
+                            || envelope.payload.cwd.trim().is_empty()
+                        {
+                            continue;
+                        }
+                        CodexMeta {
+                            id: envelope.payload.session_id,
+                            cwd: envelope.payload.cwd,
+                            created_at: Timestamp::parse(&envelope.payload.timestamp),
+                            updated_at,
+                        }
                     }
+                };
+                if let Some(current) = metadata.get_mut(&candidate.id) {
+                    current.updated_at = current.updated_at.max(candidate.updated_at);
+                    if candidate.created_at < current.created_at {
+                        current.cwd = candidate.cwd;
+                        current.created_at = candidate.created_at;
+                    }
+                } else {
+                    metadata.insert(candidate.id.clone(), candidate);
                 }
             }
         }
@@ -141,7 +178,7 @@ impl ProviderReader for Reader {
                 name: indexed.title.clone(),
                 cwd: metadata.cwd.clone(),
                 created_at: metadata.created_at,
-                updated_at: indexed.updated_at,
+                updated_at: indexed.updated_at.max(metadata.updated_at),
                 conversation_title: indexed.title.clone(),
                 last_prompt: indexed.title,
                 ..Default::default()
@@ -176,8 +213,10 @@ struct CodexMetaPayload {
 }
 
 struct CodexMeta {
+    id: String,
     cwd: String,
     created_at: i64,
+    updated_at: i64,
 }
 
 #[cfg(test)]

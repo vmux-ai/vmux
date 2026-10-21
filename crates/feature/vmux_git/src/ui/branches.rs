@@ -14,10 +14,11 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
-use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility};
+use crate::state::{
+    GitBranchCollection, GitBranchPrompt, GitCatalogProgress, GitOperationEligibility,
+};
 
 use super::model::GitPathChangeView;
-use super::shared::ListPager;
 
 #[component]
 pub(super) fn BranchPromptDialog() -> Element {
@@ -100,11 +101,12 @@ pub(super) fn BranchesCard(
     files_error: String,
     selected_path_bytes: Vec<u8>,
     operations: GitOperationEligibility,
+    catalog_progress: GitCatalogProgress,
 ) -> Element {
     let collection = branch_collection;
+    let catalog = GitCatalog::from(collection);
     let references = collection.references(&repository);
     let reference_count = references.len();
-    let pager = ListPager::use_state();
     let mut branch_open = use_signal(|| false);
     let mut file_query = use_signal(String::new);
     let query = file_query().trim().to_lowercase();
@@ -113,12 +115,6 @@ pub(super) fn BranchesCard(
         .into_iter()
         .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
         .collect::<Vec<_>>();
-    let selected_index = references
-        .iter()
-        .position(|reference| reference == &selected_branch);
-    let visible_count = pager
-        .visible(reference_count)
-        .max(selected_index.map(|index| index + 1).unwrap_or_default());
     let selected = if collection == GitBranchCollection::Local {
         repository
             .branches
@@ -151,10 +147,15 @@ pub(super) fn BranchesCard(
                             }
                             div {
                                 class: "min-h-0 overflow-y-auto",
-                                onscroll: move |event| pager.load_more(event, reference_count),
+                                onscroll: move |event: Event<ScrollData>| {
+                                    let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                                    if remaining <= 192 && catalog_progress.has_more && !catalog_progress.loading {
+                                        let _ = send(&GitCatalogNextRequest { catalog });
+                                    }
+                                },
                                 match collection {
                                     GitBranchCollection::Local => rsx! {
-                                        for (index, branch) in repository.branches.iter().take(visible_count).cloned().enumerate() {
+                                        for (index, branch) in repository.branches.iter().cloned().enumerate() {
                                             BranchRow {
                                                 key: "local-{branch.name}",
                                                 branch,
@@ -166,7 +167,7 @@ pub(super) fn BranchesCard(
                                         }
                                     },
                                     GitBranchCollection::Remote => rsx! {
-                                        for (index, branch) in repository.remote_branches.iter().take(visible_count).cloned().enumerate() {
+                                        for (index, branch) in repository.remote_branches.iter().cloned().enumerate() {
                                             BranchRow {
                                                 key: "remote-{branch.name}",
                                                 branch,
@@ -178,7 +179,7 @@ pub(super) fn BranchesCard(
                                         }
                                     },
                                     GitBranchCollection::Tags => rsx! {
-                                        for (index, tag) in repository.tags.iter().take(visible_count).cloned().enumerate() {
+                                        for (index, tag) in repository.tags.iter().cloned().enumerate() {
                                             TagRow {
                                                 key: "tag-{tag.name}",
                                                 tag,
@@ -186,6 +187,13 @@ pub(super) fn BranchesCard(
                                                 selected_branch: selected_branch.clone(),
                                                 onselected: move |_| branch_open.set(false),
                                             }
+                                        }
+                                    }
+                                }
+                                if catalog_progress.loading {
+                                    div { class: "flex flex-col gap-2 px-2.5 py-2",
+                                        for width in ["w-9/12", "w-11/12"] {
+                                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
                                         }
                                     }
                                 }

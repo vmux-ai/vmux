@@ -64,6 +64,12 @@ impl Plugin for StackPlugin {
             )
             .add_systems(
                 Update,
+                bevy::ecs::schedule::ApplyDeferred
+                    .after(LayoutRequestSet::Handle)
+                    .before(ComputeFocusSet),
+            )
+            .add_systems(
+                Update,
                 compute_focused
                     .in_set(ComputeFocusSet)
                     .after(LayoutRequestSet::Handle)

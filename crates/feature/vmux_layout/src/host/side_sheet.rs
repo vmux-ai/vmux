@@ -1,4 +1,5 @@
 use super::Open;
+#[cfg(test)]
 use crate::settings::LayoutSettings;
 use bevy::prelude::*;
 #[cfg(target_os = "macos")]
@@ -93,7 +94,6 @@ pub enum SideSheetPosition {
 }
 
 fn sync_visibility(
-    settings: Res<LayoutSettings>,
     mut side_sheet_q: Query<
         (Entity, &SideSheetPosition, &mut Visibility, &mut Node),
         With<SideSheet>,
@@ -101,17 +101,12 @@ fn sync_visibility(
     added: Query<Entity, (With<SideSheet>, Added<Open>)>,
     mut removed: RemovedComponents<Open>,
 ) {
-    let configured_width =
-        crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     for entity in &added {
         if let Ok((_, pos, mut visibility, mut node)) = side_sheet_q.get_mut(entity)
             && *pos == SideSheetPosition::Left
         {
             *visibility = Visibility::Visible;
             node.display = Display::Flex;
-            if !matches!(node.width, Val::Px(width) if width > 0.0) {
-                node.width = Val::Px(configured_width);
-            }
         }
     }
     for entity in removed.read() {

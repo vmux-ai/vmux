@@ -716,6 +716,9 @@ fn sync_url(
     >,
 ) {
     for (state, controller, mut page) in &mut pages {
+        if !crate::GitUrl::is_page(&page.url) {
+            continue;
+        }
         let Some(repository) = state.repository() else {
             continue;
         };
@@ -1173,5 +1176,50 @@ mod tests {
 
         let state = app.world().get::<GitState>(webview).unwrap();
         assert_eq!(state.workspace(), "/tmp/repository");
+    }
+
+    #[test]
+    fn repository_state_does_not_turn_a_project_page_into_git() {
+        let mut app = App::new();
+        app.add_systems(Update, sync_url);
+        let page = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        repository: Some(GitRepositorySnapshot {
+                            path: "/tmp/repository".to_string(),
+                            repo_root: "/tmp/repository".to_string(),
+                            repo_name: "repository".to_string(),
+                            is_worktree: false,
+                            branch: "main".to_string(),
+                            base_ref: String::new(),
+                            upstream: String::new(),
+                            ahead: 0,
+                            behind: 0,
+                            files: Vec::new(),
+                            commits: Vec::new(),
+                            branches: Vec::new(),
+                            remote_branches: Vec::new(),
+                            tags: Vec::new(),
+                            stashes: Vec::new(),
+                        }),
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState::default(),
+                vmux_ecs::PageMetadata {
+                    url: "vmux://projects/".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<vmux_ecs::PageMetadata>(page).unwrap().url,
+            "vmux://projects/"
+        );
     }
 }

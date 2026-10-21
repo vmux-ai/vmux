@@ -338,9 +338,9 @@ fn project(
         });
     }
     for session in &providers.sessions {
-        let stage_override = provider_stages
-            .iter()
-            .find(|(kind, id, _, _)| kind.0 == session.kind && id.0 == session.sid);
+        let stage_override = provider_stages.iter().find(|(kind, id, _, changed_at)| {
+            kind.0 == session.kind && id.0 == session.sid && changed_at.0 >= session.updated_at
+        });
         let stage = stage_override
             .map(|(_, _, stage, _)| stage.0.0.clone())
             .unwrap_or_else(|| default_stage.clone());
@@ -558,6 +558,40 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(imported, 0);
+    }
+
+    #[test]
+    fn provider_activity_after_archive_returns_to_the_default_stage() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "External task".into(),
+                cwd: "/tmp/project".into(),
+                updated_at: 10,
+                ..Default::default()
+            });
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
+            .write(crate::ProviderStageChangeRequest {
+                kind: ProviderKind("acp:codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId("done".into()),
+            });
+        app.update();
+        let archived_at = app.world().resource::<CatalogSnapshot>().sessions[0].stage_changed_at;
+        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = archived_at + 1;
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "in_progress");
+        assert_eq!(session.stage_changed_at, archived_at + 1);
     }
 
     #[test]

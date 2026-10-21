@@ -126,6 +126,11 @@ fn SideSheetContent() -> Element {
         state.window_pad_bottom,
         crate::event::SPACES_ROW_HEIGHT_PX,
     );
+    let motion = if state.zen {
+        "-translate-x-3 opacity-0"
+    } else {
+        "translate-x-0 opacity-100"
+    };
     let active_pane = side_sheet.active_pane;
     let drag_state = use_signal(|| None::<BookmarkDragState>);
     use_context_provider(|| drag_state);
@@ -135,7 +140,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "@container pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)]",
+            class: "@container pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] {motion} transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
@@ -353,7 +358,7 @@ fn SideSheetSpaceRow(
                         class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&SpaceOpenPageRequest);
+                            let _ = send(&SpaceOpenPageRequest { create: true });
                         },
                         Icon { class: "size-3.5 shrink-0",
                             path { d: "M12 5v14" }

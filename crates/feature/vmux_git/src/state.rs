@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::Component;
 use vmux_api::space::ProjectRow;
 
-use crate::event::{GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot};
+use crate::event::{
+    GitCatalog, GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot,
+};
 
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum GitPanel {
@@ -45,6 +47,16 @@ pub enum GitBranchCollection {
     Tags,
 }
 
+impl From<GitBranchCollection> for GitCatalog {
+    fn from(collection: GitBranchCollection) -> Self {
+        match collection {
+            GitBranchCollection::Local => Self::LocalBranches,
+            GitBranchCollection::Remote => Self::RemoteBranches,
+            GitBranchCollection::Tags => Self::Tags,
+        }
+    }
+}
+
 impl GitBranchCollection {
     pub fn references(self, repository: &GitRepositorySnapshot) -> Vec<String> {
         match self {
@@ -75,6 +87,9 @@ impl GitBranchCollection {
             && let Some(current) = repository.branches.iter().find(|entry| entry.current)
         {
             return current.name.clone();
+        }
+        if self == Self::Local && !repository.branch.is_empty() {
+            return repository.branch.clone();
         }
         references.into_iter().next().unwrap_or_default()
     }
@@ -202,6 +217,11 @@ pub struct GitPageSnapshot {
     pub branch_files_loading: bool,
     pub branch_files_has_more: bool,
     pub branch_files_error: String,
+    pub local_branches: GitCatalogProgress,
+    pub remote_branches: GitCatalogProgress,
+    pub tags: GitCatalogProgress,
+    pub commits: GitCatalogProgress,
+    pub stashes: GitCatalogProgress,
     pub command_log: Vec<GitCommandLogEntry>,
     pub result: Option<GitOperationResult>,
     pub result_sequence: u64,
@@ -209,6 +229,13 @@ pub struct GitPageSnapshot {
     pub fetching: bool,
     pub message: String,
     pub nonce: u32,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub struct GitCatalogProgress {
+    pub loaded: bool,
+    pub loading: bool,
+    pub has_more: bool,
 }
 
 impl Default for GitPageSnapshot {
@@ -225,6 +252,11 @@ impl Default for GitPageSnapshot {
             branch_files_loading: false,
             branch_files_has_more: false,
             branch_files_error: String::new(),
+            local_branches: GitCatalogProgress::default(),
+            remote_branches: GitCatalogProgress::default(),
+            tags: GitCatalogProgress::default(),
+            commits: GitCatalogProgress::default(),
+            stashes: GitCatalogProgress::default(),
             command_log: Vec::new(),
             result: None,
             result_sequence: 0,
@@ -237,6 +269,26 @@ impl Default for GitPageSnapshot {
 }
 
 impl GitPageSnapshot {
+    pub(crate) fn catalog(&self, catalog: GitCatalog) -> GitCatalogProgress {
+        match catalog {
+            GitCatalog::LocalBranches => self.local_branches,
+            GitCatalog::RemoteBranches => self.remote_branches,
+            GitCatalog::Tags => self.tags,
+            GitCatalog::Commits => self.commits,
+            GitCatalog::Stashes => self.stashes,
+        }
+    }
+
+    pub(crate) fn catalog_mut(&mut self, catalog: GitCatalog) -> &mut GitCatalogProgress {
+        match catalog {
+            GitCatalog::LocalBranches => &mut self.local_branches,
+            GitCatalog::RemoteBranches => &mut self.remote_branches,
+            GitCatalog::Tags => &mut self.tags,
+            GitCatalog::Commits => &mut self.commits,
+            GitCatalog::Stashes => &mut self.stashes,
+        }
+    }
+
     pub(crate) fn append_diff(&mut self, next: &GitDiffViewport) -> bool {
         let Some(current) = self.diff_viewport.as_mut() else {
             return false;
@@ -269,7 +321,7 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 5)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 6)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,

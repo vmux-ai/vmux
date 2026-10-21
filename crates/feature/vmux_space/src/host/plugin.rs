@@ -137,6 +137,7 @@ impl Plugin for SpacePlugin {
         .add_observer(activate_contribution)
         .add_observer(reset_sent)
         .add_systems(Update, handle_open_in_new.in_set(ReadCommandRequests))
+        .add_systems(Update, open_requested_form)
         .add_systems(Update, broadcast_spaces_to_views);
     }
 }
@@ -390,6 +391,9 @@ struct SpacesListSent;
 
 #[derive(Component)]
 struct SpaceForm(SpaceFormState);
+
+#[derive(Component)]
+struct OpenSpaceForm;
 
 fn reset_sent(
     trigger: On<UiInput<PageReady>>,
@@ -876,6 +880,9 @@ fn open_page(
     if let Some((existing, _)) = stacks.iter().find(|(stack, metadata)| {
         metadata.url == SpacePlugin::MANIFEST.url && space_window.window_of(*stack) == Some(window)
     }) {
+        if trigger.event().payload.create {
+            commands.entity(existing).insert(OpenSpaceForm);
+        }
         commands.trigger(ActivateRequest { entity: existing });
         return;
     }
@@ -885,14 +892,41 @@ fn open_page(
     let Some(spawn_requests) = spawn_requests.as_mut() else {
         return;
     };
-    let stack = commands
-        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
-        .id();
+    let mut stack = commands.spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)));
+    if trigger.event().payload.create {
+        stack.insert(OpenSpaceForm);
+    }
+    let stack = stack.id();
     spawn_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
         url: SpacePlugin::MANIFEST.url.to_string(),
         request_id: None,
     });
+}
+
+fn open_requested_form(
+    views: Query<Entity, (With<Spaces>, With<PageReady>)>,
+    pending: Query<(), With<OpenSpaceForm>>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    for view in &views {
+        let mut current = view;
+        loop {
+            if pending.contains(current) {
+                commands.entity(current).remove::<OpenSpaceForm>();
+                commands.trigger(UiInput {
+                    webview: view,
+                    payload: SpaceFormOpenRequest::default(),
+                });
+                break;
+            }
+            let Ok(parent) = parents.get(current) else {
+                break;
+            };
+            current = parent.parent();
+        }
+    }
 }
 
 fn delete(

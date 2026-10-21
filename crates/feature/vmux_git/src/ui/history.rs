@@ -2,31 +2,24 @@
 
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
-use crate::state::GitOperationEligibility;
+use crate::state::{GitCatalogProgress, GitOperationEligibility};
 
 use super::operation::HeaderOperationButton;
-use super::shared::ListPager;
 
 #[component]
 pub(super) fn HistoryCard(
     repository: GitRepositorySnapshot,
     selected_commit: String,
     operations: GitOperationEligibility,
+    progress: GitCatalogProgress,
 ) -> Element {
-    let total = repository.commits.len();
-    let pager = ListPager::use_state();
-    let selected_index = repository
-        .commits
-        .iter()
-        .position(|entry| entry.sha == selected_commit);
-    let visible_count = pager
-        .visible(total)
-        .max(selected_index.map(|index| index + 1).unwrap_or_default());
+    let commits_empty = repository.commits.is_empty();
     let selected = repository
         .commits
         .iter()
@@ -82,11 +75,24 @@ pub(super) fn HistoryCard(
             }
             div {
                 class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
-                onscroll: move |event| pager.load_more(event, total),
-                if repository.commits.is_empty() {
+                onscroll: move |event: Event<ScrollData>| {
+                    let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                    if remaining <= 192 && progress.has_more && !progress.loading {
+                        let _ = send(&GitCatalogNextRequest {
+                            catalog: GitCatalog::Commits,
+                        });
+                    }
+                },
+                if progress.loading && commits_empty {
+                    div { class: "flex flex-col gap-2 px-2.5 py-2",
+                        for width in ["w-10/12", "w-full", "w-8/12", "w-11/12"] {
+                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                        }
+                    }
+                } else if commits_empty {
                     div { class: "flex h-full min-h-32 items-center justify-center p-4 text-center text-xs text-muted-foreground", {translate("git-no-commits")} }
                 }
-                for (index, commit) in repository.commits.into_iter().take(visible_count).enumerate() {
+                for (index, commit) in repository.commits.into_iter().enumerate() {
                     Button {
                         id: "git-commit-row-{index}",
                         variant: ButtonVariant::Ghost,
@@ -111,6 +117,13 @@ pub(super) fn HistoryCard(
                         span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
                     }
                 }
+                if progress.loading && !commits_empty {
+                    div { class: "flex flex-col gap-2 px-2.5 py-2",
+                        for width in ["w-10/12", "w-8/12"] {
+                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                        }
+                    }
+                }
             }
         }
     }
@@ -121,16 +134,8 @@ pub(super) fn StashCard(
     repository: GitRepositorySnapshot,
     selected_stash: String,
     operations: GitOperationEligibility,
+    progress: GitCatalogProgress,
 ) -> Element {
-    let total = repository.stashes.len();
-    let pager = ListPager::use_state();
-    let selected_index = repository
-        .stashes
-        .iter()
-        .position(|entry| entry.reference == selected_stash);
-    let visible_count = pager
-        .visible(total)
-        .max(selected_index.map(|index| index + 1).unwrap_or_default());
     let selected = repository
         .stashes
         .iter()
@@ -173,11 +178,18 @@ pub(super) fn StashCard(
             div { class: "flex h-10 shrink-0 items-center justify-end px-3",
                 {stash_operations}
             }
-            if !stashes.is_empty() {
+            if !stashes.is_empty() || progress.loading {
                 div {
                     class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
-                    onscroll: move |event| pager.load_more(event, total),
-                    for (index, stash) in stashes.into_iter().take(visible_count).enumerate() {
+                    onscroll: move |event: Event<ScrollData>| {
+                        let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                        if remaining <= 192 && progress.has_more && !progress.loading {
+                            let _ = send(&GitCatalogNextRequest {
+                                catalog: GitCatalog::Stashes,
+                            });
+                        }
+                    },
+                    for (index, stash) in stashes.into_iter().enumerate() {
                         Button {
                             id: "git-stash-row-{index}",
                             variant: ButtonVariant::Ghost,
@@ -199,6 +211,13 @@ pub(super) fn StashCard(
                             span { class: "shrink-0 rounded bg-rose-400/[0.08] px-1 font-mono text-[8px] text-rose-400", "{stash.index}" }
                             span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{stash.message}" }
                             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{stash.reference}" }
+                        }
+                    }
+                    if progress.loading {
+                        div { class: "flex flex-col gap-2 px-2.5 py-2",
+                            for width in ["w-10/12", "w-8/12"] {
+                                Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                            }
                         }
                     }
                 }

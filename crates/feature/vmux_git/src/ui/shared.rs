@@ -1,7 +1,10 @@
 #![allow(non_snake_case)]
 
+use std::collections::HashSet;
+
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
+use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::diff::DiffTone;
 use vmux_ui::file_icon::TypeIcon;
@@ -183,6 +186,7 @@ pub fn DiffView(
     loading: bool,
     visible: bool,
 ) -> Element {
+    let mut collapsed_files = use_signal(HashSet::<String>::new);
     let viewport = viewport();
     let rows = viewport
         .as_ref()
@@ -214,6 +218,9 @@ pub fn DiffView(
             _ => None,
         })
         .collect();
+    let rendered_rows = display_rows();
+    let sections = DiffSection::group(rows, &rendered_rows);
+    let collapsed_snapshot = collapsed_files();
 
     rsx! {
         div {
@@ -239,96 +246,128 @@ pub fn DiffView(
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
             }
 
-            for display_row in display_rows() {
-                match display_row {
-                    GitDiffRow::Line(index) => {
-                        let index = index as usize;
-                        let line = &rows[index];
-                        let file_path = line.file_path().map(str::to_string);
-                        rsx! {
+            for (section_index, section) in sections.into_iter().enumerate() {
+                {
+                    let file_path = section.file_path.clone();
+                    let collapse_key = file_path
+                        .as_ref()
+                        .map(|file_path| format!("{identity}\0{file_path}"));
+                    let collapsed = collapse_key
+                        .as_ref()
+                        .is_some_and(|key| collapsed_snapshot.contains(key));
+                    let section_class = if file_path.is_some() {
+                        "mt-3 min-w-max overflow-hidden rounded-lg bg-card first:mt-0"
+                    } else {
+                        "contents"
+                    };
+                    rsx! {
+                        section { key: "section-{section_index}-{file_path:?}", class: section_class,
                             if let Some(file_path) = file_path {
                                 div {
-                                    key: "file-{file_path}",
                                     id: "git-diff-file-{file_path}",
-                                    class: "sticky top-0 z-10 mt-3 flex h-9 min-w-full scroll-mt-2 items-center gap-2 rounded-t-md bg-card px-3 font-sans text-[11px] font-semibold text-foreground ring-1 ring-inset ring-foreground/[0.10] first:mt-0",
+                                    class: "sticky top-0 z-10 flex h-9 min-w-full scroll-mt-2 items-center gap-2 bg-card px-3 font-sans text-[11px] font-semibold text-foreground",
                                     TypeIcon { path: file_path.clone(), is_dir: false, class: "size-3.5 shrink-0" }
-                                    span { class: "truncate font-mono", "{file_path}" }
-                                }
-                            } else {
-                                div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
-                                    div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
-                                        span { class: "flex shrink-0 select-none {DiffPresentation::from(line.kind).gutter_class()}",
-                                            span {
-                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
-                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
-                                                "{opt_no(line.old_no)}"
+                                    span { class: "min-w-0 flex-1 truncate font-mono", "{file_path}" }
+                                    SheetHeaderChevron {
+                                        expanded: !collapsed,
+                                        label: translate(if collapsed { "common-expand" } else { "common-collapse" }),
+                                        onclick: move |_| {
+                                            let Some(key) = collapse_key.as_ref() else {
+                                                return;
+                                            };
+                                            let mut files = collapsed_files.write();
+                                            if !files.remove(key) {
+                                                files.insert(key.clone());
                                             }
-                                            span {
-                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
-                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
-                                                "{opt_no(line.new_no)}"
-                                            }
-                                            span {
-                                                class: "flex w-6 shrink-0 items-center justify-center font-semibold {DiffPresentation::from(line.kind).text_class()}",
-                                                "{DiffPresentation::from(line.kind).sign()}"
-                                            }
-                                        }
-                                        span { class: "min-w-0 px-2 pr-8",
-                                            for (j, styled) in line.spans.iter().enumerate() {
-                                                span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
-                                            }
-                                        }
+                                        },
                                     }
-                                    if !path().is_empty() {
-                                        if let Some(h) = ends[index] {
-                                            {
-                                                let accept_path_bytes = path_bytes.clone();
-                                                let reject_path_bytes = path_bytes.clone();
-                                                rsx! {
-                                                    div {
-                                                        class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
-                                                        Button {
-                                                            variant: ButtonVariant::Ghost,
-                                                            class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
-                                                            onclick: move |_| {
-                                                                let _ = send(&GitHunkRequest {
-                                                                    repo_root: repo_root(),
-                                                                    path: path(),
-                                                                    path_bytes: accept_path_bytes.clone(),
-                                                                    hunk: h,
-                                                                    accept: true,
-                                                                });
-                                                            },
-                                                            LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
-                                                            {translate("git-stage")}
+                                }
+                            }
+                            if !collapsed {
+                                for display_row in section.rows {
+                                    match display_row {
+                                        GitDiffRow::Line(index) => {
+                                            let index = index as usize;
+                                            let line = &rows[index];
+                                            rsx! {
+                                                div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
+                                                    div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
+                                                        span { class: "flex shrink-0 select-none {DiffPresentation::from(line.kind).gutter_class()}",
+                                                            span {
+                                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
+                                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                                                "{opt_no(line.old_no)}"
+                                                            }
+                                                            span {
+                                                                class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/55 group-hover:text-muted-foreground/85",
+                                                                style: "width:calc(var(--cw, 1ch) * {gw} + 1rem);",
+                                                                "{opt_no(line.new_no)}"
+                                                            }
+                                                            span {
+                                                                class: "flex w-6 shrink-0 items-center justify-center font-semibold {DiffPresentation::from(line.kind).text_class()}",
+                                                                "{DiffPresentation::from(line.kind).sign()}"
+                                                            }
                                                         }
-                                                        Button {
-                                                            variant: ButtonVariant::Ghost,
-                                                            class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
-                                                            onclick: move |_| {
-                                                                let _ = send(&GitHunkRequest {
-                                                                    repo_root: repo_root(),
-                                                                    path: path(),
-                                                                    path_bytes: reject_path_bytes.clone(),
-                                                                    hunk: h,
-                                                                    accept: false,
-                                                                });
-                                                            },
-                                                            LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
-                                                            {translate("git-revert")}
+                                                        span { class: "min-w-0 px-2 pr-8",
+                                                            for (j, styled) in line.spans.iter().enumerate() {
+                                                                span { key: "{j}", class: "syntax-token", style: "{span_style(styled)}", "{styled.text}" }
+                                                            }
+                                                        }
+                                                    }
+                                                    if !path().is_empty() {
+                                                        if let Some(h) = ends[index] {
+                                                            {
+                                                                let accept_path_bytes = path_bytes.clone();
+                                                                let reject_path_bytes = path_bytes.clone();
+                                                                rsx! {
+                                                                    div {
+                                                                        class: "flex min-w-full items-center justify-end gap-1.5 bg-card/45 px-3 py-1.5 font-sans text-[11px] select-none",
+                                                                        Button {
+                                                                            variant: ButtonVariant::Ghost,
+                                                                            class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
+                                                                            onclick: move |_| {
+                                                                                let _ = send(&GitHunkRequest {
+                                                                                    repo_root: repo_root(),
+                                                                                    path: path(),
+                                                                                    path_bytes: accept_path_bytes.clone(),
+                                                                                    hunk: h,
+                                                                                    accept: true,
+                                                                                });
+                                                                            },
+                                                                            LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
+                                                                            {translate("git-stage")}
+                                                                        }
+                                                                        Button {
+                                                                            variant: ButtonVariant::Ghost,
+                                                                            class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
+                                                                            onclick: move |_| {
+                                                                                let _ = send(&GitHunkRequest {
+                                                                                    repo_root: repo_root(),
+                                                                                    path: path(),
+                                                                                    path_bytes: reject_path_bytes.clone(),
+                                                                                    hunk: h,
+                                                                                    accept: false,
+                                                                                });
+                                                                            },
+                                                                            LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
+                                                                            {translate("git-revert")}
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
+                                        },
+                                        GitDiffRow::Gap { start, end, .. } => rsx! {
+                                            DiffGap { key: "gap-{start}-{end}", start, end, total: total_rows }
+                                        },
                                     }
                                 }
                             }
                         }
-                    },
-                    GitDiffRow::Gap { start, end, .. } => rsx! {
-                        DiffGap { key: "gap-{start}-{end}", start, end, total: total_rows }
-                    },
+                    }
                 }
             }
             if loading && !rows.is_empty() {
@@ -339,6 +378,43 @@ pub fn DiffView(
                 }
             }
         }
+    }
+}
+
+struct DiffSection {
+    file_path: Option<String>,
+    rows: Vec<GitDiffRow>,
+}
+
+impl DiffSection {
+    fn group(lines: &[DiffLine], rows: &[GitDiffRow]) -> Vec<Self> {
+        let mut sections: Vec<Self> = Vec::new();
+        for row in rows {
+            let file_path = match row {
+                GitDiffRow::Line(index) => lines
+                    .get(*index as usize)
+                    .and_then(DiffLine::file_path)
+                    .map(str::to_string),
+                GitDiffRow::Gap { .. } => None,
+            };
+            if let Some(file_path) = file_path {
+                sections.push(Self {
+                    file_path: Some(file_path),
+                    rows: Vec::new(),
+                });
+                continue;
+            }
+            if sections.is_empty() {
+                sections.push(Self {
+                    file_path: None,
+                    rows: Vec::new(),
+                });
+            }
+            if let Some(section) = sections.last_mut() {
+                section.rows.push(*row);
+            }
+        }
+        sections
     }
 }
 

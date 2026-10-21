@@ -374,7 +374,9 @@ fn load(
         .visible_entry(navigation.show_hidden, navigation.selected)
         .filter(|entry| entry.is_dir)
         .map(|entry| DirectoryListing::read(Path::new(&entry.path)));
-    if let Ok(mut page) = pages.get_mut(entity) {
+    if let Ok(mut page) = pages.get_mut(entity)
+        && crate::GitUrl::is_page(&page.url)
+    {
         if let Some(url) = crate::GitUrl::from_path(&listing.path) {
             page.url = url;
         }

@@ -21,6 +21,27 @@ pub(crate) struct BranchFilesPage {
     pub(crate) has_more: bool,
 }
 
+pub(crate) enum GitCatalogPage {
+    LocalBranches(Vec<GitBranchEntry>, bool),
+    RemoteBranches(Vec<GitBranchEntry>, bool),
+    Tags(Vec<GitTagEntry>, bool),
+    Commits(Vec<GitCommitEntry>, bool),
+    Stashes(Vec<GitStashEntry>, bool),
+}
+
+struct CatalogPage<T> {
+    entries: Vec<T>,
+    has_more: bool,
+}
+
+impl<T> CatalogPage<T> {
+    fn from_all(entries: Vec<T>, offset: usize, limit: usize) -> Self {
+        let has_more = offset.saturating_add(limit) < entries.len();
+        let entries = entries.into_iter().skip(offset).take(limit).collect();
+        Self { entries, has_more }
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct BranchFilesCatalog(Vec<GitBranchFileEntry>);
 
@@ -77,6 +98,42 @@ impl GitRepository {
 
     pub fn path(&self) -> &Path {
         &self.0
+    }
+
+    pub(crate) fn catalog_page(
+        &self,
+        catalog: GitCatalog,
+        current_branch: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<GitCatalogPage, GitError> {
+        match catalog {
+            GitCatalog::LocalBranches => {
+                let page = CatalogPage::from_all(
+                    GitBranchEntry::local(self.path(), current_branch)?,
+                    offset,
+                    limit,
+                );
+                Ok(GitCatalogPage::LocalBranches(page.entries, page.has_more))
+            }
+            GitCatalog::RemoteBranches => {
+                let page =
+                    CatalogPage::from_all(GitBranchEntry::remote(self.path())?, offset, limit);
+                Ok(GitCatalogPage::RemoteBranches(page.entries, page.has_more))
+            }
+            GitCatalog::Tags => {
+                let page = CatalogPage::from_all(GitTagEntry::list(self.path())?, offset, limit);
+                Ok(GitCatalogPage::Tags(page.entries, page.has_more))
+            }
+            GitCatalog::Commits => {
+                let page = GitCommitEntry::page(self.path(), offset, limit)?;
+                Ok(GitCatalogPage::Commits(page.entries, page.has_more))
+            }
+            GitCatalog::Stashes => {
+                let page = CatalogPage::from_all(GitStashEntry::list(self.path())?, offset, limit);
+                Ok(GitCatalogPage::Stashes(page.entries, page.has_more))
+            }
+        }
     }
 
     pub fn has_repository(file: &Path) -> bool {
@@ -1113,15 +1170,25 @@ impl<'a> RequestPath<'a> {
 
 impl GitCommitEntry {
     fn recent(root: &Path) -> Result<Vec<Self>, GitError> {
+        Ok(Self::page(root, 0, 50)?.entries)
+    }
+
+    fn page(root: &Path, offset: usize, limit: usize) -> Result<CatalogPage<Self>, GitError> {
         let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         if !has_head {
-            return Ok(Vec::new());
+            return Ok(CatalogPage {
+                entries: Vec::new(),
+                has_more: false,
+            });
         }
+        let skip = format!("--skip={offset}");
+        let count = format!("-{}", limit.saturating_add(1));
         let (stdout, stderr, ok) = GitCommand::read(
             root,
             &[
                 "log",
-                "-50",
+                &skip,
+                &count,
                 "--date=short",
                 "--format=%H%x00%h%x00%an%x00%ad%x00%s",
             ],
@@ -1145,7 +1212,12 @@ impl GitCommitEntry {
                 references: String::new(),
             });
         }
-        Ok(commits)
+        let has_more = commits.len() > limit;
+        commits.truncate(limit);
+        Ok(CatalogPage {
+            entries: commits,
+            has_more,
+        })
     }
 }
 
@@ -1340,6 +1412,17 @@ impl GitStashEntry {
 
 impl GitRepositorySnapshot {
     pub fn load(path: &Path) -> Result<Self, GitError> {
+        let mut snapshot = Self::load_summary(path)?;
+        let root = Path::new(&snapshot.repo_root);
+        snapshot.commits = GitCommitEntry::recent(root)?;
+        snapshot.branches = GitBranchEntry::local(root, &snapshot.branch)?;
+        snapshot.remote_branches = GitBranchEntry::remote(root)?;
+        snapshot.tags = GitTagEntry::list(root)?;
+        snapshot.stashes = GitStashEntry::list(root)?;
+        Ok(snapshot)
+    }
+
+    pub(crate) fn load_summary(path: &Path) -> Result<Self, GitError> {
         let requested_path = path.to_string_lossy().into_owned();
         let (repository, is_worktree) = GitRepository::discover_with_worktree(path)?;
         let repo_root = repository.path();
@@ -1370,11 +1453,6 @@ impl GitRepositorySnapshot {
         let base_ref = crate::host::worktree::BaseRef::resolve(repo_root)
             .map(|reference| reference.branch().to_string())
             .unwrap_or_default();
-        let commits = GitCommitEntry::recent(repo_root)?;
-        let branches = GitBranchEntry::local(repo_root, &branch)?;
-        let remote_branches = GitBranchEntry::remote(repo_root)?;
-        let tags = GitTagEntry::list(repo_root)?;
-        let stashes = GitStashEntry::list(repo_root)?;
         Ok(Self {
             path: requested_path,
             repo_root: repo_root.to_string_lossy().to_string(),
@@ -1386,11 +1464,11 @@ impl GitRepositorySnapshot {
             ahead,
             behind,
             files,
-            commits,
-            branches,
-            remote_branches,
-            tags,
-            stashes,
+            commits: Vec::new(),
+            branches: Vec::new(),
+            remote_branches: Vec::new(),
+            tags: Vec::new(),
+            stashes: Vec::new(),
         })
     }
 }

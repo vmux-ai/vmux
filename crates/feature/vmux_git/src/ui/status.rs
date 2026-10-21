@@ -11,9 +11,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 use crate::event::*;
-use crate::state::GitPanel;
-
-use super::shared::ListPager;
+use crate::state::{GitCatalogProgress, GitPanel};
 
 #[component]
 pub(super) fn RepositoryHeader(
@@ -21,15 +19,13 @@ pub(super) fn RepositoryHeader(
     projects: Vec<ProjectRow>,
     selected_commit: String,
     can_push: bool,
+    branches_progress: GitCatalogProgress,
+    commits_progress: GitCatalogProgress,
 ) -> Element {
     let push_path = repository.repo_root.clone();
     let mut repository_open = use_signal(|| false);
     let mut branch_open = use_signal(|| false);
     let mut commit_open = use_signal(|| false);
-    let branch_pager = ListPager::use_state();
-    let commit_pager = ListPager::use_state();
-    let branch_total = repository.branches.len();
-    let commit_total = repository.commits.len();
     let selected_commit_entry = repository
         .commits
         .iter()
@@ -140,8 +136,15 @@ pub(super) fn RepositoryHeader(
                     if branch_open() {
                         div {
                             class: "absolute left-0 top-9 z-40 max-h-80 min-w-72 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                            onscroll: move |event| branch_pager.load_more(event, branch_total),
-                            for branch in repository.branches.iter().take(branch_pager.visible(branch_total)) {
+                            onscroll: move |event: Event<ScrollData>| {
+                                let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                                if remaining <= 192 && branches_progress.has_more && !branches_progress.loading {
+                                    let _ = send(&GitCatalogNextRequest {
+                                        catalog: GitCatalog::LocalBranches,
+                                    });
+                                }
+                            },
+                            for branch in repository.branches.iter() {
                                 {
                                     let repo_root = repository.repo_root.clone();
                                     let name = branch.name.clone();
@@ -195,8 +198,15 @@ pub(super) fn RepositoryHeader(
                             if commit_open() {
                                 div {
                                     class: "absolute left-0 top-9 z-40 max-h-80 min-w-80 overflow-y-auto rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                                    onscroll: move |event| commit_pager.load_more(event, commit_total),
-                                    for commit in repository.commits.iter().take(commit_pager.visible(commit_total)) {
+                                    onscroll: move |event: Event<ScrollData>| {
+                                        let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
+                                        if remaining <= 192 && commits_progress.has_more && !commits_progress.loading {
+                                            let _ = send(&GitCatalogNextRequest {
+                                                catalog: GitCatalog::Commits,
+                                            });
+                                        }
+                                    },
+                                    for commit in repository.commits.iter() {
                                         {
                                             let sha = commit.sha.clone();
                                             rsx! {

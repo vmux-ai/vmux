@@ -10515,6 +10515,7 @@ dependencies = [
  "vmux_session",
  "vmux_setting",
  "vmux_space",
+ "vmux_syntax",
  "vmux_tool",
  "vmux_transport",
  "vmux_ui",
@@ -10585,6 +10586,7 @@ dependencies = [
  "vmux_ecs",
  "vmux_page",
  "vmux_path",
+ "vmux_syntax",
  "vmux_ui",
 ]
 
@@ -11044,6 +11046,13 @@ dependencies = [
  "vmux_page",
  "vmux_space",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_syntax"
+version = "0.0.35"
+dependencies = [
+ "syntect",
 ]
 
 [[package]]

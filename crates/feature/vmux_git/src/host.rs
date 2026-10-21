@@ -3,6 +3,7 @@ use crate::event::{
     GitBranchSubmitRequest, GitCommitDraftRequest, GitCommitSubmitRequest, GitConfigEditRequest,
     GitUpdateCheckRequest,
 };
+use crate::host::catalog::CatalogPlugin;
 use crate::host::changes::ChangesPlugin;
 use crate::host::controller::ControllerPlugin;
 use crate::host::diff::DiffPlugin;
@@ -23,6 +24,7 @@ use vmux_ecs::page::{HostedPage, PrewarmPage};
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 pub use watch::RepoInfoCache;
 
+mod catalog;
 mod changes;
 mod controller;
 mod diff;
@@ -66,6 +68,7 @@ impl Plugin for GitPlugin {
                 (
                     GitUpdateSet::Watch,
                     GitUpdateSet::Status,
+                    GitUpdateSet::Catalog,
                     GitUpdateSet::Diff,
                     GitUpdateSet::Jobs,
                 )
@@ -78,6 +81,7 @@ impl Plugin for GitPlugin {
                 ControllerPlugin,
                 JobPlugin,
                 ChangesPlugin,
+                CatalogPlugin,
                 DiffPlugin,
                 DirectoryPlugin,
                 RepositoryPickerPlugin,
@@ -104,6 +108,7 @@ fn prewarm(mut commands: Commands) {
 enum GitUpdateSet {
     Watch,
     Status,
+    Catalog,
     Diff,
     Jobs,
 }

@@ -11,6 +11,8 @@ pub struct ReloadEffect {
 #[vmux_api::contract(Copy, Default)]
 pub struct LayoutGeometry {
     #[serde(default)]
+    pub zen: bool,
+    #[serde(default)]
     pub header_open: bool,
     #[serde(default)]
     pub side_sheet_open: bool,

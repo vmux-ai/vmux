@@ -13,7 +13,9 @@ use crate::event::{
     DiffKind, GitDiffRevealRequest, GitOperationError, GitOperationResult, GitRepositoryRequest,
     GitRepositorySnapshot,
 };
-use crate::state::{GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState};
+use crate::state::{
+    GitCatalogProgress, GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState,
+};
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
 use super::directory::GitDirectoryNavigation;
@@ -116,12 +118,27 @@ impl GitStates<'_, '_> {
         state.snapshot.message.clear();
     }
 
-    pub(super) fn set_repository(&mut self, entity: Entity, event: GitRepositorySnapshot) {
+    pub(super) fn set_repository(&mut self, entity: Entity, mut event: GitRepositorySnapshot) {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return;
         };
+        if let Some(previous) = state.snapshot.repository.take()
+            && previous.repo_root == event.repo_root
+        {
+            event.commits = previous.commits;
+            event.branches = previous.branches;
+            event.remote_branches = previous.remote_branches;
+            event.tags = previous.tags;
+            event.stashes = previous.stashes;
+        }
         state.snapshot.workspace.clone_from(&event.repo_root);
         state.snapshot.repository = Some(event);
+        state.snapshot.local_branches = GitCatalogProgress::default();
+        state.snapshot.remote_branches = GitCatalogProgress::default();
+        state.snapshot.tags = GitCatalogProgress::default();
+        state.snapshot.commits = GitCatalogProgress::default();
+        state.snapshot.stashes = GitCatalogProgress::default();
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
         state.snapshot.loading = false;
         state.snapshot.message.clear();
     }
@@ -305,10 +322,7 @@ fn page_ready(
         return;
     };
     let projects = page.url.trim_end_matches('/') == "vmux://projects";
-    if !page.url.starts_with(crate::GIT_PAGE_URL)
-        && page.url != super::GitPlugin::MANIFEST.url
-        && !projects
-    {
+    if !crate::GitUrl::is_page(&page.url) && !projects {
         return;
     }
     if states.contains(entity) {
@@ -327,10 +341,7 @@ type ChangedGitPages<'w, 's> = Query<
 fn cleanup_inactive_views(pages: ChangedGitPages, mut commands: Commands) {
     for (entity, page) in &pages {
         let projects = page.url.trim_end_matches('/') == "vmux://projects";
-        if !page.url.starts_with(crate::GIT_PAGE_URL)
-            && page.url != super::GitPlugin::MANIFEST.url
-            && !projects
-        {
+        if !crate::GitUrl::is_page(&page.url) && !projects {
             commands.entity(entity).remove::<GitState>();
         }
     }
@@ -377,7 +388,7 @@ fn repository_request(
         }
     };
     if let Ok(mut page) = pages.get_mut(webview)
-        && page.url.starts_with(crate::GIT_PAGE_URL)
+        && crate::GitUrl::is_page(&page.url)
         && let Some(url) = crate::GitUrl::from_path_preserving_commit(&repo_root, &page.url)
         && page.url != url
     {

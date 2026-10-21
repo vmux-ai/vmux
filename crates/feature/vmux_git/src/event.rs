@@ -86,6 +86,20 @@ pub struct GitBranchFileSelectRequest {
 #[vmux_api::ui_event]
 pub struct GitBranchFilesNextRequest;
 
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitCatalog {
+    LocalBranches,
+    RemoteBranches,
+    Tags,
+    Commits,
+    Stashes,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct GitCatalogNextRequest {
+    pub catalog: GitCatalog,
+}
+
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct GitDiffRevealRequest {
     pub start: u32,
@@ -338,6 +352,18 @@ pub struct GitRepositorySnapshot {
     pub remote_branches: Vec<GitBranchEntry>,
     pub tags: Vec<GitTagEntry>,
     pub stashes: Vec<GitStashEntry>,
+}
+
+impl GitRepositorySnapshot {
+    pub(crate) fn catalog_len(&self, catalog: GitCatalog) -> usize {
+        match catalog {
+            GitCatalog::LocalBranches => self.branches.len(),
+            GitCatalog::RemoteBranches => self.remote_branches.len(),
+            GitCatalog::Tags => self.tags.len(),
+            GitCatalog::Commits => self.commits.len(),
+            GitCatalog::Stashes => self.stashes.len(),
+        }
+    }
 }
 
 #[vmux_api::ui_event_variants(Eq, shared(repo_root: String))]

@@ -81,24 +81,9 @@ pub fn Page() -> Element {
                         }
                     }
                 }
-                button {
-                    r#type: "button",
-                    class: "vmux-primary-action inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium",
-                    onclick: move |_| {
-                        let _ = send(&SpaceFormOpenRequest {
-                            space_id: None,
-                            draft: String::new(),
-                        });
-                    },
-                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                    span { {translate("common-add")} }
-                }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-4 py-4",
                 div { class: "mx-auto w-full max-w-5xl rounded-lg bg-foreground/[0.025] p-1",
-                    if creating {
-                        NewSpaceRow { form: form.clone() }
-                    }
                     if spaces.is_empty() && !creating {
                         div { class: "flex min-h-56 items-center justify-center text-sm text-muted-foreground", {translate("spaces-empty")} }
                     } else {
@@ -110,6 +95,22 @@ pub fn Page() -> Element {
                                 deletable: count > 1,
                                 form: form.clone(),
                             }
+                        }
+                    }
+                    if creating {
+                        NewSpaceRow { form: form.clone() }
+                    } else {
+                        button {
+                            r#type: "button",
+                            class: "flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
+                            onclick: move |_| {
+                                let _ = send(&SpaceFormOpenRequest {
+                                    space_id: None,
+                                    draft: String::new(),
+                                });
+                            },
+                            LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                            span { {translate("common-add")} }
                         }
                     }
                 }
@@ -266,7 +267,7 @@ fn SpaceActions(space_id: String, name: String, deletable: bool) -> Element {
 #[component]
 fn NewSpaceRow(form: SpaceFormState) -> Element {
     rsx! {
-        div { class: "m-2 flex min-h-14 items-center gap-3 rounded-md bg-foreground/[0.055] px-4 py-2 shadow-[inset_2px_0_0_color-mix(in_oklab,var(--primary)_55%,transparent)]",
+        div { class: "m-2 flex min-h-16 items-center gap-3 rounded-md bg-foreground/[0.055] px-4 py-3 shadow-[inset_2px_0_0_color-mix(in_oklab,var(--primary)_55%,transparent)]",
             LineIconView { icon: LineIcon::Planet, class: "size-4 shrink-0 text-primary".to_string() }
             SpaceFormView { form }
         }

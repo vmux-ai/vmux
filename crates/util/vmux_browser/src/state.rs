@@ -31,6 +31,7 @@ use vmux_layout::{
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
     tab::Tab,
+    toggle::LayoutHidden,
     window::{FocusedWindow, VmuxWindow, WindowHierarchy},
 };
 
@@ -367,6 +368,7 @@ type LayoutMarkerChanged = Or<(
     Changed<Space>,
     Changed<CurrentSpace>,
     Changed<Active>,
+    Changed<LayoutHidden>,
 )>;
 
 type BookmarkProjectionChanged = Or<(
@@ -442,6 +444,7 @@ struct PageStateRemovals<'w, 's> {
     collapsed: RemovedComponents<'w, 's, Collapsed>,
     smart_folder: RemovedComponents<'w, 's, SmartBookmarkFolder>,
     expanded_projects: RemovedComponents<'w, 's, ExpandedProjectDirs>,
+    layout_hidden: RemovedComponents<'w, 's, LayoutHidden>,
 }
 
 impl PageStateRemovals<'_, '_> {
@@ -488,6 +491,7 @@ impl PageStateRemovals<'_, '_> {
         any |= self.collapsed.read().count() > 0;
         any |= self.smart_folder.read().count() > 0;
         any |= self.expanded_projects.read().count() > 0;
+        any |= self.layout_hidden.read().count() > 0;
         any
     }
 }
@@ -515,7 +519,7 @@ fn push_layout_emit(
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
-    windows: Query<&Window>,
+    windows: Query<(&Window, Has<LayoutHidden>)>,
     settings: Res<AppSettings>,
 ) {
     let Some(target) = projection.target() else {
@@ -533,11 +537,11 @@ fn push_layout_emit(
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
         is_open && projection.layout.hierarchy.get(entity) == Some(host_window)
     });
-    let window_width_px = windows
+    let (window_width_px, zen) = windows
         .get(host_window)
         .ok()
-        .map(|window| window.resolution.physical_width() as f32)
-        .unwrap_or(0.0);
+        .map(|(window, zen)| (window.resolution.physical_width() as f32, zen))
+        .unwrap_or((0.0, false));
     let header_offsets = header_q.iter().find_map(|(entity, _, computed)| {
         if projection.layout.hierarchy.get(entity) == Some(host_window) {
             LayoutFixedOffsets::from_node(computed?, window_width_px)
@@ -563,6 +567,7 @@ fn push_layout_emit(
     }
 
     let payload = LayoutGeometry {
+        zen,
         header_open,
         side_sheet_open,
         header_height: header_offsets

@@ -2,9 +2,20 @@ use std::path::PathBuf;
 
 use bevy::prelude::Component;
 
+use crate::event::GitCatalog;
+
 #[derive(Clone, Component)]
 pub(super) struct RepositoryJob {
     pub(super) path: PathBuf,
+}
+
+#[derive(Clone, Component)]
+pub(super) struct CatalogJob {
+    pub(super) catalog: GitCatalog,
+    pub(super) current_branch: String,
+    pub(super) offset: usize,
+    pub(super) limit: usize,
+    pub(super) revision: u32,
 }
 
 #[derive(Clone, Component)]

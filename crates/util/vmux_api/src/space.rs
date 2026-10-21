@@ -86,9 +86,11 @@ impl SpaceRow {
     }
 }
 
-#[vmux_api::ui_event(Eq)]
+#[vmux_api::ui_event(Default, Eq)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
-pub struct SpaceOpenPageRequest;
+pub struct SpaceOpenPageRequest {
+    pub create: bool,
+}
 
 #[vmux_api::ui_event(Eq)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]

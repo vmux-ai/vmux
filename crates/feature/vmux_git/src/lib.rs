@@ -21,6 +21,10 @@ pub const GIT_PAGE_URL: &str = "git://";
 pub struct GitUrl;
 
 impl GitUrl {
+    pub fn is_page(value: &str) -> bool {
+        value.starts_with(GIT_PAGE_URL) || value.trim_end_matches('/') == "vmux://git"
+    }
+
     pub fn parse(value: &str) -> Option<std::path::PathBuf> {
         let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
         Self::parse_with_home(value, home.as_deref())
@@ -148,5 +152,13 @@ mod tests {
             GitUrl::from_path_preserving_commit(std::path::Path::new("/Users/me/other"), &url),
             GitUrl::from_path(std::path::Path::new("/Users/me/other"))
         );
+    }
+
+    #[test]
+    fn git_page_identity_excludes_project_hosts() {
+        assert!(GitUrl::is_page("git://"));
+        assert!(GitUrl::is_page("git://Users/me/repo"));
+        assert!(GitUrl::is_page("vmux://git/"));
+        assert!(!GitUrl::is_page("vmux://projects/"));
     }
 }

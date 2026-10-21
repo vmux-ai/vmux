@@ -69,7 +69,6 @@ pub(crate) mod highlight;
 pub mod keymap;
 pub mod lsp;
 pub mod markdown;
-pub mod palette;
 pub mod shape;
 pub mod tool;
 
