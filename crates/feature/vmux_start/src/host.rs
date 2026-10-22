@@ -639,7 +639,7 @@ fn focus_command_bar(
         Err(_) => {
             let mut revision = CommandBarFocusRevision::default();
             let effect = revision.next();
-            commands.entity(webview).insert(revision);
+            commands.entity(webview).try_insert(revision);
             effect
         }
     };
