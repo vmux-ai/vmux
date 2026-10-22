@@ -202,7 +202,10 @@ impl LineIcon {
                 "M4 4h16l2 10v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4Z",
                 "M2 14h5l2 3h6l2-3h5",
             ],
-            Self::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
+            Self::Layout => &[
+                "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+                "M16 4v16",
+            ],
             Self::List => &["M4 6h16", "M4 12h16", "M4 18h16"],
             Self::MessagesRound => &[
                 "M12 4H7a5 5 0 0 0-5 5v.5A4.5 4.5 0 0 0 6.5 14H8l-1 3 4-3h1a5 5 0 0 0 0-10Z",
