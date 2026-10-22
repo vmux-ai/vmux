@@ -50,7 +50,7 @@ pub(super) fn RepositoryHeader(
     } else {
         repository.branch.clone()
     };
-    let selected_reference_count = branch_collection.references(&repository).len();
+    let selected_reference_count = branch_collection.len(&repository);
     let selected_catalog = GitCatalog::from(branch_collection);
     let first_commit = repository
         .commits

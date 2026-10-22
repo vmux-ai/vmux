@@ -19,7 +19,7 @@ use vmux_command::CommandManifest;
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
-use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -413,7 +413,7 @@ impl Stack {
     pub fn bundle() -> impl Bundle {
         (
             Self::default(),
-            vmux_ecs::PageMetadata::default(),
+            PageMetadata::default(),
             Transform::default(),
             Node {
                 position_type: PositionType::Absolute,
@@ -462,7 +462,7 @@ pub struct LayoutFocus<'w, 's> {
     pane_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
-    stack_metadata: Query<'w, 's, &'static vmux_ecs::PageMetadata, With<Stack>>,
+    stack_metadata: Query<'w, 's, &'static PageMetadata, With<Stack>>,
     parents: Query<'w, 's, &'static ChildOf>,
     tabs: Query<'w, 's, (), With<Tab>>,
 }
@@ -570,27 +570,59 @@ fn open(
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
     focused_space: crate::space::FocusedSpace,
+    target: StackOpenTarget,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
+    let mut startup_reused = false;
     for request in reader.read() {
-        let (_, active_pane, _) = focus.resolve(active_tab_param.get());
+        let (_, active_pane, active_stack) = focus.resolve(active_tab_param.get());
         let Some(pane) = active_pane else {
             continue;
         };
+        let startup_url = focused_space.resolved_startup_url();
         let url = request
             .url
             .clone()
             .filter(|url| !url.is_empty())
-            .unwrap_or_else(|| focused_space.resolved_startup_url());
-        let stack = commands
-            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
-            .id();
+            .unwrap_or_else(|| startup_url.clone());
+        let stack = active_stack.filter(|stack| {
+            if startup_reused || !target.is_startup(*stack, &startup_url) {
+                return false;
+            }
+            startup_reused = true;
+            true
+        });
+        let stack = stack.unwrap_or_else(|| {
+            commands
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id()
+        });
         page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
             url,
             request_id: None,
         });
+    }
+}
+
+#[derive(SystemParam)]
+struct StackOpenTarget<'w, 's> {
+    metadata: Query<'w, 's, &'static PageMetadata, With<Stack>>,
+}
+
+impl StackOpenTarget<'_, '_> {
+    fn is_startup(&self, stack: Entity, startup_url: &str) -> bool {
+        let Ok(metadata) = self.metadata.get(stack) else {
+            return false;
+        };
+        match (
+            vmux_api::VmuxRoute::parse(&metadata.url),
+            vmux_api::VmuxRoute::parse(startup_url),
+        ) {
+            (Some(current), Some(startup)) => current.same_page(&startup),
+            _ => metadata.url.trim_end_matches('/') == startup_url.trim_end_matches('/'),
+        }
     }
 }
 
@@ -1637,13 +1669,11 @@ mod tests {
     fn closing_only_start_page_keeps_the_existing_stack() {
         let mut app = build_app_with_collector();
         let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
-        app.world_mut()
-            .entity_mut(stack)
-            .insert(vmux_ecs::PageMetadata {
-                title: "Start".to_string(),
-                url: "vmux://start/".to_string(),
-                ..Default::default()
-            });
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            title: "Start".to_string(),
+            url: "vmux://start/".to_string(),
+            ..Default::default()
+        });
         app.world_mut()
             .resource_mut::<Messages<CloseRequest>>()
             .write(CloseRequest);
@@ -1690,6 +1720,67 @@ mod tests {
             }
             other => panic!("expected PageOpenRequest, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn open_reuses_the_active_startup_stack() {
+        let mut app = build_app_with_collector();
+        let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: "vmux://start/".into(),
+            ..Default::default()
+        });
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("vmux://git/".into()),
+            });
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        let [request] = collected.0.as_slice() else {
+            panic!("one page is opened");
+        };
+        assert!(matches!(request.target, PageOpenTarget::Stack(target) if target == stack));
+        assert_eq!(request.url, "vmux://git/");
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Stack>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn open_reuses_the_active_startup_stack_once_per_batch() {
+        let mut app = build_app_with_collector();
+        let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: "vmux://start/".into(),
+            ..Default::default()
+        });
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("vmux://git/".into()),
+            });
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("vmux://sessions/".into()),
+            });
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        let [first, second] = collected.0.as_slice() else {
+            panic!("two pages are opened");
+        };
+        assert!(matches!(first.target, PageOpenTarget::Stack(target) if target == stack));
+        assert!(matches!(second.target, PageOpenTarget::Stack(target) if target != stack));
     }
 
     #[test]

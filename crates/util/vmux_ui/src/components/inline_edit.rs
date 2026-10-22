@@ -211,23 +211,21 @@ pub fn InlineEdit(
     on_commit: EventHandler<String>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let mut draft = draft;
-    let mut finished = use_signal(|| false);
-    let ime = use_ime_guard();
-    let focus_return = FocusReturn(restore_focus_id);
+    let controller = use_inline_editing_controller(
+        draft,
+        allow_empty,
+        trim,
+        on_active_change,
+        restore_focus_id,
+        on_commit,
+        on_cancel,
+    );
     let id = use_hook(|| {
         format!(
             "vmux-inline-edit-{}",
             NEXT_INLINE_EDIT_ID.fetch_add(1, Ordering::Relaxed)
         )
     });
-    let dropped = on_active_change;
-    use_drop(move || {
-        if let Some(callback) = dropped {
-            callback.call(false);
-        }
-    });
-
     rsx! {
         input {
             id: "{id}",
@@ -246,71 +244,28 @@ pub fn InlineEdit(
             oncontextmenu: move |event: Event<MouseData>| {
                 event.stop_propagation();
             },
-            onmounted: move |event: Event<MountedData>| {
-                if let Some(callback) = on_active_change {
-                    callback.call(true);
-                }
-                let id = id.clone();
-                spawn(async move {
-                    let _ = event.data().set_focus(true).await;
-                    if caret_at_end {
-                        FocusClaim::new(id).caret_at_end().request();
-                    }
-                });
-            },
-            oninput: move |event| draft.set(event.value()),
-            oncompositionstart: move |_| ime.start(),
-            oncompositionend: move |_| ime.commit(),
+            onmounted: move |event: Event<MountedData>| controller.activate(event, Some(id.clone()), caret_at_end),
+            oninput: move |event| controller.input(event.value()),
+            oncompositionstart: move |_| controller.composition_started(),
+            oncompositionend: move |_| controller.composition_committed(),
             onkeydown: move |event: Event<KeyboardData>| {
                 event.stop_propagation();
-                if ime.swallows(&event) {
+                if controller.swallows(&event) {
                     return;
                 }
                 match event.key() {
                     Key::Enter => {
                         event.prevent_default();
-                        let name = if trim {
-                            draft().trim().to_string()
-                        } else {
-                            draft()
-                        };
-                        if !finished() {
-                            finished.set(true);
-                            if name.is_empty() && !allow_empty {
-                                on_cancel.call(());
-                            } else {
-                                on_commit.call(name);
-                            }
-                            focus_return.request();
-                        }
+                        controller.commit(true);
                     }
                     Key::Escape => {
                         event.prevent_default();
-                        if !finished() {
-                            finished.set(true);
-                            on_cancel.call(());
-                            focus_return.request();
-                        }
+                        controller.cancel(true);
                     }
                     _ => {}
                 }
             },
-            onblur: move |_| {
-                if finished() {
-                    return;
-                }
-                finished.set(true);
-                let name = if trim {
-                    draft().trim().to_string()
-                } else {
-                    draft()
-                };
-                if name.is_empty() && !allow_empty {
-                    on_cancel.call(());
-                } else {
-                    on_commit.call(name);
-                }
-            },
+            onblur: move |_| controller.commit(false),
         }
     }
 }
@@ -328,23 +283,21 @@ pub fn InlineTextarea(
     on_commit: EventHandler<String>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let mut draft = draft;
-    let mut finished = use_signal(|| false);
-    let ime = use_ime_guard();
-    let focus_return = FocusReturn(restore_focus_id);
+    let controller = use_inline_editing_controller(
+        draft,
+        allow_empty,
+        trim,
+        on_active_change,
+        restore_focus_id,
+        on_commit,
+        on_cancel,
+    );
     let id = use_hook(|| {
         format!(
             "vmux-inline-edit-{}",
             NEXT_INLINE_EDIT_ID.fetch_add(1, Ordering::Relaxed)
         )
     });
-    let dropped = on_active_change;
-    use_drop(move || {
-        if let Some(callback) = dropped {
-            callback.call(false);
-        }
-    });
-
     rsx! {
         textarea {
             id: "{id}",
@@ -360,55 +313,131 @@ pub fn InlineTextarea(
             onclick: move |event: Event<MouseData>| event.stop_propagation(),
             onpointerdown: move |event: Event<PointerData>| event.stop_propagation(),
             oncontextmenu: move |event: Event<MouseData>| event.stop_propagation(),
-            onmounted: move |event: Event<MountedData>| {
-                if let Some(callback) = on_active_change {
-                    callback.call(true);
-                }
-                spawn(async move {
-                    let _ = event.data().set_focus(true).await;
-                });
-            },
-            oninput: move |event| draft.set(event.value()),
-            oncompositionstart: move |_| ime.start(),
-            oncompositionend: move |_| ime.commit(),
+            onmounted: move |event: Event<MountedData>| controller.activate(event, None, false),
+            oninput: move |event| controller.input(event.value()),
+            oncompositionstart: move |_| controller.composition_started(),
+            oncompositionend: move |_| controller.composition_committed(),
             onkeydown: move |event: Event<KeyboardData>| {
                 event.stop_propagation();
-                if ime.swallows(&event) || event.key() != Key::Escape {
+                if controller.swallows(&event) || event.key() != Key::Escape {
                     return;
                 }
                 event.prevent_default();
-                if !finished() {
-                    finished.set(true);
-                    on_cancel.call(());
-                    focus_return.request();
-                }
+                controller.cancel(true);
             },
-            onblur: move |_| {
-                if finished() {
-                    return;
-                }
-                finished.set(true);
-                let value = if trim {
-                    draft().trim().to_string()
-                } else {
-                    draft()
-                };
-                if value.is_empty() && !allow_empty {
-                    on_cancel.call(());
-                } else {
-                    on_commit.call(value);
-                }
-            },
+            onblur: move |_| controller.commit(false),
         }
     }
 }
 
-#[derive(Clone)]
-struct FocusReturn(Option<String>);
+#[derive(Clone, Copy)]
+struct InlineEditingController {
+    draft: Signal<String>,
+    finished: Signal<bool>,
+    ime: crate::ime::ImeGuard,
+    allow_empty: bool,
+    trim: bool,
+    active: Option<EventHandler<bool>>,
+    commit_handler: EventHandler<String>,
+    cancel_handler: EventHandler<()>,
+    focus_return: FocusReturn,
+}
+
+impl InlineEditingController {
+    fn activate(self, event: Event<MountedData>, id: Option<String>, caret_at_end: bool) {
+        if let Some(callback) = self.active {
+            callback.call(true);
+        }
+        spawn(async move {
+            let _ = event.data().set_focus(true).await;
+            if caret_at_end && let Some(id) = id {
+                FocusClaim::new(id).caret_at_end().request();
+            }
+        });
+    }
+
+    fn input(mut self, value: String) {
+        self.draft.set(value);
+    }
+
+    fn composition_started(self) {
+        self.ime.start();
+    }
+
+    fn composition_committed(self) {
+        self.ime.commit();
+    }
+
+    fn swallows(self, event: &Event<KeyboardData>) -> bool {
+        self.ime.swallows(event)
+    }
+
+    fn commit(mut self, restore_focus: bool) {
+        if (self.finished)() {
+            return;
+        }
+        self.finished.set(true);
+        let value = if self.trim {
+            (self.draft)().trim().to_string()
+        } else {
+            (self.draft)()
+        };
+        if value.is_empty() && !self.allow_empty {
+            self.cancel_handler.call(());
+        } else {
+            self.commit_handler.call(value);
+        }
+        if restore_focus {
+            self.focus_return.request();
+        }
+    }
+
+    fn cancel(mut self, restore_focus: bool) {
+        if (self.finished)() {
+            return;
+        }
+        self.finished.set(true);
+        self.cancel_handler.call(());
+        if restore_focus {
+            self.focus_return.request();
+        }
+    }
+}
+
+fn use_inline_editing_controller(
+    draft: Signal<String>,
+    allow_empty: bool,
+    trim: bool,
+    active: Option<EventHandler<bool>>,
+    restore_focus_id: Option<String>,
+    commit_handler: EventHandler<String>,
+    cancel_handler: EventHandler<()>,
+) -> InlineEditingController {
+    let controller = InlineEditingController {
+        draft,
+        finished: use_signal(|| false),
+        ime: use_ime_guard(),
+        allow_empty,
+        trim,
+        active,
+        commit_handler,
+        cancel_handler,
+        focus_return: use_hook(|| FocusReturn(CopyValue::new(restore_focus_id))),
+    };
+    use_drop(move || {
+        if let Some(callback) = controller.active {
+            callback.call(false);
+        }
+    });
+    controller
+}
+
+#[derive(Clone, Copy)]
+struct FocusReturn(CopyValue<Option<String>>);
 
 impl FocusReturn {
     fn request(&self) {
-        let Some(id) = self.0.clone() else {
+        let Some(id) = self.0.peek().clone() else {
             return;
         };
         spawn(async move {

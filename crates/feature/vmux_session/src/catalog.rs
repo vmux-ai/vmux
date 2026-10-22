@@ -15,9 +15,9 @@ use vmux_ecs::{CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 use crate::model::SourceUpdatedAt;
 #[cfg(host)]
 use crate::{
-    AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent, ProviderKind,
-    ProviderSessionId, ProviderStage, RunState, Session, SessionId, Stage, StageChangedAt,
-    StageDefinition, StageId, Transcripts,
+    AgentConversationTitle, AgentFamily, AgentId, ArchiveTarget, ConversationEvent, MessageContent,
+    ProviderKind, ProviderSessionId, ProviderStage, RunState, Session, SessionId, Stage,
+    StageChangedAt, StageDefinition, StageId, Transcripts,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -67,6 +67,7 @@ pub struct StageSummary {
     pub name: String,
     pub order: u32,
     pub terminal: bool,
+    pub archive: bool,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -90,6 +91,122 @@ pub struct SessionSummary {
     pub conversation_title: String,
     pub last_prompt: String,
     pub last_message: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionAge(pub u64);
+
+impl SessionAge {
+    pub const MINUTE: u64 = 60;
+    pub const HOUR: u64 = 60 * Self::MINUTE;
+    pub const DAY: u64 = 24 * Self::HOUR;
+    pub const WEEK: u64 = 7 * Self::DAY;
+    pub const MONTH: u64 = 30 * Self::DAY;
+    pub const YEAR: u64 = 365 * Self::DAY;
+
+    pub fn from_millis(timestamp: i64, now: i64) -> Self {
+        if timestamp <= 0 {
+            return Self(0);
+        }
+        Self(now.saturating_sub(timestamp).max(0) as u64 / 1_000)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionSummaryProjection {
+    pub title: String,
+    pub preview: String,
+    pub age: SessionAge,
+    pub terminal: bool,
+    pub archived: bool,
+    pub stale: bool,
+}
+
+impl SessionSummaryProjection {
+    pub const STALE_AFTER: u64 = 3 * SessionAge::DAY;
+
+    pub fn new(session: &SessionSummary, stages: &[StageSummary], now: i64) -> Self {
+        let title = Self::title(session);
+        let stage = Self::stage(session, stages);
+        let terminal = stage.is_some_and(|stage| stage.terminal);
+        let archived = stage.is_some_and(|stage| stage.archive);
+        let age = SessionAge::from_millis(session.last_activated_at, now);
+        let stale = Self::stale(session, terminal, age);
+        Self {
+            preview: Self::preview(session, &title),
+            title,
+            age,
+            terminal,
+            archived,
+            stale,
+        }
+    }
+
+    pub fn is_stale(session: &SessionSummary, stages: &[StageSummary], now: i64) -> bool {
+        let terminal = Self::stage(session, stages).is_some_and(|stage| stage.terminal);
+        let age = SessionAge::from_millis(session.last_activated_at, now);
+        Self::stale(session, terminal, age)
+    }
+
+    fn stage<'a>(session: &SessionSummary, stages: &'a [StageSummary]) -> Option<&'a StageSummary> {
+        stages.iter().find(|stage| stage.id == session.stage)
+    }
+
+    fn stale(session: &SessionSummary, terminal: bool, age: SessionAge) -> bool {
+        let active = matches!(
+            session.runtime.as_str(),
+            "streaming" | "awaiting" | "installing" | "errored"
+        );
+        !terminal && !active && age.0 >= Self::STALE_AFTER
+    }
+
+    pub fn matches(session: &SessionSummary, query: &str) -> bool {
+        query.is_empty()
+            || session.name.to_ascii_lowercase().contains(query)
+            || session.description.to_ascii_lowercase().contains(query)
+            || session.cwd.to_ascii_lowercase().contains(query)
+            || session.agent.to_ascii_lowercase().contains(query)
+            || session.agent_name.to_ascii_lowercase().contains(query)
+            || session
+                .conversation_title
+                .to_ascii_lowercase()
+                .contains(query)
+            || session.last_prompt.to_ascii_lowercase().contains(query)
+            || session.last_message.to_ascii_lowercase().contains(query)
+    }
+
+    fn title(session: &SessionSummary) -> String {
+        for title in [
+            &session.conversation_title,
+            &session.name,
+            &session.last_prompt,
+            &session.sid,
+        ] {
+            if !title.trim().is_empty() {
+                return title.clone();
+            }
+        }
+        String::new()
+    }
+
+    fn preview(session: &SessionSummary, title: &str) -> String {
+        for preview in [
+            &session.last_prompt,
+            &session.last_message,
+            &session.description,
+        ] {
+            if !preview.trim().is_empty() && preview != title {
+                return preview.clone();
+            }
+        }
+        String::new()
+    }
+}
+
+impl CatalogSnapshot {
+    pub fn archive_stage(&self) -> Option<&StageSummary> {
+        self.stages.iter().find(|stage| stage.archive)
+    }
 }
 
 #[cfg(host)]
@@ -162,6 +279,7 @@ type ChangedStages<'w, 's> = Query<
             Changed<Name>,
             Changed<Order>,
             Changed<Terminal>,
+            Changed<ArchiveTarget>,
         )>,
     ),
 >;
@@ -209,6 +327,7 @@ struct CatalogChanges<'w, 's> {
     removed_stage_ids: RemovedComponents<'w, 's, StageId>,
     removed_orders: RemovedComponents<'w, 's, Order>,
     removed_terminal: RemovedComponents<'w, 's, Terminal>,
+    removed_archive_targets: RemovedComponents<'w, 's, ArchiveTarget>,
     removed_agents: RemovedComponents<'w, 's, AgentId>,
     removed_profiles: RemovedComponents<'w, 's, vmux_ecs::team::Profile>,
     removed_states: RemovedComponents<'w, 's, RunState>,
@@ -240,6 +359,7 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_stage_ids.read().count() > 0;
         any |= self.removed_orders.read().count() > 0;
         any |= self.removed_terminal.read().count() > 0;
+        any |= self.removed_archive_targets.read().count() > 0;
         any |= self.removed_agents.read().count() > 0;
         any |= self.removed_profiles.read().count() > 0;
         any |= self.removed_states.read().count() > 0;
@@ -256,7 +376,10 @@ impl CatalogChanges<'_, '_> {
 #[cfg(host)]
 fn project(
     sessions: SessionCatalog,
-    stages: Query<(&StageId, &Name, &Order, Has<Terminal>), With<StageDefinition>>,
+    stages: Query<
+        (&StageId, &Name, &Order, Has<Terminal>, Has<ArchiveTarget>),
+        With<StageDefinition>,
+    >,
     providers: Res<ProviderCatalog>,
     provider_stages: Query<
         (
@@ -276,12 +399,13 @@ fn project(
         return;
     }
     let mut next = CatalogSnapshot::default();
-    for (id, name, order, terminal) in &stages {
+    for (id, name, order, terminal, archive) in &stages {
         next.stages.push(StageSummary {
             id: id.0.clone(),
             name: name.as_str().to_string(),
             order: order.0,
             terminal,
+            archive,
         });
     }
     next.stages.sort_by_key(|stage| stage.order);

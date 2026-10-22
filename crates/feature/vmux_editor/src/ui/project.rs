@@ -6,9 +6,9 @@ use vmux_api::open_target::OpenTarget;
 use vmux_ecs::event::{FileDirEntry, FileDirectoryOpenRequest, OpenEditorItem};
 use vmux_git::event::GitRepositoryRequest;
 use vmux_git::state::GitUiState;
-use vmux_session::SessionSummary;
 use vmux_session::event::ResumeSession;
-use vmux_session::state::SessionCatalogUiState;
+use vmux_session::state::SessionScopeUiState;
+use vmux_session::{SessionAge, SessionSummary, SessionSummaryProjection, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
@@ -269,23 +269,12 @@ fn ProjectAddItem(
 #[component]
 pub(super) fn ProjectDashboard() -> Element {
     let files = FileUi::use_root();
-    let sessions = use_ui_state::<SessionCatalogUiState>();
-    let session_catalog = sessions.use_selector(|state| state.catalog.clone());
-    let git = use_ui_state::<GitUiState>();
     let directory = files.use_value(|state| state.document.directory.as_ref());
-    let open_editors = files.use_value(|state| state.explorer.open_editors.as_ref());
     let root = use_memo(move || {
         directory
             .read()
             .as_ref()
             .map(|directory| directory.abs_path.clone())
-            .unwrap_or_default()
-    });
-    let entries = use_memo(move || {
-        directory
-            .read()
-            .as_ref()
-            .map(|directory| directory.entries.clone())
             .unwrap_or_default()
     });
     let project_name = use_memo(move || ProjectPath::name(&root()));
@@ -298,36 +287,6 @@ pub(super) fn ProjectDashboard() -> Element {
         requested_git.set(root.clone());
         let _ = send(&GitRepositoryRequest { path: root });
     });
-
-    let related_sessions = session_catalog()
-        .sessions
-        .iter()
-        .filter(|session| ProjectPath::contains(&root(), &session.cwd))
-        .take(8)
-        .cloned()
-        .collect::<Vec<_>>();
-    let recent_files = open_editors
-        .read()
-        .as_ref()
-        .map(|editors| {
-            editors
-                .items
-                .iter()
-                .filter(|item| !item.is_dir && ProjectPath::contains(&root(), &item.path))
-                .take(6)
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let git_state = git.state.read();
-    let repository = git_state
-        .snapshot
-        .repository
-        .as_ref()
-        .filter(|repository| ProjectPath::same(&repository.repo_root, &root()))
-        .cloned();
-    let git_loading = git_state.snapshot.loading && git_state.snapshot.workspace == root();
-    drop(git_state);
     let start_url = "vmux://start/".to_string();
 
     rsx! {
@@ -354,29 +313,47 @@ pub(super) fn ProjectDashboard() -> Element {
                 }
             }
             PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
-                ProjectSessions { sessions: related_sessions }
-                ProjectGit { root: root(), repository, loading: git_loading }
-                if !recent_files.is_empty() {
-                    ProjectRecentFiles { files: recent_files }
-                }
-                ProjectFiles { entries: entries() }
+                ProjectSessionsPanel {}
+                ProjectGitPanel { root: root() }
+                ProjectRecentFilesPanel { root: root() }
+                ProjectFilesPanel {}
             }
         }
     }
 }
 
 #[component]
-fn ProjectSessions(sessions: Vec<SessionSummary>) -> Element {
+fn ProjectSessionsPanel() -> Element {
+    let sessions = use_ui_state::<SessionScopeUiState>();
+    let projection = sessions.use_selector(|state| ProjectSessionList {
+        sessions: state.sessions.iter().take(8).cloned().collect(),
+        stages: state.stages.clone(),
+    });
+    rsx! { ProjectSessions { projection: projection() } }
+}
+
+#[derive(Clone, Default, PartialEq)]
+struct ProjectSessionList {
+    sessions: Vec<SessionSummary>,
+    stages: Vec<StageSummary>,
+}
+
+#[component]
+fn ProjectSessions(projection: ProjectSessionList) -> Element {
     rsx! {
-        ProjectSection { title: translate("sessions-title"), count: sessions.len(),
-            if sessions.is_empty() {
+        ProjectSection { title: translate("sessions-title"), count: projection.sessions.len(),
+            if projection.sessions.is_empty() {
                 div { class: "flex min-h-20 items-center justify-center px-3 text-xs text-muted-foreground",
                     {translate("sessions-inbox-empty")}
                 }
             } else {
                 div { class: "divide-y divide-foreground/[0.055]",
-                    for session in sessions {
-                        ProjectSessionRow { key: "{session.id}", session }
+                    for session in projection.sessions {
+                        ProjectSessionRow {
+                            key: "{session.id}",
+                            session,
+                            stages: projection.stages.clone(),
+                        }
                     }
                 }
             }
@@ -385,11 +362,19 @@ fn ProjectSessions(sessions: Vec<SessionSummary>) -> Element {
 }
 
 #[component]
-fn ProjectSessionRow(session: SessionSummary) -> Element {
-    let title = ProjectSession::title(&session);
-    let preview = ProjectSession::preview(&session);
-    let stage = ProjectSession::stage(&session);
-    let age = ProjectTime::from_millis(session.last_activated_at).label();
+fn ProjectSessionRow(session: SessionSummary, stages: Vec<StageSummary>) -> Element {
+    let projection =
+        SessionSummaryProjection::new(&session, &stages, vmux_ecs::UnixMillis::now().0);
+    let stage = if projection.stale {
+        translate_humanized("stale")
+    } else {
+        stages
+            .iter()
+            .find(|stage| stage.id == session.stage)
+            .map(|stage| translate_humanized(&stage.name))
+            .unwrap_or_else(|| translate_humanized(&session.stage))
+    };
+    let age = ProjectTime::label(projection.age);
     let managed = session.managed;
     let id = session.id.clone();
     let kind = session.kind.clone();
@@ -422,9 +407,9 @@ fn ProjectSessionRow(session: SessionSummary) -> Element {
                 class: "size-5 text-[6px]".to_string(),
             }
             div { class: "min-w-0 flex-1",
-                div { class: "truncate text-xs font-medium text-foreground/90", "{title}" }
-                if !preview.is_empty() {
-                    div { class: "truncate text-[10px] text-muted-foreground/70", "{preview}" }
+                div { class: "truncate text-xs font-medium text-foreground/90", "{projection.title}" }
+                if !projection.preview.is_empty() {
+                    div { class: "truncate text-[10px] text-muted-foreground/70", "{projection.preview}" }
                 }
             }
             span { class: "hidden shrink-0 rounded-full bg-foreground/[0.05] px-2 py-1 text-[9px] text-muted-foreground sm:inline-flex",
@@ -434,6 +419,35 @@ fn ProjectSessionRow(session: SessionSummary) -> Element {
             LineIconView { icon: LineIcon::MessagesRound, class: "size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100".to_string() }
         }
     }
+}
+
+#[component]
+fn ProjectGitPanel(root: String) -> Element {
+    let git = use_ui_state::<GitUiState>();
+    let reactive_root = root.clone();
+    let selected_root = use_memo(use_reactive!(|(reactive_root,)| reactive_root.clone()));
+    let projection = git.use_selector(move |state| ProjectGitProjection {
+        repository: state
+            .snapshot
+            .repository
+            .as_ref()
+            .filter(|repository| ProjectPath::same(&repository.repo_root, &selected_root()))
+            .cloned(),
+        loading: state.snapshot.loading && state.snapshot.workspace == selected_root(),
+    });
+    rsx! {
+        ProjectGit {
+            root,
+            repository: projection.read().repository.clone(),
+            loading: projection.read().loading,
+        }
+    }
+}
+
+#[derive(Clone, Default, PartialEq)]
+struct ProjectGitProjection {
+    repository: Option<vmux_git::event::GitRepositorySnapshot>,
+    loading: bool,
 }
 
 #[component]
@@ -500,6 +514,31 @@ fn ProjectGit(
 }
 
 #[component]
+fn ProjectRecentFilesPanel(root: String) -> Element {
+    let files = FileUi::current();
+    let open_editors = files.use_value(|state| state.explorer.open_editors.as_ref());
+    let recent = use_memo(use_reactive!(|(root,)| {
+        open_editors
+            .read()
+            .as_ref()
+            .map(|editors| {
+                editors
+                    .items
+                    .iter()
+                    .filter(|item| !item.is_dir && ProjectPath::contains(&root, &item.path))
+                    .take(6)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    }));
+    if recent.read().is_empty() {
+        return rsx! {};
+    }
+    rsx! { ProjectRecentFiles { files: recent() } }
+}
+
+#[component]
 fn ProjectRecentFiles(files: Vec<OpenEditorItem>) -> Element {
     rsx! {
         ProjectSection { title: translate("editor-open-editors"), count: files.len(),
@@ -516,6 +555,20 @@ fn ProjectRecentFiles(files: Vec<OpenEditorItem>) -> Element {
             }
         }
     }
+}
+
+#[component]
+fn ProjectFilesPanel() -> Element {
+    let files = FileUi::current();
+    let directory = files.use_value(|state| state.document.directory.as_ref());
+    let entries = use_memo(move || {
+        directory
+            .read()
+            .as_ref()
+            .map(|directory| directory.entries.clone())
+            .unwrap_or_default()
+    });
+    rsx! { ProjectFiles { entries: entries() } }
 }
 
 #[component]
@@ -629,76 +682,22 @@ impl ProjectPath {
     }
 }
 
-struct ProjectSession;
-
-impl ProjectSession {
-    fn title(session: &SessionSummary) -> String {
-        for title in [
-            &session.conversation_title,
-            &session.name,
-            &session.last_prompt,
-        ] {
-            if !title.trim().is_empty() {
-                return title.clone();
-            }
-        }
-        session.sid.clone()
-    }
-
-    fn preview(session: &SessionSummary) -> String {
-        let title = Self::title(session);
-        for preview in [
-            &session.last_prompt,
-            &session.last_message,
-            &session.description,
-        ] {
-            if !preview.trim().is_empty() && preview.as_str() != title {
-                return preview.clone();
-            }
-        }
-        String::new()
-    }
-
-    fn stage(session: &SessionSummary) -> String {
-        let stale = session.stage != "done"
-            && session.runtime == "inactive"
-            && ProjectTime::from_millis(session.last_activated_at).0 >= 3 * ProjectTime::DAY;
-        if stale {
-            return translate_humanized("stale");
-        }
-        translate_humanized(&session.stage)
-    }
-}
-
-struct ProjectTime(u64);
+struct ProjectTime;
 
 impl ProjectTime {
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * Self::MINUTE;
-    const DAY: u64 = 24 * Self::HOUR;
-    const WEEK: u64 = 7 * Self::DAY;
-
-    fn from_millis(timestamp: i64) -> Self {
-        if timestamp <= 0 {
-            return Self(0);
-        }
-        let now = vmux_ecs::UnixMillis::now().0;
-        Self(now.saturating_sub(timestamp).max(0) as u64 / 1_000)
-    }
-
-    fn label(self) -> String {
-        if self.0 < Self::MINUTE {
+    fn label(age: SessionAge) -> String {
+        if age.0 < SessionAge::MINUTE {
             return translate("resume-age-now");
         }
-        if self.0 < Self::HOUR {
-            return format!("{}m", self.0 / Self::MINUTE);
+        if age.0 < SessionAge::HOUR {
+            return format!("{}m", age.0 / SessionAge::MINUTE);
         }
-        if self.0 < Self::DAY {
-            return format!("{}h", self.0 / Self::HOUR);
+        if age.0 < SessionAge::DAY {
+            return format!("{}h", age.0 / SessionAge::HOUR);
         }
-        if self.0 < Self::WEEK {
-            return format!("{}d", self.0 / Self::DAY);
+        if age.0 < SessionAge::WEEK {
+            return format!("{}d", age.0 / SessionAge::DAY);
         }
-        format!("{}w", self.0 / Self::WEEK)
+        format!("{}w", age.0 / SessionAge::WEEK)
     }
 }

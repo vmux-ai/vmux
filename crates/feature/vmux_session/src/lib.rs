@@ -7,7 +7,8 @@ extern crate self as vmux_session;
 use bevy_app::{App, Plugin};
 
 pub use catalog::{
-    CatalogSnapshot, ProviderCatalog, ProviderSession, SessionSummary, StageSummary,
+    CatalogSnapshot, ProviderCatalog, ProviderSession, SessionAge, SessionSummary,
+    SessionSummaryProjection, StageSummary,
 };
 #[cfg(host)]
 pub use conversation::{
@@ -18,7 +19,7 @@ pub use conversation::{
 #[cfg(feature = "app")]
 pub use host::SessionPlugin;
 pub use model::{
-    AgentFamily, AgentId, Cleanup, CleanupRequest, CreateRequest, Created,
+    AgentFamily, AgentId, ArchiveTarget, Cleanup, CleanupRequest, CreateRequest, Created,
     DescriptionUpdateRequest, LocalTask, ProviderKind, ProviderSessionId, ProviderStage,
     ProviderStageChangeRequest, RenameRequest, Session, Stage, StageChangeRequest, StageChangedAt,
     StageDefinition, StageId,

@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_git::{
+    RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
+};
+use vmux_session::host::ScopeProjectionRequest;
 
 use crate::project::{
     ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectEntry,
@@ -24,58 +28,114 @@ impl Plugin for ProjectPagePlugin {
             .add_observer(create)
             .add_observer(import)
             .add_observer(clone)
-            .add_systems(Update, (queue, finish, finish_operations).chain());
+            .add_systems(Update, (queue, finish_catalogs, finish_imports).chain())
+            .add_systems(PostUpdate, finish_repository_operations);
     }
 }
 
 #[derive(Component)]
-struct ProjectCatalogTask(Task<ProjectUiState>);
+struct ProjectCatalogTask {
+    revision: u64,
+    task: Task<ProjectUiState>,
+}
+
+impl ProjectCatalogTask {
+    fn spawn(
+        root: PathBuf,
+        revision: u64,
+        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    ) -> Self {
+        let task = IoTaskPool::get().spawn(async move {
+            let state = ProjectCatalog::read(&root);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            state
+        });
+        Self { revision, task }
+    }
+}
+
+#[derive(Component, Clone, Default, PartialEq, Eq)]
+struct ProjectPageRevision {
+    url: String,
+    value: u64,
+}
+
+impl ProjectPageRevision {
+    fn new(url: &str) -> Self {
+        Self {
+            url: url.to_string(),
+            value: 1,
+        }
+    }
+
+    fn advance_to(&mut self, url: &str) -> Option<u64> {
+        if self.url == url {
+            return None;
+        }
+        self.url = url.to_string();
+        self.value = self.value.wrapping_add(1).max(1);
+        Some(self.value)
+    }
+}
 
 #[derive(Component)]
 struct PendingProjectOperation {
     webview: Entity,
     root: PathBuf,
-    task: Task<Result<(), String>>,
+    revision: u64,
 }
 
-enum ProjectOperation {
-    Create(String),
-    Import,
-    Clone(String),
+#[derive(SystemParam)]
+struct ProjectOperationPages<'w, 's> {
+    pages: Query<
+        'w,
+        's,
+        (
+            &'static vmux_ecs::PageMetadata,
+            &'static ProjectPageRevision,
+        ),
+    >,
+    pending: Query<'w, 's, &'static PendingProjectOperation>,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
 }
 
-impl PendingProjectOperation {
-    fn spawn(
-        webview: Entity,
-        root: PathBuf,
-        operation: ProjectOperation,
-        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) -> Self {
-        let operation_root = root.clone();
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.run(&operation_root).await;
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        Self {
+impl ProjectOperationPages<'_, '_> {
+    fn for_page(&self, webview: Entity, root: &Path) -> Option<PendingProjectOperation> {
+        if self
+            .pending
+            .iter()
+            .any(|operation| operation.webview == webview)
+        {
+            return None;
+        }
+        let Ok((page, revision)) = self.pages.get(webview) else {
+            return None;
+        };
+        if !ProjectRoute::is_root(&page.url) {
+            return None;
+        }
+        Some(PendingProjectOperation {
             webview,
-            root,
-            task,
-        }
+            root: root.to_path_buf(),
+            revision: revision.value,
+        })
+    }
+
+    fn pending_state(&self, webview: Entity) -> ProjectUiState {
+        self.states
+            .get(webview)
+            .ok()
+            .and_then(vmux_ecs::UiState::current)
+            .cloned()
+            .unwrap_or_default()
+            .pending()
     }
 }
 
-impl ProjectOperation {
-    async fn run(self, root: &Path) -> Result<(), String> {
-        match self {
-            Self::Create(name) => ProjectName::parse(&name)?.create(root),
-            Self::Import => ProjectImport::select(root).await,
-            Self::Clone(repository) => GitHubRepository::parse(&repository)?.clone_into(root),
-        }
-    }
-}
+#[derive(Component)]
+struct ProjectImportTask(Task<Result<(), String>>);
 
 struct ProjectName(String);
 
@@ -88,21 +148,15 @@ impl ProjectName {
         Ok(Self(value.to_string()))
     }
 
-    fn create(self, root: &Path) -> Result<(), String> {
+    fn provision(self, root: &Path) -> Result<RepositoryProvisionOperation, String> {
         let destination = root.join(&self.0);
         if destination.exists() {
             return Err(vmux_ui::i18n::translate("project-already-exists"));
         }
-        std::fs::create_dir(&destination).map_err(|error| error.to_string())?;
-        let output = Command::new("git")
-            .args(["init", "--quiet", "--initial-branch", "main"])
-            .current_dir(&destination)
-            .output()
-            .map_err(|error| error.to_string())?;
-        if output.status.success() {
-            return Ok(());
-        }
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        Ok(RepositoryProvisionOperation::Initialize {
+            destination,
+            initial_branch: "main".to_string(),
+        })
     }
 }
 
@@ -212,119 +266,163 @@ impl GitHubRepository {
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
     }
 
-    fn clone_into(self, root: &Path) -> Result<(), String> {
+    fn provision(self, root: &Path) -> Result<RepositoryProvisionOperation, String> {
         let destination = root.join("github.com").join(&self.owner).join(&self.name);
         if destination.exists() {
             return Err(vmux_ui::i18n::translate("project-already-exists"));
         }
-        let Some(parent) = destination.parent() else {
-            return Err(vmux_ui::i18n::translate("project-clone-invalid"));
-        };
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let output = Command::new("git")
-            .arg("clone")
-            .arg("--")
-            .arg(&self.remote)
-            .arg(&destination)
-            .output()
-            .map_err(|error| error.to_string())?;
-        if output.status.success() {
-            return Ok(());
-        }
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        Ok(RepositoryProvisionOperation::Clone {
+            remote: self.remote,
+            destination,
+        })
     }
 }
 
 fn create(
     trigger: On<UiInput<ProjectCreateRequest>>,
     projects: vmux_ecs::profile::Projects,
-    pending: Query<&PendingProjectOperation>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    pages: ProjectOperationPages,
+    mut requests: MessageWriter<RepositoryProvisionRequest>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if pending.iter().any(|pending| pending.webview == webview) {
-        return;
-    }
     let Ok(root) = projects.path() else {
         return;
     };
-    let state = ProjectCatalog::read(root).pending();
+    let Some(pending) = pages.for_page(webview, root) else {
+        return;
+    };
+    let operation = match ProjectName::parse(&trigger.event().payload.name)
+        .and_then(|name| name.provision(root))
+    {
+        Ok(operation) => operation,
+        Err(error) => {
+            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                webview,
+                &ProjectUiState {
+                    view: ProjectView::Error(error),
+                },
+            ));
+            return;
+        }
+    };
+    let state = pages.pending_state(webview);
     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
         webview, &state,
     ));
-    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    commands.spawn(PendingProjectOperation::spawn(
-        webview,
-        root.to_path_buf(),
-        ProjectOperation::Create(trigger.event().payload.name.clone()),
-        wake,
-    ));
+    let requester = commands.spawn(pending).id();
+    requests.write(RepositoryProvisionRequest {
+        requester,
+        operation,
+    });
 }
 
 fn import(
     trigger: On<UiInput<ProjectImportRequest>>,
     projects: vmux_ecs::profile::Projects,
-    pending: Query<&PendingProjectOperation>,
+    pages: ProjectOperationPages,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if pending.iter().any(|pending| pending.webview == webview) {
-        return;
-    }
     let Ok(root) = projects.path() else {
         return;
     };
-    let state = ProjectCatalog::read(root).pending();
+    let Some(pending) = pages.for_page(webview, root) else {
+        return;
+    };
+    let state = pages.pending_state(webview);
     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
         webview, &state,
     ));
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    commands.spawn(PendingProjectOperation::spawn(
-        webview,
-        root.to_path_buf(),
-        ProjectOperation::Import,
-        wake,
-    ));
+    let root = root.to_path_buf();
+    let task = IoTaskPool::get().spawn(async move {
+        let result = ProjectImport::select(&root).await;
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        result
+    });
+    commands.spawn((pending, ProjectImportTask(task)));
 }
 
 fn clone(
     trigger: On<UiInput<ProjectCloneRequest>>,
     projects: vmux_ecs::profile::Projects,
-    pending: Query<&PendingProjectOperation>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
+    pages: ProjectOperationPages,
+    mut requests: MessageWriter<RepositoryProvisionRequest>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if pending.iter().any(|pending| pending.webview == webview) {
-        return;
-    }
     let Ok(root) = projects.path() else {
         return;
     };
-    let state = ProjectCatalog::read(root).pending();
+    let Some(pending) = pages.for_page(webview, root) else {
+        return;
+    };
+    let operation = match GitHubRepository::parse(&trigger.event().payload.repository)
+        .and_then(|repository| repository.provision(root))
+    {
+        Ok(operation) => operation,
+        Err(error) => {
+            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                webview,
+                &ProjectUiState {
+                    view: ProjectView::Error(error),
+                },
+            ));
+            return;
+        }
+    };
+    let state = pages.pending_state(webview);
     commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
         webview, &state,
     ));
-    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    commands.spawn(PendingProjectOperation::spawn(
-        webview,
-        root.to_path_buf(),
-        ProjectOperation::Clone(trigger.event().payload.repository.clone()),
-        wake,
-    ));
+    let requester = commands.spawn(pending).id();
+    requests.write(RepositoryProvisionRequest {
+        requester,
+        operation,
+    });
 }
 
 fn queue(
     pages: Query<(Entity, &vmux_ecs::PageMetadata), Changed<vmux_ecs::PageMetadata>>,
+    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
+    mut revisions: Query<&mut ProjectPageRevision>,
     projects: vmux_ecs::profile::Projects,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for (entity, page) in &pages {
         if !ProjectRoute::is_page(&page.url) {
+            let Ok(mut revision) = revisions.get_mut(entity) else {
+                continue;
+            };
+            if revision.advance_to(&page.url).is_none() {
+                continue;
+            }
+            commands.entity(entity).remove::<ProjectCatalogTask>();
+            commands.trigger(ScopeProjectionRequest {
+                webview: entity,
+                cwd: None,
+            });
             continue;
         }
+        let revision = match revisions.get_mut(entity) {
+            Ok(mut revision) => {
+                let Some(revision) = revision.advance_to(&page.url) else {
+                    continue;
+                };
+                revision
+            }
+            Err(_) => {
+                commands
+                    .entity(entity)
+                    .insert(ProjectPageRevision::new(&page.url));
+                1
+            }
+        };
         let root = match projects.path() {
             Ok(root) => root.to_path_buf(),
             Err(error) => {
@@ -338,42 +436,70 @@ fn queue(
             }
         };
         if !ProjectRoute::is_root(&page.url) {
-            let state = match ProjectRoute::resolve(&page.url, &root) {
-                Some(Ok(_)) => ProjectUiState {
-                    view: ProjectView::Detail,
-                },
-                Some(Err(error)) => ProjectUiState {
-                    view: ProjectView::Error(error),
-                },
+            let (state, cwd) = match ProjectRoute::resolve(&page.url, &root) {
+                Some(Ok(path)) => (
+                    ProjectUiState {
+                        view: ProjectView::Detail,
+                    },
+                    Some(path),
+                ),
+                Some(Err(error)) => (
+                    ProjectUiState {
+                        view: ProjectView::Error(error),
+                    },
+                    None,
+                ),
                 None => continue,
             };
             commands.entity(entity).remove::<ProjectCatalogTask>();
+            commands.trigger(ScopeProjectionRequest {
+                webview: entity,
+                cwd,
+            });
             commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
                 entity, &state,
             ));
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-            entity,
-            &ProjectUiState {
-                view: ProjectView::Loading,
-            },
-        ));
-        let task = IoTaskPool::get().spawn(async move { ProjectCatalog::read(&root) });
-        commands.entity(entity).insert(ProjectCatalogTask(task));
+        commands.trigger(ScopeProjectionRequest {
+            webview: entity,
+            cwd: None,
+        });
+        let has_catalog = states.get(entity).is_ok_and(|state| {
+            state
+                .current()
+                .is_some_and(|state| matches!(state.view, ProjectView::Catalog(_)))
+        });
+        if !has_catalog {
+            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                entity,
+                &ProjectUiState {
+                    view: ProjectView::Loading,
+                },
+            ));
+        }
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        commands
+            .entity(entity)
+            .insert(ProjectCatalogTask::spawn(root, revision, wake));
     }
 }
 
-fn finish(
-    mut tasks: Query<(Entity, &mut ProjectCatalogTask, &vmux_ecs::PageMetadata)>,
+fn finish_catalogs(
+    mut tasks: Query<(
+        Entity,
+        &mut ProjectCatalogTask,
+        &vmux_ecs::PageMetadata,
+        &ProjectPageRevision,
+    )>,
     mut commands: Commands,
 ) {
-    for (entity, mut task, page) in &mut tasks {
-        let Some(state) = future::block_on(future::poll_once(&mut task.0)) else {
+    for (entity, mut task, page, revision) in &mut tasks {
+        let Some(state) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
         commands.entity(entity).remove::<ProjectCatalogTask>();
-        if !ProjectRoute::is_root(&page.url) {
+        if !ProjectRoute::is_root(&page.url) || revision.value != task.revision {
             continue;
         }
         commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
@@ -382,25 +508,82 @@ fn finish(
     }
 }
 
-fn finish_operations(
-    mut pending: Query<(Entity, &mut PendingProjectOperation)>,
+fn finish_imports(
+    mut pending: Query<(Entity, &PendingProjectOperation, &mut ProjectImportTask)>,
+    pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, mut operation) in &mut pending {
-        let Some(result) = future::block_on(future::poll_once(&mut operation.task)) else {
+    for (entity, operation, mut task) in &mut pending {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
-        let state = match result {
-            Ok(()) => ProjectCatalog::read(&operation.root),
-            Err(error) => ProjectUiState {
-                view: ProjectView::Error(error),
-            },
-        };
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
-            operation.webview,
-            &state,
-        ));
+        let current = pages.get(operation.webview).is_ok_and(|(page, revision)| {
+            ProjectRoute::is_root(&page.url) && revision.value == operation.revision
+        });
+        if current {
+            match result {
+                Ok(()) => {
+                    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+                    commands
+                        .entity(operation.webview)
+                        .insert(ProjectCatalogTask::spawn(
+                            operation.root.clone(),
+                            operation.revision,
+                            wake,
+                        ));
+                }
+                Err(error) => {
+                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                        operation.webview,
+                        &ProjectUiState {
+                            view: ProjectView::Error(error),
+                        },
+                    ));
+                }
+            }
+        }
         commands.entity(entity).despawn();
+    }
+}
+
+fn finish_repository_operations(
+    mut completed: MessageReader<RepositoryProvisionCompleted>,
+    pending: Query<&PendingProjectOperation>,
+    pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for completed in completed.read() {
+        let Ok(operation) = pending.get(completed.requester) else {
+            continue;
+        };
+        let current = pages.get(operation.webview).is_ok_and(|(page, revision)| {
+            ProjectRoute::is_root(&page.url) && revision.value == operation.revision
+        });
+        if current {
+            match &completed.result {
+                Ok(()) => {
+                    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+                    commands
+                        .entity(operation.webview)
+                        .insert(ProjectCatalogTask::spawn(
+                            operation.root.clone(),
+                            operation.revision,
+                            wake,
+                        ));
+                }
+                Err(error) => {
+                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                        operation.webview,
+                        &ProjectUiState {
+                            view: ProjectView::Error(error.clone()),
+                        },
+                    ));
+                }
+            }
+        }
+        commands.entity(completed.requester).despawn();
     }
 }
 
@@ -431,16 +614,15 @@ impl ProjectCatalog {
             let Some(url) = ProjectRoute::from_path(root, directory) else {
                 return;
             };
+            let Some(Ok(path)) = ProjectRoute::resolve(&url, root) else {
+                return;
+            };
             let Some(name) = directory.file_name().and_then(|name| name.to_str()) else {
                 return;
             };
             entries.push(ProjectEntry {
                 name: name.to_string(),
-                path: directory
-                    .canonicalize()
-                    .unwrap_or_else(|_| directory.to_path_buf())
-                    .to_string_lossy()
-                    .into_owned(),
+                path: path.to_string_lossy().into_owned(),
                 url,
             });
             return;
@@ -525,6 +707,21 @@ mod tests {
                 .display()
                 .to_string()
         );
+    }
+
+    #[test]
+    fn catalog_excludes_unmanaged_external_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        std::fs::create_dir(external.path().join(".git")).unwrap();
+        std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
+
+        let state = ProjectCatalog::read(root.path());
+        let ProjectView::Catalog(catalog) = state.view else {
+            panic!("expected project catalog");
+        };
+
+        assert!(catalog.entries.is_empty());
     }
 
     #[test]

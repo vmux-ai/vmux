@@ -1,4 +1,8 @@
+use std::rc::Rc;
+
 use dioxus::prelude::*;
+#[cfg(test)]
+use vmux_session::SessionSummaryProjection;
 use vmux_session::{SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::dropdown::Dropdown;
@@ -33,26 +37,38 @@ pub fn SessionsManager() -> Element {
     let snapshot = catalog();
     let repositories = repositories();
     let optimistic_stages = use_optimistic_map(ManagerPresentation::stage_observations(&snapshot));
-    let mutations = SessionStageMutations::new(optimistic_stages);
+    let archive_stage = use_memo(move || {
+        catalog
+            .read()
+            .archive_stage()
+            .map(|stage| stage.id.clone())
+            .unwrap_or_default()
+    });
+    let stages = use_memo(move || catalog.read().stages.clone());
+    let mutations = SessionStageMutations::new(optimistic_stages, archive_stage);
     use_context_provider(|| mutations);
+    use_context_provider(|| stages);
     let filters = controls.filters();
-    let presentation = ManagerPresentation::new(
+    let presentation = Rc::new(ManagerPresentation::new(
         snapshot,
         repositories,
         &controls.query(),
         &filters,
         |id, stage| optimistic_stages.value(id, stage),
-    );
+    ));
     rsx! {
         ManagerPage {
-            SessionsManagerToolbar { controls, presentation: presentation.clone() }
+            SessionsManagerToolbar { controls, presentation: Rc::clone(&presentation) }
             SessionsManagerContent { controls, presentation }
         }
     }
 }
 
 #[component]
-fn SessionsManagerToolbar(controls: ManagerControls, presentation: ManagerPresentation) -> Element {
+fn SessionsManagerToolbar(
+    controls: ManagerControls,
+    presentation: Rc<ManagerPresentation>,
+) -> Element {
     rsx! {
         ManagerToolbar {
             Dropdown {
@@ -90,10 +106,10 @@ fn SessionsManagerToolbar(controls: ManagerControls, presentation: ManagerPresen
                 }
                 if presentation.filter_requested {
                     SessionFilterMenu {
-                        groups: presentation.category_groups,
-                        sessions: presentation.snapshot.sessions,
-                        repositories: presentation.repositories,
-                        needle: presentation.filter_needle,
+                        groups: presentation.category_groups.clone(),
+                        sessions: presentation.snapshot.sessions.clone(),
+                        repositories: presentation.repositories.clone(),
+                        needle: presentation.filter_needle.clone(),
                         step: controls.filter_step(),
                         value: controls.filter_value(),
                         onstep: move |step| controls.select_filter_step(step),
@@ -122,12 +138,15 @@ fn SessionsManagerToolbar(controls: ManagerControls, presentation: ManagerPresen
 }
 
 #[component]
-fn SessionsManagerContent(controls: ManagerControls, presentation: ManagerPresentation) -> Element {
+fn SessionsManagerContent(
+    controls: ManagerControls,
+    presentation: Rc<ManagerPresentation>,
+) -> Element {
     rsx! {
         div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
             SessionCategories {
-                groups: presentation.category_groups,
-                selected: presentation.selected_stage,
+                groups: presentation.category_groups.clone(),
+                selected: presentation.selected_stage.clone(),
                 onselect: move |stage| controls.select_stage(stage),
             }
             div { class: "flex min-w-0 flex-1 overflow-hidden",
@@ -145,13 +164,13 @@ fn SessionsManagerContent(controls: ManagerControls, presentation: ManagerPresen
                     }
                 } else if controls.view() == ManagerView::List {
                     SessionsList {
-                        groups: presentation.groups,
-                        repositories: presentation.repositories,
+                        groups: presentation.groups.clone(),
+                        repositories: presentation.repositories.clone(),
                     }
                 } else {
                     SessionsBoard {
-                        groups: presentation.groups,
-                        repositories: presentation.repositories,
+                        groups: presentation.groups.clone(),
+                        repositories: presentation.repositories.clone(),
                     }
                 }
             }
@@ -262,12 +281,6 @@ fn SessionFilterMenu(
     onvalue: EventHandler<String>,
     onselect: EventHandler<SessionFilter>,
 ) -> Element {
-    let SessionFilterMenuPresentation {
-        agents,
-        projects,
-        date_filter,
-        within_filter,
-    } = SessionFilterMenuPresentation::new(&sessions, &repositories, step, &value);
     match step {
         SessionFilterStep::Field => rsx! { SessionFilterFields { needle, onstep } },
         SessionFilterStep::Status => {
@@ -277,7 +290,7 @@ fn SessionFilterMenu(
             SessionValueFilters {
                 title: translate("resume-column-agent"),
                 kind: SessionFilterValueKind::Agent,
-                values: agents,
+                values: SessionFilterMenuPresentation::agents(&sessions),
                 needle,
                 onstep,
                 onselect,
@@ -287,36 +300,42 @@ fn SessionFilterMenu(
             SessionValueFilters {
                 title: translate("resume-column-project"),
                 kind: SessionFilterValueKind::Project,
-                values: projects,
+                values: SessionFilterMenuPresentation::projects(&sessions, &repositories),
                 needle,
                 onstep,
                 onselect,
             }
         },
         SessionFilterStep::Updated => rsx! { SessionUpdatedFilters { onstep } },
-        SessionFilterStep::Date(comparison) => rsx! {
-            SessionUpdatedFilterInput {
-                title: format!("{} · {}", translate("common-updated"), comparison.label()),
-                input_type: "date".to_string(),
-                value,
-                candidate: date_filter,
-                onstep,
-                onvalue,
-                onselect,
+        SessionFilterStep::Date(comparison) => {
+            let candidate = UpdatedFilter::from_date(comparison, &value);
+            rsx! {
+                SessionUpdatedFilterInput {
+                    title: format!("{} · {}", translate("common-updated"), comparison.label()),
+                    input_type: "date".to_string(),
+                    value,
+                    candidate,
+                    onstep,
+                    onvalue,
+                    onselect,
+                }
             }
-        },
-        SessionFilterStep::Within => rsx! {
-            SessionUpdatedFilterInput {
-                title: format!("{} · {}", translate("common-updated"), UpdatedComparison::Within.label()),
-                input_type: "number".to_string(),
-                suffix: translate("common-days"),
-                value,
-                candidate: within_filter,
-                onstep,
-                onvalue,
-                onselect,
+        }
+        SessionFilterStep::Within => {
+            let candidate = value.parse().ok().and_then(UpdatedFilter::within);
+            rsx! {
+                SessionUpdatedFilterInput {
+                    title: format!("{} · {}", translate("common-updated"), UpdatedComparison::Within.label()),
+                    input_type: "number".to_string(),
+                    suffix: translate("common-days"),
+                    value,
+                    candidate,
+                    onstep,
+                    onvalue,
+                    onselect,
+                }
             }
-        },
+        }
     }
 }
 
@@ -526,7 +545,9 @@ fn SessionGroup(
     let pager = SessionPager::use_state();
     let total = sessions.len();
     let visible = pager.visible(total);
-    let group = StageGroupPresentation::new(&stage, &sessions);
+    let mutations = use_context::<SessionStageMutations>();
+    let archive_stage = mutations.archive_stage();
+    let group = StageGroupPresentation::new(&stage, &sessions, &archive_stage);
     let section_class = if view == ManagerView::List {
         "rounded-lg bg-foreground/[0.014] p-1"
     } else {
@@ -624,8 +645,9 @@ fn SessionItem(
     repository: Option<SessionRepository>,
     stage: String,
 ) -> Element {
+    let stages = use_context::<Memo<Vec<StageSummary>>>()();
     let leaving = use_context::<SessionStageMutations>().is_leaving(&session.id);
-    let presentation = SessionPresentation::new(&session, repository, &stage);
+    let presentation = SessionPresentation::new(&session, repository, &stages, &stage);
     let resume = ResumeTarget::from(&session);
     rsx! {
         Collapse { leaving,
@@ -746,7 +768,7 @@ pub(super) fn SessionMetaPanel(
     repository: Option<SessionRepository>,
     stages: Vec<StageSummary>,
 ) -> Element {
-    let presentation = SessionPresentation::new(&session, repository, &session.stage);
+    let presentation = SessionPresentation::new(&session, repository, &stages, &session.stage);
     rsx! {
         aside { class: "hidden min-h-0 w-[19rem] shrink-0 flex-col bg-foreground/[0.018] lg:flex",
             header { class: "flex h-11 shrink-0 items-center px-4",
@@ -1211,28 +1233,32 @@ mod tests {
 
     #[test]
     fn stale_requires_three_days_without_active_work() {
-        let threshold = SessionFreshness::STALE_AFTER;
+        let now = 10 * SessionSummaryProjection::STALE_AFTER as i64 * 1_000;
+        let stages = vec![StageSummary {
+            id: "active".into(),
+            terminal: false,
+            ..Default::default()
+        }];
+        let mut session = SessionSummary {
+            stage: "active".into(),
+            runtime: "idle".into(),
+            last_activated_at: now - (SessionSummaryProjection::STALE_AFTER as i64 * 1_000),
+            ..Default::default()
+        };
 
-        assert!(!SessionFreshness::from_age(
-            RelativeTime(threshold - 1),
-            "idle",
-            false,
-        ));
-        assert!(SessionFreshness::from_age(
-            RelativeTime(threshold),
-            "idle",
-            false,
-        ));
-        assert!(!SessionFreshness::from_age(
-            RelativeTime(threshold),
-            "streaming",
-            false,
-        ));
-        assert!(!SessionFreshness::from_age(
-            RelativeTime(threshold),
-            "idle",
-            true,
-        ));
+        assert!(SessionSummaryProjection::new(&session, &stages, now).stale);
+        session.last_activated_at += 1_000;
+        assert!(!SessionSummaryProjection::new(&session, &stages, now).stale);
+        session.last_activated_at -= 1_000;
+        session.runtime = "streaming".into();
+        assert!(!SessionSummaryProjection::new(&session, &stages, now).stale);
+        session.runtime = "idle".into();
+        let terminal = vec![StageSummary {
+            id: "active".into(),
+            terminal: true,
+            ..Default::default()
+        }];
+        assert!(!SessionSummaryProjection::new(&session, &terminal, now).stale);
     }
 
     #[test]
@@ -1242,13 +1268,14 @@ mod tests {
             name: "session-stage-active".into(),
             order: 10,
             terminal: false,
+            archive: false,
         }];
         let session = SessionSummary {
             id: "session-1".into(),
             stage: "in_progress".into(),
             runtime: "idle".into(),
             last_activated_at: vmux_ecs::UnixMillis::now().0
-                - (SessionFreshness::STALE_AFTER as i64 * 1_000),
+                - (SessionSummaryProjection::STALE_AFTER as i64 * 1_000),
             ..Default::default()
         };
 

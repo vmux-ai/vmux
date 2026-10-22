@@ -14,7 +14,7 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ChatUiState", "SessionCatalogUiState", "KeyClaimsUiState"],
+    states = ["ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
     subtree,
     preserve_title,
     no_favicon,
@@ -36,11 +36,24 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
-    let catalog = vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
+    let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();
-    let details = catalog.state.read().session_details(&session_id);
+    let details = {
+        let state = detail.state.read();
+        state
+            .session
+            .as_ref()
+            .filter(|session| session.id == session_id)
+            .map(|session| {
+                (
+                    session.clone(),
+                    state.repository.clone(),
+                    state.stages.clone(),
+                )
+            })
+    };
     let details_available = details.is_some();
     let mut details_open = use_signal(|| false);
 

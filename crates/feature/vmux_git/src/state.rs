@@ -58,6 +58,14 @@ impl From<GitBranchCollection> for GitCatalog {
 }
 
 impl GitBranchCollection {
+    pub fn len(self, repository: &GitRepositorySnapshot) -> usize {
+        match self {
+            Self::Local => repository.branches.len(),
+            Self::Remote => repository.remote_branches.len(),
+            Self::Tags => repository.tags.len(),
+        }
+    }
+
     pub fn references(self, repository: &GitRepositorySnapshot) -> Vec<String> {
         match self {
             Self::Local => repository

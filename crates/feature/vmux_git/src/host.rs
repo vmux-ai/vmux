@@ -10,6 +10,7 @@ use crate::host::diff::DiffPlugin;
 use crate::host::directory::DirectoryPlugin;
 use crate::host::job_runner::JobPlugin;
 use crate::host::repository_picker::RepositoryPickerPlugin;
+use crate::host::repository_provision::RepositoryProvisionPlugin;
 use crate::host::status::StatusPlugin;
 use crate::host::watch::WatchPlugin;
 #[cfg(ui)]
@@ -18,6 +19,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 pub use diff::GitDiffSource;
 pub use repository::{GitError, GitRepository};
+pub use repository_provision::{
+    RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
+};
 pub use status::FileGit;
 use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostedPage, PrewarmPage};
@@ -32,6 +36,7 @@ mod directory;
 mod job;
 mod job_runner;
 mod repository_picker;
+mod repository_provision;
 mod state;
 mod status;
 mod watch;
@@ -85,6 +90,7 @@ impl Plugin for GitPlugin {
                 DiffPlugin,
                 DirectoryPlugin,
                 RepositoryPickerPlugin,
+                RepositoryProvisionPlugin,
             ))
             .add_plugins(
                 Self::MANIFEST

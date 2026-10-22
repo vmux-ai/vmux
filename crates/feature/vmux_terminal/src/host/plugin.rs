@@ -99,6 +99,7 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::TerminalPrevRequest>()
         .add_message::<super::command::TerminalClearRequest>()
         .add_message::<super::command::CopyModeRequest>()
+        .add_message::<PendingProcessPresentation>()
         .add_plugins((
             vmux_ecs::UiStatePlugin::<TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
@@ -108,9 +109,10 @@ impl Plugin for TerminalPlugin {
         .add_observer(open)
         .add_observer(contribute)
         .add_observer(activate)
-        .add_observer(present)
+        .add_observer(queue_presentation)
         .register_persisted::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
+        .add_systems(PostUpdate, present)
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
         .add_plugins((
@@ -126,41 +128,50 @@ impl Plugin for TerminalPlugin {
     }
 }
 
-fn present(
+#[derive(Message, Clone, Copy)]
+struct PendingProcessPresentation(ProcessPresentationRequest);
+
+fn queue_presentation(
     trigger: On<ProcessPresentationRequest>,
+    mut pending: MessageWriter<PendingProcessPresentation>,
+) {
+    pending.write(PendingProcessPresentation(*trigger.event()));
+}
+
+fn present(
+    mut requests: MessageReader<PendingProcessPresentation>,
     stacks: Query<(Entity, &EntityTarget<Session>)>,
     mut placement: PanePlacement,
     mut commands: Commands,
 ) {
-    let request = trigger.event();
-    let Some(stack) = stacks
-        .iter()
-        .find(|(_, target)| target.entity() == request.owner)
-        .map(|(stack, _)| stack)
-    else {
-        return;
-    };
-    let Ok(agent_pane) = placement
-        .child_of_q
-        .get(stack)
-        .map(|child_of| child_of.parent())
-    else {
-        return;
-    };
-    let target_pane = placement.resolve_spiral(
-        agent_pane,
-        TerminalPlugin::URL,
-        false,
-        &mut std::collections::HashSet::new(),
-    );
-    let tab = commands
-        .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
-        .id();
-    commands.spawn((
-        ReattachedTerminalBundle::new(request.process_id),
-        RetainOnProcessExit,
-        ChildOf(tab),
-    ));
+    let mut split_batch = std::collections::HashSet::new();
+    for pending in requests.read() {
+        let request = &pending.0;
+        let Some(stack) = stacks
+            .iter()
+            .find(|(_, target)| target.entity() == request.owner)
+            .map(|(stack, _)| stack)
+        else {
+            continue;
+        };
+        let Ok(agent_pane) = placement
+            .child_of_q
+            .get(stack)
+            .map(|child_of| child_of.parent())
+        else {
+            continue;
+        };
+        let target_pane =
+            placement.resolve_spiral(agent_pane, TerminalPlugin::URL, false, &mut split_batch);
+        let tab = commands
+            .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
+            .id();
+        commands.spawn((
+            ReattachedTerminalBundle::new(request.process_id),
+            RetainOnProcessExit,
+            ChildOf(tab),
+        ));
+    }
 }
 
 #[derive(Component)]
@@ -2054,7 +2065,9 @@ mod tests {
     #[test]
     fn process_presentation_does_not_take_focus_from_owner() {
         let mut app = App::new();
-        app.add_observer(present);
+        app.add_message::<PendingProcessPresentation>()
+            .add_observer(queue_presentation)
+            .add_systems(Update, present);
         let tab = app.world_mut().spawn(Tab::bundle()).id();
         let pane = app
             .world_mut()
@@ -2075,7 +2088,7 @@ mod tests {
             owner: session,
             process_id: ProcessId::new(),
         });
-        app.world_mut().flush();
+        app.update();
 
         let stack_times = {
             let world = app.world_mut();
@@ -2098,6 +2111,57 @@ mod tests {
                 .find(|(entity, _)| *entity != owner)
                 .map(|(_, activated)| *activated),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn process_presentation_batches_splits_for_one_session() {
+        let mut app = App::new();
+        app.add_message::<PendingProcessPresentation>()
+            .add_observer(queue_presentation)
+            .add_systems(Update, present);
+        app.world_mut().spawn(TerminalPlugin::MANIFEST);
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
+        let pane = app
+            .world_mut()
+            .spawn((vmux_layout::pane::Pane::bundle(), ChildOf(tab)))
+            .id();
+        let session = app.world_mut().spawn(Session).id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt(10),
+                ChildOf(pane),
+                EntityTarget::<Session>::new(session),
+            ))
+            .id();
+        app.world_mut().entity_mut(owner).insert(PageMetadata {
+            url: "https://github.com/vmux-ai/vmux".into(),
+            ..default()
+        });
+
+        app.world_mut().trigger(ProcessPresentationRequest {
+            owner: session,
+            process_id: process_id(1),
+        });
+        app.world_mut().trigger(ProcessPresentationRequest {
+            owner: session,
+            process_id: process_id(2),
+        });
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<vmux_layout::pane::PaneSplit>(pane)
+                .is_some()
+        );
+        let children = app.world().get::<Children>(pane).unwrap();
+        assert_eq!(children.len(), 3);
+        assert!(
+            children
+                .iter()
+                .all(|child| app.world().get::<vmux_layout::pane::Pane>(child).is_some())
         );
     }
 

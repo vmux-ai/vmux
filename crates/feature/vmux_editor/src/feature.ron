@@ -219,7 +219,7 @@
                 "ThemeUiState",
                 "FileUiState",
                 "ProjectUiState",
-                "SessionCatalogUiState",
+                "SessionScopeUiState",
                 "GitUiState",
                 "GitRepositoryRequest",
                 "ProjectCloneRequest",

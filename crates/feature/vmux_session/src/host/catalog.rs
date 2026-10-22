@@ -11,6 +11,8 @@ use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::{KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
+#[cfg(test)]
+use vmux_session::SessionSummary;
 use vmux_session::{
     AgentId, CatalogSnapshot, CleanupRequest, CreateRequest, Created, DescriptionUpdateRequest,
     ProviderKind, ProviderSessionId, ProviderStageChangeRequest, RenameRequest, Route, SessionId,
@@ -23,7 +25,7 @@ use crate::event::{
     SessionsCleanup, SessionsCreate, SessionsDescriptionUpdate, SessionsRename,
     SessionsStageChange,
 };
-use crate::state::{ChatUiState, SessionCatalogUiState};
+use crate::state::{ChatUiState, SessionCatalogUiState, SessionDetailUiState, SessionScopeUiState};
 
 pub(super) struct CatalogPlugin;
 
@@ -34,6 +36,8 @@ impl Plugin for CatalogPlugin {
             .init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
             .add_plugins(UiStatePlugin::<SessionCatalogUiState>::default())
+            .add_plugins(UiStatePlugin::<SessionDetailUiState>::default())
+            .add_plugins(UiStatePlugin::<SessionScopeUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 SessionsCreate,
                 SessionsChooseDirectory,
@@ -49,13 +53,16 @@ impl Plugin for CatalogPlugin {
             .add_observer(update_description)
             .add_observer(change_stage)
             .add_observer(cleanup)
+            .add_observer(scope_projection)
             .add_observer(ready)
             .add_systems(Update, (finish_directory_pickers, cleanup_inactive_views))
             .add_systems(
                 PostUpdate,
                 (
                     sync_repositories.run_if(Activity::<SessionCatalogView>::active),
-                    publish,
+                    publish_manager,
+                    publish_scope,
+                    publish_detail,
                 )
                     .chain(),
             );
@@ -63,14 +70,30 @@ impl Plugin for CatalogPlugin {
 }
 
 #[derive(Component)]
-#[require(SessionCatalogView)]
+#[require(SessionCatalogView, SessionCatalogUiStateComponent)]
 pub struct SessionManagerView;
 
 type SessionCatalogUiStateComponent = UiState<SessionCatalogUiState>;
+type SessionDetailUiStateComponent = UiState<SessionDetailUiState>;
+type SessionScopeUiStateComponent = UiState<SessionScopeUiState>;
 
 #[derive(Component, Default)]
-#[require(SessionCatalogUiStateComponent)]
 pub struct SessionCatalogView;
+
+#[derive(Component, Default)]
+#[require(SessionCatalogView, SessionDetailUiStateComponent)]
+struct SessionDetailView;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[require(SessionCatalogView, SessionScopeUiStateComponent)]
+struct SessionScopeView(PathBuf);
+
+#[derive(EntityEvent, Clone, Debug)]
+pub struct ScopeProjectionRequest {
+    #[event_target]
+    pub webview: Entity,
+    pub cwd: Option<PathBuf>,
+}
 
 #[derive(Resource, Default)]
 struct PendingOpens(HashMap<SessionId, Entity>);
@@ -121,11 +144,14 @@ impl DirectoryPicker {
 struct CatalogViews<'w, 's> {
     managers: Query<'w, 's, Option<&'static PageMetadata>, With<SessionManagerView>>,
     chats: Query<'w, 's, (), With<ChatView>>,
+    scopes: Query<'w, 's, (), With<SessionScopeView>>,
 }
 
 impl CatalogViews<'_, '_> {
     fn contains(&self, entity: Entity) -> bool {
-        self.managers.contains(entity) || self.chats.contains(entity)
+        self.managers.contains(entity)
+            || self.chats.contains(entity)
+            || self.scopes.contains(entity)
     }
 
     fn manager_contains(&self, entity: Entity) -> bool {
@@ -317,13 +343,54 @@ fn cleanup(
     });
 }
 
-fn publish(
+impl SessionScopeUiState {
+    fn project(root: &Path, catalog: &CatalogSnapshot) -> Self {
+        let sessions = catalog
+            .sessions
+            .iter()
+            .filter(|session| Path::new(&session.cwd).starts_with(root))
+            .cloned()
+            .collect();
+        Self {
+            sessions,
+            stages: catalog.stages.clone(),
+        }
+    }
+}
+
+impl SessionDetailUiState {
+    fn project(
+        page: &PageMetadata,
+        catalog: &CatalogSnapshot,
+        repositories: &SessionRepositories,
+    ) -> Self {
+        let id = match Route::parse(&page.url) {
+            Some(Route::Session(id)) => id.0,
+            Some(Route::Manager) | None => return Self::default(),
+        };
+        let session = catalog
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .cloned();
+        let repository = session
+            .as_ref()
+            .and_then(|session| repositories.get(&session.id));
+        Self {
+            session,
+            repository,
+            stages: catalog.stages.clone(),
+        }
+    }
+}
+
+fn publish_manager(
     catalog: Res<CatalogSnapshot>,
     repositories: Res<SessionRepositories>,
     targets: Query<
         Entity,
         (
-            With<SessionCatalogView>,
+            With<SessionManagerView>,
             With<PageReady>,
             With<KeyboardOwner>,
         ),
@@ -331,7 +398,7 @@ fn publish(
     claimed: Query<
         (),
         (
-            With<SessionCatalogView>,
+            With<SessionManagerView>,
             With<PageReady>,
             Added<KeyboardOwner>,
         ),
@@ -348,6 +415,68 @@ fn publish(
         commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
             target,
             &*repositories,
+        ));
+    }
+}
+
+fn publish_scope(
+    catalog: Res<CatalogSnapshot>,
+    targets: Query<(Entity, &SessionScopeView), (With<PageReady>, With<KeyboardOwner>)>,
+    claimed: Query<
+        (),
+        (
+            With<SessionScopeView>,
+            With<PageReady>,
+            Added<KeyboardOwner>,
+        ),
+    >,
+    changed: Query<(), Changed<SessionScopeView>>,
+    mut commands: Commands,
+) {
+    if !catalog.is_changed() && claimed.is_empty() && changed.is_empty() {
+        return;
+    }
+    for (target, scope) in &targets {
+        let state = SessionScopeUiState::project(&scope.0, &catalog);
+        commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
+            target, &state,
+        ));
+    }
+}
+
+fn publish_detail(
+    catalog: Res<CatalogSnapshot>,
+    repositories: Res<SessionRepositories>,
+    targets: Query<
+        (Entity, &PageMetadata),
+        (
+            With<SessionDetailView>,
+            With<PageReady>,
+            With<KeyboardOwner>,
+        ),
+    >,
+    claimed: Query<
+        (),
+        (
+            With<SessionDetailView>,
+            With<PageReady>,
+            Added<KeyboardOwner>,
+        ),
+    >,
+    changed: Query<(), (With<SessionDetailView>, Changed<PageMetadata>)>,
+    mut commands: Commands,
+) {
+    if !catalog.is_changed()
+        && !repositories.is_changed()
+        && claimed.is_empty()
+        && changed.is_empty()
+    {
+        return;
+    }
+    for (target, page) in &targets {
+        let state = SessionDetailUiState::project(page, &catalog, &repositories);
+        commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
+            target, &state,
         ));
     }
 }
@@ -415,24 +544,64 @@ fn ready(
     trigger: On<UiInput<PageReady>>,
     views: CatalogViews,
     pages: Query<&PageMetadata>,
+    scopes: Query<&SessionScopeView>,
     catalog: Res<CatalogSnapshot>,
     repositories: Res<SessionRepositories>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    let project_detail = pages
-        .get(target)
-        .is_ok_and(|page| ProjectCatalogRoute::is_detail(&page.url));
-    if !views.contains(target) && !project_detail {
-        return;
+    if views.manager_contains(target) {
+        commands.entity(target).insert(SessionCatalogView);
+        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+            target, &*catalog,
+        ));
+        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+            target,
+            &*repositories,
+        ));
     }
-    commands.entity(target).insert(SessionCatalogView);
-    commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
-        target, &*catalog,
-    ));
-    commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
-        target,
-        &*repositories,
+    if views.chats.contains(target)
+        && let Ok(page) = pages.get(target)
+    {
+        commands.entity(target).insert(SessionDetailView);
+        let state = SessionDetailUiState::project(page, &catalog, &repositories);
+        commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
+            target, &state,
+        ));
+    }
+    if let Ok(scope) = scopes.get(target) {
+        let state = SessionScopeUiState::project(&scope.0, &catalog);
+        commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
+            target, &state,
+        ));
+    }
+}
+
+fn scope_projection(
+    trigger: On<ScopeProjectionRequest>,
+    owners: Query<(Has<SessionManagerView>, Has<ChatView>)>,
+    catalog: Res<CatalogSnapshot>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Some(cwd) = &trigger.event().cwd else {
+        commands
+            .entity(target)
+            .remove::<(SessionScopeView, SessionScopeUiStateComponent)>();
+        if owners
+            .get(target)
+            .is_ok_and(|(manager, chat)| !manager && !chat)
+        {
+            commands.entity(target).remove::<SessionCatalogView>();
+        }
+        return;
+    };
+    commands
+        .entity(target)
+        .insert(SessionScopeView(cwd.clone()));
+    let state = SessionScopeUiState::project(cwd, &catalog);
+    commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
+        target, &state,
     ));
 }
 
@@ -440,27 +609,24 @@ fn cleanup_inactive_views(
     views: Query<
         (
             Entity,
-            &PageMetadata,
             Has<SessionManagerView>,
             Has<ChatView>,
+            Has<SessionDetailView>,
+            Has<SessionScopeView>,
         ),
         (With<SessionCatalogView>, Changed<PageMetadata>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, page, manager, chat) in &views {
-        if !manager && !chat && !ProjectCatalogRoute::is_detail(&page.url) {
+    for (entity, manager, chat, detail, scope) in &views {
+        if detail && !chat {
+            commands
+                .entity(entity)
+                .remove::<(SessionDetailView, SessionDetailUiStateComponent)>();
+        }
+        if !manager && !chat && !scope {
             commands.entity(entity).remove::<SessionCatalogView>();
         }
-    }
-}
-
-struct ProjectCatalogRoute;
-
-impl ProjectCatalogRoute {
-    fn is_detail(url: &str) -> bool {
-        url.strip_prefix("vmux://projects/")
-            .is_some_and(|path| !path.is_empty())
     }
 }
 
@@ -469,7 +635,11 @@ mod tests {
     use super::*;
 
     #[derive(Resource, Default)]
-    struct Published(Vec<Entity>);
+    struct Published {
+        catalogs: Vec<Entity>,
+        details: Vec<Entity>,
+        scopes: Vec<(Entity, Vec<String>)>,
+    }
 
     impl Published {
         fn record(
@@ -477,8 +647,31 @@ mod tests {
             mut published: ResMut<Published>,
         ) {
             if trigger.event().update().catalog.is_some() {
-                published.0.push(trigger.event().webview());
+                published.catalogs.push(trigger.event().webview());
             }
+        }
+
+        fn record_detail(
+            trigger: On<UiStateWrite<SessionDetailUiState>>,
+            mut published: ResMut<Published>,
+        ) {
+            published.details.push(trigger.event().webview());
+        }
+
+        fn record_scope(
+            trigger: On<UiStateWrite<SessionScopeUiState>>,
+            mut published: ResMut<Published>,
+        ) {
+            published.scopes.push((
+                trigger.event().webview(),
+                trigger
+                    .event()
+                    .update()
+                    .sessions
+                    .iter()
+                    .map(|session| session.id.clone())
+                    .collect(),
+            ));
         }
     }
 
@@ -605,9 +798,19 @@ mod tests {
             .init_resource::<SessionRepositories>()
             .init_resource::<Published>()
             .add_observer(Published::record)
+            .add_observer(Published::record_detail)
             .add_observer(ready);
         let manager = app.world_mut().spawn(SessionManagerView).id();
-        let session = app.world_mut().spawn(super::super::session::ChatView).id();
+        let session = app
+            .world_mut()
+            .spawn((
+                super::super::session::ChatView,
+                PageMetadata {
+                    url: Route::Session(SessionId("session-1".into())).url(),
+                    ..Default::default()
+                },
+            ))
+            .id();
 
         app.world_mut().trigger(UiInput {
             webview: session,
@@ -619,34 +822,71 @@ mod tests {
         });
         app.world_mut().flush();
 
-        assert_eq!(
-            app.world().resource::<Published>().0,
-            vec![session, manager]
-        );
+        let published = app.world().resource::<Published>();
+        assert_eq!(published.catalogs, vec![manager]);
+        assert_eq!(published.details, vec![session]);
     }
 
     #[test]
-    fn project_detail_receives_catalog_without_publishing_to_project_index() {
+    fn leaving_session_route_removes_detail_projection() {
+        let mut app = App::new();
+        app.add_systems(Update, cleanup_inactive_views);
+        let webview = app
+            .world_mut()
+            .spawn((
+                super::super::session::ChatView,
+                SessionDetailView,
+                PageMetadata {
+                    url: Route::Session(SessionId("session-1".into())).url(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .entity_mut(webview)
+            .remove::<super::super::session::ChatView>()
+            .insert(PageMetadata {
+                url: "vmux://git/".into(),
+                ..Default::default()
+            });
+        app.update();
+
+        let entity = app.world().entity(webview);
+        assert!(!entity.contains::<SessionDetailView>());
+        assert!(!entity.contains::<SessionDetailUiStateComponent>());
+        assert!(!entity.contains::<SessionCatalogView>());
+    }
+
+    #[test]
+    fn explicit_scope_projection_excludes_unrelated_sessions() {
         let mut app = App::new();
         app.init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
             .init_resource::<Published>()
-            .add_observer(Published::record)
+            .add_observer(Published::record_scope)
+            .add_observer(scope_projection)
             .add_observer(ready);
-        let index = app
-            .world_mut()
-            .spawn(PageMetadata {
-                url: "vmux://projects/".to_string(),
+        app.world_mut().resource_mut::<CatalogSnapshot>().sessions = vec![
+            SessionSummary {
+                id: "vmux".into(),
+                cwd: "/projects/vmux".into(),
                 ..Default::default()
-            })
-            .id();
-        let detail = app
-            .world_mut()
-            .spawn(PageMetadata {
-                url: "vmux://projects/github.com/vmux-ai/vmux".to_string(),
+            },
+            SessionSummary {
+                id: "other".into(),
+                cwd: "/projects/other".into(),
                 ..Default::default()
-            })
-            .id();
+            },
+        ];
+        let index = app.world_mut().spawn_empty().id();
+        let detail = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(ScopeProjectionRequest {
+            webview: detail,
+            cwd: Some(PathBuf::from("/projects/vmux")),
+        });
 
         app.world_mut().trigger(UiInput {
             webview: index,
@@ -658,7 +898,11 @@ mod tests {
         });
         app.world_mut().flush();
 
-        assert_eq!(app.world().resource::<Published>().0, vec![detail]);
+        assert_eq!(
+            app.world().resource::<Published>().scopes,
+            vec![(detail, vec!["vmux".into()])]
+        );
+        assert!(!app.world().entity(index).contains::<SessionScopeView>());
     }
 
     #[test]

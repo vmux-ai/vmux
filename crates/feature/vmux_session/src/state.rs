@@ -33,19 +33,25 @@ impl vmux_api::UiStateProjection<SessionCatalogUiStatePatch> for SessionCatalogU
 }
 
 impl SessionCatalogUiState {
-    pub fn session_details(
-        &self,
-        id: &str,
-    ) -> Option<(SessionSummary, Option<SessionRepository>, Vec<StageSummary>)> {
-        let session = self
-            .catalog
+    pub fn session(&self, id: &str) -> Option<&SessionSummary> {
+        self.catalog
             .sessions
             .iter()
-            .find(|session| session.id == id)?
-            .clone();
-        let repository = self.repositories.get(id);
-        Some((session, repository, self.catalog.stages.clone()))
+            .find(|session| session.id == id)
     }
+}
+
+#[vmux_api::ui_state(Default, Eq)]
+pub struct SessionDetailUiState {
+    pub session: Option<SessionSummary>,
+    pub repository: Option<SessionRepository>,
+    pub stages: Vec<StageSummary>,
+}
+
+#[vmux_api::ui_state(Default, Eq)]
+pub struct SessionScopeUiState {
+    pub sessions: Vec<SessionSummary>,
+    pub stages: Vec<StageSummary>,
 }
 
 #[vmux_api::ui_state_patch(Default)]

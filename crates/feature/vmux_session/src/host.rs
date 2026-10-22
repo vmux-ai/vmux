@@ -11,7 +11,7 @@ use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::persistence::WorkspaceStoreValidator;
 
 #[cfg(host)]
-pub use catalog::{SessionCatalogView, SessionManagerView};
+pub use catalog::{ScopeProjectionRequest, SessionCatalogView, SessionManagerView};
 pub use conversation::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
 #[cfg(host)]
 pub use handoff::ImportedConversation;

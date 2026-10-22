@@ -109,14 +109,20 @@ impl ManagerControls {
 pub(super) struct SessionStageMutations {
     optimistic: OptimisticMap<String, String>,
     leaving: Signal<HashSet<String>>,
+    archive_stage: Memo<String>,
 }
 
 impl SessionStageMutations {
-    pub fn new(optimistic: OptimisticMap<String, String>) -> Self {
+    pub fn new(optimistic: OptimisticMap<String, String>, archive_stage: Memo<String>) -> Self {
         Self {
             optimistic,
             leaving: use_signal(HashSet::new),
+            archive_stage,
         }
+    }
+
+    pub fn archive_stage(self) -> String {
+        (self.archive_stage)()
     }
 
     pub fn change(self, target: StageTarget, stage: String) {
@@ -139,10 +145,14 @@ impl SessionStageMutations {
     }
 
     pub fn archive(mut self, targets: Vec<StageTarget>) {
+        let archive_stage = self.archive_stage();
+        if archive_stage.is_empty() {
+            return;
+        }
         let leaving = self.leaving.read();
         let targets = targets
             .into_iter()
-            .filter(|target| target.stage != "done" && !leaving.contains(&target.id))
+            .filter(|target| target.stage != archive_stage && !leaving.contains(&target.id))
             .collect::<Vec<_>>();
         drop(leaving);
         if targets.is_empty() {
@@ -152,13 +162,16 @@ impl SessionStageMutations {
             .write()
             .extend(targets.iter().map(|target| target.id.clone()));
         for target in &targets {
-            self.optimistic
-                .set(target.id.clone(), target.stage.clone(), "done".to_string());
+            self.optimistic.set(
+                target.id.clone(),
+                target.stage.clone(),
+                archive_stage.clone(),
+            );
             if send(&SessionsStageChange {
                 id: target.id.clone(),
                 kind: target.kind.clone(),
                 sid: target.sid.clone(),
-                stage: "done".to_string(),
+                stage: archive_stage.clone(),
             })
             .is_err()
             {

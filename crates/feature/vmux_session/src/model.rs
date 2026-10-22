@@ -72,6 +72,7 @@ impl Plugin for StagePlugin {
             .register_persisted::<StageChangedAt>()
             .register_type::<StageId>()
             .register_type::<StageDefinition>()
+            .register_type::<ArchiveTarget>()
             .add_message::<StageChangeRequest>()
             .add_message::<ProviderStageChangeRequest>()
             .add_systems(
@@ -187,6 +188,11 @@ pub struct ProviderSessionId(pub String);
 #[reflect(Component)]
 #[type_path = "vmux_session"]
 pub struct StageDefinition;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[type_path = "vmux_session"]
+pub struct ArchiveTarget;
 
 #[derive(Message, Clone, Debug)]
 pub struct CreateRequest {
@@ -326,6 +332,7 @@ impl SessionConfiguration {
     fn validate(&self) {
         let mut ids = HashSet::new();
         let mut orders = HashSet::new();
+        let mut archive_targets = 0;
         for stage in &self.stages {
             assert!(
                 !stage.id.trim().is_empty(),
@@ -333,10 +340,18 @@ impl SessionConfiguration {
             );
             assert!(ids.insert(stage.id.as_str()), "duplicate Session stage ID");
             assert!(orders.insert(stage.order), "duplicate Session stage order");
+            if stage.archive {
+                archive_targets += 1;
+                assert!(stage.terminal, "archive Session stage must be terminal");
+            }
         }
         assert!(
             ids.contains(self.default_stage.as_str()),
             "default Session stage must reference a configured stage"
+        );
+        assert_eq!(
+            archive_targets, 1,
+            "exactly one archive Session stage is required"
         );
     }
 }
@@ -347,6 +362,7 @@ struct StageSeed {
     id: String,
     name: String,
     terminal: bool,
+    archive: bool,
     order: u32,
 }
 
@@ -354,13 +370,23 @@ struct StageSeed {
 fn ensure_stages(
     configuration: Res<Configuration>,
     definitions: Query<
-        (Entity, &StageId, &Name, &Order, Has<vmux_ecs::Terminal>),
+        (
+            Entity,
+            &StageId,
+            &Name,
+            &Order,
+            Has<vmux_ecs::Terminal>,
+            Has<ArchiveTarget>,
+        ),
         With<StageDefinition>,
     >,
     mut commands: Commands,
 ) {
     for stage in &configuration.stages {
-        if definitions.iter().any(|(_, id, _, _, _)| id.0 == stage.id) {
+        if definitions
+            .iter()
+            .any(|(_, id, _, _, _, _)| id.0 == stage.id)
+        {
             continue;
         }
         let mut entity = commands.spawn((
@@ -371,6 +397,9 @@ fn ensure_stages(
         ));
         if stage.terminal {
             entity.insert(vmux_ecs::Terminal);
+        }
+        if stage.archive {
+            entity.insert(ArchiveTarget);
         }
     }
 }
@@ -729,6 +758,12 @@ mod tests {
                 ("canceled".into(), 40),
             ]
         );
+        let archive = app
+            .world_mut()
+            .query_filtered::<(&StageId, Has<ArchiveTarget>), With<StageDefinition>>()
+            .iter(app.world())
+            .find_map(|(id, archive)| archive.then(|| id.0.clone()));
+        assert_eq!(archive.as_deref(), Some("done"));
     }
 
     #[test]

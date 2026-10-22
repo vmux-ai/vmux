@@ -89,6 +89,19 @@ mod tests {
 
         assert_eq!(result, "project URL contains an invalid path");
     }
+
+    #[test]
+    fn route_rejects_unmanaged_symlinks_outside_the_projects_root() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
+
+        let result = ProjectRoute::resolve("vmux://projects/external", root.path())
+            .unwrap()
+            .unwrap_err();
+
+        assert_eq!(result, "project is unavailable");
+    }
 }
 
 #[cfg(host)]
@@ -131,7 +144,9 @@ impl ProjectRoute {
                 return Some(Err(format!("project is unavailable: {error}")));
             }
         };
-        if !path.starts_with(&root) || !path.is_dir() || !canonical.is_dir() {
+        let imported = path.parent() == Some(root.join("imported").as_path())
+            && std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink());
+        if (!canonical.starts_with(&root) && !imported) || !path.is_dir() || !canonical.is_dir() {
             return Some(Err("project is unavailable".to_string()));
         }
         Some(Ok(canonical))

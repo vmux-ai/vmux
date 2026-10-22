@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use chrono::{Duration, Local, NaiveDate, TimeZone};
-use vmux_session::{CatalogSnapshot, SessionSummary, StageSummary};
+use vmux_session::{
+    CatalogSnapshot, SessionAge, SessionSummary, SessionSummaryProjection, StageSummary,
+};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 
 use crate::event::{SessionRepositories, SessionRepository};
@@ -312,52 +314,37 @@ impl UpdatedFilter {
     }
 }
 
-pub(super) struct SessionFilterMenuPresentation {
-    pub agents: Vec<(String, usize)>,
-    pub projects: Vec<(String, usize)>,
-    pub date_filter: Option<UpdatedFilter>,
-    pub within_filter: Option<UpdatedFilter>,
-}
+pub(super) struct SessionFilterMenuPresentation;
 
 impl SessionFilterMenuPresentation {
-    pub fn new(
-        sessions: &[SessionSummary],
-        repositories: &SessionRepositories,
-        step: SessionFilterStep,
-        value: &str,
-    ) -> Self {
+    pub fn agents(sessions: &[SessionSummary]) -> Vec<(String, usize)> {
         let mut agents = HashMap::<String, usize>::new();
-        let mut projects = HashMap::<String, usize>::new();
         for session in sessions {
             let agent = SessionFilterValue::agent(session);
             if !agent.is_empty() {
                 *agents.entry(agent).or_default() += 1;
             }
+        }
+        let mut agents = agents.into_iter().collect::<Vec<_>>();
+        agents.sort_by_key(|left| left.0.to_lowercase());
+        agents
+    }
+
+    pub fn projects(
+        sessions: &[SessionSummary],
+        repositories: &SessionRepositories,
+    ) -> Vec<(String, usize)> {
+        let mut projects = HashMap::<String, usize>::new();
+        for session in sessions {
             if let Some(repository) = repositories.get(&session.id)
                 && !repository.project.is_empty()
             {
                 *projects.entry(repository.project).or_default() += 1;
             }
         }
-        let mut agents = agents.into_iter().collect::<Vec<_>>();
-        agents.sort_by_key(|left| left.0.to_lowercase());
         let mut projects = projects.into_iter().collect::<Vec<_>>();
         projects.sort_by_key(|left| left.0.to_lowercase());
-        let date_filter = match step {
-            SessionFilterStep::Date(comparison) => UpdatedFilter::from_date(comparison, value),
-            _ => None,
-        };
-        let within_filter = if step == SessionFilterStep::Within {
-            value.parse().ok().and_then(UpdatedFilter::within)
-        } else {
-            None
-        };
-        Self {
-            agents,
-            projects,
-            date_filter,
-            within_filter,
-        }
+        projects
     }
 }
 
@@ -406,6 +393,7 @@ impl StageGroup {
         sessions: &[SessionSummary],
         search: &str,
     ) -> Vec<Self> {
+        let now = vmux_ecs::UnixMillis::now().0;
         let mut groups = stages
             .iter()
             .cloned()
@@ -415,14 +403,10 @@ impl StageGroup {
             })
             .collect::<Vec<_>>();
         for session in sessions {
-            if !SessionSummaryPresentation::matches(session, search) {
+            if !SessionSummaryProjection::matches(session, search) {
                 continue;
             }
-            let terminal = stages
-                .iter()
-                .find(|stage| stage.id == session.stage)
-                .is_some_and(|stage| stage.terminal);
-            if SessionFreshness::is_stale(session, terminal) {
+            if SessionSummaryProjection::is_stale(session, stages, now) {
                 let stale_index = match groups.iter().position(|group| group.stage.id == "stale") {
                     Some(index) => index,
                     None => {
@@ -439,6 +423,7 @@ impl StageGroup {
                                     name: "sessions-stale".into(),
                                     order: 0,
                                     terminal: false,
+                                    archive: false,
                                 },
                                 sessions: Vec::new(),
                             },
@@ -462,6 +447,7 @@ impl StageGroup {
                     name: session.stage.clone(),
                     order: u32::MAX,
                     terminal: false,
+                    archive: false,
                 },
                 sessions: vec![session.clone()],
             });
@@ -476,12 +462,12 @@ pub(super) struct StageGroupPresentation {
 }
 
 impl StageGroupPresentation {
-    pub fn new(stage: &StageSummary, sessions: &[SessionSummary]) -> Self {
+    pub fn new(stage: &StageSummary, sessions: &[SessionSummary], archive_stage: &str) -> Self {
         Self {
             dot: StageVisual::for_id(&stage.id).dot,
             archivable: sessions
                 .iter()
-                .filter(|session| session.stage != "done")
+                .filter(|session| session.stage != archive_stage)
                 .map(StageTarget::from_session)
                 .collect(),
         }
@@ -572,19 +558,25 @@ impl SessionPresentation {
     pub fn new(
         session: &SessionSummary,
         repository: Option<SessionRepository>,
+        stages: &[StageSummary],
         stage: &str,
     ) -> Self {
+        let summary = SessionSummaryProjection::new(session, stages, vmux_ecs::UnixMillis::now().0);
+        let archived = stages
+            .iter()
+            .find(|candidate| candidate.id == stage)
+            .is_some_and(|candidate| candidate.archive);
         Self {
             context: SessionContext::from(repository),
             stage_target: StageTarget::from_session(session),
-            archived: session.stage == "done",
+            archived,
             runtime: RuntimeVisual::for_id(&session.runtime),
             agent: AgentPresentation::from_session(session),
             stage_dot: StageVisual::for_id(stage).dot,
-            title: SessionSummaryPresentation::display_title(session),
-            preview: SessionSummaryPresentation::preview(session),
+            title: summary.title,
+            preview: summary.preview,
             compact_id: SessionIdentity::new(&session.sid).compact(),
-            updated: RelativeTime::from_millis(session.last_activated_at).label(),
+            updated: RelativeTime(summary.age).label(),
         }
     }
 }
@@ -629,54 +621,24 @@ impl RuntimeVisual {
     }
 }
 
-pub(super) struct SessionFreshness;
-
-impl SessionFreshness {
-    pub const STALE_AFTER: u64 = 3 * RelativeTime::DAY;
-
-    fn is_stale(session: &SessionSummary, terminal: bool) -> bool {
-        let age = RelativeTime::from_millis(session.last_activated_at);
-        Self::from_age(age, &session.runtime, terminal)
-    }
-
-    pub fn from_age(age: RelativeTime, runtime: &str, terminal: bool) -> bool {
-        !terminal && !RuntimeVisual::for_id(runtime).visible && age.0 >= Self::STALE_AFTER
-    }
-}
-
-pub(super) struct RelativeTime(pub u64);
+pub(super) struct RelativeTime(pub SessionAge);
 
 impl RelativeTime {
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * Self::MINUTE;
-    pub const DAY: u64 = 24 * Self::HOUR;
-    const WEEK: u64 = 7 * Self::DAY;
-    const MONTH: u64 = 30 * Self::DAY;
-    const YEAR: u64 = 365 * Self::DAY;
-
-    pub fn from_millis(timestamp: i64) -> Self {
-        if timestamp <= 0 {
-            return Self(0);
-        }
-        let now = vmux_ecs::UnixMillis::now().0;
-        Self(now.saturating_sub(timestamp).max(0) as u64 / 1_000)
-    }
-
     pub fn label(self) -> String {
-        let (id, count) = if self.0 < Self::MINUTE {
+        let (id, count) = if self.0.0 < SessionAge::MINUTE {
             ("resume-age-now", 0)
-        } else if self.0 < Self::HOUR {
-            ("resume-age-minutes", self.0 / Self::MINUTE)
-        } else if self.0 < Self::DAY {
-            ("resume-age-hours", self.0 / Self::HOUR)
-        } else if self.0 < Self::WEEK {
-            ("resume-age-days", self.0 / Self::DAY)
-        } else if self.0 < Self::MONTH {
-            ("resume-age-weeks", self.0 / Self::WEEK)
-        } else if self.0 < Self::YEAR {
-            ("resume-age-months", self.0 / Self::MONTH)
+        } else if self.0.0 < SessionAge::HOUR {
+            ("resume-age-minutes", self.0.0 / SessionAge::MINUTE)
+        } else if self.0.0 < SessionAge::DAY {
+            ("resume-age-hours", self.0.0 / SessionAge::HOUR)
+        } else if self.0.0 < SessionAge::WEEK {
+            ("resume-age-days", self.0.0 / SessionAge::DAY)
+        } else if self.0.0 < SessionAge::MONTH {
+            ("resume-age-weeks", self.0.0 / SessionAge::WEEK)
+        } else if self.0.0 < SessionAge::YEAR {
+            ("resume-age-months", self.0.0 / SessionAge::MONTH)
         } else {
-            ("resume-age-years", self.0 / Self::YEAR)
+            ("resume-age-years", self.0.0 / SessionAge::YEAR)
         };
         if count == 0 {
             return translate(id);
@@ -702,43 +664,6 @@ impl<'a> SessionIdentity<'a> {
             .iter()
             .collect::<String>();
         format!("{start}…{end}")
-    }
-}
-
-struct SessionSummaryPresentation;
-
-impl SessionSummaryPresentation {
-    fn matches(session: &SessionSummary, query: &str) -> bool {
-        query.is_empty()
-            || session.name.to_ascii_lowercase().contains(query)
-            || session.description.to_ascii_lowercase().contains(query)
-            || session.cwd.to_ascii_lowercase().contains(query)
-            || session.agent.to_ascii_lowercase().contains(query)
-            || session.agent_name.to_ascii_lowercase().contains(query)
-            || session
-                .conversation_title
-                .to_ascii_lowercase()
-                .contains(query)
-            || session.last_prompt.to_ascii_lowercase().contains(query)
-            || session.last_message.to_ascii_lowercase().contains(query)
-    }
-
-    fn display_title(session: &SessionSummary) -> String {
-        if session.conversation_title.is_empty() {
-            return session.name.clone();
-        }
-        session.conversation_title.clone()
-    }
-
-    fn preview(session: &SessionSummary) -> String {
-        let title = Self::display_title(session);
-        if !session.last_prompt.is_empty() && session.last_prompt != title {
-            return session.last_prompt.clone();
-        }
-        if !session.last_message.is_empty() && session.last_message != title {
-            return session.last_message.clone();
-        }
-        String::new()
     }
 }
 
