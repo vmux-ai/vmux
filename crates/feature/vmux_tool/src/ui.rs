@@ -12,9 +12,9 @@ use dioxus::prelude::*;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage, ManagerRow,
-    ManagerSearch, ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView,
-    ManagerViewToggle,
+    ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
+    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSection,
+    ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView, ManagerViewToggle,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -359,16 +359,8 @@ fn ToolSection(
 ) -> Element {
     let count = entries.len();
     rsx! {
-        section { class: "flex flex-col gap-2",
-            header { class: "flex items-center gap-2 px-1",
-                h2 { class: "text-[11px] font-semibold text-foreground/80", "{label}" }
-                span { class: "text-[10px] tabular-nums text-muted-foreground/55", "{count}" }
-            }
-            div { class: if view == ManagerView::Grid {
-                    "grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-2"
-                } else {
-                    "flex flex-col gap-2"
-                },
+        ManagerSection { label, count,
+            ManagerCollection { view,
                 for entry in entries {
                     if view == ManagerView::Grid {
                         ToolCard {
@@ -473,48 +465,27 @@ fn ToolCard(
 ) -> Element {
     let version = item.version.clone().unwrap_or_default();
     let selection = ToolSelection::of(&item);
-    let keyboard_selection = selection.clone();
     rsx! {
-        div {
-            class: if selected {
-                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-primary/[0.09] p-3 shadow-[inset_2px_0_0_var(--primary)] transition-colors"
-            } else {
-                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-foreground/[0.03] p-3 transition-colors hover:bg-foreground/[0.06]"
+        ManagerCard {
+            show_icon: provider.thumbnails,
+            icon_surface: !provider.provider.is("acp"),
+            selected,
+            onselect: move |_| onselect.call(selection.clone()),
+            icon: rsx! {
+                ToolThumbnail {
+                    item: item.clone(),
+                    provider: provider.clone(),
+                    class: "size-10 text-[10px]".to_string(),
+                }
             },
-            role: "button",
-            tabindex: "0",
-            aria_selected: selected,
-            onclick: move |_| onselect.call(selection.clone()),
-            onkeydown: move |event| {
-                let activate = event.key() == Key::Enter
-                    || matches!(event.key(), Key::Character(key) if key == " ");
-                if !activate {
-                    return;
-                }
-                event.prevent_default();
-                onselect.call(keyboard_selection.clone());
-            },
-            div { class: "flex min-w-0 items-start gap-3",
-                if provider.thumbnails {
-                    div { class: "flex size-10 shrink-0 items-center justify-center",
-                        ToolThumbnail {
-                            item: item.clone(),
-                            provider: provider.clone(),
-                            class: "size-10 text-[10px]".to_string(),
-                        }
-                    }
-                }
-                div { class: "min-w-0 flex-1",
-                    div { class: "truncate font-medium text-foreground/95", "{item.name}" }
-                    if !version.is_empty() {
-                        div { class: "mt-0.5 truncate text-xs text-muted-foreground/70", "{version}" }
-                    }
-                }
+            title: item.name.clone(),
+            subtitle: version,
+            actions: rsx! {
                 ToolQuickInstall { item: item.clone(), pending }
-            }
-            div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
+            },
+            meta: rsx! {
                 ToolMeta { item: item.clone(), provider }
-            }
+            },
         }
     }
 }
@@ -562,32 +533,24 @@ fn ToolDetails(
 ) -> Element {
     let version = item.version.clone().unwrap_or_default();
     rsx! {
-        aside { class: "flex min-h-0 w-[21rem] shrink-0 flex-col bg-foreground/[0.018]",
-            header { class: "flex shrink-0 items-start gap-3 p-4",
-                if provider.thumbnails {
-                    div { class: "flex size-9 shrink-0 items-center justify-center",
-                        ToolThumbnail {
-                            item: item.clone(),
-                            provider: provider.clone(),
-                            class: "size-9 text-[9px]".to_string(),
-                        }
-                    }
+        ManagerDetails {
+            show_icon: provider.thumbnails,
+            icon: rsx! {
+                ToolThumbnail {
+                    item: item.clone(),
+                    provider: provider.clone(),
+                    class: "size-9 text-[9px]".to_string(),
                 }
-                div { class: "min-w-0 flex-1",
-                    h2 { class: "truncate text-sm font-semibold text-foreground", "{item.name}" }
-                    if !version.is_empty() {
-                        div { class: "mt-0.5 truncate text-xs text-muted-foreground/70", "{version}" }
-                    }
+            },
+            title: item.name.clone(),
+            subtitle: version,
+            onclose,
+            actions: rsx! {
+                if !item.operations.is_empty() {
+                    ToolActions { item: item.clone(), pending }
                 }
-                button {
-                    r#type: "button",
-                    class: "flex size-7 shrink-0 items-center justify-center rounded-md text-lg leading-none text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
-                    aria_label: translate("common-close"),
-                    onclick: move |event| onclose.call(event),
-                    "×"
-                }
-            }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-4 pb-4",
+            },
+            div {
                 if !item.detail.is_empty() {
                     p { class: "mb-4 whitespace-pre-wrap text-xs leading-5 text-muted-foreground", "{item.detail}" }
                 }
@@ -597,11 +560,6 @@ fn ToolDetails(
                     }
                     div { class: "mt-3 break-all font-mono text-[10px] text-muted-foreground/65", "{item.id}" }
                     div { class: "mt-2 text-[10px] text-muted-foreground/60", {provider.localized_title()} }
-                }
-            }
-            if !item.operations.is_empty() {
-                footer { class: "flex shrink-0 flex-wrap items-center justify-end gap-2 px-4 pb-4 pt-2",
-                    ToolActions { item, pending }
                 }
             }
         }

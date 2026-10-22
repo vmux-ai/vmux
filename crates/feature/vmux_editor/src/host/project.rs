@@ -5,9 +5,11 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_git::worktree::RepoInfo;
 use vmux_git::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
 };
+use vmux_session::CatalogSnapshot;
 use vmux_session::host::ScopeProjectionRequest;
 
 use crate::project::{
@@ -29,7 +31,10 @@ impl Plugin for ProjectPagePlugin {
             .add_observer(import)
             .add_observer(clone)
             .add_systems(Update, (queue, finish_catalogs, finish_imports).chain())
-            .add_systems(PostUpdate, finish_repository_operations);
+            .add_systems(
+                PostUpdate,
+                (finish_repository_operations, sync_session_counts).chain(),
+            );
     }
 }
 
@@ -492,6 +497,7 @@ fn finish_catalogs(
         &vmux_ecs::PageMetadata,
         &ProjectPageRevision,
     )>,
+    catalog: Res<CatalogSnapshot>,
     mut commands: Commands,
 ) {
     for (entity, mut task, page, revision) in &mut tasks {
@@ -502,8 +508,38 @@ fn finish_catalogs(
         if !ProjectRoute::is_root(&page.url) || revision.value != task.revision {
             continue;
         }
+        let state = ProjectCatalog::with_session_counts(state, &catalog);
         commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
             entity, &state,
+        ));
+    }
+}
+
+fn sync_session_counts(
+    catalog: Res<CatalogSnapshot>,
+    pages: Query<(
+        Entity,
+        &vmux_ecs::PageMetadata,
+        &vmux_ecs::UiState<ProjectUiState>,
+    )>,
+    mut commands: Commands,
+) {
+    if !catalog.is_changed() {
+        return;
+    }
+    for (entity, page, state) in &pages {
+        if !ProjectRoute::is_root(&page.url) {
+            continue;
+        }
+        let Some(current) = state.current() else {
+            continue;
+        };
+        let next = ProjectCatalog::with_session_counts(current.clone(), &catalog);
+        if next == *current {
+            continue;
+        }
+        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            entity, &next,
         ));
     }
 }
@@ -609,6 +645,21 @@ impl ProjectCatalog {
         }
     }
 
+    fn with_session_counts(mut state: ProjectUiState, catalog: &CatalogSnapshot) -> ProjectUiState {
+        let ProjectView::Catalog(view) = &mut state.view else {
+            return state;
+        };
+        for entry in &mut view.entries {
+            let root = Path::new(&entry.path);
+            entry.sessions = catalog
+                .sessions
+                .iter()
+                .filter(|session| Path::new(&session.cwd).starts_with(root))
+                .count() as u32;
+        }
+        state
+    }
+
     fn walk(root: &Path, directory: &Path, depth: usize, entries: &mut Vec<ProjectEntry>) {
         if depth > 0 && directory.join(".git").exists() {
             let Some(url) = ProjectRoute::from_path(root, directory) else {
@@ -620,10 +671,24 @@ impl ProjectCatalog {
             let Some(name) = directory.file_name().and_then(|name| name.to_str()) else {
                 return;
             };
+            let source = directory
+                .strip_prefix(root)
+                .ok()
+                .and_then(Path::parent)
+                .map(|source| source.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let info = RepoInfo::read(&path).unwrap_or_default();
             entries.push(ProjectEntry {
                 name: name.to_string(),
+                source,
                 path: path.to_string_lossy().into_owned(),
                 url,
+                branch: info.branch,
+                base_ref: info.base_ref,
+                is_worktree: info.is_worktree,
+                uncommitted: info.uncommitted,
+                ahead: info.ahead,
+                sessions: 0,
             });
             return;
         }

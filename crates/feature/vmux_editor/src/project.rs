@@ -1,8 +1,15 @@
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectEntry {
     pub name: String,
+    pub source: String,
     pub path: String,
     pub url: String,
+    pub branch: String,
+    pub base_ref: String,
+    pub is_worktree: bool,
+    pub uncommitted: u32,
+    pub ahead: u32,
+    pub sessions: u32,
 }
 
 #[vmux_api::contract(Default, Eq)]

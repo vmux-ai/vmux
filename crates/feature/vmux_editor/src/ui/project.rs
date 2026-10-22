@@ -13,6 +13,11 @@ use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::manager::{
+    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection,
+    ManagerDetails, ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
+    ManagerSkeleton, ManagerTone, ManagerToolbar, ManagerView, ManagerViewToggle,
+};
 use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
@@ -23,8 +28,8 @@ use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIco
 
 use super::state::FileUi;
 use crate::project::{
-    ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectImportRequest,
-    ProjectUiState, ProjectView,
+    ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectEntry,
+    ProjectImportRequest, ProjectUiState, ProjectView,
 };
 
 #[component]
@@ -44,78 +49,229 @@ pub(super) fn ProjectList(
     #[props(default)] view: Option<ProjectCatalogView>,
     #[props(default)] error: String,
 ) -> Element {
-    let count = view.as_ref().map_or(0, |view| view.entries.len());
+    let entries = view
+        .as_ref()
+        .map(|view| view.entries.clone())
+        .unwrap_or_default();
+    let count = entries.len();
     let pending = view.as_ref().is_some_and(|view| view.operation_pending);
+    let mut query = use_signal(String::new);
+    let mut manager_view = use_signal(ManagerView::default);
+    let mut selected = use_signal(|| None::<String>);
+    let needle = query().trim().to_ascii_lowercase();
+    let visible = entries
+        .iter()
+        .filter(|entry| entry.matches(&needle))
+        .cloned()
+        .collect::<Vec<_>>();
+    let selected_entry =
+        selected().and_then(|path| entries.iter().find(|entry| entry.path == path).cloned());
     rsx! {
-        PageShell {
-            PageHeader {
-                div { class: "flex min-h-10 items-center gap-3",
-                div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
+        ManagerPage {
+            ManagerToolbar {
+                div { class: "flex shrink-0 items-center gap-2 px-1",
                     BuiltinIconView {
                         icon: vmux_api::BuiltinIcon::Project,
-                        class: "size-5 text-muted-foreground".to_string(),
+                        class: "size-4 text-muted-foreground".to_string(),
+                    }
+                    span { class: "hidden text-xs font-semibold text-foreground sm:inline", {translate("layout-projects")} }
+                }
+                ManagerSearch {
+                    value: query(),
+                    placeholder: translate("layout-projects"),
+                    onsearch: move |event: FormEvent| query.set(event.value()),
+                    onkeydown: None,
+                }
+                if count > 0 {
+                    ManagerViewToggle {
+                        view: manager_view(),
+                        list_label: translate("tools-view-list"),
+                        grid_label: translate("tools-view-grid"),
+                        onchange: move |view| manager_view.set(view),
                     }
                 }
-                h1 { class: "min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.015em]", {translate("layout-projects")} }
-                if count > 0 {
-                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-1 text-[10px] tabular-nums text-muted-foreground", "{count}" }
-                }
                 ProjectAdd { pending }
-                }
             }
-            PageContent {
-                div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
-                        if view.is_none() && error.is_empty() {
-                            for width in ["w-28", "w-36", "w-24"] {
-                                div { class: "flex h-14 items-center gap-3 px-3",
-                                    Skeleton { class: "size-8 rounded-lg bg-foreground/[0.055]" }
-                                    Skeleton { class: "h-3 {width} bg-foreground/[0.06]" }
-                                }
-                            }
-                        } else if !error.is_empty() {
-                            div { class: "flex min-h-28 items-center justify-center px-5 text-center text-xs text-muted-foreground", "{error}" }
-                        } else if view.as_ref().is_some_and(|view| view.entries.is_empty()) {
-                            div { class: "flex min-h-56 flex-col items-center justify-center gap-3 px-5 text-center",
-                                div { class: "flex size-10 items-center justify-center rounded-lg bg-foreground/[0.055]",
-                                    BuiltinIconView {
-                                        icon: vmux_api::BuiltinIcon::Project,
-                                        class: "size-5 text-muted-foreground".to_string(),
-                                    }
-                                }
-                                div {
-                                    div { class: "text-sm font-medium text-foreground", {translate("agent-project-none")} }
-                                    div { class: "mt-1 text-xs text-muted-foreground", {translate("project-empty-description")} }
-                                }
-                                ProjectAdd { pending }
-                            }
-                        } else {
-                            for entry in view.as_ref().into_iter().flat_map(|view| view.entries.iter()) {
-                                {
-                                    let url = entry.url.clone();
-                                    rsx! {
-                                        button {
-                                            key: "project-{entry.path}",
-                                            r#type: "button",
-                                            class: "group flex h-14 w-full min-w-0 items-center gap-3 px-3 text-left hover:bg-foreground/[0.04]",
-                                            title: "{entry.path}",
-                                            onclick: move |_| {
-                                                let _ = send(&OpenRequest {
-                                                    value: url.clone(),
-                                                    open: Some(OpenTarget::InPlace),
-                                                });
-                                            },
-                                            div { class: "flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
-                                                TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-4".to_string() }
-                                            }
-                                            span { class: "min-w-0 flex-1 truncate text-sm font-medium", "{entry.name}" }
-                                            LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 -rotate-90 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100".to_string() }
-                                        }
-                                    }
+            div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
+                ManagerList { class: "mx-auto flex w-full max-w-5xl flex-col gap-3".to_string(),
+                    if view.is_none() && error.is_empty() {
+                        ManagerSkeleton {}
+                    } else if !error.is_empty() {
+                        ManagerEmpty { title: error, detail: String::new() }
+                    } else if entries.is_empty() {
+                        ManagerEmpty {
+                            title: translate("agent-project-none"),
+                            detail: translate("project-empty-description"),
+                            actions: rsx! { ProjectAdd { pending } },
+                        }
+                    } else if visible.is_empty() {
+                        ManagerEmpty {
+                            title: translate("agent-project-none"),
+                            detail: query(),
+                        }
+                    } else {
+                        ManagerCollection { view: manager_view(),
+                            for entry in visible {
+                                ProjectItem {
+                                    key: "project-{entry.path}",
+                                    entry: entry.clone(),
+                                    view: manager_view(),
+                                    selected: selected().as_deref() == Some(entry.path.as_str()),
+                                    onselect: move |path| selected.set(Some(path)),
                                 }
                             }
                         }
+                    }
+                }
+                if let Some(entry) = selected_entry {
+                    ProjectDetails { entry, onclose: move |_| selected.set(None) }
                 }
             }
+        }
+    }
+}
+
+impl ProjectEntry {
+    fn matches(&self, needle: &str) -> bool {
+        needle.is_empty()
+            || self.name.to_ascii_lowercase().contains(needle)
+            || self.source.to_ascii_lowercase().contains(needle)
+            || self.path.to_ascii_lowercase().contains(needle)
+            || self.branch.to_ascii_lowercase().contains(needle)
+    }
+}
+
+#[component]
+fn ProjectItem(
+    entry: ProjectEntry,
+    view: ManagerView,
+    selected: bool,
+    onselect: EventHandler<String>,
+) -> Element {
+    let path = entry.path.clone();
+    let select = move |_| onselect.call(path.clone());
+    let icon = rsx! {
+        TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-5".to_string() }
+    };
+    let meta = rsx! { ProjectMeta { entry: entry.clone() } };
+    if view == ManagerView::Grid {
+        return rsx! {
+            ManagerCard {
+                selected,
+                onselect: select,
+                icon,
+                title: entry.name,
+                subtitle: entry.source,
+                meta,
+                actions: rsx! {},
+            }
+        };
+    }
+    rsx! {
+        ManagerRow {
+            selected,
+            onselect: select,
+            icon,
+            title: entry.name,
+            subtitle: entry.source,
+            meta,
+            actions: rsx! {},
+        }
+    }
+}
+
+#[component]
+fn ProjectMeta(entry: ProjectEntry) -> Element {
+    let changes = format!("{} {}", entry.uncommitted, translate("git-changes"));
+    let sessions = format!("{} {}", entry.sessions, translate("sessions-title"));
+    rsx! {
+        if !entry.branch.is_empty() {
+            ManagerBadge { uppercase: false,
+                LineIconView { icon: LineIcon::GitBranch, class: "size-3" }
+                span { "{entry.branch}" }
+            }
+        }
+        if entry.uncommitted > 0 {
+            ManagerBadge { tone: ManagerTone::Amber,
+                span { "{changes}" }
+            }
+        }
+        if entry.ahead > 0 {
+            ManagerBadge { tone: ManagerTone::Green,
+                span { title: translate("composer-commits-ahead"), "↑{entry.ahead}" }
+            }
+        }
+        if entry.sessions > 0 {
+            ManagerBadge { tone: ManagerTone::Primary,
+                span { "{sessions}" }
+            }
+        }
+        if entry.is_worktree {
+            ManagerBadge { span { {translate("layout-worktree")} } }
+        }
+    }
+}
+
+#[component]
+fn ProjectDetails(entry: ProjectEntry, onclose: EventHandler<MouseEvent>) -> Element {
+    let open_url = entry.url.clone();
+    let git_url = vmux_git::GitUrl::from_path(Path::new(&entry.path));
+    rsx! {
+        ManagerDetails {
+            icon: rsx! {
+                TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-7".to_string() }
+            },
+            title: entry.name.clone(),
+            subtitle: entry.source.clone(),
+            onclose,
+            actions: rsx! {
+                if let Some(url) = git_url {
+                    ManagerButton {
+                        variant: ManagerButtonVariant::Secondary,
+                        onclick: move |_| ProjectEntry::open(url.clone()),
+                        {translate("git-title")}
+                    }
+                }
+                ManagerButton {
+                    variant: ManagerButtonVariant::Primary,
+                    onclick: move |_| ProjectEntry::open(open_url.clone()),
+                    {translate("common-open")}
+                }
+            },
+            div { class: "space-y-4",
+                div { class: "flex flex-wrap gap-1.5", ProjectMeta { entry: entry.clone() } }
+                ProjectDetailField { label: translate("git-branches"), value: entry.branch.clone() }
+                ProjectDetailField { label: translate("agent-project-branch-change"), value: entry.base_ref.clone() }
+                ProjectDetailField { label: translate("git-changes"), value: entry.uncommitted.to_string() }
+                ProjectDetailField { label: translate("composer-commits-ahead"), value: entry.ahead.to_string() }
+                ProjectDetailField { label: translate("sessions-title"), value: entry.sessions.to_string() }
+                div { class: "break-all rounded-lg bg-foreground/[0.035] p-3 font-mono text-[10px] leading-4 text-muted-foreground/70",
+                    title: "{entry.path}",
+                    "{entry.path}"
+                }
+            }
+        }
+    }
+}
+
+impl ProjectEntry {
+    fn open(url: String) {
+        let _ = send(&OpenRequest {
+            value: url,
+            open: Some(OpenTarget::InPlace),
+        });
+    }
+}
+
+#[component]
+fn ProjectDetailField(label: String, value: String) -> Element {
+    if value.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "flex items-center justify-between gap-3 text-xs",
+            span { class: "text-muted-foreground/70", "{label}" }
+            span { class: "min-w-0 truncate text-right text-foreground/85", "{value}" }
         }
     }
 }

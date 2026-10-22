@@ -2,6 +2,7 @@ use crate::cn::cn;
 use crate::components::badge::Badge;
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
+use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
 use dioxus::prelude::*;
 
@@ -260,6 +261,32 @@ pub fn ManagerList(children: Element, #[props(default)] class: String) -> Elemen
 }
 
 #[component]
+pub fn ManagerSection(label: String, count: usize, children: Element) -> Element {
+    rsx! {
+        section { class: "flex flex-col gap-2",
+            header { class: "flex items-center gap-2 px-1",
+                h2 { class: "text-[11px] font-semibold text-foreground/80", "{label}" }
+                span { class: "text-[10px] tabular-nums text-muted-foreground/55", "{count}" }
+            }
+            {children}
+        }
+    }
+}
+
+#[component]
+pub fn ManagerCollection(view: ManagerView, children: Element) -> Element {
+    rsx! {
+        div { class: if view == ManagerView::Grid {
+                "grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-2"
+            } else {
+                "flex flex-col gap-2"
+            },
+            {children}
+        }
+    }
+}
+
+#[component]
 pub fn ManagerRow(
     icon: Element,
     title: String,
@@ -329,6 +356,102 @@ pub fn ManagerRow(
 }
 
 #[component]
+pub fn ManagerCard(
+    icon: Element,
+    title: String,
+    subtitle: String,
+    meta: Element,
+    actions: Element,
+    #[props(default = true)] show_icon: bool,
+    #[props(default = true)] icon_surface: bool,
+    #[props(default)] selected: bool,
+    onselect: EventHandler<()>,
+) -> Element {
+    let keyboard_select = onselect;
+    rsx! {
+        div {
+            class: if selected {
+                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-primary/[0.09] p-3 shadow-[inset_2px_0_0_var(--primary)] transition-colors"
+            } else {
+                "group flex min-h-28 min-w-0 cursor-pointer flex-col rounded-xl bg-foreground/[0.03] p-3 transition-colors hover:bg-foreground/[0.06]"
+            },
+            role: "button",
+            tabindex: "0",
+            aria_selected: selected,
+            onclick: move |_| onselect.call(()),
+            onkeydown: move |event| {
+                let activate = event.key() == Key::Enter
+                    || matches!(event.key(), Key::Character(key) if key == " ");
+                if !activate {
+                    return;
+                }
+                event.prevent_default();
+                keyboard_select.call(());
+            },
+            div { class: "flex min-w-0 items-start gap-3",
+                if show_icon {
+                    div { class: if icon_surface {
+                            "flex size-10 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.065]"
+                        } else {
+                            "flex size-10 shrink-0 items-center justify-center"
+                        },
+                        {icon}
+                    }
+                }
+                div { class: "min-w-0 flex-1",
+                    div { class: "truncate font-medium text-foreground/95", "{title}" }
+                    if !subtitle.is_empty() {
+                        div { class: "mt-0.5 truncate text-xs text-muted-foreground/70", "{subtitle}" }
+                    }
+                }
+                {actions}
+            }
+            div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
+                {meta}
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ManagerDetails(
+    icon: Element,
+    title: String,
+    subtitle: String,
+    children: Element,
+    actions: Element,
+    #[props(default = true)] show_icon: bool,
+    onclose: EventHandler<MouseEvent>,
+) -> Element {
+    rsx! {
+        aside { class: "flex min-h-0 w-[21rem] shrink-0 flex-col bg-foreground/[0.018]",
+            header { class: "flex shrink-0 items-start gap-3 p-4",
+                if show_icon {
+                    div { class: "flex size-9 shrink-0 items-center justify-center", {icon} }
+                }
+                div { class: "min-w-0 flex-1",
+                    h2 { class: "truncate text-sm font-semibold text-foreground", "{title}" }
+                    if !subtitle.is_empty() {
+                        div { class: "mt-0.5 truncate text-xs text-muted-foreground/70", "{subtitle}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
+                    aria_label: translate("common-close"),
+                    onclick: move |event| onclose.call(event),
+                    LineIconView { icon: LineIcon::X, class: "size-3.5" }
+                }
+            }
+            div { class: "min-h-0 flex-1 overflow-y-auto px-4 pb-4", {children} }
+            footer { class: "flex shrink-0 flex-wrap items-center justify-end gap-2 px-4 pb-4 pt-2",
+                {actions}
+            }
+        }
+    }
+}
+
+#[component]
 pub fn ManagerThumbnail(src: Option<String>, fallback: String) -> Element {
     rsx! {
         if let Some(src) = src.filter(|src| !src.is_empty()) {
@@ -344,9 +467,18 @@ pub fn ManagerThumbnail(src: Option<String>, fallback: String) -> Element {
 }
 
 #[component]
-pub fn ManagerBadge(#[props(default)] tone: ManagerTone, children: Element) -> Element {
+pub fn ManagerBadge(
+    #[props(default)] tone: ManagerTone,
+    #[props(default = true)] uppercase: bool,
+    children: Element,
+) -> Element {
+    let typography = if uppercase {
+        "uppercase tracking-wide"
+    } else {
+        "tracking-normal"
+    };
     rsx! {
-        Badge { class: cn(["rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset", tone.classes()]),
+        Badge { class: cn(["rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", typography, tone.classes()]),
             {children}
         }
     }
