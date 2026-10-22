@@ -31,7 +31,7 @@ impl Plugin for DiffPlugin {
             .add_observer(file_refresh)
             .add_observer(reveal)
             .add_observer(load_next)
-            .add_observer(retry_diff)
+            .add_observer(retry)
             .add_observer(load_next_branch_files)
             .add_observer(retry_branch_files)
             .add_systems(
@@ -522,7 +522,7 @@ fn load_next(
     ));
 }
 
-fn retry_diff(
+fn retry(
     trigger: On<UiInput<GitDiffRetryRequest>>,
     mut pages: Query<(
         &mut super::state::GitState,

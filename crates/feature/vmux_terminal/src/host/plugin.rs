@@ -27,19 +27,24 @@ use vmux_ecs::page::{BindsEditingChords, HostsPage};
 use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
 use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
-use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
+use vmux_ecs::{
+    CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged, EntityTarget,
+    ProcessPresentationRequest,
+};
 use vmux_ecs::{
     KeyboardOwner, PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet,
     PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
+use vmux_layout::pane::PanePlacement;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack};
 #[cfg(test)]
 use vmux_layout::tab::Tab;
 use vmux_layout::tab::TabHierarchy;
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
+use vmux_session::Session;
 #[cfg(test)]
 use vmux_setting::SpaceOverrides;
 use vmux_setting::{AppSettings, TerminalTheme};
@@ -103,7 +108,7 @@ impl Plugin for TerminalPlugin {
         .add_observer(open)
         .add_observer(contribute)
         .add_observer(activate)
-        .add_observer(super::presentation::present)
+        .add_observer(present)
         .register_persisted::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
         .add_message::<TerminalStackSpawnRequest>()
@@ -119,6 +124,43 @@ impl Plugin for TerminalPlugin {
             crate::theme::TerminalThemePlugin,
         ));
     }
+}
+
+fn present(
+    trigger: On<ProcessPresentationRequest>,
+    stacks: Query<(Entity, &EntityTarget<Session>)>,
+    mut placement: PanePlacement,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    let Some(stack) = stacks
+        .iter()
+        .find(|(_, target)| target.entity() == request.owner)
+        .map(|(stack, _)| stack)
+    else {
+        return;
+    };
+    let Ok(agent_pane) = placement
+        .child_of_q
+        .get(stack)
+        .map(|child_of| child_of.parent())
+    else {
+        return;
+    };
+    let target_pane = placement.resolve_spiral(
+        agent_pane,
+        TerminalPlugin::URL,
+        false,
+        &mut std::collections::HashSet::new(),
+    );
+    let tab = commands
+        .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
+        .id();
+    commands.spawn((
+        ReattachedTerminalBundle::new(request.process_id),
+        RetainOnProcessExit,
+        ChildOf(tab),
+    ));
 }
 
 #[derive(Component)]
@@ -2007,6 +2049,56 @@ mod tests {
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    #[test]
+    fn process_presentation_does_not_take_focus_from_owner() {
+        let mut app = App::new();
+        app.add_observer(present);
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
+        let pane = app
+            .world_mut()
+            .spawn((vmux_layout::pane::Pane::bundle(), ChildOf(tab)))
+            .id();
+        let session = app.world_mut().spawn(Session).id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt(10),
+                ChildOf(pane),
+                EntityTarget::<Session>::new(session),
+            ))
+            .id();
+
+        app.world_mut().trigger(ProcessPresentationRequest {
+            owner: session,
+            process_id: ProcessId::new(),
+        });
+        app.world_mut().flush();
+
+        let stack_times = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<(Entity, &LastActivatedAt), With<Stack>>();
+            query
+                .iter(world)
+                .map(|(entity, activated)| (entity, activated.0))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity == owner)
+                .map(|(_, activated)| *activated),
+            Some(10)
+        );
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity != owner)
+                .map(|(_, activated)| *activated),
+            Some(0)
+        );
     }
 
     #[test]

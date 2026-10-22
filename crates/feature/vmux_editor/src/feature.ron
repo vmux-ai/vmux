@@ -222,6 +222,8 @@
                 "SessionCatalogUiState",
                 "GitUiState",
                 "GitRepositoryRequest",
+                "ProjectCloneRequest",
+                "ProjectCreateRequest",
                 "OpenRequest",
                 "ResumeSession",
                 "FileEditorGotoDeclarationRequest",
