@@ -13,10 +13,11 @@ use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty, ManagerList,
-    ManagerPage, ManagerRow, ManagerSearch, ManagerSkeleton, ManagerTone, ManagerToolbar,
-    ManagerView, ManagerViewToggle,
+    ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty, ManagerGridSize,
+    ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSkeleton, ManagerTone,
+    ManagerToolbar, ManagerView, ManagerViewToggle,
 };
 use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::components::sheet::SheetHeaderChevron;
@@ -26,6 +27,7 @@ use vmux_ui::hooks::{send, use_ui_state};
 use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
+use super::project_manager::{ProjectControls, ProjectFilterMenu, ProjectPresentation};
 use super::state::FileUi;
 use crate::project::{
     ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectEntry,
@@ -55,14 +57,8 @@ pub(super) fn ProjectList(
         .unwrap_or_default();
     let count = entries.len();
     let pending = view.as_ref().is_some_and(|view| view.operation_pending);
-    let mut query = use_signal(String::new);
-    let mut manager_view = use_signal(ManagerView::default);
-    let needle = query().trim().to_ascii_lowercase();
-    let visible = entries
-        .iter()
-        .filter(|entry| entry.matches(&needle))
-        .cloned()
-        .collect::<Vec<_>>();
+    let controls = ProjectControls::use_state();
+    let presentation = ProjectPresentation::new(&entries, &controls.query(), &controls.filters());
     rsx! {
         ManagerPage {
             ManagerToolbar {
@@ -73,11 +69,46 @@ pub(super) fn ProjectList(
                     }
                     span { class: "hidden text-xs font-semibold text-foreground sm:inline", {translate("layout-projects")} }
                 }
-                ManagerSearch {
-                    value: query(),
-                    placeholder: translate("layout-projects"),
-                    onsearch: move |event: FormEvent| query.set(event.value()),
-                    onkeydown: None,
+                Dropdown {
+                    open: presentation.filter_requested,
+                    class: "min-w-0 flex-1".to_string(),
+                    keyboard_navigation: true,
+                    on_dismiss: move |_| controls.dismiss_filter(),
+                    ManagerSearch {
+                        value: controls.query(),
+                        placeholder: translate("layout-projects"),
+                        onsearch: move |event: FormEvent| controls.set_query(event.value()),
+                        onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                            if event.key() == Key::Backspace && controls.query().is_empty() {
+                                controls.pop_filter();
+                            }
+                        })),
+                        prefix: rsx! {
+                            for (index, filter) in presentation.selected_filters.iter().cloned().enumerate() {
+                                FilterPill {
+                                    key: "project-filter-pill-{index}",
+                                    label: filter.label,
+                                    dot: filter.dot,
+                                    clear_label: translate("common-remove-filter"),
+                                    onclear: move |_| controls.remove_filter(index),
+                                }
+                            }
+                        },
+                        suffix: rsx! {
+                            FilterTrigger {
+                                active: presentation.filter_requested,
+                                label: translate("common-filter"),
+                                onclick: move |_| controls.toggle_filter(),
+                            }
+                        },
+                    }
+                    if presentation.filter_requested {
+                        ProjectFilterMenu {
+                            entries: entries.clone(),
+                            needle: presentation.filter_needle.clone(),
+                            onselect: move |filter| controls.apply_filter(filter),
+                        }
+                    }
                 }
                 ProjectAdd { pending }
             }
@@ -86,10 +117,10 @@ pub(super) fn ProjectList(
                     if count > 0 {
                         ManagerControls {
                             ManagerViewToggle {
-                                view: manager_view(),
+                                view: controls.view(),
                                 list_label: translate("tools-view-list"),
                                 grid_label: translate("tools-view-grid"),
-                                onchange: move |view| manager_view.set(view),
+                                onchange: move |view| controls.set_view(view),
                             }
                         }
                     }
@@ -103,18 +134,18 @@ pub(super) fn ProjectList(
                             detail: translate("project-empty-description"),
                             actions: rsx! { ProjectAdd { pending } },
                         }
-                    } else if visible.is_empty() {
+                    } else if presentation.entries.is_empty() {
                         ManagerEmpty {
                             title: translate("agent-project-none"),
-                            detail: query(),
+                            detail: controls.query(),
                         }
                     } else {
-                        ManagerCollection { view: manager_view(),
-                            for entry in visible {
+                        ManagerCollection { view: controls.view(), grid_size: ManagerGridSize::Comfortable,
+                            for entry in presentation.entries {
                                 ProjectItem {
                                     key: "project-{entry.path}",
                                     entry: entry.clone(),
-                                    view: manager_view(),
+                                    view: controls.view(),
                                 }
                             }
                         }
@@ -122,16 +153,6 @@ pub(super) fn ProjectList(
                 }
             }
         }
-    }
-}
-
-impl ProjectEntry {
-    fn matches(&self, needle: &str) -> bool {
-        needle.is_empty()
-            || self.name.to_ascii_lowercase().contains(needle)
-            || self.source.to_ascii_lowercase().contains(needle)
-            || self.path.to_ascii_lowercase().contains(needle)
-            || self.branch.to_ascii_lowercase().contains(needle)
     }
 }
 
@@ -171,22 +192,23 @@ fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
 
 #[component]
 fn ProjectMeta(entry: ProjectEntry) -> Element {
-    let changes = format!("{} {}", entry.uncommitted, translate("git-changes"));
-    let sessions = format!("{} {}", entry.sessions, translate("sessions-title"));
+    let ongoing = format!(
+        "{} {}",
+        entry.ongoing_sessions,
+        translate("session-stage-in-progress")
+    );
+    let stale = format!("{} {}", entry.stale_sessions, translate("sessions-stale"));
     rsx! {
-        if entry.uncommitted > 0 {
-            ManagerBadge { tone: ManagerTone::Amber,
-                span { "{changes}" }
-            }
-        }
-        if entry.ahead > 0 {
+        if entry.ongoing_sessions > 0 {
             ManagerBadge { tone: ManagerTone::Green,
-                span { title: translate("composer-commits-ahead"), "↑{entry.ahead}" }
+                uppercase: false,
+                span { "{ongoing}" }
             }
         }
-        if entry.sessions > 0 {
-            ManagerBadge { tone: ManagerTone::Primary,
-                span { "{sessions}" }
+        if entry.stale_sessions > 0 {
+            ManagerBadge { tone: ManagerTone::Amber,
+                uppercase: false,
+                span { "{stale}" }
             }
         }
     }

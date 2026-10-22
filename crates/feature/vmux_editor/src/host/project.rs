@@ -9,8 +9,8 @@ use vmux_git::worktree::RepoInfo;
 use vmux_git::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
 };
-use vmux_session::CatalogSnapshot;
 use vmux_session::host::ScopeProjectionRequest;
+use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
     ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectEntry,
@@ -649,13 +649,22 @@ impl ProjectCatalog {
         let ProjectView::Catalog(view) = &mut state.view else {
             return state;
         };
+        let now = vmux_ecs::UnixMillis::now().0;
         for entry in &mut view.entries {
             let root = Path::new(&entry.path);
-            entry.sessions = catalog
-                .sessions
-                .iter()
-                .filter(|session| Path::new(&session.cwd).starts_with(root))
-                .count() as u32;
+            entry.ongoing_sessions = 0;
+            entry.stale_sessions = 0;
+            for session in &catalog.sessions {
+                if !Path::new(&session.cwd).starts_with(root) {
+                    continue;
+                }
+                let projection = SessionSummaryProjection::new(session, &catalog.stages, now);
+                if projection.stale {
+                    entry.stale_sessions += 1;
+                } else if !projection.terminal {
+                    entry.ongoing_sessions += 1;
+                }
+            }
         }
         state
     }
@@ -688,7 +697,8 @@ impl ProjectCatalog {
                 is_worktree: info.is_worktree,
                 uncommitted: info.uncommitted,
                 ahead: info.ahead,
-                sessions: 0,
+                ongoing_sessions: 0,
+                stale_sessions: 0,
             });
             return;
         }
@@ -713,6 +723,7 @@ impl ProjectCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
     fn catalog_finds_repository_roots_without_descending_into_them() {
@@ -741,6 +752,66 @@ mod tests {
             "vmux://projects/github.com/mistralai/dashboard"
         );
         assert!(!catalog.operation_pending);
+    }
+
+    #[test]
+    fn catalog_counts_current_and_stale_sessions_separately() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("github.com/vmux-ai/vmux");
+        std::fs::create_dir_all(&project).unwrap();
+        let now = vmux_ecs::UnixMillis::now().0;
+        let state = ProjectUiState {
+            view: ProjectView::Catalog(ProjectCatalogView {
+                entries: vec![ProjectEntry {
+                    path: project.display().to_string(),
+                    ..Default::default()
+                }],
+                operation_pending: false,
+            }),
+        };
+        let catalog = CatalogSnapshot {
+            stages: vec![
+                StageSummary {
+                    id: "active".into(),
+                    terminal: false,
+                    ..Default::default()
+                },
+                StageSummary {
+                    id: "done".into(),
+                    terminal: true,
+                    ..Default::default()
+                },
+            ],
+            sessions: vec![
+                SessionSummary {
+                    cwd: project.display().to_string(),
+                    stage: "active".into(),
+                    runtime: "idle".into(),
+                    last_activated_at: now,
+                    ..Default::default()
+                },
+                SessionSummary {
+                    cwd: project.display().to_string(),
+                    stage: "active".into(),
+                    runtime: "idle".into(),
+                    last_activated_at: now - (SessionSummaryProjection::STALE_AFTER as i64 * 1_000),
+                    ..Default::default()
+                },
+                SessionSummary {
+                    cwd: project.display().to_string(),
+                    stage: "done".into(),
+                    last_activated_at: now,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let ProjectView::Catalog(view) = ProjectCatalog::with_session_counts(state, &catalog).view
+        else {
+            panic!("expected project catalog");
+        };
+        assert_eq!(view.entries[0].ongoing_sessions, 1);
+        assert_eq!(view.entries[0].stale_sessions, 1);
     }
 
     #[test]

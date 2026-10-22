@@ -17,6 +17,7 @@ mod menu;
 mod note;
 mod note_text;
 mod project;
+mod project_manager;
 mod sidebar;
 mod state;
 mod status;

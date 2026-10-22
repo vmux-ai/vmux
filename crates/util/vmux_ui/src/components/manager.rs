@@ -291,16 +291,30 @@ pub fn ManagerSection(label: String, count: usize, children: Element) -> Element
 }
 
 #[component]
-pub fn ManagerCollection(view: ManagerView, children: Element) -> Element {
-    rsx! {
-        div { class: if view == ManagerView::Grid {
-                "grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-2"
-            } else {
-                "flex flex-col gap-2"
-            },
-            {children}
+pub fn ManagerCollection(
+    view: ManagerView,
+    #[props(default)] grid_size: ManagerGridSize,
+    children: Element,
+) -> Element {
+    let class = match (view, grid_size) {
+        (ManagerView::Grid, ManagerGridSize::Compact) => {
+            "grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-2"
         }
+        (ManagerView::Grid, ManagerGridSize::Comfortable) => {
+            "grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-2"
+        }
+        (ManagerView::List, _) => "flex flex-col gap-2",
+    };
+    rsx! {
+        div { class, {children} }
     }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum ManagerGridSize {
+    #[default]
+    Compact,
+    Comfortable,
 }
 
 #[component]

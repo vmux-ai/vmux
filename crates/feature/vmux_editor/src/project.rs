@@ -9,7 +9,8 @@ pub struct ProjectEntry {
     pub is_worktree: bool,
     pub uncommitted: u32,
     pub ahead: u32,
-    pub sessions: u32,
+    pub ongoing_sessions: u32,
+    pub stale_sessions: u32,
 }
 
 #[vmux_api::contract(Default, Eq)]
