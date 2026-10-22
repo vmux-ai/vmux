@@ -12,9 +12,10 @@ use dioxus::prelude::*;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
-    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSection,
-    ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView, ManagerViewToggle,
+    ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerControls,
+    ManagerDetails, ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
+    ManagerSection, ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView,
+    ManagerViewToggle,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -246,14 +247,6 @@ fn ToolManager(state: ToolsUiState) -> Element {
                     },
                     onkeydown: None,
                 }
-                if snapshot.loaded && view.visible_count > 0 {
-                    ManagerViewToggle {
-                        view: manager_view(),
-                        list_label: translate("tools-view-list"),
-                        grid_label: translate("tools-view-grid"),
-                        onchange: move |view| manager_view.set(view),
-                    }
-                }
                 if let Some(provider) = apply_provider {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
@@ -276,7 +269,16 @@ fn ToolManager(state: ToolsUiState) -> Element {
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
                 ManagerList {
-                    class: "mx-auto flex w-full max-w-5xl flex-col gap-3".to_string(),
+                    if snapshot.loaded && view.visible_count > 0 {
+                        ManagerControls {
+                            ManagerViewToggle {
+                                view: manager_view(),
+                                list_label: translate("tools-view-list"),
+                                grid_label: translate("tools-view-grid"),
+                                onchange: move |view| manager_view.set(view),
+                            }
+                        }
+                    }
                     if view.show_brewfile {
                         HomebrewSourceCard {
                             root: snapshot.root.clone(),

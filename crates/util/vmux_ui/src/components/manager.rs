@@ -129,7 +129,7 @@ pub fn ManagerHeader(
     actions: Element,
 ) -> Element {
     let content_class = if content_class.is_empty() {
-        "mx-auto w-full max-w-3xl".to_string()
+        "mx-auto w-full max-w-5xl".to_string()
     } else {
         content_class
     };
@@ -160,11 +160,28 @@ pub fn ManagerHeader(
 }
 
 #[component]
-pub fn ManagerToolbar(children: Element) -> Element {
+pub fn ManagerToolbar(children: Element, #[props(default)] content_class: String) -> Element {
+    let content_class = if content_class.is_empty() {
+        "mx-auto flex h-full w-full max-w-5xl items-center gap-2.5".to_string()
+    } else {
+        content_class
+    };
     rsx! {
-        header { class: "flex h-11 shrink-0 items-center gap-2.5 bg-foreground/[0.018] px-3",
-            {children}
+        header { class: "h-11 shrink-0 bg-foreground/[0.018] px-5",
+            div { class: "{content_class}", {children} }
         }
+    }
+}
+
+#[component]
+pub fn ManagerControls(children: Element, #[props(default)] class: String) -> Element {
+    let class = if class.is_empty() {
+        "flex min-h-7 items-center justify-end gap-2".to_string()
+    } else {
+        class
+    };
+    rsx! {
+        div { class: "{class}", {children} }
     }
 }
 
@@ -251,7 +268,7 @@ pub fn ManagerViewToggle(
 #[component]
 pub fn ManagerList(children: Element, #[props(default)] class: String) -> Element {
     let content_class = if class.is_empty() {
-        "mx-auto flex max-w-3xl flex-col gap-2.5".to_string()
+        "mx-auto flex w-full max-w-5xl flex-col gap-3".to_string()
     } else {
         class
     };

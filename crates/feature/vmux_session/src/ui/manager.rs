@@ -9,8 +9,8 @@ use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch, ManagerToolbar,
-    ManagerView, ManagerViewToggle,
+    ManagerButton, ManagerButtonVariant, ManagerControls as ManagerControlsRow, ManagerEmpty,
+    ManagerPage, ManagerSearch, ManagerToolbar, ManagerView, ManagerViewToggle,
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
@@ -70,7 +70,7 @@ fn SessionsManagerToolbar(
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
     rsx! {
-        ManagerToolbar {
+        ManagerToolbar { content_class: "flex h-full w-full items-center gap-2.5".to_string(),
             Dropdown {
                 open: presentation.filter_requested,
                 class: "min-w-0 flex-1".to_string(),
@@ -118,13 +118,6 @@ fn SessionsManagerToolbar(
                     }
                 }
             }
-            ManagerViewToggle {
-                view: controls.view(),
-                list_label: translate("sessions-view-list"),
-                grid_label: translate("sessions-view-board"),
-                grid_icon: LineIcon::Columns3,
-                onchange: move |view| controls.set_view(view),
-            }
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| StartPage::open(),
@@ -149,28 +142,39 @@ fn SessionsManagerContent(
                 selected: presentation.selected_stage.clone(),
                 onselect: move |stage| controls.select_stage(stage),
             }
-            div { class: "flex min-w-0 flex-1 overflow-hidden",
-                if presentation.snapshot.sessions.is_empty() {
-                    ManagerEmpty {
-                        title: translate("sessions-empty"),
-                        detail: translate("sessions-empty-detail"),
-                        actions: rsx! { StartSessionButton {} },
+            div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                ManagerControlsRow { class: "shrink-0 px-3 py-2".to_string(),
+                    ManagerViewToggle {
+                        view: controls.view(),
+                        list_label: translate("sessions-view-list"),
+                        grid_label: translate("sessions-view-board"),
+                        grid_icon: LineIcon::Columns3,
+                        onchange: move |view| controls.set_view(view),
                     }
-                } else if !presentation.visible_sessions {
-                    ManagerEmpty {
-                        title: translate("sessions-inbox-empty"),
-                        detail: translate("sessions-inbox-empty-detail"),
-                        actions: rsx! { StartSessionButton {} },
-                    }
-                } else if controls.view() == ManagerView::List {
-                    SessionsList {
-                        groups: presentation.groups.clone(),
-                        repositories: presentation.repositories.clone(),
-                    }
-                } else {
-                    SessionsBoard {
-                        groups: presentation.groups.clone(),
-                        repositories: presentation.repositories.clone(),
+                }
+                div { class: "flex min-h-0 flex-1 overflow-hidden",
+                    if presentation.snapshot.sessions.is_empty() {
+                        ManagerEmpty {
+                            title: translate("sessions-empty"),
+                            detail: translate("sessions-empty-detail"),
+                            actions: rsx! { StartSessionButton {} },
+                        }
+                    } else if !presentation.visible_sessions {
+                        ManagerEmpty {
+                            title: translate("sessions-inbox-empty"),
+                            detail: translate("sessions-inbox-empty-detail"),
+                            actions: rsx! { StartSessionButton {} },
+                        }
+                    } else if controls.view() == ManagerView::List {
+                        SessionsList {
+                            groups: presentation.groups.clone(),
+                            repositories: presentation.repositories.clone(),
+                        }
+                    } else {
+                        SessionsBoard {
+                            groups: presentation.groups.clone(),
+                            repositories: presentation.repositories.clone(),
+                        }
                     }
                 }
             }

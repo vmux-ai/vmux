@@ -361,52 +361,6 @@ pub(super) fn RepositoryHeader(
 }
 
 #[component]
-pub(super) fn RepositoryPanelHeader(
-    repository: GitRepositorySnapshot,
-    focused_panel: GitPanel,
-    fetching: bool,
-    can_stage_all: bool,
-) -> Element {
-    rsx! {
-        div { class: "flex h-11 shrink-0 items-center gap-2 px-3 text-[10px] tabular-nums text-muted-foreground",
-            if focused_panel == GitPanel::Files && repository.files.iter().any(|file| file.unstaged) {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    class: "h-7 w-7 shrink-0 p-0 text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
-                    title: translate("git-stage-all"),
-                    aria_label: translate("git-stage-all"),
-                    disabled: !can_stage_all,
-                    onclick: {
-                        let path = repository.repo_root.clone();
-                        move |_| {
-                            let _ = send(&GitStageAllRequest { path: path.clone() });
-                        }
-                    },
-                    LineIconView { icon: LineIcon::Plus, class: "size-3.5" }
-                }
-            }
-            div { class: "ml-auto flex shrink-0 items-center gap-2",
-                if fetching {
-                    FetchIndicator {}
-                }
-                if repository.ahead > 0 {
-                    span { class: "inline-flex items-center gap-0.5",
-                        LineIconView { icon: LineIcon::ArrowUp, class: "size-3" }
-                        "{repository.ahead}"
-                    }
-                }
-                if repository.behind > 0 {
-                    span { class: "inline-flex items-center gap-0.5",
-                        LineIconView { icon: LineIcon::ArrowDown, class: "size-3" }
-                        "{repository.behind}"
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
 fn ViewPicker(
     focused_panel: GitPanel,
     changes: usize,
@@ -518,19 +472,6 @@ fn ViewPickerItem(
             if count > 0 {
                 span { class: "shrink-0 text-[9px] tabular-nums text-muted-foreground", "{count}" }
             }
-        }
-    }
-}
-
-#[component]
-fn FetchIndicator() -> Element {
-    rsx! {
-        span {
-            class: "inline-flex items-center gap-1 text-git-reference",
-            role: "status",
-            aria_live: "polite",
-            LineIconView { icon: LineIcon::RefreshCw, class: "size-3 animate-spin" }
-            span { class: "hidden sm:inline", {translate("git-fetching")} }
         }
     }
 }

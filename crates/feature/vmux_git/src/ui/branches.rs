@@ -1,10 +1,8 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
-use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
@@ -15,7 +13,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
-use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility};
+use crate::state::{GitBranchCollection, GitBranchPrompt};
 
 use super::model::GitPathChangeView;
 
@@ -90,15 +88,12 @@ pub(super) fn BranchPromptDialog() -> Element {
 
 #[component]
 pub(super) fn BranchesCard(
-    repository: GitRepositorySnapshot,
-    selected_branch: String,
     files: Vec<GitBranchFileEntry>,
     files_total: u32,
     files_loading: bool,
     files_has_more: bool,
     files_error: String,
     selected_path_bytes: Vec<u8>,
-    operations: GitOperationEligibility,
 ) -> Element {
     let mut file_query = use_signal(String::new);
     let query = file_query().trim().to_lowercase();
@@ -108,41 +103,9 @@ pub(super) fn BranchesCard(
         .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
         .collect::<Vec<_>>();
     let visible_file_count = visible_files.len();
-    let selected = repository
-        .branches
-        .iter()
-        .find(|entry| entry.name == selected_branch)
-        .cloned();
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
-            div { class: "flex h-10 shrink-0 items-center justify-end gap-1 px-3",
-                div { class: "flex shrink-0 items-center gap-1",
-                    if let Some(branch) = selected {
-                        Button {
-                            size: ButtonSize::Xs,
-                            variant: ButtonVariant::Ghost,
-                            class: "h-7 gap-1.5 px-2 text-[10px] font-medium text-muted-foreground hover:text-foreground",
-                            disabled: !operations.create_branch,
-                            onclick: {
-                                let base = branch.name.clone();
-                                move |_| {
-                                    let _ = send(&GitBranchPromptOpenRequest {
-                                        prompt: GitBranchPrompt::Create { base: base.clone() },
-                                    });
-                                }
-                            },
-                            LineIconView { icon: LineIcon::Plus, class: "size-3" }
-                            span { {translate("git-new-branch")} }
-                        }
-                        BranchActions {
-                            repository: repository.clone(),
-                            branch,
-                            operations: operations.clone(),
-                        }
-                    }
-                }
-            }
-            div { class: "shrink-0 px-2 pb-1.5",
+            div { class: "shrink-0 px-2 pb-1.5 pt-2",
                 ManagerSearch {
                     value: file_query(),
                     placeholder: translate("common-filter"),
@@ -252,146 +215,6 @@ fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Ele
                 span { class: "max-w-[65%] shrink-0 truncate font-medium", "{entry.name()}" }
             }
             span { class: "w-4 shrink-0 text-center font-mono text-[10px] font-semibold {status_class}", "{status_code}" }
-        }
-    }
-}
-
-#[component]
-fn BranchActions(
-    repository: GitRepositorySnapshot,
-    branch: GitBranchEntry,
-    operations: GitOperationEligibility,
-) -> Element {
-    let mut open = use_signal(|| false);
-    let has_actions = operations.checkout_branch
-        || operations.delete_branch
-        || operations.rebase
-        || operations.merge
-        || operations.fast_forward;
-    if !has_actions {
-        return rsx! {};
-    }
-    rsx! {
-        Dropdown {
-            open: open(),
-            class: "shrink-0".to_string(),
-            on_dismiss: move |_| open.set(false),
-            button {
-                r#type: "button",
-                class: "flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
-                title: translate("git-branches"),
-                aria_label: translate("git-branches"),
-                onclick: move |_| open.set(!open()),
-                LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5" }
-            }
-            if open() {
-                div { class: "absolute right-0 top-8 z-40 min-w-44 rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                    if operations.checkout_branch {
-                        BranchActionItem {
-                            icon: LineIcon::Check,
-                            label: translate("git-checkout"),
-                            danger: false,
-                            onpress: {
-                                let repo_root = repository.repo_root.clone();
-                                let branch = branch.clone();
-                                move |_| {
-                                    open.set(false);
-                                    let _ = send(&ProjectActivateRequest {
-                                        path: repo_root.clone(),
-                                        branch: branch.name.clone(),
-                                        checkout: branch.checkout.clone(),
-                                        pane_id: None,
-                                    });
-                                }
-                            },
-                        }
-                    }
-                    if operations.rebase {
-                        BranchActionItem {
-                            icon: LineIcon::GitPullRequest,
-                            label: translate("git-rebase"),
-                            danger: false,
-                            onpress: {
-                                let repo_root = repository.repo_root.clone();
-                                let name = branch.name.clone();
-                                move |_| {
-                                    open.set(false);
-                                    GitOperation::Rebase { branch: name.clone() }.send(repo_root.clone());
-                                }
-                            },
-                        }
-                    }
-                    if operations.merge {
-                        BranchActionItem {
-                            icon: LineIcon::GitMerge,
-                            label: translate("git-merge"),
-                            danger: false,
-                            onpress: {
-                                let repo_root = repository.repo_root.clone();
-                                let name = branch.name.clone();
-                                move |_| {
-                                    open.set(false);
-                                    GitOperation::Merge { branch: name.clone() }.send(repo_root.clone());
-                                }
-                            },
-                        }
-                    }
-                    if operations.fast_forward {
-                        BranchActionItem {
-                            icon: LineIcon::FastForward,
-                            label: translate("git-fast-forward"),
-                            danger: false,
-                            onpress: {
-                                let repo_root = repository.repo_root.clone();
-                                let name = branch.name.clone();
-                                move |_| {
-                                    open.set(false);
-                                    GitOperation::FastForward { branch: name.clone() }.send(repo_root.clone());
-                                }
-                            },
-                        }
-                    }
-                    if operations.delete_branch {
-                        div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
-                        BranchActionItem {
-                            icon: LineIcon::Trash,
-                            label: translate("git-delete-branch"),
-                            danger: true,
-                            onpress: {
-                                let name = branch.name.clone();
-                                move |_| {
-                                    open.set(false);
-                                    let _ = send(&GitBranchPromptOpenRequest {
-                                        prompt: GitBranchPrompt::Delete { branch: name.clone() },
-                                    });
-                                }
-                            },
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn BranchActionItem(
-    icon: LineIcon,
-    label: String,
-    danger: bool,
-    onpress: EventHandler<()>,
-) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            class: if danger {
-                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-destructive hover:bg-destructive/10"
-            } else {
-                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-            },
-            onclick: move |_| onpress.call(()),
-            LineIconView { icon, class: "size-3.5 shrink-0" }
-            span { "{label}" }
         }
     }
 }

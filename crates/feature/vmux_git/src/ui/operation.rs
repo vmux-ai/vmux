@@ -13,7 +13,11 @@ pub(super) fn HeaderOperationButton(
     danger: bool,
     onpress: EventHandler<()>,
 ) -> Element {
-    let title = format!("{label} ({shortcut})");
+    let title = if shortcut.is_empty() {
+        label.clone()
+    } else {
+        format!("{label} ({shortcut})")
+    };
 
     rsx! {
         Tooltip { label: title,

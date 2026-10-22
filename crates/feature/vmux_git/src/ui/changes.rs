@@ -55,8 +55,24 @@ pub(super) fn ChangesCard(
     let visible_unstaged = visible_rows
         .saturating_sub(staged_total)
         .min(unstaged_total);
+    let has_unstaged = !unstaged.is_empty();
     let file_operations = rsx! {
         div { class: "flex shrink-0 items-center gap-0.5",
+            if has_unstaged {
+                HeaderOperationButton {
+                    icon: LineIcon::Plus,
+                    shortcut: "",
+                    label: translate("git-stage-all"),
+                    disabled: !operations.stage_all,
+                    danger: false,
+                    onpress: {
+                        let repo_root = repository.repo_root.clone();
+                        move |_| {
+                            let _ = send(&GitStageAllRequest { path: repo_root.clone() });
+                        }
+                    },
+                }
+            }
             HeaderOperationButton {
                 icon: LineIcon::Package,
                 shortcut: "s",

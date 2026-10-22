@@ -14,9 +14,9 @@ use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::manager::{
-    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection,
-    ManagerDetails, ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
-    ManagerSkeleton, ManagerTone, ManagerToolbar, ManagerView, ManagerViewToggle,
+    ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty, ManagerList,
+    ManagerPage, ManagerRow, ManagerSearch, ManagerSkeleton, ManagerTone, ManagerToolbar,
+    ManagerView, ManagerViewToggle,
 };
 use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::components::sheet::SheetHeaderChevron;
@@ -57,15 +57,12 @@ pub(super) fn ProjectList(
     let pending = view.as_ref().is_some_and(|view| view.operation_pending);
     let mut query = use_signal(String::new);
     let mut manager_view = use_signal(ManagerView::default);
-    let mut selected = use_signal(|| None::<String>);
     let needle = query().trim().to_ascii_lowercase();
     let visible = entries
         .iter()
         .filter(|entry| entry.matches(&needle))
         .cloned()
         .collect::<Vec<_>>();
-    let selected_entry =
-        selected().and_then(|path| entries.iter().find(|entry| entry.path == path).cloned());
     rsx! {
         ManagerPage {
             ManagerToolbar {
@@ -82,18 +79,20 @@ pub(super) fn ProjectList(
                     onsearch: move |event: FormEvent| query.set(event.value()),
                     onkeydown: None,
                 }
-                if count > 0 {
-                    ManagerViewToggle {
-                        view: manager_view(),
-                        list_label: translate("tools-view-list"),
-                        grid_label: translate("tools-view-grid"),
-                        onchange: move |view| manager_view.set(view),
-                    }
-                }
                 ProjectAdd { pending }
             }
             div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
-                ManagerList { class: "mx-auto flex w-full max-w-5xl flex-col gap-3".to_string(),
+                ManagerList {
+                    if count > 0 {
+                        ManagerControls {
+                            ManagerViewToggle {
+                                view: manager_view(),
+                                list_label: translate("tools-view-list"),
+                                grid_label: translate("tools-view-grid"),
+                                onchange: move |view| manager_view.set(view),
+                            }
+                        }
+                    }
                     if view.is_none() && error.is_empty() {
                         ManagerSkeleton {}
                     } else if !error.is_empty() {
@@ -116,15 +115,10 @@ pub(super) fn ProjectList(
                                     key: "project-{entry.path}",
                                     entry: entry.clone(),
                                     view: manager_view(),
-                                    selected: selected().as_deref() == Some(entry.path.as_str()),
-                                    onselect: move |path| selected.set(Some(path)),
                                 }
                             }
                         }
                     }
-                }
-                if let Some(entry) = selected_entry {
-                    ProjectDetails { entry, onclose: move |_| selected.set(None) }
                 }
             }
         }
@@ -142,14 +136,9 @@ impl ProjectEntry {
 }
 
 #[component]
-fn ProjectItem(
-    entry: ProjectEntry,
-    view: ManagerView,
-    selected: bool,
-    onselect: EventHandler<String>,
-) -> Element {
-    let path = entry.path.clone();
-    let select = move |_| onselect.call(path.clone());
+fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
+    let url = entry.url.clone();
+    let select = move |_| ProjectEntry::open(url.clone());
     let icon = rsx! {
         TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-5".to_string() }
     };
@@ -157,7 +146,7 @@ fn ProjectItem(
     if view == ManagerView::Grid {
         return rsx! {
             ManagerCard {
-                selected,
+                selected: false,
                 onselect: select,
                 icon,
                 title: entry.name,
@@ -169,7 +158,7 @@ fn ProjectItem(
     }
     rsx! {
         ManagerRow {
-            selected,
+            selected: false,
             onselect: select,
             icon,
             title: entry.name,
@@ -185,12 +174,6 @@ fn ProjectMeta(entry: ProjectEntry) -> Element {
     let changes = format!("{} {}", entry.uncommitted, translate("git-changes"));
     let sessions = format!("{} {}", entry.sessions, translate("sessions-title"));
     rsx! {
-        if !entry.branch.is_empty() {
-            ManagerBadge { uppercase: false,
-                LineIconView { icon: LineIcon::GitBranch, class: "size-3" }
-                span { "{entry.branch}" }
-            }
-        }
         if entry.uncommitted > 0 {
             ManagerBadge { tone: ManagerTone::Amber,
                 span { "{changes}" }
@@ -206,51 +189,6 @@ fn ProjectMeta(entry: ProjectEntry) -> Element {
                 span { "{sessions}" }
             }
         }
-        if entry.is_worktree {
-            ManagerBadge { span { {translate("layout-worktree")} } }
-        }
-    }
-}
-
-#[component]
-fn ProjectDetails(entry: ProjectEntry, onclose: EventHandler<MouseEvent>) -> Element {
-    let open_url = entry.url.clone();
-    let git_url = vmux_git::GitUrl::from_path(Path::new(&entry.path));
-    rsx! {
-        ManagerDetails {
-            icon: rsx! {
-                TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-7".to_string() }
-            },
-            title: entry.name.clone(),
-            subtitle: entry.source.clone(),
-            onclose,
-            actions: rsx! {
-                if let Some(url) = git_url {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Secondary,
-                        onclick: move |_| ProjectEntry::open(url.clone()),
-                        {translate("git-title")}
-                    }
-                }
-                ManagerButton {
-                    variant: ManagerButtonVariant::Primary,
-                    onclick: move |_| ProjectEntry::open(open_url.clone()),
-                    {translate("common-open")}
-                }
-            },
-            div { class: "space-y-4",
-                div { class: "flex flex-wrap gap-1.5", ProjectMeta { entry: entry.clone() } }
-                ProjectDetailField { label: translate("git-branches"), value: entry.branch.clone() }
-                ProjectDetailField { label: translate("agent-project-branch-change"), value: entry.base_ref.clone() }
-                ProjectDetailField { label: translate("git-changes"), value: entry.uncommitted.to_string() }
-                ProjectDetailField { label: translate("composer-commits-ahead"), value: entry.ahead.to_string() }
-                ProjectDetailField { label: translate("sessions-title"), value: entry.sessions.to_string() }
-                div { class: "break-all rounded-lg bg-foreground/[0.035] p-3 font-mono text-[10px] leading-4 text-muted-foreground/70",
-                    title: "{entry.path}",
-                    "{entry.path}"
-                }
-            }
-        }
     }
 }
 
@@ -260,19 +198,6 @@ impl ProjectEntry {
             value: url,
             open: Some(OpenTarget::InPlace),
         });
-    }
-}
-
-#[component]
-fn ProjectDetailField(label: String, value: String) -> Element {
-    if value.is_empty() {
-        return rsx! {};
-    }
-    rsx! {
-        div { class: "flex items-center justify-between gap-3 text-xs",
-            span { class: "text-muted-foreground/70", "{label}" }
-            span { class: "min-w-0 truncate text-right text-foreground/85", "{value}" }
-        }
     }
 }
 

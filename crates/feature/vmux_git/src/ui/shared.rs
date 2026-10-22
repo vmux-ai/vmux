@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
-use vmux_ui::components::checkbox::Checkbox;
+use vmux_ui::components::checkbox::{Checkbox, CheckboxTone};
 use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
@@ -289,7 +289,7 @@ pub fn DiffView(
                         .is_some_and(|key| viewed_snapshot.contains(key));
                     let viewed_key = collapse_key.clone();
                     let section_class = if file_path.is_some() {
-                        "mt-3 min-w-max overflow-hidden rounded-lg bg-card first:mt-0"
+                        "mt-3 w-full min-w-0 rounded-lg bg-card first:mt-0"
                     } else {
                         "contents"
                     };
@@ -298,12 +298,13 @@ pub fn DiffView(
                             if let Some(file_path) = file_path {
                                 div {
                                     id: "git-diff-file-{file_path}",
-                                    class: "sticky top-0 z-10 flex h-9 min-w-full scroll-mt-2 items-center gap-2 bg-card px-3 font-sans text-[11px] font-semibold text-foreground",
+                                    class: "sticky left-0 top-0 z-10 flex h-9 w-full min-w-0 scroll-mt-2 items-center gap-2 rounded-t-lg bg-card px-3 font-sans text-[11px] font-semibold text-foreground",
                                     TypeIcon { path: file_path.clone(), is_dir: false, class: "size-3.5 shrink-0" }
                                     span { class: "min-w-0 flex-1 truncate font-mono", "{file_path}" }
                                     label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
                                         Checkbox {
                                             checked: viewed,
+                                            tone: CheckboxTone::Neutral,
                                             aria_label: translate("git-viewed"),
                                             on_checked_change: move |checked| {
                                                 let Some(key) = viewed_key.as_ref() else {
