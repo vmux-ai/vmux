@@ -84,8 +84,8 @@ fn update(
         return;
     }
     search.query.clone_from(&request.query);
-    queue_files(target, &mut search, &mut snapshot, &mut commands);
-    queue_history(target, &mut search, &mut snapshot, &mut commands);
+    queue_files(target, &search, &mut snapshot, &mut commands);
+    queue_history(target, &search, &mut snapshot, &mut commands);
 }
 
 fn receive_files(
