@@ -248,7 +248,7 @@ pub fn DiffView(
             key: "{identity}",
             id: "git-diff-viewport",
             onmounted: move |event: Event<MountedData>| scroll_container.set(Some(event.data())),
-            class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
+            class: if visible { "min-h-0 flex-1 scroll-smooth overflow-auto bg-transparent font-mono text-[11px] leading-5 motion-reduce:scroll-auto" } else { "hidden" },
             onscroll: move |event| {
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                 let preload_distance = event.client_height().saturating_mul(2).max(640);
@@ -289,7 +289,7 @@ pub fn DiffView(
                         .is_some_and(|key| viewed_snapshot.contains(key));
                     let viewed_key = collapse_key.clone();
                     let section_class = if file_path.is_some() {
-                        "mt-3 w-full min-w-0 rounded-lg bg-card first:mt-0"
+                        "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-card first:mt-0"
                     } else {
                         "contents"
                     };
