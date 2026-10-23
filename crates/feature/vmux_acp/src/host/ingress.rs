@@ -68,17 +68,23 @@ pub(super) fn add(app: &mut App) {
 fn route_messages(
     mut inbound: MessageReader<AgentMessagesSnapshot>,
     mut snapshots: MessageWriter<SnapshotReceived>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
+    sessions: Query<(Entity, &SessionId, Has<vmux_session::TranscriptLoading>), With<Session>>,
+    transcripts: Transcripts,
     mut commands: Commands,
 ) {
     for inbound in inbound.read() {
-        if let Some((session, _)) = sessions
+        let Some((session, _, loading)) = sessions
             .iter()
-            .find(|(_, session_id)| session_id.0 == inbound.sid)
+            .find(|(_, session_id, _)| session_id.0 == inbound.sid)
+        else {
+            continue;
+        };
+        commands
+            .entity(session)
+            .remove::<vmux_session::TranscriptLoading>();
+        if inbound.messages.is_empty() && !loading && !transcripts.get(session).messages.is_empty()
         {
-            commands
-                .entity(session)
-                .remove::<vmux_session::TranscriptLoading>();
+            continue;
         }
         snapshots.write(SnapshotReceived {
             session: SessionId(inbound.sid.clone()),
@@ -298,5 +304,42 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].session.0, "session-1");
+    }
+
+    #[test]
+    fn empty_snapshot_preserves_persisted_transcript() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        add(&mut app);
+        let session_id = SessionId("session-1".into());
+        let session = app.world_mut().spawn((Session, session_id.clone())).id();
+        app.world_mut().spawn((
+            vmux_session::ConversationEvent,
+            vmux_session::EventIdentity {
+                event_id: vmux_api::session::EventId::new("event-1"),
+                actor_id: vmux_api::session::MemberId::local(&session_id),
+                client_op_id: None,
+                sequence: 1,
+                reply_to: None,
+            },
+            vmux_session::MessageContent(Message::user("persisted")),
+            vmux_ecs::CreatedAt(1),
+            ChildOf(session),
+        ));
+        app.world_mut()
+            .resource_mut::<Messages<AgentMessagesSnapshot>>()
+            .write(AgentMessagesSnapshot {
+                sid: session_id.0,
+                messages: Vec::new(),
+            });
+
+        app.update();
+
+        let snapshots = app
+            .world_mut()
+            .resource_mut::<Messages<SnapshotReceived>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert!(snapshots.is_empty());
     }
 }

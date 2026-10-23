@@ -1,10 +1,20 @@
 use dioxus::prelude::*;
 
 #[component]
-pub fn PageShell(children: Element) -> Element {
+pub fn PageShell(
+    children: Element,
+    #[props(default)] onkeydown: Option<EventHandler<KeyboardEvent>>,
+    #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
+) -> Element {
     rsx! {
         main {
-            class: "flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-sans text-sm",
+            class: "flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-sans text-sm outline-none",
+            onkeydown: move |event| {
+                if let Some(handler) = &onkeydown {
+                    handler.call(event);
+                }
+            },
+            ..attributes,
             {children}
         }
     }

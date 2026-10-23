@@ -286,7 +286,7 @@ fn open(
         let default_cwd = if matches!(route, Route::Manager) {
             PathBuf::new()
         } else {
-            let tab = workspace.tab(task.stack);
+            let tab = opener.tab(task.stack);
             let tab_dir = tab
                 .as_ref()
                 .and_then(|(_, startup_dir)| startup_dir.clone());
@@ -579,6 +579,39 @@ mod tests {
         let target = AgentChatTarget::parse(&url).unwrap();
 
         assert_eq!(target.url, url);
+    }
+
+    #[test]
+    fn opening_session_rebinds_the_ancestor_tab_workspace() {
+        let mut world = World::new();
+        world.insert_resource(AppSettings::default());
+        let tab = world
+            .spawn((
+                Tab {
+                    startup_dir: Some("/old".into()),
+                    ..Default::default()
+                },
+                TabWorkspace {
+                    project_dir: "/old".into(),
+                },
+            ))
+            .id();
+        let stack = world.spawn(ChildOf(tab)).id();
+
+        world
+            .run_system_once(move |mut opener: PageOpener| {
+                opener.bind_workspace(stack, Path::new("/project"));
+            })
+            .unwrap();
+
+        assert_eq!(
+            world.get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some("/project")
+        );
+        assert_eq!(
+            world.get::<TabWorkspace>(tab).unwrap().project_dir,
+            "/project"
+        );
     }
 
     #[test]

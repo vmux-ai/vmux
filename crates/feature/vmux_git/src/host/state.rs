@@ -288,7 +288,8 @@ fn page_ready(
     let Ok(page) = pages.get(entity) else {
         return;
     };
-    let projects = page.url.trim_end_matches('/') == "vmux://projects";
+    let projects = page.url.trim_end_matches('/') == "vmux://projects"
+        || page.url.starts_with("vmux://projects/");
     if !crate::GitUrl::is_page(&page.url) && !projects {
         return;
     }
@@ -307,7 +308,8 @@ type ChangedGitPages<'w, 's> = Query<
 
 fn cleanup_inactive_views(pages: ChangedGitPages, mut commands: Commands) {
     for (entity, page) in &pages {
-        let projects = page.url.trim_end_matches('/') == "vmux://projects";
+        let projects = page.url.trim_end_matches('/') == "vmux://projects"
+            || page.url.starts_with("vmux://projects/");
         if !crate::GitUrl::is_page(&page.url) && !projects {
             commands.entity(entity).remove::<GitState>();
         }
@@ -518,6 +520,35 @@ mod tests {
         let state = app.world().get::<GitState>(entity).unwrap();
         assert_eq!(state.snapshot.workspace, "/workspace");
         assert!(state.snapshot.loading);
+    }
+
+    #[test]
+    fn project_detail_page_owns_git_state() {
+        let mut app = App::new();
+        app.add_observer(page_ready)
+            .add_systems(Update, cleanup_inactive_views);
+        let entity = app
+            .world_mut()
+            .spawn(vmux_ecs::PageMetadata {
+                url: "vmux://projects/github.com/vmux-ai/vmux".into(),
+                ..Default::default()
+            })
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview: entity,
+            payload: PageReady {},
+        });
+        app.update();
+
+        assert!(app.world().entity(entity).contains::<GitState>());
+        app.world_mut()
+            .entity_mut(entity)
+            .get_mut::<vmux_ecs::PageMetadata>()
+            .unwrap()
+            .title = "vmux".into();
+        app.update();
+        assert!(app.world().entity(entity).contains::<GitState>());
     }
 
     #[test]

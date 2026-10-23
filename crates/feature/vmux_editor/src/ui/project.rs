@@ -9,6 +9,10 @@ use vmux_git::state::GitUiState;
 use vmux_session::event::ResumeSession;
 use vmux_session::state::SessionScopeUiState;
 use vmux_session::{SessionAge, SessionSummary, SessionSummaryProjection, StageSummary};
+use vmux_ui::components::alert_dialog::{
+    AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
+    AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
+};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
@@ -22,16 +26,18 @@ use vmux_ui::components::manager::{
 use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
+use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_ui_state};
-use vmux_ui::i18n::{translate, translate_humanized};
+use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use super::project_manager::{ProjectControls, ProjectFilterMenu, ProjectPresentation};
 use super::state::FileUi;
 use crate::project::{
     ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
-    ProjectEntry, ProjectImportRequest, ProjectUiState, ProjectView,
+    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectUiState,
+    ProjectView,
 };
 
 #[component]
@@ -39,7 +45,7 @@ pub(super) fn ProjectPage() -> Element {
     let state = use_ui_state::<ProjectUiState>().state;
     let snapshot = state();
     match snapshot.view {
-        ProjectView::Detail => rsx! { ProjectDashboard {} },
+        ProjectView::Detail(detail) => rsx! { ProjectDashboard { detail } },
         ProjectView::Loading => rsx! { ProjectList { view: None } },
         ProjectView::Catalog(view) => rsx! { ProjectList { view: Some(view) } },
         ProjectView::Error(error) => rsx! { ProjectList { error } },
@@ -223,29 +229,129 @@ fn ProjectMeta(entry: ProjectEntry) -> Element {
 
 #[component]
 fn ProjectActions(entry: ProjectEntry) -> Element {
+    let mut open = use_signal(|| false);
+    let mut confirm_open = use_signal(|| false);
     let archived = entry.archived;
-    let label = if archived {
+    let archive_label = if archived {
         translate("project-restore")
     } else {
         translate("project-archive")
     };
+    let resume_url = entry.url.clone();
+    let archive_url = entry.url.clone();
+    let delete_url = entry.url.clone();
+    let name = entry.name.clone();
+    let confirm = use_memo(move || Some(confirm_open()));
+    rsx! {
+        Dropdown {
+            open: open(),
+            class: "shrink-0".to_string(),
+            on_dismiss: move |_| open.set(false),
+            Tooltip { label: translate("sessions-actions"),
+                button {
+                    r#type: "button",
+                    class: if open() {
+                        "flex size-7 items-center justify-center rounded-md bg-foreground/[0.08] text-foreground"
+                    } else {
+                        "flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                    },
+                    aria_label: translate("sessions-actions"),
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        open.set(!open());
+                    },
+                    LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5".to_string() }
+                }
+            }
+            if open() {
+                div {
+                    class: "absolute right-0 top-8 z-30 w-40 rounded-[var(--radius)] bg-background p-1 shadow-xl",
+                    onclick: move |event| event.stop_propagation(),
+                    ProjectActionMenuItem {
+                        icon: LineIcon::MessagesRound,
+                        label: translate("sessions-resume"),
+                        danger: false,
+                        onclick: move |_| {
+                            open.set(false);
+                            ProjectEntry::open(resume_url.clone());
+                        },
+                    }
+                    ProjectActionMenuItem {
+                        icon: if archived { LineIcon::RotateCcw } else { LineIcon::Archive },
+                        label: archive_label.clone(),
+                        danger: false,
+                        onclick: move |_| {
+                            open.set(false);
+                            let _ = send(&ProjectArchiveRequest {
+                                url: archive_url.clone(),
+                                archived: !archived,
+                            });
+                        },
+                    }
+                    ProjectActionMenuItem {
+                        icon: LineIcon::Trash,
+                        label: translate("common-delete"),
+                        danger: true,
+                        onclick: move |_| {
+                            open.set(false);
+                            confirm_open.set(true);
+                        },
+                    }
+                }
+            }
+        }
+        AlertDialogRoot {
+            open: Into::<ReadSignal<Option<bool>>>::into(confirm),
+            on_open_change: Callback::new(move |next| confirm_open.set(next)),
+            default_open: false,
+            attributes: vec![],
+            AlertDialogContent { attributes: vec![],
+                AlertDialogTitle { attributes: vec![], {translate("common-delete")} }
+                AlertDialogDescription { attributes: vec![],
+                    {translate_with(
+                        "editor-delete-confirm",
+                        &[("name", TranslationValue::String(&name))],
+                    )}
+                }
+                AlertDialogActions { attributes: vec![],
+                    AlertDialogCancel {
+                        attributes: vec![],
+                        on_click: Some(EventHandler::new(move |_| confirm_open.set(false))),
+                        {translate("common-cancel")}
+                    }
+                    AlertDialogAction {
+                        attributes: vec![],
+                        on_click: Some(EventHandler::new(move |_| {
+                            confirm_open.set(false);
+                            let _ = send(&ProjectDeleteRequest { url: delete_url.clone() });
+                        })),
+                        {translate("common-delete")}
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProjectActionMenuItem(
+    icon: LineIcon,
+    label: String,
+    danger: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let class = if danger {
+        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-ansi-1 hover:bg-ansi-1/10"
+    } else {
+        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground"
+    };
     rsx! {
         button {
             r#type: "button",
-            class: "flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
-            title: label.clone(),
-            aria_label: label,
-            onclick: move |event| {
-                event.stop_propagation();
-                let _ = send(&ProjectArchiveRequest {
-                    url: entry.url.clone(),
-                    archived: !archived,
-                });
-            },
-            LineIconView {
-                icon: if archived { LineIcon::RotateCcw } else { LineIcon::Archive },
-                class: "size-3.5".to_string(),
-            }
+            class,
+            onclick: move |event| onclick.call(event),
+            LineIconView { icon, class: "size-3.5 shrink-0".to_string() }
+            span { class: "truncate", "{label}" }
         }
     }
 }
@@ -406,36 +512,35 @@ fn ProjectAddItem(
 }
 
 #[component]
-pub(super) fn ProjectDashboard() -> Element {
-    let files = FileUi::use_root();
-    let directory = files.use_value(|state| state.document.directory.as_ref());
-    let root = use_memo(move || {
-        directory
-            .read()
-            .as_ref()
-            .map(|directory| directory.abs_path.clone())
-            .unwrap_or_default()
-    });
-    let project_name = use_memo(move || ProjectPath::name(&root()));
+pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
+    let root = detail.path;
+    let project_name = detail.name;
     let mut requested_git = use_signal(String::new);
+    let requested_root = root.clone();
     use_effect(move || {
-        let root = root();
-        if root.is_empty() || requested_git() == root {
+        if requested_root.is_empty() || requested_git() == requested_root {
             return;
         }
-        requested_git.set(root.clone());
-        let _ = send(&GitRepositoryRequest { path: root });
+        requested_git.set(requested_root.clone());
+        let _ = send(&GitRepositoryRequest {
+            path: requested_root.clone(),
+        });
     });
     let start_url = "vmux://start/".to_string();
+    let header_root = root.clone();
 
     rsx! {
         PageShell {
             PageHeader {
                 div { class: "flex min-h-10 items-center gap-3",
                 div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
-                    TypeIcon { path: root(), is_dir: true, class: "size-5".to_string() }
+                    TypeIcon { path: root.clone(), is_dir: true, class: "size-5".to_string() }
                 }
-                h1 { class: "min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.015em]", title: "{root}", "{project_name}" }
+                div { class: "min-w-0 flex-1",
+                    Tooltip { label: header_root,
+                        h1 { class: "max-w-full truncate text-sm font-semibold tracking-[-0.015em]", "{project_name}" }
+                    }
+                }
                 Button {
                     variant: ButtonVariant::Primary,
                     size: ButtonSize::Sm,
@@ -453,8 +558,8 @@ pub(super) fn ProjectDashboard() -> Element {
             }
             PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
                 ProjectSessionsPanel {}
-                ProjectGitPanel { root: root() }
-                ProjectRecentFilesPanel { root: root() }
+                ProjectGitPanel { root: root.clone() }
+                ProjectRecentFilesPanel { root: root.clone() }
                 ProjectFilesPanel {}
             }
         }
@@ -464,9 +569,19 @@ pub(super) fn ProjectDashboard() -> Element {
 #[component]
 fn ProjectSessionsPanel() -> Element {
     let sessions = use_ui_state::<SessionScopeUiState>();
-    let projection = sessions.use_selector(|state| ProjectSessionList {
-        sessions: state.sessions.iter().take(8).cloned().collect(),
-        stages: state.stages.clone(),
+    let projection = sessions.use_selector(|state| {
+        let now = vmux_ecs::UnixMillis::now().0;
+        ProjectSessionList {
+            sessions: state
+                .sessions
+                .iter()
+                .filter(|session| {
+                    !SessionSummaryProjection::new(session, &state.stages, now).terminal
+                })
+                .cloned()
+                .collect(),
+            stages: state.stages.clone(),
+        }
     });
     rsx! { ProjectSessions { projection: projection() } }
 }
@@ -479,19 +594,33 @@ struct ProjectSessionList {
 
 #[component]
 fn ProjectSessions(projection: ProjectSessionList) -> Element {
+    let mut view = use_signal(ManagerView::default);
     rsx! {
-        ProjectSection { title: translate("sessions-title"), count: projection.sessions.len(),
+        ProjectSection {
+            title: translate("sessions-title"),
+            count: projection.sessions.len(),
+            actions: rsx! {
+                if !projection.sessions.is_empty() {
+                    ManagerViewToggle {
+                        view: view(),
+                        list_label: translate("tools-view-list"),
+                        grid_label: translate("tools-view-grid"),
+                        onchange: move |next| view.set(next),
+                    }
+                }
+            },
             if projection.sessions.is_empty() {
                 div { class: "flex min-h-20 items-center justify-center px-3 text-xs text-muted-foreground",
                     {translate("sessions-inbox-empty")}
                 }
             } else {
-                div { class: "divide-y divide-foreground/[0.055]",
+                ManagerCollection { view: view(), grid_size: ManagerGridSize::Comfortable,
                     for session in projection.sessions {
-                        ProjectSessionRow {
+                        ProjectSessionItem {
                             key: "{session.id}",
                             session,
                             stages: projection.stages.clone(),
+                            view: view(),
                         }
                     }
                 }
@@ -501,7 +630,11 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
 }
 
 #[component]
-fn ProjectSessionRow(session: SessionSummary, stages: Vec<StageSummary>) -> Element {
+fn ProjectSessionItem(
+    session: SessionSummary,
+    stages: Vec<StageSummary>,
+    view: ManagerView,
+) -> Element {
     let projection =
         SessionSummaryProjection::new(&session, &stages, vmux_ecs::UnixMillis::now().0);
     let stage = if projection.stale {
@@ -514,49 +647,86 @@ fn ProjectSessionRow(session: SessionSummary, stages: Vec<StageSummary>) -> Elem
             .unwrap_or_else(|| translate_humanized(&session.stage))
     };
     let age = ProjectTime::label(projection.age);
-    let managed = session.managed;
-    let id = session.id.clone();
-    let kind = session.kind.clone();
-    let sid = session.sid.clone();
-    let cwd = session.cwd.clone();
-    rsx! {
-        button {
-            r#type: "button",
-            class: "group flex w-full min-w-0 items-center gap-3 rounded-md px-3 py-2.5 text-left hover:bg-foreground/[0.035]",
-            onclick: move |_| {
-                if managed {
-                    let url = vmux_session::Route::Session(vmux_session::SessionId(id.clone())).url();
-                    let _ = send(&OpenRequest {
-                        value: url,
-                        open: Some(OpenTarget::InPlace),
-                    });
-                } else {
-                    let _ = send(&ResumeSession {
-                        kind: kind.clone(),
-                        sid: sid.clone(),
-                        cwd: cwd.clone(),
-                    });
-                }
-            },
+    let target = ProjectSessionTarget::from(&session);
+    let icon = rsx! {
             AgentThumbnail {
                 src: (!session.agent_icon.is_empty()).then(|| session.agent_icon.clone()),
                 seed: session.agent.clone(),
                 background: session.agent_color.clone(),
                 alt: session.agent_name.clone(),
-                class: "size-5 text-[6px]".to_string(),
+                class: "size-6 text-[7px]".to_string(),
             }
-            div { class: "min-w-0 flex-1",
-                div { class: "truncate text-xs font-medium text-foreground/90", "{projection.title}" }
-                if !projection.preview.is_empty() {
-                    div { class: "truncate text-[10px] text-muted-foreground/70", "{projection.preview}" }
-                }
-            }
-            span { class: "hidden shrink-0 rounded-full bg-foreground/[0.05] px-2 py-1 text-[9px] text-muted-foreground sm:inline-flex",
-                "{stage}"
-            }
-            time { class: "w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground/65", "{age}" }
-            LineIconView { icon: LineIcon::MessagesRound, class: "size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100".to_string() }
+    };
+    let meta = rsx! {
+        ManagerBadge { tone: ManagerTone::Neutral, uppercase: false,
+            span { "{stage}" }
         }
+        ManagerBadge { tone: ManagerTone::Neutral, uppercase: false,
+            span { "{age}" }
+        }
+    };
+    if view == ManagerView::Grid {
+        return rsx! {
+            ManagerCard {
+                selected: false,
+                icon_surface: false,
+                onselect: move |_| target.open(),
+                icon,
+                title: projection.title,
+                subtitle: projection.preview,
+                meta,
+                actions: rsx! {},
+            }
+        };
+    }
+    rsx! {
+        ManagerRow {
+            selected: false,
+            icon_surface: false,
+            onselect: move |_| target.open(),
+            icon,
+            title: projection.title,
+            subtitle: projection.preview,
+            meta,
+            actions: rsx! {},
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ProjectSessionTarget {
+    managed: bool,
+    id: String,
+    kind: String,
+    sid: String,
+    cwd: String,
+}
+
+impl ProjectSessionTarget {
+    fn from(session: &SessionSummary) -> Self {
+        Self {
+            managed: session.managed,
+            id: session.id.clone(),
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+            cwd: session.cwd.clone(),
+        }
+    }
+
+    fn open(&self) {
+        if self.managed {
+            let url = vmux_session::Route::Session(vmux_session::SessionId(self.id.clone())).url();
+            let _ = send(&OpenRequest {
+                value: url,
+                open: Some(OpenTarget::InPlace),
+            });
+            return;
+        }
+        let _ = send(&ResumeSession {
+            kind: self.kind.clone(),
+            sid: self.sid.clone(),
+            cwd: self.cwd.clone(),
+        });
     }
 }
 
@@ -572,7 +742,8 @@ fn ProjectGitPanel(root: String) -> Element {
             .as_ref()
             .filter(|repository| ProjectPath::same(&repository.repo_root, &selected_root()))
             .cloned(),
-        loading: state.snapshot.loading && state.snapshot.workspace == selected_root(),
+        loading: !selected_root().is_empty()
+            && (state.snapshot.workspace != selected_root() || state.snapshot.loading),
     });
     rsx! {
         ProjectGit {
@@ -700,27 +871,43 @@ fn ProjectRecentFiles(files: Vec<OpenEditorItem>) -> Element {
 fn ProjectFilesPanel() -> Element {
     let files = FileUi::current();
     let directory = files.use_value(|state| state.document.directory.as_ref());
-    let entries = use_memo(move || {
-        directory
-            .read()
-            .as_ref()
-            .map(|directory| directory.entries.clone())
-            .unwrap_or_default()
+    let projection = use_memo(move || {
+        let directory = directory.read();
+        ProjectFilesProjection {
+            loaded: directory.is_some(),
+            entries: directory
+                .as_ref()
+                .map(|directory| directory.entries.clone())
+                .unwrap_or_default(),
+        }
     });
-    rsx! { ProjectFiles { entries: entries() } }
+    rsx! { ProjectFiles { projection: projection() } }
+}
+
+#[derive(Clone, Default, PartialEq)]
+struct ProjectFilesProjection {
+    loaded: bool,
+    entries: Vec<FileDirEntry>,
 }
 
 #[component]
-fn ProjectFiles(entries: Vec<FileDirEntry>) -> Element {
+fn ProjectFiles(projection: ProjectFilesProjection) -> Element {
     let mut expanded = use_signal(|| true);
-    let visible = entries.iter().take(18).cloned().collect::<Vec<_>>();
+    let visible = projection
+        .entries
+        .iter()
+        .take(18)
+        .cloned()
+        .collect::<Vec<_>>();
     rsx! {
         section { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
             div { class: "flex h-10 items-center gap-2 px-3",
                 div { class: "flex min-w-0 flex-1 items-center gap-2",
                     LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                     h2 { class: "truncate text-xs font-semibold", {translate("git-files")} }
-                    span { class: "text-[10px] tabular-nums text-muted-foreground", "{entries.len()}" }
+                    if projection.loaded {
+                        span { class: "text-[10px] tabular-nums text-muted-foreground", "{projection.entries.len()}" }
+                    }
                 }
                 SheetHeaderChevron {
                     expanded: expanded(),
@@ -734,14 +921,22 @@ fn ProjectFiles(entries: Vec<FileDirEntry>) -> Element {
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "min-h-0 overflow-hidden",
-                    div { class: "grid grid-cols-1 gap-px px-1 pb-1 sm:grid-cols-2 lg:grid-cols-3",
-                        for entry in visible {
-                            ProjectFileButton {
-                                key: "file-{entry.path}",
-                                path: entry.path,
-                                name: entry.name,
-                                context: String::new(),
-                                is_dir: entry.is_dir,
+                    if projection.loaded {
+                        div { class: "grid grid-cols-1 gap-px px-1 pb-1 sm:grid-cols-2 lg:grid-cols-3",
+                            for entry in visible {
+                                ProjectFileButton {
+                                    key: "file-{entry.path}",
+                                    path: entry.path,
+                                    name: entry.name,
+                                    context: String::new(),
+                                    is_dir: entry.is_dir,
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "grid grid-cols-1 gap-2 px-3 pb-3 sm:grid-cols-2 lg:grid-cols-3",
+                            for index in 0..6 {
+                                Skeleton { key: "project-file-skeleton-{index}", class: "h-8 rounded-md bg-foreground/[0.045]" }
                             }
                         }
                     }
@@ -775,7 +970,12 @@ fn ProjectFileButton(path: String, name: String, context: String, is_dir: bool) 
 }
 
 #[component]
-fn ProjectSection(title: String, count: usize, children: Element) -> Element {
+fn ProjectSection(
+    title: String,
+    count: usize,
+    #[props(default = rsx! {})] actions: Element,
+    children: Element,
+) -> Element {
     rsx! {
         section { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
             header { class: "flex h-10 items-center gap-2 px-3",
@@ -783,6 +983,8 @@ fn ProjectSection(title: String, count: usize, children: Element) -> Element {
                 if count > 0 {
                     span { class: "text-[10px] tabular-nums text-muted-foreground", "{count}" }
                 }
+                div { class: "flex-1" }
+                {actions}
             }
             {children}
         }
@@ -810,14 +1012,6 @@ impl ProjectPath {
             || path
                 .strip_prefix(root)
                 .is_some_and(|relative| relative.starts_with('/'))
-    }
-
-    fn name(path: &str) -> String {
-        Self::clean(path)
-            .rsplit('/')
-            .find(|part| !part.is_empty())
-            .unwrap_or(path)
-            .to_string()
     }
 }
 

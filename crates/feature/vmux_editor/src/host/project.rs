@@ -17,7 +17,8 @@ use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
     ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
-    ProjectEntry, ProjectImportRequest, ProjectRoute, ProjectUiState, ProjectView,
+    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectRoute,
+    ProjectUiState, ProjectView,
 };
 
 pub(super) struct ProjectPagePlugin;
@@ -30,13 +31,18 @@ impl Plugin for ProjectPagePlugin {
                 ProjectImportRequest,
                 ProjectCloneRequest,
                 ProjectArchiveRequest,
+                ProjectDeleteRequest,
             )>::default())
             .add_observer(create)
             .add_observer(import)
             .add_observer(clone)
             .add_observer(archive)
+            .add_observer(delete)
             .add_systems(PreStartup, prewarm)
-            .add_systems(Update, (queue, finish_catalogs, finish_imports).chain())
+            .add_systems(
+                Update,
+                (queue, finish_catalogs, finish_imports, finish_deletes).chain(),
+            )
             .add_systems(
                 PostUpdate,
                 (finish_repository_operations, sync_session_counts).chain(),
@@ -157,6 +163,9 @@ impl ProjectOperationPages<'_, '_> {
 #[derive(Component)]
 struct ProjectImportTask(Task<Result<(), String>>);
 
+#[derive(Component)]
+struct ProjectDeleteTask(Task<Result<(), String>>);
+
 #[derive(Default, Serialize, Deserialize)]
 struct ProjectArchive {
     projects: BTreeSet<String>,
@@ -271,6 +280,38 @@ impl ImportedProject {
             }
         }
         Err(vmux_ui::i18n::translate("project-import-name-conflict"))
+    }
+}
+
+struct ProjectDeletion {
+    path: PathBuf,
+    imported: bool,
+}
+
+impl ProjectDeletion {
+    fn resolve(root: &Path, url: &str) -> Result<Self, String> {
+        let root = root.canonicalize().map_err(|error| error.to_string())?;
+        let path = ProjectRoute::route_path(url, &root)
+            .ok_or_else(|| vmux_ui::i18n::translate("error-page-not-found"))??;
+        if path == root {
+            return Err(vmux_ui::i18n::translate("error-page-not-found"));
+        }
+        ProjectRoute::resolve(url, &root)
+            .ok_or_else(|| vmux_ui::i18n::translate("error-page-not-found"))??;
+        let imported = path.parent() == Some(root.join("imported").as_path())
+            && std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink());
+        if !imported && !path.starts_with(&root) {
+            return Err(vmux_ui::i18n::translate("error-page-not-found"));
+        }
+        Ok(Self { path, imported })
+    }
+
+    fn remove(self) -> Result<(), String> {
+        if self.imported {
+            std::fs::remove_file(self.path).map_err(|error| error.to_string())
+        } else {
+            std::fs::remove_dir_all(self.path).map_err(|error| error.to_string())
+        }
     }
 }
 
@@ -494,20 +535,67 @@ fn archive(
     }
 }
 
+fn delete(
+    trigger: On<UiInput<ProjectDeleteRequest>>,
+    projects: vmux_ecs::profile::Projects,
+    pages: ProjectOperationPages,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    let Some(pending) = pages.for_page(webview, root) else {
+        return;
+    };
+    let deletion = match ProjectDeletion::resolve(root, &trigger.event().payload.url) {
+        Ok(deletion) => deletion,
+        Err(error) => {
+            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                webview,
+                &ProjectUiState {
+                    view: ProjectView::Error(error),
+                },
+            ));
+            return;
+        }
+    };
+    let mut state = pages.pending_state(webview);
+    if let ProjectView::Catalog(catalog) = &mut state.view {
+        catalog
+            .entries
+            .retain(|entry| entry.url != trigger.event().payload.url);
+    }
+    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        webview, &state,
+    ));
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let result = deletion.remove();
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        result
+    });
+    commands.spawn((pending, ProjectDeleteTask(task)));
+}
+
 fn queue(
-    pages: Query<(Entity, &vmux_ecs::PageMetadata), Changed<vmux_ecs::PageMetadata>>,
+    mut pages: Query<(Entity, &mut vmux_ecs::PageMetadata), Changed<vmux_ecs::PageMetadata>>,
     states: Query<&vmux_ecs::UiState<ProjectUiState>>,
     mut revisions: Query<&mut ProjectPageRevision>,
     projects: vmux_ecs::profile::Projects,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (entity, page) in &pages {
-        if !ProjectRoute::is_page(&page.url) {
+    for (entity, mut page) in &mut pages {
+        let url = page.url.clone();
+        if !ProjectRoute::is_page(&url) {
             let Ok(mut revision) = revisions.get_mut(entity) else {
                 continue;
             };
-            if revision.advance_to(&page.url).is_none() {
+            if revision.advance_to(&url).is_none() {
                 continue;
             }
             commands.entity(entity).remove::<ProjectCatalogTask>();
@@ -519,7 +607,7 @@ fn queue(
         }
         let revision = match revisions.get_mut(entity) {
             Ok(mut revision) => {
-                let Some(revision) = revision.advance_to(&page.url) else {
+                let Some(revision) = revision.advance_to(&url) else {
                     continue;
                 };
                 revision
@@ -527,7 +615,7 @@ fn queue(
             Err(_) => {
                 commands
                     .entity(entity)
-                    .insert(ProjectPageRevision::new(&page.url));
+                    .insert(ProjectPageRevision::new(&url));
                 1
             }
         };
@@ -543,14 +631,24 @@ fn queue(
                 continue;
             }
         };
-        if !ProjectRoute::is_root(&page.url) {
-            let (state, cwd) = match ProjectRoute::resolve(&page.url, &root) {
-                Some(Ok(path)) => (
-                    ProjectUiState {
-                        view: ProjectView::Detail,
-                    },
-                    Some(path),
-                ),
+        if !ProjectRoute::is_root(&url) {
+            let (state, cwd) = match ProjectRoute::resolve(&url, &root) {
+                Some(Ok(path)) => {
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                    page.title.clone_from(&name);
+                    (
+                        ProjectUiState {
+                            view: ProjectView::Detail(ProjectDetailView {
+                                name,
+                                path: path.to_string_lossy().into_owned(),
+                            }),
+                        },
+                        Some(path),
+                    )
+                }
                 Some(Err(error)) => (
                     ProjectUiState {
                         view: ProjectView::Error(error),
@@ -569,6 +667,7 @@ fn queue(
             ));
             continue;
         }
+        page.title = vmux_ui::i18n::translate("layout-projects");
         commands.trigger(ScopeProjectionRequest {
             webview: entity,
             cwd: None,
@@ -590,6 +689,45 @@ fn queue(
         commands
             .entity(entity)
             .insert(ProjectCatalogTask::spawn(root, revision, wake));
+    }
+}
+
+fn finish_deletes(
+    mut pending: Query<(Entity, &PendingProjectOperation, &mut ProjectDeleteTask)>,
+    pages: Query<(&vmux_ecs::PageMetadata, &ProjectPageRevision)>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, operation, mut task) in &mut pending {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        let current = pages.get(operation.webview).is_ok_and(|(page, revision)| {
+            ProjectRoute::is_root(&page.url) && revision.value == operation.revision
+        });
+        if current {
+            match result {
+                Ok(()) => {
+                    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+                    commands
+                        .entity(operation.webview)
+                        .insert(ProjectCatalogTask::spawn(
+                            operation.root.clone(),
+                            operation.revision,
+                            wake,
+                        ));
+                }
+                Err(error) => {
+                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                        operation.webview,
+                        &ProjectUiState {
+                            view: ProjectView::Error(error),
+                        },
+                    ));
+                }
+            }
+        }
+        commands.entity(entity).despawn();
     }
 }
 
@@ -990,6 +1128,39 @@ mod tests {
         };
 
         assert!(catalog.entries.is_empty());
+    }
+
+    #[test]
+    fn deleting_imported_project_removes_only_the_managed_link() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        std::fs::create_dir(external.path().join(".git")).unwrap();
+        let imports = root.path().join("imported");
+        std::fs::create_dir(&imports).unwrap();
+        let link = imports.join("external");
+        std::os::unix::fs::symlink(external.path(), &link).unwrap();
+
+        ProjectDeletion::resolve(root.path(), "vmux://projects/imported/external")
+            .unwrap()
+            .remove()
+            .unwrap();
+
+        assert!(std::fs::symlink_metadata(link).is_err());
+        assert!(external.path().is_dir());
+    }
+
+    #[test]
+    fn deleting_managed_project_removes_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("github.com/vmux-ai/vmux");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+
+        ProjectDeletion::resolve(root.path(), "vmux://projects/github.com/vmux-ai/vmux")
+            .unwrap()
+            .remove()
+            .unwrap();
+
+        assert!(!project.exists());
     }
 
     #[test]

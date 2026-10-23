@@ -140,6 +140,31 @@ impl DirectoryPicker {
     }
 }
 
+struct SessionProject;
+
+impl SessionProject {
+    fn fallback(path: &Path, managed: bool) -> String {
+        if !managed {
+            return String::new();
+        }
+        for ancestor in path.ancestors() {
+            if ancestor
+                .file_name()
+                .is_some_and(|name| name == ".worktrees")
+            {
+                return ancestor
+                    .parent()
+                    .and_then(Path::file_name)
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+            }
+        }
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+}
+
 #[derive(SystemParam)]
 struct CatalogViews<'w, 's> {
     managers: Query<'w, 's, Option<&'static PageMetadata>, With<SessionManagerView>>,
@@ -498,7 +523,7 @@ fn sync_repositories(
         let paths = catalog
             .sessions
             .iter()
-            .filter(|session| session.managed)
+            .filter(|session| !session.cwd.is_empty())
             .map(|session| PathBuf::from(&session.cwd))
             .collect::<Vec<_>>();
         for owner in &active {
@@ -508,13 +533,9 @@ fn sync_repositories(
     let mut sessions = Vec::with_capacity(catalog.sessions.len());
     for session in &catalog.sessions {
         let path = Path::new(&session.cwd);
-        let info = if session.managed {
-            cache
-                .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().snapshot(path))
-        } else {
-            None
-        };
+        let info = cache
+            .as_mut()
+            .and_then(|cache| cache.bypass_change_detection().snapshot(path));
         let repository = match info {
             Some(info) => SessionRepository {
                 id: session.id.clone(),
@@ -524,10 +545,7 @@ fn sync_repositories(
             },
             None => SessionRepository {
                 id: session.id.clone(),
-                project: path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
+                project: SessionProject::fallback(path, session.managed),
                 branch: String::new(),
                 url: String::new(),
             },
@@ -913,6 +931,18 @@ mod tests {
         assert_eq!(
             DirectoryPicker::initial_directory(&missing.to_string_lossy(), None),
             cwd
+        );
+    }
+
+    #[test]
+    fn project_fallback_collapses_managed_worktrees_and_ignores_provider_storage() {
+        assert_eq!(
+            SessionProject::fallback(Path::new("/projects/vmux-cloud/.worktrees/vmx-226"), true),
+            "vmux-cloud"
+        );
+        assert_eq!(
+            SessionProject::fallback(Path::new("/Users/example/.vibe"), false),
+            ""
         );
     }
 }

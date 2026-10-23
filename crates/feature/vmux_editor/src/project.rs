@@ -25,8 +25,14 @@ pub enum ProjectView {
     #[default]
     Loading,
     Catalog(ProjectCatalogView),
-    Detail,
+    Detail(ProjectDetailView),
     Error(String),
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ProjectDetailView {
+    pub name: String,
+    pub path: String,
 }
 
 #[vmux_api::ui_state(Default, Eq)]
@@ -61,6 +67,11 @@ pub struct ProjectCloneRequest {
 pub struct ProjectArchiveRequest {
     pub url: String,
     pub archived: bool,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectDeleteRequest {
+    pub url: String,
 }
 
 pub struct ProjectRoute;
@@ -121,7 +132,7 @@ mod tests {
 
 #[cfg(host)]
 impl ProjectRoute {
-    pub fn resolve(
+    pub(crate) fn route_path(
         value: &str,
         root: &std::path::Path,
     ) -> Option<Result<std::path::PathBuf, String>> {
@@ -137,9 +148,9 @@ impl ProjectRoute {
         let relative = value.strip_prefix(Self::ROOT)?;
         let relative = relative.split(['?', '#']).next().unwrap_or_default();
         if relative.is_empty() {
-            return Some(Ok(root.to_path_buf()));
+            return Some(Ok(root));
         }
-        let mut path = root.clone();
+        let mut path = root;
         for encoded in relative.split('/') {
             let Ok(decoded) = percent_encoding::percent_decode_str(encoded).decode_utf8() else {
                 return Some(Err("project URL contains invalid UTF-8".to_string()));
@@ -153,6 +164,23 @@ impl ProjectRoute {
             }
             path.push(component);
         }
+        Some(Ok(path))
+    }
+
+    pub fn resolve(
+        value: &str,
+        root: &std::path::Path,
+    ) -> Option<Result<std::path::PathBuf, String>> {
+        let root = match root.canonicalize() {
+            Ok(root) => root,
+            Err(error) => {
+                return Some(Err(format!("projects directory is unavailable: {error}")));
+            }
+        };
+        let path = match Self::route_path(value, &root)? {
+            Ok(path) => path,
+            Err(error) => return Some(Err(error)),
+        };
         let canonical = match path.canonicalize() {
             Ok(path) => path,
             Err(error) => {

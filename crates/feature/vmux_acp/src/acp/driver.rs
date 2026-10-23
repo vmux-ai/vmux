@@ -52,7 +52,6 @@ use vmux_process::{ProcessCreated, ProcessLaunch, ProcessRuntime, ProcessUpdate}
 use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-pub(super) const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
@@ -1969,7 +1968,7 @@ mod tests {
     }
 
     #[test]
-    fn history_replay_emits_progressive_and_final_snapshots() {
+    fn history_replay_emits_only_the_final_snapshot() {
         let mut harness = ProjectionHarness::new(64);
         harness
             .shared
@@ -1986,14 +1985,10 @@ mod tests {
                 ))),
             )));
         harness.update();
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) = harness
-            .stream
-            .try_recv()
-            .expect("first progressive snapshot")
-        else {
-            panic!("expected snapshot");
-        };
-        assert_eq!(messages.len(), 1);
+        assert!(matches!(
+            harness.stream.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
         for _ in 0..300 {
             harness
                 .shared
@@ -2006,10 +2001,10 @@ mod tests {
         }
         harness.update();
 
-        let snapshots: Vec<ServiceMessage> =
-            std::iter::from_fn(|| harness.stream.try_recv().ok()).collect();
-        assert!(snapshots.len() > 1);
-        assert!(snapshots.len() < 64);
+        assert!(matches!(
+            harness.stream.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
         harness
             .shared
             .projection
@@ -2050,13 +2045,10 @@ mod tests {
                 ))),
             )));
         harness.update();
-
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
-            harness.stream.try_recv().expect("progressive snapshot")
-        else {
-            panic!("expected snapshot");
-        };
-        assert_eq!(messages.len(), 1);
+        assert!(matches!(
+            harness.stream.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
 
         harness
             .shared

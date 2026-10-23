@@ -239,7 +239,6 @@ struct AcpApprovalState(Option<RemoteApproval>);
 #[derive(Component, Default)]
 struct AcpHistoryReplay {
     active: bool,
-    updates: usize,
 }
 
 #[derive(Component)]

@@ -5,9 +5,10 @@ use crate::{
     ShortcutUiState,
 };
 use dioxus::prelude::*;
+use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::BuiltinIconView;
+use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
@@ -31,8 +32,7 @@ pub fn Page() -> Element {
         )],
     );
     rsx! {
-        main {
-            class: "relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground outline-none",
+        PageShell {
             tabindex: "-1",
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {
@@ -54,16 +54,13 @@ pub fn Page() -> Element {
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
-            header { class: "shrink-0 px-5 py-3",
-                div { class: "mx-auto flex w-full max-w-4xl items-center gap-4",
-                    div { class: "min-w-0",
-                        h1 { class: "text-lg font-semibold tracking-tight", {translate("shortcuts-title")} }
-                        p { class: "mt-0.5 text-xs text-muted-foreground", "{subtitle}" }
-                    }
+            PageHeader {
+                div { class: "min-w-0",
+                    h1 { class: "text-base font-semibold tracking-tight", {translate("shortcuts-title")} }
+                    p { class: "mt-0.5 text-xs text-muted-foreground", "{subtitle}" }
                 }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-5 pb-5 [scrollbar-gutter:stable]",
-                div { class: "mx-auto w-full max-w-4xl",
+            PageContent {
                     div {
                         class: "mb-3 flex min-h-12 w-full items-center gap-3 rounded-lg bg-foreground/[0.035] px-3 py-2",
                         aria_label: translate("shortcuts-try-title"),
@@ -90,13 +87,13 @@ pub fn Page() -> Element {
                             button {
                                 r#type: "button",
                                 tabindex: "-1",
-                                class: "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
+                                class: "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground/[0.045] px-2 text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground",
                                 onpointerdown: move |event| event.prevent_default(),
                                 onclick: move |event| {
                                     event.stop_propagation();
                                     let _ = send(&ShortcutProbeClearRequest);
                                 },
-                                kbd { class: "font-mono", "Esc" }
+                                LineIconView { icon: LineIcon::RotateCcw, class: "size-3".to_string() }
                                 {translate("shortcuts-clear")}
                             }
                         }
@@ -119,7 +116,6 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                }
             }
         }
     }
@@ -190,7 +186,7 @@ fn ShortcutGroupView(group: crate::ShortcutGroup) -> Element {
 fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
     let selected = entry.shortcuts.iter().any(|shortcut| shortcut.emphasized);
     let class = if selected {
-        "flex min-h-10 items-center gap-3 bg-primary/[0.08] px-3 py-2"
+        "flex min-h-10 items-center gap-3 bg-foreground/[0.07] px-3 py-2"
     } else {
         "flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-foreground/[0.035]"
     };
@@ -229,7 +225,7 @@ fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
 fn probe_presentation(status: &ShortcutProbeStatus) -> (String, &'static str) {
     match status {
         ShortcutProbeStatus::Idle => (translate("shortcuts-try-hint"), "text-muted-foreground"),
-        ShortcutProbeStatus::Pending => (translate("shortcuts-waiting"), "text-amber-500"),
+        ShortcutProbeStatus::Pending => (translate("shortcuts-waiting"), "text-muted-foreground"),
         ShortcutProbeStatus::Match(names) => {
             let commands = names.join(", ");
             (
@@ -237,11 +233,11 @@ fn probe_presentation(status: &ShortcutProbeStatus) -> (String, &'static str) {
                     "shortcuts-triggered",
                     &[("action", TranslationValue::String(&commands))],
                 ),
-                "text-primary",
+                "text-foreground",
             )
         }
-        ShortcutProbeStatus::Contextual(labels) => (labels.join(", "), "text-sky-500"),
-        ShortcutProbeStatus::Miss => (translate("shortcuts-no-match"), "text-rose-500"),
+        ShortcutProbeStatus::Contextual(labels) => (labels.join(", "), "text-foreground/80"),
+        ShortcutProbeStatus::Miss => (translate("shortcuts-no-match"), "text-ansi-1"),
     }
 }
 
@@ -254,7 +250,7 @@ fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
                     span { class: "text-xs text-muted-foreground/55", "›" }
                 }
                 for keycap in stroke.keycaps() {
-                    kbd { class: "inline-flex min-w-6 items-center justify-center rounded-md bg-primary/10 px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-primary", "{keycap}" }
+                    kbd { class: "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.09] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground", "{keycap}" }
                 }
             }
         }
@@ -263,7 +259,7 @@ fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
 
 fn shortcut_key_class(emphasized: bool) -> &'static str {
     if emphasized {
-        "inline-flex min-w-6 items-center justify-center rounded-md bg-primary/10 px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-primary"
+        "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.09] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground"
     } else {
         "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.06] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground"
     }

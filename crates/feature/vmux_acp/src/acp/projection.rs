@@ -28,7 +28,6 @@ fn project(
                 AcpTranscriptInput::BeginHistoryReplay => {
                     *projector = AcpProjector::default();
                     replay.active = true;
-                    replay.updates = 0;
                 }
                 AcpTranscriptInput::Update(update) => {
                     match update.as_ref() {
@@ -85,16 +84,6 @@ fn project(
                                 shared.0.publish_workspace_change(workspace);
                             }
                         }
-                        replay.updates += 1;
-                        if replay.updates == 1
-                            || replay
-                                .updates
-                                .is_multiple_of(super::driver::HISTORY_REPLAY_SNAPSHOT_INTERVAL)
-                        {
-                            shared
-                                .0
-                                .emit(shared.0.snapshot_message(projector.messages()));
-                        }
                         continue;
                     }
                     for intent in intents {
@@ -150,7 +139,6 @@ fn project(
                         *projector = AcpProjector::default();
                     }
                     replay.active = false;
-                    replay.updates = 0;
                     shared
                         .0
                         .emit(shared.0.snapshot_message(projector.messages()));

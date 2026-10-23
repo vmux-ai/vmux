@@ -9,7 +9,7 @@ use vmux_ecs::{
     ProcessAnchor,
 };
 use vmux_layout::space::FocusedSpace;
-use vmux_layout::tab::Tab;
+use vmux_layout::tab::{Tab, TabWorkspace};
 use vmux_session::host::{ChatView, SessionManagerView};
 use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
 use vmux_setting::AppSettings;
@@ -27,8 +27,6 @@ pub(super) struct AcpCatalog<'w, 's> {
 #[derive(SystemParam)]
 pub(super) struct AgentPageOpenWorkspace<'w, 's> {
     active_space: FocusedSpace<'w, 's>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    tabs: Query<'w, 's, &'static Tab>,
     hierarchy: vmux_layout::space::SpaceHierarchy<'w, 's>,
 }
 
@@ -49,6 +47,9 @@ pub(super) struct PageOpener<'w, 's> {
         With<Session>,
     >,
     children: Query<'w, 's, &'static Children>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    tabs: Query<'w, 's, &'static mut Tab>,
+    workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     queues: Query<'w, 's, &'static mut PromptQueue>,
     transcripts: vmux_session::Transcripts<'w, 's>,
     pub(super) commands: Commands<'w, 's>,
@@ -101,7 +102,9 @@ impl AgentPageOpenWorkspace<'_, '_> {
             .or_else(|| self.active_space.id().map(str::to_string))?;
         vmux_setting::StartupDir::resolve(settings, &space_id, None)
     }
+}
 
+impl PageOpener<'_, '_> {
     pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<String>)> {
         let mut current = entity;
         loop {
@@ -111,9 +114,7 @@ impl AgentPageOpenWorkspace<'_, '_> {
             current = self.child_of.get(current).ok()?.parent();
         }
     }
-}
 
-impl PageOpener<'_, '_> {
     pub(super) fn apply(
         &mut self,
         task: &PageOpenTask,
@@ -188,6 +189,7 @@ impl PageOpener<'_, '_> {
                 } else {
                     stored_cwd
                 };
+                self.bind_workspace(task.stack, &cwd);
                 self.commands.entity(task.stack).insert((
                     EntityTarget::<Session>::new(session_entity),
                     PageMetadata {
@@ -330,6 +332,23 @@ impl PageOpener<'_, '_> {
             if Some(child) != keep {
                 self.commands.entity(child).despawn();
             }
+        }
+    }
+
+    pub(super) fn bind_workspace(&mut self, stack: Entity, cwd: &Path) {
+        let Some((tab_entity, _)) = self.tab(stack) else {
+            return;
+        };
+        let cwd = cwd.to_string_lossy().into_owned();
+        if let Ok(mut tab) = self.tabs.get_mut(tab_entity) {
+            tab.startup_dir = Some(cwd.clone());
+        }
+        if let Ok(mut workspace) = self.workspaces.get_mut(tab_entity) {
+            workspace.project_dir.clone_from(&cwd);
+        } else {
+            self.commands
+                .entity(tab_entity)
+                .insert(TabWorkspace { project_dir: cwd });
         }
     }
 
