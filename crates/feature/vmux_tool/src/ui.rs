@@ -247,8 +247,8 @@ fn ToolManager(state: ToolsUiState) -> Element {
                 ManagerSearch {
                     value: view.query.clone(),
                     placeholder: translate("tools-search"),
-                    onsearch: move |event: FormEvent| {
-                        let _ = send(&ToolsFilterRequest { query: event.value() });
+                    onsearch: move |query: String| {
+                        let _ = send(&ToolsFilterRequest { query });
                     },
                     onkeydown: None,
                 }

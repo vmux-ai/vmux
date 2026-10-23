@@ -20,6 +20,17 @@ impl UnixMillis {
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
 
+#[derive(Component, Reflect)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum CollectionView {
+    #[default]
+    List,
+    Grid,
+}
+
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WindowFullscreen(pub bool);
 

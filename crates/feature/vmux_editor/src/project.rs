@@ -35,9 +35,10 @@ pub struct ProjectDetailView {
     pub path: String,
 }
 
-#[vmux_api::ui_state(Default, Eq)]
+#[vmux_api::ui_state(Default, Eq, version = 2)]
 pub struct ProjectUiState {
     pub view: ProjectView,
+    pub collection_view: vmux_ecs::CollectionView,
 }
 
 #[cfg(host)]
@@ -72,6 +73,11 @@ pub struct ProjectArchiveRequest {
 #[vmux_api::ui_event(Eq)]
 pub struct ProjectDeleteRequest {
     pub url: String,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ProjectCollectionViewRequest {
+    pub view: vmux_ecs::CollectionView,
 }
 
 pub struct ProjectRoute;

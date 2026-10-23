@@ -79,7 +79,7 @@ fn SessionsManagerToolbar(
                 ManagerSearch {
                     value: controls.query(),
                     placeholder: translate("sessions-search"),
-                    onsearch: move |event: FormEvent| controls.set_query(event.value()),
+                    onsearch: move |query: String| controls.set_query(query),
                     onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
                         if event.key() == Key::Backspace && controls.query().is_empty() {
                             controls.pop_filter();
@@ -986,7 +986,7 @@ fn SessionActions(
             }
             if !archived {
                 SessionActionButton {
-                    label: translate("sessions-archive"),
+                    label: translate("common-archive"),
                     visibility: visibility.to_string(),
                     onclick: move |event: MouseEvent| {
                         event.stop_propagation();
@@ -1043,7 +1043,7 @@ fn SessionActionButton(
 
 #[component]
 fn SessionArchiveAllButton(targets: Vec<StageTarget>) -> Element {
-    let label = format!("{} {}", translate("sessions-archive"), targets.len());
+    let label = format!("{} {}", translate("common-archive"), targets.len());
     let mutations = use_context::<SessionStageMutations>();
     rsx! {
         SheetHeaderAction {

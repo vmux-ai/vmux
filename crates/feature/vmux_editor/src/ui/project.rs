@@ -46,9 +46,15 @@ pub(super) fn ProjectPage() -> Element {
     let snapshot = state();
     match snapshot.view {
         ProjectView::Detail(detail) => rsx! { ProjectDashboard { detail } },
-        ProjectView::Loading => rsx! { ProjectList { view: None } },
-        ProjectView::Catalog(view) => rsx! { ProjectList { view: Some(view) } },
-        ProjectView::Error(error) => rsx! { ProjectList { error } },
+        ProjectView::Loading => {
+            rsx! { ProjectList { view: None, collection_view: snapshot.collection_view } }
+        }
+        ProjectView::Catalog(view) => {
+            rsx! { ProjectList { view: Some(view), collection_view: snapshot.collection_view } }
+        }
+        ProjectView::Error(error) => {
+            rsx! { ProjectList { error, collection_view: snapshot.collection_view } }
+        }
     }
 }
 
@@ -56,6 +62,7 @@ pub(super) fn ProjectPage() -> Element {
 pub(super) fn ProjectList(
     #[props(default)] view: Option<ProjectCatalogView>,
     #[props(default)] error: String,
+    collection_view: vmux_ecs::CollectionView,
 ) -> Element {
     let entries = view
         .as_ref()
@@ -63,7 +70,7 @@ pub(super) fn ProjectList(
         .unwrap_or_default();
     let count = entries.len();
     let pending = view.as_ref().is_some_and(|view| view.operation_pending);
-    let controls = ProjectControls::use_state();
+    let controls = ProjectControls::use_state(collection_view);
     let presentation = ProjectPresentation::new(&entries, &controls.query(), &controls.filters());
     rsx! {
         ManagerPage {
@@ -83,7 +90,7 @@ pub(super) fn ProjectList(
                     ManagerSearch {
                         value: controls.query(),
                         placeholder: translate("layout-projects"),
-                        onsearch: move |event: FormEvent| controls.set_query(event.value()),
+                        onsearch: move |query: String| controls.set_query(query),
                         onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
                             if event.key() == Key::Backspace && controls.query().is_empty() {
                                 controls.pop_filter();
@@ -235,7 +242,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
     let archive_label = if archived {
         translate("project-restore")
     } else {
-        translate("project-archive")
+        translate("common-archive")
     };
     let resume_url = entry.url.clone();
     let archive_url = entry.url.clone();
@@ -316,12 +323,16 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                 AlertDialogActions { attributes: vec![],
                     AlertDialogCancel {
                         attributes: vec![],
-                        on_click: Some(EventHandler::new(move |_| confirm_open.set(false))),
+                        on_click: Some(EventHandler::new(move |event: MouseEvent| {
+                            event.stop_propagation();
+                            confirm_open.set(false);
+                        })),
                         {translate("common-cancel")}
                     }
                     AlertDialogAction {
                         attributes: vec![],
-                        on_click: Some(EventHandler::new(move |_| {
+                        on_click: Some(EventHandler::new(move |event: MouseEvent| {
+                            event.stop_propagation();
                             confirm_open.set(false);
                             let _ = send(&ProjectDeleteRequest { url: delete_url.clone() });
                         })),
@@ -389,7 +400,7 @@ fn ProjectAdd(pending: bool) -> Element {
                 disabled: pending,
                 onclick: move |_| open.set(!open()),
                 LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                span { {translate("project-add")} }
+                span { {translate("common-add")} }
             }
             if open() {
                 div { class: "absolute right-0 top-9 z-50 w-72 rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",

@@ -62,8 +62,8 @@ pub fn Page() -> Element {
                 ManagerSearch {
                     value: snapshot.query.clone(),
                     placeholder: translate("extensions-search"),
-                    onsearch: move |event: FormEvent| {
-                        let _ = send(&ExtFilterRequest { query: event.value() });
+                    onsearch: move |query: String| {
+                        let _ = send(&ExtFilterRequest { query });
                     },
                     onkeydown: move |event: KeyboardEvent| {
                         if event.key() == Key::Enter {

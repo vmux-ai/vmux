@@ -11,6 +11,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::*;
 use crate::state::{GitBranchCollection, GitBranchPrompt};
@@ -109,7 +110,7 @@ pub(super) fn BranchesCard(
                 ManagerSearch {
                     value: file_query(),
                     placeholder: translate("common-filter"),
-                    onsearch: move |event: FormEvent| file_query.set(event.value()),
+                    onsearch: move |query: String| file_query.set(query),
                     onkeydown: None,
                 }
             }
@@ -189,6 +190,7 @@ pub(super) fn BranchesCard(
 fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Element {
     let selected = selected_path_bytes == entry.path_bytes;
     let path_bytes = entry.path_bytes.clone();
+    let path = entry.path.clone();
     let row_id = entry.row_id();
     let status_code = entry.change.code();
     let status_class = entry.change.class();
@@ -202,6 +204,7 @@ fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Ele
                 "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
+                ScrollIntoView::nearest_vertical(&format!("git-diff-file-{path}"));
                 let _ = send(&GitBranchFileSelectRequest {
                     path_bytes: path_bytes.clone(),
                 });

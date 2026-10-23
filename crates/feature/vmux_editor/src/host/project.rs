@@ -16,9 +16,9 @@ use vmux_session::host::ScopeProjectionRequest;
 use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
-    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
-    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectRoute,
-    ProjectUiState, ProjectView,
+    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCollectionViewRequest,
+    ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView, ProjectEntry,
+    ProjectImportRequest, ProjectRoute, ProjectUiState, ProjectView,
 };
 
 pub(super) struct ProjectPagePlugin;
@@ -32,12 +32,14 @@ impl Plugin for ProjectPagePlugin {
                 ProjectCloneRequest,
                 ProjectArchiveRequest,
                 ProjectDeleteRequest,
+                ProjectCollectionViewRequest,
             )>::default())
             .add_observer(create)
             .add_observer(import)
             .add_observer(clone)
             .add_observer(archive)
             .add_observer(delete)
+            .add_observer(collection_view)
             .add_systems(PreStartup, prewarm)
             .add_systems(
                 Update,
@@ -398,6 +400,7 @@ fn create(
                 webview,
                 &ProjectUiState {
                     view: ProjectView::Error(error),
+                    ..Default::default()
                 },
             ));
             return;
@@ -467,6 +470,7 @@ fn clone(
                 webview,
                 &ProjectUiState {
                     view: ProjectView::Error(error),
+                    ..Default::default()
                 },
             ));
             return;
@@ -507,6 +511,7 @@ fn archive(
             trigger.event().webview,
             &ProjectUiState {
                 view: ProjectView::Error(error),
+                ..Default::default()
             },
         ));
         return;
@@ -556,6 +561,7 @@ fn delete(
                 webview,
                 &ProjectUiState {
                     view: ProjectView::Error(error),
+                    ..Default::default()
                 },
             ));
             return;
@@ -581,16 +587,50 @@ fn delete(
     commands.spawn((pending, ProjectDeleteTask(task)));
 }
 
+fn collection_view(
+    trigger: On<UiInput<ProjectCollectionViewRequest>>,
+    hierarchy: vmux_layout::space::SpaceHierarchy,
+    mut spaces: Query<&mut vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
+    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Some(space) = hierarchy.get(webview) else {
+        return;
+    };
+    let view = trigger.event().payload.view;
+    if let Ok(mut current) = spaces.get_mut(space) {
+        *current = view;
+    }
+    let mut state = states
+        .get(webview)
+        .ok()
+        .and_then(vmux_ecs::UiState::current)
+        .cloned()
+        .unwrap_or_default();
+    state.collection_view = view;
+    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        webview, &state,
+    ));
+}
+
 fn queue(
     mut pages: Query<(Entity, &mut vmux_ecs::PageMetadata), Changed<vmux_ecs::PageMetadata>>,
     states: Query<&vmux_ecs::UiState<ProjectUiState>>,
     mut revisions: Query<&mut ProjectPageRevision>,
     projects: vmux_ecs::profile::Projects,
+    hierarchy: vmux_layout::space::SpaceHierarchy,
+    collection_views: Query<&vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for (entity, mut page) in &mut pages {
         let url = page.url.clone();
+        let collection_view = hierarchy
+            .get(entity)
+            .and_then(|space| collection_views.get(space).ok())
+            .copied()
+            .unwrap_or_default();
         if !ProjectRoute::is_page(&url) {
             let Ok(mut revision) = revisions.get_mut(entity) else {
                 continue;
@@ -626,6 +666,7 @@ fn queue(
                     entity,
                     &ProjectUiState {
                         view: ProjectView::Error(error),
+                        collection_view,
                     },
                 ));
                 continue;
@@ -645,6 +686,7 @@ fn queue(
                                 name,
                                 path: path.to_string_lossy().into_owned(),
                             }),
+                            collection_view,
                         },
                         Some(path),
                     )
@@ -652,6 +694,7 @@ fn queue(
                 Some(Err(error)) => (
                     ProjectUiState {
                         view: ProjectView::Error(error),
+                        collection_view,
                     },
                     None,
                 ),
@@ -682,6 +725,7 @@ fn queue(
                 entity,
                 &ProjectUiState {
                     view: ProjectView::Loading,
+                    collection_view,
                 },
             ));
         }
@@ -722,6 +766,7 @@ fn finish_deletes(
                         operation.webview,
                         &ProjectUiState {
                             view: ProjectView::Error(error),
+                            ..Default::default()
                         },
                     ));
                 }
@@ -739,6 +784,7 @@ fn finish_catalogs(
         &ProjectPageRevision,
     )>,
     catalog: Res<CatalogSnapshot>,
+    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
     mut commands: Commands,
 ) {
     for (entity, mut task, page, revision) in &mut tasks {
@@ -749,7 +795,12 @@ fn finish_catalogs(
         if !ProjectRoute::is_root(&page.url) || revision.value != task.revision {
             continue;
         }
-        let state = ProjectCatalog::with_session_counts(state, &catalog);
+        let mut state = ProjectCatalog::with_session_counts(state, &catalog);
+        if let Ok(current) = states.get(entity)
+            && let Some(current) = current.current()
+        {
+            state.collection_view = current.collection_view;
+        }
         commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
             entity, &state,
         ));
@@ -815,6 +866,7 @@ fn finish_imports(
                         operation.webview,
                         &ProjectUiState {
                             view: ProjectView::Error(error),
+                            ..Default::default()
                         },
                     ));
                 }
@@ -855,6 +907,7 @@ fn finish_repository_operations(
                         operation.webview,
                         &ProjectUiState {
                             view: ProjectView::Error(error.clone()),
+                            ..Default::default()
                         },
                     ));
                 }
@@ -883,6 +936,7 @@ impl ProjectCatalog {
                 entries,
                 operation_pending: false,
             }),
+            ..Default::default()
         }
     }
 
@@ -1038,6 +1092,7 @@ mod tests {
                 }],
                 operation_pending: false,
             }),
+            ..Default::default()
         };
         let catalog = CatalogSnapshot {
             stages: vec![

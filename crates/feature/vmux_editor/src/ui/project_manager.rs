@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 use vmux_ui::components::filter::{FilterMenu, FilterOption};
 use vmux_ui::components::manager::ManagerView;
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-use crate::project::ProjectEntry;
+use crate::project::{ProjectCollectionViewRequest, ProjectEntry};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct ProjectControls {
@@ -13,10 +14,14 @@ pub(super) struct ProjectControls {
 }
 
 impl ProjectControls {
-    pub(super) fn use_state() -> Self {
+    pub(super) fn use_state(view: vmux_ecs::CollectionView) -> Self {
+        let view = match view {
+            vmux_ecs::CollectionView::List => ManagerView::List,
+            vmux_ecs::CollectionView::Grid => ManagerView::Grid,
+        };
         Self {
             query: use_signal(String::new),
-            view: use_signal(ManagerView::default),
+            view: use_signal(|| view),
             filters: use_signal(ProjectFilters::default),
         }
     }
@@ -35,6 +40,11 @@ impl ProjectControls {
 
     pub(super) fn set_view(mut self, view: ManagerView) {
         self.view.set(view);
+        let view = match view {
+            ManagerView::List => vmux_ecs::CollectionView::List,
+            ManagerView::Grid => vmux_ecs::CollectionView::Grid,
+        };
+        let _ = send(&ProjectCollectionViewRequest { view });
     }
 
     pub(super) fn toggle_filter(mut self) {

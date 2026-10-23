@@ -4,6 +4,8 @@ use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
 use crate::i18n::translate;
 use crate::icon::{LineIcon, LineIconView};
+use crate::platform::Platform;
+use dioxus::core::Task;
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -189,11 +191,25 @@ pub fn ManagerControls(children: Element, #[props(default)] class: String) -> El
 pub fn ManagerSearch(
     value: String,
     placeholder: String,
-    onsearch: EventHandler<FormEvent>,
+    #[props(default)] onsearch: Option<EventHandler<String>>,
+    #[props(default)] ondebounced: Option<EventHandler<String>>,
+    #[props(default = 150)] debounce_ms: u32,
     onkeydown: Option<EventHandler<KeyboardEvent>>,
     #[props(default = rsx! {})] prefix: Element,
     #[props(default = rsx! {})] suffix: Element,
 ) -> Element {
+    let mut draft = use_signal(|| value.clone());
+    let mut pending = use_signal(|| None::<Task>);
+    use_effect(use_reactive!(|value| {
+        if *draft.peek() != value {
+            draft.set(value);
+        }
+    }));
+    use_drop(move || {
+        if let Some(task) = pending.write().take() {
+            task.cancel();
+        }
+    });
     rsx! {
         div { class: "relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md bg-foreground/[0.025] px-2.5 ring-1 ring-inset ring-foreground/[0.08] focus-within:bg-foreground/[0.05] focus-within:ring-foreground/[0.16]",
             LineIconView {
@@ -205,9 +221,32 @@ pub fn ManagerSearch(
                 r#type: "search",
                 class: "h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/55",
                 placeholder,
-                value,
-                oninput: move |event| onsearch.call(event),
+                value: draft(),
+                autocomplete: "off",
+                spellcheck: "false",
+                oninput: move |event: FormEvent| {
+                    let query = event.value();
+                    draft.set(query.clone());
+                    if let Some(handler) = onsearch {
+                        handler.call(query.clone());
+                    }
+                    if let Some(task) = pending.write().take() {
+                        task.cancel();
+                    }
+                    let Some(handler) = ondebounced else {
+                        return;
+                    };
+                    if debounce_ms == 0 {
+                        handler.call(query);
+                        return;
+                    }
+                    pending.set(Some(spawn(async move {
+                        Platform::sleep(debounce_ms).await;
+                        handler.call(query);
+                    })));
+                },
                 onkeydown: move |event| {
+                    event.stop_propagation();
                     if let Some(handler) = &onkeydown {
                         handler.call(event);
                     }

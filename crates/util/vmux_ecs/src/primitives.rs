@@ -4,7 +4,7 @@ use moonshine_save::prelude::Save;
 use super::persistence::PersistenceAppExt;
 use crate::PageMetadata;
 use crate::component::{
-    ActivateRequest, Active, CreatedAt, Cwd, Description, LastActivatedAt, Order,
+    ActivateRequest, Active, CollectionView, CreatedAt, Cwd, Description, LastActivatedAt, Order,
 };
 use vmux_api::{BuiltinIcon, PageIcon};
 
@@ -19,6 +19,7 @@ impl Plugin for PrimitivesPlugin {
             .register_type::<BuiltinIcon>()
             .register_persisted::<Cwd>()
             .register_persisted::<Description>()
+            .register_persisted::<CollectionView>()
             .register_persisted::<CreatedAt>()
             .register_persisted::<LastActivatedAt>()
             .register_persisted::<Order>()
@@ -63,6 +64,7 @@ mod tests {
         assert!(registry.get(std::any::TypeId::of::<Order>()).is_some());
         assert!(filter.is_allowed::<Cwd>());
         assert!(filter.is_allowed::<Description>());
+        assert!(filter.is_allowed::<CollectionView>());
     }
 
     #[test]
