@@ -2,7 +2,7 @@
 pub use crate::key_stroke::PressedKey;
 pub use crate::transport;
 #[allow(unused_imports)]
-pub use crate::transport::event_listener::{EventListenerError, send};
+pub use crate::transport::event_listener::{EventListenerError, send, try_send};
 #[cfg(ui)]
 pub use use_key_claim::{KeyClaim, Unclaimed, use_key_claim};
 #[cfg(ui)]

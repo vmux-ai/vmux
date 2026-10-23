@@ -102,7 +102,7 @@ pub fn Page() -> Element {
                         placeholder: "{search_placeholder}",
                         value: "{query}",
                         oninput: move |event: FormEvent| {
-                            let _ = send(&SettingsFilterRequest { query: event.value() });
+                            send(&SettingsFilterRequest { query: event.value() });
                         },
                     }
                     div { class: "flex flex-col gap-8",
@@ -231,7 +231,7 @@ fn FieldView(field: SettingsRenderField, catalog: SettingsRenderCatalog) -> Elem
                         variant: ButtonVariant::Outline,
                         disabled,
                         onclick: move |_| {
-                            let _ = send(&CheckForUpdatesEvent);
+                            send(&CheckForUpdatesEvent);
                         },
                         "{button_label}"
                     }
@@ -277,7 +277,7 @@ fn Toggle(path: String, value: bool) -> Element {
         Switch {
             checked: value,
             on_checked_change: move |checked| {
-                let _ = send(&SettingsRequest {
+                send(&SettingsRequest {
                     path: path.clone(),
                     value: serde_json::json!(checked).into(),
                 });
@@ -298,7 +298,7 @@ fn IntInput(path: String, value: String) -> Element {
                 class: "w-24 text-right tabular-nums text-sm",
             }),
             oninput: move |event: FormEvent| {
-                let _ = send(&SettingsEditRequest {
+                send(&SettingsEditRequest {
                     path: path.clone(),
                     draft: event.value(),
                 });
@@ -320,7 +320,7 @@ fn NumberInput(path: String, value: String, step: f64) -> Element {
                 class: "w-24 text-right tabular-nums text-sm",
             }),
             oninput: move |event: FormEvent| {
-                let _ = send(&SettingsEditRequest {
+                send(&SettingsEditRequest {
                     path: path.clone(),
                     draft: event.value(),
                 });
@@ -343,7 +343,7 @@ fn TextInput(path: String, value: String, placeholder: Option<String>) -> Elemen
                 class: "w-full text-sm",
             }),
             oninput: move |event: FormEvent| {
-                let _ = send(&SettingsEditRequest {
+                send(&SettingsEditRequest {
                     path: path.clone(),
                     draft: event.value(),
                 });
@@ -364,7 +364,7 @@ fn SelectInput(path: String, value: String, options: Vec<SettingsSelectOption>) 
             placeholder: Into::<ReadSignal<String>>::into(Signal::new(String::new())),
             on_value_change: Callback::new(move |value: Option<String>| {
                 if let Some(value) = value {
-                    let _ = send(&SettingsRequest {
+                    send(&SettingsRequest {
                         path: path.clone(),
                         value: serde_json::json!(value).into(),
                     });
@@ -532,7 +532,7 @@ fn ChordEditor(path: String, text: String) -> Element {
                         key => key.to_string(),
                     };
                     let modifiers = event.modifiers();
-                    let _ = send(&SettingsRequest {
+                    send(&SettingsRequest {
                         path: path.clone(),
                         value: serde_json::json!({
                             "key": key,

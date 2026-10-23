@@ -168,7 +168,7 @@ pub fn GitFooter(
                     variant: ButtonVariant::Ghost,
                     class: "h-auto shrink-0 gap-1 px-2 py-0.5 text-xs hover:bg-foreground/10",
                     onclick: move |_| {
-                        let _ = send(&GitPushRequest { path: git_state().path });
+                        send(&GitPushRequest { path: git_state().path });
                     },
                     LineIconView { icon: LineIcon::Upload, class: "h-3 w-3" }
                     {translate("git-push")}
@@ -314,7 +314,7 @@ pub fn DiffView(
                 return;
             };
             if size.height <= rect.size.height * 4.0 {
-                let _ = send(&GitDiffNextRequest);
+                send(&GitDiffNextRequest);
             }
         });
     });
@@ -345,7 +345,7 @@ pub fn DiffView(
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                 let preload_distance = event.client_height().saturating_mul(6).max(1600);
                 if remaining <= preload_distance && has_more && !loading {
-                    let _ = send(&GitDiffNextRequest);
+                    send(&GitDiffNextRequest);
                 }
             },
 
@@ -360,7 +360,7 @@ pub fn DiffView(
                     class: "min-h-64 font-sans".to_string(),
                     message: error.to_string(),
                     on_retry: move |_| {
-                        let _ = send(&GitDiffRetryRequest);
+                        send(&GitDiffRetryRequest);
                     },
                 }
             } else if rows.is_empty() {
@@ -480,7 +480,7 @@ pub fn DiffView(
                                                                             variant: ButtonVariant::Ghost,
                                                                             class: "h-6 gap-1 rounded-md bg-ansi-2/15 px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/25 hover:text-ansi-2",
                                                                             onclick: move |_| {
-                                                                                let _ = send(&GitHunkRequest {
+                                                                                send(&GitHunkRequest {
                                                                                     repo_root: repo_root(),
                                                                                     path: path(),
                                                                                     path_bytes: accept_path_bytes.clone(),
@@ -495,7 +495,7 @@ pub fn DiffView(
                                                                             variant: ButtonVariant::Ghost,
                                                                             class: "h-6 gap-1 rounded-md border border-foreground/[0.16] bg-transparent px-2 text-[11px] text-muted-foreground hover:border-ansi-1/35 hover:bg-transparent hover:text-ansi-1",
                                                                             onclick: move |_| {
-                                                                                let _ = send(&GitHunkRequest {
+                                                                                send(&GitHunkRequest {
                                                                                     repo_root: repo_root(),
                                                                                     path: path(),
                                                                                     path_bytes: reject_path_bytes.clone(),
@@ -846,7 +846,7 @@ fn DiffGap(start: u32, end: u32, total: u32) -> Element {
                             &[("count", TranslationValue::Number(chunk as i64))],
                         ),
                         onclick: move |_| {
-                            let _ = send(&GitDiffRevealRequest { start, end });
+                            send(&GitDiffRevealRequest { start, end });
                         },
                         LineIconView { icon: LineIcon::ArrowUp, class: "size-3" }
                         "{chunk}"
@@ -857,7 +857,7 @@ fn DiffGap(start: u32, end: u32, total: u32) -> Element {
                     class: "h-6 shrink-0 gap-1.5 rounded-md border border-foreground/[0.08] bg-background/70 px-3 text-[10px] text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
                     title: show_all.clone(),
                     onclick: move |_| {
-                        let _ = send(&GitDiffRevealRequest { start, end });
+                        send(&GitDiffRevealRequest { start, end });
                     },
                     span { "⋯" }
                     span { "{show_all}" }
@@ -871,7 +871,7 @@ fn DiffGap(start: u32, end: u32, total: u32) -> Element {
                             &[("count", TranslationValue::Number(chunk as i64))],
                         ),
                         onclick: move |_| {
-                            let _ = send(&GitDiffRevealRequest { start, end });
+                            send(&GitDiffRevealRequest { start, end });
                         },
                         "{chunk}"
                         LineIconView { icon: LineIcon::ArrowDown, class: "size-3" }

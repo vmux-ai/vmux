@@ -51,7 +51,7 @@ pub(super) fn FindBar(
                 placeholder: translate("editor-find-placeholder"),
                 value: "{query}",
                 oninput: move |event| {
-                    let _ = send(&FileFindRequest {
+                    send(&FileFindRequest {
                         query: event.value(),
                         step: false,
                         reverse: false,
@@ -70,7 +70,7 @@ pub(super) fn FindBar(
                     match event.key() {
                         Key::Enter => {
                             event.prevent_default();
-                            let _ = send(&FileFindRequest {
+                            send(&FileFindRequest {
                                 query: key_query.clone(),
                                 step: true,
                                 reverse: event.modifiers().shift(),
@@ -84,7 +84,7 @@ pub(super) fn FindBar(
                         }
                         Key::Escape => {
                             event.prevent_default();
-                            let _ = send(&FileFindRequest {
+                            send(&FileFindRequest {
                                 done: true,
                                 ..Default::default()
                             });
@@ -103,7 +103,7 @@ pub(super) fn FindBar(
                 },
                 title: translate("editor-find-regex"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    send(&FileFindRequest {
                         query: regex_query.clone(),
                         step: false,
                         reverse: false,
@@ -127,7 +127,7 @@ pub(super) fn FindBar(
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-previous"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    send(&FileFindRequest {
                         query: previous_query.clone(),
                         step: true,
                         reverse: true,
@@ -143,7 +143,7 @@ pub(super) fn FindBar(
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-next"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    send(&FileFindRequest {
                         query: next_query.clone(),
                         step: true,
                         reverse: false,
@@ -159,7 +159,7 @@ pub(super) fn FindBar(
                 class: "shrink-0 rounded px-1 text-foreground/60 hover:bg-foreground/10 hover:text-foreground",
                 title: translate("editor-find-close"),
                 onclick: move |_| {
-                    let _ = send(&FileFindRequest {
+                    send(&FileFindRequest {
                         done: true,
                         ..Default::default()
                     });
@@ -219,7 +219,7 @@ fn EditorTab(tab: OpenEditorItem) -> Element {
             class,
             title: "{tab.path}",
             onclick: move |_| {
-                let _ = send(&FileOpenEvent {
+                send(&FileOpenEvent {
                     path: open_path.clone(),
                 });
             },
@@ -235,7 +235,7 @@ fn EditorTab(tab: OpenEditorItem) -> Element {
                 title: close_title,
                 onclick: move |event: Event<MouseData>| {
                     event.stop_propagation();
-                    let _ = send(&ExplorerCloseEditor {
+                    send(&ExplorerCloseEditor {
                         path: close_path.clone(),
                     });
                 },

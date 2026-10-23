@@ -47,7 +47,7 @@ pub fn use_key_claim(
         if !resolves {
             return;
         }
-        let _ = send(&KeyContextRequest { keys: context() });
+        send(&KeyContextRequest { keys: context() });
     });
 
     KeyClaim {
@@ -96,6 +96,6 @@ impl KeyClaim {
             return;
         }
         event.prevent_default();
-        let _ = send(&stroke);
+        send(&stroke);
     }
 }

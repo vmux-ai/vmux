@@ -75,7 +75,7 @@ pub(super) fn RepositoryHeader(
                     open: repository_open,
                     class: "min-w-0".to_string(),
                     on_dismiss: move |_| {
-                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                     },
                     button {
                         r#type: "button",
@@ -87,7 +87,7 @@ pub(super) fn RepositoryHeader(
                             } else {
                                 HeaderDropdown::Repository
                             };
-                            let _ = send(&HeaderDropdownRequest { open });
+                            send(&HeaderDropdownRequest { open });
                         },
                         BuiltinIconView {
                             icon: vmux_api::BuiltinIcon::Project,
@@ -115,8 +115,8 @@ pub(super) fn RepositoryHeader(
                                             },
                                             title: "{display_path}",
                                             onclick: move |_| {
-                                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                                let _ = send(&ProjectActivateRequest {
+                                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                send(&ProjectActivateRequest {
                                                     path: path.clone(),
                                                     branch: String::new(),
                                                     checkout: String::new(),
@@ -141,8 +141,8 @@ pub(super) fn RepositoryHeader(
                                 r#type: "button",
                                 class: "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
                                 onclick: move |_| {
-                                    let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                    let _ = send(&ProjectPickerRequest {
+                                    send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                    send(&ProjectPickerRequest {
                                         current_dir: project_picker_dir.clone(),
                                         pane_id: None,
                                     });
@@ -158,7 +158,7 @@ pub(super) fn RepositoryHeader(
                     open: branch_open,
                     class: "min-w-0".to_string(),
                     on_dismiss: move |_| {
-                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                     },
                     button {
                         r#type: "button",
@@ -169,7 +169,7 @@ pub(super) fn RepositoryHeader(
                             } else {
                                 HeaderDropdown::Branch
                             };
-                            let _ = send(&HeaderDropdownRequest { open });
+                            send(&HeaderDropdownRequest { open });
                         },
                         LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
                         if !branch_base.is_empty() && branch_base != branch_label {
@@ -192,7 +192,7 @@ pub(super) fn RepositoryHeader(
                                     onscroll: move |event: Event<ScrollData>| {
                                         let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                                         if remaining <= 192 && selected_branches_progress.has_more && !selected_branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: selected_catalog });
+                                            send(&GitCatalogNextRequest { catalog: selected_catalog });
                                         }
                                     },
                                     match branch_collection {
@@ -205,7 +205,7 @@ pub(super) fn RepositoryHeader(
                                                     remote: false,
                                                     selected_branch: selected_branch.clone(),
                                                     onselected: move |_| {
-                                                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                                                     },
                                                 }
                                             }
@@ -219,7 +219,7 @@ pub(super) fn RepositoryHeader(
                                                     remote: true,
                                                     selected_branch: selected_branch.clone(),
                                                     onselected: move |_| {
-                                                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                                                     },
                                                 }
                                             }
@@ -232,7 +232,7 @@ pub(super) fn RepositoryHeader(
                                                     index,
                                                     selected_branch: selected_branch.clone(),
                                                     onselected: move |_| {
-                                                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                                                     },
                                                 }
                                             }
@@ -252,7 +252,7 @@ pub(super) fn RepositoryHeader(
                                     onscroll: move |event: Event<ScrollData>| {
                                         let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                                         if remaining <= 192 && branches_progress.has_more && !branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
+                                            send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
                                         }
                                     },
                                     for branch in repository.branches.iter() {
@@ -270,8 +270,8 @@ pub(super) fn RepositoryHeader(
                                                         "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
                                                     },
                                                     onclick: move |_| {
-                                                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                                        let _ = send(&ProjectActivateRequest {
+                                                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                        send(&ProjectActivateRequest {
                                                             path: repo_root.clone(),
                                                             branch: name.clone(),
                                                             checkout: checkout.clone(),
@@ -319,7 +319,7 @@ pub(super) fn RepositoryHeader(
                             open: commit_open,
                             class: "min-w-0".to_string(),
                             on_dismiss: move |_| {
-                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                             },
                             button {
                                 r#type: "button",
@@ -331,7 +331,7 @@ pub(super) fn RepositoryHeader(
                                     } else {
                                         HeaderDropdown::Commit
                                     };
-                                    let _ = send(&HeaderDropdownRequest { open });
+                                    send(&HeaderDropdownRequest { open });
                                 },
                                 LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
                                 span { class: "min-w-0 truncate text-xs font-medium text-foreground/85", "{revision_label}" }
@@ -343,7 +343,7 @@ pub(super) fn RepositoryHeader(
                                     onscroll: move |event: Event<ScrollData>| {
                                         let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                                         if remaining <= 192 && commits_progress.has_more && !commits_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest {
+                                            send(&GitCatalogNextRequest {
                                                 catalog: GitCatalog::Commits,
                                             });
                                         }
@@ -362,9 +362,9 @@ pub(super) fn RepositoryHeader(
                                                     },
                                                     title: "{commit.summary}",
                                                     onclick: move |_| {
-                                                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                                        let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-                                                        let _ = send(&GitCommitSelectRequest { commit: sha.clone() });
+                                                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                        send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                                                        send(&GitCommitSelectRequest { commit: sha.clone() });
                                                     },
                                                     code { class: "shrink-0 font-mono text-[10px] text-git-reference", "{commit.short_sha}" }
                                                     span { class: "min-w-0 flex-1 truncate font-medium", "{commit.summary}" }
@@ -382,8 +382,8 @@ pub(super) fn RepositoryHeader(
                             title: translate("git-branch-changes"),
                             aria_label: translate("git-branch-changes"),
                             onclick: move |_| {
-                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                let _ = send(&GitBranchDiffSelectRequest);
+                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                send(&GitBranchDiffSelectRequest);
                             },
                             LineIconView { icon: LineIcon::X, class: "size-3" }
                         }
@@ -394,7 +394,7 @@ pub(super) fn RepositoryHeader(
                     class: "ml-auto h-8 gap-1.5 px-3 text-[11px] font-medium",
                     disabled: !can_push,
                     onclick: move |_| {
-                        let _ = send(&GitPushRequest { path: push_path.clone() });
+                        send(&GitPushRequest { path: push_path.clone() });
                     },
                     LineIconView { icon: LineIcon::Upload, class: "size-4" }
                     span { {translate("git-push-label")} }
@@ -425,7 +425,7 @@ fn ViewPicker(
             open,
             class: "shrink-0".to_string(),
             on_dismiss: move |_| {
-                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
             },
             button {
                 r#type: "button",
@@ -436,7 +436,7 @@ fn ViewPicker(
                     } else {
                         HeaderDropdown::View
                     };
-                    let _ = send(&HeaderDropdownRequest { open });
+                    send(&HeaderDropdownRequest { open });
                 },
                 LineIconView { icon, class: "size-3.5 shrink-0" }
                 span { "{label}" }
@@ -453,7 +453,7 @@ fn ViewPicker(
                         label: translate("git-changes"),
                         count: changes,
                         onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
+                            send(&GitPanelSelectRequest { panel: GitPanel::Files });
                         },
                     }
                     div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
@@ -463,7 +463,7 @@ fn ViewPicker(
                         label: translate("git-branch-changes"),
                         count: 0,
                         onselect: move |_| {
-                            let _ = send(&GitBranchDiffSelectRequest);
+                            send(&GitBranchDiffSelectRequest);
                         },
                     }
                     ViewPickerItem {
@@ -473,9 +473,9 @@ fn ViewPicker(
                         count: commits,
                         onselect: move |_| {
                             if first_commit.is_empty() {
-                                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                                send(&GitPanelSelectRequest { panel: GitPanel::Commits });
                             } else {
-                                let _ = send(&GitCommitSelectRequest {
+                                send(&GitCommitSelectRequest {
                                     commit: first_commit.clone(),
                                 });
                             }
@@ -487,7 +487,7 @@ fn ViewPicker(
                         label: translate("git-stashes"),
                         count: stashes,
                         onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
+                            send(&GitPanelSelectRequest { panel: GitPanel::Stash });
                         },
                     }
                 }
@@ -513,7 +513,7 @@ fn ViewPickerItem(
                 "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
             },
             onclick: move |_| {
-                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                 onselect.call(());
             },
             LineIconView { icon, class: "size-3.5 shrink-0" }

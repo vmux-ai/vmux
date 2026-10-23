@@ -37,7 +37,7 @@ pub(super) fn BranchPromptDialog() -> Element {
             open: true,
             on_open_change: move |open: bool| {
                 if !open {
-                    let _ = send(&GitBranchPromptCloseRequest);
+                    send(&GitBranchPromptCloseRequest);
                 }
             },
             attributes: vec![],
@@ -50,13 +50,13 @@ pub(super) fn BranchPromptDialog() -> Element {
                         value: "{draft}",
                         placeholder: translate("git-new-branch"),
                         oninput: move |event: Event<FormData>| {
-                            let _ = send(&GitBranchDraftRequest { draft: event.value() });
+                            send(&GitBranchDraftRequest { draft: event.value() });
                         },
                         onkeydown: move |event: KeyboardEvent| {
                             event.stop_propagation();
                             if event.key() == Key::Enter && submit_ready {
                                 event.prevent_default();
-                                let _ = send(&GitBranchSubmitRequest);
+                                send(&GitBranchSubmitRequest);
                             }
                         },
                     }
@@ -68,7 +68,7 @@ pub(super) fn BranchPromptDialog() -> Element {
                         size: ButtonSize::Xs,
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| {
-                            let _ = send(&GitBranchPromptCloseRequest);
+                            send(&GitBranchPromptCloseRequest);
                         },
                         {translate("common-cancel")}
                     }
@@ -77,7 +77,7 @@ pub(super) fn BranchPromptDialog() -> Element {
                         variant: if is_create { ButtonVariant::Primary } else { ButtonVariant::Destructive },
                         disabled: is_create && !submit_ready,
                         onclick: move |_| {
-                            let _ = send(&GitBranchSubmitRequest);
+                            send(&GitBranchSubmitRequest);
                         },
                         {if is_create { translate("common-save") } else { translate("common-delete") }}
                     }
@@ -124,7 +124,7 @@ pub(super) fn BranchesCard(
                     let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                     let preload_distance = event.client_height().saturating_mul(2).max(480);
                     if remaining <= preload_distance && files_has_more && !files_loading {
-                        let _ = send(&GitBranchFilesNextRequest);
+                        send(&GitBranchFilesNextRequest);
                     }
                 },
                 if files_loading && files_empty {
@@ -138,7 +138,7 @@ pub(super) fn BranchesCard(
                         class: "min-h-40".to_string(),
                         message: files_error,
                         on_retry: move |_| {
-                            let _ = send(&GitBranchFilesRetryRequest);
+                            send(&GitBranchFilesRetryRequest);
                         },
                     }
                 } else if visible_files.is_empty() {
@@ -149,7 +149,7 @@ pub(super) fn BranchesCard(
                             size: ButtonSize::Xs,
                             class: "w-full".to_string(),
                             onclick: move |_| {
-                                let _ = send(&GitBranchFilesNextRequest);
+                                send(&GitBranchFilesNextRequest);
                             },
                             {translate("common-expand")}
                         }
@@ -173,7 +173,7 @@ pub(super) fn BranchesCard(
                             key: "branch-files-next-{visible_file_count}",
                             class: "flex flex-col gap-2 px-2.5 py-2",
                             onvisible: move |_| {
-                                let _ = send(&GitBranchFilesNextRequest);
+                                send(&GitBranchFilesNextRequest);
                             },
                             for width in ["w-10/12", "w-8/12", "w-11/12"] {
                                 Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
@@ -209,7 +209,7 @@ fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Ele
                     ScrollIntoView::first_rendered(&[id.as_str()]);
                     return;
                 }
-                let _ = send(&GitBranchFileSelectRequest {
+                send(&GitBranchFileSelectRequest {
                     path_bytes: path_bytes.clone(),
                 });
             },
@@ -257,7 +257,7 @@ pub(super) fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> El
                     "tags" => GitBranchCollection::Tags,
                     _ => GitBranchCollection::Local,
                 };
-                let _ = send(&GitBranchCollectionSelectRequest { collection });
+                send(&GitBranchCollectionSelectRequest { collection });
             },
         }
     }
@@ -283,7 +283,7 @@ pub(super) fn BranchRow(
                 "flex h-9 w-full items-center justify-start gap-2 rounded-md px-2.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
-                let _ = send(&GitBranchSelectRequest {
+                send(&GitBranchSelectRequest {
                     reference: name.clone(),
                 });
                 onselected.call(());
@@ -341,7 +341,7 @@ pub(super) fn TagRow(
                 "flex h-9 w-full items-center justify-start gap-2 rounded-md px-2.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
-                let _ = send(&GitBranchSelectRequest {
+                send(&GitBranchSelectRequest {
                     reference: name.clone(),
                 });
                 onselected.call(());

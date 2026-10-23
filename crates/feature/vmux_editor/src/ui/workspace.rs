@@ -570,7 +570,7 @@ fn EditorWorkspace() -> Element {
             }
             dom.reset();
             last_scroll_req.set(0);
-            let _ = send(&FileScrollEvent {
+            send(&FileScrollEvent {
                 top_row: 0,
                 needs_rows: true,
             });
@@ -585,7 +585,7 @@ fn EditorWorkspace() -> Element {
     let file_viewport = FileUi::current().use_field(|state| state.viewport.content.as_ref());
     use_effect(move || {
         file_viewport.for_each(|_| {
-            let _ = send(&FileHoverDismissRequest);
+            send(&FileHoverDismissRequest);
         })
     });
 
@@ -883,7 +883,7 @@ fn EditorWorkspace() -> Element {
                     Mode::Dir => match key.as_str() {
                         "Escape" => {
                             e.prevent_default();
-                            let _ = send(&ExplorerCloseEditor { path: git_path() });
+                            send(&ExplorerCloseEditor { path: git_path() });
                         }
                         " " => {
                             e.prevent_default();
@@ -896,7 +896,7 @@ fn EditorWorkspace() -> Element {
                     _ => {
                         if matches!(key.as_str(), "Escape" | "h") {
                             e.prevent_default();
-                            let _ = send(&FileDirectoryBackRequest);
+                            send(&FileDirectoryBackRequest);
                         }
                     }
                 }
@@ -961,7 +961,7 @@ fn EditorWorkspace() -> Element {
                                     class: file_mode_class(file_view_mode() == FileViewMode::Note),
                                     title: translate("editor-rendered-markdown"),
                                     onclick: move |_| {
-                                        let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
+                                        send(&FileViewModeSet { mode: FileViewMode::Note });
                                     },
                                     {translate("editor-note")}
                                 }
@@ -974,7 +974,7 @@ fn EditorWorkspace() -> Element {
                                 ),
                                 title: translate("editor-source-editor"),
                                 onclick: move |_| {
-                                    let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
+                                    send(&FileViewModeSet { mode: FileViewMode::Editor });
                                 },
                                 {translate("editor-editor")}
                             }
@@ -983,7 +983,7 @@ fn EditorWorkspace() -> Element {
                                     class: file_mode_class(file_view_mode() == FileViewMode::Diff),
                                     title: translate("editor-git-diff"),
                                     onclick: move |_| {
-                                        let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
+                                        send(&FileViewModeSet { mode: FileViewMode::Diff });
                                     },
                                     {translate("editor-diff")}
                                 }
@@ -1006,21 +1006,21 @@ fn EditorWorkspace() -> Element {
                                 button {
                                     class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
                                     onclick: move |_| {
-                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Tidy });
+                                        send(&FileTidyRequest { choice: TidyChoice::Tidy });
                                     },
                                     {translate("editor-tidy")}
                                 }
                                 button {
                                     class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Always });
+                                        send(&FileTidyRequest { choice: TidyChoice::Always });
                                     },
                                     {translate("editor-always")}
                                 }
                                 button {
                                     class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Dismiss });
+                                        send(&FileTidyRequest { choice: TidyChoice::Dismiss });
                                     },
                                     "\u{2715}"
                                 }
@@ -1091,7 +1091,7 @@ fn EditorWorkspace() -> Element {
                                             button {
                                                 class: "rounded-lg bg-primary/15 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/25",
                                                 onclick: move |_| {
-                                                    let _ = send(&FileOpenExternalRequest { path: abs.clone() });
+                                                    send(&FileOpenExternalRequest { path: abs.clone() });
                                                 },
                                                 {translate("editor-open-externally")}
                                             }
@@ -1118,31 +1118,31 @@ fn EditorWorkspace() -> Element {
                             let Ok(index) = u32::try_from(index) else {
                                 return;
                             };
-                            let _ = send(&FileDirectorySelectRequest { index });
+                            send(&FileDirectorySelectRequest { index });
                         },
                         on_ascend: move |target| {
-                            let _ = send(&FileDirectoryAscendRequest { target });
+                            send(&FileDirectoryAscendRequest { target });
                         },
                         on_descend: move |target| {
-                            let _ = send(&FileDirectoryDescendRequest { target });
+                            send(&FileDirectoryDescendRequest { target });
                         },
                         on_open: move |entry: FileDirEntry| {
-                            let _ = send(&FileDirectoryOpenRequest { path: entry.path });
+                            send(&FileDirectoryOpenRequest { path: entry.path });
                         },
                         on_next: move |_| {
-                            let _ = send(&FileDirectoryNextRequest);
+                            send(&FileDirectoryNextRequest);
                         },
                         on_previous: move |_| {
-                            let _ = send(&FileDirectoryPreviousRequest);
+                            send(&FileDirectoryPreviousRequest);
                         },
                         on_activate: move |_| {
-                            let _ = send(&FileDirectoryActivateRequest);
+                            send(&FileDirectoryActivateRequest);
                         },
                         on_parent: move |_| {
-                            let _ = send(&FileDirectoryParentRequest);
+                            send(&FileDirectoryParentRequest);
                         },
                         on_toggle_hidden: move |_| {
-                            let _ = send(&FileDirectoryToggleHiddenRequest);
+                            send(&FileDirectoryToggleHiddenRequest);
                         },
                     }
                 },
@@ -1291,7 +1291,7 @@ fn EditorWorkspace() -> Element {
                                                         note_cursor.set_editing(false);
                                                     }
                                                     if let Some(stroke) = PressedKey::new(&event.data()).stroke() {
-                                                        let _ = send(&stroke);
+                                                        send(&stroke);
                                                     }
                                                     if keymap() == KeymapKind::Vim {
                                                         EditorFocus::file();
@@ -1319,7 +1319,7 @@ fn EditorWorkspace() -> Element {
                                                                     class: "rounded-lg px-3 py-2 text-left text-xs text-foreground/75 ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
                                                                     title: "{reference.path}",
                                                                     onclick: move |_| {
-                                                                        let _ = send(&KnowledgeLinkOpen {
+                                                                        send(&KnowledgeLinkOpen {
                                                                             path: open_path.clone(),
                                                                             title: open_title.clone(),
                                                                             line: Some(open_line),
@@ -1382,7 +1382,7 @@ fn EditorWorkspace() -> Element {
                                     id: SCROLL_ID,
                                     class: "file-mode-editor-enter relative min-h-0 flex-1 overflow-auto",
                                     onmouseleave: move |_| {
-                                        let _ = send(&FileHoverDismissRequest);
+                                        send(&FileHoverDismissRequest);
                                         hover_pos.set(None);
                                         gutter_hover.set(false);
                                     },
@@ -1442,7 +1442,7 @@ fn EditorWorkspace() -> Element {
                                             .map_or(0, |line| line.row + line.rows as u32 - rfirst);
                                         let needs_rows = ScrollWindow::new(total_lines(), vis_first, vis_rows)
                                             .needs_refetch(rfirst, loaded_len, trigger);
-                                        let _ = send(&FileScrollEvent {
+                                        send(&FileScrollEvent {
                                             top_row: vis_first,
                                             needs_rows,
                                         });
@@ -1688,7 +1688,7 @@ fn EditorWorkspace() -> Element {
                                                                 class: if i == comp_sel_clamped { "flex items-center gap-2 px-3 py-1 bg-primary/15" } else { "flex items-center gap-2 px-3 py-1" },
                                                                 onmousedown: move |event: Event<MouseData>| {
                                                                     event.prevent_default();
-                                                                    let _ = send(&FilePanelPick { index: i as u32 });
+                                                                    send(&FilePanelPick { index: i as u32 });
                                                                 },
                                                                 span { class: "truncate", "{it.label}" }
                                                                 if !it.detail.is_empty() {

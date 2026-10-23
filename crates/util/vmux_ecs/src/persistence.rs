@@ -8,6 +8,8 @@ use bevy_world_serialization::WorldFilter;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
+use crate::{Revision, UnixMillis};
+
 pub struct PersistenceDomain<D>(PhantomData<fn() -> D>);
 
 impl<D> Clone for PersistenceDomain<D> {
@@ -40,6 +42,91 @@ pub type WorkspacePersisted = PersistenceDomain<WorkspacePersistence>;
 
 #[derive(Event, Clone, Copy, Debug, Default)]
 pub struct PersistenceDirty;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct PersistenceState {
+    loaded: Option<Revision>,
+    dirty: Option<Revision>,
+    saving: Option<Revision>,
+    last_saved_at: Option<UnixMillis>,
+    last_error: Option<String>,
+}
+
+impl PersistenceState {
+    pub const fn unloaded() -> Self {
+        Self {
+            loaded: None,
+            dirty: None,
+            saving: None,
+            last_saved_at: None,
+            last_error: None,
+        }
+    }
+
+    pub const fn restored(revision: Revision) -> Self {
+        Self {
+            loaded: Some(revision),
+            dirty: None,
+            saving: None,
+            last_saved_at: None,
+            last_error: None,
+        }
+    }
+
+    pub const fn loaded(&self) -> Option<Revision> {
+        self.loaded
+    }
+
+    pub const fn dirty(&self) -> Option<Revision> {
+        self.dirty
+    }
+
+    pub const fn saving(&self) -> Option<Revision> {
+        self.saving
+    }
+
+    pub const fn last_saved_at(&self) -> Option<UnixMillis> {
+        self.last_saved_at
+    }
+
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+
+    pub fn mark_dirty(&mut self, revision: Revision) {
+        self.dirty = Some(self.dirty.map_or(revision, |dirty| dirty.max(revision)));
+    }
+
+    pub fn start_save(&mut self) -> Option<Revision> {
+        if self.saving.is_some() {
+            return None;
+        }
+        let revision = self.dirty.take()?;
+        self.saving = Some(revision);
+        Some(revision)
+    }
+
+    pub fn save_succeeded(&mut self, revision: Revision, saved_at: UnixMillis) -> bool {
+        if self.saving != Some(revision) {
+            return false;
+        }
+        self.loaded = Some(revision);
+        self.saving = None;
+        self.last_saved_at = Some(saved_at);
+        self.last_error = None;
+        true
+    }
+
+    pub fn save_failed(&mut self, revision: Revision, error: impl Into<String>) -> bool {
+        if self.saving != Some(revision) {
+            return false;
+        }
+        self.saving = None;
+        self.mark_dirty(revision);
+        self.last_error = Some(error.into());
+        true
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct PageRestore;
@@ -142,6 +229,9 @@ mod tests {
 
     enum FeaturePersistence {}
 
+    #[derive(TypePath)]
+    enum Issue {}
+
     type FeaturePersisted = PersistenceDomain<FeaturePersistence>;
 
     #[test]
@@ -169,5 +259,55 @@ mod tests {
         assert!(!feature.is_allowed::<Transient>());
         assert!(!workspace.is_allowed::<Saved>());
         assert!(workspace.is_allowed::<Transient>());
+    }
+
+    #[test]
+    fn typed_ids_can_be_registered_for_persistence() {
+        let mut app = App::new();
+        app.register_persisted::<vmux_api::Id<Issue>>();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let filter = WorkspacePersisted::filter(&registry);
+
+        assert!(filter.is_allowed::<vmux_api::Id<Issue>>());
+    }
+
+    #[test]
+    fn mutation_during_save_remains_dirty_after_success() {
+        let mut state = PersistenceState::restored(Revision::new(1));
+        state.mark_dirty(Revision::new(2));
+
+        assert_eq!(state.start_save(), Some(Revision::new(2)));
+        state.mark_dirty(Revision::new(3));
+        assert!(state.save_succeeded(Revision::new(2), UnixMillis(10)));
+
+        assert_eq!(state.loaded(), Some(Revision::new(2)));
+        assert_eq!(state.dirty(), Some(Revision::new(3)));
+        assert_eq!(state.saving(), None);
+        assert_eq!(state.last_saved_at(), Some(UnixMillis(10)));
+    }
+
+    #[test]
+    fn failed_save_is_retryable() {
+        let mut state = PersistenceState::restored(Revision::new(4));
+        state.mark_dirty(Revision::new(5));
+        assert_eq!(state.start_save(), Some(Revision::new(5)));
+
+        assert!(state.save_failed(Revision::new(5), "disk full"));
+
+        assert_eq!(state.dirty(), Some(Revision::new(5)));
+        assert_eq!(state.start_save(), Some(Revision::new(5)));
+        assert_eq!(state.last_error(), Some("disk full"));
+    }
+
+    #[test]
+    fn stale_save_completion_cannot_replace_current_state() {
+        let mut state = PersistenceState::restored(Revision::new(6));
+        state.mark_dirty(Revision::new(7));
+        assert_eq!(state.start_save(), Some(Revision::new(7)));
+
+        assert!(!state.save_succeeded(Revision::new(6), UnixMillis(10)));
+
+        assert_eq!(state.loaded(), Some(Revision::new(6)));
+        assert_eq!(state.saving(), Some(Revision::new(7)));
     }
 }

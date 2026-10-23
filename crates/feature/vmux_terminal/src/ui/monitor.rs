@@ -43,7 +43,7 @@ pub fn Page() -> Element {
                 search_value: snapshot.query.clone(),
                 search_placeholder: translate("services-filter"),
                 onsearch: move |event: FormEvent| {
-                    let _ = send(&ProcessSearchRequest { query: event.value() });
+                    send(&ProcessSearchRequest { query: event.value() });
                 },
                 onkeydown: None,
                 actions: rsx! {
@@ -53,7 +53,7 @@ pub fn Page() -> Element {
                             variant: ManagerButtonVariant::Danger,
                             onclick: move |event: Event<MouseData>| {
                                 event.stop_propagation();
-                                let _ = send(&ProcessKillAllEvent { kill_all: true });
+                                send(&ProcessKillAllEvent { kill_all: true });
                             },
                             {translate("services-kill-all")}
                         }
@@ -198,14 +198,14 @@ fn ProcessRow(process: ProcessEntry) -> Element {
         if !managed {
             return;
         }
-        let _ = send(&ProcessNavigateEvent {
+        send(&ProcessNavigateEvent {
             process_id: nav_id.clone(),
             navigate: true,
         });
     };
     let onkill = move |event: Event<MouseData>| {
         event.stop_propagation();
-        let _ = send(&ProcessKillEvent {
+        send(&ProcessKillEvent {
             process_id: kill_id.clone(),
             kill: true,
         });
