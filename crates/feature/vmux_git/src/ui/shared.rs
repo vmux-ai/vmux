@@ -237,7 +237,7 @@ pub fn DiffView(
             let Ok(rect) = container.get_client_rect().await else {
                 return;
             };
-            if size.height <= rect.size.height * 2.0 {
+            if size.height <= rect.size.height * 4.0 {
                 let _ = send(&GitDiffNextRequest);
             }
         });
@@ -248,10 +248,10 @@ pub fn DiffView(
             key: "{identity}",
             id: "git-diff-viewport",
             onmounted: move |event: Event<MountedData>| scroll_container.set(Some(event.data())),
-            class: if visible { "min-h-0 flex-1 scroll-smooth overflow-auto bg-transparent font-mono text-[11px] leading-5 motion-reduce:scroll-auto" } else { "hidden" },
+            class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             onscroll: move |event| {
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                let preload_distance = event.client_height().saturating_mul(2).max(640);
+                let preload_distance = event.client_height().saturating_mul(6).max(1600);
                 if remaining <= preload_distance && has_more && !loading {
                     let _ = send(&GitDiffNextRequest);
                 }

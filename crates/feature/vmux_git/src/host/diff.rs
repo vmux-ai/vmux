@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -15,7 +16,7 @@ use super::job::{BranchFilesJob, DiffJob, DiffScope};
 use super::job_runner::{GitJob, QueuedGitJobs};
 use super::repository::{BranchFilesCatalog, BranchFilesPage, GitRepository};
 
-const DIFF_WINDOW_ROWS: u32 = 800;
+const DIFF_WINDOW_ROWS: u32 = 320;
 
 pub(super) struct DiffPlugin;
 
@@ -165,14 +166,17 @@ struct BranchDiffProgress {
     loaded: HashSet<Vec<u8>>,
     in_flight: HashSet<Vec<u8>>,
     continuation: Option<(Vec<u8>, u32)>,
+    cached: HashMap<Vec<u8>, Arc<Vec<DiffLine>>>,
     next: usize,
 }
 
 #[derive(Default)]
 struct BranchDiffBatch {
     paths: Vec<Vec<u8>>,
+    lines: Option<Arc<Vec<DiffLine>>>,
     top_line: u32,
     has_more: bool,
+    prefetch: bool,
 }
 
 impl BranchDiffProgress {
@@ -182,6 +186,7 @@ impl BranchDiffProgress {
             loaded: HashSet::new(),
             in_flight: HashSet::new(),
             continuation: None,
+            cached: HashMap::new(),
             next: 0,
         }
     }
@@ -189,10 +194,13 @@ impl BranchDiffProgress {
     fn next(&mut self) -> BranchDiffBatch {
         if let Some((path, top_line)) = self.continuation.take() {
             self.in_flight.insert(path.clone());
+            let lines = self.cached.get(&path).cloned();
             return BranchDiffBatch {
                 paths: vec![path],
+                lines,
                 top_line,
                 has_more: true,
+                prefetch: false,
             };
         }
         self.advance();
@@ -204,8 +212,10 @@ impl BranchDiffProgress {
         self.advance();
         BranchDiffBatch {
             paths: vec![path],
+            lines: None,
             top_line: 0,
             has_more: self.has_more(),
+            prefetch: false,
         }
     }
 
@@ -218,8 +228,10 @@ impl BranchDiffProgress {
         }
         Some(BranchDiffBatch {
             paths: vec![path.to_vec()],
+            lines: None,
             top_line: 0,
             has_more: self.has_more(),
+            prefetch: true,
         })
     }
 
@@ -239,11 +251,13 @@ impl BranchDiffProgress {
         loaded_lines: u32,
         page_complete: bool,
         succeeded: bool,
+        lines: Option<Arc<Vec<DiffLine>>>,
     ) {
         for path in paths {
             self.in_flight.remove(path);
             if succeeded && page_complete {
                 self.loaded.insert(path.clone());
+                self.cached.remove(path);
             } else {
                 let next_line = if succeeded {
                     top_line.saturating_add(loaded_lines)
@@ -251,6 +265,9 @@ impl BranchDiffProgress {
                     top_line
                 };
                 self.continuation = Some((path.clone(), next_line));
+                if let Some(lines) = lines.as_ref() {
+                    self.cached.insert(path.clone(), Arc::clone(lines));
+                }
             }
         }
         self.advance();
@@ -340,11 +357,19 @@ impl GitDiffQuery {
         loaded_lines: u32,
         page_complete: bool,
         succeeded: bool,
+        lines: Option<Arc<Vec<DiffLine>>>,
     ) -> bool {
         let Some(branch) = self.branch.as_mut() else {
             return false;
         };
-        branch.complete(paths, top_line, loaded_lines, page_complete, succeeded);
+        branch.complete(
+            paths,
+            top_line,
+            loaded_lines,
+            page_complete,
+            succeeded,
+            lines,
+        );
         branch.has_more()
     }
 }
@@ -562,8 +587,10 @@ fn load_next(
             path: query.target.path.clone(),
             scope: query.target.scope.clone(),
             branch_paths: batch.paths,
+            branch_lines: batch.lines,
             branch_top_line: batch.top_line,
             branch_has_more: batch.has_more,
+            prefetch: batch.prefetch,
             generation: query.generation,
             top_line: loaded,
             rows: DIFF_WINDOW_ROWS,
@@ -632,8 +659,10 @@ fn start_pending_seek(
                 path: query.target.path.clone(),
                 scope: query.target.scope.clone(),
                 branch_paths: batch.paths,
+                branch_lines: batch.lines,
                 branch_top_line: batch.top_line,
                 branch_has_more: batch.has_more,
+                prefetch: batch.prefetch,
                 generation: query.generation,
                 top_line: loaded,
                 rows: DIFF_WINDOW_ROWS,
@@ -736,8 +765,10 @@ fn start_requests(
                 path: target.path,
                 scope: target.scope,
                 branch_paths: batch.paths,
+                branch_lines: batch.lines,
                 branch_top_line: batch.top_line,
                 branch_has_more: batch.has_more,
+                prefetch: batch.prefetch,
                 generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
@@ -906,8 +937,10 @@ mod tests {
                     path: PathBuf::new(),
                     scope: target.scope,
                     branch_paths: Vec::new(),
+                    branch_lines: None,
                     branch_top_line: 0,
                     branch_has_more: false,
+                    prefetch: false,
                     generation: 1,
                     top_line: 0,
                     rows: DIFF_WINDOW_ROWS,
@@ -935,7 +968,7 @@ mod tests {
         assert!(first.has_more);
         assert!(progress.seek(b"file-9.rs").is_some());
         assert!(progress.seek(b"file-9.rs").is_none());
-        progress.complete(&first.paths, first.top_line, 40, true, true);
+        progress.complete(&first.paths, first.top_line, 40, true, true, None);
         let second = progress.next();
 
         assert_eq!(second.paths, [b"file-1.rs".to_vec()]);
@@ -950,7 +983,7 @@ mod tests {
         let mut progress = BranchDiffProgress::new(paths);
 
         let first = progress.next();
-        progress.complete(&first.paths, first.top_line, 0, false, false);
+        progress.complete(&first.paths, first.top_line, 0, false, false, None);
         let retry = progress.next();
 
         assert_eq!(retry.paths, first.paths);
@@ -964,13 +997,29 @@ mod tests {
             BranchDiffProgress::new(vec![b"large.lock".to_vec(), b"src/lib.rs".to_vec()]);
 
         let first = progress.next();
-        progress.complete(&first.paths, first.top_line, 800, false, true);
+        let lines = Arc::new(vec![line(DiffKind::Add, 1); 920]);
+        progress.complete(
+            &first.paths,
+            first.top_line,
+            800,
+            false,
+            true,
+            Some(Arc::clone(&lines)),
+        );
         let continuation = progress.next();
 
         assert_eq!(continuation.paths, [b"large.lock".to_vec()]);
         assert_eq!(continuation.top_line, 800);
+        assert!(continuation.lines.is_some());
 
-        progress.complete(&continuation.paths, continuation.top_line, 120, true, true);
+        progress.complete(
+            &continuation.paths,
+            continuation.top_line,
+            120,
+            true,
+            true,
+            continuation.lines,
+        );
         let next = progress.next();
 
         assert_eq!(next.paths, [b"src/lib.rs".to_vec()]);

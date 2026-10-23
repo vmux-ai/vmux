@@ -17,7 +17,7 @@ use super::job::{
 use super::repository::{BranchFilesCatalog, GitCatalogPage, GitRepository, RepositorySummary};
 use super::runtime::{GitRuntime, GitTask};
 use crate::event::{
-    GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
+    DiffLine, GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
     GitRepositorySnapshot,
 };
 use crate::state::GitUiState;
@@ -305,8 +305,10 @@ struct BranchFilesOutput {
 struct DiffOutput {
     viewport: GitDiffViewport,
     branch_paths: Vec<Vec<u8>>,
+    branch_lines: Option<Arc<Vec<DiffLine>>>,
     branch_top_line: u32,
     branch_page_complete: bool,
+    prefetch: bool,
 }
 
 #[derive(Component, Clone, Debug)]
@@ -558,6 +560,7 @@ fn deliver_diff_outputs(
     mut views: Query<(
         &mut super::state::GitState,
         &mut super::state::GitDiffRevealRanges,
+        &mut super::state::GitDiffProjectionState,
     )>,
     mut files: super::status::FileGitStates,
     mut diffs: Query<&mut super::diff::GitDiffQuery>,
@@ -582,6 +585,7 @@ fn deliver_diff_outputs(
             loaded_lines,
             output.branch_page_complete,
             succeeded,
+            output.branch_lines.clone(),
         );
         if !output.branch_paths.is_empty() {
             event.has_more = branch_has_more;
@@ -589,12 +593,13 @@ fn deliver_diff_outputs(
                 event.total_lines = event.first_line;
             }
         }
-        if let Ok((mut view, mut revealed)) = views.get_mut(webview) {
+        if let Ok((mut view, mut revealed, mut projection)) = views.get_mut(webview) {
             if view.snapshot.can_append_diff(&event) {
                 let snapshot = &mut view.bypass_change_detection().snapshot;
                 let append = snapshot
                     .append_diff_patch(event, &revealed.0)
                     .expect("appendability was checked");
+                projection.capture(snapshot, &revealed.0);
                 commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                     webview, &append,
                 ));
@@ -602,6 +607,12 @@ fn deliver_diff_outputs(
                 view.snapshot.diff_loading = false;
                 view.snapshot.diff_viewport = Some(event);
                 revealed.0.clear();
+            }
+            if output.prefetch && branch_has_more && succeeded {
+                commands.trigger(bevy_cef::prelude::UiInput {
+                    webview,
+                    payload: crate::event::GitDiffNextRequest,
+                });
             }
             commands.entity(entity).despawn();
             continue;
@@ -904,20 +915,29 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                         error: String::new(),
                     },
                     branch_paths: job.branch_paths,
+                    branch_lines: None,
                     branch_top_line: job.branch_top_line,
                     branch_page_complete: true,
+                    prefetch: false,
                 };
             }
             let result = match &job.scope {
                 DiffScope::File => match job.content.as_deref() {
-                    Some(content) => repository.diff_lines_with_content(&job.path, content),
-                    None => repository.diff_lines(&job.path),
+                    Some(content) => repository
+                        .diff_lines_with_content(&job.path, content)
+                        .map(Arc::new),
+                    None => repository.diff_lines(&job.path).map(Arc::new),
                 },
-                DiffScope::Branch(reference) => {
-                    repository.branch_diff_lines_for_paths(reference, &job.branch_paths)
+                DiffScope::Branch(reference) => match job.branch_lines.clone() {
+                    Some(lines) => Ok(lines),
+                    None => repository
+                        .branch_diff_lines_for_paths(reference, &job.branch_paths)
+                        .map(Arc::new),
+                },
+                DiffScope::Commit(reference) => {
+                    repository.commit_diff_lines(reference).map(Arc::new)
                 }
-                DiffScope::Commit(reference) => repository.commit_diff_lines(reference),
-                DiffScope::Stash(reference) => repository.stash_diff_lines(reference),
+                DiffScope::Stash(reference) => repository.stash_diff_lines(reference).map(Arc::new),
             };
             match result {
                 Ok(all_lines) => {
@@ -967,8 +987,11 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                             error: String::new(),
                         },
                         branch_paths: job.branch_paths,
+                        branch_lines: matches!(job.scope, DiffScope::Branch(_))
+                            .then_some(all_lines),
                         branch_top_line: job.branch_top_line,
                         branch_page_complete,
+                        prefetch: job.prefetch,
                     }
                 }
                 Err(error) => DiffOutput {
@@ -982,8 +1005,10 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                         error: error.0,
                     },
                     branch_paths: job.branch_paths,
+                    branch_lines: None,
                     branch_top_line: job.branch_top_line,
                     branch_page_complete: false,
+                    prefetch: false,
                 },
             }
         }) else {
@@ -1604,8 +1629,10 @@ mod tests {
                 path: file,
                 scope: DiffScope::File,
                 branch_paths: Vec::new(),
+                branch_lines: None,
                 branch_top_line: 0,
                 branch_has_more: false,
+                prefetch: false,
                 generation: 7,
                 top_line: 0,
                 rows: 50,
@@ -1654,8 +1681,10 @@ mod tests {
                 path: file,
                 scope: DiffScope::File,
                 branch_paths: Vec::new(),
+                branch_lines: None,
                 branch_top_line: 0,
                 branch_has_more: false,
+                prefetch: false,
                 generation: 7,
                 top_line: 0,
                 rows: 50,

@@ -51,7 +51,8 @@ impl Plugin for StatePlugin {
     PendingBranchCheckout,
     SelectionRevealRevision,
     GitCommitResultSequence,
-    GitDiffRevealRanges
+    GitDiffRevealRanges,
+    GitDiffProjectionState
 )]
 pub(super) struct GitState {
     pub(super) snapshot: GitPageSnapshot,
@@ -59,6 +60,44 @@ pub(super) struct GitState {
 
 #[derive(Component, Default)]
 pub(super) struct GitDiffRevealRanges(pub(super) Vec<(usize, usize)>);
+
+#[derive(Component, Default)]
+pub(super) struct GitDiffProjectionState {
+    generation: u64,
+    lines: usize,
+    revealed: Vec<(usize, usize)>,
+}
+
+impl GitDiffProjectionState {
+    fn current(&self, snapshot: &GitPageSnapshot, revealed: &[(usize, usize)]) -> bool {
+        let generation = snapshot
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| viewport.generation)
+            .unwrap_or_default();
+        let lines = snapshot
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| viewport.lines.len())
+            .unwrap_or_default();
+        self.generation == generation && self.lines == lines && self.revealed == revealed
+    }
+
+    pub(super) fn capture(&mut self, snapshot: &GitPageSnapshot, revealed: &[(usize, usize)]) {
+        self.generation = snapshot
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| viewport.generation)
+            .unwrap_or_default();
+        self.lines = snapshot
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| viewport.lines.len())
+            .unwrap_or_default();
+        self.revealed.clear();
+        self.revealed.extend_from_slice(revealed);
+    }
+}
 
 impl GitState {
     pub(super) fn workspace(&self) -> &str {
@@ -286,14 +325,24 @@ impl GitStates<'_, '_> {
     }
 }
 
-fn project_diff(mut pages: Query<(&mut GitState, Ref<GitDiffRevealRanges>)>) {
-    for (mut state, revealed) in &mut pages {
+fn project_diff(
+    mut pages: Query<(
+        &mut GitState,
+        Ref<GitDiffRevealRanges>,
+        &mut GitDiffProjectionState,
+    )>,
+) {
+    for (mut state, revealed, mut projection) in &mut pages {
         if !state.is_changed() && !revealed.is_changed() {
+            continue;
+        }
+        if projection.current(&state.snapshot, &revealed.0) {
             continue;
         }
         state
             .snapshot
             .project_diff_rows(&revealed.0, GitPageSnapshot::DIFF_CONTEXT_LINES);
+        projection.capture(&state.snapshot, &revealed.0);
     }
 }
 

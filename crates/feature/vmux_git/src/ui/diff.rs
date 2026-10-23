@@ -24,6 +24,7 @@ pub(super) fn BranchDiffCard(
     error: String,
 ) -> Element {
     let selected_branch_value = selected_branch();
+    let mut revealed = use_signal(String::new);
     let comparison = if repository.base_ref.is_empty() {
         selected_branch_value.clone()
     } else {
@@ -31,14 +32,23 @@ pub(super) fn BranchDiffCard(
     };
     use_effect(move || {
         let path = selected_path();
-        let loaded_lines = diff_viewport()
-            .as_ref()
-            .map(|viewport| viewport.lines.len())
-            .unwrap_or_default();
-        if path.is_empty() || loaded_lines == 0 {
+        let branch = selected_branch();
+        let reveal_key = format!("{branch}\0{path}");
+        if path.is_empty() || *revealed.peek() == reveal_key {
             return;
         }
-        ScrollIntoView::nearest_vertical(&format!("git-diff-file-{path}"));
+        let rendered = diff_viewport().as_ref().is_some_and(|viewport| {
+            viewport
+                .lines
+                .iter()
+                .any(|line| line.file_path() == Some(path.as_str()))
+        });
+        if !rendered {
+            return;
+        }
+        revealed.set(reveal_key);
+        let id = format!("git-diff-file-{path}");
+        ScrollIntoView::first_rendered(&[id.as_str()]);
     });
     let available = !selected_branch_value.is_empty();
     rsx! {
@@ -54,6 +64,7 @@ pub(super) fn BranchDiffCard(
             empty: translate("git-select-file"),
             icon: LineIcon::File,
             error,
+            show_header: false,
         }
     }
 }
@@ -93,6 +104,7 @@ pub(super) fn CommitDiffCard(
             empty: translate("git-no-commits"),
             icon: LineIcon::GitCommit,
             error: String::new(),
+            show_header: true,
         }
     }
 }
@@ -128,6 +140,7 @@ pub(super) fn StashDiffCard(
             empty: translate("git-no-stashes"),
             icon: LineIcon::Package,
             error: String::new(),
+            show_header: true,
         }
     }
 }
@@ -145,23 +158,26 @@ fn RevisionDiffCard(
     empty: String,
     icon: LineIcon,
     error: String,
+    show_header: bool,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let identity = title.clone();
     rsx! {
         section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-card/60 ring-1 ring-inset ring-foreground/[0.10]",
-            div { class: "flex min-h-12 shrink-0 items-center gap-2.5 bg-foreground/[0.025] px-3",
-                if file_path.is_empty() {
-                    LineIconView { icon, class: "size-3.5 shrink-0 text-muted-foreground" }
-                } else {
-                    TypeIcon { path: file_path, is_dir: false, class: "size-4 shrink-0" }
-                }
-                div { class: "min-w-0 flex-1",
-                    div { class: "truncate font-mono text-[11px] font-semibold text-foreground", "{title}" }
-                    if !subtitle.is_empty() {
-                        div { class: "mt-0.5 flex items-center gap-1 truncate text-[9px] text-muted-foreground",
-                            LineIconView { icon: LineIcon::GitBranch, class: "size-2.5 shrink-0" }
-                            span { class: "truncate", "{subtitle}" }
+            if show_header {
+                div { class: "flex min-h-12 shrink-0 items-center gap-2.5 bg-foreground/[0.025] px-3",
+                    if file_path.is_empty() {
+                        LineIconView { icon, class: "size-3.5 shrink-0 text-muted-foreground" }
+                    } else {
+                        TypeIcon { path: file_path, is_dir: false, class: "size-4 shrink-0" }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "truncate font-mono text-[11px] font-semibold text-foreground", "{title}" }
+                        if !subtitle.is_empty() {
+                            div { class: "mt-0.5 flex items-center gap-1 truncate text-[9px] text-muted-foreground",
+                                LineIconView { icon: LineIcon::GitBranch, class: "size-2.5 shrink-0" }
+                                span { class: "truncate", "{subtitle}" }
+                            }
                         }
                     }
                 }

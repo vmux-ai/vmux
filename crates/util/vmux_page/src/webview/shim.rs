@@ -141,13 +141,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         );
         return;
       case 'revealElement':
-        for (const id of request.elements) {
-          const target = document.getElementById(id);
-          if (target) {
-            target.scrollIntoView({ block: request.block, inline: 'nearest' });
-            break;
+        requestAnimationFrame(() => {
+          for (const id of request.elements) {
+            const target = document.getElementById(id);
+            if (target) {
+              target.scrollIntoView({ block: request.block, inline: 'nearest', behavior: 'instant' });
+              break;
+            }
           }
-        }
+        });
         return;
       case 'textOffsetAtPoint':
         window.ipc.postMessage(

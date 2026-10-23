@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bevy::prelude::Component;
 
@@ -25,8 +26,10 @@ pub(super) struct DiffJob {
     pub(super) path: PathBuf,
     pub(super) scope: DiffScope,
     pub(super) branch_paths: Vec<Vec<u8>>,
+    pub(super) branch_lines: Option<Arc<Vec<crate::event::DiffLine>>>,
     pub(super) branch_top_line: u32,
     pub(super) branch_has_more: bool,
+    pub(super) prefetch: bool,
     pub(super) generation: u64,
     pub(super) top_line: u32,
     pub(super) rows: u32,

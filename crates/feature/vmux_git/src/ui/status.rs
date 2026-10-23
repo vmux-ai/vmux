@@ -51,6 +51,11 @@ pub(super) fn RepositoryHeader(
     } else {
         repository.branch.clone()
     };
+    let branch_base = if focused_panel == GitPanel::Branches {
+        repository.base_ref.clone()
+    } else {
+        String::new()
+    };
     let selected_reference_count = branch_collection.len(&repository);
     let selected_catalog = GitCatalog::from(branch_collection);
     let first_commit = repository
@@ -167,6 +172,10 @@ pub(super) fn RepositoryHeader(
                             let _ = send(&HeaderDropdownRequest { open });
                         },
                         LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0" }
+                        if !branch_base.is_empty() && branch_base != branch_label {
+                            span { class: "truncate text-muted-foreground", "{branch_base}" }
+                            span { class: "shrink-0 text-muted-foreground/65", "←" }
+                        }
                         span { class: "truncate text-foreground/90", "{branch_label}" }
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0" }
                     }

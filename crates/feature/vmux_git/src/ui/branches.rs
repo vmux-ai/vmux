@@ -204,7 +204,11 @@ fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Ele
                 "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
-                ScrollIntoView::nearest_vertical(&format!("git-diff-file-{path}"));
+                if selected {
+                    let id = format!("git-diff-file-{path}");
+                    ScrollIntoView::first_rendered(&[id.as_str()]);
+                    return;
+                }
                 let _ = send(&GitBranchFileSelectRequest {
                     path_bytes: path_bytes.clone(),
                 });
