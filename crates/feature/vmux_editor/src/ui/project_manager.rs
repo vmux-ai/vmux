@@ -75,6 +75,18 @@ impl ProjectControls {
     pub(super) fn filters(self) -> ProjectFilters {
         (self.filters)()
     }
+
+    pub(super) fn selected_filter(self) -> Option<ProjectFilter> {
+        self.filters.read().selected()
+    }
+
+    pub(super) fn select_filter(mut self, filter: Option<ProjectFilter>) {
+        let mut filters = self.filters.write();
+        filters.0.clear();
+        if let Some(filter) = filter {
+            filters.0.push(filter);
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -130,7 +142,7 @@ pub(super) enum ProjectFilter {
 }
 
 impl ProjectFilter {
-    fn label(self) -> String {
+    pub(super) fn label(self) -> String {
         translate(match self {
             Self::Ongoing => "session-stage-in-progress",
             Self::Stale => "sessions-stale",
@@ -138,7 +150,7 @@ impl ProjectFilter {
         })
     }
 
-    fn dot(self) -> &'static str {
+    pub(super) fn dot(self) -> &'static str {
         match self {
             Self::Ongoing => "bg-success",
             Self::Stale => "bg-muted-foreground",
@@ -154,7 +166,7 @@ impl ProjectFilter {
         }
     }
 
-    fn count(self, entries: &[ProjectEntry]) -> usize {
+    pub(super) fn count(self, entries: &[ProjectEntry]) -> usize {
         entries.iter().filter(|entry| self.matches(entry)).count()
     }
 }
@@ -163,6 +175,10 @@ impl ProjectFilter {
 pub(super) struct ProjectFilters(Vec<ProjectFilter>);
 
 impl ProjectFilters {
+    fn selected(&self) -> Option<ProjectFilter> {
+        self.0.first().copied()
+    }
+
     fn matches(&self, entry: &ProjectEntry) -> bool {
         if self.0.is_empty() {
             return !entry.archived;

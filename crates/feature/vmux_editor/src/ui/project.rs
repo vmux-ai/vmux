@@ -19,20 +19,22 @@ use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty, ManagerGridSize,
-    ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSkeleton, ManagerTone,
-    ManagerToolbar, ManagerView, ManagerViewToggle,
+    ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
+    ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSidebarItem, ManagerSidebarSection,
+    ManagerSkeleton, ManagerTone, ManagerToolbar, ManagerView, ManagerViewToggle, ManagerWorkspace,
 };
-use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
+use vmux_ui::components::page::{PageContent, PageHeader};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
-use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
-use super::project_manager::{ProjectControls, ProjectFilterMenu, ProjectPresentation};
+use super::project_manager::{
+    ProjectControls, ProjectFilter, ProjectFilterMenu, ProjectPresentation,
+};
 use super::state::FileUi;
 use crate::project::{
     ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
@@ -75,13 +77,6 @@ pub(super) fn ProjectList(
     rsx! {
         ManagerPage {
             ManagerToolbar {
-                div { class: "flex shrink-0 items-center gap-2 px-1",
-                    BuiltinIconView {
-                        icon: vmux_api::BuiltinIcon::Project,
-                        class: "size-4 text-muted-foreground".to_string(),
-                    }
-                    span { class: "hidden text-xs font-semibold text-foreground sm:inline", {translate("layout-projects")} }
-                }
                 Dropdown {
                     open: presentation.filter_requested,
                     class: "min-w-0 flex-1".to_string(),
@@ -123,20 +118,26 @@ pub(super) fn ProjectList(
                         }
                     }
                 }
+                if count > 0 {
+                    ManagerViewToggle {
+                        view: controls.view(),
+                        list_label: translate("tools-view-list"),
+                        grid_label: translate("tools-view-grid"),
+                        onchange: move |view| controls.set_view(view),
+                    }
+                }
                 ProjectAdd { pending }
             }
-            div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
+            ManagerWorkspace {
+                active: ManagerArea::Projects,
+                onnavigate: move |url| {
+                    let _ = send(&OpenRequest {
+                        value: url,
+                        open: Some(OpenTarget::InPlace),
+                    });
+                },
+                sidebar: rsx! { ProjectCategories { entries: entries.clone(), controls } },
                 ManagerList {
-                    if count > 0 {
-                        ManagerControls {
-                            ManagerViewToggle {
-                                view: controls.view(),
-                                list_label: translate("tools-view-list"),
-                                grid_label: translate("tools-view-grid"),
-                                onchange: move |view| controls.set_view(view),
-                            }
-                        }
-                    }
                     if view.is_none() && error.is_empty() {
                         ManagerSkeleton {}
                     } else if !error.is_empty() {
@@ -162,6 +163,35 @@ pub(super) fn ProjectList(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProjectCategories(entries: Vec<ProjectEntry>, controls: ProjectControls) -> Element {
+    let selected = controls.selected_filter();
+    let active = entries.iter().filter(|entry| !entry.archived).count();
+    rsx! {
+        ManagerSidebarSection { title: translate("common-status"),
+            ManagerSidebarItem {
+                label: translate_humanized("common-active"),
+                count: active,
+                selected: selected.is_none(),
+                icon: Some(LineIcon::Package),
+                onclick: move |_| controls.select_filter(None),
+            }
+            for filter in [ProjectFilter::Ongoing, ProjectFilter::Stale, ProjectFilter::Archived] {
+                if filter.count(&entries) > 0 {
+                    ManagerSidebarItem {
+                        key: "project-category-{filter:?}",
+                        label: filter.label(),
+                        count: filter.count(&entries),
+                        selected: selected == Some(filter),
+                        dot: filter.dot().to_string(),
+                        onclick: move |_| controls.select_filter(Some(filter)),
                     }
                 }
             }
@@ -541,7 +571,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     let header_root = root.clone();
 
     rsx! {
-        PageShell {
+        ManagerPage {
             PageHeader {
                 div { class: "flex min-h-10 items-center gap-3",
                 div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
@@ -567,11 +597,20 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                 }
                 }
             }
-            PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
-                ProjectSessionsPanel {}
-                ProjectGitPanel { root: root.clone() }
-                ProjectRecentFilesPanel { root: root.clone() }
-                ProjectFilesPanel {}
+            ManagerWorkspace {
+                active: ManagerArea::Projects,
+                onnavigate: move |url| {
+                    let _ = send(&OpenRequest {
+                        value: url,
+                        open: Some(OpenTarget::InPlace),
+                    });
+                },
+                PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
+                    ProjectSessionsPanel {}
+                    ProjectGitPanel { root: root.clone() }
+                    ProjectRecentFilesPanel { root: root.clone() }
+                    ProjectFilesPanel {}
+                }
             }
         }
     }

@@ -1,6 +1,8 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use vmux_api::command_bar::OpenRequest;
+use vmux_api::open_target::OpenTarget;
 #[cfg(test)]
 use vmux_session::SessionSummaryProjection;
 use vmux_session::{SessionSummary, StageSummary};
@@ -9,8 +11,9 @@ use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch, ManagerToolbar,
-    ManagerView, ManagerViewToggle,
+    ManagerArea, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch,
+    ManagerSidebarItem, ManagerSidebarSection, ManagerToolbar, ManagerView, ManagerViewToggle,
+    ManagerWorkspace,
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
@@ -144,37 +147,42 @@ fn SessionsManagerContent(
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
-            SessionCategories {
-                groups: presentation.category_groups.clone(),
-                selected: presentation.selected_stage.clone(),
-                onselect: move |stage| controls.select_stage(stage),
-            }
-            div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                div { class: "flex min-h-0 flex-1 overflow-hidden",
-                    if presentation.snapshot.sessions.is_empty() {
-                        ManagerEmpty {
-                            title: translate("sessions-empty"),
-                            detail: translate("sessions-empty-detail"),
-                            actions: rsx! { StartSessionButton {} },
-                        }
-                    } else if !presentation.visible_sessions {
-                        ManagerEmpty {
-                            title: translate("sessions-inbox-empty"),
-                            detail: translate("sessions-inbox-empty-detail"),
-                            actions: rsx! { StartSessionButton {} },
-                        }
-                    } else if controls.view() == ManagerView::List {
-                        SessionsList {
-                            groups: presentation.groups.clone(),
-                            repositories: presentation.repositories.clone(),
-                        }
-                    } else {
-                        SessionsBoard {
-                            groups: presentation.groups.clone(),
-                            repositories: presentation.repositories.clone(),
-                        }
-                    }
+        ManagerWorkspace {
+            active: ManagerArea::Sessions,
+            onnavigate: move |url| {
+                let _ = send(&OpenRequest {
+                    value: url,
+                    open: Some(OpenTarget::InPlace),
+                });
+            },
+            sidebar: rsx! {
+                SessionCategories {
+                    groups: presentation.category_groups.clone(),
+                    selected: presentation.selected_stage.clone(),
+                    onselect: move |stage| controls.select_stage(stage),
+                }
+            },
+            if presentation.snapshot.sessions.is_empty() {
+                ManagerEmpty {
+                    title: translate("sessions-empty"),
+                    detail: translate("sessions-empty-detail"),
+                    actions: rsx! { StartSessionButton {} },
+                }
+            } else if !presentation.visible_sessions {
+                ManagerEmpty {
+                    title: translate("sessions-inbox-empty"),
+                    detail: translate("sessions-inbox-empty-detail"),
+                    actions: rsx! { StartSessionButton {} },
+                }
+            } else if controls.view() == ManagerView::List {
+                SessionsList {
+                    groups: presentation.groups.clone(),
+                    repositories: presentation.repositories.clone(),
+                }
+            } else {
+                SessionsBoard {
+                    groups: presentation.groups.clone(),
+                    repositories: presentation.repositories.clone(),
                 }
             }
         }
@@ -216,19 +224,17 @@ fn SessionCategories(
         .map(|group| group.sessions.len())
         .sum::<usize>();
     rsx! {
-        aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
-            h2 { class: "px-2 pb-2 pt-1 text-xs font-semibold text-foreground/90", {translate("sessions-title")} }
-            SessionCategory {
+        ManagerSidebarSection { title: translate("common-status"),
+            ManagerSidebarItem {
                 label: translate("sessions-inbox"),
                 count: inbox_count,
                 selected: selected.is_none(),
                 icon: Some(LineIcon::Inbox),
                 onclick: move |_| onselect.call(None),
             }
-            div { class: "h-2" }
             for group in groups {
                 if !group.sessions.is_empty() {
-                    SessionCategory {
+                    ManagerSidebarItem {
                         key: "{group.stage.id}",
                         label: translate_humanized(&group.stage.name),
                         count: group.sessions.len(),
@@ -238,36 +244,6 @@ fn SessionCategories(
                     }
                 }
             }
-        }
-    }
-}
-
-#[component]
-fn SessionCategory(
-    label: String,
-    count: usize,
-    selected: bool,
-    #[props(default)] icon: Option<LineIcon>,
-    #[props(default)] dot: String,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
-    let class = if selected {
-        "bg-foreground/[0.065] text-foreground"
-    } else {
-        "text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground"
-    };
-    rsx! {
-        button {
-            r#type: "button",
-            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] transition-colors {class}",
-            onclick: move |event| onclick.call(event),
-            if let Some(icon) = icon {
-                LineIconView { icon, class: "size-3.5 shrink-0".to_string() }
-            } else {
-                span { class: "size-2 shrink-0 rounded-full {dot}" }
-            }
-            span { class: "min-w-0 flex-1 truncate", "{label}" }
-            span { class: "text-[10px] tabular-nums text-muted-foreground/65", "{count}" }
         }
     }
 }

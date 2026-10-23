@@ -3,10 +3,11 @@ use crate::components::badge::Badge;
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
 use crate::i18n::translate;
-use crate::icon::{LineIcon, LineIconView};
+use crate::icon::{BuiltinIconView, LineIcon, LineIconView};
 use crate::platform::Platform;
 use dioxus::core::Task;
 use dioxus::prelude::*;
+use vmux_api::BuiltinIcon;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum ManagerTone {
@@ -71,6 +72,126 @@ impl ManagerButtonVariant {
 pub fn ManagerPage(children: Element) -> Element {
     rsx! {
         PageShell { {children} }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManagerArea {
+    Sessions,
+    Projects,
+}
+
+impl ManagerArea {
+    const ALL: [Self; 2] = [Self::Sessions, Self::Projects];
+
+    fn label(self) -> String {
+        translate(match self {
+            Self::Sessions => "sessions-title",
+            Self::Projects => "layout-projects",
+        })
+    }
+
+    fn url(self) -> &'static str {
+        match self {
+            Self::Sessions => "vmux://sessions/",
+            Self::Projects => "vmux://projects/",
+        }
+    }
+
+    fn icon(self) -> BuiltinIcon {
+        match self {
+            Self::Sessions => BuiltinIcon::MessagesRound,
+            Self::Projects => BuiltinIcon::Project,
+        }
+    }
+}
+
+#[component]
+pub fn ManagerWorkspace(
+    active: ManagerArea,
+    onnavigate: EventHandler<String>,
+    #[props(default = rsx! {})] sidebar: Element,
+    children: Element,
+) -> Element {
+    rsx! {
+        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
+            aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
+                nav { class: "flex shrink-0 flex-col gap-0.5",
+                    for area in ManagerArea::ALL {
+                        ManagerAreaLink {
+                            key: "{area:?}",
+                            area,
+                            selected: area == active,
+                            onselect: move |url| onnavigate.call(url),
+                        }
+                    }
+                }
+                div { class: "mt-3 min-h-0 flex-1 overflow-y-auto", {sidebar} }
+            }
+            div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
+        }
+    }
+}
+
+#[component]
+fn ManagerAreaLink(area: ManagerArea, selected: bool, onselect: EventHandler<String>) -> Element {
+    let class = if selected {
+        "bg-foreground/[0.075] text-foreground"
+    } else {
+        "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
+    };
+    rsx! {
+        a {
+            href: area.url(),
+            aria_current: if selected { "page" } else { "false" },
+            class: "flex h-8 items-center gap-2 rounded-md px-2 text-[11px] font-medium transition-colors {class}",
+            onclick: move |event| {
+                event.prevent_default();
+                onselect.call(area.url().to_string());
+            },
+            BuiltinIconView { icon: area.icon(), class: "size-3.5 shrink-0".to_string() }
+            span { class: "truncate", {area.label()} }
+        }
+    }
+}
+
+#[component]
+pub fn ManagerSidebarSection(title: String, children: Element) -> Element {
+    rsx! {
+        section { class: "flex flex-col gap-0.5",
+            h2 { class: "px-2 pb-1 text-[10px] font-medium text-muted-foreground/65", "{title}" }
+            {children}
+        }
+    }
+}
+
+#[component]
+pub fn ManagerSidebarItem(
+    label: String,
+    count: usize,
+    selected: bool,
+    #[props(default)] icon: Option<LineIcon>,
+    #[props(default)] dot: String,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let class = if selected {
+        "bg-foreground/[0.065] text-foreground"
+    } else {
+        "text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground"
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] transition-colors {class}",
+            onclick: move |event| onclick.call(event),
+            if let Some(icon) = icon {
+                LineIconView { icon, class: "size-3.5 shrink-0".to_string() }
+            } else {
+                span { class: "size-2 shrink-0 rounded-full {dot}" }
+            }
+            span { class: "min-w-0 flex-1 truncate", "{label}" }
+            span { class: "text-[10px] tabular-nums text-muted-foreground/65", "{count}" }
+        }
     }
 }
 
