@@ -227,6 +227,7 @@
                 "ProjectImportRequest",
                 "ProjectArchiveRequest",
                 "ProjectDeleteRequest",
+                "ProjectCollectionViewRequest",
                 "OpenRequest",
                 "ResumeSession",
                 "FileEditorGotoDeclarationRequest",
