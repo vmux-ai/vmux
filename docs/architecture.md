@@ -812,6 +812,16 @@ line into `StyledSpan`s. The file viewer, the preview and git diffs all emit the
 spans, so code looks identical wherever it appears. No tree-sitter, no LSP. The host ships
 only the visible slice of a file and re-slices as you scroll.
 
+**Git.** The Git page and automatic Git-backed projections for the editor, Projects, Sessions and
+ACP enqueue work and only project completed results. Their repository discovery, status
+aggregation, directory reads and path resolution use one bounded worker runtime with separate
+interactive and mutating-operation lanes. Repository refreshes are single-flight per checkout,
+inactive views release their watches and tasks, and watcher bursts coalesce into invalidations; the
+watcher never runs a Git command or filters paths synchronously. Each Git child process drains
+stdin, stdout and stderr concurrently, has bounded output and a timeout, and is terminated when its
+operation entity is discarded. Catalogs and diffs page at their source, so opening a page cannot
+schedule work in proportion to the total repository history or block the ECS schedule.
+
 The host counts columns in **display cells** — `DisplayCells`, one per narrow character and
 two per wide one — because wrapping and selection are grid problems and the host has no
 font. Only the page can turn a cell into a pixel, so it does: it measures a narrow advance

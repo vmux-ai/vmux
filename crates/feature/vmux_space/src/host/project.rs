@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
@@ -26,6 +24,7 @@ pub struct SpaceProjectPlugin;
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_repository_roots)
+            .init_resource::<vmux_git::GitRuntime>()
             .init_resource::<ActiveProjectRows>()
             .init_resource::<ActiveProjectScan>()
             .register_persisted::<ExpandedProjectDirs>()
@@ -35,6 +34,8 @@ impl Plugin for SpaceProjectPlugin {
                 Update,
                 (
                     remember.before(EffectiveStartupSet),
+                    start_repo_root_resolutions.after(remember),
+                    finish_repo_root_resolutions.after(start_repo_root_resolutions),
                     refresh_active_projects.after(remember),
                     publish_roots
                         .in_set(WriteCommandBarSnapshots)
@@ -154,11 +155,15 @@ fn finish_picks(mut pending: Query<(Entity, &mut PendingProjectPicker)>, mut com
 struct ActiveProjectRows {
     space: Option<String>,
     rows: Vec<ProjectRow>,
+    repositories: Vec<ProjectRow>,
 }
 
-type ActiveProjectScanResult = (Option<String>, Vec<ProjectRow>);
+type ActiveProjectScanResult = (Option<String>, ProjectCatalog);
 
-struct ProjectCatalog(Vec<ProjectRow>);
+struct ProjectCatalog {
+    rows: Vec<ProjectRow>,
+    repositories: Vec<ProjectRow>,
+}
 
 impl ProjectCatalog {
     fn from_rows(rows: &[ProjectRow]) -> Self {
@@ -218,60 +223,74 @@ impl ProjectCatalog {
             }
             projected.push((identity.clone(), row.clone()));
         }
-        Self(projected.into_iter().map(|(_, row)| row).collect())
+        let mut rows = Vec::new();
+        let mut repositories = Vec::new();
+        for (identity, row) in projected {
+            if identity.is_some() {
+                repositories.push(row.clone());
+            }
+            rows.push(row);
+        }
+        Self { rows, repositories }
     }
 }
 
 #[derive(Resource, Default)]
 struct ActiveProjectScan {
-    task: Option<Task<ActiveProjectScanResult>>,
+    task: Option<vmux_git::GitTask<ActiveProjectScanResult>>,
     requested: bool,
-    scanned_at: Option<Instant>,
 }
-
-const PROJECT_ROWS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 fn refresh_active_projects(
     projects: SpaceProjects,
     mut active: ResMut<ActiveProjectRows>,
     mut scan: ResMut<ActiveProjectScan>,
+    runtime: Res<vmux_git::GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let space = projects.active_space.id();
     if let Some(task) = scan.task.as_mut()
-        && let Some((scanned_space, rows)) = future::block_on(future::poll_once(task))
+        && let Some(output) = task.poll()
     {
         scan.task = None;
-        scan.scanned_at = Some(Instant::now());
+        let Ok((scanned_space, catalog)) = output else {
+            scan.requested = true;
+            return;
+        };
         if scanned_space.as_deref() == space
-            && (active.space != scanned_space || active.rows != rows)
+            && (active.space != scanned_space
+                || active.rows != catalog.rows
+                || active.repositories != catalog.repositories)
         {
             active.space = scanned_space;
-            active.rows = rows;
+            active.rows = catalog.rows;
+            active.repositories = catalog.repositories;
         }
     }
-    let now = Instant::now();
-    let scan_due = scan
-        .scanned_at
-        .as_ref()
-        .is_none_or(|last| now.duration_since(*last) >= PROJECT_ROWS_REFRESH_INTERVAL);
-    scan.requested |= active.space.as_deref() != space
-        || projects.settings_changed()
-        || (scan.task.is_none() && scan_due);
+    scan.requested |= active.space.as_deref() != space || projects.settings_changed();
     if scan.task.is_some() || !scan.requested {
         return;
     }
     scan.requested = false;
     let space = space.map(str::to_string);
     let settings = projects.settings.as_deref().cloned();
-    scan.task = Some(IoTaskPool::get().spawn(async move {
-        let rows = match (space.as_deref(), settings.as_ref()) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    let Some(task) = runtime.spawn(wake, move || {
+        let catalog = match (space.as_deref(), settings.as_ref()) {
             (Some(space), Some(settings)) => {
-                ProjectCatalog::from_rows(&settings.project_rows(space)).0
+                ProjectCatalog::from_rows(&settings.project_rows(space))
             }
-            _ => Vec::new(),
+            _ => ProjectCatalog {
+                rows: Vec::new(),
+                repositories: Vec::new(),
+            },
         };
-        (space, rows)
-    }));
+        (space, catalog)
+    }) else {
+        scan.requested = true;
+        return;
+    };
+    scan.task = Some(task);
 }
 
 fn publish_roots(projects: Res<ActiveProjectRows>, mut roots: Single<&mut CommandBarProjectRoots>) {
@@ -303,52 +322,19 @@ struct GitProjectsProjection(Vec<ProjectRow>);
 
 impl GitProjectsProjection {
     fn from_rows(rows: &[ProjectRow]) -> Self {
-        let mut candidates = Vec::new();
-        for row in &ProjectCatalog::from_rows(rows).0 {
-            if row.depth != 0
-                || row.kind != ProjectRowKind::Project
-                || row.missing
-                || std::path::Path::new(&row.path)
-                    .components()
-                    .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
-            {
-                continue;
-            }
-            let Ok(checkout) = CheckoutInfo::try_from(std::path::Path::new(&row.path)) else {
-                continue;
-            };
-            let identity =
-                LinkedRepoRoot::find(&checkout.root).unwrap_or_else(|| checkout.root.clone());
-            let identity = identity.canonicalize().unwrap_or(identity);
-            let mut projected = row.clone();
-            projected.path = checkout.root.to_string_lossy().into_owned();
-            projected.display_path = vmux_path::DisplayPath::project(&identity);
-            projected.label = identity
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| projected.label.clone());
-            projected.is_worktree = checkout.root != identity;
-            candidates.push((identity, projected));
-        }
-        let mut rows = Vec::<(std::path::PathBuf, ProjectRow)>::new();
-        for (identity, row) in &candidates {
-            let nested = candidates.iter().any(|(other_identity, _)| {
-                identity != other_identity
-                    && std::path::Path::new(&row.path).starts_with(other_identity)
-            });
-            if nested {
-                continue;
-            }
-            if let Some((_, held)) = rows.iter_mut().find(|(held, _)| held == identity) {
-                if row.is_active && !held.is_active {
-                    held.clone_from(row);
-                }
-                continue;
-            }
-            rows.push((identity.clone(), row.clone()));
-        }
-        Self(rows.into_iter().map(|(_, row)| row).collect())
+        Self(
+            rows.iter()
+                .filter(|row| {
+                    row.depth == 0
+                        && row.kind == ProjectRowKind::Project
+                        && !row.missing
+                        && !std::path::Path::new(&row.path)
+                            .components()
+                            .any(|component| component.as_os_str() == std::ffi::OsStr::new(".git"))
+                })
+                .cloned()
+                .collect(),
+        )
     }
 }
 
@@ -368,8 +354,8 @@ fn publish_git_projects(
         if !changed && current.is_some() {
             continue;
         }
-        let rows =
-            projection.get_or_insert_with(|| GitProjectsProjection::from_rows(&projects.rows));
+        let rows = projection
+            .get_or_insert_with(|| GitProjectsProjection::from_rows(&projects.repositories));
         if current.is_some_and(|current| current.0.as_slice() == rows.0.as_slice()) {
             continue;
         }
@@ -552,13 +538,12 @@ impl SpaceOfTab<'_, '_> {
 struct RepoRoots(std::collections::HashMap<String, Option<String>>);
 
 impl RepoRoots {
-    fn resolve(&mut self, dir: &str) -> Option<String> {
-        if let Some(held) = self.0.get(dir) {
-            return held.clone();
-        }
-        let found = Self::read(dir);
-        self.0.insert(dir.to_string(), found.clone());
-        found
+    fn cached(&self, dir: &str) -> Option<Option<String>> {
+        self.0.get(dir).cloned()
+    }
+
+    fn remember(&mut self, dir: String, root: Option<String>) {
+        self.0.insert(dir, root);
     }
 
     fn read(dir: &str) -> Option<String> {
@@ -566,6 +551,28 @@ impl RepoRoots {
         let root = root.to_string_lossy().into_owned();
         (root != dir && !root.is_empty()).then_some(root)
     }
+}
+
+#[derive(Component, Clone)]
+struct PendingRepoRoot {
+    space_id: String,
+    dir: String,
+}
+
+#[derive(Component)]
+struct RepoRootTask(vmux_git::GitTask<Option<String>>);
+
+fn remember_project(
+    settings: &mut AppSettings,
+    saves: &mut MessageWriter<SettingsSaveRequest>,
+    space_id: &str,
+    project: SpaceProject,
+) -> bool {
+    if settings.remember_space_project(space_id, project) {
+        saves.write(SettingsSaveRequest);
+        return true;
+    }
+    false
 }
 
 fn remember(
@@ -576,9 +583,10 @@ fn remember(
         Option<&Tab>,
     )>,
     space_of_tab: SpaceOfTab,
-    mut roots: Single<&mut RepoRoots>,
+    roots: Single<&RepoRoots>,
     settings: Option<ResMut<AppSettings>>,
     mut saves: MessageWriter<SettingsSaveRequest>,
+    mut commands: Commands,
 ) {
     if bound.is_empty() {
         return;
@@ -603,6 +611,9 @@ fn remember(
         };
         let project = match worktree.as_ref() {
             Some(worktree) if !worktree.repo_root.trim().is_empty() => {
+                commands
+                    .entity(tab_entity)
+                    .remove::<(PendingRepoRoot, RepoRootTask)>();
                 let checkout = tab
                     .and_then(|tab| tab.startup_dir.as_deref())
                     .filter(|path| !path.is_empty())
@@ -615,18 +626,92 @@ fn remember(
                     });
                 SpaceProject::checked_out(&worktree.repo_root, checkout)
             }
-            _ => match roots.resolve(dir) {
-                Some(root) => SpaceProject::checked_out(&root, dir),
-                None => SpaceProject::at(dir),
-            },
+            _ => {
+                let Some(root) = roots.cached(dir) else {
+                    commands
+                        .entity(tab_entity)
+                        .remove::<RepoRootTask>()
+                        .insert(PendingRepoRoot {
+                            space_id,
+                            dir: dir.to_string(),
+                        });
+                    continue;
+                };
+                match root {
+                    Some(root) => SpaceProject::checked_out(&root, dir),
+                    None => SpaceProject::at(dir),
+                }
+            }
         };
-        let changed = settings
-            .bypass_change_detection()
-            .remember_space_project(&space_id, project);
-        if changed {
+        if remember_project(
+            settings.bypass_change_detection(),
+            &mut saves,
+            &space_id,
+            project,
+        ) {
             settings.set_changed();
-            saves.write(SettingsSaveRequest);
         }
+    }
+}
+
+fn start_repo_root_resolutions(
+    pending: Query<(Entity, &PendingRepoRoot), Without<RepoRootTask>>,
+    runtime: Res<vmux_git::GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (entity, pending) in &pending {
+        let dir = pending.dir.clone();
+        let Some(task) = runtime.spawn(wake.clone(), move || RepoRoots::read(&dir)) else {
+            break;
+        };
+        commands.entity(entity).insert(RepoRootTask(task));
+    }
+}
+
+fn finish_repo_root_resolutions(
+    mut tasks: Query<(Entity, &PendingRepoRoot, &mut RepoRootTask)>,
+    workspaces: Query<&TabWorkspace>,
+    worktrees: Query<(), With<TabWorktree>>,
+    space_of_tab: SpaceOfTab,
+    mut roots: Single<&mut RepoRoots>,
+    settings: Option<ResMut<AppSettings>>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
+    mut commands: Commands,
+) {
+    let mut settings = settings;
+    for (entity, pending, mut task) in &mut tasks {
+        let Some(output) = task.0.poll() else {
+            continue;
+        };
+        let Ok(root) = output else {
+            commands.entity(entity).remove::<RepoRootTask>();
+            continue;
+        };
+        roots.remember(pending.dir.clone(), root.clone());
+        let current = workspaces
+            .get(entity)
+            .is_ok_and(|workspace| workspace.project_dir.trim() == pending.dir)
+            && !worktrees.contains(entity)
+            && space_of_tab.find(entity).as_deref() == Some(pending.space_id.as_str());
+        if current && let Some(settings) = settings.as_mut() {
+            let project = match root {
+                Some(root) => SpaceProject::checked_out(&root, &pending.dir),
+                None => SpaceProject::at(&pending.dir),
+            };
+            if remember_project(
+                settings.bypass_change_detection(),
+                &mut saves,
+                &pending.space_id,
+                project,
+            ) {
+                settings.set_changed();
+            }
+        }
+        commands
+            .entity(entity)
+            .remove::<(PendingRepoRoot, RepoRootTask)>();
     }
 }
 
@@ -655,7 +740,12 @@ mod tests {
             app.add_plugins(SpaceProjectPlugin)
                 .add_message::<SettingsSaveRequest>()
                 .init_resource::<SawSettingsChange>()
-                .add_systems(Update, record_settings_change.after(remember))
+                .add_systems(
+                    Update,
+                    record_settings_change
+                        .after(remember)
+                        .after(finish_repo_root_resolutions),
+                )
                 .insert_resource(AppSettings::default());
             let space = app
                 .world_mut()
@@ -698,7 +788,17 @@ mod tests {
                 .insert(TabWorkspace {
                     project_dir: project_dir.to_string(),
                 });
-            self.app.update();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                self.app.update();
+                if self.app.world().get::<PendingRepoRoot>(self.tab).is_none()
+                    && self.app.world().get::<RepoRootTask>(self.tab).is_none()
+                {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
         }
 
         fn select_worktree(&mut self, project_dir: &str, repo_root: &str) {
@@ -864,28 +964,27 @@ mod tests {
             fixture.row(&non_repository, false),
         ];
 
-        let projection = GitProjectsProjection::from_rows(&rows);
+        let projection = ProjectCatalog::from_rows(&rows).repositories;
 
         assert_eq!(
             projection
-                .0
                 .iter()
                 .map(|row| row.label.as_str())
                 .collect::<Vec<_>>(),
             ["vmux-cloud", "dashboard"]
         );
         assert_eq!(
-            projection.0[0].path,
+            projection[0].path,
             fixture
                 .cloud_worktree
                 .canonicalize()
                 .unwrap()
                 .to_string_lossy()
         );
-        assert!(projection.0[0].is_active);
-        assert!(projection.0[0].is_worktree);
+        assert!(projection[0].is_active);
+        assert!(projection[0].is_worktree);
         assert_eq!(
-            projection.0[0].display_path,
+            projection[0].display_path,
             vmux_path::DisplayPath::project(fixture.cloud.canonicalize().unwrap())
         );
     }
@@ -908,21 +1007,21 @@ mod tests {
 
         assert_eq!(
             catalog
-                .0
+                .rows
                 .iter()
                 .map(|row| row.label.as_str())
                 .collect::<Vec<_>>(),
             ["vmux-cloud", "dashboard", "notes"]
         );
         assert_eq!(
-            catalog.0[0].path,
+            catalog.rows[0].path,
             fixture
                 .cloud_worktree
                 .canonicalize()
                 .unwrap()
                 .to_string_lossy()
         );
-        assert!(catalog.0[0].is_active);
+        assert!(catalog.rows[0].is_active);
     }
 
     #[test]

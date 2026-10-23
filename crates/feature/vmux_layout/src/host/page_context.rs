@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::PageMetadata;
 use vmux_ecs::event::space::ProjectActivateRequest;
@@ -17,9 +19,12 @@ pub struct PageContextPlugin;
 
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
+        app.init_resource::<vmux_git::GitRuntime>()
+            .init_resource::<ProjectActivationRevisions>()
+            .add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
             .add_observer(git_page_ready)
-            .add_observer(project_activate);
+            .add_observer(project_activate)
+            .add_systems(Update, poll_project_activations);
     }
 }
 
@@ -27,6 +32,100 @@ struct TabWorkspaceSelection {
     startup_dir: String,
     project_dir: String,
     worktree: Option<(TabWorktree, TabWorktreeReady)>,
+}
+
+#[derive(Component)]
+struct ProjectActivationTask {
+    webview: Entity,
+    tab: Entity,
+    branch: String,
+    revision: u64,
+    task: vmux_git::GitTask<Result<TabWorkspaceSelection, String>>,
+}
+
+#[derive(Resource, Default)]
+struct ProjectActivationRevisions(HashMap<Entity, u64>);
+
+impl ProjectActivationRevisions {
+    fn next(&mut self, tab: Entity) -> u64 {
+        let revision = self.0.entry(tab).or_default();
+        *revision = revision.wrapping_add(1).max(1);
+        *revision
+    }
+
+    fn accepts(&self, tab: Entity, revision: u64) -> bool {
+        self.0.get(&tab) == Some(&revision)
+    }
+
+    fn finish(&mut self, tab: Entity, revision: u64) {
+        if self.accepts(tab, revision) {
+            self.0.remove(&tab);
+        }
+    }
+}
+
+struct ProjectActivationOutcome {
+    path: String,
+    branch: String,
+    error: String,
+}
+
+impl ProjectActivationOutcome {
+    fn from_result(branch: String, result: Result<String, String>) -> Self {
+        match result {
+            Ok(path) => Self {
+                path,
+                branch,
+                error: String::new(),
+            },
+            Err(error) => Self {
+                path: String::new(),
+                branch,
+                error,
+            },
+        }
+    }
+
+    fn publish(
+        self,
+        webview: Entity,
+        tab: Option<Entity>,
+        child_of: &Query<&ChildOf>,
+        pages: &Query<(Entity, &PageMetadata)>,
+        commands: &mut Commands,
+    ) {
+        let event = GitWorkspaceChanged {
+            path: self.path,
+            branch: self.branch,
+            error: self.error,
+        };
+        let Some(tab) = tab else {
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
+            );
+            return;
+        };
+        for (page, metadata) in pages {
+            if !vmux_git::GitUrl::is_page(&metadata.url) {
+                continue;
+            }
+            let mut current = page;
+            loop {
+                if current == tab {
+                    commands.trigger(
+                        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+                            page, &event,
+                        ),
+                    );
+                    break;
+                }
+                let Ok(parent) = child_of.get(current) else {
+                    break;
+                };
+                current = parent.parent();
+            }
+        }
+    }
 }
 
 impl TabWorkspaceSelection {
@@ -229,7 +328,11 @@ fn project_activate(
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
     pages: Query<(Entity, &PageMetadata)>,
     managed_root: Res<ManagedWorktreeRoot>,
-    mut writer: WorkspaceWriter,
+    runtime: Res<vmux_git::GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    running: Query<(Entity, &ProjectActivationTask)>,
+    mut revisions: ResMut<ProjectActivationRevisions>,
+    mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let ProjectActivateRequest {
@@ -254,43 +357,80 @@ fn project_activate(
         };
         current = parent.parent();
     };
-    let result = match tab_entity {
-        Some(tab_entity) => TabWorkspaceSelection::resolve(path, branch, checkout, &managed_root.0)
-            .and_then(|selection| writer.apply(selection, tab_entity)),
-        None => Err("tab workspace is unavailable".to_string()),
-    };
-    let (path, error) = match result {
-        Ok(path) => (path, String::new()),
-        Err(error) => (String::new(), error),
-    };
-    let event = GitWorkspaceChanged {
-        path,
-        branch: branch.clone(),
-        error,
-    };
     let Some(tab_entity) = tab_entity else {
-        writer.commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
-        );
+        ProjectActivationOutcome::from_result(
+            branch.clone(),
+            Err("tab workspace is unavailable".to_string()),
+        )
+        .publish(webview, None, &child_of, &pages, &mut commands);
         return;
     };
-    for (page, metadata) in &pages {
-        if !vmux_git::GitUrl::is_page(&metadata.url) {
+    let revision = revisions.next(tab_entity);
+    for (entity, task) in &running {
+        if task.tab == tab_entity {
+            commands.entity(entity).despawn();
+        }
+    }
+    let path = path.clone();
+    let branch = branch.clone();
+    let checkout = checkout.clone();
+    let managed_root = managed_root.0.clone();
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    let task_branch = branch.clone();
+    let Some(task) = runtime.spawn_operation(wake, move || {
+        TabWorkspaceSelection::resolve(&path, &task_branch, &checkout, &managed_root)
+    }) else {
+        revisions.finish(tab_entity, revision);
+        ProjectActivationOutcome::from_result(
+            branch,
+            Err("Git operation queue is busy".to_string()),
+        )
+        .publish(webview, Some(tab_entity), &child_of, &pages, &mut commands);
+        return;
+    };
+    commands.spawn(ProjectActivationTask {
+        webview,
+        tab: tab_entity,
+        branch,
+        revision,
+        task,
+    });
+}
+
+fn poll_project_activations(
+    mut tasks: Query<(Entity, &mut ProjectActivationTask)>,
+    tabs: Query<(), With<Tab>>,
+    child_of: Query<&ChildOf>,
+    pages: Query<(Entity, &PageMetadata)>,
+    mut revisions: ResMut<ProjectActivationRevisions>,
+    mut writer: WorkspaceWriter,
+) {
+    for (entity, mut activation) in &mut tasks {
+        if !revisions.accepts(activation.tab, activation.revision) {
+            writer.commands.entity(entity).despawn();
             continue;
         }
-        let mut current = page;
-        loop {
-            if current == tab_entity {
-                writer.commands.trigger(
-                    vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(page, &event),
-                );
-                break;
-            }
-            let Ok(parent) = child_of.get(current) else {
-                break;
-            };
-            current = parent.parent();
+        if !tabs.contains(activation.tab) {
+            revisions.finish(activation.tab, activation.revision);
+            writer.commands.entity(entity).despawn();
+            continue;
         }
+        let Some(output) = activation.task.poll() else {
+            continue;
+        };
+        let result = match output {
+            Ok(result) => result.and_then(|selection| writer.apply(selection, activation.tab)),
+            Err(_) => Err("Git workspace worker panicked".to_string()),
+        };
+        ProjectActivationOutcome::from_result(activation.branch.clone(), result).publish(
+            activation.webview,
+            Some(activation.tab),
+            &child_of,
+            &pages,
+            &mut writer.commands,
+        );
+        revisions.finish(activation.tab, activation.revision);
+        writer.commands.entity(entity).despawn();
     }
 }
 
@@ -353,8 +493,11 @@ mod tests {
         let managed_root = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_git::GitRuntime>()
+            .init_resource::<ProjectActivationRevisions>()
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
-            .add_observer(project_activate);
+            .add_observer(project_activate)
+            .add_systems(Update, poll_project_activations);
         let tab = app.world_mut().spawn(Tab::default()).id();
         let webview = app.world_mut().spawn(ChildOf(tab)).id();
 
@@ -367,7 +510,12 @@ mod tests {
                 pane_id: None,
             },
         });
-        app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.world().get::<TabWorkspace>(tab).is_none() {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
 
         let expected = project.path().canonicalize().unwrap();
         let tab_state = app.world().get::<Tab>(tab).unwrap();
@@ -389,10 +537,13 @@ mod tests {
         let managed_root = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_git::GitRuntime>()
+            .init_resource::<ProjectActivationRevisions>()
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .init_resource::<WorkspaceWrites>()
             .add_observer(project_activate)
-            .add_observer(capture_workspace);
+            .add_observer(capture_workspace)
+            .add_systems(Update, poll_project_activations);
         let tab = app.world_mut().spawn(Tab::default()).id();
         let requester = app
             .world_mut()
@@ -431,7 +582,12 @@ mod tests {
                 pane_id: None,
             },
         });
-        app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.world().resource::<WorkspaceWrites>().0.is_empty() {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
 
         assert_eq!(app.world().resource::<WorkspaceWrites>().0, vec![git]);
     }

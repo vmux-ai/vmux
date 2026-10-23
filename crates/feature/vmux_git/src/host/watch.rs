@@ -6,23 +6,27 @@ use std::time::{Duration, Instant};
 
 use super::GitUpdateSet;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_ecs::KeyboardOwner;
 use vmux_path::PathIdentity;
 
+use super::runtime::{GitRuntime, GitTask};
+
 pub(super) struct WatchPlugin;
 
 impl Plugin for WatchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, initialize)
+        app.init_resource::<GitRuntime>()
+            .add_systems(Startup, initialize)
             .add_systems(Startup, spawn_repo_info_cache)
             .add_systems(
                 Update,
                 (
                     sync_page_subscriptions,
                     drain,
+                    start_relevance_tasks,
+                    poll_relevance_tasks,
                     start_repo_info_loads,
                     poll_info,
                 )
@@ -68,7 +72,6 @@ fn spawn_repo_info_cache(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands
         RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),
-            guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             wake,
@@ -77,7 +80,7 @@ fn spawn_repo_info_cache(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct GitWatchTarget {
+pub(super) struct GitWatchTarget {
     path: PathBuf,
     recursive: bool,
     kind: GitWatchKind,
@@ -103,12 +106,164 @@ struct GitSubscription {
     complete: bool,
 }
 
+#[derive(Clone)]
+pub(super) struct GitWatchSubscription {
+    repo_root: PathBuf,
+    targets: Vec<GitWatchTarget>,
+}
+
 pub(super) struct GitWatch {
     watcher: RecommendedWatcher,
     rx: mpsc::Receiver<GitWatchBatch>,
     watch_references: HashMap<GitWatchTarget, usize>,
     subscriptions: HashMap<Entity, GitSubscription>,
     repo_info_subscriptions: HashMap<PathBuf, Vec<GitWatchTarget>>,
+}
+
+#[derive(Clone, Default)]
+struct GitWatchRelevanceBatch(HashMap<PathBuf, GitWatchRelevanceRoot>);
+
+#[derive(Clone, Default)]
+struct GitWatchRelevanceRoot {
+    changed: HashSet<PathBuf>,
+    entities: HashSet<Entity>,
+    repo_info: HashSet<PathBuf>,
+}
+
+#[derive(Clone, Default)]
+struct GitWatchRelevanceOutput {
+    entities: HashMap<Entity, HashSet<PathBuf>>,
+    repo_info: HashSet<PathBuf>,
+}
+
+#[derive(Component, Clone)]
+struct PendingGitWatchRelevance(GitWatchRelevanceBatch);
+
+#[derive(Component)]
+struct GitWatchRelevanceTask {
+    fallback: GitWatchRelevanceOutput,
+    task: GitTask<GitWatchRelevanceOutput>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct GitWatchRefreshes<'w, 's> {
+    states: super::state::GitStates<'w, 's>,
+    files: super::status::FileGitStates<'w, 's>,
+    active: Query<'w, 's, (), With<KeyboardOwner>>,
+    wake: Option<Res<'w, EventLoopProxyWrapper>>,
+    commands: Commands<'w, 's>,
+}
+
+impl GitWatchRefreshes<'_, '_> {
+    fn request(&mut self, entity: Entity, refresh_catalogs: bool) {
+        if self.states.contains(entity) {
+            if let Some((path, revision)) = self.states.mark_changed(entity) {
+                self.commands.spawn((
+                    super::job_runner::GitJob::new(entity),
+                    super::job::RepositoryJob {
+                        path: path.into(),
+                        refresh_catalogs,
+                        revision,
+                    },
+                ));
+            }
+        } else if let Some(refresh) = self
+            .files
+            .schedule_changed(entity, self.wake.as_deref().map(|wake| (**wake).clone()))
+        {
+            self.commands.entity(entity).insert(refresh);
+        }
+    }
+}
+
+impl GitWatchRelevanceBatch {
+    fn add_entity(
+        &mut self,
+        entity: Entity,
+        targets: &[GitWatchTarget],
+        changed: &HashSet<PathBuf>,
+    ) {
+        for target in targets {
+            if target.kind != GitWatchKind::Worktree {
+                continue;
+            }
+            let matching = changed
+                .iter()
+                .filter(|path| target.matches(path))
+                .cloned()
+                .collect::<Vec<_>>();
+            if matching.is_empty() {
+                continue;
+            }
+            let root = self.0.entry(target.path.clone()).or_default();
+            root.changed.extend(matching);
+            root.entities.insert(entity);
+        }
+    }
+
+    fn add_repo_info(
+        &mut self,
+        path: &Path,
+        targets: &[GitWatchTarget],
+        changed: &HashSet<PathBuf>,
+    ) {
+        for target in targets {
+            if target.kind != GitWatchKind::Worktree {
+                continue;
+            }
+            let matching = changed
+                .iter()
+                .filter(|path| target.matches(path))
+                .cloned()
+                .collect::<Vec<_>>();
+            if matching.is_empty() {
+                continue;
+            }
+            let root = self.0.entry(target.path.clone()).or_default();
+            root.changed.extend(matching);
+            root.repo_info.insert(path.to_path_buf());
+        }
+    }
+
+    fn read(self) -> GitWatchRelevanceOutput {
+        let mut output = GitWatchRelevanceOutput::default();
+        for (root, candidates) in self.0 {
+            let repository = super::repository::GitRepository::at(&root);
+            if !repository.has_unignored_changes(candidates.changed.iter().map(PathBuf::as_path)) {
+                continue;
+            }
+            for entity in candidates.entities {
+                output
+                    .entities
+                    .entry(entity)
+                    .or_default()
+                    .insert(root.clone());
+            }
+            output.repo_info.extend(candidates.repo_info);
+        }
+        output
+    }
+
+    fn all(&self) -> GitWatchRelevanceOutput {
+        let mut output = GitWatchRelevanceOutput::default();
+        for (root, candidates) in &self.0 {
+            for entity in &candidates.entities {
+                output
+                    .entities
+                    .entry(*entity)
+                    .or_default()
+                    .insert(root.clone());
+            }
+            output
+                .repo_info
+                .extend(candidates.repo_info.iter().cloned());
+        }
+        output
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 struct RepoInfoCacheEntry {
@@ -118,7 +273,7 @@ struct RepoInfoCacheEntry {
     branches_dirty: bool,
     watch_attempted: bool,
     last_accessed: Instant,
-    pending: Option<Task<Option<super::worktree::RepoInfo>>>,
+    pending: Option<GitTask<Option<super::worktree::RepoInfo>>>,
 }
 
 struct RepoInfoLease {
@@ -126,34 +281,12 @@ struct RepoInfoLease {
     active_only: bool,
 }
 
-const UNRESOLVED_RETRY: Duration = Duration::from_secs(1);
 const REPO_INFO_IDLE_TTL: Duration = Duration::from_secs(300);
-
-struct GuessedPath {
-    guess: PathBuf,
-    made_at: Instant,
-}
-
-impl From<&Path> for GuessedPath {
-    fn from(path: &Path) -> Self {
-        Self {
-            guess: PathIdentity::resolve(path).into_path_buf(),
-            made_at: Instant::now(),
-        }
-    }
-}
-
-impl GuessedPath {
-    fn worth_reusing(&self) -> bool {
-        self.made_at.elapsed() < UNRESOLVED_RETRY
-    }
-}
 
 #[derive(Component)]
 pub struct RepoInfoCache {
     entries: HashMap<PathBuf, RepoInfoCacheEntry>,
     canonical: HashMap<PathBuf, PathBuf>,
-    guessed: HashMap<PathBuf, GuessedPath>,
     repositories: HashMap<PathBuf, PathBuf>,
     leases: HashMap<Entity, RepoInfoLease>,
     wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
@@ -242,7 +375,16 @@ impl RepoInfoCache {
     }
 
     fn remember_repository(&mut self, path: PathBuf, info: &super::worktree::RepoInfo) {
-        let root = PathIdentity::resolve(&info.repo_root).into_path_buf();
+        let root = info.repo_root.clone();
+        self.canonical.insert(path.clone(), info.identity.clone());
+        if let Ok(relative) = info.identity.strip_prefix(&root) {
+            let depth = relative.components().count();
+            if let Some(alias) = path.ancestors().nth(depth) {
+                self.repositories
+                    .entry(alias.to_path_buf())
+                    .or_insert_with(|| path.clone());
+            }
+        }
         self.repositories.entry(root).or_insert(path);
     }
 
@@ -253,18 +395,7 @@ impl RepoInfoCache {
         if self.canonical.len() >= CANONICAL_CAP {
             self.canonical.clear();
         }
-        if let Some(guessed) = self.guessed.get(path)
-            && guessed.worth_reusing()
-        {
-            return guessed.guess.clone();
-        }
-        let Ok(resolved) = path.canonicalize() else {
-            let guessed = GuessedPath::from(path);
-            let guess = guessed.guess.clone();
-            self.guessed.insert(path.to_path_buf(), guessed);
-            return guess;
-        };
-        self.guessed.remove(path);
+        let resolved = PathIdentity::lexical(path).into_path_buf();
         self.canonical.insert(path.to_path_buf(), resolved.clone());
         resolved
     }
@@ -292,7 +423,6 @@ impl RepoInfoCache {
     fn remove(&mut self, path: &Path) {
         self.entries.remove(path);
         self.canonical.retain(|_, canonical| canonical != path);
-        self.guessed.remove(path);
         self.repositories.retain(|_, entry| entry != path);
     }
 }
@@ -423,71 +553,25 @@ impl GitWatchEvents {
 }
 
 impl GitWatchTarget {
+    #[cfg(test)]
     fn for_checkout(file: &Path) -> Result<(PathBuf, Vec<Self>), super::repository::GitError> {
         let repository = super::repository::GitRepository::discover(file)?;
         let root = repository.path().to_path_buf();
-        let (stdout, stderr, ok) = super::repository::GitCommand::run(
-            &root,
-            &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
-        )?;
-        if !ok {
-            return Err(super::repository::GitCommand::error(&stdout, &stderr));
-        }
-        let mut lines = stdout.lines();
-        let git_dir = lines
-            .next()
-            .map(|line| Self::resolve_path(&root, line))
-            .ok_or_else(|| super::repository::GitError("missing git directory".into()))?;
-        let common_dir = lines
-            .next()
-            .map(|line| Self::resolve_path(&root, line))
-            .ok_or_else(|| super::repository::GitError("missing common git directory".into()))?;
-        let mut targets = vec![
-            Self {
-                path: PathIdentity::resolve(&root).into_path_buf(),
-                recursive: true,
-                kind: GitWatchKind::Worktree,
-            },
-            Self {
-                path: git_dir.clone(),
-                recursive: false,
-                kind: GitWatchKind::Metadata,
-            },
-        ];
-        if common_dir != git_dir {
-            targets.push(Self {
-                path: common_dir.clone(),
-                recursive: false,
-                kind: GitWatchKind::Metadata,
-            });
-        }
-        targets.push(Self {
-            path: common_dir.join("refs"),
-            recursive: true,
-            kind: GitWatchKind::Metadata,
-        });
-        let worktrees = common_dir.join("worktrees");
-        if worktrees.is_dir() {
-            targets.push(Self {
-                path: worktrees,
-                recursive: true,
-                kind: GitWatchKind::Metadata,
-            });
-        }
-        Ok((root, targets))
+        let subscription = GitWatchSubscription::read(&root)?;
+        Ok((subscription.repo_root, subscription.targets))
     }
 
     fn for_repo_info(path: &Path, info: Option<&super::worktree::RepoInfo>) -> Vec<Self> {
         let Some(info) = info else {
             return vec![Self {
-                path: PathIdentity::resolve(path).into_path_buf(),
+                path: PathIdentity::lexical(path).into_path_buf(),
                 recursive: true,
                 kind: GitWatchKind::Worktree,
             }];
         };
-        let repo_root = PathIdentity::resolve(&info.repo_root).into_path_buf();
-        let git_dir = PathIdentity::resolve(&info.git_dir).into_path_buf();
-        let common_dir = PathIdentity::resolve(&info.common_dir).into_path_buf();
+        let repo_root = info.repo_root.clone();
+        let git_dir = info.git_dir.clone();
+        let common_dir = info.common_dir.clone();
         let mut targets = vec![
             Self {
                 path: repo_root,
@@ -512,10 +596,9 @@ impl GitWatchTarget {
             recursive: true,
             kind: GitWatchKind::Metadata,
         });
-        let worktrees = common_dir.join("worktrees");
-        if worktrees.is_dir() {
+        if let Some(worktrees) = &info.worktrees_dir {
             targets.push(Self {
-                path: worktrees,
+                path: worktrees.clone(),
                 recursive: true,
                 kind: GitWatchKind::Metadata,
             });
@@ -580,6 +663,63 @@ impl GitWatchTarget {
     }
 }
 
+impl GitWatchSubscription {
+    pub(super) fn read(root: &Path) -> Result<Self, super::repository::GitError> {
+        let (stdout, stderr, ok) = super::repository::GitCommand::run(
+            root,
+            &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
+        )?;
+        if !ok {
+            return Err(super::repository::GitCommand::error(&stdout, &stderr));
+        }
+        let mut lines = stdout.lines();
+        let git_dir = lines
+            .next()
+            .map(|line| GitWatchTarget::resolve_path(root, line))
+            .ok_or_else(|| super::repository::GitError("missing git directory".into()))?;
+        let common_dir = lines
+            .next()
+            .map(|line| GitWatchTarget::resolve_path(root, line))
+            .ok_or_else(|| super::repository::GitError("missing common git directory".into()))?;
+        let mut targets = vec![
+            GitWatchTarget {
+                path: PathIdentity::resolve(root).into_path_buf(),
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            },
+            GitWatchTarget {
+                path: git_dir.clone(),
+                recursive: false,
+                kind: GitWatchKind::Metadata,
+            },
+        ];
+        if common_dir != git_dir {
+            targets.push(GitWatchTarget {
+                path: common_dir.clone(),
+                recursive: false,
+                kind: GitWatchKind::Metadata,
+            });
+        }
+        targets.push(GitWatchTarget {
+            path: common_dir.join("refs"),
+            recursive: true,
+            kind: GitWatchKind::Metadata,
+        });
+        let worktrees = common_dir.join("worktrees");
+        if worktrees.is_dir() {
+            targets.push(GitWatchTarget {
+                path: worktrees,
+                recursive: true,
+                kind: GitWatchKind::Metadata,
+            });
+        }
+        Ok(Self {
+            repo_root: root.to_path_buf(),
+            targets,
+        })
+    }
+}
+
 impl GitWatch {
     fn should_forward(result: &notify::Result<notify::Event>) -> bool {
         match result {
@@ -594,42 +734,14 @@ impl GitWatch {
         }
     }
 
-    fn changes_match(
-        targets: &[GitWatchTarget],
-        changed: &HashSet<PathBuf>,
-        worktree_relevance: &mut HashMap<PathBuf, bool>,
-    ) -> bool {
-        for target in targets {
-            let mut matching = changed
-                .iter()
-                .filter(|path| target.matches(path.as_path()))
-                .peekable();
-            if matching.peek().is_none() {
-                continue;
-            }
-            if target.kind == GitWatchKind::Metadata {
-                return true;
-            }
-            let relevant = *worktree_relevance
-                .entry(target.path.clone())
-                .or_insert_with(|| {
-                    super::repository::GitRepository::at(&target.path)
-                        .has_unignored_changes(matching.map(PathBuf::as_path))
-                });
-            if relevant {
-                return true;
-            }
-        }
-        false
-    }
-
     fn subscribe(
         &mut self,
         entity: Entity,
         path: &Path,
         kind: GitSubscriptionKind,
+        prepared: GitWatchSubscription,
     ) -> Result<PathBuf, super::repository::GitError> {
-        let path = PathIdentity::resolve(path).into_path_buf();
+        let path = PathIdentity::lexical(path).into_path_buf();
         if let Some(subscription) = self
             .subscriptions
             .get_mut(&entity)
@@ -638,15 +750,8 @@ impl GitWatch {
             subscription.kind = kind;
             return Ok(subscription.repo_root.clone());
         }
-        let (repo_root, targets) = match GitWatchTarget::for_checkout(&path) {
-            Ok(result) => result,
-            Err(error) => {
-                if let Some(previous) = self.subscriptions.remove(&entity) {
-                    self.release_targets(&previous.targets);
-                }
-                return Err(error);
-            }
-        };
+        let repo_root = prepared.repo_root;
+        let targets = prepared.targets;
         let complete = self.acquire_targets(&targets);
         let previous = self.subscriptions.insert(
             entity,
@@ -668,16 +773,29 @@ impl GitWatch {
         &mut self,
         entity: Entity,
         path: &Path,
+        prepared: GitWatchSubscription,
     ) -> Result<PathBuf, super::repository::GitError> {
-        self.subscribe(entity, path, GitSubscriptionKind::File)
+        self.subscribe(entity, path, GitSubscriptionKind::File, prepared)
     }
 
     pub(super) fn subscribe_page(
         &mut self,
         entity: Entity,
         path: &Path,
+        prepared: GitWatchSubscription,
     ) -> Result<PathBuf, super::repository::GitError> {
-        self.subscribe(entity, path, GitSubscriptionKind::Page)
+        self.subscribe(entity, path, GitSubscriptionKind::Page, prepared)
+    }
+
+    #[cfg(test)]
+    fn subscribe_file_now(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Result<PathBuf, super::repository::GitError> {
+        let repository = super::repository::GitRepository::discover(path)?;
+        let prepared = GitWatchSubscription::read(repository.path())?;
+        self.subscribe_file(entity, path, prepared)
     }
 
     pub(super) fn release_subscription(&mut self, entity: Entity) {
@@ -786,7 +904,7 @@ impl GitWatch {
         path: &Path,
         info: Option<&super::worktree::RepoInfo>,
     ) -> bool {
-        let path = PathIdentity::resolve(path).into_path_buf();
+        let path = PathIdentity::lexical(path).into_path_buf();
         let targets = GitWatchTarget::for_repo_info(&path, info);
         if self.repo_info_subscriptions.get(&path) == Some(&targets) {
             return true;
@@ -855,21 +973,16 @@ fn sync_page_subscriptions(
     }
     for (entity, state) in &activated {
         let path = Path::new(state.workspace());
-        if path.as_os_str().is_empty() || watch.subscriptions.contains_key(&entity) {
+        if path.as_os_str().is_empty() {
             continue;
         }
-        if let Err(error) = watch.subscribe_page(entity, path) {
-            commands.trigger(super::job_runner::GitJobFailure {
-                webview: entity,
-                message: error.0,
-            });
-            continue;
-        }
+        watch.release_subscription(entity);
         commands.spawn((
             super::job_runner::GitJob::new(entity),
             super::job::RepositoryJob {
                 path: path.to_path_buf(),
                 refresh_catalogs: true,
+                revision: state.diff_revision(),
             },
         ));
     }
@@ -878,11 +991,7 @@ fn sync_page_subscriptions(
 fn drain(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: Single<&mut RepoInfoCache>,
-    mut states: super::state::GitStates,
-    mut files: super::status::FileGitStates,
-    active: Query<(), With<KeyboardOwner>>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
-    mut commands: Commands,
+    mut refreshes: GitWatchRefreshes,
 ) {
     let Some(watch) = watch else {
         return;
@@ -903,85 +1012,128 @@ fn drain(
     if changed.is_empty() && !overflow {
         return;
     }
-    let mut worktree_relevance = HashMap::new();
-    let affected: Vec<(Entity, bool)> = watch
-        .subscriptions
-        .iter()
-        .filter(|(_, subscription)| {
-            overflow
-                || GitWatch::changes_match(&subscription.targets, &changed, &mut worktree_relevance)
-        })
-        .filter_map(|(entity, subscription)| {
-            if !active.contains(*entity) {
-                return None;
-            }
+    let mut relevance = GitWatchRelevanceBatch::default();
+    for (entity, subscription) in &watch.subscriptions {
+        if !refreshes.active.contains(*entity) {
+            continue;
+        }
+        let metadata = subscription.targets.iter().any(|target| {
+            target.kind == GitWatchKind::Metadata && changed.iter().any(|path| target.matches(path))
+        });
+        if overflow || metadata {
             let refresh_catalogs = overflow
                 || subscription
                     .targets
                     .iter()
                     .any(|target| changed.iter().any(|path| target.branches_changed(path)));
-            Some((*entity, refresh_catalogs))
-        })
-        .collect();
-    for (entity, refresh_catalogs) in affected {
-        if states.contains(entity) {
-            if let Some(path) = states.mark_changed(entity) {
-                commands.spawn((
-                    super::job_runner::GitJob::new(entity),
-                    super::job::RepositoryJob {
-                        path: path.into(),
-                        refresh_catalogs,
-                    },
-                ));
-            }
-        } else if let Some(refresh) =
-            files.schedule_changed(entity, wake.as_deref().map(|wake| (**wake).clone()))
-        {
-            commands.entity(entity).insert(refresh);
+            refreshes.request(*entity, refresh_catalogs);
+        } else {
+            relevance.add_entity(*entity, &subscription.targets, &changed);
         }
     }
-    let affected_repo_info: Vec<(PathBuf, bool)> = watch
-        .repo_info_subscriptions
-        .iter()
-        .filter(|(_, targets)| {
-            overflow || GitWatch::changes_match(targets, &changed, &mut worktree_relevance)
-        })
-        .map(|(path, targets)| {
+    for (path, targets) in &watch.repo_info_subscriptions {
+        let metadata = targets.iter().any(|target| {
+            target.kind == GitWatchKind::Metadata
+                && changed.iter().any(|changed| target.matches(changed))
+        });
+        if overflow || metadata {
             let branches_dirty = overflow
                 || targets
                     .iter()
                     .any(|target| changed.iter().any(|path| target.branches_changed(path)));
-            (path.clone(), branches_dirty)
-        })
-        .collect();
-    for (path, branches_dirty) in affected_repo_info {
-        repo_info.invalidate(&path, branches_dirty);
+            repo_info.invalidate(path, branches_dirty);
+        } else {
+            relevance.add_repo_info(path, targets, &changed);
+        }
+    }
+    if !relevance.is_empty() {
+        refreshes
+            .commands
+            .spawn(PendingGitWatchRelevance(relevance));
     }
 }
 
-fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>) {
+fn start_relevance_tasks(
+    pending: Query<(Entity, &PendingGitWatchRelevance), Without<GitWatchRelevanceTask>>,
+    runtime: Res<GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (entity, pending) in &pending {
+        let batch = pending.0.clone();
+        let fallback = batch.all();
+        let Some(task) = runtime.spawn(wake.clone(), move || batch.read()) else {
+            break;
+        };
+        commands
+            .entity(entity)
+            .remove::<PendingGitWatchRelevance>()
+            .insert(GitWatchRelevanceTask { fallback, task });
+    }
+}
+
+fn poll_relevance_tasks(
+    mut tasks: Query<(Entity, &mut GitWatchRelevanceTask)>,
+    watch: Option<NonSend<GitWatch>>,
+    mut repo_info: Single<&mut RepoInfoCache>,
+    mut refreshes: GitWatchRefreshes,
+) {
+    let Some(watch) = watch else {
+        return;
+    };
+    for (task_entity, mut task) in &mut tasks {
+        let Some(output) = task.task.poll() else {
+            continue;
+        };
+        refreshes.commands.entity(task_entity).despawn();
+        let output = output.unwrap_or_else(|_| task.fallback.clone());
+        for (entity, roots) in output.entities {
+            let current = refreshes.active.contains(entity)
+                && watch
+                    .subscriptions
+                    .get(&entity)
+                    .is_some_and(|subscription| {
+                        subscription.targets.iter().any(|target| {
+                            target.kind == GitWatchKind::Worktree && roots.contains(&target.path)
+                        })
+                    });
+            if current {
+                refreshes.request(entity, false);
+            }
+        }
+        let repo_info = repo_info.bypass_change_detection();
+        for path in output.repo_info {
+            if watch.repo_info_subscriptions.contains_key(&path) {
+                repo_info.invalidate(&path, false);
+            }
+        }
+    }
+}
+
+fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>, runtime: Res<GitRuntime>) {
     let repo_info = repo_info.bypass_change_detection();
     let wake = repo_info.wake.clone();
     for (path, entry) in &mut repo_info.entries {
         if entry.pending.is_some() || (!entry.dirty && entry.loaded) {
             continue;
         }
-        entry.dirty = false;
         let path = path.clone();
         let wake = wake.clone();
-        let cached_branches = if entry.branches_dirty {
-            entry.branches_dirty = false;
+        let refresh_branches = entry.branches_dirty;
+        let cached_branches = if refresh_branches {
             None
         } else {
             entry.info.as_ref().map(|info| info.branches.clone())
         };
-        entry.pending = Some(IoTaskPool::get().spawn(async move {
-            let info = super::worktree::RepoInfo::read_with_branches(&path, cached_branches);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            info
-        }));
+        let Some(task) = runtime.spawn(wake, move || {
+            super::worktree::RepoInfo::read_with_branches(&path, cached_branches)
+        }) else {
+            continue;
+        };
+        entry.dirty = false;
+        entry.branches_dirty &= !refresh_branches;
+        entry.pending = Some(task);
     }
 }
 
@@ -994,9 +1146,10 @@ fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
             let Some(task) = entry.pending.as_mut() else {
                 continue;
             };
-            let Some(info) = future::block_on(future::poll_once(task)) else {
+            let Some(output) = task.poll() else {
                 continue;
             };
+            let info = output.unwrap_or(None);
             changed |= entry.info != info;
             entry.info = info;
             entry.loaded = true;
@@ -1152,7 +1305,7 @@ mod tests {
         let entity = Entity::from_bits(1);
         let mut watch = GitWatch::test();
 
-        watch.subscribe_file(entity, &first_file).unwrap();
+        watch.subscribe_file_now(entity, &first_file).unwrap();
         assert!(watch.subscribe_repo_info(first.path(), Some(&first_info)));
         assert!(first_targets.iter().all(|target| {
             watch
@@ -1161,7 +1314,7 @@ mod tests {
                 .is_some_and(|references| *references == 2)
         }));
 
-        watch.subscribe_file(entity, &second_file).unwrap();
+        watch.subscribe_file_now(entity, &second_file).unwrap();
 
         assert!(first_targets.iter().all(|target| {
             watch
@@ -1211,6 +1364,48 @@ mod tests {
 
         assert!(batch.overflow);
         assert!(batch.paths.is_empty());
+    }
+
+    #[test]
+    fn relevance_batch_ignores_ignored_worktree_paths() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), ".gitignore", "target/\n");
+        std::fs::create_dir_all(repo.path().join("target")).unwrap();
+        std::fs::create_dir_all(repo.path().join("src")).unwrap();
+        let ignored = PathIdentity::resolve(test_repo::write(
+            repo.path(),
+            "target/cache.bin",
+            "ignored\n",
+        ))
+        .into_path_buf();
+        let source = PathIdentity::resolve(test_repo::write(
+            repo.path(),
+            "src/lib.rs",
+            "fn source() {}\n",
+        ))
+        .into_path_buf();
+        let root = PathIdentity::resolve(repo.path()).into_path_buf();
+        let target = GitWatchTarget {
+            path: root,
+            recursive: true,
+            kind: GitWatchKind::Worktree,
+        };
+        let entity = Entity::from_bits(1);
+        let mut ignored_batch = GitWatchRelevanceBatch::default();
+        ignored_batch.add_entity(
+            entity,
+            std::slice::from_ref(&target),
+            &HashSet::from([ignored]),
+        );
+        let mut source_batch = GitWatchRelevanceBatch::default();
+        source_batch.add_entity(
+            entity,
+            std::slice::from_ref(&target),
+            &HashSet::from([source]),
+        );
+
+        assert!(!ignored_batch.read().entities.contains_key(&entity));
+        assert!(source_batch.read().entities.contains_key(&entity));
     }
 
     #[test]
@@ -1266,7 +1461,6 @@ mod tests {
                 ),
             ]),
             canonical: HashMap::new(),
-            guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             wake: None,
@@ -1329,7 +1523,6 @@ mod tests {
                 ),
             ]),
             canonical: HashMap::new(),
-            guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             wake: None,
@@ -1357,7 +1550,7 @@ mod tests {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, super::super::job_runner::JobPlugin))
             .add_systems(Update, sync_page_subscriptions);
         app.insert_non_send(GitWatch::test());
         let page = app
@@ -1373,20 +1566,25 @@ mod tests {
             ))
             .id();
 
-        app.update();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            app.update();
+            if app
+                .world()
+                .non_send::<GitWatch>()
+                .subscriptions
+                .contains_key(&page)
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert!(
             app.world()
                 .non_send::<GitWatch>()
                 .subscriptions
                 .contains_key(&page)
         );
-        let mut jobs = app.world_mut().query::<&super::super::job::RepositoryJob>();
-        assert_eq!(jobs.iter(app.world()).count(), 1);
-
-        app.update();
-        let mut jobs = app.world_mut().query::<&super::super::job::RepositoryJob>();
-        assert_eq!(jobs.iter(app.world()).count(), 1);
-
         app.world_mut().entity_mut(page).remove::<KeyboardOwner>();
         app.update();
         assert!(app.world().non_send::<GitWatch>().subscriptions.is_empty());
@@ -1406,7 +1604,7 @@ mod tests {
             .id();
         app.world_mut()
             .non_send_mut::<GitWatch>()
-            .subscribe_file(editor, &file)
+            .subscribe_file_now(editor, &file)
             .unwrap();
 
         app.update();
@@ -1428,7 +1626,7 @@ mod tests {
             .id();
         app.world_mut()
             .non_send_mut::<GitWatch>()
-            .subscribe_file(editor, &file)
+            .subscribe_file_now(editor, &file)
             .unwrap();
 
         app.update();
@@ -1454,7 +1652,7 @@ mod tests {
             .id();
         app.world_mut()
             .non_send_mut::<GitWatch>()
-            .subscribe_file(editor, &file)
+            .subscribe_file_now(editor, &file)
             .unwrap();
 
         app.update();
@@ -1515,39 +1713,6 @@ mod tests {
     }
 
     #[test]
-    fn a_path_that_will_not_resolve_is_guessed_once_rather_than_every_call() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let real = dir.path().join("real");
-        std::fs::create_dir_all(&real).expect("create real");
-        let link = dir.path().join("link");
-        std::os::unix::fs::symlink(&real, &link).expect("symlink");
-        let absent = link.join("not-yet").join("file.txt");
-        let mut cache = RepoInfoCache {
-            entries: HashMap::new(),
-            canonical: HashMap::new(),
-            guessed: HashMap::new(),
-            repositories: HashMap::new(),
-            leases: HashMap::new(),
-            wake: None,
-        };
-
-        let guessed = cache.canonical_path(&absent);
-        std::fs::create_dir_all(absent.parent().expect("parent")).expect("create");
-        std::fs::write(&absent, "").expect("write");
-
-        assert_eq!(
-            cache.canonical_path(&absent),
-            guessed,
-            "the guess is reused inside the retry window instead of hitting the filesystem again"
-        );
-        assert_ne!(
-            guessed,
-            absent.canonicalize().expect("now resolvable"),
-            "the guess must differ from a fresh resolution, or this test cannot tell them apart"
-        );
-    }
-
-    #[test]
     fn known_repository_reuses_one_cache_entry_for_nested_paths() {
         let repo = test_repo::init();
         let first = repo.path().join("first");
@@ -1557,16 +1722,14 @@ mod tests {
         let mut cache = RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),
-            guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             wake: None,
         };
 
         assert!(cache.snapshot(&first).is_none());
-        let first = PathIdentity::resolve(&first).into_path_buf();
         let info = super::super::worktree::RepoInfo::read(&first).unwrap();
-        cache.remember_repository(first, &info);
+        cache.remember_repository(PathIdentity::lexical(&first).into_path_buf(), &info);
         assert!(cache.snapshot(&second).is_none());
 
         assert_eq!(cache.entries.len(), 1);
@@ -1574,7 +1737,6 @@ mod tests {
 
     #[test]
     fn repo_info_cache_refreshes_only_after_invalidation() {
-        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let repo = test_repo::init();
         test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
@@ -1583,13 +1745,13 @@ mod tests {
         let cache = RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),
-            guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             wake: None,
         };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .init_resource::<GitRuntime>()
             .add_systems(Update, (start_repo_info_loads, poll_info).chain());
         let cache = app.world_mut().spawn(cache).id();
         let wait_for = |app: &mut App, expected| {
@@ -1630,7 +1792,6 @@ mod tests {
 
     #[test]
     fn snapshot_requests_do_not_register_watch_targets() {
-        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let repo = test_repo::init();
         test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
@@ -1639,13 +1800,13 @@ mod tests {
         let cache = RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),
-            guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             wake: None,
         };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .init_resource::<GitRuntime>()
             .add_systems(Update, (start_repo_info_loads, poll_info).chain())
             .add_systems(PostUpdate, info);
         app.insert_non_send(GitWatch::test());
@@ -1682,7 +1843,6 @@ mod tests {
 
     #[test]
     fn repo_info_cache_keeps_changes_that_arrive_during_refresh() {
-        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let repo = test_repo::init();
         test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
@@ -1690,9 +1850,10 @@ mod tests {
         let path = PathIdentity::resolve(repo.path()).into_path_buf();
         let stale = super::super::worktree::RepoInfo::read(&path);
         test_repo::write(repo.path(), "a.txt", "two\n");
+        let runtime = GitRuntime::default();
+        let pending = runtime.spawn(None, move || stale).unwrap();
         let cache = RepoInfoCache {
             canonical: HashMap::new(),
-            guessed: HashMap::new(),
             repositories: HashMap::new(),
             leases: HashMap::new(),
             entries: HashMap::from([(
@@ -1704,13 +1865,14 @@ mod tests {
                     branches_dirty: false,
                     watch_attempted: false,
                     last_accessed: Instant::now(),
-                    pending: Some(IoTaskPool::get().spawn(async move { stale })),
+                    pending: Some(pending),
                 },
             )]),
             wake: None,
         };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .insert_resource(runtime)
             .add_systems(Update, (start_repo_info_loads, poll_info).chain());
         let cache = app.world_mut().spawn(cache).id();
         app.world_mut()

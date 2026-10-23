@@ -87,6 +87,10 @@ impl PathIdentity {
         Self(Self::normalize(path))
     }
 
+    pub fn lexical(path: impl AsRef<Path>) -> Self {
+        Self(Self::normalize(path.as_ref()))
+    }
+
     pub fn as_path(&self) -> &Path {
         &self.0
     }

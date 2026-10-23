@@ -509,10 +509,25 @@ fn publish_detail(
 fn sync_repositories(
     catalog: Res<CatalogSnapshot>,
     mut cache: Option<Single<&mut RepoInfoCache>>,
-    active: Query<Entity, (With<SessionCatalogView>, With<KeyboardOwner>)>,
-    claimed: Query<(), (With<SessionCatalogView>, Added<KeyboardOwner>)>,
+    active: Query<
+        Entity,
+        (
+            With<KeyboardOwner>,
+            Or<(With<SessionCatalogView>, With<SessionDetailView>)>,
+        ),
+    >,
+    claimed: Query<
+        (),
+        (
+            Added<KeyboardOwner>,
+            Or<(With<SessionCatalogView>, With<SessionDetailView>)>,
+        ),
+    >,
     mut repositories: ResMut<SessionRepositories>,
 ) {
+    if active.is_empty() {
+        return;
+    }
     let cache_changed = cache.as_ref().is_some_and(|cache| cache.is_changed());
     let claimed = !claimed.is_empty();
     if !catalog.is_changed() && !cache_changed && !claimed {

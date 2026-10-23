@@ -689,6 +689,8 @@ pub struct RepoInfo {
     pub repo_root: PathBuf,
     pub(crate) git_dir: PathBuf,
     pub(crate) common_dir: PathBuf,
+    pub(crate) worktrees_dir: Option<PathBuf>,
+    pub(crate) identity: PathBuf,
 }
 
 impl RepoInfo {
@@ -825,6 +827,9 @@ impl RepoInfo {
         dir: &Path,
         cached_branches: Option<Arc<[BranchHolder]>>,
     ) -> Option<Self> {
+        let identity = dir
+            .canonicalize()
+            .unwrap_or_else(|_| vmux_path::PathIdentity::lexical(dir).into_path_buf());
         let (status, _, ok) =
             GitCommand::read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
         if !ok {
@@ -864,6 +869,8 @@ impl RepoInfo {
         let repo_root = dirs.next()?;
         let git_dir = dirs.next()?;
         let common_dir = dirs.next()?;
+        let worktrees = common_dir.join("worktrees");
+        let worktrees_dir = worktrees.is_dir().then_some(worktrees);
         let name = Self::name_at(&repo_root);
         let branches = match cached_branches {
             Some(branches) => branches,
@@ -889,6 +896,8 @@ impl RepoInfo {
             repo_root,
             git_dir,
             common_dir,
+            worktrees_dir,
+            identity,
         })
     }
 }

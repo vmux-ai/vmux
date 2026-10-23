@@ -26,13 +26,25 @@ use crate::AcpSessionId;
 use crate::host::acp::registry::RegistryAgent;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+type ReadyPageOpen = (
+    Without<PageOpenHandled>,
+    Without<PageOpenError>,
+    Without<PageOpenDeferred>,
+);
 
 pub(super) fn add(app: &mut App) {
-    app.add_observer(cleanup)
+    app.init_resource::<vmux_git::GitRuntime>()
+        .add_observer(cleanup)
         .add_systems(Update, swap)
         .add_systems(
             Update,
-            (release_transition, prepare, open)
+            (
+                poll_workspace_checks,
+                start_workspace_checks,
+                release_transition,
+                prepare,
+                open,
+            )
                 .chain()
                 .in_set(PageOpenSet::HandleKnownPages),
         );
@@ -43,6 +55,32 @@ struct PreparingAgentChatView;
 
 #[derive(Component)]
 struct AwaitingAgentTransitionPaint;
+
+#[derive(Component, Clone)]
+struct WorkspaceCheckRequest {
+    tab: Entity,
+    project_dir: String,
+    startup_dir: Option<String>,
+}
+
+impl WorkspaceCheckRequest {
+    fn needs_worktree(&self) -> bool {
+        let linked = self
+            .startup_dir
+            .as_deref()
+            .map(Path::new)
+            .and_then(|path| path.canonicalize().ok())
+            .as_deref()
+            .is_some_and(vmux_git::worktree::CheckoutInfo::is_linked);
+        !linked && vmux_git::worktree::CheckoutInfo::try_from(Path::new(&self.project_dir)).is_ok()
+    }
+}
+
+#[derive(Component)]
+struct WorkspaceCheckTask {
+    request: WorkspaceCheckRequest,
+    task: vmux_git::GitTask<bool>,
+}
 
 struct AgentChatTarget {
     url: String,
@@ -92,6 +130,7 @@ fn prepare(
     pending: Query<(), With<TabWorktreePending>>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
+    workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
     child_of: Query<&ChildOf>,
     space_hierarchy: vmux_layout::space::SpaceHierarchy,
     mut tabs: Query<(
@@ -155,6 +194,9 @@ fn prepare(
             continue;
         }
         if matches!(route, Route::Manager) {
+            continue;
+        }
+        if workspace_checks.contains(task_entity) {
             continue;
         }
         let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
@@ -231,23 +273,68 @@ fn prepare(
                 PageOpenWaitForWorktree { tab: tab_entity },
             ));
         } else {
-            let current_dir = tab
-                .startup_dir
-                .as_deref()
-                .map(Path::new)
-                .and_then(|path| path.canonicalize().ok());
-            let needs_worktree = decided.is_none()
-                && !current_dir
-                    .as_deref()
-                    .is_some_and(vmux_git::worktree::CheckoutInfo::is_linked)
-                && vmux_git::worktree::CheckoutInfo::try_from(Path::new(&workspace.project_dir))
-                    .is_ok();
-            let mut entity = commands.entity(tab_entity);
-            if needs_worktree {
-                entity.insert(vmux_space::RepositoryNeedsWorktree);
-            } else {
-                entity.remove::<vmux_space::RepositoryNeedsWorktree>();
+            if decided.is_none() {
+                commands.entity(task_entity).insert((
+                    PageOpenDeferred,
+                    WorkspaceCheckRequest {
+                        tab: tab_entity,
+                        project_dir: workspace.project_dir,
+                        startup_dir: tab.startup_dir.clone(),
+                    },
+                ));
             }
+        }
+    }
+}
+
+fn start_workspace_checks(
+    requests: Query<(Entity, &WorkspaceCheckRequest), Without<WorkspaceCheckTask>>,
+    runtime: Res<vmux_git::GitRuntime>,
+    wake: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (entity, request) in &requests {
+        let worker_request = request.clone();
+        let Some(task) = runtime.spawn(wake.clone(), move || worker_request.needs_worktree())
+        else {
+            break;
+        };
+        commands.entity(entity).insert(WorkspaceCheckTask {
+            request: request.clone(),
+            task,
+        });
+    }
+}
+
+fn poll_workspace_checks(
+    mut tasks: Query<(Entity, &mut WorkspaceCheckTask)>,
+    tabs: Query<(&Tab, &TabWorkspace, Has<TabWorktree>)>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(output) = task.task.poll() else {
+            continue;
+        };
+        let current = tabs
+            .get(task.request.tab)
+            .is_ok_and(|(tab, workspace, worktree)| {
+                !worktree
+                    && workspace.project_dir == task.request.project_dir
+                    && tab.startup_dir == task.request.startup_dir
+            });
+        let mut request = commands.entity(entity);
+        request.remove::<(WorkspaceCheckRequest, WorkspaceCheckTask, PageOpenDeferred)>();
+        if !current {
+            continue;
+        }
+        let needs_worktree = output.unwrap_or(false);
+        let mut tab = commands.entity(task.request.tab);
+        tab.insert(TabDirDecided);
+        if needs_worktree {
+            tab.insert(vmux_space::RepositoryNeedsWorktree);
+        } else {
+            tab.remove::<vmux_space::RepositoryNeedsWorktree>();
         }
     }
 }
@@ -265,7 +352,7 @@ fn release_transition(
 
 fn open(
     mut open_q: ParamSet<(
-        Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
+        Query<(Entity, &PageOpenTask, Has<PageRestore>), ReadyPageOpen>,
         Query<(&PendingPrompt, Option<&PendingPromptAttachments>)>,
     )>,
     workspace: AgentPageOpenWorkspace,
@@ -579,6 +666,57 @@ mod tests {
         let target = AgentChatTarget::parse(&url).unwrap();
 
         assert_eq!(target.url, url);
+    }
+
+    #[test]
+    fn workspace_check_runs_once_before_releasing_page_open() {
+        let repository = tempfile::tempdir().unwrap();
+        vmux_git::worktree::CheckoutInfo::initialize(repository.path()).unwrap();
+        let path = repository.path().to_string_lossy().into_owned();
+        let mut app = App::new();
+        app.init_resource::<vmux_git::GitRuntime>().add_systems(
+            Update,
+            (poll_workspace_checks, start_workspace_checks).chain(),
+        );
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    startup_dir: Some(path.clone()),
+                    ..Default::default()
+                },
+                TabWorkspace {
+                    project_dir: path.clone(),
+                },
+            ))
+            .id();
+        let request = app
+            .world_mut()
+            .spawn((
+                PageOpenDeferred,
+                WorkspaceCheckRequest {
+                    tab,
+                    project_dir: path.clone(),
+                    startup_dir: Some(path),
+                },
+            ))
+            .id();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.world().get::<PageOpenDeferred>(request).is_some() {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+
+        assert!(app.world().get::<TabDirDecided>(tab).is_some());
+        assert!(
+            app.world()
+                .get::<vmux_space::RepositoryNeedsWorktree>(tab)
+                .is_some()
+        );
+        assert!(app.world().get::<WorkspaceCheckRequest>(request).is_none());
+        assert!(app.world().get::<WorkspaceCheckTask>(request).is_none());
     }
 
     #[test]

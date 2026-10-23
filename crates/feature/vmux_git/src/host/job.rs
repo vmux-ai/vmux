@@ -8,6 +8,7 @@ use crate::event::GitCatalog;
 pub(super) struct RepositoryJob {
     pub(super) path: PathBuf,
     pub(super) refresh_catalogs: bool,
+    pub(super) revision: u32,
 }
 
 #[derive(Clone, Component)]

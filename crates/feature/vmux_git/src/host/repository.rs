@@ -5,8 +5,10 @@ use std::io::{Read, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock, mpsc};
+use std::time::{Duration, Instant};
 
 use bevy::prelude::Component;
 use similar::{ChangeTag, TextDiff};
@@ -60,9 +62,10 @@ impl DiffFileContent {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct RepositorySummary {
     pub(crate) snapshot: GitRepositorySnapshot,
-    pub(crate) refresh_catalogs: bool,
+    pub(super) watch: super::watch::GitWatchSubscription,
 }
 
 pub(crate) enum GitCatalogPage {
@@ -120,7 +123,7 @@ impl GitRepository {
         Ok(repository)
     }
 
-    fn discover_with_worktree(file: &Path) -> Result<(Self, bool), GitError> {
+    pub(crate) fn discover_with_worktree(file: &Path) -> Result<(Self, bool), GitError> {
         let (stdout, stderr, ok) = GitCommand::run(
             &Self::start_dir(file),
             &[
@@ -571,9 +574,7 @@ impl GitRepository {
                 command.arg(format!(":(exclude,literal){}", path.to_string_lossy()));
             }
         }
-        let output = command
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let output = GitCommand::output(&mut command)?;
         if !output.status.success() {
             return Err(GitCommand::error(
                 &String::from_utf8_lossy(&output.stdout),
@@ -679,9 +680,7 @@ impl GitRepository {
                 command.arg(format!(":(exclude,literal){}", path.to_string_lossy()));
             }
         }
-        let output = command
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let output = GitCommand::output(&mut command)?;
         if !output.status.success() {
             return Err(GitCommand::error(
                 &String::from_utf8_lossy(&output.stdout),
@@ -777,9 +776,7 @@ impl GitRepository {
         for path in paths {
             command.arg(path);
         }
-        let output = command
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let output = GitCommand::output(&mut command)?;
         if !output.status.success() {
             return Err(GitCommand::error(
                 &String::from_utf8_lossy(&output.stdout),
@@ -1028,7 +1025,8 @@ impl GitRepository {
     }
 
     fn run(&self, args: &[&str]) -> Result<String, GitError> {
-        let (stdout, stderr, ok) = GitCommand::run(&self.0, args)?;
+        let (stdout, stderr, ok) =
+            GitCommand::run_with_timeout(&self.0, args, GIT_OPERATION_TIMEOUT)?;
         if ok {
             Ok(stdout)
         } else {
@@ -1037,7 +1035,8 @@ impl GitRepository {
     }
 
     fn operation(&self, args: &[&str]) -> Result<String, GitError> {
-        let (stdout, stderr, ok) = GitCommand::run(&self.0, args)?;
+        let (stdout, stderr, ok) =
+            GitCommand::run_with_timeout(&self.0, args, GIT_OPERATION_TIMEOUT)?;
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
@@ -1075,12 +1074,8 @@ impl GitRepository {
         if cached {
             command.arg("--cached");
         }
-        let output = command
-            .arg(&unified)
-            .arg("--")
-            .arg(target)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        command.arg(&unified).arg("--").arg(target);
+        let output = GitCommand::output(&mut command)?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
@@ -1173,11 +1168,9 @@ impl GitRepository {
         #[cfg(not(unix))]
         let spec = OsString::from(format!(":{}", target.to_string_lossy()));
 
-        let output = GitCommand::command(&self.0)
-            .arg("show")
-            .arg(spec)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let mut command = GitCommand::command(&self.0);
+        command.arg("show").arg(spec);
+        let output = GitCommand::output(&mut command)?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
@@ -1192,22 +1185,7 @@ impl GitRepository {
             args.push("--cached");
         }
         args.push("--unidiff-zero");
-        let mut child = GitCommand::command(&self.0)
-            .args(&args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| GitError(format!("failed to run git apply: {error}")))?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| GitError("git apply: no stdin".into()))?
-            .write_all(patch.as_bytes())
-            .map_err(|error| GitError(format!("git apply write: {error}")))?;
-        let output = child
-            .wait_with_output()
-            .map_err(|error| GitError(format!("git apply wait: {error}")))?;
+        let output = GitCommand::output_with_input(&self.0, &args, patch.as_bytes())?;
         if output.status.success() {
             return Ok(());
         }
@@ -1219,11 +1197,9 @@ impl GitRepository {
 
     fn file_operation(&self, file: &Path, verb: &[&str]) -> Result<(), GitError> {
         let target = self.relative_path(file);
-        let output = GitCommand::command(&self.0)
-            .args(verb)
-            .arg(&target)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let mut command = GitCommand::command(&self.0);
+        command.args(verb).arg(&target);
+        let output = GitCommand::output(&mut command)?;
         if output.status.success() {
             return Ok(());
         }
@@ -1254,13 +1230,117 @@ const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
 
 pub(crate) struct GitCommand;
 
+const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const GIT_OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
+const GIT_COMMAND_POLL: Duration = Duration::from_millis(50);
+const GIT_IO_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const GIT_OUTPUT_LIMIT: usize = 32 * 1024 * 1024;
+
+struct GitOutputCapture {
+    bytes: Vec<u8>,
+}
+
+struct GitChild {
+    child: Child,
+    reaped: bool,
+}
+
+impl GitChild {
+    fn new(child: Child) -> Self {
+        Self {
+            child,
+            reaped: false,
+        }
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        let status = self.child.try_wait()?;
+        self.reaped |= status.is_some();
+        Ok(status)
+    }
+
+    fn stop(&mut self) -> std::io::Result<ExitStatus> {
+        if let Some(status) = self.try_wait()? {
+            return Ok(status);
+        }
+        self.signal(libc::SIGTERM);
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline {
+            if let Some(status) = self.try_wait()? {
+                return Ok(status);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.signal(libc::SIGKILL);
+        let _ = self.child.kill();
+        let status = self.child.wait()?;
+        self.reaped = true;
+        Ok(status)
+    }
+
+    fn abort_group(&mut self) {
+        self.signal(libc::SIGTERM);
+        std::thread::sleep(Duration::from_millis(50));
+        self.signal(libc::SIGKILL);
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.reaped = true;
+        }
+    }
+
+    #[cfg(unix)]
+    fn signal(&self, signal: libc::c_int) {
+        unsafe {
+            libc::kill(-(self.child.id() as i32), signal);
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn signal(&self, _signal: libc::c_int) {}
+}
+
+impl Drop for GitChild {
+    fn drop(&mut self) {
+        if !self.reaped {
+            self.abort_group();
+        }
+    }
+}
+
+impl GitOutputCapture {
+    fn read(
+        mut source: impl Read,
+        used: Arc<AtomicUsize>,
+        overflow: Arc<AtomicBool>,
+    ) -> std::io::Result<Self> {
+        let mut bytes = Vec::new();
+        let mut chunk = [0_u8; 16 * 1024];
+        loop {
+            let read = source.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            let before = used.fetch_add(read, Ordering::AcqRel);
+            let remaining = GIT_OUTPUT_LIMIT.saturating_sub(before);
+            let kept = read.min(remaining);
+            bytes.extend_from_slice(&chunk[..kept]);
+            if kept != read {
+                overflow.store(true, Ordering::Release);
+                break;
+            }
+        }
+        Ok(Self { bytes })
+    }
+}
+
 impl GitCommand {
     fn local_env_vars() -> &'static [String] {
         static VARS: OnceLock<Vec<String>> = OnceLock::new();
         VARS.get_or_init(|| {
-            Command::new("git")
-                .args(["rev-parse", "--local-env-vars"])
-                .output()
+            let mut command = Command::new("git");
+            command.args(["rev-parse", "--local-env-vars"]);
+            Self::output_raw(&mut command, None, GIT_COMMAND_TIMEOUT)
                 .ok()
                 .filter(|out| out.status.success())
                 .map(|out| {
@@ -1291,10 +1371,17 @@ impl GitCommand {
     }
 
     pub(crate) fn run(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
-        let output = Self::command(root)
-            .args(args)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        Self::run_with_timeout(root, args, GIT_COMMAND_TIMEOUT)
+    }
+
+    pub(super) fn run_with_timeout(
+        root: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<(String, String, bool), GitError> {
+        let mut command = Self::command(root);
+        command.args(args);
+        let output = Self::output_raw(&mut command, None, timeout)?;
         Ok((
             String::from_utf8_lossy(&output.stdout).into_owned(),
             String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -1311,11 +1398,9 @@ impl GitCommand {
         root: &Path,
         args: &[&str],
     ) -> Result<(Vec<u8>, String, bool), GitError> {
-        let output = Self::command(root)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .args(args)
-            .output()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let mut command = Self::command(root);
+        command.env("GIT_OPTIONAL_LOCKS", "0").args(args);
+        let output = Self::output(&mut command)?;
         Ok((
             output.stdout,
             String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -1324,29 +1409,175 @@ impl GitCommand {
     }
 
     fn output_with_input(root: &Path, args: &[&str], input: &[u8]) -> Result<Output, GitError> {
-        let mut child = Self::command(root)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .args(args)
-            .stdin(Stdio::piped())
+        let mut command = Self::command(root);
+        command.env("GIT_OPTIONAL_LOCKS", "0").args(args);
+        Self::output_raw(&mut command, Some(input), GIT_COMMAND_TIMEOUT)
+    }
+
+    fn output(command: &mut Command) -> Result<Output, GitError> {
+        Self::output_raw(command, None, GIT_COMMAND_TIMEOUT)
+    }
+
+    fn output_raw(
+        command: &mut Command,
+        input: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<Output, GitError> {
+        if super::runtime::GitRuntime::canceled() {
+            return Err(GitError("git command canceled".to_string()));
+        }
+        command
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
-        let mut stdin = child
-            .stdin
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = GitChild::new(
+            command
+                .spawn()
+                .map_err(|error| GitError(format!("failed to run git: {error}")))?,
+        );
+        let stdout = child
+            .child
+            .stdout
             .take()
-            .ok_or_else(|| GitError("git stdin unavailable".into()))?;
-        std::thread::scope(|scope| {
-            let writer = scope.spawn(move || stdin.write_all(input));
-            let output = child
-                .wait_with_output()
-                .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
-            writer
-                .join()
-                .map_err(|_| GitError("git stdin writer panicked".into()))?
-                .map_err(|error| GitError(format!("failed to write git stdin: {error}")))?;
-            Ok(output)
+            .ok_or_else(|| GitError("git stdout unavailable".to_string()))?;
+        let stderr = child
+            .child
+            .stderr
+            .take()
+            .ok_or_else(|| GitError("git stderr unavailable".to_string()))?;
+        let stdin = child.child.stdin.take();
+        let used = Arc::new(AtomicUsize::new(0));
+        let overflow = Arc::new(AtomicBool::new(false));
+        let (stdout_tx, stdout_rx) = mpsc::sync_channel(1);
+        let stdout_used = Arc::clone(&used);
+        let stdout_overflow = Arc::clone(&overflow);
+        if let Err(error) = std::thread::Builder::new()
+            .name("vmux-git-stdout".to_string())
+            .spawn(move || {
+                let _ =
+                    stdout_tx.send(GitOutputCapture::read(stdout, stdout_used, stdout_overflow));
+            })
+        {
+            return Err(GitError(format!("failed to read git stdout: {error}")));
+        }
+        let (stderr_tx, stderr_rx) = mpsc::sync_channel(1);
+        let stderr_used = Arc::clone(&used);
+        let stderr_overflow = Arc::clone(&overflow);
+        if let Err(error) = std::thread::Builder::new()
+            .name("vmux-git-stderr".to_string())
+            .spawn(move || {
+                let _ =
+                    stderr_tx.send(GitOutputCapture::read(stderr, stderr_used, stderr_overflow));
+            })
+        {
+            return Err(GitError(format!("failed to read git stderr: {error}")));
+        }
+        let writer = match (stdin, input) {
+            (Some(mut stdin), Some(input)) => {
+                let input = input.to_vec();
+                let (tx, rx) = mpsc::sync_channel(1);
+                if let Err(error) = std::thread::Builder::new()
+                    .name("vmux-git-stdin".to_string())
+                    .spawn(move || {
+                        let _ = tx.send(stdin.write_all(&input));
+                    })
+                {
+                    return Err(GitError(format!("failed to write git stdin: {error}")));
+                }
+                Some(rx)
+            }
+            _ => None,
+        };
+        let deadline = Instant::now() + timeout;
+        let mut interrupted = None;
+        let status = loop {
+            if overflow.load(Ordering::Acquire) {
+                interrupted = Some("git command output exceeded 32 MiB");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            if super::runtime::GitRuntime::canceled() {
+                interrupted = Some("git command canceled");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                interrupted = Some("git command timed out");
+                break child
+                    .stop()
+                    .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            }
+            let remaining = deadline.saturating_duration_since(now);
+            let wait = remaining.min(GIT_COMMAND_POLL);
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| GitError(format!("failed to wait for git: {error}")))?
+            {
+                break status;
+            }
+            std::thread::sleep(wait);
+        };
+        let drain_deadline = Instant::now() + GIT_IO_DRAIN_TIMEOUT;
+        let write = writer.map(|writer| Self::receive(writer, drain_deadline, "git stdin"));
+        let stdout = Self::receive(stdout_rx, drain_deadline, "git stdout");
+        let stderr = Self::receive(stderr_rx, drain_deadline, "git stderr");
+        if let Some(message) = interrupted {
+            return Err(GitError(message.to_string()));
+        }
+        if let Some(write) = write {
+            let write = match write {
+                Ok(write) => write,
+                Err(error) => {
+                    child.abort_group();
+                    return Err(error);
+                }
+            };
+            write.map_err(|error| GitError(format!("failed to write git stdin: {error}")))?;
+        }
+        let stdout = match stdout {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                child.abort_group();
+                return Err(error);
+            }
+        }
+        .map_err(|error| GitError(format!("failed to read git stdout: {error}")))?;
+        let stderr = match stderr {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                child.abort_group();
+                return Err(error);
+            }
+        }
+        .map_err(|error| GitError(format!("failed to read git stderr: {error}")))?;
+        Ok(Output {
+            status,
+            stdout: stdout.bytes,
+            stderr: stderr.bytes,
         })
+    }
+
+    fn receive<T>(
+        receiver: mpsc::Receiver<T>,
+        deadline: Instant,
+        stream: &str,
+    ) -> Result<T, GitError> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        receiver
+            .recv_timeout(remaining)
+            .map_err(|_| GitError(format!("{stream} did not close")))
     }
 
     pub(crate) fn error(stdout: &str, stderr: &str) -> GitError {
@@ -1704,7 +1935,7 @@ impl GitStashEntry {
 
 impl GitRepositorySnapshot {
     pub fn load(path: &Path) -> Result<Self, GitError> {
-        let mut snapshot = Self::load_summary(path, true)?.snapshot;
+        let mut snapshot = Self::load_summary(path)?.snapshot;
         let root = Path::new(&snapshot.repo_root);
         snapshot.commits = GitCommitEntry::recent(root)?;
         snapshot.branches = GitBranchEntry::local(root, &snapshot.branch)?;
@@ -1714,12 +1945,16 @@ impl GitRepositorySnapshot {
         Ok(snapshot)
     }
 
-    pub(crate) fn load_summary(
-        path: &Path,
-        refresh_catalogs: bool,
-    ) -> Result<RepositorySummary, GitError> {
-        let requested_path = path.to_string_lossy().into_owned();
+    pub(crate) fn load_summary(path: &Path) -> Result<RepositorySummary, GitError> {
         let (repository, is_worktree) = GitRepository::discover_with_worktree(path)?;
+        Self::load_discovered_summary(path, &repository, is_worktree)
+    }
+
+    pub(crate) fn load_discovered_summary(
+        requested_path: &Path,
+        repository: &GitRepository,
+        is_worktree: bool,
+    ) -> Result<RepositorySummary, GitError> {
         let repo_root = repository.path();
         let (stdout, stderr, ok) = GitCommand::read_bytes(
             repo_root,
@@ -1748,9 +1983,10 @@ impl GitRepositorySnapshot {
         let base_ref = crate::host::worktree::BaseRef::resolve(repo_root)
             .map(|reference| reference.branch().to_string())
             .unwrap_or_default();
+        let watch = super::watch::GitWatchSubscription::read(repo_root)?;
         Ok(RepositorySummary {
             snapshot: Self {
-                path: requested_path,
+                path: requested_path.to_string_lossy().into_owned(),
                 repo_root: repo_root.to_string_lossy().to_string(),
                 repo_name,
                 is_worktree,
@@ -1766,7 +2002,7 @@ impl GitRepositorySnapshot {
                 tags: Vec::new(),
                 stashes: Vec::new(),
             },
-            refresh_catalogs,
+            watch,
         })
     }
 }
@@ -1839,6 +2075,18 @@ mod tests {
                 "{key} must appear in git's local-env-vars"
             );
         }
+    }
+
+    #[test]
+    fn excessive_git_output_is_terminated_at_the_shared_limit() {
+        let repo = test_repo::init();
+        let alias = "alias.vmux-flood=!yes x | head -c 40000000";
+        let started = Instant::now();
+
+        let error = GitCommand::run(repo.path(), &["-c", alias, "vmux-flood"]).unwrap_err();
+
+        assert_eq!(error.0, "git command output exceeded 32 MiB");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

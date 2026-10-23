@@ -1,13 +1,8 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::event::FileTidyState;
 use vmux_ecs::{FileUiStateWrite, LastActivatedAt};
-use vmux_git::GitRepository;
 use vmux_layout::CloseStackRequest;
-use vmux_path::FileUrl;
 use vmux_setting::AppSettings;
 
 use super::follow_driver::AgentFileLayout;
@@ -21,6 +16,8 @@ pub(super) struct PendingTidy {
 pub(super) struct TidyFiles<'w, 's> {
     layout: AgentFileLayout<'w, 's>,
     last_activated: Query<'w, 's, &'static LastActivatedAt>,
+    file_git: Query<'w, 's, &'static vmux_git::FileGit>,
+    diff_sources: Query<'w, 's, &'static vmux_git::GitDiffSource>,
     pending: Query<'w, 's, (), With<PendingTidy>>,
     close: MessageWriter<'w, CloseStackRequest>,
     commands: Commands<'w, 's>,
@@ -40,19 +37,24 @@ impl TidyFiles<'_, '_> {
         if self.pending.get(follow_pane).is_ok() {
             return;
         }
-        let mut repos: Vec<(PathBuf, HashSet<String>)> = Vec::new();
         let rows: Vec<(Entity, i64, bool)> = stacks
             .iter()
-            .map(|(stack, _page, url)| {
+            .map(|(stack, page, _url)| {
                 let timestamp = self
                     .last_activated
                     .get(*stack)
                     .map(|timestamp| timestamp.0)
                     .unwrap_or(i64::MIN);
-                let changed = FileUrl::parse(url)
-                    .and_then(|url| url.path())
-                    .map(|path| TidyPolicy::changed(&path, &mut repos))
-                    .unwrap_or(false);
+                let changed = self
+                    .diff_sources
+                    .get(*page)
+                    .is_ok_and(|source| source.dirty)
+                    || self
+                        .file_git
+                        .get(*page)
+                        .ok()
+                        .and_then(vmux_git::FileGit::has_changes)
+                        .unwrap_or(true);
                 (*stack, timestamp, changed)
             })
             .collect();
@@ -102,29 +104,5 @@ impl TidyPolicy {
             .filter(|(stack, _, changed)| Some(*stack) != active && !changed)
             .map(|(stack, _, _)| *stack)
             .collect()
-    }
-
-    fn changed(abs: &Path, repos: &mut Vec<(PathBuf, HashSet<String>)>) -> bool {
-        let abs = abs.canonicalize().unwrap_or_else(|_| abs.to_path_buf());
-        if let Some((root, set)) = repos.iter().find(|(root, _)| abs.starts_with(root)) {
-            return set.contains(&Self::relative(root, &abs));
-        }
-        match GitRepository::discover(&abs)
-            .and_then(|repository| repository.dirty_paths().map(|set| (repository, set)))
-        {
-            Ok((repository, set)) => {
-                let root = repository.path().to_path_buf();
-                let changed = set.contains(&Self::relative(&root, &abs));
-                repos.push((root, set));
-                changed
-            }
-            Err(_) => false,
-        }
-    }
-
-    fn relative(root: &Path, abs: &Path) -> String {
-        abs.strip_prefix(root)
-            .map(|relative| relative.to_string_lossy().into_owned())
-            .unwrap_or_default()
     }
 }

@@ -1,7 +1,7 @@
 #[cfg(host)]
 pub use host::{
     FileGit, GitCheckForUpdatesRequest, GitDiffSource, GitError, GitPlugin, GitRepository,
-    RepoInfoCache, RepositoryProvisionCompleted, RepositoryProvisionOperation,
+    GitRuntime, GitTask, RepoInfoCache, RepositoryProvisionCompleted, RepositoryProvisionOperation,
     RepositoryProvisionRequest, worktree,
 };
 

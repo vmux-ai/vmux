@@ -1,22 +1,29 @@
+use std::collections::HashMap;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
 use std::io;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy::winit::EventLoopProxyWrapper;
+
+use super::repository::GitCommand;
+use super::runtime::{GitRuntime, GitTask};
+
+const PROVISION_TIMEOUT: Duration = Duration::from_secs(900);
+const PROVISION_BACKLOG_LIMIT: usize = 8;
 
 pub(super) struct RepositoryProvisionPlugin;
 
 impl Plugin for RepositoryProvisionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<RepositoryProvisionRequest>()
+        app.init_resource::<GitRuntime>()
+            .add_message::<RepositoryProvisionRequest>()
             .add_message::<RepositoryProvisionCompleted>()
-            .add_systems(Update, (start, finish).chain());
+            .add_systems(Update, (queue, start, finish).chain());
     }
 }
 
@@ -33,6 +40,12 @@ pub enum RepositoryProvisionOperation {
 }
 
 impl RepositoryProvisionOperation {
+    fn destination(&self) -> &Path {
+        match self {
+            Self::Initialize { destination, .. } | Self::Clone { destination, .. } => destination,
+        }
+    }
+
     fn run(self) -> Result<(), String> {
         match self {
             Self::Initialize {
@@ -61,8 +74,16 @@ pub struct RepositoryProvisionCompleted {
 
 #[derive(Component)]
 struct RepositoryProvisionTask {
-    requester: Entity,
-    task: Task<Result<(), String>>,
+    requesters: Vec<Entity>,
+    destination: PathBuf,
+    operation: RepositoryProvisionOperation,
+    task: GitTask<Result<(), String>>,
+}
+
+#[derive(Component, Clone)]
+struct PendingRepositoryProvision {
+    requesters: Vec<Entity>,
+    operation: RepositoryProvisionOperation,
 }
 
 struct RepositoryStaging {
@@ -90,28 +111,28 @@ impl RepositoryStaging {
     }
 
     fn initialize(self, initial_branch: &str) -> Result<(), String> {
-        let output = Command::new("git")
-            .args(["init", "--quiet", "--initial-branch", initial_branch])
-            .current_dir(self.directory.path())
-            .output()
-            .map_err(|error| error.to_string())?;
-        self.finish(output)
+        let (stdout, stderr, ok) = GitCommand::run_with_timeout(
+            self.directory.path(),
+            &["init", "--quiet", "--initial-branch", initial_branch],
+            PROVISION_TIMEOUT,
+        )
+        .map_err(|error| error.0)?;
+        self.finish(&stdout, &stderr, ok)
     }
 
     fn clone_from(self, remote: &str) -> Result<(), String> {
-        let output = Command::new("git")
-            .arg("clone")
-            .arg("--")
-            .arg(remote)
-            .arg(self.directory.path())
-            .output()
-            .map_err(|error| error.to_string())?;
-        self.finish(output)
+        let (stdout, stderr, ok) = GitCommand::run_with_timeout(
+            self.directory.path(),
+            &["clone", "--", remote, "."],
+            PROVISION_TIMEOUT,
+        )
+        .map_err(|error| error.0)?;
+        self.finish(&stdout, &stderr, ok)
     }
 
-    fn finish(self, output: std::process::Output) -> Result<(), String> {
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    fn finish(self, stdout: &str, stderr: &str, ok: bool) -> Result<(), String> {
+        if !ok {
+            return Err(GitCommand::error(stdout, stderr).0);
         }
         self.move_into_place().map_err(|error| error.to_string())?;
         Ok(())
@@ -164,26 +185,110 @@ impl RepositoryStaging {
     }
 }
 
-fn start(
+fn queue(
     mut requests: MessageReader<RepositoryProvisionRequest>,
+    mut pending: Query<&mut PendingRepositoryProvision>,
+    mut running: Query<&mut RepositoryProvisionTask>,
+    mut completed: MessageWriter<RepositoryProvisionCompleted>,
+    mut commands: Commands,
+) {
+    let mut queued = HashMap::<PathBuf, (Entity, PendingRepositoryProvision)>::new();
+    for request in requests.read() {
+        let destination =
+            vmux_path::PathIdentity::lexical(request.operation.destination()).into_path_buf();
+        let mut accepted = false;
+        for mut existing in &mut pending {
+            if vmux_path::PathIdentity::lexical(existing.operation.destination()).as_path()
+                != destination.as_path()
+            {
+                continue;
+            }
+            if existing.operation == request.operation {
+                existing.requesters.push(request.requester);
+            } else {
+                completed.write(RepositoryProvisionCompleted {
+                    requester: request.requester,
+                    result: Err("repository destination is already being provisioned".into()),
+                });
+            }
+            accepted = true;
+            break;
+        }
+        if accepted {
+            continue;
+        }
+        for mut existing in &mut running {
+            if existing.destination != destination {
+                continue;
+            }
+            if existing.operation == request.operation {
+                existing.requesters.push(request.requester);
+            } else {
+                completed.write(RepositoryProvisionCompleted {
+                    requester: request.requester,
+                    result: Err("repository destination is already being provisioned".into()),
+                });
+            }
+            accepted = true;
+            break;
+        }
+        if accepted {
+            continue;
+        }
+        if let Some((entity, existing)) = queued.get_mut(&destination) {
+            if existing.operation == request.operation {
+                existing.requesters.push(request.requester);
+                commands.entity(*entity).insert(existing.clone());
+            } else {
+                completed.write(RepositoryProvisionCompleted {
+                    requester: request.requester,
+                    result: Err("repository destination is already being provisioned".into()),
+                });
+            }
+            continue;
+        }
+        if pending.iter().count() + running.iter().count() + queued.len() >= PROVISION_BACKLOG_LIMIT
+        {
+            completed.write(RepositoryProvisionCompleted {
+                requester: request.requester,
+                result: Err("repository provision queue is full".into()),
+            });
+            continue;
+        }
+        let provision = PendingRepositoryProvision {
+            requesters: vec![request.requester],
+            operation: request.operation.clone(),
+        };
+        let entity = commands.spawn(provision.clone()).id();
+        queued.insert(destination, (entity, provision));
+    }
+}
+
+fn start(
+    pending: Query<(Entity, &PendingRepositoryProvision)>,
+    runtime: Res<GitRuntime>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for request in requests.read() {
-        let operation = request.operation.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = operation.run();
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands.spawn(RepositoryProvisionTask {
-            requester: request.requester,
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let Some((entity, pending)) = pending.iter().next() else {
+        return;
+    };
+    let operation = pending.operation.clone();
+    let destination = vmux_path::PathIdentity::lexical(operation.destination()).into_path_buf();
+    let queued_operation = operation.clone();
+    let Some(task) = runtime.spawn_operation(wake, move || operation.run()) else {
+        return;
+    };
+    commands
+        .entity(entity)
+        .remove::<PendingRepositoryProvision>()
+        .insert(RepositoryProvisionTask {
+            requesters: pending.requesters.clone(),
+            destination,
+            operation: queued_operation,
             task,
         });
-    }
 }
 
 fn finish(
@@ -192,13 +297,16 @@ fn finish(
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+        let Some(result) = task.task.poll() else {
             continue;
         };
-        completed.write(RepositoryProvisionCompleted {
-            requester: task.requester,
-            result,
-        });
+        let result = result.unwrap_or_else(|_| Err("repository provision worker panicked".into()));
+        for requester in &task.requesters {
+            completed.write(RepositoryProvisionCompleted {
+                requester: *requester,
+                result: result.clone(),
+            });
+        }
         commands.entity(entity).despawn();
     }
 }
@@ -206,6 +314,37 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duplicate_requests_share_one_pending_operation() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("repo");
+        let operation = RepositoryProvisionOperation::Initialize {
+            destination,
+            initial_branch: "main".to_string(),
+        };
+        let first = Entity::from_bits(1);
+        let second = Entity::from_bits(2);
+        let mut app = App::new();
+        app.add_message::<RepositoryProvisionRequest>()
+            .add_message::<RepositoryProvisionCompleted>()
+            .add_systems(Update, queue);
+        app.world_mut().write_message(RepositoryProvisionRequest {
+            requester: first,
+            operation: operation.clone(),
+        });
+        app.world_mut().write_message(RepositoryProvisionRequest {
+            requester: second,
+            operation,
+        });
+
+        app.update();
+
+        let mut pending = app.world_mut().query::<&PendingRepositoryProvision>();
+        let pending = pending.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].requesters, vec![first, second]);
+    }
 
     #[test]
     fn failed_clone_removes_staging_and_destination() {

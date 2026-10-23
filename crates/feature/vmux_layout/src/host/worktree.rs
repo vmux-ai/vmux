@@ -8,7 +8,6 @@ use std::{
 use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use sha2::{Digest, Sha256};
 
 use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
@@ -18,6 +17,7 @@ use vmux_git::worktree::{self, CheckoutInfo};
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ManagedWorktreeRoot>()
+            .init_resource::<vmux_git::GitRuntime>()
             .add_message::<TabDirectoryObserved>()
             .add_systems(
                 Update,
@@ -79,7 +79,7 @@ struct TabWorktreeTask {
     startup_dir: Option<String>,
     workspace: TabWorkspace,
     metadata: TabWorktree,
-    task: Task<Result<TabWorktreeActivation, String>>,
+    task: vmux_git::GitTask<Result<TabWorktreeActivation, String>>,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -562,6 +562,7 @@ fn start_reconcile(
     running: Query<(), With<TabWorktreeTask>>,
     tabs: Query<(&Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
     managed_root: Res<ManagedWorktreeRoot>,
+    runtime: Res<vmux_git::GitRuntime>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -584,14 +585,11 @@ fn start_reconcile(
         let task_metadata = metadata.clone();
         let root = managed_root.0.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result =
-                TabWorktreeActivation::restore(&tab, &task_workspace, &task_metadata, &root);
-            if let Some(wake) = wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
+        let Some(task) = runtime.spawn_operation(wake, move || {
+            TabWorktreeActivation::restore(&tab, &task_workspace, &task_metadata, &root)
+        }) else {
+            return;
+        };
         commands.entity(entity).insert(TabWorktreeTask {
             startup_dir,
             workspace,
@@ -608,9 +606,10 @@ fn finish_reconcile(
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut pending {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+        let Some(result) = pending.task.poll() else {
             continue;
         };
+        let result = result.unwrap_or_else(|_| Err("Git worktree worker panicked".to_string()));
         let Ok((mut tab, workspace, metadata)) = tabs.get_mut(entity) else {
             commands
                 .entity(entity)
@@ -1260,7 +1259,6 @@ mod tests {
 
     #[test]
     fn reconcile_recovers_missing_worktree_without_dropping_metadata() {
-        IoTaskPool::get_or_init(bevy::tasks::TaskPool::new);
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
         let activation =

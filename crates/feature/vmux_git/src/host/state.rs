@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::page::PageReady;
+use vmux_path::PathIdentity;
 
 #[cfg(test)]
 use crate::event::GitDiffViewport;
@@ -18,8 +19,7 @@ use crate::state::{
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
 use super::directory::GitDirectoryNavigation;
 use super::job::RepositoryJob;
-use super::job_runner::{GitJob, GitJobFailure};
-use super::repository::GitRepository;
+use super::job_runner::GitJob;
 use super::watch::GitWatch;
 
 type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
@@ -124,6 +124,19 @@ impl GitStates<'_, '_> {
             .is_ok_and(|state| state.snapshot.workspace == path && state.snapshot.loading)
     }
 
+    pub(super) fn repository_requested_at(
+        &self,
+        entity: Entity,
+        path: &Path,
+        revision: u32,
+    ) -> bool {
+        self.states.get(entity).is_ok_and(|state| {
+            state.snapshot.nonce == revision
+                && PathIdentity::lexical(Path::new(&state.snapshot.workspace))
+                    == PathIdentity::lexical(path)
+        })
+    }
+
     pub(super) fn reset(&mut self, entity: Entity, workspace: String) {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return;
@@ -135,13 +148,15 @@ impl GitStates<'_, '_> {
         };
     }
 
-    pub(super) fn start_repository(&mut self, entity: Entity, path: &Path) {
+    pub(super) fn start_repository(&mut self, entity: Entity, path: &Path) -> Option<u32> {
         let Ok(mut state) = self.states.get_mut(entity) else {
-            return;
+            return None;
         };
         state.snapshot.workspace = path.to_string_lossy().into_owned();
         state.snapshot.loading = true;
         state.snapshot.message.clear();
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
+        Some(state.snapshot.nonce)
     }
 
     pub(super) fn set_repository(
@@ -163,6 +178,7 @@ impl GitStates<'_, '_> {
         state.snapshot.workspace = path.to_string_lossy().into_owned();
         state.snapshot.loading = true;
         state.snapshot.message.clear();
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
     }
 
     pub(super) fn finish_directory(&mut self, entity: Entity) {
@@ -185,7 +201,7 @@ impl GitStates<'_, '_> {
         &mut self,
         entity: Entity,
         event: &GitOperationResult,
-    ) -> Option<String> {
+    ) -> Option<(String, u32)> {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return None;
         };
@@ -211,10 +227,10 @@ impl GitStates<'_, '_> {
         } else {
             state.snapshot.message.clone_from(&event.message);
         }
-        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1);
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
         state.snapshot.result = Some(event.clone());
         state.snapshot.result_sequence = state.snapshot.result_sequence.wrapping_add(1).max(1);
-        Some(state.snapshot.workspace.clone())
+        Some((state.snapshot.workspace.clone(), state.snapshot.nonce))
     }
 
     pub(super) fn apply_error(&mut self, entity: Entity, event: &GitOperationError) {
@@ -251,12 +267,13 @@ impl GitStates<'_, '_> {
         state.snapshot.message = message;
     }
 
-    pub(super) fn mark_changed(&mut self, entity: Entity) -> Option<String> {
+    pub(super) fn mark_changed(&mut self, entity: Entity) -> Option<(String, u32)> {
         let Ok(mut state) = self.states.get_mut(entity) else {
             return None;
         };
-        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1);
-        (!state.snapshot.workspace.is_empty()).then(|| state.snapshot.workspace.clone())
+        state.snapshot.nonce = state.snapshot.nonce.wrapping_add(1).max(1);
+        (!state.snapshot.workspace.is_empty())
+            .then(|| (state.snapshot.workspace.clone(), state.snapshot.nonce))
     }
 
     fn push_log(state: &mut GitState, entry: GitCommandLogEntry) {
@@ -320,54 +337,29 @@ fn repository_request(
     trigger: On<UiInput<GitRepositoryRequest>>,
     mut watch: Option<NonSendMut<GitWatch>>,
     active: Query<(), With<KeyboardOwner>>,
-    mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut states: GitStates,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
-    states.start_repository(webview, &path);
+    let Some(revision) = states.start_repository(webview, &path) else {
+        return;
+    };
     if !active.contains(webview) {
         if let Some(watch) = watch.as_deref_mut() {
             watch.release_subscription(webview);
         }
         return;
     }
-    let repo_root = if let Some(mut watch) = watch {
-        match watch.subscribe_page(webview, &path) {
-            Ok(repo_root) => repo_root,
-            Err(error) => {
-                commands.trigger(GitJobFailure {
-                    webview,
-                    message: error.0,
-                });
-                return;
-            }
-        }
-    } else {
-        match GitRepository::discover(&path) {
-            Ok(repository) => repository.path().to_path_buf(),
-            Err(error) => {
-                commands.trigger(GitJobFailure {
-                    webview,
-                    message: error.0,
-                });
-                return;
-            }
-        }
-    };
-    if let Ok(mut page) = pages.get_mut(webview)
-        && crate::GitUrl::is_page(&page.url)
-        && let Some(url) = crate::GitUrl::from_path_preserving_commit(&repo_root, &page.url)
-        && page.url != url
-    {
-        page.url = url;
+    if let Some(mut watch) = watch {
+        watch.release_subscription(webview);
     }
     commands.spawn((
         GitJob::new(webview),
         RepositoryJob {
             path,
             refresh_catalogs: true,
+            revision,
         },
     ));
 }
@@ -585,7 +577,7 @@ mod tests {
         test_repo::write(repo.path(), "file.txt", "content\n");
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "base"]);
-        let repository = GitRepositorySnapshot::load_summary(repo.path(), false)
+        let repository = GitRepositorySnapshot::load_summary(repo.path())
             .unwrap()
             .snapshot;
         let mut state = GitState {
@@ -598,9 +590,9 @@ mod tests {
                 ..Default::default()
             },
         };
-        let next = GitRepositorySnapshot::load_summary(repo.path(), false).unwrap();
+        let next = GitRepositorySnapshot::load_summary(repo.path()).unwrap();
 
-        state.replace_repository(next.snapshot, next.refresh_catalogs);
+        state.replace_repository(next.snapshot, false);
 
         assert!(state.snapshot.local_branches.loaded);
     }
@@ -611,7 +603,7 @@ mod tests {
         test_repo::write(repo.path(), "file.txt", "content\n");
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "base"]);
-        let repository = GitRepositorySnapshot::load_summary(repo.path(), false)
+        let repository = GitRepositorySnapshot::load_summary(repo.path())
             .unwrap()
             .snapshot;
         let mut state = GitState {
@@ -624,9 +616,9 @@ mod tests {
                 ..Default::default()
             },
         };
-        let next = GitRepositorySnapshot::load_summary(repo.path(), true).unwrap();
+        let next = GitRepositorySnapshot::load_summary(repo.path()).unwrap();
 
-        state.replace_repository(next.snapshot, next.refresh_catalogs);
+        state.replace_repository(next.snapshot, true);
 
         assert!(!state.snapshot.local_branches.loaded);
     }
