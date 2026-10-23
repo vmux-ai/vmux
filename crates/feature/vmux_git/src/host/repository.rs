@@ -550,9 +550,10 @@ impl GitRepository {
             return Err(GitCommand::error(&merge_base, &stderr));
         }
         let merge_base = merge_base.trim();
-        let (head, _, head_ok) = GitCommand::read(&self.0, &["rev-parse", "HEAD"])?;
-        let (selected, _, selected_ok) = GitCommand::read(&self.0, &["rev-parse", reference])?;
-        let current = head_ok && selected_ok && head.trim() == selected.trim();
+        let current = self.branch_is_current(reference);
+        if !current && let Some(checkout) = self.branch_checkout(reference) {
+            return checkout.branch_files(reference, prefix);
+        }
         let submodules = if current {
             self.branch_submodules()
         } else {
@@ -619,6 +620,9 @@ impl GitRepository {
         context: u32,
         prefix: &Path,
     ) -> Result<String, GitError> {
+        if let Some(checkout) = self.branch_checkout(reference) {
+            return checkout.branch_diff_text(reference, context, prefix);
+        }
         let branch = self.branch_diff_context(reference)?;
         self.branch_diff_text_with(&branch, context, prefix, &[])
     }
@@ -632,9 +636,7 @@ impl GitRepository {
             return Err(GitCommand::error(&merge_base, &stderr));
         }
         let merge_base = merge_base.trim();
-        let (head, _, head_ok) = GitCommand::read(&self.0, &["rev-parse", "HEAD"])?;
-        let (selected, _, selected_ok) = GitCommand::read(&self.0, &["rev-parse", reference])?;
-        let current = head_ok && selected_ok && head.trim() == selected.trim();
+        let current = self.branch_is_current(reference);
         Ok(BranchDiffContext {
             merge_base: merge_base.trim().to_string(),
             selected: (!current).then(|| reference.to_string()),
@@ -713,6 +715,9 @@ impl GitRepository {
         prefix: &Path,
         paths: &[PathBuf],
     ) -> Result<Vec<DiffLine>, GitError> {
+        if let Some(checkout) = self.branch_checkout(reference) {
+            return checkout.branch_diff_lines_for_paths_at(reference, prefix, paths);
+        }
         let branch = self.branch_diff_context(reference)?;
         let mut root_paths = Vec::new();
         let mut nested_paths = vec![Vec::new(); branch.submodules.len()];
@@ -898,6 +903,28 @@ impl GitRepository {
                 )
             })
             .collect()
+    }
+
+    fn branch_checkout(&self, reference: &str) -> Option<Self> {
+        let checkout = crate::host::worktree::CheckoutInfo::try_from(self.0.as_path()).ok()?;
+        let root = self.0.canonicalize().ok()?;
+        let holder = checkout
+            .branch_holders()
+            .ok()?
+            .into_iter()
+            .find(|holder| holder.branch == reference)?;
+        let path = holder.checkout?.canonicalize().ok()?;
+        (path != root).then(|| Self::at(path))
+    }
+
+    fn branch_is_current(&self, reference: &str) -> bool {
+        let Ok((branch, _, true)) =
+            GitCommand::read(&self.0, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        else {
+            return false;
+        };
+        let branch = branch.trim();
+        reference == branch || reference.strip_prefix("refs/heads/") == Some(branch)
     }
 
     fn highlight_diff(&self, stdout: &str) -> Vec<DiffLine> {
@@ -2594,6 +2621,89 @@ mod tests {
         assert_eq!(branch.changed_files, 2);
         assert_eq!(branch.insertions, 2);
         assert_eq!(branch.deletions, 2);
+    }
+
+    #[test]
+    fn selected_worktree_branch_expands_its_submodule_changes() {
+        let child = test_repo::init();
+        test_repo::write(child.path(), "inside.rs", "fn old() {}\n");
+        test_repo::write(child.path(), "other.rs", "fn before() {}\n");
+        test_repo::run(child.path(), &["add", "."]);
+        test_repo::run(child.path(), &["commit", "-qm", "base"]);
+
+        let parent = test_repo::init();
+        test_repo::run(
+            parent.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                child.path().to_str().unwrap(),
+                "client",
+            ],
+        );
+        test_repo::run(parent.path(), &["commit", "-qam", "base"]);
+
+        let worktrees = tempfile::tempdir().unwrap();
+        let feature = worktrees.path().join("feature");
+        test_repo::run(
+            parent.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                feature.to_str().unwrap(),
+            ],
+        );
+        test_repo::run(
+            &feature,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--init",
+                "-q",
+            ],
+        );
+
+        let checkout = feature.join("client");
+        test_repo::run(&checkout, &["config", "user.email", "t@example.com"]);
+        test_repo::run(&checkout, &["config", "user.name", "Test"]);
+        test_repo::run(&checkout, &["switch", "-qc", "feature"]);
+        test_repo::write(&checkout, "inside.rs", "fn new() {}\n");
+        test_repo::write(&checkout, "other.rs", "fn after() {}\n");
+        test_repo::run(&checkout, &["add", "."]);
+        test_repo::run(&checkout, &["commit", "-qm", "feature"]);
+
+        let repository = GitRepository::at(parent.path());
+        let branch_files = repository
+            .branch_files_catalog("feature")
+            .unwrap()
+            .page(0, 80);
+        let lines = repository
+            .branch_diff_lines_for_paths("feature", &[b"client/inside.rs".to_vec()])
+            .unwrap();
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(
+            branch_files
+                .files
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["client/inside.rs", "client/other.rs"]
+        );
+        assert!(text.contains("fn old() {}"));
+        assert!(text.contains("fn new() {}"));
     }
 
     #[test]

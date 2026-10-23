@@ -6,7 +6,7 @@ pub use vmux_api::git::{
 };
 use vmux_api::input::KeyModifiers;
 
-use crate::state::{GitBranchCollection, GitBranchPrompt, GitPanel};
+use crate::state::{GitBranchCollection, GitBranchPrompt, GitPanel, HeaderDropdown};
 
 #[vmux_api::ui_event(Eq)]
 pub struct GitKeyRequest {
@@ -73,6 +73,11 @@ pub struct GitPanelSelectRequest {
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct GitShortcutHelpRequest {
     pub visible: bool,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct HeaderDropdownRequest {
+    pub open: HeaderDropdown,
 }
 
 #[vmux_api::ui_event(Eq)]

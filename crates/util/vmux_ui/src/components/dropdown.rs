@@ -1,3 +1,4 @@
+use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
 
 use crate::cn::cn;
@@ -87,25 +88,43 @@ document.addEventListener('input', input, true);
 "#;
 
 const DROPDOWN_OUTSIDE_SCRIPT: &str = r#"
-globalThis.__vmuxDropdownOutsideCleanup?.();
+const owner = __VMUX_DROPDOWN_OWNER__;
+const cleanups = globalThis.__vmuxDropdownOutsideCleanups ??= new Map();
+cleanups.get(owner)?.();
 let active = true;
 const cleanup = () => {
   if (!active) return;
   active = false;
-  document.removeEventListener('mousedown', dismiss, true);
-  if (globalThis.__vmuxDropdownOutsideCleanup === cleanup) {
-    delete globalThis.__vmuxDropdownOutsideCleanup;
+  document.removeEventListener('mousedown', outside, true);
+  if (cleanups.get(owner) === cleanup) {
+    cleanups.delete(owner);
   }
 };
-const dismiss = event => {
-  const root = document.querySelector('[data-vmux-dropdown-open="true"]');
+const outside = event => {
+  const root = document.querySelector(`[data-vmux-dropdown-owner="${owner}"]`);
   if (!root || root.contains(event.target)) return;
   cleanup();
   dioxus.send(true);
 };
-globalThis.__vmuxDropdownOutsideCleanup = cleanup;
-document.addEventListener('mousedown', dismiss, true);
+cleanups.set(owner, cleanup);
+document.addEventListener('mousedown', outside, true);
 "#;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DropdownOutsideOwner(usize);
+
+impl DropdownOutsideOwner {
+    fn install_script(self) -> String {
+        DROPDOWN_OUTSIDE_SCRIPT.replace("__VMUX_DROPDOWN_OWNER__", &self.0.to_string())
+    }
+
+    fn cleanup_script(self) -> String {
+        format!(
+            "globalThis.__vmuxDropdownOutsideCleanups?.get({})?.();",
+            self.0
+        )
+    }
+}
 
 #[component]
 pub fn Dropdown(
@@ -115,6 +134,7 @@ pub fn Dropdown(
     on_dismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
+    let outside_owner = DropdownOutsideOwner(current_scope_id().0);
     let layer = if open { "z-[100]" } else { "z-auto" };
     let root_class = cn(["relative", layer, class.as_str()]);
     rsx! {
@@ -122,6 +142,7 @@ pub fn Dropdown(
             class: root_class,
             "data-vmux-dropdown-root": "",
             "data-vmux-dropdown-open": if open { "true" } else { "false" },
+            "data-vmux-dropdown-owner": outside_owner.0,
             "data-vmux-dropdown-keyboard": if keyboard_navigation { "true" } else { "false" },
             onkeydown: move |event: KeyboardEvent| {
                 if open && event.key() == Key::Escape {
@@ -132,7 +153,7 @@ pub fn Dropdown(
             },
             if open {
                 DropdownBlurDismiss { on_dismiss }
-                DropdownOutsideDismiss { on_dismiss }
+                DropdownOutsideDismiss { owner: outside_owner, on_dismiss }
                 if keyboard_navigation {
                     DropdownKeyboardNavigation {}
                 }
@@ -143,15 +164,16 @@ pub fn Dropdown(
 }
 
 #[component]
-fn DropdownOutsideDismiss(on_dismiss: EventHandler<()>) -> Element {
+fn DropdownOutsideDismiss(owner: DropdownOutsideOwner, on_dismiss: EventHandler<()>) -> Element {
     use_future(move || async move {
-        let mut eval = document::eval(DROPDOWN_OUTSIDE_SCRIPT);
+        let script = owner.install_script();
+        let mut eval = document::eval(&script);
         if eval.recv::<bool>().await.is_ok_and(|dismiss| dismiss) {
             on_dismiss.call(());
         }
     });
     use_drop(move || {
-        let _ = document::eval("globalThis.__vmuxDropdownOutsideCleanup?.();");
+        let _ = document::eval(&owner.cleanup_script());
     });
     rsx! {}
 }

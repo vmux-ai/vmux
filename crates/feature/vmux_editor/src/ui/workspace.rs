@@ -39,6 +39,7 @@ use vmux_ui::scroll::ScrollIntoView;
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    FileUi::use_root();
     let project_url = try_consume_context::<vmux_ecs::PageMetadata>()
         .map(|metadata| metadata.url)
         .filter(|url| crate::project::ProjectRoute::is_page(url));
@@ -50,7 +51,7 @@ pub fn Page() -> Element {
 
 #[component]
 fn EditorWorkspace() -> Element {
-    let ui = FileUi::use_root();
+    let ui = FileUi::current();
     let mut handled_document_revision = use_signal(|| 0u64);
     let meta_state = ui.use_value(|state| state.document.meta.as_ref());
     let directory_state = ui.use_value(|state| state.document.directory.as_ref());

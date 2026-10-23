@@ -16,6 +16,7 @@ pub(super) fn GitDashboard() -> Element {
     let GitPageState {
         snapshot,
         controller,
+        header_dropdown,
         projects,
         ..
     } = use_context::<GitPageState>();
@@ -43,6 +44,7 @@ pub(super) fn GitDashboard() -> Element {
     rsx! {
         RepositoryHeader {
             repository: repository.clone(),
+            open_dropdown: header_dropdown(),
             projects: projects().rows,
             focused_panel: active_panel,
             selected_branch: controller_state.selected_branch.clone(),

@@ -16,12 +16,12 @@ use crate::event::{
     GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest, GitRepositoryRequest,
     GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest,
     GitStageRequest, GitStashDropRequest, GitStashPopRequest, GitStashPushRequest,
-    GitStashSelectRequest, GitUnstageRequest,
+    GitStashSelectRequest, GitUnstageRequest, HeaderDropdownRequest,
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
     GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState,
-    GitWorkspaceChanged,
+    GitWorkspaceChanged, HeaderDropdown,
 };
 
 use super::directory::GitDirectoryNavigation;
@@ -35,6 +35,7 @@ impl Plugin for ControllerPlugin {
             GitKeyRequest,
             GitPanelSelectRequest,
             GitShortcutHelpRequest,
+            HeaderDropdownRequest,
             GitFileSelectRequest,
             GitBranchFileSelectRequest,
             GitBranchCollectionSelectRequest,
@@ -48,6 +49,7 @@ impl Plugin for ControllerPlugin {
             .add_observer(key_request)
             .add_observer(panel_select_request)
             .add_observer(shortcut_help_request)
+            .add_observer(header_dropdown_request)
             .add_observer(file_select_request)
             .add_observer(branch_file_select_request)
             .add_observer(select_branch_collection)
@@ -932,6 +934,16 @@ fn shortcut_help_request(
     controller.shortcut_help_visible = trigger.event().payload.visible;
 }
 
+fn header_dropdown_request(
+    trigger: On<UiInput<HeaderDropdownRequest>>,
+    mut pages: Query<&mut HeaderDropdown>,
+) {
+    let Ok(mut dropdown) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    dropdown.set_if_neq(trigger.event().payload.open);
+}
+
 fn file_select_request(
     trigger: On<UiInput<GitFileSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitPageControllerState)>,
@@ -971,6 +983,7 @@ fn select_branch_collection(
 fn branch_select_request(
     trigger: On<UiInput<GitBranchSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitPageControllerState)>,
+    mut commands: Commands,
 ) {
     let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
         return;
@@ -978,7 +991,27 @@ fn branch_select_request(
     let Some(repository) = state.repository() else {
         return;
     };
-    controller.select_branch(&trigger.event().payload.reference, repository);
+    let reference = &trigger.event().payload.reference;
+    let activate = controller.branch_collection == GitBranchCollection::Local;
+    if !controller.select_branch(reference, repository) || !activate {
+        return;
+    }
+    let Some(branch) = repository
+        .branches
+        .iter()
+        .find(|branch| branch.name == *reference)
+    else {
+        return;
+    };
+    commands.trigger(UiInput {
+        webview: trigger.event().webview,
+        payload: ProjectActivateRequest {
+            path: repository.repo_root.clone(),
+            branch: branch.name.clone(),
+            checkout: branch.checkout.clone(),
+            pane_id: None,
+        },
+    });
 }
 
 fn branch_diff_select_request(
@@ -1150,6 +1183,16 @@ fn submit_commit(
 mod tests {
     use super::*;
 
+    #[derive(Resource, Default)]
+    struct ProjectActivations(Vec<ProjectActivateRequest>);
+
+    fn capture_project_activation(
+        trigger: On<UiInput<ProjectActivateRequest>>,
+        mut activations: ResMut<ProjectActivations>,
+    ) {
+        activations.0.push(trigger.event().payload.clone());
+    }
+
     #[test]
     fn url_commit_selects_a_commit_without_locking_other_panels() {
         let mut controller = GitPageControllerState::default();
@@ -1194,6 +1237,91 @@ mod tests {
         assert_eq!(
             controller.selected_branch_path,
             "crates/feature/vmux_session/src/ui.rs"
+        );
+    }
+
+    #[test]
+    fn selecting_a_local_branch_activates_its_workspace() {
+        let mut app = App::new();
+        app.init_resource::<ProjectActivations>()
+            .add_observer(branch_select_request)
+            .add_observer(capture_project_activation);
+        let page = app
+            .world_mut()
+            .spawn((
+                GitState {
+                    snapshot: crate::state::GitPageSnapshot {
+                        repository: Some(GitRepositorySnapshot {
+                            path: "/repo".to_string(),
+                            repo_root: "/repo".to_string(),
+                            repo_name: "repo".to_string(),
+                            is_worktree: false,
+                            branch: "main".to_string(),
+                            base_ref: "main".to_string(),
+                            upstream: String::new(),
+                            ahead: 0,
+                            behind: 0,
+                            files: Vec::new(),
+                            commits: Vec::new(),
+                            branches: vec![crate::event::GitBranchEntry {
+                                name: "feature".to_string(),
+                                current: false,
+                                upstream: String::new(),
+                                checkout: String::new(),
+                                short_sha: "abc123".to_string(),
+                                ahead: 0,
+                                behind: 0,
+                                changed_files: 0,
+                                insertions: 0,
+                                deletions: 0,
+                            }],
+                            remote_branches: Vec::new(),
+                            tags: Vec::new(),
+                            stashes: Vec::new(),
+                        }),
+                        ..Default::default()
+                    },
+                },
+                GitPageControllerState::default(),
+            ))
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: GitBranchSelectRequest {
+                reference: "feature".to_string(),
+            },
+        });
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ProjectActivations>().0,
+            [ProjectActivateRequest {
+                path: "/repo".to_string(),
+                branch: "feature".to_string(),
+                checkout: String::new(),
+                pane_id: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn header_dropdown_selection_keeps_only_one_open() {
+        let mut app = App::new();
+        app.add_plugins(ControllerPlugin);
+        let page = app.world_mut().spawn(HeaderDropdown::Repository).id();
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: HeaderDropdownRequest {
+                open: HeaderDropdown::Branch,
+            },
+        });
+        app.update();
+
+        assert_eq!(
+            app.world().get::<HeaderDropdown>(page),
+            Some(&HeaderDropdown::Branch)
         );
     }
 
