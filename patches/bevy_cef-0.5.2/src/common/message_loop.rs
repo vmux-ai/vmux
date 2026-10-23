@@ -225,6 +225,7 @@ Fix: make install-debug-render-process  (or: cargo build -p bevy_cef_debug_rende
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         disable_signal_handlers: true as _,
+        log_severity: cef::LogSeverity::DISABLE,
         ..Default::default()
     };
     assert_eq!(
@@ -270,6 +271,7 @@ fn cef_initialize(
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         disable_signal_handlers: false as _,
+        log_severity: cef::LogSeverity::DISABLE,
         ..Default::default()
     };
     assert_eq!(
