@@ -19,7 +19,7 @@ use vmux_session::{
     StageChangeRequest, StageId,
 };
 
-use super::session::ChatView;
+use super::session::SessionView;
 use crate::event::{
     SessionDirectorySelection, SessionRepositories, SessionRepository, SessionsChooseDirectory,
     SessionsCleanup, SessionsCreate, SessionsDescriptionUpdate, SessionsRename,
@@ -168,7 +168,7 @@ impl SessionProject {
 #[derive(SystemParam)]
 struct CatalogViews<'w, 's> {
     managers: Query<'w, 's, Option<&'static PageMetadata>, With<SessionManagerView>>,
-    chats: Query<'w, 's, (), With<ChatView>>,
+    chats: Query<'w, 's, (), With<SessionView>>,
     scopes: Query<'w, 's, (), With<SessionScopeView>>,
 }
 
@@ -339,7 +339,7 @@ fn change_stage(
     if !request.kind.is_empty() && request.kind != "session" && !request.sid.is_empty() {
         let source_updated_at = providers
             .get(&request.kind, &request.sid)
-            .map(|session| session.updated_at)
+            .map(vmux_session::ProviderSession::source_updated_at)
             .unwrap_or_default();
         provider_requests.write(ProviderStageChangeRequest {
             kind: ProviderKind(request.kind.clone()),
@@ -615,7 +615,7 @@ fn ready(
 
 fn scope_projection(
     trigger: On<ScopeProjectionRequest>,
-    owners: Query<(Has<SessionManagerView>, Has<ChatView>)>,
+    owners: Query<(Has<SessionManagerView>, Has<SessionView>)>,
     catalog: Res<CatalogSnapshot>,
     mut commands: Commands,
 ) {
@@ -646,7 +646,7 @@ fn cleanup_inactive_views(
         (
             Entity,
             Has<SessionManagerView>,
-            Has<ChatView>,
+            Has<SessionView>,
             Has<SessionDetailView>,
             Has<SessionScopeView>,
         ),
@@ -768,7 +768,10 @@ mod tests {
         app.init_resource::<PendingOpens>()
             .add_message::<CreateRequest>()
             .add_observer(create);
-        let webview = app.world_mut().spawn(super::super::session::ChatView).id();
+        let webview = app
+            .world_mut()
+            .spawn(super::super::session::SessionView)
+            .id();
 
         app.world_mut().trigger(UiInput {
             webview,
@@ -840,7 +843,7 @@ mod tests {
         let session = app
             .world_mut()
             .spawn((
-                super::super::session::ChatView,
+                super::super::session::SessionView,
                 PageMetadata {
                     url: Route::Session(SessionId("session-1".into())).url(),
                     ..Default::default()
@@ -870,7 +873,7 @@ mod tests {
         let webview = app
             .world_mut()
             .spawn((
-                super::super::session::ChatView,
+                super::super::session::SessionView,
                 SessionDetailView,
                 PageMetadata {
                     url: Route::Session(SessionId("session-1".into())).url(),
@@ -882,9 +885,9 @@ mod tests {
 
         app.world_mut()
             .entity_mut(webview)
-            .remove::<super::super::session::ChatView>()
+            .remove::<super::super::session::SessionView>()
             .insert(PageMetadata {
-                url: "vmux://git/".into(),
+                url: "git://".into(),
                 ..Default::default()
             });
         app.update();

@@ -101,7 +101,10 @@ fn open_session_page(
     if url.is_empty() {
         return;
     }
-    requests.write(crate::stack::OpenRequest { url: Some(url) });
+    requests.write(crate::stack::OpenRequest {
+        url: Some(url),
+        focus_existing: false,
+    });
 }
 
 fn spawn_update_state(mut commands: Commands) {

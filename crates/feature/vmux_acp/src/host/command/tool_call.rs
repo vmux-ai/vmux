@@ -11,21 +11,25 @@ use crate::host::event::{AgentRequestInput, AgentToolCallRequest, CommandOrigin}
 
 use super::CommandSet;
 
-pub(super) fn add(app: &mut App) {
-    app.add_message::<ServiceRequest>()
-        .add_systems(
-            Update,
-            (handle_tool_calls, ApplyDeferred)
-                .chain()
-                .in_set(CommandSet::ToolCalls)
-                .before(ToolResolveSet),
-        )
-        .add_systems(
-            Update,
-            (forward_commands, forward_queries, report_errors)
-                .after(ToolDispatchFlush)
-                .before(CommandSet::Commands),
-        );
+pub(super) struct Plugin;
+
+impl bevy::prelude::Plugin for Plugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
+                (handle_tool_calls, ApplyDeferred)
+                    .chain()
+                    .in_set(CommandSet::ToolCalls)
+                    .before(ToolResolveSet),
+            )
+            .add_systems(
+                Update,
+                (forward_commands, forward_queries, report_errors)
+                    .after(ToolDispatchFlush)
+                    .before(CommandSet::Commands),
+            );
+    }
 }
 
 #[derive(Component)]
@@ -197,7 +201,7 @@ mod tests {
                 capture.after(CommandSet::Commands),
             ),
         );
-        add(&mut app);
+        app.add_plugins(Plugin);
         app.update();
 
         app.world_mut()

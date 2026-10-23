@@ -17,7 +17,7 @@ impl Plugin for AcpPlugin {
         super::approval::add(app);
         super::attach::add(app);
         super::attention::add(app);
-        super::command::add(app);
+        app.add_plugins(super::command::Plugin);
         super::continuation::add(app);
         super::external::add(app);
         super::follow::add(app);

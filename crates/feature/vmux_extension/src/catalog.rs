@@ -343,6 +343,7 @@ fn open_page(
     for _ in requests.read() {
         pages.write(vmux_layout::stack::OpenRequest {
             url: Some(crate::ui::ExtensionPage::URL.to_string()),
+            focus_existing: false,
         });
     }
 }

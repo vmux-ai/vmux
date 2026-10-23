@@ -10,13 +10,15 @@ use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTr
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerArea, ManagerEmpty, ManagerIconButton, ManagerPage, ManagerSearch, ManagerSearchPopover,
-    ManagerSidebarItem, ManagerSidebarSection, ManagerToolbar, ManagerView, ManagerViewToggle,
-    ManagerWorkspace,
+    ManagerSidebarItem, ManagerSidebarSection, ManagerView, ManagerViewToggle, ManagerWorkspace,
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::hooks::{send, use_optimistic_map, use_theme, use_ui_state};
+use vmux_ui::hooks::{
+    CollectionController, send, use_collection_controller, use_optimistic_map, use_theme,
+    use_ui_state,
+};
 use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
 
@@ -33,7 +35,8 @@ use super::manager_model::*;
 pub fn SessionsManager() -> Element {
     use_theme();
     let ui = use_ui_state::<SessionCatalogUiState>();
-    let controls = ManagerControls::use_state();
+    let controls = use_collection_controller::<SessionFilter>(ManagerView::List);
+    let filter_picker = SessionFilterPicker::use_state();
     let catalog = ui.use_selector(|state| state.catalog.clone());
     let repositories = ui.use_selector(|state| state.repositories.clone());
     let snapshot = catalog();
@@ -60,39 +63,15 @@ pub fn SessionsManager() -> Element {
     ));
     rsx! {
         ManagerPage {
-            SessionsManagerToolbar { controls, presentation: Rc::clone(&presentation) }
-            SessionsManagerContent { controls, presentation }
-        }
-    }
-}
-
-#[component]
-fn SessionsManagerToolbar(
-    controls: ManagerControls,
-    presentation: Rc<ManagerPresentation>,
-) -> Element {
-    rsx! {
-        ManagerToolbar { content_class: "flex h-full w-full items-center gap-2.5".to_string(),
-            div { class: "min-w-0 flex-1" }
-            ManagerViewToggle {
-                view: controls.view(),
-                list_label: translate("sessions-view-list"),
-                grid_label: translate("sessions-view-board"),
-                grid_icon: LineIcon::Columns3,
-                onchange: move |view| controls.set_view(view),
-            }
-            SessionsManagerActions {
-                controls,
-                presentation,
-                align_left: false,
-            }
+            SessionsManagerContent { controls, filter_picker, presentation }
         }
     }
 }
 
 #[component]
 fn SessionsManagerActions(
-    controls: ManagerControls,
+    controls: CollectionController<SessionFilter>,
+    filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
     align_left: bool,
 ) -> Element {
@@ -109,13 +88,13 @@ fn SessionsManagerActions(
                 ontoggle: move |_| {
                     search_open.set(!open);
                     if open && controls.query().starts_with('#') {
-                        controls.dismiss_filter();
+                        filter_picker.dismiss(controls);
                     }
                 },
                 ondismiss: move |_| {
                     search_open.set(false);
                     if controls.query().starts_with('#') {
-                        controls.dismiss_filter();
+                        filter_picker.dismiss(controls);
                     }
                 },
                 ManagerSearch {
@@ -143,7 +122,7 @@ fn SessionsManagerActions(
                         FilterTrigger {
                             active: presentation.filter_requested,
                             label: translate("common-filter"),
-                            onclick: move |_| controls.toggle_filter(),
+                            onclick: move |_| filter_picker.toggle(controls),
                         }
                     },
                 }
@@ -153,11 +132,11 @@ fn SessionsManagerActions(
                         sessions: presentation.snapshot.sessions.clone(),
                         repositories: presentation.repositories.clone(),
                         needle: presentation.filter_needle.clone(),
-                        step: controls.filter_step(),
-                        value: controls.filter_value(),
-                        onstep: move |step| controls.select_filter_step(step),
-                        onvalue: move |value| controls.set_filter_value(value),
-                        onselect: move |filter| controls.apply_filter(filter),
+                        step: filter_picker.filter_step(),
+                        value: filter_picker.filter_value(),
+                        onstep: move |step| filter_picker.select_step(controls, step),
+                        onvalue: move |value| filter_picker.set_value(value),
+                        onselect: move |filter| filter_picker.apply(controls, filter),
                     }
                 }
             }
@@ -172,7 +151,8 @@ fn SessionsManagerActions(
 
 #[component]
 fn SessionsManagerContent(
-    controls: ManagerControls,
+    controls: CollectionController<SessionFilter>,
+    filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
     rsx! {
@@ -180,7 +160,8 @@ fn SessionsManagerContent(
             active: presentation.selected_stage.is_none().then_some(ManagerArea::Inbox),
             onnavigate: move |area: ManagerArea| {
                 if area == ManagerArea::Inbox {
-                    controls.select_stage(None);
+                    controls.update_filters(|filters| SessionFilter::set_stage(filters, None));
+                    controls.set_query(String::new());
                     return;
                 }
                 let _ = send(&ChatOpenPage {
@@ -188,8 +169,16 @@ fn SessionsManagerContent(
                 });
             },
             sidebar_actions: rsx! {
+                ManagerViewToggle {
+                    view: controls.view(),
+                    list_label: translate("sessions-view-list"),
+                    grid_label: translate("sessions-view-board"),
+                    grid_icon: LineIcon::Columns3,
+                    onchange: move |view| controls.set_view(view),
+                }
                 SessionsManagerActions {
                     controls,
+                    filter_picker,
                     presentation: Rc::clone(&presentation),
                     align_left: true,
                 }
@@ -198,7 +187,10 @@ fn SessionsManagerContent(
                 SessionCategories {
                     groups: presentation.category_groups.clone(),
                     selected: presentation.selected_stage.clone(),
-                    onselect: move |stage| controls.select_stage(stage),
+                    onselect: move |stage| {
+                        controls.update_filters(|filters| SessionFilter::set_stage(filters, stage));
+                        controls.set_query(String::new());
+                    },
                 }
             },
             if presentation.snapshot.sessions.is_empty() {

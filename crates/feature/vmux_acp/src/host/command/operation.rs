@@ -3,50 +3,50 @@ use vmux_api::protocol::{
     AgentCommandResult, AgentFileSearch, AgentFileTouched, AgentListAgents, AgentNewChat,
     AgentTurnEnded,
 };
+use vmux_ecs::PageOpenTarget;
 use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
-use vmux_session::{AgentConversationTitle, CreateRequest, Created, SessionId};
+use vmux_session::host::StartRequest;
+use vmux_session::{Created, SessionId};
 
 use super::CommandSet;
 use crate::host::acp::registry::RegistryAgent;
 use vmux_session::Route as SessionRoute;
 
-pub(super) fn add(app: &mut App) {
-    app.init_resource::<PendingNewChats>()
-        .add_observer(open_created_chat)
-        .add_systems(
-            Update,
-            (
-                acknowledge_file_touched,
-                acknowledge_file_search,
-                acknowledge_turn_ended,
-                new_chat,
-                list_agents,
-            )
-                .in_set(CommandSet::Commands),
-        );
+pub(super) struct Plugin;
+
+impl bevy::prelude::Plugin for Plugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PendingSessionCreations>()
+            .add_observer(open_created_session)
+            .add_systems(
+                Update,
+                (
+                    acknowledge_file_touched,
+                    acknowledge_file_search,
+                    acknowledge_turn_ended,
+                    create_session,
+                    list_agents,
+                )
+                    .in_set(CommandSet::Commands),
+            );
+    }
 }
 
 #[derive(Resource, Default)]
-struct PendingNewChats(std::collections::HashMap<SessionId, PendingNewChat>);
+struct PendingSessionCreations(std::collections::HashMap<SessionId, PendingSessionCreation>);
 
-struct PendingNewChat {
+struct PendingSessionCreation {
     request_id: vmux_api::protocol::AgentRequestId,
-    prompt: String,
 }
 
-fn open_created_chat(
+fn open_created_session(
     trigger: On<Created>,
-    mut pending: ResMut<PendingNewChats>,
-    mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
+    mut pending: ResMut<PendingSessionCreations>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     let Some(pending) = pending.0.remove(&trigger.event().id) else {
         return;
     };
-    new_tabs.write(vmux_layout::NewTabRequest {
-        url: SessionRoute::Session(trigger.event().id.clone()).url(),
-        pending_prompt: Some(pending.prompt),
-    });
     responses.write(AgentReply::new(pending.request_id).ok());
 }
 
@@ -83,11 +83,11 @@ fn acknowledge_turn_ended(
     }
 }
 
-fn new_chat(
+fn create_session(
     mut requests: MessageReader<AgentRequestInput>,
     contributed_pages: vmux_command::ContributedPages,
-    mut session_requests: MessageWriter<CreateRequest>,
-    mut pending: ResMut<PendingNewChats>,
+    mut session_requests: MessageWriter<StartRequest>,
+    mut pending: ResMut<PendingSessionCreations>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -99,18 +99,19 @@ fn new_chat(
             .and_then(|url| SessionRoute::requested_agent(&url).map(|agent| (url, agent)))
         {
             Some((_, agent)) => {
-                let name = AgentConversationTitle::from_prompt(&payload.prompt)
-                    .map(|title| title.0)
-                    .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-new"));
-                let create =
-                    CreateRequest::new(name, String::new(), std::path::PathBuf::new(), Some(agent));
+                let create = StartRequest::from_prompt(
+                    payload.prompt,
+                    std::path::PathBuf::new(),
+                    agent,
+                    PageOpenTarget::NewStack,
+                    Vec::new(),
+                );
                 let id = create.id().clone();
                 session_requests.write(create);
                 pending.0.insert(
                     id,
-                    PendingNewChat {
+                    PendingSessionCreation {
                         request_id: request.request_id,
-                        prompt: payload.prompt,
                     },
                 );
                 continue;

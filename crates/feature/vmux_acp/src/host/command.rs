@@ -14,18 +14,21 @@ pub(crate) enum CommandSet {
     Commands,
 }
 
-pub(super) fn add(app: &mut App) {
-    app.add_message::<AgentCommandResponse>()
-        .configure_sets(
-            Update,
-            (CommandSet::ToolCalls, CommandSet::Commands)
-                .chain()
-                .in_set(WriteCommandRequests)
-                .after(ServiceMessageSet),
-        )
-        .add_systems(Update, notify.in_set(CommandSet::Commands));
-    operation::add(app);
-    tool_call::add(app);
+pub(super) struct Plugin;
+
+impl bevy::prelude::Plugin for Plugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((operation::Plugin, tool_call::Plugin))
+            .add_message::<AgentCommandResponse>()
+            .configure_sets(
+                Update,
+                (CommandSet::ToolCalls, CommandSet::Commands)
+                    .chain()
+                    .in_set(WriteCommandRequests)
+                    .after(ServiceMessageSet),
+            )
+            .add_systems(Update, notify.in_set(CommandSet::Commands));
+    }
 }
 
 fn notify(

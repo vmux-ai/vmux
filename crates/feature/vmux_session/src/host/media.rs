@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use super::prompt::ChatPromptFocusRevision;
 use super::session::{
     ChatAttachmentProjection, ChatMediaProjection, ChatSnapshotProjection,
-    ChatTranscriptProjection, ChatView, SessionViews,
+    ChatTranscriptProjection, SessionView, SessionViews,
 };
 use crate as vmux_session;
 use crate::event::{
@@ -814,7 +814,7 @@ fn query_request(trigger: On<UiInput<ChatMediaQueryRequest>>, mut commands: Comm
 
 fn query(
     trigger: On<ChatMediaQuery>,
-    mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
+    mut projections: Query<&mut ChatMediaProjection, With<SessionView>>,
     views: SessionViews,
     sessions: Query<&Cwd>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -871,7 +871,7 @@ fn attach_paths(trigger: On<UiInput<ChatAttachPaths>>, mut tasks: AttachmentTask
 
 fn hydrate_attachments(
     trigger: On<ChatAttachmentHydrationRequest>,
-    mut projections: Query<&mut ChatAttachmentProjection, With<ChatView>>,
+    mut projections: Query<&mut ChatAttachmentProjection, With<SessionView>>,
     mut tasks: AttachmentTasks,
 ) {
     let request = trigger.event();
@@ -886,7 +886,7 @@ fn remove_attachment(
     trigger: On<UiInput<ChatRemoveAttachment>>,
     mut projections: Query<
         (&mut ChatAttachmentProjection, &mut ChatPromptFocusRevision),
-        With<ChatView>,
+        With<SessionView>,
     >,
     mut commands: Commands,
 ) {
@@ -959,7 +959,7 @@ fn drain_attachment_tasks(
             &mut ChatTranscriptProjection,
             &mut ChatSnapshotProjection,
         ),
-        With<ChatView>,
+        With<SessionView>,
     >,
     mut attachment_tasks: AttachmentTasks,
 ) {
@@ -1045,7 +1045,7 @@ fn drain_attachment_tasks(
 
 fn drain_list_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
-    mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
+    mut projections: Query<&mut ChatMediaProjection, With<SessionView>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -1090,7 +1090,7 @@ fn drain_list_tasks(
 
 fn drain_preview_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaPreviewTask)>,
-    mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
+    mut projections: Query<&mut ChatMediaProjection, With<SessionView>>,
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut tasks {

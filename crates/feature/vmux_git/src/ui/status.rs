@@ -28,6 +28,8 @@ pub(super) fn RepositoryHeader(
     branches_progress: GitCatalogProgress,
     selected_branches_progress: GitCatalogProgress,
     commits_progress: GitCatalogProgress,
+    viewed_count: usize,
+    viewed_total: u32,
 ) -> Element {
     let push_path = repository.repo_root.clone();
     let repository_open = open_dropdown == HeaderDropdown::Repository;
@@ -69,7 +71,7 @@ pub(super) fn RepositoryHeader(
         .filter(|project| project.depth == 0 && !project.missing)
         .collect::<Vec<_>>();
     rsx! {
-        header { class: "relative z-40 shrink-0 overflow-visible bg-card/55",
+        header { class: "relative z-40 shrink-0 overflow-visible bg-transparent",
             div { class: "flex h-14 min-w-0 items-center gap-1 px-4",
                 Dropdown {
                     open: repository_open,
@@ -389,9 +391,19 @@ pub(super) fn RepositoryHeader(
                         }
                     }
                 }
+                if focused_panel == GitPanel::Branches && viewed_total > 0 {
+                    span { class: "ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground",
+                        "{viewed_count} / {viewed_total} "
+                        {translate("git-viewed")}
+                    }
+                }
                 Button {
                     variant: ButtonVariant::Primary,
-                    class: "ml-auto h-8 gap-1.5 px-3 text-[11px] font-medium",
+                    class: if focused_panel == GitPanel::Branches && viewed_total > 0 {
+                        "h-8 gap-1.5 px-3 text-[11px] font-medium"
+                    } else {
+                        "ml-auto h-8 gap-1.5 px-3 text-[11px] font-medium"
+                    },
                     disabled: !can_push,
                     onclick: move |_| {
                         let _ = send(&GitPushRequest { path: push_path.clone() });

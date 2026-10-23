@@ -16,7 +16,7 @@ use super::job::{BranchFilesJob, DiffJob, DiffScope};
 use super::job_runner::{GitJob, QueuedGitJobs};
 use super::repository::{BranchFilesCatalog, BranchFilesPage, GitRepository};
 
-const DIFF_WINDOW_ROWS: u32 = 320;
+const DIFF_WINDOW_ROWS: u32 = 640;
 
 pub(super) struct DiffPlugin;
 

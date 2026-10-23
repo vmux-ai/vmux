@@ -2,7 +2,7 @@ use super::composer::{ComposerChanged, ComposerState};
 use super::model::{ModeProjection, ModelPickerProjection, SlashCommandProjection};
 use super::session::{
     ChatBranchesProjection, ChatComposerContext, ChatMediaProjection, ChatResumeProjection,
-    ChatSnapshotProjection, ChatTranscriptProjection, ChatView, PendingAgentChoice,
+    ChatSnapshotProjection, ChatTranscriptProjection, PendingAgentChoice, SessionView,
 };
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatBranchesRequest, ChatCancel,
@@ -449,7 +449,7 @@ impl ChatLists<'_, '_> {
 fn project_selector(
     lists: ChatLists,
     composers: Query<&ComposerState>,
-    mut projections: Query<(Entity, &mut ChatSelectorProjection), With<ChatView>>,
+    mut projections: Query<(Entity, &mut ChatSelectorProjection), With<SessionView>>,
     mut selections: Query<&mut ChatListSelection>,
     mut commands: Commands,
 ) {
@@ -889,7 +889,7 @@ fn composer_menu(
     trigger: On<UiInput<ChatComposerMenuRequest>>,
     mut menus: Query<&mut ActiveComposerMenu>,
     mut selections: Query<&mut ChatListSelection>,
-    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut composers: Query<&mut ComposerState, With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -988,7 +988,7 @@ fn move_history(
             &ChatTranscriptProjection,
             &ChatSnapshotProjection,
         ),
-        With<ChatView>,
+        With<SessionView>,
     >,
     mut commands: Commands,
 ) {
@@ -1014,7 +1014,7 @@ fn move_history(
 fn submit(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ChatSubmitBinding>>,
-    composers: Query<&ComposerState, With<ChatView>>,
+    composers: Query<&ComposerState, With<SessionView>>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
@@ -1054,7 +1054,7 @@ fn dismiss_input(trigger: On<UiInput<ChatDismissSelectorRequest>>, mut commands:
 fn dismiss(
     trigger: On<DismissSelector>,
     menus: Query<&ActiveComposerMenu>,
-    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut composers: Query<&mut ComposerState, With<SessionView>>,
     mut selections: Query<&mut ChatListSelection>,
     mut commands: Commands,
 ) {
@@ -1099,7 +1099,7 @@ fn dismiss(
 fn interrupt(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ChatInterruptBinding>>,
-    views: Query<(), With<ChatView>>,
+    views: Query<(), With<SessionView>>,
     mut commands: Commands,
 ) {
     let caller = trigger.event().invocation().caller;
@@ -1115,7 +1115,7 @@ fn interrupt(
 fn cancel(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ChatCancelBinding>>,
-    views: Query<(), With<ChatView>>,
+    views: Query<(), With<SessionView>>,
     mut commands: Commands,
 ) {
     let caller = trigger.event().invocation().caller;
@@ -1345,7 +1345,7 @@ mod tests {
         let page = app
             .world_mut()
             .spawn((
-                ChatView,
+                SessionView,
                 ModelPickerProjection(ModelState {
                     models: vec![
                         ModelOptionEntry {
@@ -1379,7 +1379,7 @@ mod tests {
     #[test]
     fn ui_dismissal_uses_host_composer_state() {
         let mut app = Echo::app();
-        let page = app.world_mut().spawn(ChatView).id();
+        let page = app.world_mut().spawn(SessionView).id();
         app.world_mut()
             .get_mut::<ComposerState>(page)
             .unwrap()
@@ -1401,7 +1401,7 @@ mod tests {
     #[test]
     fn composer_menu_is_host_authoritative() {
         let mut app = Echo::app();
-        let page = app.world_mut().spawn(ChatView).id();
+        let page = app.world_mut().spawn(SessionView).id();
 
         app.world_mut().trigger(UiInput {
             webview: page,

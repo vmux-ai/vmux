@@ -90,7 +90,7 @@ fn publish_composer_effects(
 #[cfg(host)]
 fn project_mcp(
     trigger: On<UiStateWrite<vmux_api::mcp::McpServersUiState>>,
-    views: Query<(), With<super::session::ChatView>>,
+    views: Query<(), With<super::session::SessionView>>,
     mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
 ) {
     if !views.contains(trigger.event().webview()) {
@@ -123,7 +123,7 @@ fn emit_ui(
 #[cfg(host)]
 fn emit_ui(
     mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
-    targets: Query<Entity, With<super::session::ChatView>>,
+    targets: Query<Entity, With<super::session::SessionView>>,
     mut commands: Commands,
 ) {
     let mut targets = targets.iter().peekable();

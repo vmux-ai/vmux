@@ -440,6 +440,7 @@ fn open_request(
 
     stack_requests.write(OpenRequest {
         url: Some(TeamPlugin::URL.to_string()),
+        focus_existing: false,
     });
 }
 

@@ -13,7 +13,7 @@ use vmux_ecs::{
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
-use vmux_session::host::{ChatView, ImportedConversation};
+use vmux_session::host::{ImportedConversation, SessionView};
 use vmux_session::{AgentId, Cleanup, PromptQueue, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
@@ -170,7 +170,7 @@ fn prepare(
                         bg_color: None,
                         ..default()
                     },
-                    ChatView,
+                    SessionView,
                     PreparingAgentChatView,
                 ))
                 .remove::<(

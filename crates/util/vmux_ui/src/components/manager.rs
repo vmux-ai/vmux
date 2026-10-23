@@ -152,11 +152,14 @@ fn ManagerAreaLink(
         "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
     };
     rsx! {
-        button {
-            r#type: "button",
+        a {
+            href: area.url(),
             aria_current: if selected { "page" } else { "false" },
             class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium transition-colors {class}",
-            onclick: move |_| onselect.call(area),
+            onclick: move |event| {
+                event.prevent_default();
+                onselect.call(area);
+            },
             BuiltinIconView { icon: area.icon(), class: "size-3.5 shrink-0".to_string() }
             span { class: "truncate", {area.label()} }
         }

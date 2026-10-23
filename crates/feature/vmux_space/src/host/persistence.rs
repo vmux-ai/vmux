@@ -807,7 +807,7 @@ mod tests {
             Save,
             PageMetadata {
                 title: "Git".into(),
-                url: "vmux://git/".into(),
+                url: "git://".into(),
                 icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Project),
                 bg_color: None,
             },

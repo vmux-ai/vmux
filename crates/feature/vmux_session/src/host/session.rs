@@ -72,7 +72,8 @@ pub(super) struct ChatHostPlugin;
 #[cfg(host)]
 impl Plugin for ChatHostPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingCreatedSessions>()
+        app.init_resource::<PendingSessionStarts>()
+            .add_message::<StartRequest>()
             .add_plugins((
                 AgentProjectionPlugin,
                 super::key::ChatKeyPlugin,
@@ -82,24 +83,78 @@ impl Plugin for ChatHostPlugin {
                 super::prompt::ChatPromptInputPlugin,
             ))
             .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
-            .add_observer(open_created)
+            .add_observer(open_started)
             .add_observer(submit_from_command_bar)
-            .add_systems(Update, report_tab_identity);
+            .add_systems(
+                Update,
+                (start.before(crate::model::MutationSet), report_tab_identity),
+            );
     }
 }
 
-#[derive(Resource, Default)]
-struct PendingCreatedSessions(std::collections::HashMap<SessionId, PendingCreatedSession>);
-
-struct PendingCreatedSession {
-    stack: Entity,
+#[derive(Message, Clone, Debug)]
+pub struct StartRequest {
+    create: CreateRequest,
+    target: PageOpenTarget,
     prompt: String,
     attachments: Vec<vmux_api::protocol::AgentAttachment>,
 }
 
-fn open_created(
+impl StartRequest {
+    pub fn from_prompt(
+        prompt: impl Into<String>,
+        cwd: std::path::PathBuf,
+        agent: AgentId,
+        target: PageOpenTarget,
+        attachments: Vec<vmux_api::protocol::AgentAttachment>,
+    ) -> Self {
+        let prompt = prompt.into();
+        let name = AgentConversationTitle::from_prompt(&prompt)
+            .map(|title| title.0)
+            .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-new"));
+        Self {
+            create: CreateRequest::new(name, String::new(), cwd, Some(agent)),
+            target,
+            prompt,
+            attachments,
+        }
+    }
+
+    pub fn id(&self) -> &SessionId {
+        self.create.id()
+    }
+}
+
+#[derive(Resource, Default)]
+struct PendingSessionStarts(std::collections::HashMap<SessionId, PendingSessionStart>);
+
+struct PendingSessionStart {
+    target: PageOpenTarget,
+    prompt: String,
+    attachments: Vec<vmux_api::protocol::AgentAttachment>,
+}
+
+fn start(
+    mut requests: MessageReader<StartRequest>,
+    mut creates: MessageWriter<CreateRequest>,
+    mut pending: ResMut<PendingSessionStarts>,
+) {
+    for request in requests.read() {
+        pending.0.insert(
+            request.create.id().clone(),
+            PendingSessionStart {
+                target: request.target.clone(),
+                prompt: request.prompt.clone(),
+                attachments: request.attachments.clone(),
+            },
+        );
+        creates.write(request.create.clone());
+    }
+}
+
+fn open_started(
     trigger: On<Created>,
-    mut pending: ResMut<PendingCreatedSessions>,
+    mut pending: ResMut<PendingSessionStarts>,
     mut requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
@@ -115,7 +170,7 @@ fn open_created(
             .insert((title, vmux_session::TitlePending));
     }
     requests.write(PageOpenRequest {
-        target: PageOpenTarget::Stack(created.stack),
+        target: created.target,
         url: Route::Session(trigger.event().id.clone()).url(),
         request_id: None,
     });
@@ -133,8 +188,7 @@ fn submit_from_command_bar(
 
 #[derive(SystemParam)]
 struct PromptSubmission<'w, 's> {
-    session_requests: MessageWriter<'w, CreateRequest>,
-    pending: ResMut<'w, PendingCreatedSessions>,
+    session_starts: MessageWriter<'w, StartRequest>,
     page_open_requests: MessageWriter<'w, PageOpenRequest>,
     inline_transition: MessageWriter<'w, InlineTransitionRequested>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
@@ -169,21 +223,13 @@ impl PromptSubmission<'_, '_> {
         {
             let mut created = false;
             if let Some(agent) = Route::requested_agent(&url) {
-                let name = AgentConversationTitle::from_prompt(prompt)
-                    .map(|title| title.0)
-                    .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-new"));
-                let create =
-                    CreateRequest::new(name, String::new(), target.cwd(stack), Some(agent));
-                let id = create.id().clone();
-                self.session_requests.write(create);
-                self.pending.0.insert(
-                    id,
-                    PendingCreatedSession {
-                        stack,
-                        prompt: prompt.to_string(),
-                        attachments: attachments.clone(),
-                    },
-                );
+                self.session_starts.write(StartRequest::from_prompt(
+                    prompt,
+                    target.cwd(stack),
+                    agent,
+                    PageOpenTarget::Stack(stack),
+                    attachments.clone(),
+                ));
                 created = true;
             }
             if inline_stack == Some(stack)
@@ -295,7 +341,7 @@ fn request_user_choice(
     mut requests: MessageReader<AgentRequestMessage<AgentRequestUserChoice>>,
     targets: AgentChatTarget,
     choices: Query<(), With<PendingAgentChoice>>,
-    views: Query<(), With<ChatView>>,
+    views: Query<(), With<SessionView>>,
     mut responses: MessageWriter<AgentCommandResponse>,
     mut commands: Commands,
 ) {
@@ -446,7 +492,7 @@ fn report_tab_identity(
     changed_events: ChangedConversationEvents,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
     transcripts: Transcripts,
-    views: Query<Option<&PageIdentity>, With<ChatView>>,
+    views: Query<Option<&PageIdentity>, With<SessionView>>,
     mut commands: Commands,
 ) {
     let mut changed = changed_sessions
@@ -516,7 +562,7 @@ fn tab_activity_icon(
     ChatListSelection,
     ChatSelectorProjection
 )]
-pub struct ChatView;
+pub struct SessionView;
 
 #[derive(Component, Default)]
 pub struct ChatComposerContext(pub ComposerContext);
@@ -744,28 +790,36 @@ mod tests {
     #[test]
     fn created_session_owns_the_initial_prompt_before_opening() {
         let mut app = App::new();
-        app.init_resource::<PendingCreatedSessions>()
+        app.init_resource::<PendingSessionStarts>()
+            .add_message::<StartRequest>()
+            .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
-            .add_observer(open_created);
-        let id = SessionId("session-1".into());
-        let session = app.world_mut().spawn_empty().id();
+            .add_observer(open_started)
+            .add_systems(Update, start);
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .resource_mut::<PendingCreatedSessions>()
-            .0
-            .insert(
-                id.clone(),
-                PendingCreatedSession {
-                    stack,
-                    prompt: "Fix session startup".into(),
-                    attachments: vec![vmux_api::protocol::AgentAttachment {
-                        path: "/tmp/screenshot.png".into(),
-                        name: "screenshot.png".into(),
-                        mime_type: "image/png".into(),
-                        size: 42,
-                    }],
-                },
-            );
+            .resource_mut::<Messages<StartRequest>>()
+            .write(StartRequest::from_prompt(
+                "Fix session startup",
+                std::path::PathBuf::new(),
+                AgentId("mock".into()),
+                PageOpenTarget::Stack(stack),
+                vec![vmux_api::protocol::AgentAttachment {
+                    path: "/tmp/screenshot.png".into(),
+                    name: "screenshot.png".into(),
+                    mime_type: "image/png".into(),
+                    size: 42,
+                }],
+            ));
+        app.update();
+        let create = app
+            .world_mut()
+            .resource_mut::<Messages<CreateRequest>>()
+            .drain()
+            .next()
+            .unwrap();
+        let id = create.id().clone();
+        let session = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(Created {
             entity: session,
@@ -817,7 +871,7 @@ mod tests {
                 .world_mut()
                 .spawn(vmux_ecs::EntityTarget::<Session>::new(session))
                 .id();
-            let view = app.world_mut().spawn((ChatView, ChildOf(stack))).id();
+            let view = app.world_mut().spawn((SessionView, ChildOf(stack))).id();
             Self { view, session }
         }
 
@@ -948,7 +1002,7 @@ mod tests {
             .world_mut()
             .spawn(EntityTarget::<Session>::new(session))
             .id();
-        app.world_mut().spawn((anchor, ChatView, ChildOf(stack)));
+        app.world_mut().spawn((anchor, SessionView, ChildOf(stack)));
         app.world_mut().write_message(AgentRequestInput {
             request_id: AgentRequestId::new(),
             origin: CommandOrigin::Agent {
@@ -994,7 +1048,7 @@ mod tests {
             .id();
         let webview = app
             .world_mut()
-            .spawn((anchor, ChatView, ChatSynced, ChildOf(stack)))
+            .spawn((anchor, SessionView, ChatSynced, ChildOf(stack)))
             .id();
         app.world_mut().write_message(AgentRequestInput {
             request_id: AgentRequestId::new(),

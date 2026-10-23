@@ -8,7 +8,7 @@ use bevy_app::{App, Plugin};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 #[cfg(host)]
-use super::session::ChatView;
+use super::session::SessionView;
 #[cfg(host)]
 use crate::event::ChatDraftChanged;
 use crate::event::{ChatComposerDraft, ChatComposerEffect};
@@ -126,7 +126,7 @@ impl Plugin for ChatComposerPlugin {
 #[cfg(host)]
 fn draft_changed(
     trigger: On<UiInput<ChatDraftChanged>>,
-    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut composers: Query<&mut ComposerState, With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -140,7 +140,7 @@ fn draft_changed(
 #[cfg(host)]
 fn slash_command(
     trigger: On<UiInput<ChatSlashCommandRequest>>,
-    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut composers: Query<&mut ComposerState, With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;

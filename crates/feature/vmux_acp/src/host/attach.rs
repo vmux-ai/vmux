@@ -27,7 +27,7 @@ fn attach(
             &WorkingDirectory,
             &AcpAttachmentIcon,
             &AcpResume,
-            Option<&EntityTarget<vmux_session::host::ChatView>>,
+            Option<&EntityTarget<vmux_session::host::SessionView>>,
         ),
         Added<PendingAcpAgentAttachment>,
     >,
@@ -98,7 +98,7 @@ fn attach(
             commands
                 .spawn((
                     vmux_layout::Browser::hosted_page_with_icon(&url, session_name, icon.clone()),
-                    vmux_session::host::ChatView,
+                    vmux_session::host::SessionView,
                     ChildOf(*stack),
                     anchor,
                 ))
@@ -112,7 +112,7 @@ fn attach(
                 icon: icon.clone(),
             },
             anchor,
-            vmux_session::host::ChatView,
+            vmux_session::host::SessionView,
         ));
         commands.entity(view).remove::<(
             vmux_session::host::SessionManagerView,

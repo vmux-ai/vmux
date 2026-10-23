@@ -8,19 +8,22 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::GitDiffRow;
-use crate::event::{GitDiffViewport, GitRepositorySnapshot};
+use crate::event::{GitBranchFileEntry, GitDiffViewport, GitRepositorySnapshot};
 use crate::ui::DiffView;
 
 #[component]
 pub(super) fn BranchDiffCard(
     repository: GitRepositorySnapshot,
+    files: Vec<GitBranchFileEntry>,
+    active_path: Signal<String>,
     repo_root: ReadSignal<String>,
     selected_branch: ReadSignal<String>,
-    selected_path: ReadSignal<String>,
+    reveal_path: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     diff_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
     error: String,
+    #[props(default)] onviewedchange: Option<EventHandler<usize>>,
 ) -> Element {
     let selected_branch_value = selected_branch();
     let comparison = if repository.base_ref.is_empty() {
@@ -29,6 +32,7 @@ pub(super) fn BranchDiffCard(
         format!("{}…{}", repository.base_ref, selected_branch_value)
     };
     let available = !selected_branch_value.is_empty();
+    let active_files = files;
     rsx! {
         RevisionDiffCard {
             repo_root,
@@ -43,7 +47,15 @@ pub(super) fn BranchDiffCard(
             icon: LineIcon::File,
             error,
             show_header: false,
-            reveal_path: Some(selected_path),
+            reveal_path: Some(reveal_path),
+            onactivefile: Some(EventHandler::new(move |path: String| {
+                if !active_files.iter().any(|file| file.path == path) {
+                    return;
+                }
+                let mut active_path = active_path;
+                active_path.set(path);
+            })),
+            onviewedchange,
         }
     }
 }
@@ -141,6 +153,8 @@ fn RevisionDiffCard(
     error: String,
     show_header: bool,
     reveal_path: Option<ReadSignal<String>>,
+    #[props(default)] onactivefile: Option<EventHandler<String>>,
+    #[props(default)] onviewedchange: Option<EventHandler<usize>>,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let identity = title.clone();
@@ -180,6 +194,8 @@ fn RevisionDiffCard(
                     viewport: diff_viewport,
                     display_rows: diff_rows,
                     reveal_path,
+                    onactivefile,
+                    onviewedchange,
                     loading,
                     visible: true,
                 }

@@ -10,7 +10,7 @@ use vmux_ecs::{
 };
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabWorkspace};
-use vmux_session::host::{ChatView, SessionManagerView};
+use vmux_session::host::{SessionManagerView, SessionView};
 use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
@@ -240,7 +240,7 @@ impl PageOpener<'_, '_> {
                 if let Some(webview) = transition_webview {
                     self.commands
                         .entity(operation)
-                        .insert(EntityTarget::<ChatView>::new(webview));
+                        .insert(EntityTarget::<SessionView>::new(webview));
                 }
                 Ok(())
             }
@@ -269,7 +269,7 @@ impl PageOpener<'_, '_> {
                 ))
                 .id()
         });
-        self.commands.entity(view).remove::<ChatView>().insert((
+        self.commands.entity(view).remove::<SessionView>().insert((
             PageMetadata {
                 url: url.to_string(),
                 title,
@@ -298,7 +298,7 @@ impl PageOpener<'_, '_> {
             self.commands
                 .spawn((
                     vmux_layout::Browser::hosted_page(&url, name),
-                    ChatView,
+                    SessionView,
                     ChildOf(stack),
                     anchor,
                 ))
@@ -315,7 +315,7 @@ impl PageOpener<'_, '_> {
                     .map(PageIcon::favicon)
                     .unwrap_or_default(),
             },
-            ChatView,
+            SessionView,
             anchor,
         ));
         self.commands.entity(view).remove::<SessionManagerView>();

@@ -14,7 +14,7 @@ use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 use vmux_session::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
-use vmux_session::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
+use vmux_session::host::{ChatBranchesProjection, ChatComposerContext, SessionView};
 use vmux_session::{ApprovalPolicy, Session};
 
 use bevy::tasks::futures_lite::future;
@@ -135,7 +135,7 @@ fn push_context_to_page(
             Has<KeyboardOwner>,
             &mut ChatComposerContext,
         ),
-        With<ChatView>,
+        With<SessionView>,
     >,
     browsers: NonSend<Browsers>,
     mut projection: ComposerProjection,
@@ -220,7 +220,7 @@ struct BranchRead {
 fn chat_branches_request(
     trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut projections: Query<(&ChatComposerContext, &mut ChatBranchesProjection), With<ChatView>>,
+    mut projections: Query<(&ChatComposerContext, &mut ChatBranchesProjection), With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -272,7 +272,7 @@ fn chat_branches_request(
 
 fn drain_branch_reads(
     mut reads: Query<(Entity, &mut BranchRead)>,
-    mut projections: Query<&mut ChatBranchesProjection, With<ChatView>>,
+    mut projections: Query<&mut ChatBranchesProjection, With<SessionView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {

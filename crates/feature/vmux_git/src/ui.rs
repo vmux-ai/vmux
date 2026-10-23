@@ -21,10 +21,3 @@ mod status;
     subtree
 )]
 pub(crate) struct GitPage;
-
-#[vmux_page::page(
-    page = "document",
-    component = Page,
-    states = ["ThemeUiState", "GitUiState", "KeyClaimsUiState"]
-)]
-pub(crate) struct LegacyGitPage;

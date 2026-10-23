@@ -4,9 +4,10 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, Duration, Utc};
+use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use vmux_api::session::{AssistantBlock, Message};
-use vmux_session::ProviderSession;
+use vmux_session::{ArchiveState, ProviderSession};
 
 use super::{
     BoundedLines, PROVIDER_LINE_LIMIT, PROVIDER_READ_LIMIT, PromptText, Reader as ProviderReader,
@@ -14,6 +15,7 @@ use super::{
 };
 
 pub(super) struct Reader {
+    root: PathBuf,
     index: PathBuf,
     sessions: PathBuf,
     previous: HashMap<String, ProviderSession>,
@@ -34,6 +36,7 @@ impl Reader {
 
     pub(super) fn at(root: &Path) -> Self {
         Self {
+            root: root.to_path_buf(),
             index: root.join("session_index.jsonl"),
             sessions: root.join("sessions"),
             previous: HashMap::new(),
@@ -131,6 +134,87 @@ impl Reader {
             return Ok(0);
         }
         Ok(length)
+    }
+
+    fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
+        let Some(path) = self.state_database()? else {
+            return Ok(None);
+        };
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|error| error.to_string())?;
+        connection
+            .busy_timeout(std::time::Duration::from_millis(100))
+            .map_err(|error| error.to_string())?;
+        let mut statement =
+            match connection.prepare("SELECT id, archived, archived_at, updated_at FROM threads") {
+                Ok(statement) => statement,
+                Err(_) => return Ok(None),
+            };
+        let rows = statement
+            .query_map([], |row| {
+                let id = row.get::<_, String>(0)?;
+                let archived = row.get::<_, bool>(1)?;
+                let archived_at = row.get::<_, Option<i64>>(2)?;
+                let updated_at = row.get::<_, i64>(3)?;
+                Ok((id, archived, archived_at, updated_at))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut archives = HashMap::new();
+        for row in rows {
+            let (id, archived, archived_at, updated_at) = row.map_err(|error| error.to_string())?;
+            let state = if archived {
+                ArchiveState::Archived(Self::milliseconds(archived_at.unwrap_or(updated_at)))
+            } else {
+                ArchiveState::Active(Self::milliseconds(updated_at))
+            };
+            archives.insert(id, state);
+        }
+        Ok(Some(archives))
+    }
+
+    fn state_database(&self) -> Result<Option<PathBuf>, String> {
+        let entries = match std::fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+        let mut selected = None::<(u32, PathBuf)>;
+        for entry in entries {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            if !kind.is_file() || kind.is_symlink() {
+                continue;
+            }
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some(version) = name
+                .strip_prefix("state_")
+                .and_then(|name| name.strip_suffix(".sqlite"))
+                .and_then(|version| version.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            if selected
+                .as_ref()
+                .is_none_or(|(current, _)| version > *current)
+            {
+                selected = Some((version, entry.path()));
+            }
+        }
+        Ok(selected.map(|(_, path)| path))
+    }
+
+    fn milliseconds(value: i64) -> i64 {
+        if value == 0 || value.abs() >= 10_000_000_000 {
+            value
+        } else {
+            value.saturating_mul(1_000)
+        }
     }
 
     fn rollout(&self, sid: &str, created_at: i64) -> Result<Option<PathBuf>, String> {
@@ -409,11 +493,16 @@ impl ProviderReader for Reader {
     fn read(&self) -> Result<Vec<ProviderSession>, String> {
         let indexed = self.indexed()?;
         let metadata = self.metadata(&indexed)?;
+        let archives = self.archives().ok().flatten();
         let mut sessions = Vec::new();
         for (id, indexed) in indexed {
             let Some(metadata) = metadata.get(&id) else {
                 continue;
             };
+            let archive = archives
+                .as_ref()
+                .and_then(|archives| archives.get(&id).copied())
+                .or_else(|| self.previous.get(&id).and_then(|session| session.archive));
             sessions.push(ProviderSession {
                 kind: "acp:codex".to_string(),
                 sid: id,
@@ -425,6 +514,7 @@ impl ProviderReader for Reader {
                 updated_at: indexed.updated_at.max(metadata.updated_at),
                 conversation_title: indexed.title.clone(),
                 last_prompt: indexed.title,
+                archive,
                 ..Default::default()
             });
         }
@@ -576,6 +666,21 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, content).unwrap();
         }
+
+        fn archive(&self, id: &str, archived: bool, archived_at: Option<i64>, updated_at: i64) {
+            let connection = Connection::open(self.path().join("state_5.sqlite")).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, archived INTEGER NOT NULL, archived_at INTEGER, updated_at INTEGER NOT NULL)",
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT OR REPLACE INTO threads (id, archived, archived_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![id, archived, archived_at, updated_at],
+                )
+                .unwrap();
+        }
     }
 
     #[test]
@@ -598,6 +703,43 @@ mod tests {
         assert_eq!(sessions[0].sid, "01a14fcc-f46a-7c12-b000-779be98d72ae");
         assert_eq!(sessions[0].cwd, "/work/vmux");
         assert_eq!(sessions[0].name, "Casual greeting");
+    }
+
+    #[test]
+    fn codex_reader_projects_the_native_archive_state() {
+        let fixture = Fixture::new();
+        let sid = "01a14fcc-f46a-7c12-b000-779be98d72ae";
+        fixture.write(
+            "session_index.jsonl",
+            &format!(
+                "{{\"id\":\"{sid}\",\"thread_name\":\"Archived task\",\"updated_at\":\"2026-10-18T16:16:54Z\"}}\n"
+            ),
+        );
+        fixture.write(
+            &format!("sessions/2026/10/18/rollout-2026-10-18T18-16-34-{sid}.jsonl"),
+            &format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{sid}\",\"timestamp\":\"2026-10-18T16:16:34Z\",\"cwd\":\"/work/vmux\"}}}}\n"
+            ),
+        );
+        fixture.archive(sid, true, Some(1_760_806_000), 1_760_806_000);
+
+        let archived = Reader::at(fixture.path()).read().unwrap();
+
+        assert_eq!(
+            archived[0].archive,
+            Some(ArchiveState::Archived(1_760_806_000_000))
+        );
+
+        fixture.archive(sid, false, None, 1_760_806_100);
+        let active = Reader::at(fixture.path())
+            .with_previous(&archived)
+            .read()
+            .unwrap();
+
+        assert_eq!(
+            active[0].archive,
+            Some(ArchiveState::Active(1_760_806_100_000))
+        );
     }
 
     #[test]

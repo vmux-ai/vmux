@@ -19,6 +19,7 @@ pub(super) fn GitDashboard() -> Element {
         header_dropdown,
         projects,
         diff,
+        mut active_branch_file,
         ..
     } = use_context::<GitPageState>();
     let ui = snapshot.read();
@@ -33,7 +34,15 @@ pub(super) fn GitDashboard() -> Element {
     let selected_commit = use_memo(move || controller.read().selected_commit.clone());
     let selected_stash = use_memo(move || controller.read().selected_stash.clone());
     let selected_branch = use_memo(move || controller.read().selected_branch.clone());
-    let selected_branch_path = use_memo(move || controller.read().selected_branch_path.clone());
+    let mut branch_reveal_path = use_signal(String::new);
+    let mut viewed_count = use_signal(|| 0usize);
+    use_effect(move || {
+        selected_branch.read();
+        let mut active_branch_file = active_branch_file;
+        active_branch_file.set(String::new());
+        branch_reveal_path.set(String::new());
+        viewed_count.set(0);
+    });
     let active_panel = controller_state.focused_panel;
     let mut list_width = use_signal(|| 336.0_f64);
     let mut resizing = use_signal(|| false);
@@ -53,13 +62,15 @@ pub(super) fn GitDashboard() -> Element {
             branches_progress: ui.local_branches,
             selected_branches_progress: ui.catalog(controller_state.branch_collection.into()),
             commits_progress: ui.commits,
+            viewed_count: viewed_count(),
+            viewed_total: ui.branch_files_total,
         }
-        main { class: "flex min-h-0 flex-1 flex-col bg-background",
+        main { class: "flex min-h-0 flex-1 flex-col bg-transparent",
             div {
                 id: "git-dashboard-split",
-                class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(18rem,var(--git-list-width))_0.5rem_minmax(0,1fr)] sm:grid-rows-1",
+                class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(18rem,var(--git-list-width))_0_minmax(0,1fr)] sm:grid-rows-1",
                 style: "{split_style}",
-                aside { class: "relative z-20 flex min-h-0 flex-col overflow-visible bg-foreground/[0.018]",
+                aside { class: "relative z-20 flex min-h-0 flex-col overflow-visible bg-transparent",
                     div { class: "min-h-0 flex-1",
                         if active_panel == GitPanel::Files {
                             ChangesCard {
@@ -78,6 +89,11 @@ pub(super) fn GitDashboard() -> Element {
                                 files_has_more: ui.branch_files_has_more,
                                 files_error: ui.branch_files_error.clone(),
                                 selected_path_bytes: controller_state.selected_branch_path_bytes.clone(),
+                                active_path: active_branch_file,
+                                onfileselect: move |path: String| {
+                                    active_branch_file.set(path.clone());
+                                    branch_reveal_path.set(path);
+                                },
                             }
                         } else if active_panel == GitPanel::Commits {
                             HistoryCard {
@@ -97,7 +113,7 @@ pub(super) fn GitDashboard() -> Element {
                     }
                 }
                 div {
-                    class: "group relative z-20 hidden h-full cursor-col-resize items-center justify-center sm:flex",
+                    class: "group relative z-30 hidden h-full w-2 -translate-x-1/2 cursor-col-resize items-center justify-center sm:flex",
                     onmousedown: move |event: Event<MouseData>| {
                         event.prevent_default();
                         resize_origin.set(Some((event.client_coordinates().x, list_width())));
@@ -105,17 +121,22 @@ pub(super) fn GitDashboard() -> Element {
                     },
                     div { class: "pointer-events-none h-10 w-1 rounded-full bg-foreground/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100" }
                 }
-                section { class: "min-h-0 min-w-0 overflow-hidden bg-background p-2.5",
+                section { class: "min-h-0 min-w-0 overflow-hidden bg-transparent py-2.5 pr-2.5",
                     if active_panel == GitPanel::Branches {
                         BranchDiffCard {
                             repository: repository.clone(),
+                            files: ui.branch_files.clone(),
+                            active_path: active_branch_file,
                             repo_root,
                             selected_branch,
-                            selected_path: selected_branch_path,
+                            reveal_path: branch_reveal_path,
                             diff_viewport: diff.viewport,
                             diff_rows: diff.rows,
                             loading: (diff.loading)(),
                             error: ui.branch_files_error.clone(),
+                            onviewedchange: Some(EventHandler::new(move |count| {
+                                viewed_count.set(count);
+                            })),
                         }
                     } else if active_panel == GitPanel::Commits {
                         CommitDiffCard {

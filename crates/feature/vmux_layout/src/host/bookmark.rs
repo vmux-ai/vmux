@@ -1070,7 +1070,10 @@ fn request_open(
     mut requests: MessageWriter<OpenRequest>,
 ) {
     let url = trigger.event().payload.url.clone();
-    requests.write(OpenRequest { url: Some(url) });
+    requests.write(OpenRequest {
+        url: Some(url),
+        focus_existing: true,
+    });
 }
 
 fn request_menu<R>(trigger: On<UiInput<R>>, mut menu_req: MessageWriter<ShowBookmarkMenuRequest>)
@@ -1456,6 +1459,7 @@ mod tests {
             requests,
             vec![OpenRequest {
                 url: Some("https://a.test".into()),
+                focus_existing: true,
             }]
         );
     }

@@ -14,7 +14,7 @@ use crate::host::repository_provision::RepositoryProvisionPlugin;
 use crate::host::status::StatusPlugin;
 use crate::host::watch::WatchPlugin;
 #[cfg(ui)]
-use crate::ui::{GitPage, LegacyGitPage};
+use crate::ui::GitPage;
 use bevy::prelude::*;
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -57,7 +57,7 @@ impl Plugin for GitPlugin {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .init_resource::<GitRuntime>();
         #[cfg(ui)]
-        app.add_plugins((GitPage::plugin(), LegacyGitPage::plugin()));
+        app.add_plugins(GitPage::plugin());
         app.add_systems(PreStartup, prewarm)
             .add_message::<GitCheckForUpdatesRequest>()
             .add_plugins(UiEventPlugin::<(
@@ -100,8 +100,7 @@ impl Plugin for GitPlugin {
             .add_plugins(
                 Self::MANIFEST
                     .plugin()
-                    .hosted(HostedPage::subtree(crate::GIT_PAGE_URL, "Git"))
-                    .alias(HostedPage::page(Self::MANIFEST.url, "Git")),
+                    .hosted(HostedPage::subtree(crate::GIT_PAGE_URL, "Git")),
             );
     }
 }

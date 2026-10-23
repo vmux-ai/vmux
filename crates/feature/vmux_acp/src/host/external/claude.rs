@@ -79,6 +79,7 @@ impl ProviderReader for Reader {
                     updated_at: session.updated_at,
                     conversation_title: session.title,
                     last_prompt: session.latest,
+                    archive: None,
                 }
             })
             .collect();

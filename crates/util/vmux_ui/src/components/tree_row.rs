@@ -103,6 +103,8 @@ pub fn SidebarTreeRow(
     label: String,
     is_dir: bool,
     #[props(default)] expanded: bool,
+    #[props(default)] active: bool,
+    #[props(default)] show_dir_icon: bool,
     #[props(default)] depth: u32,
     #[props(default)] emphasis: bool,
     #[props(default)] title: Option<String>,
@@ -117,13 +119,20 @@ pub fn SidebarTreeRow(
         button {
             r#type: "button",
             title: "{hint}",
-            class: SIDEBAR_TREE_ROW,
+            class: if active {
+                "flex h-[22px] w-full min-w-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-md bg-foreground/[0.085] px-1 text-left text-foreground"
+            } else {
+                SIDEBAR_TREE_ROW
+            },
             style: "padding-left:{indent}px;",
             onclick: move |_| on_activate.call(()),
             if is_dir {
                 Icon {
                     class: if expanded { SIDEBAR_TREE_CHEVRON_OPEN } else { SIDEBAR_TREE_CHEVRON_CLOSED },
                     path { d: "m9 18 6-6-6-6" }
+                }
+                if show_dir_icon {
+                    TypeIcon { path: path.clone(), is_dir: true, class: "h-3.5 w-3.5 shrink-0" }
                 }
             } else if let Some(leading) = leading {
                 span { class: "w-3 shrink-0" }

@@ -17,6 +17,7 @@ use vmux_command::CommandInvocation;
 use vmux_command::CommandManifest;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::page::PagePlacementCatalog;
 use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
@@ -96,6 +97,7 @@ pub(crate) struct OpenStartupPageSet;
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub url: Option<String>,
+    pub focus_existing: bool,
 }
 
 impl TryFrom<&CommandInvocation> for OpenRequest {
@@ -105,6 +107,7 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
         match invocation.id.as_str() {
             "open_in_new_stack" => Ok(Self {
                 url: invocation.argument("url"),
+                focus_existing: false,
             }),
             _ => Err(()),
         }
@@ -543,6 +546,18 @@ impl LayoutFocus<'_, '_> {
         }
         None
     }
+
+    fn focus_stack(&self, stack: Entity, commands: &mut Commands) {
+        if let Ok(parent) = self.parents.get(stack) {
+            commands
+                .entity(parent.parent())
+                .insert(LastActivatedAt::now());
+        }
+        commands.entity(stack).insert(LastActivatedAt::now());
+        if let Some(tab) = self.tab_of(stack) {
+            commands.entity(tab).insert(LastActivatedAt::now());
+        }
+    }
 }
 
 fn compute_focused(
@@ -575,8 +590,9 @@ fn open(
     mut commands: Commands,
 ) {
     let mut startup_reused = false;
+    let mut pending = Vec::<(String, Entity)>::new();
     for request in reader.read() {
-        let (_, active_pane, active_stack) = focus.resolve(active_tab_param.get());
+        let (active_tab, active_pane, active_stack) = focus.resolve(active_tab_param.get());
         let Some(pane) = active_pane else {
             continue;
         };
@@ -586,6 +602,22 @@ fn open(
             .clone()
             .filter(|url| !url.is_empty())
             .unwrap_or_else(|| startup_url.clone());
+        if request.focus_existing
+            && let Some(tab) = active_tab
+            && let Some(stack) = target
+                .reusable(&focus, tab, &url)
+                .or_else(|| target.pending_reusable(&pending, &url))
+        {
+            focus.focus_stack(stack, &mut commands);
+            if target.url(stack) != Some(url.as_str()) {
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url: url.clone(),
+                    request_id: None,
+                });
+            }
+            continue;
+        }
         let stack = active_stack.filter(|stack| {
             if startup_reused || !target.is_startup(*stack, &startup_url) {
                 return false;
@@ -600,18 +632,51 @@ fn open(
         });
         page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
-            url,
+            url: url.clone(),
             request_id: None,
         });
+        pending.push((url, stack));
     }
 }
 
 #[derive(SystemParam)]
 struct StackOpenTarget<'w, 's> {
     metadata: Query<'w, 's, &'static PageMetadata, With<Stack>>,
+    placements: PagePlacementCatalog<'w, 's>,
 }
 
 impl StackOpenTarget<'_, '_> {
+    fn reusable(&self, focus: &LayoutFocus, tab: Entity, url: &str) -> Option<Entity> {
+        for pane in focus.leaves(tab) {
+            let Ok(children) = focus.pane_children.get(pane) else {
+                continue;
+            };
+            for stack in children.iter() {
+                let Ok(metadata) = self.metadata.get(stack) else {
+                    continue;
+                };
+                if self.placements.reuses(url, &metadata.url) {
+                    return Some(stack);
+                }
+            }
+        }
+        None
+    }
+
+    fn pending_reusable(&self, pending: &[(String, Entity)], url: &str) -> Option<Entity> {
+        pending
+            .iter()
+            .find(|(pending_url, _)| self.placements.reuses(url, pending_url))
+            .map(|(_, stack)| *stack)
+    }
+
+    fn url(&self, stack: Entity) -> Option<&str> {
+        self.metadata
+            .get(stack)
+            .ok()
+            .map(|metadata| metadata.url.as_str())
+    }
+
     fn is_startup(&self, stack: Entity, startup_url: &str) -> bool {
         let Ok(metadata) = self.metadata.get(stack) else {
             return false;
@@ -1700,6 +1765,7 @@ mod tests {
             .resource_mut::<Messages<OpenRequest>>()
             .write(OpenRequest {
                 url: Some("https://example.com".into()),
+                focus_existing: false,
             });
 
         app.update();
@@ -1723,6 +1789,52 @@ mod tests {
     }
 
     #[test]
+    fn open_focuses_an_existing_page_in_the_active_tab() {
+        let mut app = build_app_with_collector();
+        let (_tab, pane, existing) = build_hierarchy(&mut app, "");
+        app.world_mut().entity_mut(existing).insert((
+            LastActivatedAt(1),
+            PageMetadata {
+                url: "vmux://services/".into(),
+                ..Default::default()
+            },
+        ));
+        let active = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                PageMetadata {
+                    url: "vmux://projects/".into(),
+                    ..Default::default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("vmux://services/".into()),
+                focus_existing: true,
+            });
+        app.update();
+
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Stack>>()
+                .iter(app.world())
+                .count(),
+            2
+        );
+        assert!(
+            app.world().get::<LastActivatedAt>(existing).unwrap().0
+                > app.world().get::<LastActivatedAt>(active).unwrap().0
+        );
+    }
+
+    #[test]
     fn open_reuses_the_active_startup_stack() {
         let mut app = build_app_with_collector();
         let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
@@ -1734,7 +1846,8 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
             .write(OpenRequest {
-                url: Some("vmux://git/".into()),
+                url: Some("git://".into()),
+                focus_existing: false,
             });
 
         app.update();
@@ -1744,7 +1857,7 @@ mod tests {
             panic!("one page is opened");
         };
         assert!(matches!(request.target, PageOpenTarget::Stack(target) if target == stack));
-        assert_eq!(request.url, "vmux://git/");
+        assert_eq!(request.url, "git://");
         assert_eq!(
             app.world_mut()
                 .query_filtered::<Entity, With<Stack>>()
@@ -1765,12 +1878,14 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
             .write(OpenRequest {
-                url: Some("vmux://git/".into()),
+                url: Some("git://".into()),
+                focus_existing: false,
             });
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
             .write(OpenRequest {
                 url: Some("vmux://sessions/".into()),
+                focus_existing: false,
             });
 
         app.update();
@@ -1790,7 +1905,10 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest { url: None });
+            .write(OpenRequest {
+                url: None,
+                focus_existing: false,
+            });
 
         app.update();
 
@@ -1821,7 +1939,10 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest { url: None });
+            .write(OpenRequest {
+                url: None,
+                focus_existing: false,
+            });
 
         app.update();
 

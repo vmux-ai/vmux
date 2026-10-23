@@ -34,7 +34,7 @@ impl ManagerPresentation {
         mut snapshot: CatalogSnapshot,
         repositories: SessionRepositories,
         query: &str,
-        filters: &SessionFilters,
+        filters: &[SessionFilter],
         mut stage_for: impl FnMut(&String, &String) -> String,
     ) -> Self {
         for session in &mut snapshot.sessions {
@@ -53,16 +53,15 @@ impl ManagerPresentation {
         };
         let category_groups =
             StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
-        let filtered_groups =
-            StageGroup::filtered(&category_groups, filters.as_slice(), &repositories);
-        let groups = if filters.stage().is_none() {
+        let filtered_groups = StageGroup::filtered(&category_groups, filters, &repositories);
+        let groups = if SessionFilter::stage(filters).is_none() {
             StageGroup::inbox(&filtered_groups)
         } else {
             filtered_groups
         };
         let visible_sessions = groups.iter().any(|group| !group.sessions.is_empty());
-        let selected_filters = filters.presentations(&snapshot.stages);
-        let selected_stage = filters.stage().map(str::to_string);
+        let selected_filters = SessionFilter::presentations(filters, &snapshot.stages);
+        let selected_stage = SessionFilter::stage(filters).map(str::to_string);
         Self {
             snapshot,
             repositories,
@@ -86,6 +85,48 @@ pub(super) enum SessionFilter {
 }
 
 impl SessionFilter {
+    pub fn presentations(
+        filters: &[Self],
+        stages: &[StageSummary],
+    ) -> Vec<SessionFilterPresentation> {
+        filters
+            .iter()
+            .map(|filter| filter.presentation(stages))
+            .collect()
+    }
+
+    pub fn stage(filters: &[Self]) -> Option<&str> {
+        filters.iter().find_map(|filter| match filter {
+            Self::Stage(id) => Some(id.as_str()),
+            Self::Agent(_) | Self::Project(_) | Self::Updated(_) => None,
+        })
+    }
+
+    pub fn set_stage(filters: &mut Vec<Self>, stage: Option<String>) {
+        filters.retain(|filter| !matches!(filter, Self::Stage(_)));
+        if let Some(stage) = stage {
+            filters.insert(0, Self::Stage(stage));
+        }
+    }
+
+    pub fn upsert(filters: &mut Vec<Self>, selected: Self) {
+        match selected {
+            Self::Stage(stage) => Self::set_stage(filters, Some(stage)),
+            Self::Agent(agent) => {
+                filters.retain(|filter| !matches!(filter, Self::Agent(_)));
+                filters.push(Self::Agent(agent));
+            }
+            Self::Project(project) => {
+                filters.retain(|filter| !matches!(filter, Self::Project(_)));
+                filters.push(Self::Project(project));
+            }
+            Self::Updated(updated) => {
+                filters.retain(|filter| !matches!(filter, Self::Updated(_)));
+                filters.push(Self::Updated(updated));
+            }
+        }
+    }
+
     fn presentation(&self, stages: &[StageSummary]) -> SessionFilterPresentation {
         match self {
             Self::Stage(id) => {
@@ -153,68 +194,6 @@ impl SessionFilterValue {
 pub(super) struct SessionFilterPresentation {
     pub label: String,
     pub dot: String,
-}
-
-#[derive(Clone, Default, PartialEq)]
-pub(super) struct SessionFilters(Vec<SessionFilter>);
-
-impl SessionFilters {
-    pub fn as_slice(&self) -> &[SessionFilter] {
-        &self.0
-    }
-
-    pub fn presentations(&self, stages: &[StageSummary]) -> Vec<SessionFilterPresentation> {
-        self.0
-            .iter()
-            .map(|filter| filter.presentation(stages))
-            .collect()
-    }
-
-    pub fn stage(&self) -> Option<&str> {
-        self.0.iter().find_map(|filter| match filter {
-            SessionFilter::Stage(id) => Some(id.as_str()),
-            SessionFilter::Agent(_) | SessionFilter::Project(_) | SessionFilter::Updated(_) => None,
-        })
-    }
-
-    pub fn set_stage(&mut self, stage: Option<String>) {
-        self.0
-            .retain(|filter| !matches!(filter, SessionFilter::Stage(_)));
-        if let Some(stage) = stage {
-            self.0.insert(0, SessionFilter::Stage(stage));
-        }
-    }
-
-    pub fn upsert(&mut self, selected: SessionFilter) {
-        match selected {
-            SessionFilter::Stage(stage) => self.set_stage(Some(stage)),
-            SessionFilter::Agent(agent) => {
-                self.0
-                    .retain(|filter| !matches!(filter, SessionFilter::Agent(_)));
-                self.0.push(SessionFilter::Agent(agent));
-            }
-            SessionFilter::Project(project) => {
-                self.0
-                    .retain(|filter| !matches!(filter, SessionFilter::Project(_)));
-                self.0.push(SessionFilter::Project(project));
-            }
-            SessionFilter::Updated(updated) => {
-                self.0
-                    .retain(|filter| !matches!(filter, SessionFilter::Updated(_)));
-                self.0.push(SessionFilter::Updated(updated));
-            }
-        }
-    }
-
-    pub fn remove(&mut self, index: usize) {
-        if index < self.0.len() {
-            self.0.remove(index);
-        }
-    }
-
-    pub fn pop(&mut self) {
-        self.0.pop();
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]

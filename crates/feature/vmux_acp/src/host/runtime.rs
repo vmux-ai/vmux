@@ -21,7 +21,7 @@ use crate::host::event::{
     AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest,
 };
 use crate::policy::AcpWorkspacePolicy;
-use vmux_session::host::{ChatView, ImportedConversation};
+use vmux_session::host::{ImportedConversation, SessionView};
 use vmux_session::{
     AgentId, ApprovalPolicy, PromptQueue, Route, RunState, Session, SessionId, TitlePending,
 };
@@ -301,7 +301,7 @@ fn session(
     mut reader: MessageReader<AcpSessionCreated>,
     sessions: Query<(Entity, &SessionId), With<Session>>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
-    mut page_meta: Query<&mut PageMetadata, With<ChatView>>,
+    mut page_meta: Query<&mut PageMetadata, With<SessionView>>,
     mut commands: Commands,
 ) {
     for ev in reader.read() {

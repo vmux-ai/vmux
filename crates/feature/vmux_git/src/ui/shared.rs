@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
@@ -186,16 +188,19 @@ pub fn DiffView(
     #[props(default)] path_bytes: Vec<u8>,
     #[props(default)] identity: String,
     #[props(default)] reveal_path: Option<ReadSignal<String>>,
+    #[props(default)] onactivefile: Option<EventHandler<String>>,
+    #[props(default)] onviewedchange: Option<EventHandler<usize>>,
     viewport: ReadSignal<Option<GitDiffViewport>>,
     display_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
     visible: bool,
 ) -> Element {
     let mut collapsed_files = use_signal(HashSet::<String>::new);
-    let mut viewed_files = use_signal(HashSet::<String>::new);
+    let mut viewed_files = use_signal(ViewedFiles::default);
     let mut scroll_container = use_signal(|| None::<Rc<MountedData>>);
     let mut render_window = use_signal(DiffRenderWindow::default);
     let mut revealed_file = use_signal(String::new);
+    let mut active_file = use_signal(String::new);
     let layout = use_memo(move || {
         let viewport = viewport.read();
         let lines = viewport
@@ -204,6 +209,10 @@ pub fn DiffView(
             .unwrap_or_default();
         let rows = display_rows.read();
         DiffLayout::group(lines, &rows)
+    });
+    let geometry_identity = identity.clone();
+    let geometry = use_memo(move || {
+        DiffGeometry::new(&layout.read(), &geometry_identity, &collapsed_files.read())
     });
     let gutter_width = use_memo(move || {
         let viewport = viewport.read();
@@ -253,17 +262,25 @@ pub fn DiffView(
         if *revealed_file.peek() == key {
             return;
         }
-        let collapsed = collapsed_files.read();
-        let Some(offset) = layout
-            .read()
-            .file_offset(&reveal_identity, &collapsed, &path)
-        else {
+        let layout = layout.read();
+        let geometry = geometry.read();
+        let Some(offset) = geometry.file_offset(&layout, &path) else {
             return;
         };
         revealed_file.set(key);
         let height = render_window.peek().height;
         render_window.set(DiffRenderWindow::at(offset, height));
         ScrollIntoView::element_to("git-diff-viewport", offset);
+    });
+    let viewed_identity = identity.clone();
+    use_effect(move || {
+        let layout = layout.read();
+        let mut viewed = viewed_files.write();
+        let mut collapsed = collapsed_files.write();
+        viewed.reconcile(&viewed_identity, &layout, &mut collapsed);
+        if let Some(handler) = onviewedchange {
+            handler.call(viewed.count(&viewed_identity, layout.file_paths()));
+        }
     });
     let viewport_state = viewport.read();
     let rows = viewport_state
@@ -290,6 +307,7 @@ pub fn DiffView(
     } = layout.read().visible(
         &identity,
         &collapsed_snapshot,
+        &geometry.read(),
         *render_window.peek(),
         virtualized,
     );
@@ -318,6 +336,7 @@ pub fn DiffView(
             }
         });
     });
+    let scroll_identity = identity.clone();
 
     rsx! {
         div {
@@ -342,8 +361,19 @@ pub fn DiffView(
                 if *render_window.peek() != next {
                     render_window.set(next);
                 }
+                if let Some(path) = geometry
+                    .read()
+                    .file_at(&layout.read(), event.scroll_top() + 1.0)
+                    && *active_file.peek() != path
+                {
+                    active_file.set(path.clone());
+                    revealed_file.set(format!("{scroll_identity}\0{path}"));
+                    if let Some(handler) = onactivefile {
+                        handler.call(path);
+                    }
+                }
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                let preload_distance = event.client_height().saturating_mul(6).max(1600);
+                let preload_distance = event.client_height().saturating_mul(10).max(2400);
                 if remaining <= preload_distance && has_more && !loading {
                     let _ = send(&GitDiffNextRequest);
                 }
@@ -381,12 +411,15 @@ pub fn DiffView(
                         .is_some_and(|key| collapsed_snapshot.contains(key));
                     let viewed = collapse_key
                         .as_ref()
-                        .is_some_and(|key| viewed_snapshot.contains(key));
+                        .is_some_and(|key| viewed_snapshot.contains(key, section.fingerprint));
                     let viewed_key = collapse_key.clone();
+                    let viewed_fingerprint = section.fingerprint;
+                    let viewed_count_identity = identity.clone();
+                    let viewed_count_layout = layout;
                     let section_class = if file_path.is_some() && section.index > 0 {
-                        "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-card"
+                        "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-foreground/[0.035]"
                     } else if file_path.is_some() {
-                        "w-full min-w-0 overflow-clip rounded-lg bg-card"
+                        "w-full min-w-0 overflow-clip rounded-lg bg-foreground/[0.035]"
                     } else {
                         "contents"
                     };
@@ -395,7 +428,7 @@ pub fn DiffView(
                             if let Some(file_path) = file_path {
                                 div {
                                     id: "git-diff-file-{file_path}",
-                                    class: "sticky left-0 top-0 z-10 flex h-9 w-full min-w-0 scroll-mt-2 items-center gap-2 rounded-t-lg bg-card px-3 font-sans text-[11px] font-semibold text-foreground",
+                                    class: "sticky left-0 top-0 z-10 flex h-9 w-full min-w-0 scroll-mt-2 items-center gap-2 rounded-t-lg bg-inherit px-3 font-sans text-[11px] font-semibold text-foreground backdrop-blur-xl",
                                     TypeIcon { path: file_path.clone(), is_dir: false, class: "size-3.5 shrink-0" }
                                     span { class: "min-w-0 flex-1 truncate font-mono", "{file_path}" }
                                     label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
@@ -410,11 +443,17 @@ pub fn DiffView(
                                                 let mut viewed = viewed_files.write();
                                                 let mut collapsed = collapsed_files.write();
                                                 if checked {
-                                                    viewed.insert(key.clone());
+                                                    viewed.insert(key.clone(), viewed_fingerprint);
                                                     collapsed.insert(key.clone());
                                                 } else {
                                                     viewed.remove(key);
                                                     collapsed.remove(key);
+                                                }
+                                                if let Some(handler) = onviewedchange {
+                                                    handler.call(viewed.count(
+                                                        &viewed_count_identity,
+                                                        viewed_count_layout.read().file_paths(),
+                                                    ));
                                                 }
                                             },
                                         }
@@ -547,8 +586,8 @@ const DIFF_LINE_HEIGHT: f64 = 20.0;
 const DIFF_GAP_HEIGHT: f64 = 34.0;
 const DIFF_FILE_HEADER_HEIGHT: f64 = 36.0;
 const DIFF_SECTION_GAP: f64 = 12.0;
-const DIFF_RENDER_OVERSCAN: f64 = 1200.0;
-const DIFF_RENDER_STEP: f64 = 320.0;
+const DIFF_RENDER_OVERSCAN: f64 = 1600.0;
+const DIFF_RENDER_STEP: f64 = 640.0;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 struct DiffRenderWindow {
@@ -583,6 +622,7 @@ struct DiffLayout {
 
 impl DiffLayout {
     fn group(lines: &[DiffLine], rows: &[GitDiffRow]) -> Self {
+        let fingerprints = DiffFingerprints::of(lines);
         let mut sections: Vec<DiffSection> = Vec::new();
         for row in rows {
             let file_path = match row {
@@ -593,11 +633,12 @@ impl DiffLayout {
                 GitDiffRow::Gap { .. } => None,
             };
             if let Some(file_path) = file_path {
-                sections.push(DiffSection::new(Some(file_path)));
+                let fingerprint = fingerprints.get(&file_path);
+                sections.push(DiffSection::new(Some(file_path), fingerprint));
                 continue;
             }
             if sections.is_empty() {
-                sections.push(DiffSection::new(None));
+                sections.push(DiffSection::new(None, None));
             }
             if let Some(section) = sections.last_mut() {
                 section.push(*row);
@@ -606,21 +647,17 @@ impl DiffLayout {
         Self { sections }
     }
 
-    fn file_offset(&self, identity: &str, collapsed: &HashSet<String>, path: &str) -> Option<f64> {
-        let mut offset = 0.0;
-        for (index, section) in self.sections.iter().enumerate() {
-            if section.file_path.as_deref() == Some(path) {
-                return Some(offset + section.margin(index));
-            }
-            offset += section.height(index, identity, collapsed);
-        }
-        None
+    fn file_paths(&self) -> impl Iterator<Item = &str> {
+        self.sections
+            .iter()
+            .filter_map(|section| section.file_path.as_deref())
     }
 
     fn visible(
         &self,
         identity: &str,
         collapsed: &HashSet<String>,
+        geometry: &DiffGeometry,
         window: DiffRenderWindow,
         virtualized: bool,
     ) -> VisibleDiffLayout {
@@ -629,15 +666,15 @@ impl DiffLayout {
         } else {
             (0.0, f64::MAX)
         };
-        let mut offset = 0.0;
         let mut first_visible = None;
         let mut last_visible = 0.0;
         let mut visible = Vec::new();
-        let total_height = self.total_height(identity, collapsed);
-        for (index, section) in self.sections.iter().enumerate() {
-            let section_start = offset;
-            let section_end = section_start + section.height(index, identity, collapsed);
-            offset = section_end;
+        let first = geometry
+            .ends
+            .partition_point(|section_end| *section_end < range_start);
+        for (index, section) in self.sections.iter().enumerate().skip(first) {
+            let section_start = geometry.starts[index];
+            let section_end = geometry.ends[index];
             if section_end < range_start {
                 continue;
             }
@@ -657,7 +694,7 @@ impl DiffLayout {
         }
         if visible.is_empty() {
             return VisibleDiffLayout {
-                top_spacer: total_height,
+                top_spacer: geometry.total_height,
                 bottom_spacer: 0.0,
                 sections: visible,
             };
@@ -665,31 +702,67 @@ impl DiffLayout {
         let top_spacer = first_visible.unwrap_or_default();
         VisibleDiffLayout {
             top_spacer,
-            bottom_spacer: (total_height - last_visible).max(0.0),
+            bottom_spacer: (geometry.total_height - last_visible).max(0.0),
             sections: visible,
         }
     }
+}
 
-    fn total_height(&self, identity: &str, collapsed: &HashSet<String>) -> f64 {
-        self.sections
+#[derive(Clone, PartialEq)]
+struct DiffGeometry {
+    starts: Vec<f64>,
+    ends: Vec<f64>,
+    total_height: f64,
+}
+
+impl DiffGeometry {
+    fn new(layout: &DiffLayout, identity: &str, collapsed: &HashSet<String>) -> Self {
+        let mut starts = Vec::with_capacity(layout.sections.len());
+        let mut ends = Vec::with_capacity(layout.sections.len());
+        let mut offset = 0.0;
+        for (index, section) in layout.sections.iter().enumerate() {
+            starts.push(offset);
+            offset += section.height(index, identity, collapsed);
+            ends.push(offset);
+        }
+        Self {
+            starts,
+            ends,
+            total_height: offset,
+        }
+    }
+
+    fn file_offset(&self, layout: &DiffLayout, path: &str) -> Option<f64> {
+        layout
+            .sections
             .iter()
-            .enumerate()
-            .map(|(index, section)| section.height(index, identity, collapsed))
-            .sum()
+            .position(|section| section.file_path.as_deref() == Some(path))
+            .map(|index| self.starts[index] + layout.sections[index].margin(index))
+    }
+
+    fn file_at(&self, layout: &DiffLayout, offset: f64) -> Option<String> {
+        let index = self.ends.partition_point(|end| *end <= offset);
+        let index = index.min(layout.sections.len().saturating_sub(1));
+        layout.sections[..=index]
+            .iter()
+            .rev()
+            .find_map(|section| section.file_path.clone())
     }
 }
 
 #[derive(Clone, PartialEq)]
 struct DiffSection {
     file_path: Option<String>,
+    fingerprint: Option<DiffFingerprint>,
     rows: Vec<GitDiffRow>,
     row_offsets: Vec<f64>,
 }
 
 impl DiffSection {
-    fn new(file_path: Option<String>) -> Self {
+    fn new(file_path: Option<String>, fingerprint: Option<DiffFingerprint>) -> Self {
         Self {
             file_path,
+            fingerprint,
             rows: Vec::new(),
             row_offsets: vec![0.0],
         }
@@ -764,9 +837,109 @@ impl DiffSection {
         VisibleDiffSection {
             index,
             file_path: self.file_path.clone(),
+            fingerprint: self.fingerprint,
             rows: self.rows[first..end].to_vec(),
             top_spacer,
             bottom_spacer,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DiffFingerprint(u64);
+
+impl DiffFingerprint {
+    fn write(line: &DiffLine, hasher: &mut DefaultHasher) {
+        let kind = match line.kind {
+            DiffKind::Context => 0_u8,
+            DiffKind::Add => 1,
+            DiffKind::Remove => 2,
+            DiffKind::Hunk => 3,
+            DiffKind::Staged => 4,
+        };
+        kind.hash(hasher);
+        line.old_no.hash(hasher);
+        line.new_no.hash(hasher);
+        line.hunk.hash(hasher);
+        for span in &line.spans {
+            span.text.hash(hasher);
+        }
+    }
+}
+
+#[derive(Default)]
+struct DiffFingerprints(HashMap<String, DiffFingerprint>);
+
+impl DiffFingerprints {
+    fn of(lines: &[DiffLine]) -> Self {
+        let mut fingerprints = HashMap::new();
+        let mut current: Option<(String, DefaultHasher)> = None;
+        for line in lines {
+            if let Some(path) = line.file_path() {
+                if let Some((path, hasher)) = current.take() {
+                    fingerprints.insert(path, DiffFingerprint(hasher.finish()));
+                }
+                current = Some((path.to_string(), DefaultHasher::new()));
+            }
+            if let Some((_, hasher)) = current.as_mut() {
+                DiffFingerprint::write(line, hasher);
+            }
+        }
+        if let Some((path, hasher)) = current {
+            fingerprints.insert(path, DiffFingerprint(hasher.finish()));
+        }
+        Self(fingerprints)
+    }
+
+    fn get(&self, path: &str) -> Option<DiffFingerprint> {
+        self.0.get(path).copied()
+    }
+}
+
+#[derive(Clone, Default)]
+struct ViewedFiles(HashMap<String, DiffFingerprint>);
+
+impl ViewedFiles {
+    fn count<'a>(&self, identity: &str, paths: impl Iterator<Item = &'a str>) -> usize {
+        paths
+            .filter(|path| {
+                let key = format!("{identity}\0{path}");
+                self.0.contains_key(&key)
+            })
+            .count()
+    }
+
+    fn contains(&self, key: &str, fingerprint: Option<DiffFingerprint>) -> bool {
+        fingerprint.is_some_and(|fingerprint| self.0.get(key) == Some(&fingerprint))
+    }
+
+    fn insert(&mut self, key: String, fingerprint: Option<DiffFingerprint>) {
+        if let Some(fingerprint) = fingerprint {
+            self.0.insert(key, fingerprint);
+        }
+    }
+
+    fn remove(&mut self, key: &str) {
+        self.0.remove(key);
+    }
+
+    fn reconcile(&mut self, identity: &str, layout: &DiffLayout, collapsed: &mut HashSet<String>) {
+        for section in &layout.sections {
+            let Some(path) = section.file_path.as_ref() else {
+                continue;
+            };
+            let Some(fingerprint) = section.fingerprint else {
+                continue;
+            };
+            let key = format!("{identity}\0{path}");
+            let changed = self
+                .0
+                .get(&key)
+                .is_some_and(|viewed| *viewed != fingerprint);
+            if changed {
+                self.0.remove(&key);
+                collapsed.remove(&key);
+            }
         }
     }
 }
@@ -791,6 +964,7 @@ struct VisibleDiffLayout {
 struct VisibleDiffSection {
     index: usize,
     file_path: Option<String>,
+    fingerprint: Option<DiffFingerprint>,
     rows: Vec<GitDiffRow>,
     top_spacer: f64,
     bottom_spacer: f64,
@@ -920,16 +1094,18 @@ mod tests {
 
     #[test]
     fn virtualized_diff_keeps_the_full_scroll_height() {
-        let mut section = DiffSection::new(Some("src/lib.rs".to_string()));
+        let mut section = DiffSection::new(Some("src/lib.rs".to_string()), None);
         for index in 0..500 {
             section.push(GitDiffRow::Line(index));
         }
         let layout = DiffLayout {
             sections: vec![section],
         };
+        let geometry = DiffGeometry::new(&layout, "branch", &HashSet::new());
         let visible = layout.visible(
             "branch",
             &HashSet::new(),
+            &geometry,
             DiffRenderWindow {
                 top: 5_000.0,
                 height: 800.0,
@@ -952,15 +1128,62 @@ mod tests {
     }
 
     #[test]
+    fn scroll_offset_resolves_the_active_file() {
+        let mut first = DiffSection::new(Some("src/first.rs".to_string()), None);
+        first.push(GitDiffRow::Line(0));
+        let mut second = DiffSection::new(Some("src/second.rs".to_string()), None);
+        second.push(GitDiffRow::Line(1));
+        let layout = DiffLayout {
+            sections: vec![first, second],
+        };
+        let geometry = DiffGeometry::new(&layout, "branch", &HashSet::new());
+
+        assert_eq!(
+            geometry.file_at(&layout, 0.0).as_deref(),
+            Some("src/first.rs")
+        );
+        assert_eq!(
+            geometry
+                .file_at(
+                    &layout,
+                    DIFF_FILE_HEADER_HEIGHT + DIFF_LINE_HEIGHT + DIFF_SECTION_GAP,
+                )
+                .as_deref(),
+            Some("src/second.rs")
+        );
+    }
+
+    #[test]
+    fn changed_diff_invalidates_viewed_and_expands_the_file() {
+        let initial = DiffFixture::new("before");
+        let unchanged = DiffFixture::new("before");
+        let changed = DiffFixture::new("after");
+        let key = "branch\0src/lib.rs".to_string();
+        let mut viewed = ViewedFiles::default();
+        let mut collapsed = HashSet::from([key.clone()]);
+        viewed.insert(key.clone(), initial.fingerprint());
+
+        viewed.reconcile("branch", &unchanged.layout, &mut collapsed);
+        assert!(viewed.contains(&key, unchanged.fingerprint()));
+        assert!(collapsed.contains(&key));
+
+        viewed.reconcile("branch", &changed.layout, &mut collapsed);
+        assert!(!viewed.contains(&key, changed.fingerprint()));
+        assert!(!collapsed.contains(&key));
+    }
+
+    #[test]
     fn a_window_past_the_diff_does_not_duplicate_the_spacer() {
-        let mut section = DiffSection::new(Some("src/lib.rs".to_string()));
+        let mut section = DiffSection::new(Some("src/lib.rs".to_string()), None);
         section.push(GitDiffRow::Line(0));
         let layout = DiffLayout {
             sections: vec![section],
         };
+        let geometry = DiffGeometry::new(&layout, "branch", &HashSet::new());
         let visible = layout.visible(
             "branch",
             &HashSet::new(),
+            &geometry,
             DiffRenderWindow {
                 top: 10_000.0,
                 height: 1.0,
@@ -974,5 +1197,49 @@ mod tests {
             DIFF_FILE_HEADER_HEIGHT + DIFF_LINE_HEIGHT
         );
         assert_eq!(visible.bottom_spacer, 0.0);
+    }
+
+    struct DiffFixture {
+        layout: DiffLayout,
+    }
+
+    impl DiffFixture {
+        fn new(text: &str) -> Self {
+            let lines = vec![
+                DiffLine {
+                    kind: DiffKind::Hunk,
+                    old_no: None,
+                    new_no: None,
+                    hunk: None,
+                    spans: vec![StyledSpan {
+                        text: "src/lib.rs".to_string(),
+                        light_fg: [0; 3],
+                        dark_fg: [0; 3],
+                        bold: false,
+                        italic: false,
+                    }],
+                },
+                DiffLine {
+                    kind: DiffKind::Add,
+                    old_no: None,
+                    new_no: Some(1),
+                    hunk: None,
+                    spans: vec![StyledSpan {
+                        text: text.to_string(),
+                        light_fg: [0; 3],
+                        dark_fg: [0; 3],
+                        bold: false,
+                        italic: false,
+                    }],
+                },
+            ];
+            Self {
+                layout: DiffLayout::group(&lines, &[GitDiffRow::Line(0), GitDiffRow::Line(1)]),
+            }
+        }
+
+        fn fingerprint(&self) -> Option<DiffFingerprint> {
+            self.layout.sections[0].fingerprint
+        }
     }
 }

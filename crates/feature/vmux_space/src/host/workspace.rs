@@ -16,7 +16,7 @@ use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
 };
 use vmux_session::event::ChatChoiceSelected;
-use vmux_session::host::{ChatSynced, ChatView, PendingAgentChoice};
+use vmux_session::host::{ChatSynced, PendingAgentChoice, SessionView};
 use vmux_session::{Session, SessionId};
 use vmux_ui::i18n::Locale;
 
@@ -468,7 +468,7 @@ impl ExistingWorktreeCandidates {
 
 fn drain_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
-    chat_views: Query<(), With<ChatView>>,
+    chat_views: Query<(), With<SessionView>>,
     mut workspace: AgentWorkspaceState,
     mut commands: Commands,
     mut continuations: MessageWriter<AgentContinuationRequest>,
@@ -713,7 +713,7 @@ mod tests {
             .id();
         let view = app
             .world_mut()
-            .spawn((ChatView, anchor, ChildOf(stack)))
+            .spawn((SessionView, anchor, ChildOf(stack)))
             .id();
 
         let project_for_system = project_dir.clone();
@@ -757,7 +757,7 @@ mod tests {
         assert_eq!(app.world().get::<ProcessAnchor>(session).unwrap().0, anchor);
         assert_eq!(app.world().get::<Cwd>(session).unwrap().0, execution_dir);
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
-        assert!(app.world().get::<ChatView>(view).is_some());
+        assert!(app.world().get::<SessionView>(view).is_some());
         assert!(matches!(
             rebind,
             ClientMessage::RebindAcpWorkspace { sid, cwd }

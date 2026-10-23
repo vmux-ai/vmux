@@ -15,7 +15,7 @@ use vmux_git::RepoInfoCache;
 use vmux_session::{AgentFamily, AgentId, ProviderCatalog, Route, Session, SessionId, Transcripts};
 
 use crate::event::ChatResumeQueryRequest;
-use crate::host::session::{ChatResumeProjection, ChatView};
+use crate::host::session::{ChatResumeProjection, SessionView};
 use crate::state::ChatUiState;
 
 pub(super) struct Plugin;
@@ -267,7 +267,7 @@ fn open(
 fn query(
     trigger: On<UiInput<ChatResumeQueryRequest>>,
     mut catalog: ResumeCatalog,
-    mut projections: Query<&mut ChatResumeProjection, With<ChatView>>,
+    mut projections: Query<&mut ChatResumeProjection, With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -422,7 +422,7 @@ mod tests {
             .add_plugins(Plugin)
             .add_observer(Responses::chat);
         spawn_session(app.world_mut());
-        let webview = app.world_mut().spawn(ChatView).id();
+        let webview = app.world_mut().spawn(SessionView).id();
 
         app.world_mut().trigger(UiInput {
             webview,

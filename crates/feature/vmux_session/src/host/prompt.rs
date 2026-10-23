@@ -16,7 +16,7 @@ use vmux_session::{AgentConversationTitle, PromptQueue, RunState, SessionId};
 use super::composer::{ComposerChanged, ComposerState};
 use super::conversation::Submitted;
 #[cfg(host)]
-use super::session::{ChatAttachmentProjection, ChatView};
+use super::session::{ChatAttachmentProjection, SessionView};
 use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
 #[cfg(host)]
 use crate::event::{
@@ -96,7 +96,10 @@ impl Plugin for ChatPromptInputPlugin {
 fn submit(
     trigger: On<UiInput<ChatSubmit>>,
     targets: super::session::SessionViews,
-    mut views: Query<(&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState), With<ChatView>>,
+    mut views: Query<
+        (&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState),
+        With<SessionView>,
+    >,
     mut sessions: Query<(
         &mut PromptQueue,
         &mut RunState,
@@ -219,7 +222,7 @@ fn cancel(
 fn escape(
     trigger: On<UiInput<ChatEscape>>,
     targets: super::session::SessionViews,
-    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut composers: Query<&mut ComposerState, With<SessionView>>,
     mut sessions: Query<(&mut PromptQueue, &mut RunState, &SessionId)>,
     mut commands: Commands,
     mut control: SessionControl,
@@ -630,7 +633,7 @@ mod tests {
                 session,
             ))
             .id();
-        let webview = app.world_mut().spawn((ChildOf(stack), ChatView)).id();
+        let webview = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
 
         app.world_mut().trigger(UiInput {
             webview,
@@ -760,7 +763,7 @@ mod tests {
                 session,
             ))
             .id();
-        let webview = app.world_mut().spawn((ChildOf(stack), ChatView)).id();
+        let webview = app.world_mut().spawn((ChildOf(stack), SessionView)).id();
         app.world_mut()
             .get_mut::<ComposerState>(webview)
             .unwrap()

@@ -21,20 +21,20 @@ use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
     ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
     ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSearchPopover,
-    ManagerSidebarItem, ManagerSidebarSection, ManagerSkeleton, ManagerTone, ManagerToolbar,
-    ManagerView, ManagerViewToggle, ManagerWorkspace,
+    ManagerSidebarItem, ManagerSidebarSection, ManagerSkeleton, ManagerTone, ManagerView,
+    ManagerViewToggle, ManagerWorkspace,
 };
 use vmux_ui::components::page::{PageContent, PageHeader};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{send, use_ui_state};
+use vmux_ui::hooks::{CollectionController, send, use_collection_controller, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use super::project_manager::{
-    ProjectControls, ProjectFilter, ProjectFilterMenu, ProjectPresentation,
+    ProjectFilter, ProjectFilterMenu, ProjectPresentation, ViewPreference,
 };
 use super::state::FileUi;
 use crate::project::{
@@ -73,33 +73,17 @@ pub(super) fn ProjectList(
         .unwrap_or_default();
     let count = entries.len();
     let pending = view.as_ref().is_some_and(|view| view.operation_pending);
-    let controls = ProjectControls::use_state(collection_view);
-    let presentation = ProjectPresentation::new(&entries, &controls.query(), &controls.filters());
+    let controls =
+        use_collection_controller::<ProjectFilter>(ViewPreference::manager(collection_view));
+    let filters = controls.filters();
+    let presentation = ProjectPresentation::new(&entries, &controls.query(), &filters);
     rsx! {
         ManagerPage {
-            ManagerToolbar {
-                div { class: "min-w-0 flex-1" }
-                if count > 0 {
-                    ManagerViewToggle {
-                        view: controls.view(),
-                        list_label: translate("tools-view-list"),
-                        grid_label: translate("tools-view-grid"),
-                        onchange: move |view| controls.set_view(view),
-                    }
-                }
-                ProjectManagerActions {
-                    entries: entries.clone(),
-                    presentation: presentation.clone(),
-                    controls,
-                    pending,
-                    align_left: false,
-                }
-            }
             ManagerWorkspace {
-                active: controls.selected_filter().is_none().then_some(ManagerArea::Projects),
+                active: ProjectFilter::selected(&filters).is_none().then_some(ManagerArea::Projects),
                 onnavigate: move |area: ManagerArea| {
                     if area == ManagerArea::Projects {
-                        controls.select_filter(None);
+                        controls.replace_filters(Vec::new());
                         return;
                     }
                     let _ = send(&OpenRequest {
@@ -108,6 +92,17 @@ pub(super) fn ProjectList(
                     });
                 },
                 sidebar_actions: rsx! {
+                    if count > 0 {
+                        ManagerViewToggle {
+                            view: controls.view(),
+                            list_label: translate("tools-view-list"),
+                            grid_label: translate("tools-view-grid"),
+                            onchange: move |view| {
+                                controls.set_view(view);
+                                let _ = send(&ViewPreference::request(view));
+                            },
+                        }
+                    }
                     ProjectManagerActions {
                         entries: entries.clone(),
                         presentation: presentation.clone(),
@@ -154,7 +149,7 @@ pub(super) fn ProjectList(
 fn ProjectManagerActions(
     entries: Vec<ProjectEntry>,
     presentation: ProjectPresentation,
-    controls: ProjectControls,
+    controls: CollectionController<ProjectFilter>,
     pending: bool,
     align_left: bool,
 ) -> Element {
@@ -213,7 +208,12 @@ fn ProjectManagerActions(
                     ProjectFilterMenu {
                         entries,
                         needle: presentation.filter_needle,
-                        onselect: move |filter| controls.apply_filter(filter),
+                        onselect: move |filter| {
+                            controls.update_filters(|filters| {
+                                ProjectFilter::select(filters, Some(filter));
+                            });
+                            controls.dismiss_filter();
+                        },
                     }
                 }
             }
@@ -223,8 +223,11 @@ fn ProjectManagerActions(
 }
 
 #[component]
-fn ProjectCategories(entries: Vec<ProjectEntry>, controls: ProjectControls) -> Element {
-    let selected = controls.selected_filter();
+fn ProjectCategories(
+    entries: Vec<ProjectEntry>,
+    controls: CollectionController<ProjectFilter>,
+) -> Element {
+    let selected = ProjectFilter::selected(&controls.filters());
     rsx! {
         ManagerSidebarSection { title: translate("common-status"),
             for filter in [ProjectFilter::Ongoing, ProjectFilter::Stale, ProjectFilter::Archived] {
@@ -235,7 +238,11 @@ fn ProjectCategories(entries: Vec<ProjectEntry>, controls: ProjectControls) -> E
                         count: filter.count(&entries),
                         selected: selected == Some(filter),
                         dot: filter.dot().to_string(),
-                        onclick: move |_| controls.select_filter(Some(filter)),
+                        onclick: move |_| {
+                            controls.update_filters(|filters| {
+                                ProjectFilter::select(filters, Some(filter));
+                            });
+                        },
                     }
                 }
             }

@@ -820,7 +820,10 @@ fn side_sheet_stack_create(
         return;
     };
     commands.entity(target_pane).insert(LastActivatedAt::now());
-    requests.write(vmux_layout::stack::OpenRequest { url: None });
+    requests.write(vmux_layout::stack::OpenRequest {
+        url: None,
+        focus_existing: false,
+    });
 }
 
 fn side_sheet_project_open(

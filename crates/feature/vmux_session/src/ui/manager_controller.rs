@@ -2,43 +2,24 @@ use std::collections::HashSet;
 
 use dioxus::prelude::*;
 use vmux_session::SessionSummary;
-use vmux_ui::components::manager::ManagerView;
-use vmux_ui::hooks::{OptimisticMap, send};
+use vmux_ui::hooks::{CollectionController, OptimisticMap, send};
 
 use crate::event::{ResumeSession, SessionsCleanup, SessionsStageChange};
 
-use super::manager_model::{SessionFilter, SessionFilterStep, SessionFilters, StageTarget};
+use super::manager_model::{SessionFilter, SessionFilterStep, StageTarget};
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) struct ManagerControls {
-    query: Signal<String>,
-    view: Signal<ManagerView>,
-    filters: Signal<SessionFilters>,
+pub(super) struct SessionFilterPicker {
     filter_step: Signal<SessionFilterStep>,
     filter_value: Signal<String>,
 }
 
-impl ManagerControls {
+impl SessionFilterPicker {
     pub fn use_state() -> Self {
         Self {
-            query: use_signal(String::new),
-            view: use_signal(ManagerView::default),
-            filters: use_signal(SessionFilters::default),
             filter_step: use_signal(|| SessionFilterStep::Field),
             filter_value: use_signal(String::new),
         }
-    }
-
-    pub fn query(self) -> String {
-        (self.query)()
-    }
-
-    pub fn view(self) -> ManagerView {
-        (self.view)()
-    }
-
-    pub fn filters(self) -> SessionFilters {
-        (self.filters)()
     }
 
     pub fn filter_step(self) -> SessionFilterStep {
@@ -49,54 +30,34 @@ impl ManagerControls {
         (self.filter_value)()
     }
 
-    pub fn set_query(mut self, query: String) {
-        self.query.set(query);
-    }
-
-    pub fn set_view(mut self, view: ManagerView) {
-        self.view.set(view);
-    }
-
-    pub fn remove_filter(mut self, index: usize) {
-        self.filters.write().remove(index);
-    }
-
-    pub fn pop_filter(mut self) {
-        self.filters.write().pop();
-    }
-
-    pub fn dismiss_filter(mut self) {
-        self.query.set(String::new());
+    pub fn dismiss(self, controls: CollectionController<SessionFilter>) {
+        controls.dismiss_filter();
         self.reset_filter_input();
     }
 
-    pub fn toggle_filter(mut self) {
-        if (self.query)().starts_with('#') {
-            self.query.set(String::new());
-        } else {
-            self.query.set("#".to_string());
-        }
+    pub fn toggle(self, controls: CollectionController<SessionFilter>) {
+        controls.toggle_filter();
         self.reset_filter_input();
     }
 
-    pub fn select_filter_step(mut self, step: SessionFilterStep) {
+    pub fn select_step(
+        mut self,
+        controls: CollectionController<SessionFilter>,
+        step: SessionFilterStep,
+    ) {
         self.filter_step.set(step);
         self.filter_value.set(String::new());
-        self.query.set("#".to_string());
+        controls.set_query("#".to_string());
     }
 
-    pub fn set_filter_value(mut self, value: String) {
+    pub fn set_value(mut self, value: String) {
         self.filter_value.set(value);
     }
 
-    pub fn apply_filter(mut self, filter: SessionFilter) {
-        self.filters.write().upsert(filter);
-        self.dismiss_filter();
-    }
-
-    pub fn select_stage(mut self, stage: Option<String>) {
-        self.filters.write().set_stage(stage);
-        self.query.set(String::new());
+    pub fn apply(self, controls: CollectionController<SessionFilter>, filter: SessionFilter) {
+        controls.update_filters(|filters| SessionFilter::upsert(filters, filter));
+        controls.dismiss_filter();
+        self.reset_filter_input();
     }
 
     fn reset_filter_input(mut self) {

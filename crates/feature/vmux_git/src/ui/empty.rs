@@ -118,7 +118,7 @@ pub(super) fn EmptyRepository() -> Element {
 #[component]
 fn GitLoadingSkeleton() -> Element {
     rsx! {
-        header { class: "shrink-0 bg-card/55",
+        header { class: "shrink-0 bg-transparent",
             div { class: "flex h-14 min-w-0 items-center gap-1 px-4",
                 div { class: "flex h-8 min-w-0 items-center gap-2 px-2",
                     GitSymbolView {
@@ -137,9 +137,9 @@ fn GitLoadingSkeleton() -> Element {
                 Skeleton { class: "ml-auto h-8 w-20 rounded-md bg-foreground/[0.055]" }
             }
         }
-        main { class: "flex min-h-0 flex-1 flex-col bg-background text-foreground",
-            div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] sm:grid-rows-1",
-                aside { class: "flex min-h-0 flex-col overflow-hidden bg-card/55",
+        main { class: "flex min-h-0 flex-1 flex-col bg-transparent text-foreground",
+            div { class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] overflow-hidden sm:grid-cols-[minmax(18rem,24rem)_0_minmax(0,1fr)] sm:grid-rows-1",
+                aside { class: "flex min-h-0 flex-col overflow-hidden bg-transparent",
                     div { class: "flex h-11 shrink-0 items-center gap-2 px-3",
                         div { class: "flex h-8 items-center gap-2 px-2.5",
                             LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground" }
@@ -160,14 +160,16 @@ fn GitLoadingSkeleton() -> Element {
                         }
                     }
                 }
-                section { class: "flex min-h-0 min-w-0 flex-col overflow-hidden bg-background",
-                    div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
-                        LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground" }
-                        Skeleton { class: "h-3 w-40 bg-foreground/[0.06]" }
-                    }
-                    div { class: "flex min-h-0 flex-1 flex-col gap-3 px-5 py-4",
-                        for width in ["w-full", "w-11/12", "w-10/12", "w-full", "w-8/12", "w-11/12", "w-9/12", "w-full"] {
-                            Skeleton { class: "h-3 {width} bg-foreground/[0.045]" }
+                section { class: "min-h-0 min-w-0 overflow-hidden bg-transparent py-2.5 pr-2.5",
+                    div { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-card/60 ring-1 ring-inset ring-foreground/[0.10]",
+                        div { class: "flex h-9 shrink-0 items-center gap-2 px-3",
+                            LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground" }
+                            Skeleton { class: "h-3 w-40 bg-foreground/[0.06]" }
+                        }
+                        div { class: "flex min-h-0 flex-1 flex-col gap-3 px-5 py-4",
+                            for width in ["w-full", "w-11/12", "w-10/12", "w-full", "w-8/12", "w-11/12", "w-9/12", "w-full"] {
+                                Skeleton { class: "h-3 {width} bg-foreground/[0.045]" }
+                            }
                         }
                     }
                 }

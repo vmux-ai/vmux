@@ -19,7 +19,7 @@ use vmux_ecs::EntityTarget;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::event::{ModelOptionEntry, SelectMode, SelectModel, SetAgentEffort};
-use vmux_session::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
+use vmux_session::host::{ChatModeStateChanged, ChatModelStateChanged, SessionView};
 use vmux_session::{AgentId, Session, SessionId};
 
 use super::config_driver::AcpConfigProjection;
@@ -386,7 +386,7 @@ fn publish_modes(
 fn push_state_to_page(
     sessions: Query<Entity, (With<Session>, Changed<AcpSessionConfigState>)>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
-    chat_views: Query<(), With<ChatView>>,
+    chat_views: Query<(), With<SessionView>>,
     projection: AcpConfigProjection,
     mut commands: Commands,
 ) {
@@ -412,7 +412,7 @@ fn push_state_to_page(
 fn remove_state(
     mut removed: RemovedComponents<AcpSessionConfigState>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
-    chat_views: Query<(), With<ChatView>>,
+    chat_views: Query<(), With<SessionView>>,
     projection: AcpConfigProjection,
     mut commands: Commands,
 ) {

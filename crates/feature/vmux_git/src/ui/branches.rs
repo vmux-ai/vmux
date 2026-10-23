@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+use std::collections::{BTreeMap, HashSet};
+
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
@@ -7,11 +9,10 @@ use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::components::tree_row::{SidebarTreeChildren, SidebarTreeRow, SidebarTreeRowGroup};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::*;
 use crate::state::{GitBranchCollection, GitBranchPrompt};
@@ -95,6 +96,8 @@ pub(super) fn BranchesCard(
     files_has_more: bool,
     files_error: String,
     selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    onfileselect: EventHandler<String>,
 ) -> Element {
     let mut file_query = use_signal(String::new);
     let query = file_query().trim().to_lowercase();
@@ -104,6 +107,7 @@ pub(super) fn BranchesCard(
         .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
         .collect::<Vec<_>>();
     let visible_file_count = visible_files.len();
+    let tree = BranchFileTree::from_files(visible_files);
     rsx! {
         section { class: "flex h-full min-h-0 flex-col",
             div { class: "shrink-0 px-2 pb-1.5 pt-2",
@@ -141,7 +145,7 @@ pub(super) fn BranchesCard(
                             let _ = send(&GitBranchFilesRetryRequest);
                         },
                     }
-                } else if visible_files.is_empty() {
+                } else if tree.is_empty() {
                     div { class: "flex min-h-24 items-center justify-center px-3 text-center text-xs text-muted-foreground", {translate("git-no-changes")} }
                     if files_has_more {
                         Button {
@@ -155,12 +159,11 @@ pub(super) fn BranchesCard(
                         }
                     }
                 } else {
-                    for entry in visible_files {
-                        BranchFileRow {
-                            key: "branch-file-{entry.path_bytes:?}",
-                            entry,
-                            selected_path_bytes: selected_path_bytes.clone(),
-                        }
+                    BranchFileTreeView {
+                        tree,
+                        selected_path_bytes: selected_path_bytes.clone(),
+                        active_path,
+                        onfileselect,
                     }
                     if files_loading {
                         div { class: "flex flex-col gap-2 px-2.5 py-2",
@@ -187,41 +190,214 @@ pub(super) fn BranchesCard(
 }
 
 #[component]
-fn BranchFileRow(entry: GitBranchFileEntry, selected_path_bytes: Vec<u8>) -> Element {
-    let selected = selected_path_bytes == entry.path_bytes;
+fn BranchFileTreeView(
+    tree: BranchFileTree,
+    selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    onfileselect: EventHandler<String>,
+) -> Element {
+    let collapsed = use_signal(HashSet::<String>::new);
+    rsx! {
+        div { class: "flex min-w-0 flex-col",
+            BranchFileTreeNodes {
+                nodes: tree.roots,
+                depth: 0,
+                collapsed,
+                selected_path_bytes,
+                active_path,
+                onfileselect,
+            }
+        }
+    }
+}
+
+#[component]
+fn BranchFileTreeNodes(
+    nodes: Vec<BranchFileNode>,
+    depth: u32,
+    collapsed: Signal<HashSet<String>>,
+    selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    onfileselect: EventHandler<String>,
+) -> Element {
+    rsx! {
+        for node in nodes {
+            match node {
+                BranchFileNode::Directory(directory) => {
+                    let path = directory.path.clone();
+                    let expanded = !collapsed.read().contains(&path);
+                    rsx! {
+                        div { key: "branch-dir-{path}",
+                            SidebarTreeRowGroup {
+                                SidebarTreeRow {
+                                    path: directory.path.clone(),
+                                    label: directory.label,
+                                    is_dir: true,
+                                    expanded,
+                                    show_dir_icon: true,
+                                    depth,
+                                    title: directory.path.clone(),
+                                    on_activate: move |()| {
+                                        let mut collapsed = collapsed.write();
+                                        if !collapsed.remove(&path) {
+                                            collapsed.insert(path.clone());
+                                        }
+                                    },
+                                }
+                            }
+                            SidebarTreeChildren { expanded,
+                                BranchFileTreeNodes {
+                                    nodes: directory.children,
+                                    depth: depth + 1,
+                                    collapsed,
+                                    selected_path_bytes: selected_path_bytes.clone(),
+                                    active_path,
+                                    onfileselect,
+                                }
+                            }
+                        }
+                    }
+                }
+                BranchFileNode::File(entry) => rsx! {
+                    BranchFileRow {
+                        key: "branch-file-{entry.path_bytes:?}",
+                        entry,
+                        depth,
+                        selected_path_bytes: selected_path_bytes.clone(),
+                        active_path,
+                        onfileselect,
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn BranchFileRow(
+    entry: GitBranchFileEntry,
+    depth: u32,
+    selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    onfileselect: EventHandler<String>,
+) -> Element {
+    let current_path = active_path();
+    let selected = if current_path.is_empty() {
+        selected_path_bytes == entry.path_bytes
+    } else {
+        current_path == entry.path
+    };
     let path_bytes = entry.path_bytes.clone();
     let path = entry.path.clone();
-    let row_id = entry.row_id();
     let status_code = entry.change.code();
     let status_class = entry.change.class();
     rsx! {
-        button {
-            id: "{row_id}",
-            r#type: "button",
-            class: if selected {
-                "flex h-8 w-full items-center gap-2 rounded-md bg-foreground/[0.085] px-2 text-left text-foreground shadow-[inset_2px_0_0_var(--git-selection-accent)]"
-            } else {
-                "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-foreground hover:bg-foreground/[0.045]"
-            },
-            onclick: move |_| {
-                if selected {
-                    let id = format!("git-diff-file-{path}");
-                    ScrollIntoView::first_rendered(&[id.as_str()]);
-                    return;
+        div { id: "{entry.row_id()}",
+            SidebarTreeRowGroup {
+                SidebarTreeRow {
+                    path: entry.path.clone(),
+                    label: entry.name().to_string(),
+                    is_dir: false,
+                    active: selected,
+                    depth,
+                    title: entry.path.clone(),
+                    trailing: rsx! {
+                        span { class: "w-4 shrink-0 text-center font-mono text-[10px] font-semibold {status_class}", "{status_code}" }
+                    },
+                    on_activate: move |()| {
+                        onfileselect.call(path.clone());
+                        let _ = send(&GitBranchFileSelectRequest {
+                            path_bytes: path_bytes.clone(),
+                        });
+                    },
                 }
-                let _ = send(&GitBranchFileSelectRequest {
-                    path_bytes: path_bytes.clone(),
-                });
-            },
-            TypeIcon { path: entry.path.clone(), is_dir: false, class: "size-3.5 shrink-0 opacity-85" }
-            div { class: "flex min-w-0 flex-1 items-baseline gap-0.5 overflow-hidden text-[11px]",
-                if !entry.parent().is_empty() {
-                    span { class: "min-w-0 truncate text-muted-foreground", "{entry.parent()}" }
-                    span { class: "shrink-0 text-muted-foreground/55", "/" }
-                }
-                span { class: "max-w-[65%] shrink-0 truncate font-medium", "{entry.name()}" }
             }
-            span { class: "w-4 shrink-0 text-center font-mono text-[10px] font-semibold {status_class}", "{status_code}" }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct BranchFileTree {
+    roots: Vec<BranchFileNode>,
+}
+
+impl BranchFileTree {
+    fn from_files(files: Vec<GitBranchFileEntry>) -> Self {
+        let mut root = BranchDirectoryBuilder::default();
+        for file in files {
+            root.insert(file);
+        }
+        Self {
+            roots: root.finish(String::new()),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.roots.is_empty()
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum BranchFileNode {
+    Directory(BranchDirectoryNode),
+    File(GitBranchFileEntry),
+}
+
+#[derive(Clone, PartialEq)]
+struct BranchDirectoryNode {
+    path: String,
+    label: String,
+    children: Vec<BranchFileNode>,
+}
+
+#[derive(Default)]
+struct BranchDirectoryBuilder {
+    directories: BTreeMap<String, BranchDirectoryBuilder>,
+    files: Vec<GitBranchFileEntry>,
+}
+
+impl BranchDirectoryBuilder {
+    fn insert(&mut self, file: GitBranchFileEntry) {
+        let segments = file.path.split('/').collect::<Vec<_>>();
+        let mut directory = self;
+        for segment in segments.iter().take(segments.len().saturating_sub(1)) {
+            directory = directory
+                .directories
+                .entry((*segment).to_string())
+                .or_default();
+        }
+        directory.files.push(file);
+    }
+
+    fn finish(mut self, parent: String) -> Vec<BranchFileNode> {
+        self.files
+            .sort_by(|left, right| left.name().cmp(right.name()));
+        let mut nodes = Vec::with_capacity(self.directories.len() + self.files.len());
+        for (name, directory) in self.directories {
+            let path = if parent.is_empty() {
+                name.clone()
+            } else {
+                format!("{parent}/{name}")
+            };
+            nodes.push(BranchFileNode::Directory(directory.node(path, name)));
+        }
+        nodes.extend(self.files.into_iter().map(BranchFileNode::File));
+        nodes
+    }
+
+    fn node(mut self, mut path: String, mut label: String) -> BranchDirectoryNode {
+        while self.files.is_empty() && self.directories.len() == 1 {
+            let (name, next) = self.directories.pop_first().unwrap();
+            path.push('/');
+            path.push_str(&name);
+            label.push('/');
+            label.push_str(&name);
+            self = next;
+        }
+        BranchDirectoryNode {
+            children: self.finish(path.clone()),
+            path,
+            label,
         }
     }
 }
@@ -387,5 +563,52 @@ fn BranchMarker(current: bool, upstream: String, worktree: bool, remote: bool) -
             title,
             LineIconView { icon, class: "size-3.5" }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Fixture;
+
+    impl Fixture {
+        fn file(path: &str) -> GitBranchFileEntry {
+            GitBranchFileEntry {
+                path: path.to_string(),
+                path_bytes: path.as_bytes().to_vec(),
+                previous_path: None,
+                previous_path_bytes: None,
+                change: GitPathChange::Modified,
+            }
+        }
+    }
+
+    #[test]
+    fn file_tree_compacts_single_directory_chains_and_sorts_files() {
+        let tree = BranchFileTree::from_files(vec![
+            Fixture::file("crates/app/vmux/src/main.rs"),
+            Fixture::file("Cargo.toml"),
+            Fixture::file(".github/workflows/ci.yml"),
+            Fixture::file("crates/app/vmux/src/lib.rs"),
+        ]);
+
+        let BranchFileNode::Directory(workflows) = &tree.roots[0] else {
+            panic!("first node must be the workflow directory");
+        };
+        assert_eq!(workflows.label, ".github/workflows");
+        let BranchFileNode::Directory(source) = &tree.roots[1] else {
+            panic!("second node must be the source directory");
+        };
+        assert_eq!(source.label, "crates/app/vmux/src");
+        assert_eq!(source.children.len(), 2);
+        let BranchFileNode::File(first) = &source.children[0] else {
+            panic!("source child must be a file");
+        };
+        assert_eq!(first.name(), "lib.rs");
+        let BranchFileNode::File(root) = &tree.roots[2] else {
+            panic!("last node must be the root file");
+        };
+        assert_eq!(root.name(), "Cargo.toml");
     }
 }

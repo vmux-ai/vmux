@@ -1,93 +1,9 @@
 use dioxus::prelude::*;
 use vmux_ui::components::filter::{FilterMenu, FilterOption};
 use vmux_ui::components::manager::ManagerView;
-use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use crate::project::{ProjectCollectionViewRequest, ProjectEntry};
-
-#[derive(Clone, Copy, PartialEq)]
-pub(super) struct ProjectControls {
-    query: Signal<String>,
-    view: Signal<ManagerView>,
-    filters: Signal<ProjectFilters>,
-}
-
-impl ProjectControls {
-    pub(super) fn use_state(view: vmux_ecs::CollectionView) -> Self {
-        let view = match view {
-            vmux_ecs::CollectionView::List => ManagerView::List,
-            vmux_ecs::CollectionView::Grid => ManagerView::Grid,
-        };
-        Self {
-            query: use_signal(String::new),
-            view: use_signal(|| view),
-            filters: use_signal(ProjectFilters::default),
-        }
-    }
-
-    pub(super) fn query(self) -> String {
-        (self.query)()
-    }
-
-    pub(super) fn view(self) -> ManagerView {
-        (self.view)()
-    }
-
-    pub(super) fn set_query(mut self, query: String) {
-        self.query.set(query);
-    }
-
-    pub(super) fn set_view(mut self, view: ManagerView) {
-        self.view.set(view);
-        let view = match view {
-            ManagerView::List => vmux_ecs::CollectionView::List,
-            ManagerView::Grid => vmux_ecs::CollectionView::Grid,
-        };
-        let _ = send(&ProjectCollectionViewRequest { view });
-    }
-
-    pub(super) fn toggle_filter(mut self) {
-        if (self.query)().starts_with('#') {
-            self.query.set(String::new());
-        } else {
-            self.query.set("#".to_string());
-        }
-    }
-
-    pub(super) fn dismiss_filter(mut self) {
-        self.query.set(String::new());
-    }
-
-    pub(super) fn apply_filter(mut self, filter: ProjectFilter) {
-        self.filters.write().set(filter);
-        self.dismiss_filter();
-    }
-
-    pub(super) fn remove_filter(mut self, index: usize) {
-        self.filters.write().remove(index);
-    }
-
-    pub(super) fn pop_filter(mut self) {
-        self.filters.write().pop();
-    }
-
-    pub(super) fn filters(self) -> ProjectFilters {
-        (self.filters)()
-    }
-
-    pub(super) fn selected_filter(self) -> Option<ProjectFilter> {
-        self.filters.read().selected()
-    }
-
-    pub(super) fn select_filter(mut self, filter: Option<ProjectFilter>) {
-        let mut filters = self.filters.write();
-        filters.0.clear();
-        if let Some(filter) = filter {
-            filters.0.push(filter);
-        }
-    }
-}
 
 #[derive(Clone, PartialEq)]
 pub(super) struct ProjectPresentation {
@@ -98,7 +14,7 @@ pub(super) struct ProjectPresentation {
 }
 
 impl ProjectPresentation {
-    pub(super) fn new(entries: &[ProjectEntry], query: &str, filters: &ProjectFilters) -> Self {
+    pub(super) fn new(entries: &[ProjectEntry], query: &str, filters: &[ProjectFilter]) -> Self {
         let filter_requested = query.starts_with('#');
         let filter_needle = query
             .strip_prefix('#')
@@ -112,12 +28,12 @@ impl ProjectPresentation {
         };
         let entries = entries
             .iter()
-            .filter(|entry| entry.matches(&search) && filters.matches(entry))
+            .filter(|entry| entry.matches(&search) && ProjectFilter::matches_all(filters, entry))
             .cloned()
             .collect();
         Self {
             entries,
-            selected_filters: filters.presentations(),
+            selected_filters: ProjectFilter::presentations(filters),
             filter_requested,
             filter_needle,
         }
@@ -142,6 +58,34 @@ pub(super) enum ProjectFilter {
 }
 
 impl ProjectFilter {
+    pub(super) fn selected(filters: &[Self]) -> Option<Self> {
+        filters.first().copied()
+    }
+
+    pub(super) fn select(filters: &mut Vec<Self>, filter: Option<Self>) {
+        filters.clear();
+        if let Some(filter) = filter {
+            filters.push(filter);
+        }
+    }
+
+    pub(super) fn presentations(filters: &[Self]) -> Vec<ProjectFilterPresentation> {
+        filters
+            .iter()
+            .map(|filter| ProjectFilterPresentation {
+                label: format!("{} · {}", translate("common-status"), filter.label()),
+                dot: filter.dot().to_string(),
+            })
+            .collect()
+    }
+
+    pub(super) fn matches_all(filters: &[Self], entry: &ProjectEntry) -> bool {
+        if filters.is_empty() {
+            return !entry.archived;
+        }
+        filters.iter().all(|filter| filter.matches(entry))
+    }
+
     pub(super) fn label(self) -> String {
         translate(match self {
             Self::Ongoing => "session-stage-in-progress",
@@ -171,44 +115,22 @@ impl ProjectFilter {
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
-pub(super) struct ProjectFilters(Vec<ProjectFilter>);
+pub(super) struct ViewPreference;
 
-impl ProjectFilters {
-    fn selected(&self) -> Option<ProjectFilter> {
-        self.0.first().copied()
-    }
-
-    fn matches(&self, entry: &ProjectEntry) -> bool {
-        if self.0.is_empty() {
-            return !entry.archived;
-        }
-        self.0.iter().all(|filter| filter.matches(entry))
-    }
-
-    fn presentations(&self) -> Vec<ProjectFilterPresentation> {
-        self.0
-            .iter()
-            .map(|filter| ProjectFilterPresentation {
-                label: format!("{} · {}", translate("common-status"), filter.label()),
-                dot: filter.dot().to_string(),
-            })
-            .collect()
-    }
-
-    fn set(&mut self, filter: ProjectFilter) {
-        self.0.clear();
-        self.0.push(filter);
-    }
-
-    fn remove(&mut self, index: usize) {
-        if index < self.0.len() {
-            self.0.remove(index);
+impl ViewPreference {
+    pub(super) fn manager(view: vmux_ecs::CollectionView) -> ManagerView {
+        match view {
+            vmux_ecs::CollectionView::List => ManagerView::List,
+            vmux_ecs::CollectionView::Grid => ManagerView::Grid,
         }
     }
 
-    fn pop(&mut self) {
-        self.0.pop();
+    pub(super) fn request(view: ManagerView) -> ProjectCollectionViewRequest {
+        let view = match view {
+            ManagerView::List => vmux_ecs::CollectionView::List,
+            ManagerView::Grid => vmux_ecs::CollectionView::Grid,
+        };
+        ProjectCollectionViewRequest { view }
     }
 }
 

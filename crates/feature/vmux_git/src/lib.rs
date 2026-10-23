@@ -23,7 +23,7 @@ pub struct GitUrl;
 
 impl GitUrl {
     pub fn is_page(value: &str) -> bool {
-        value.starts_with(GIT_PAGE_URL) || value.trim_end_matches('/') == "vmux://git"
+        value.starts_with(GIT_PAGE_URL)
     }
 
     pub fn parse(value: &str) -> Option<std::path::PathBuf> {
@@ -159,7 +159,7 @@ mod tests {
     fn git_page_identity_excludes_project_hosts() {
         assert!(GitUrl::is_page("git://"));
         assert!(GitUrl::is_page("git://Users/me/repo"));
-        assert!(GitUrl::is_page("vmux://git/"));
+        assert!(!GitUrl::is_page("vmux://git/"));
         assert!(!GitUrl::is_page("vmux://projects/"));
     }
 }

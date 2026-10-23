@@ -14,6 +14,7 @@ pub(super) struct GitPageState {
     pub(super) header_dropdown: Memo<HeaderDropdown>,
     pub(super) projects: Memo<GitProjects>,
     pub(super) diff: GitDiffState,
+    pub(super) active_branch_file: Signal<String>,
     handled_selection_reveal: Signal<u64>,
     handled_diff_update: Signal<u64>,
 }
@@ -27,6 +28,7 @@ impl GitPageState {
             header_dropdown: use_memo(move || root.read().header_dropdown),
             projects: use_memo(move || root.read().projects.clone()),
             diff: GitDiffState::new(),
+            active_branch_file: use_signal(String::new),
             handled_selection_reveal: use_signal(|| 0),
             handled_diff_update: use_signal(|| 0),
         };

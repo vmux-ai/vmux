@@ -53,11 +53,33 @@ pub struct ProviderSession {
     pub updated_at: i64,
     pub conversation_title: String,
     pub last_prompt: String,
+    pub archive: Option<ArchiveState>,
 }
 
 impl ProviderSession {
     pub fn catalog_id(&self) -> String {
         format!("{}:{}", self.kind, self.sid)
+    }
+
+    pub fn source_updated_at(&self) -> i64 {
+        self.archive
+            .map(ArchiveState::updated_at)
+            .unwrap_or_default()
+            .max(self.updated_at)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArchiveState {
+    Active(i64),
+    Archived(i64),
+}
+
+impl ArchiveState {
+    pub fn updated_at(self) -> i64 {
+        match self {
+            Self::Active(at) | Self::Archived(at) => at,
+        }
     }
 }
 
@@ -415,6 +437,12 @@ fn project(
         .find(|stage| !stage.terminal)
         .map(|stage| stage.id.clone())
         .unwrap_or_default();
+    let archive_stage = next
+        .stages
+        .iter()
+        .find(|stage| stage.archive)
+        .map(|stage| stage.id.clone())
+        .unwrap_or_default();
     for (
         entity,
         id,
@@ -471,6 +499,7 @@ fn project(
         });
     }
     for session in &providers.sessions {
+        let provider_updated_at = session.source_updated_at();
         let stage_override =
             provider_stages
                 .iter()
@@ -482,14 +511,22 @@ fn project(
                     };
                     kind.0 == session.kind
                         && id.0 == session.sid
-                        && source_updated_at >= session.updated_at
+                        && source_updated_at >= provider_updated_at
                 });
-        let stage = stage_override
-            .map(|(_, _, stage, _, _)| stage.0.0.clone())
-            .unwrap_or_else(|| default_stage.clone());
-        let stage_changed_at = stage_override
-            .map(|(_, _, _, changed_at, _)| changed_at.0)
-            .unwrap_or(session.updated_at);
+        let (stage, stage_changed_at) = match session.archive {
+            Some(ArchiveState::Archived(at)) => (
+                archive_stage.clone(),
+                if at > 0 { at } else { session.updated_at },
+            ),
+            Some(ArchiveState::Active(_)) | None => (
+                stage_override
+                    .map(|(_, _, stage, _, _)| stage.0.0.clone())
+                    .unwrap_or_else(|| default_stage.clone()),
+                stage_override
+                    .map(|(_, _, _, changed_at, _)| changed_at.0)
+                    .unwrap_or(provider_updated_at),
+            ),
+        };
         next.sessions.push(SessionSummary {
             id: session.catalog_id(),
             kind: session.kind.clone(),
@@ -702,6 +739,56 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(imported, 0);
+    }
+
+    #[test]
+    fn provider_archive_state_overrides_local_stage_state() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "External task".into(),
+                cwd: "/tmp/project".into(),
+                updated_at: 10,
+                archive: Some(ArchiveState::Archived(20)),
+                ..Default::default()
+            });
+        app.world_mut()
+            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
+            .write(crate::ProviderStageChangeRequest {
+                kind: ProviderKind("acp:codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                stage: StageId("in_progress".into()),
+                source_updated_at: 100,
+            });
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "done");
+        assert_eq!(session.stage_changed_at, 20);
+
+        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].archive =
+            Some(ArchiveState::Active(30));
+        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 30;
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "in_progress");
+        assert!(session.stage_changed_at > 30);
+
+        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].archive =
+            Some(ArchiveState::Active(101));
+        app.update();
+
+        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(session.stage, "in_progress");
+        assert_eq!(session.stage_changed_at, 101);
     }
 
     #[test]

@@ -99,11 +99,4 @@ impl GitBranchFileEntry {
     pub(super) fn name(&self) -> &str {
         self.path.rsplit('/').next().unwrap_or(&self.path)
     }
-
-    pub(super) fn parent(&self) -> &str {
-        self.path
-            .rsplit_once('/')
-            .map(|(parent, _)| parent)
-            .unwrap_or("")
-    }
 }

@@ -13,7 +13,7 @@ use crate::event::{
 use crate::host::{ChatAttachmentHydrationRequest, ImportedConversation};
 use crate::host::{
     ChatAttachmentProjection, ChatHistoryQuery, ChatHistoryResult, ChatSnapshotProjection,
-    ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,
+    ChatSynced, ChatTranscriptProjection, PendingAgentChoice, SessionView, TranscriptPage,
     TranscriptTail,
 };
 use vmux_ecs::service::ServiceMessageSet;
@@ -100,7 +100,7 @@ struct PushWorld<'w, 's> {
             Option<&'static PageMetadata>,
         ),
     >,
-    chat_views: Query<'w, 's, ProjectionView, With<ChatView>>,
+    chat_views: Query<'w, 's, ProjectionView, With<SessionView>>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     user_profiles: Query<'w, 's, Ref<'static, Profile>, With<User>>,
     transcripts: Transcripts<'w, 's>,
@@ -115,7 +115,7 @@ type ReadyView = (
 );
 
 type ReadyViewFilter = (
-    With<ChatView>,
+    With<SessionView>,
     With<vmux_ecs::page::PageReady>,
     Without<ChatSynced>,
 );
@@ -505,7 +505,7 @@ fn sync_ready_views(
 
 fn reset_synced(
     trigger: On<UiInput<vmux_ecs::page::PageReady>>,
-    chat_views: Query<(), With<ChatView>>,
+    chat_views: Query<(), With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -517,7 +517,7 @@ fn reset_synced(
 fn request_more(
     trigger: On<UiInput<ChatHistoryMoreRequest>>,
     targets: super::session::SessionViews,
-    mut views: Query<&mut ChatTranscriptProjection, With<ChatView>>,
+    mut views: Query<&mut ChatTranscriptProjection, With<SessionView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -589,7 +589,7 @@ fn apply_results(
             &ChatSnapshotProjection,
             &ChatAttachmentProjection,
         ),
-        With<ChatView>,
+        With<SessionView>,
     >,
     mut commands: Commands,
 ) {
@@ -893,7 +893,7 @@ mod tests {
         let mut app = App::new();
         app.add_observer(reset_synced);
 
-        let chat = app.world_mut().spawn((ChatView, ChatSynced)).id();
+        let chat = app.world_mut().spawn((SessionView, ChatSynced)).id();
         let other = app.world_mut().spawn(ChatSynced).id();
 
         app.world_mut().trigger(UiInput::<PageReady> {
