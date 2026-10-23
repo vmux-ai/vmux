@@ -841,7 +841,11 @@ fn push_projects_host_emit(
     let cef_e = target.entity;
     let mut projects = space_projects.active_rows();
     for row in &mut projects {
-        row.display_path = vmux_path::DisplayPath::project(&row.path);
+        let display_path = match row.display_path.is_empty() {
+            true => &row.path,
+            false => &row.display_path,
+        };
+        row.display_path = vmux_path::DisplayPath::project(display_path);
     }
     let mut boundary = projects
         .iter()

@@ -160,7 +160,7 @@ impl AppSettings {
             rows.push(ProjectRow {
                 path: in_use.to_string(),
                 label: project.display_label().to_string(),
-                display_path: in_use.to_string(),
+                display_path: project.path.clone(),
                 depth: 0,
                 is_active: false,
                 is_worktree: project.checkout.is_some(),
@@ -542,7 +542,7 @@ impl SpaceOverrides {
             rows.push(ProjectRow {
                 path: in_use.to_string(),
                 label: project.display_label().to_string(),
-                display_path: in_use.to_string(),
+                display_path: project.path.clone(),
                 depth: 0,
                 is_active: active == Some(in_use),
                 is_worktree: project.checkout.is_some(),
@@ -2614,6 +2614,22 @@ mod tests {
             )],
             "the worktree replaces the repository's checkout; it never becomes a second row"
         );
+    }
+
+    #[test]
+    fn checked_out_project_displays_repository_path() {
+        let space = SpaceOverrides {
+            projects: vec![SpaceProject::checked_out(
+                "/repo/vmux",
+                "/repo/vmux/.worktrees/vmx-226",
+            )],
+            ..Default::default()
+        };
+
+        let rows = space.project_rows();
+
+        assert_eq!(rows[0].path, "/repo/vmux/.worktrees/vmx-226");
+        assert_eq!(rows[0].display_path, "/repo/vmux");
     }
 
     #[test]
