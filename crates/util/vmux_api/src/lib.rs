@@ -1,5 +1,6 @@
 pub use bin_event::{AgentRequestContract, BinEvent, HostEvent, PageReady, UiEvent};
 pub use icon::{BuiltinIcon, PageIcon};
+pub use identity::Id;
 pub use json_schema::{JsonSchema, JsonSchemaType};
 #[cfg(feature = "bevy")]
 pub use page::UiEventPermissions;
@@ -30,6 +31,7 @@ pub mod extension;
 pub mod git;
 pub mod history;
 pub mod icon;
+mod identity;
 pub mod input;
 pub mod json;
 pub mod json_schema;

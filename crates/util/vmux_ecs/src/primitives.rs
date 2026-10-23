@@ -5,7 +5,7 @@ use super::persistence::PersistenceAppExt;
 use crate::PageMetadata;
 use crate::component::{
     ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
-    LastActivatedAt, Order,
+    LastActivatedAt, Order, Revision,
 };
 use vmux_api::{BuiltinIcon, PageIcon};
 
@@ -25,6 +25,7 @@ impl Plugin for PrimitivesPlugin {
             .register_persisted::<LastActivatedAt>()
             .register_persisted::<ArchivedAt>()
             .register_persisted::<Order>()
+            .register_persisted::<Revision>()
             .register_type::<Active>()
             .register_type::<Children>()
             .register_type::<ChildOf>()
@@ -68,6 +69,7 @@ mod tests {
         assert!(filter.is_allowed::<Cwd>());
         assert!(filter.is_allowed::<Description>());
         assert!(filter.is_allowed::<CollectionView>());
+        assert!(filter.is_allowed::<Revision>());
     }
 
     #[test]
