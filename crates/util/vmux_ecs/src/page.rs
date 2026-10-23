@@ -413,6 +413,13 @@ impl HostHistory {
         self.cursor + 1 < self.entries.len()
     }
 
+    pub fn can_step(&self, delta: HostHistoryDelta) -> bool {
+        match delta {
+            HostHistoryDelta::Back => self.can_go_back(),
+            HostHistoryDelta::Forward => self.can_go_forward(),
+        }
+    }
+
     pub fn showing(&self, url: &str, top_line: u32) -> bool {
         let Some(current) = self.entries.get(self.cursor) else {
             return false;

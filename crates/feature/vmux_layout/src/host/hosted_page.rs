@@ -1,6 +1,11 @@
 use bevy::prelude::*;
-use vmux_ecs::page::PageManifest;
-use vmux_ecs::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_ecs::page::{
+    HostHistory, HostHistoryObserve, HostHistorySet, HostHistoryTraversed, PageManifest,
+};
+use vmux_ecs::{
+    PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget,
+    PageOpenTask,
+};
 
 use vmux_ecs::page::HostedPage;
 
@@ -75,7 +80,9 @@ pub struct HostedPagePlugin;
 
 impl Plugin for HostedPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, open.in_set(PageOpenSet::HandleKnownPages));
+        app.add_systems(Update, open.in_set(PageOpenSet::HandleKnownPages))
+            .add_systems(Update, open_traversed_history.in_set(HostHistorySet::Apply))
+            .add_systems(Update, record_history.in_set(HostHistorySet::Record));
     }
 }
 
@@ -84,6 +91,7 @@ type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 fn open(
     pages: Query<(&HostedPage, Option<&PageManifest>)>,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    histories: Query<(), With<HostHistory>>,
     mut commands: Commands,
 ) {
     let mut opened = std::collections::HashSet::new();
@@ -111,6 +119,9 @@ fn open(
                 |manifest| manifest.metadata_for(&task.url),
             );
             commands.entity(task.stack).insert(metadata);
+            if !histories.contains(task.stack) {
+                commands.entity(task.stack).insert(HostHistory::default());
+            }
             commands.spawn((
                 Browser::hosted_page(&task.url, page.title),
                 ChildOf(task.stack),
@@ -120,10 +131,49 @@ fn open(
     }
 }
 
+fn open_traversed_history(
+    mut traversed: MessageReader<HostHistoryTraversed>,
+    stacks: Query<(), With<crate::stack::Stack>>,
+    mut requests: MessageWriter<PageOpenRequest>,
+) {
+    for event in traversed.read() {
+        if !stacks.contains(event.webview) {
+            continue;
+        }
+        requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(event.webview),
+            url: event.entry.url.clone(),
+            request_id: None,
+        });
+    }
+}
+
+fn record_history(
+    stacks: Query<
+        (Entity, &PageMetadata, &HostHistory),
+        (With<crate::stack::Stack>, Changed<PageMetadata>),
+    >,
+    mut observations: MessageWriter<HostHistoryObserve>,
+) {
+    for (entity, metadata, history) in &stacks {
+        if vmux_api::VmuxRoute::parse(&metadata.url).is_none() || history.showing(&metadata.url, 0)
+        {
+            continue;
+        }
+        observations.write(HostHistoryObserve {
+            webview: entity,
+            url: metadata.url.clone(),
+            top_line: 0,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use bevy::ecs::message::Messages;
     use vmux_api::{BuiltinIcon, PageIcon};
     use vmux_ecs::PageOpenId;
+    use vmux_ecs::page::{HostHistoryDelta, HostHistoryStep};
 
     use super::*;
     use vmux_ecs::page::HostedPage;
@@ -263,5 +313,42 @@ mod tests {
         assert_eq!(metadata.title, "Simulator");
         assert_eq!(metadata.icon, PageIcon::Builtin(BuiltinIcon::Smartphone));
         assert_eq!(metadata.url, "vmux://simulator/ios/27.0/iPhone%2017%20Pro");
+    }
+
+    #[test]
+    fn hosted_pages_keep_back_forward_history_on_the_stack() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::page::PagePlugin, HostedPagePlugin))
+            .add_message::<PageOpenRequest>();
+        app.world_mut()
+            .spawn(HostedPage::subtree("vmux://projects/", "Projects"));
+        let stack = app.world_mut().spawn(crate::stack::Stack::default()).id();
+        for url in ["vmux://projects/", "vmux://projects/vmux-cloud"] {
+            app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: url.to_string(),
+                request_id: None,
+            });
+            app.update();
+            app.update();
+        }
+
+        let history = app.world().get::<HostHistory>(stack).unwrap();
+        assert!(history.can_go_back());
+        app.world_mut().write_message(HostHistoryStep {
+            webview: stack,
+            delta: HostHistoryDelta::Back,
+        });
+        app.update();
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url, "vmux://projects/");
+        assert!(matches!(requests[0].target, PageOpenTarget::Stack(entity) if entity == stack));
     }
 }

@@ -633,6 +633,7 @@ fn push_stacks_host_emit(
         ),
         With<Browser>,
     >,
+    stack_histories: Query<(&PageMetadata, &HostHistory), With<Stack>>,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<Zoomed>>,
     focus: FocusedStack,
@@ -670,7 +671,12 @@ fn push_stacks_host_emit(
             }
             let is_active = stack_entity == active_stack_entity;
             if is_active {
-                if let Some(history) = host_history {
+                if let Ok((metadata, history)) = stack_histories.get(stack_entity)
+                    && VmuxRoute::parse(&metadata.url).is_some()
+                {
+                    can_go_back = history.can_go_back();
+                    can_go_forward = history.can_go_forward();
+                } else if let Some(history) = host_history {
                     can_go_back = history.can_go_back();
                     can_go_forward = history.can_go_forward();
                 } else if let Some(ns) = nav_state {

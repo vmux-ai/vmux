@@ -27,7 +27,7 @@ use vmux_ecs::page::HostHistoryObserve;
 use vmux_ecs::page::HostedPage;
 use vmux_ecs::{
     PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
-    page::{HostHistory, HostHistoryDelta, HostHistoryStep, PageReady},
+    page::{HostHistoryDelta, HostHistoryStep, PageReady},
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -419,7 +419,7 @@ fn handle_navigation_requests(
     focus: FocusedStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
-    host_histories: Query<(), With<HostHistory>>,
+    histories: crate::navigation::NavigationHistory,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
@@ -440,9 +440,9 @@ fn handle_navigation_requests(
                 if is_terminal {
                     continue;
                 }
-                if host_histories.contains(webview) {
+                if let Some(owner) = histories.owner(active, webview, HostHistoryDelta::Back) {
                     host_history_steps.write(HostHistoryStep {
-                        webview,
+                        webview: owner,
                         delta: HostHistoryDelta::Back,
                     });
                 } else {
@@ -453,9 +453,9 @@ fn handle_navigation_requests(
                 if is_terminal {
                     continue;
                 }
-                if host_histories.contains(webview) {
+                if let Some(owner) = histories.owner(active, webview, HostHistoryDelta::Forward) {
                     host_history_steps.write(HostHistoryStep {
-                        webview,
+                        webview: owner,
                         delta: HostHistoryDelta::Forward,
                     });
                 } else {
