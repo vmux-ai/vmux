@@ -20,6 +20,8 @@ pub use provider::*;
 #[cfg(host)]
 pub use query::*;
 pub use registry::*;
+#[cfg(ui)]
+pub use ui::ToolsRouteSelector;
 use vmux_ecs::manifest::FeaturePlugin;
 pub use vmux_macro::input;
 
@@ -59,8 +61,6 @@ mod route;
 pub mod state;
 #[cfg(ui)]
 mod ui;
-#[cfg(ui)]
-pub use ui::ToolsRouteSelector;
 
 #[vmux_page::page]
 pub struct ToolPlugin;
