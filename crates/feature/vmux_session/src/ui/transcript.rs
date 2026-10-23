@@ -270,7 +270,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                         class: "flex shrink-0 items-center rounded-lg p-1 text-foreground/35 opacity-70 transition hover:bg-foreground/10 hover:text-foreground hover:opacity-100 focus:opacity-100",
                         title: translate("agent-cancel-queued"),
                         onclick: move |_| {
-                            let _ = send(&ChatCancelQueuedPrompt { id: queued_prompt.id });
+                            send(&ChatCancelQueuedPrompt { id: queued_prompt.id });
                         },
                         svg {
                             class: "h-3.5 w-3.5",
@@ -290,7 +290,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                         class: "flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
                         title: translate("agent-resume-queued"),
                         onclick: move |_| {
-                            let _ = send(&ChatResume);
+                            send(&ChatResume);
                         },
                         svg {
                             class: "h-3.5 w-3.5",
@@ -304,7 +304,7 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                         class: "flex items-center rounded-lg p-1 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
                         title: translate("agent-clear-queue"),
                         onclick: move |_| {
-                            let _ = send(&ChatClearQueue);
+                            send(&ChatClearQueue);
                         },
                         svg {
                             class: "h-3.5 w-3.5",

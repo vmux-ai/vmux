@@ -16,7 +16,7 @@ use dioxus::prelude::*;
 use vmux_api::mcp::McpServersUiState;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
-use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state};
+use vmux_ui::hooks::{send, try_send, use_selector, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::scroll::PrependScrollAnchor;
 
@@ -553,45 +553,45 @@ impl Chat {
         if text.is_empty() && selected.is_empty() {
             return;
         }
-        if send(&ChatSubmit { text }).is_err() {
+        if try_send(&ChatSubmit { text }).is_err() {
             return;
         }
         at_bottom.set(true);
     }
 
     pub fn stop_or_flush(&self) {
-        let _ = send(&ChatStop);
+        send(&ChatStop);
     }
 
     pub fn select_mode(&self, mode_id: String) {
-        let _ = send(&SelectMode { mode_id });
+        send(&SelectMode { mode_id });
         PromptFocus::end(PROMPT_INPUT_ID);
     }
 
     pub fn choose_list(&self, index: usize) {
-        let _ = send(&ChatListChooseRequest {
+        send(&ChatListChooseRequest {
             index: index as u32,
         });
     }
 
     pub fn point_at_choice(&self, index: usize) {
-        let _ = send(&ChatListSelectionChanged {
+        send(&ChatListSelectionChanged {
             index: index as u32,
         });
     }
 
     pub fn answer_approval(&self, call_id: String, decision: ApprovalDecision) {
-        let _ = send(&ChatApproval { call_id, decision });
+        send(&ChatApproval { call_id, decision });
     }
 
     pub fn point_at_approval(&self, index: usize) {
-        let _ = send(&ChatListSelectionChanged {
+        send(&ChatListSelectionChanged {
             index: index as u32,
         });
     }
 
     pub fn point_at_list(&self, index: usize) {
-        let _ = send(&ChatListSelectionChanged {
+        send(&ChatListSelectionChanged {
             index: index as u32,
         });
     }
@@ -611,18 +611,18 @@ impl Chat {
             ComposerMenuKind::Branch => ChatComposerMenuKind::Branch,
             ComposerMenuKind::Agent | ComposerMenuKind::Model => return,
         };
-        let _ = send(&ChatComposerMenuRequest {
+        send(&ChatComposerMenuRequest {
             menu: Some(menu),
             index: index as u32,
         });
     }
 
     pub fn dismiss_selector(&self) {
-        let _ = send(&ChatDismissSelectorRequest);
+        send(&ChatDismissSelectorRequest);
     }
 
     pub fn edit_draft(&self, value: String) {
-        let _ = send(&ChatComposerMenuRequest {
+        send(&ChatComposerMenuRequest {
             menu: None,
             index: 0,
         });
@@ -633,7 +633,7 @@ impl Chat {
         if self.root.peek().composer_draft == value {
             return;
         }
-        let _ = send(&ChatDraftChanged { text: value });
+        send(&ChatDraftChanged { text: value });
     }
 
     pub fn remove_attachment(&self, index: usize) {
@@ -641,7 +641,7 @@ impl Chat {
         let Some(attachment) = attachments.attachments.get(index) else {
             return;
         };
-        let _ = send(&ChatRemoveAttachment {
+        send(&ChatRemoveAttachment {
             path: attachment.path.clone(),
         });
     }
@@ -753,7 +753,7 @@ impl Transcript {
         }
         let mut pending = self.prepend_anchor;
         pending.set(Some(anchor));
-        let _ = send(&ChatHistoryMoreRequest);
+        send(&ChatHistoryMoreRequest);
     }
 
     pub(super) fn restore_prepend(self, revision: u64) {

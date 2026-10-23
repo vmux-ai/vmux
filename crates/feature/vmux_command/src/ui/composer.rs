@@ -36,14 +36,14 @@ pub fn CommandComposerMenus(
                 selected_url: composer.agent_url.clone(),
                 cursor,
                 on_hover: move |index| {
-                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                    send(&CommandPaletteMenuHighlightRequest {
                         open_id,
                         index: index as u32,
                     });
                 },
                 on_select: move |url: String| selection.agent(&agents, &url),
                 on_dismiss: move |()| {
-                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                    send(&CommandPaletteMenuDismissRequest { open_id });
                 },
             }
         }
@@ -54,7 +54,7 @@ pub fn CommandComposerMenus(
                 current_model_id: composer.model_current_id.clone(),
                 selected: cursor,
                 on_hover: move |index| {
-                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                    send(&CommandPaletteMenuHighlightRequest {
                         open_id,
                         index: index as u32,
                     });
@@ -63,7 +63,7 @@ pub fn CommandComposerMenus(
                     selection.model(&models, &model.id);
                 },
                 on_dismiss: move |()| {
-                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                    send(&CommandPaletteMenuDismissRequest { open_id });
                 },
             }
         }
@@ -74,7 +74,7 @@ pub fn CommandComposerMenus(
                 current_mode_id: composer.permission_current_id.clone(),
                 selected: cursor,
                 on_hover: move |index| {
-                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                    send(&CommandPaletteMenuHighlightRequest {
                         open_id,
                         index: index as u32,
                     });
@@ -83,7 +83,7 @@ pub fn CommandComposerMenus(
                     selection.permission(&modes, &mode.id);
                 },
                 on_dismiss: move |()| {
-                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                    send(&CommandPaletteMenuDismissRequest { open_id });
                 },
             }
         }
@@ -94,7 +94,7 @@ pub fn CommandComposerMenus(
                 loaded: !composer.loading,
                 cursor,
                 on_hover: move |index| {
-                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                    send(&CommandPaletteMenuHighlightRequest {
                         open_id,
                         index: index as u32,
                     });
@@ -102,7 +102,7 @@ pub fn CommandComposerMenus(
                 on_pick: move |pick| selection.project(&projects, &pick),
                 on_choose_another: move |()| selection.activate(project_count),
                 on_dismiss: move |()| {
-                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                    send(&CommandPaletteMenuDismissRequest { open_id });
                 },
             }
         }
@@ -114,14 +114,14 @@ pub fn CommandComposerMenus(
                 loaded: palette.branch_project == composer.project,
                 cursor,
                 on_hover: move |index| {
-                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                    send(&CommandPaletteMenuHighlightRequest {
                         open_id,
                         index: index as u32,
                     });
                 },
                 on_pick: move |pick| selection.branch(&branches, &pick),
                 on_dismiss: move |()| {
-                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                    send(&CommandPaletteMenuDismissRequest { open_id });
                 },
             }
         }

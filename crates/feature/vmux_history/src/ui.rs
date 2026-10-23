@@ -42,7 +42,7 @@ pub fn Page() -> Element {
         if !has_more {
             return;
         }
-        let _ = send(&HistoryLoadMoreRequest);
+        send(&HistoryLoadMoreRequest);
     };
 
     let groups = group_by_day(&snapshot.entries, Platform::now());
@@ -58,14 +58,14 @@ pub fn Page() -> Element {
                         value: query,
                         placeholder: translate("history-search"),
                         onsearch: move |query| {
-                            let _ = send(&HistoryQueryRequest { query });
+                            send(&HistoryQueryRequest { query });
                         },
                     }
                     ManagerIconButton {
                         label: translate("history-clear-all"),
                         disabled: entry_count == 0,
                         onclick: move |_| {
-                            let _ = send(&HistoryClearConfirmRequest { open: true });
+                            send(&HistoryClearConfirmRequest { open: true });
                         },
                         LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }
                     }
@@ -85,7 +85,7 @@ pub fn Page() -> Element {
                                         onclick: {
                                             let url = entry.url.clone();
                                             move |_| {
-                                                let _ = send(&HistoryOpenRequest {
+                                                send(&HistoryOpenRequest {
                                                     url: url.clone(),
                                                     in_new_stack: true,
                                                 });
@@ -120,7 +120,7 @@ pub fn Page() -> Element {
                                                     let url_bits = entry.url_entity_bits;
                                                     move |e: Event<MouseData>| {
                                                         e.stop_propagation();
-                                                        let _ = send(&HistoryDeleteRequest { url_entity_bits: url_bits });
+                                                        send(&HistoryDeleteRequest { url_entity_bits: url_bits });
                                                     }
                                                 },
                                                 svg { class: "size-3.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
@@ -139,7 +139,7 @@ pub fn Page() -> Element {
         AlertDialogRoot {
             open: Into::<ReadSignal<Option<bool>>>::into(confirm_open),
             on_open_change: Callback::new(move |open| {
-                let _ = send(&HistoryClearConfirmRequest { open });
+                send(&HistoryClearConfirmRequest { open });
             }),
             default_open: false,
             attributes: vec![],
@@ -150,14 +150,14 @@ pub fn Page() -> Element {
                     AlertDialogCancel {
                         attributes: vec![],
                         on_click: Some(EventHandler::new(move |_| {
-                            let _ = send(&HistoryClearConfirmRequest { open: false });
+                            send(&HistoryClearConfirmRequest { open: false });
                         })),
                         {translate("history-cancel")}
                     }
                     AlertDialogAction {
                         attributes: vec![],
                         on_click: Some(EventHandler::new(move |_| {
-                            let _ = send(&HistoryClearAllRequest);
+                            send(&HistoryClearAllRequest);
                         })),
                         {translate("history-clear-all")}
                     }

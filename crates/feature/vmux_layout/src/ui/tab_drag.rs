@@ -259,7 +259,7 @@ impl TabDrag {
             .cloned()
             .unwrap_or_else(|| state.source_id.clone());
         if state.source_index != state.target_index {
-            let _ = send(&TabReorderRequest {
+            send(&TabReorderRequest {
                 tab_id: state.source_id.clone(),
                 target_tab_id: target_id.clone(),
                 drop_placement: if state.target_index < state.source_index {
@@ -325,7 +325,7 @@ impl TabDrag {
                 selection.set(None);
             }
         });
-        let _ = send(&TabActivateRequest { tab_id });
+        send(&TabActivateRequest { tab_id });
     }
 }
 

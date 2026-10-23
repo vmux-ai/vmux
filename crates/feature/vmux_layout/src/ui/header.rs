@@ -173,19 +173,19 @@ fn HeaderContent() -> Element {
                 if let Some(err) = stacks_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    NavButton { label: translate("layout-back"), disabled: !can_go_back, onclick: move |_| { let _ = send(&HeaderBackRequest); },
+                    NavButton { label: translate("layout-back"), disabled: !can_go_back, onclick: move |_| { send(&HeaderBackRequest); },
                         Icon { class: "h-4 w-4",
                             path { d: "M19 12H5" }
                             path { d: "M12 19l-7-7 7-7" }
                         }
                     }
-                    NavButton { label: translate("layout-forward"), disabled: !can_go_forward, onclick: move |_| { let _ = send(&HeaderForwardRequest); },
+                    NavButton { label: translate("layout-forward"), disabled: !can_go_forward, onclick: move |_| { send(&HeaderForwardRequest); },
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "M12 5l7 7-7 7" }
                         }
                     }
-                    NavButton { label: translate("layout-reload"), disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| { let _ = send(&HeaderReloadRequest); },
+                    NavButton { label: translate("layout-reload"), disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| { send(&HeaderReloadRequest); },
                         span {
                             key: "{reload_key}",
                             class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
@@ -212,7 +212,7 @@ fn HeaderContent() -> Element {
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                             },
                             onclick: move |_| {
-                                let _ = send(&BookmarkToggleRequest);
+                                send(&BookmarkToggleRequest);
                             },
                             Icon { class: "h-4 w-4",
                                 path {
@@ -232,9 +232,9 @@ fn HeaderContent() -> Element {
                             },
                             onclick: move |_| {
                                 if let Some(uuid) = pinned_uuid.clone() {
-                                    let _ = send(&BookmarkUnpinRequest { uuid });
+                                    send(&BookmarkUnpinRequest { uuid });
                                 } else if let Some(metadata) = active_metadata.clone() {
-                                    let _ = send(&BookmarkPinUrlRequest { metadata });
+                                    send(&BookmarkPinUrlRequest { metadata });
                                 }
                             },
                             Icon { class: "h-4 w-4",
@@ -403,7 +403,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                     onclick: move |evt| {
                         evt.prevent_default();
                         evt.stop_propagation();
-                        let _ = send(&TabCloseRequest {
+                        send(&TabCloseRequest {
                             tab_id: Some(id_close.clone()),
                         });
                     },
@@ -419,14 +419,14 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| { let _ = send(&BookmarkAddRequest { metadata: bookmark_metadata.clone(), folder: None }); },
+                    on_select: move |_: String| { send(&BookmarkAddRequest { metadata: bookmark_metadata.clone(), folder: None }); },
                     attributes: vec![],
                     {translate("layout-bookmark")}
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| { let _ = send(&BookmarkPinUrlRequest { metadata: pin_metadata.clone() }); },
+                    on_select: move |_: String| { send(&BookmarkPinUrlRequest { metadata: pin_metadata.clone() }); },
                     attributes: vec![],
                     {translate("layout-pin")}
                 }
@@ -455,13 +455,13 @@ fn NewTabButton() -> Element {
                 onpointerdown: move |event: Event<PointerData>| {
                     if event.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
                         pressed.set(true);
-                        let _ = send(&TabCreateRequest);
+                        send(&TabCreateRequest);
                     }
                 },
                 onpointercancel: move |_| pressed.set(false),
                 onclick: move |_| {
                     if pressed() { pressed.set(false); return; }
-                    let _ = send(&TabCreateRequest);
+                    send(&TabCreateRequest);
                 },
                 Icon { class: "h-4 w-4",
                     path { d: "M12 5v14" }
@@ -516,7 +516,7 @@ fn HeaderAddressBar(
     let fallback = rsx! { HeaderAddressReadout { active_row, bg_color, page_address } };
     rsx! { vmux_ui::components::page_address::AddressSurface {
         url,
-        onactivate: move |_| { let _ = send(&HeaderAddressFocusRequest); },
+        onactivate: move |_| { send(&HeaderAddressFocusRequest); },
         if let Some(slot) = address_slot {
             vmux_ui::components::page_address::PageAddressOutlet { slot, fallback }
         } else {
@@ -536,7 +536,7 @@ fn HeaderAddressReadout(
     if let Some(address) = page_address {
         return rsx! {
             div { class: "flex h-8 min-w-0 flex-1 items-center",
-                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, onpopup: move |active| { let _ = send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active }); } }
+                vmux_ui::components::address::AddressTrail { state: address, dismiss_revision, onpopup: move |active| { send(&crate::event::LayoutOverlayEvent { id: "page-address".to_string(), active }); } }
             }
         };
     }
@@ -608,13 +608,13 @@ fn TeamFacepile(user: Option<TeamMemberRow>, profiles: Vec<ProfileRow>) -> Eleme
                                 selected: profile.is_active,
                                 onclick: move |_| {
                                     open.set(false);
-                                    if !profile.is_active { let _ = send(&TeamProfileSwitchRequest { profile_id: profile.id.clone() }); }
+                                    if !profile.is_active { send(&TeamProfileSwitchRequest { profile_id: profile.id.clone() }); }
                                 },
                                 leading: rsx! { Avatar { src: None, seed: profile.name.clone(), background: profile.color, alt: profile.name, class: "size-5 text-[8px]" } },
                             }
                         }
                         DropdownOption { label: translate("team-profiles"), selected: false,
-                            onclick: move |_| { open.set(false); let _ = send(&TeamOpenRequest); },
+                            onclick: move |_| { open.set(false); send(&TeamOpenRequest); },
                         }
                     }
                 }

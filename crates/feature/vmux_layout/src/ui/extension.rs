@@ -39,17 +39,17 @@ pub(crate) fn ExtensionPopupModal(
     let mounted = reporter;
     let resized = reporter;
     use_effect(move || {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: true,
         });
     });
     use_drop(move || {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: false,
         });
-        let _ = send(&ExtensionPopupCloseRequest);
+        send(&ExtensionPopupCloseRequest);
     });
 
     rsx! {
@@ -114,11 +114,11 @@ struct ExtensionPopupState;
 
 impl ExtensionPopupState {
     fn close(self) {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: false,
         });
-        let _ = send(&ExtensionPopupCloseRequest);
+        send(&ExtensionPopupCloseRequest);
     }
 }
 
@@ -141,7 +141,7 @@ impl ExtensionPopupBoundsReporter {
             let Ok(rect) = region.get_client_rect().await else {
                 return;
             };
-            let _ = send(&ExtensionPopupBoundsRequest {
+            send(&ExtensionPopupBoundsRequest {
                 left: rect.origin.x as f32,
                 top: rect.origin.y as f32,
                 width: rect.size.width as f32,
@@ -204,7 +204,7 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                         class: "flex w-full items-center gap-2 border-t border-border/70 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground",
                         onclick: move |_| {
                             menu.close();
-                            let _ = send(&ExtOpenManagerRequest);
+                            send(&ExtOpenManagerRequest);
                         },
                         Icon { class: "size-3.5",
                             path { d: "M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" }
@@ -269,7 +269,7 @@ impl ExtensionButtonState {
                     .unwrap_or_default(),
                 None => ExtensionPopupAnchor::default(),
             };
-            let _ = send(&ExtensionPopupOpenRequest {
+            send(&ExtensionPopupOpenRequest {
                 id: self.id,
                 anchor,
             });
@@ -347,7 +347,7 @@ fn ExtensionMenuRow(
                 aria_label: if pinned { translate("layout-unpin") } else { translate("layout-pin") },
                 onclick: move |event| {
                     event.stop_propagation();
-                    let _ = send(&ExtPinRequest {
+                    send(&ExtPinRequest {
                         id: pin_id.clone(),
                         pinned: !pinned,
                     });

@@ -28,7 +28,7 @@ pub fn Page() -> Element {
     let state = use_ui_state::<SpacesUiState>().state;
     let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
     use_drop(move || {
-        let _ = send(&KeyContextRequest { keys: Vec::new() });
+        send(&KeyContextRequest { keys: Vec::new() });
     });
 
     let current = state();
@@ -77,7 +77,7 @@ pub fn Page() -> Element {
                             value: active_profile,
                             placeholder: translate("team-profile-name"),
                             onselect: move |profile_id| {
-                                let _ = send(&TeamProfileSwitchRequest { profile_id });
+                                send(&TeamProfileSwitchRequest { profile_id });
                             },
                         }
                     }
@@ -105,7 +105,7 @@ pub fn Page() -> Element {
                             r#type: "button",
                             class: "flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
                             onclick: move |_| {
-                                let _ = send(&SpaceFormOpenRequest {
+                                send(&SpaceFormOpenRequest {
                                     space_id: None,
                                     draft: String::new(),
                                 });
@@ -155,7 +155,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFor
                 aria_label: space.display_name(),
                 disabled: editing,
                 onclick: move |_| {
-                    let _ = send(&SpaceAttachRequest { space_id: nav_id.clone() });
+                    send(&SpaceAttachRequest { space_id: nav_id.clone() });
                 },
             }
             div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-3",
@@ -177,7 +177,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool, form: SpaceFor
                             title: translate("common-rename"),
                             onclick: move |event| {
                                 event.stop_propagation();
-                                let _ = send(&SpaceFormOpenRequest {
+                                send(&SpaceFormOpenRequest {
                                     space_id: Some(rename_id.clone()),
                                     draft: rename_name.clone(),
                                 });
@@ -240,7 +240,7 @@ fn SpaceActions(space_id: String, name: String, deletable: bool) -> Element {
                         class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&SpaceFormOpenRequest {
+                            send(&SpaceFormOpenRequest {
                                 space_id: Some(rename_id.clone()),
                                 draft: name.clone(),
                             });
@@ -254,7 +254,7 @@ fn SpaceActions(space_id: String, name: String, deletable: bool) -> Element {
                             class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
                             onclick: move |_| {
                                 open.set(false);
-                                let _ = send(&SpaceDeleteRequest { space_id: delete_id.clone() });
+                                send(&SpaceDeleteRequest { space_id: delete_id.clone() });
                             },
                             LineIconView { icon: LineIcon::Trash, class: "size-3.5 shrink-0".to_string() }
                             span { {translate("common-delete")} }
@@ -303,7 +303,7 @@ fn SpaceFormView(form: SpaceFormState) -> Element {
             selection_key: form.suggestion,
             onclick: move |event: MouseEvent| event.stop_propagation(),
             oninput: move |event: FormEvent| {
-                let _ = send(&SpaceFormInputRequest { draft: event.value() });
+                send(&SpaceFormInputRequest { draft: event.value() });
             },
             onkeydown: move |event: KeyboardEvent| match event.key() {
                 Key::Enter if !finished() => {
@@ -314,14 +314,14 @@ fn SpaceFormView(form: SpaceFormState) -> Element {
                 Key::Escape if !finished() => {
                     event.prevent_default();
                     finished.set(true);
-                    let _ = send(&SpaceFormCloseRequest);
+                    send(&SpaceFormCloseRequest);
                 }
                 _ => {}
             },
             onblur: move |_| {
                 if !finished() {
                     finished.set(true);
-                    let _ = send(&SpaceFormCloseRequest);
+                    send(&SpaceFormCloseRequest);
                 }
             },
             onaction: move |_| {
@@ -343,16 +343,16 @@ impl SpaceFormSubmission {
         }
         match &self.0.space_id {
             Some(space_id) if !name.is_empty() => {
-                let _ = send(&SpaceRenameRequest {
+                send(&SpaceRenameRequest {
                     space_id: space_id.clone(),
                     name,
                 });
             }
             Some(_) => {}
             None => {
-                let _ = send(&SpaceCreateRequest { name });
+                send(&SpaceCreateRequest { name });
             }
         }
-        let _ = send(&SpaceFormCloseRequest);
+        send(&SpaceFormCloseRequest);
     }
 }

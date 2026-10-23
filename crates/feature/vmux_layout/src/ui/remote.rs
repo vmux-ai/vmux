@@ -18,13 +18,13 @@ use qrcode::render::svg;
 pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
     let mut open = use_signal(|| false);
     use_effect(move || {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: "remote".to_string(),
             active: open(),
         });
     });
     use_drop(move || {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: "remote".to_string(),
             active: false,
         });
@@ -51,7 +51,7 @@ pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
                     aria_label: "Toggle Live",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
-                        let _ = send(&RemoteRequest {
+                        send(&RemoteRequest {
                             enabled: !remote.enabled,
                         });
                     },
@@ -140,7 +140,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                     aria_label: "Toggle Live",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
-                        let _ = send(&RemoteRequest {
+                        send(&RemoteRequest {
                             enabled: !remote.enabled,
                         });
                     },
@@ -160,7 +160,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                         r#type: "button",
                         class: "mt-1.5 text-[10px] font-semibold text-foreground hover:opacity-70",
                         onclick: move |_| {
-                            let _ = send(&RemoteRequest {
+                            send(&RemoteRequest {
                                 enabled: remote.enabled,
                             });
                         },
@@ -183,7 +183,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                             r#type: "button",
                             class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onclick: move |_| {
-                                let _ = send(&RemotePairingDismissRequest);
+                                send(&RemotePairingDismissRequest);
                             },
                             "Close"
                         }
@@ -206,7 +206,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                             r#type: "button",
                             class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-foreground hover:bg-foreground/10",
                             onclick: move |_| {
-                                let _ = send(&RemoteCopyEvent);
+                                send(&RemoteCopyEvent);
                                 copied.set(true);
                             },
                             if copied() { "Copied" } else { "Copy" }
@@ -226,7 +226,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                             class: "text-[10px] font-semibold text-foreground hover:opacity-70",
                             onclick: move |_| {
                                 copied.set(false);
-                                let _ = send(&RemotePairingShowRequest);
+                                send(&RemotePairingShowRequest);
                             },
                             if remote.paired { "Show QR" } else { "Connect device" }
                         }
@@ -243,7 +243,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                                     onclick: {
                                         let client_id = device.id.clone();
                                         move |_| {
-                                            let _ = send(&RemoteRevokeRequest {
+                                            send(&RemoteRevokeRequest {
                                                 client_id: client_id.clone(),
                                             });
                                         }

@@ -193,14 +193,14 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             },
                             on_add: move |_| {
                                 choosing.set(false);
-                                let _ = send(&ProjectPickerRequest {
+                                send(&ProjectPickerRequest {
                                     current_dir: picker_root.clone(),
                                     pane_id: Some(pane_id),
                                 });
                             },
                             on_open_selected: move |project: ProjectRow| {
                                 choosing.set(false);
-                                let _ = send(&SideSheetProjectPageOpenRequest {
+                                send(&SideSheetProjectPageOpenRequest {
                                     pane_id,
                                     path: project.path,
                                 });

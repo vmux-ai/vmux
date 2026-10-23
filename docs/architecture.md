@@ -445,6 +445,11 @@ therefore has the wire id `bookmark_menu_pin@1`, with its module-local `Events` 
 the `layout` target. A namespace would duplicate the target and the type prefix. Both UI-to-host
 decoding and host-to-UI delivery reject a mismatched host before decoding the data.
 
+Dioxus sends the concrete UI event contract directly. Ordinary interaction uses `send`, which
+reports transport failures centrally; optimistic behavior that must roll back immediately uses
+`try_send`. Page components do not repeat transport error handling or wrap requests in a second
+UI action type.
+
 `#[vmux_api::ui_state]` is the state-specific host-to-UI contract. It includes the contract,
 `HostEvent`, and `UiState` implementations, while `#[vmux_api::ui_state_patch]` supplies the
 serializable typed patch mapping. `#[vmux_api::host_event]` remains for one-shot notifications and

@@ -60,7 +60,7 @@ impl ScrollBox {
             return;
         }
         last.set(next.clone());
-        let _ = send(&next);
+        send(&next);
     }
 }
 

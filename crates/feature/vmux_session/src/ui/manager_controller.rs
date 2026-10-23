@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use dioxus::prelude::*;
 use vmux_session::SessionSummary;
-use vmux_ui::hooks::{CollectionController, OptimisticMap, send};
+use vmux_ui::hooks::{CollectionController, OptimisticMap, send, try_send};
 use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
 use crate::SessionId;
@@ -192,7 +192,7 @@ impl SessionMutations {
         providers.sort_by(|left, right| (&left.kind, &left.sid).cmp(&(&right.kind, &right.sid)));
         providers.dedup();
         self.leaving.write().extend(ids.iter().cloned());
-        if send(&SessionsCleanup { ids: ids.clone() }).is_err() {
+        if try_send(&SessionsCleanup { ids: ids.clone() }).is_err() {
             let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
             self.leaving.write().retain(|id| !ids.contains(id.as_str()));
             return;
@@ -219,7 +219,7 @@ impl SessionMutations {
         if sessions.is_empty() {
             return;
         }
-        if send(&SessionsRestoreDeleted { sessions }).is_ok() {
+        if try_send(&SessionsRestoreDeleted { sessions }).is_ok() {
             self.deleted_providers.set(Vec::new());
         }
     }
@@ -253,7 +253,7 @@ impl ResumeTarget {
             PageNavigation::gesture(Route::Session(SessionId(self.id.clone())).url(), gesture);
             return;
         }
-        let _ = send(&ResumeSession {
+        send(&ResumeSession {
             kind: self.kind.clone(),
             sid: self.sid.clone(),
             cwd: self.cwd.clone(),

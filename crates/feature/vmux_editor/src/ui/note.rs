@@ -54,7 +54,7 @@ impl NoteCursor {
             };
             let (line, col) = NoteText::new(&source).rendered_position(start, offset);
             self.edit();
-            let _ = send(&FilePointerEvent {
+            send(&FilePointerEvent {
                 line,
                 col,
                 extend,
@@ -152,14 +152,14 @@ impl NoteCursor {
     }
 
     pub(super) fn reset(self) {
-        let _ = send(&FileNoteEditDismissRequest);
+        send(&FileNoteEditDismissRequest);
     }
 
     pub(super) fn set_editing(self, editing: bool) {
         if editing {
-            let _ = send(&FileNoteEditRequest);
+            send(&FileNoteEditRequest);
         } else {
-            let _ = send(&FileNoteEditDismissRequest);
+            send(&FileNoteEditDismissRequest);
         }
     }
 
@@ -176,7 +176,7 @@ impl NoteCursor {
     }
 
     fn edit(self) {
-        let _ = send(&FileNoteEditRequest);
+        send(&FileNoteEditRequest);
     }
 
     fn activate_with_scroll(self, block_index: usize, line: u32, center: bool) {
@@ -299,7 +299,7 @@ fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint,
         let Some(offset) = TextRun::in_element(element_id).offset_at(at.x, at.y).await else {
             return;
         };
-        let _ = send(&FilePointerEvent {
+        send(&FilePointerEvent {
             line,
             col: prefix + offset,
             extend,
@@ -318,7 +318,7 @@ fn place_rendered_list_caret(line: u32, source: String, at: ClientPoint) {
             return;
         };
         let (line, col) = NoteText::new(&source).rendered_position(line, offset);
-        let _ = send(&FilePointerEvent {
+        send(&FilePointerEvent {
             line,
             col,
             extend: false,
@@ -337,7 +337,7 @@ fn place_note_block_caret(index: usize, start_line: u32, source: String, at: Cli
             return;
         };
         let (line, col) = NoteText::new(&source).cell_position(start_line, offset);
-        let _ = send(&FilePointerEvent {
+        send(&FilePointerEvent {
             line,
             col,
             extend: false,
@@ -551,7 +551,7 @@ fn emit_property_edit(
     values: Vec<String>,
     remove: bool,
 ) {
-    let _ = send(&FilePropertyEdit {
+    send(&FilePropertyEdit {
         original_key,
         key,
         kind,
@@ -617,7 +617,7 @@ pub(super) fn NoteProperties(
                     r#type: "button",
                     class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
                     onclick: move |_| {
-                        let _ = send(&FileNotePropertiesToggleRequest);
+                        send(&FileNotePropertiesToggleRequest);
                     },
                     Icon { class: if open { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
                     span { {translate("editor-properties")} }
@@ -632,7 +632,7 @@ pub(super) fn NoteProperties(
                     class: if has_tags { "rounded-md px-1 text-xs text-muted-foreground/30" } else { "rounded-md px-1 text-xs text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" },
                     onclick: move |_| {
                         if !open {
-                            let _ = send(&FileNotePropertiesToggleRequest);
+                            send(&FileNotePropertiesToggleRequest);
                         }
                         emit_property_edit(
                             String::new(),
@@ -650,7 +650,7 @@ pub(super) fn NoteProperties(
                     class: "rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
                     onclick: move |_| {
                         if !open {
-                            let _ = send(&FileNotePropertiesToggleRequest);
+                            send(&FileNotePropertiesToggleRequest);
                         }
                         emit_property_edit(
                             String::new(),
@@ -1031,7 +1031,7 @@ pub(super) fn NoteBlockView(
                                     class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-primary/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
                                     onmousedown: move |event: Event<MouseData>| {
                                         event.prevent_default();
-                                        let _ = send(&FilePanelPick { index: item_index as u32 });
+                                        send(&FilePanelPick { index: item_index as u32 });
                                     },
                                     span { class: "truncate", "{item.label}" }
                                     span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
@@ -1088,7 +1088,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                     move |event: FormEvent| {
                         let mut draft = draft.clone();
                         draft.key = event.value();
-                        let _ = send(&FilePropertyDraftRequest {
+                        send(&FilePropertyDraftRequest {
                             draft,
                         });
                     }
@@ -1163,7 +1163,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                                 move |event: FormEvent| {
                                     let mut draft = draft.clone();
                                     draft.item = event.value();
-                                    let _ = send(&FilePropertyDraftRequest {
+                                    send(&FilePropertyDraftRequest {
                                         draft,
                                     });
                                 }
@@ -1211,7 +1211,7 @@ fn NotePropertyRow(property: KnowledgeProperty, draft: Option<FilePropertyDraftS
                             move |event: FormEvent| {
                                 let mut draft = draft.clone();
                                 draft.scalar = event.value();
-                                let _ = send(&FilePropertyDraftRequest {
+                                send(&FilePropertyDraftRequest {
                                     draft,
                                 });
                             }

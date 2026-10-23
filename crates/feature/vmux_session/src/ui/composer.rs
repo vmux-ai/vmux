@@ -73,10 +73,10 @@ fn ChatComposer(chat: Chat) -> Element {
             on_input: move |value| chat.edit_draft(value),
             on_keydown: move |event| keys.on_prompt_keydown(event),
             on_paste: move |_| {
-                let _ = send(&ChatPasteMedia);
+                send(&ChatPasteMedia);
             },
             on_attach: move |_| {
-                let _ = send(&ChatPickFiles);
+                send(&ChatPickFiles);
             },
             on_remove_attachment: move |index| chat.remove_attachment(index),
             on_action: move |_| {

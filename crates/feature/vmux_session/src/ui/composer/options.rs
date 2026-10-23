@@ -45,7 +45,7 @@ impl From<Chat> for ChatMenuSet {
             levels: effort_state.effort_levels,
             selected: effort_state.effort_current,
             on_select: EventHandler::new(move |level: String| {
-                let _ = send(&SetAgentEffort {
+                send(&SetAgentEffort {
                     agent_key: agent_key.clone(),
                     level,
                 });
@@ -65,7 +65,7 @@ impl From<Chat> for ChatMenuSet {
             loaded: chat.projects.context_ready(),
             on_pick: EventHandler::new(Self::go_to),
             on_choose_another: EventHandler::new(move |()| {
-                let _ = send(&ChatSelectWorkspace);
+                send(&ChatSelectWorkspace);
                 PromptFocus::end(PROMPT_INPUT_ID);
             }),
         };
@@ -88,7 +88,7 @@ impl From<Chat> for ChatMenuSet {
 
 impl ChatMenuSet {
     fn go_to(pick: ProjectPick) {
-        let _ = send(&ChatGoToBranch {
+        send(&ChatGoToBranch {
             project: pick.project,
             branch: pick.branch,
             checkout: pick.checkout,

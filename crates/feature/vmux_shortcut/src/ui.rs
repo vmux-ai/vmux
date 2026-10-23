@@ -61,7 +61,7 @@ pub fn Page() -> Element {
                 let Some(stroke) = ShortcutStroke::from_keyboard_event(&event) else {
                     return;
                 };
-                let _ = send(&ShortcutProbePressRequest { stroke });
+                send(&ShortcutProbePressRequest { stroke });
             },
             PageAddress {
                 current: WorkspacePage::Shortcuts.option(),
@@ -113,7 +113,7 @@ pub fn Page() -> Element {
                                 onpointerdown: move |event| event.prevent_default(),
                                 onclick: move |event| {
                                     event.stop_propagation();
-                                    let _ = send(&ShortcutProbeClearRequest);
+                                    send(&ShortcutProbeClearRequest);
                                 },
                                 LineIconView { icon: LineIcon::RotateCcw, class: "size-3".to_string() }
                                 {translate("shortcuts-clear")}

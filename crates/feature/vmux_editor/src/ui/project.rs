@@ -82,7 +82,7 @@ pub(super) fn ProjectList(
                     PageAddress {
                         current: WorkspacePage::Projects.option(),
                         options: WorkspacePage::options(),
-                        view_controls: rsx! { if !entries.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| { controls.set_view(view); let _ = send(&ViewPreference::request(view)); } } } },
+                        view_controls: rsx! { if !entries.is_empty() { ManagerViewToggle { view: controls.view(), list_label: translate("tools-view-list"), grid_label: translate("tools-view-grid"), onchange: move |view| { controls.set_view(view); send(&ViewPreference::request(view)); } } } },
                         actions: rsx! {
                             ProjectManagerActions {
                                 entries: entries.clone(),
@@ -369,7 +369,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         danger: false,
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&ProjectArchiveRequest {
+                            send(&ProjectArchiveRequest {
                                 url: archive_url.clone(),
                                 archived: !archived,
                             });
@@ -414,7 +414,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         on_click: Some(EventHandler::new(move |event: MouseEvent| {
                             event.stop_propagation();
                             confirm_open.set(false);
-                            let _ = send(&ProjectDeleteRequest { url: delete_url.clone() });
+                            send(&ProjectDeleteRequest { url: delete_url.clone() });
                         })),
                         {translate("common-delete")}
                     }
@@ -506,7 +506,7 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
                         description: translate("project-import-description"),
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&ProjectImportRequest);
+                            send(&ProjectImportRequest);
                         },
                     }
                     ProjectAddItem {
@@ -579,10 +579,10 @@ impl ProjectPrompt {
     fn submit(self, draft: String) {
         match self {
             Self::New => {
-                let _ = send(&ProjectCreateRequest { name: draft });
+                send(&ProjectCreateRequest { name: draft });
             }
             Self::Clone => {
-                let _ = send(&ProjectCloneRequest { repository: draft });
+                send(&ProjectCloneRequest { repository: draft });
             }
         }
     }
@@ -621,7 +621,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             return;
         }
         requested_git.set(requested_root.clone());
-        let _ = send(&GitRepositoryRequest::at(requested_root.clone()));
+        send(&GitRepositoryRequest::at(requested_root.clone()));
     });
     let start_url = "vmux://start/".to_string();
     let header_root = root.clone();

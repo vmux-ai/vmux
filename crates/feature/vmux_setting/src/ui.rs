@@ -145,7 +145,7 @@ pub fn Page() -> Element {
                         value: query.clone(),
                         placeholder: translate("command-search"),
                         onsearch: move |query| {
-                            let _ = send(&SettingsFilterRequest { query });
+                            send(&SettingsFilterRequest { query });
                         },
                     }
                 },
@@ -350,7 +350,7 @@ fn FieldView(field: SettingsRenderField, catalog: SettingsRenderCatalog) -> Elem
                         class: "h-7 px-2.5 text-[11px]".to_string(),
                         disabled,
                         onclick: move |_| {
-                            let _ = send(&CheckForUpdatesEvent);
+                            send(&CheckForUpdatesEvent);
                         },
                         "{button_label}"
                     }
@@ -397,7 +397,7 @@ fn Toggle(path: String, value: bool) -> Element {
             Switch {
                 checked: value,
                 on_checked_change: move |checked| {
-                    let _ = send(&SettingsRequest {
+                    send(&SettingsRequest {
                         path: path.clone(),
                         value: serde_json::json!(checked).into(),
                     });
@@ -419,7 +419,7 @@ fn IntInput(path: String, value: String) -> Element {
                 class: "h-7 w-20 bg-transparent px-2 py-1 text-right text-xs tabular-nums dark:bg-transparent",
             }),
             oninput: move |event: FormEvent| {
-                let _ = send(&SettingsEditRequest {
+                send(&SettingsEditRequest {
                     path: path.clone(),
                     draft: event.value(),
                 });
@@ -441,7 +441,7 @@ fn NumberInput(path: String, value: String, step: f64) -> Element {
                 class: "h-7 w-20 bg-transparent px-2 py-1 text-right text-xs tabular-nums dark:bg-transparent",
             }),
             oninput: move |event: FormEvent| {
-                let _ = send(&SettingsEditRequest {
+                send(&SettingsEditRequest {
                     path: path.clone(),
                     draft: event.value(),
                 });
@@ -464,7 +464,7 @@ fn TextInput(path: String, value: String, placeholder: Option<String>) -> Elemen
                 class: "h-7 w-full bg-transparent px-2 py-1 text-xs dark:bg-transparent",
             }),
             oninput: move |event: FormEvent| {
-                let _ = send(&SettingsEditRequest {
+                send(&SettingsEditRequest {
                     path: path.clone(),
                     draft: event.value(),
                 });
@@ -490,7 +490,7 @@ fn SelectInput(path: String, value: String, options: Vec<SettingsSelectOption>) 
             value: (!value.is_empty()).then_some(value),
             placeholder: String::new(),
             onselect: move |value| {
-                let _ = send(&SettingsRequest {
+                send(&SettingsRequest {
                     path: path.clone(),
                     value: serde_json::json!(value).into(),
                 });
@@ -640,7 +640,7 @@ fn ChordEditor(path: String, text: String) -> Element {
                         key => key.to_string(),
                     };
                     let modifiers = event.modifiers();
-                    let _ = send(&SettingsRequest {
+                    send(&SettingsRequest {
                         path: path.clone(),
                         value: serde_json::json!({
                             "key": key,
