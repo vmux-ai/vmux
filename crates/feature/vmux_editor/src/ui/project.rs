@@ -159,7 +159,7 @@ fn ProjectManagerActions(
     align_left: bool,
 ) -> Element {
     let mut search_open = use_signal(|| false);
-    let open = search_open() || presentation.filter_requested;
+    let open = search_open();
     let active = !controls.query().is_empty() || !presentation.selected_filters.is_empty();
     rsx! {
         div { class: "flex shrink-0 items-center gap-1",
