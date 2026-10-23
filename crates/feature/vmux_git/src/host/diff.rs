@@ -158,6 +158,7 @@ pub(super) struct GitDiffQuery {
     file: Option<FileDiffIdentity>,
     page_revision: Option<u32>,
     branch: Option<BranchDiffProgress>,
+    loading: bool,
 }
 
 #[derive(Clone)]
@@ -334,6 +335,10 @@ impl GitDiffQuery {
             && self
                 .file
                 .is_some_and(|identity| file.accepts(identity.document, identity.refresh))
+    }
+
+    pub(super) fn complete_load(&mut self) {
+        self.loading = false;
     }
 
     fn next_branch(&mut self) -> Option<BranchDiffBatch> {
@@ -556,12 +561,12 @@ fn retry_branch_files(
 
 fn load_next(
     trigger: On<UiInput<GitDiffNextRequest>>,
-    mut pages: Query<(&mut super::state::GitState, &mut GitDiffQuery)>,
+    mut pages: Query<(&super::state::GitState, &mut GitDiffQuery)>,
     sources: Query<&GitDiffSource>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok((mut state, mut query)) = pages.get_mut(entity) else {
+    let Ok((state, mut query)) = pages.get_mut(entity) else {
         return;
     };
     let Some(viewport) = state.snapshot.diff_viewport.as_ref() else {
@@ -570,7 +575,7 @@ fn load_next(
     let loaded = viewport
         .first_line
         .saturating_add(u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX));
-    if state.snapshot.diff_loading || !viewport.has_more {
+    if query.loading || !viewport.has_more {
         return;
     }
     let content = sources
@@ -578,7 +583,7 @@ fn load_next(
         .ok()
         .filter(|source| source.dirty)
         .map(|source| source.content.clone());
-    state.snapshot.diff_loading = true;
+    query.loading = true;
     let batch = query.next_branch().unwrap_or_default();
     commands.spawn((
         GitJob::new(entity),
@@ -626,14 +631,14 @@ fn retry(
 fn start_pending_seek(
     mut pages: Query<(
         Entity,
-        &mut super::state::GitState,
+        &super::state::GitState,
         &mut GitDiffQuery,
         &PendingGitDiffSeek,
     )>,
     mut commands: Commands,
 ) {
-    for (entity, mut state, mut query, pending) in &mut pages {
-        if state.snapshot.diff_loading || !matches!(query.target.scope, DiffScope::Branch(_)) {
+    for (entity, state, mut query, pending) in &mut pages {
+        if query.loading || !matches!(query.target.scope, DiffScope::Branch(_)) {
             continue;
         }
         let loaded = state
@@ -651,7 +656,7 @@ fn start_pending_seek(
         let Some(batch) = batch else {
             continue;
         };
-        state.snapshot.diff_loading = true;
+        query.loading = true;
         commands.spawn((
             GitJob::new(entity),
             GitRepository::at(query.target.repo_root.clone()),
@@ -752,6 +757,7 @@ fn start_requests(
             file: pending.file,
             page_revision: pending.page_revision,
             branch,
+            loading: true,
         };
         let batch = query.next_branch().unwrap_or_default();
         commands
@@ -1213,6 +1219,7 @@ mod tests {
             }),
             page_revision: None,
             branch: None,
+            loading: false,
         };
 
         assert!(query.accepts_file(3, &file));

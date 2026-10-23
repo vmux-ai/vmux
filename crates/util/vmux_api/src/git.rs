@@ -96,6 +96,22 @@ pub enum GitDiffRow {
     },
 }
 
+impl GitDiffRow {
+    pub fn start(self) -> u32 {
+        match self {
+            Self::Line(index) => index,
+            Self::Gap { start, .. } => start,
+        }
+    }
+
+    pub fn end(self) -> u32 {
+        match self {
+            Self::Line(index) => index.saturating_add(1),
+            Self::Gap { end, .. } => end,
+        }
+    }
+}
+
 #[vmux_api::contract(Eq)]
 pub struct GitOperationResult {
     pub operation: String,

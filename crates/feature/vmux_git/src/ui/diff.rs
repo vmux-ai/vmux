@@ -6,7 +6,6 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::GitDiffRow;
 use crate::event::{GitDiffViewport, GitRepositorySnapshot};
@@ -24,32 +23,11 @@ pub(super) fn BranchDiffCard(
     error: String,
 ) -> Element {
     let selected_branch_value = selected_branch();
-    let mut revealed = use_signal(String::new);
     let comparison = if repository.base_ref.is_empty() {
         selected_branch_value.clone()
     } else {
         format!("{}…{}", repository.base_ref, selected_branch_value)
     };
-    use_effect(move || {
-        let path = selected_path();
-        let branch = selected_branch();
-        let reveal_key = format!("{branch}\0{path}");
-        if path.is_empty() || *revealed.peek() == reveal_key {
-            return;
-        }
-        let rendered = diff_viewport().as_ref().is_some_and(|viewport| {
-            viewport
-                .lines
-                .iter()
-                .any(|line| line.file_path() == Some(path.as_str()))
-        });
-        if !rendered {
-            return;
-        }
-        revealed.set(reveal_key);
-        let id = format!("git-diff-file-{path}");
-        ScrollIntoView::first_rendered(&[id.as_str()]);
-    });
     let available = !selected_branch_value.is_empty();
     rsx! {
         RevisionDiffCard {
@@ -65,6 +43,7 @@ pub(super) fn BranchDiffCard(
             icon: LineIcon::File,
             error,
             show_header: false,
+            reveal_path: Some(selected_path),
         }
     }
 }
@@ -105,6 +84,7 @@ pub(super) fn CommitDiffCard(
             icon: LineIcon::GitCommit,
             error: String::new(),
             show_header: true,
+            reveal_path: None,
         }
     }
 }
@@ -141,6 +121,7 @@ pub(super) fn StashDiffCard(
             icon: LineIcon::Package,
             error: String::new(),
             show_header: true,
+            reveal_path: None,
         }
     }
 }
@@ -159,6 +140,7 @@ fn RevisionDiffCard(
     icon: LineIcon,
     error: String,
     show_header: bool,
+    reveal_path: Option<ReadSignal<String>>,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let identity = title.clone();
@@ -197,6 +179,7 @@ fn RevisionDiffCard(
                     identity,
                     viewport: diff_viewport,
                     display_rows: diff_rows,
+                    reveal_path,
                     loading,
                     visible: true,
                 }
@@ -230,7 +213,7 @@ pub(super) fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, loading, visible: true }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), identity: selected_path(), viewport: diff_viewport, display_rows: diff_rows, loading, visible: true, reveal_path: None }
             }
         }
     }

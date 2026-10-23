@@ -578,6 +578,7 @@ fn deliver_diff_outputs(
             commands.entity(entity).despawn();
             continue;
         }
+        query.complete_load();
         let loaded_lines = u32::try_from(event.lines.len()).unwrap_or(u32::MAX);
         let branch_has_more = query.complete_branch(
             &output.branch_paths,

@@ -14,6 +14,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::GitDiffRow;
 use crate::event::*;
@@ -184,6 +185,7 @@ pub fn DiffView(
     path: ReadSignal<String>,
     #[props(default)] path_bytes: Vec<u8>,
     #[props(default)] identity: String,
+    #[props(default)] reveal_path: Option<ReadSignal<String>>,
     viewport: ReadSignal<Option<GitDiffViewport>>,
     display_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
@@ -192,38 +194,112 @@ pub fn DiffView(
     let mut collapsed_files = use_signal(HashSet::<String>::new);
     let mut viewed_files = use_signal(HashSet::<String>::new);
     let mut scroll_container = use_signal(|| None::<Rc<MountedData>>);
-    let viewport = viewport();
-    let rows = viewport
+    let mut render_window = use_signal(DiffRenderWindow::default);
+    let mut revealed_file = use_signal(String::new);
+    let layout = use_memo(move || {
+        let viewport = viewport.read();
+        let lines = viewport
+            .as_ref()
+            .map(|viewport| viewport.lines.as_slice())
+            .unwrap_or_default();
+        let rows = display_rows.read();
+        DiffLayout::group(lines, &rows)
+    });
+    let gutter_width = use_memo(move || {
+        let viewport = viewport.read();
+        let rows = viewport
+            .as_ref()
+            .map(|viewport| viewport.lines.as_slice())
+            .unwrap_or_default();
+        rows.iter()
+            .flat_map(|line| [line.old_no, line.new_no])
+            .flatten()
+            .max()
+            .unwrap_or(0)
+            .max(1)
+            .to_string()
+            .len()
+            .max(3)
+    });
+    let hunk_ends = use_memo(move || {
+        if path.read().is_empty() {
+            return Vec::new();
+        }
+        let viewport = viewport.read();
+        let rows = viewport
+            .as_ref()
+            .map(|viewport| viewport.lines.as_slice())
+            .unwrap_or_default();
+        rows.iter()
+            .enumerate()
+            .map(|(index, line)| match line.hunk {
+                Some(hunk) if index + 1 == rows.len() || rows[index + 1].hunk != Some(hunk) => {
+                    Some(hunk)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    });
+    let reveal_identity = identity.clone();
+    use_effect(move || {
+        let Some(reveal_path) = reveal_path else {
+            return;
+        };
+        let path = reveal_path();
+        if path.is_empty() {
+            return;
+        }
+        let key = format!("{reveal_identity}\0{path}");
+        if *revealed_file.peek() == key {
+            return;
+        }
+        let collapsed = collapsed_files.read();
+        let Some(offset) = layout
+            .read()
+            .file_offset(&reveal_identity, &collapsed, &path)
+        else {
+            return;
+        };
+        revealed_file.set(key);
+        let height = render_window.peek().height;
+        render_window.set(DiffRenderWindow::at(offset, height));
+        ScrollIntoView::element_to("git-diff-viewport", offset);
+    });
+    let viewport_state = viewport.read();
+    let rows = viewport_state
         .as_ref()
         .map(|viewport| viewport.lines.as_slice())
         .unwrap_or_default();
-    let error = viewport
+    let error = viewport_state
         .as_ref()
         .map(|viewport| viewport.error.as_str())
         .unwrap_or_default();
-    let has_more = viewport.as_ref().is_some_and(|viewport| viewport.has_more);
-    let maxno = rows
-        .iter()
-        .flat_map(|l| [l.old_no, l.new_no])
-        .flatten()
-        .max()
-        .unwrap_or(0);
-    let gw = maxno.max(1).to_string().len().max(3);
+    let has_more = viewport_state
+        .as_ref()
+        .is_some_and(|viewport| viewport.has_more);
+    let gw = gutter_width();
     let total_rows = u32::try_from(rows.len()).unwrap_or(u32::MAX);
-    let ends: Vec<Option<u32>> = rows
-        .iter()
-        .enumerate()
-        .map(|(i, l)| match l.hunk {
-            Some(h) if i + 1 == rows.len() || rows[i + 1].hunk != Some(h) => Some(h),
-            _ => None,
-        })
-        .collect();
-    let rendered_rows = display_rows();
-    let sections = DiffSection::group(rows, &rendered_rows);
+    let ends = hunk_ends.read();
     let collapsed_snapshot = collapsed_files();
     let viewed_snapshot = viewed_files();
-    let row_count = rows.len();
+    let virtualized = path.read().is_empty();
+    let VisibleDiffLayout {
+        top_spacer,
+        bottom_spacer,
+        sections,
+    } = layout.read().visible(
+        &identity,
+        &collapsed_snapshot,
+        *render_window.peek(),
+        virtualized,
+    );
     use_effect(move || {
+        let viewport = viewport.read();
+        let has_more = viewport.as_ref().is_some_and(|viewport| viewport.has_more);
+        let row_count = viewport
+            .as_ref()
+            .map(|viewport| viewport.lines.len())
+            .unwrap_or_default();
         if loading || !has_more || row_count == 0 {
             return;
         }
@@ -247,9 +323,25 @@ pub fn DiffView(
         div {
             key: "{identity}",
             id: "git-diff-viewport",
-            onmounted: move |event: Event<MountedData>| scroll_container.set(Some(event.data())),
+            onmounted: move |event: Event<MountedData>| {
+                let element = event.data();
+                scroll_container.set(Some(element.clone()));
+                spawn(async move {
+                    let Ok(rect) = element.get_client_rect().await else {
+                        return;
+                    };
+                    render_window.set(DiffRenderWindow::at(0.0, rect.size.height));
+                });
+            },
             class: if visible { "min-h-0 flex-1 overflow-auto bg-transparent font-mono text-[11px] leading-5" } else { "hidden" },
             onscroll: move |event| {
+                let next = DiffRenderWindow::from_scroll(
+                    event.scroll_top(),
+                    f64::from(event.client_height()),
+                );
+                if *render_window.peek() != next {
+                    render_window.set(next);
+                }
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                 let preload_distance = event.client_height().saturating_mul(6).max(1600);
                 if remaining <= preload_distance && has_more && !loading {
@@ -275,7 +367,10 @@ pub fn DiffView(
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
             }
 
-            for (section_index, section) in sections.into_iter().enumerate() {
+            if top_spacer > 0.0 {
+                div { style: "height:{top_spacer}px;" }
+            }
+            for section in sections {
                 {
                     let file_path = section.file_path.clone();
                     let collapse_key = file_path
@@ -288,13 +383,15 @@ pub fn DiffView(
                         .as_ref()
                         .is_some_and(|key| viewed_snapshot.contains(key));
                     let viewed_key = collapse_key.clone();
-                    let section_class = if file_path.is_some() {
-                        "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-card first:mt-0"
+                    let section_class = if file_path.is_some() && section.index > 0 {
+                        "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-card"
+                    } else if file_path.is_some() {
+                        "w-full min-w-0 overflow-clip rounded-lg bg-card"
                     } else {
                         "contents"
                     };
                     rsx! {
-                        section { key: "section-{section_index}-{file_path:?}", class: section_class,
+                        section { key: "section-{section.index}-{file_path:?}", class: section_class,
                             if let Some(file_path) = file_path {
                                 div {
                                     id: "git-diff-file-{file_path}",
@@ -339,6 +436,9 @@ pub fn DiffView(
                                 }
                             }
                             if !collapsed {
+                                if section.top_spacer > 0.0 {
+                                    div { style: "height:{section.top_spacer}px;" }
+                                }
                                 for display_row in section.rows {
                                     match display_row {
                                         GitDiffRow::Line(index) => {
@@ -369,8 +469,7 @@ pub fn DiffView(
                                                             }
                                                         }
                                                     }
-                                                    if !path().is_empty() {
-                                                        if let Some(h) = ends[index] {
+                                                    if let Some(h) = ends.get(index).copied().flatten() {
                                                             {
                                                                 let accept_path_bytes = path_bytes.clone();
                                                                 let reject_path_bytes = path_bytes.clone();
@@ -412,7 +511,6 @@ pub fn DiffView(
                                                             }
                                                         }
                                                     }
-                                                }
                                             }
                                         },
                                         GitDiffRow::Gap { start, end, .. } => rsx! {
@@ -420,10 +518,16 @@ pub fn DiffView(
                                         },
                                     }
                                 }
+                                if section.bottom_spacer > 0.0 {
+                                    div { style: "height:{section.bottom_spacer}px;" }
+                                }
                             }
                         }
                     }
                 }
+            }
+            if bottom_spacer > 0.0 {
+                div { style: "height:{bottom_spacer}px;" }
             }
             if (loading || has_more) && !rows.is_empty() && error.is_empty() {
                 div {
@@ -439,14 +543,47 @@ pub fn DiffView(
     }
 }
 
-struct DiffSection {
-    file_path: Option<String>,
-    rows: Vec<GitDiffRow>,
+const DIFF_LINE_HEIGHT: f64 = 20.0;
+const DIFF_GAP_HEIGHT: f64 = 34.0;
+const DIFF_FILE_HEADER_HEIGHT: f64 = 36.0;
+const DIFF_SECTION_GAP: f64 = 12.0;
+const DIFF_RENDER_OVERSCAN: f64 = 1200.0;
+const DIFF_RENDER_STEP: f64 = 320.0;
+
+#[derive(Clone, Copy, Default, PartialEq)]
+struct DiffRenderWindow {
+    top: f64,
+    height: f64,
 }
 
-impl DiffSection {
-    fn group(lines: &[DiffLine], rows: &[GitDiffRow]) -> Vec<Self> {
-        let mut sections: Vec<Self> = Vec::new();
+impl DiffRenderWindow {
+    fn at(top: f64, height: f64) -> Self {
+        Self {
+            top: (top.max(0.0) / DIFF_RENDER_STEP).floor() * DIFF_RENDER_STEP,
+            height: height.max(1600.0),
+        }
+    }
+
+    fn from_scroll(top: f64, height: f64) -> Self {
+        Self::at(top, height)
+    }
+
+    fn range(self) -> (f64, f64) {
+        (
+            (self.top - DIFF_RENDER_OVERSCAN).max(0.0),
+            self.top + self.height + DIFF_RENDER_OVERSCAN,
+        )
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct DiffLayout {
+    sections: Vec<DiffSection>,
+}
+
+impl DiffLayout {
+    fn group(lines: &[DiffLine], rows: &[GitDiffRow]) -> Self {
+        let mut sections: Vec<DiffSection> = Vec::new();
         for row in rows {
             let file_path = match row {
                 GitDiffRow::Line(index) => lines
@@ -456,24 +593,207 @@ impl DiffSection {
                 GitDiffRow::Gap { .. } => None,
             };
             if let Some(file_path) = file_path {
-                sections.push(Self {
-                    file_path: Some(file_path),
-                    rows: Vec::new(),
-                });
+                sections.push(DiffSection::new(Some(file_path)));
                 continue;
             }
             if sections.is_empty() {
-                sections.push(Self {
-                    file_path: None,
-                    rows: Vec::new(),
-                });
+                sections.push(DiffSection::new(None));
             }
             if let Some(section) = sections.last_mut() {
-                section.rows.push(*row);
+                section.push(*row);
             }
         }
-        sections
+        Self { sections }
     }
+
+    fn file_offset(&self, identity: &str, collapsed: &HashSet<String>, path: &str) -> Option<f64> {
+        let mut offset = 0.0;
+        for (index, section) in self.sections.iter().enumerate() {
+            if section.file_path.as_deref() == Some(path) {
+                return Some(offset + section.margin(index));
+            }
+            offset += section.height(index, identity, collapsed);
+        }
+        None
+    }
+
+    fn visible(
+        &self,
+        identity: &str,
+        collapsed: &HashSet<String>,
+        window: DiffRenderWindow,
+        virtualized: bool,
+    ) -> VisibleDiffLayout {
+        let (range_start, range_end) = if virtualized {
+            window.range()
+        } else {
+            (0.0, f64::MAX)
+        };
+        let mut offset = 0.0;
+        let mut first_visible = None;
+        let mut last_visible = 0.0;
+        let mut visible = Vec::new();
+        let total_height = self.total_height(identity, collapsed);
+        for (index, section) in self.sections.iter().enumerate() {
+            let section_start = offset;
+            let section_end = section_start + section.height(index, identity, collapsed);
+            offset = section_end;
+            if section_end < range_start {
+                continue;
+            }
+            if section_start > range_end {
+                break;
+            }
+            first_visible.get_or_insert(section_start);
+            last_visible = section_end;
+            visible.push(section.visible(
+                index,
+                identity,
+                collapsed,
+                section_start,
+                range_start,
+                range_end,
+            ));
+        }
+        if visible.is_empty() {
+            return VisibleDiffLayout {
+                top_spacer: total_height,
+                bottom_spacer: 0.0,
+                sections: visible,
+            };
+        }
+        let top_spacer = first_visible.unwrap_or_default();
+        VisibleDiffLayout {
+            top_spacer,
+            bottom_spacer: (total_height - last_visible).max(0.0),
+            sections: visible,
+        }
+    }
+
+    fn total_height(&self, identity: &str, collapsed: &HashSet<String>) -> f64 {
+        self.sections
+            .iter()
+            .enumerate()
+            .map(|(index, section)| section.height(index, identity, collapsed))
+            .sum()
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct DiffSection {
+    file_path: Option<String>,
+    rows: Vec<GitDiffRow>,
+    row_offsets: Vec<f64>,
+}
+
+impl DiffSection {
+    fn new(file_path: Option<String>) -> Self {
+        Self {
+            file_path,
+            rows: Vec::new(),
+            row_offsets: vec![0.0],
+        }
+    }
+
+    fn push(&mut self, row: GitDiffRow) {
+        let offset = self.row_offsets.last().copied().unwrap_or_default();
+        self.rows.push(row);
+        self.row_offsets.push(offset + DiffRowHeight::of(row));
+    }
+
+    fn margin(&self, index: usize) -> f64 {
+        if self.file_path.is_some() && index > 0 {
+            DIFF_SECTION_GAP
+        } else {
+            0.0
+        }
+    }
+
+    fn collapsed(&self, identity: &str, collapsed: &HashSet<String>) -> bool {
+        self.file_path
+            .as_ref()
+            .is_some_and(|path| collapsed.contains(&format!("{identity}\0{path}")))
+    }
+
+    fn height(&self, index: usize, identity: &str, collapsed: &HashSet<String>) -> f64 {
+        let header = self
+            .file_path
+            .as_ref()
+            .map(|_| DIFF_FILE_HEADER_HEIGHT)
+            .unwrap_or_default();
+        let rows = if self.collapsed(identity, collapsed) {
+            0.0
+        } else {
+            self.row_offsets.last().copied().unwrap_or_default()
+        };
+        self.margin(index) + header + rows
+    }
+
+    fn visible(
+        &self,
+        index: usize,
+        identity: &str,
+        collapsed: &HashSet<String>,
+        section_start: f64,
+        range_start: f64,
+        range_end: f64,
+    ) -> VisibleDiffSection {
+        let is_collapsed = self.collapsed(identity, collapsed);
+        let content_start = section_start
+            + self.margin(index)
+            + self
+                .file_path
+                .as_ref()
+                .map(|_| DIFF_FILE_HEADER_HEIGHT)
+                .unwrap_or_default();
+        let local_start = (range_start - content_start).max(0.0);
+        let local_end = (range_end - content_start).max(0.0);
+        let first = if is_collapsed {
+            0
+        } else {
+            self.row_offsets[1..].partition_point(|end| *end < local_start)
+        };
+        let end = if is_collapsed {
+            0
+        } else {
+            self.row_offsets[..self.rows.len()].partition_point(|start| *start <= local_end)
+        };
+        let total = self.row_offsets.last().copied().unwrap_or_default();
+        let top_spacer = self.row_offsets.get(first).copied().unwrap_or_default();
+        let bottom_spacer = total - self.row_offsets.get(end).copied().unwrap_or(total);
+        VisibleDiffSection {
+            index,
+            file_path: self.file_path.clone(),
+            rows: self.rows[first..end].to_vec(),
+            top_spacer,
+            bottom_spacer,
+        }
+    }
+}
+
+struct DiffRowHeight;
+
+impl DiffRowHeight {
+    fn of(row: GitDiffRow) -> f64 {
+        match row {
+            GitDiffRow::Line(_) => DIFF_LINE_HEIGHT,
+            GitDiffRow::Gap { .. } => DIFF_GAP_HEIGHT,
+        }
+    }
+}
+
+struct VisibleDiffLayout {
+    top_spacer: f64,
+    bottom_spacer: f64,
+    sections: Vec<VisibleDiffSection>,
+}
+
+struct VisibleDiffSection {
+    index: usize,
+    file_path: Option<String>,
+    rows: Vec<GitDiffRow>,
+    top_spacer: f64,
+    bottom_spacer: f64,
 }
 
 struct DiffGapRange {
@@ -596,5 +916,63 @@ mod tests {
         assert_eq!(top.next(), None);
         assert_eq!(bottom.previous(), None);
         assert_eq!(bottom.next(), Some((100, 120)));
+    }
+
+    #[test]
+    fn virtualized_diff_keeps_the_full_scroll_height() {
+        let mut section = DiffSection::new(Some("src/lib.rs".to_string()));
+        for index in 0..500 {
+            section.push(GitDiffRow::Line(index));
+        }
+        let layout = DiffLayout {
+            sections: vec![section],
+        };
+        let visible = layout.visible(
+            "branch",
+            &HashSet::new(),
+            DiffRenderWindow {
+                top: 5_000.0,
+                height: 800.0,
+            },
+            true,
+        );
+        let section = &visible.sections[0];
+        let rendered = section.rows.len() as f64 * DIFF_LINE_HEIGHT;
+
+        assert!(section.rows.len() < 500);
+        assert_eq!(
+            visible.top_spacer
+                + DIFF_FILE_HEADER_HEIGHT
+                + section.top_spacer
+                + rendered
+                + section.bottom_spacer
+                + visible.bottom_spacer,
+            500.0 * DIFF_LINE_HEIGHT + DIFF_FILE_HEADER_HEIGHT,
+        );
+    }
+
+    #[test]
+    fn a_window_past_the_diff_does_not_duplicate_the_spacer() {
+        let mut section = DiffSection::new(Some("src/lib.rs".to_string()));
+        section.push(GitDiffRow::Line(0));
+        let layout = DiffLayout {
+            sections: vec![section],
+        };
+        let visible = layout.visible(
+            "branch",
+            &HashSet::new(),
+            DiffRenderWindow {
+                top: 10_000.0,
+                height: 1.0,
+            },
+            true,
+        );
+
+        assert!(visible.sections.is_empty());
+        assert_eq!(
+            visible.top_spacer,
+            DIFF_FILE_HEADER_HEIGHT + DIFF_LINE_HEIGHT
+        );
+        assert_eq!(visible.bottom_spacer, 0.0);
     }
 }

@@ -18,23 +18,22 @@ pub(super) fn GitDashboard() -> Element {
         controller,
         header_dropdown,
         projects,
+        diff,
         ..
     } = use_context::<GitPageState>();
-    let ui = snapshot();
-    let controller_state = controller();
+    let ui = snapshot.read();
+    let controller_state = controller.read();
     let Some(repository) = ui.repository.clone() else {
         return rsx! {};
     };
-    let repo_root = use_memo(move || snapshot().workspace);
-    let diff_viewport = use_memo(move || snapshot().diff_viewport);
-    let diff_rows = use_memo(move || snapshot().diff_rows);
-    let selected_path = use_memo(move || controller().selected_path);
-    let selected_path_bytes = use_memo(move || controller().selected_path_bytes);
-    let selected_abs_path = use_memo(move || controller().selected_abs_path);
-    let selected_commit = use_memo(move || controller().selected_commit);
-    let selected_stash = use_memo(move || controller().selected_stash);
-    let selected_branch = use_memo(move || controller().selected_branch);
-    let selected_branch_path = use_memo(move || controller().selected_branch_path);
+    let repo_root = use_memo(move || snapshot.read().workspace.clone());
+    let selected_path = use_memo(move || controller.read().selected_path.clone());
+    let selected_path_bytes = use_memo(move || controller.read().selected_path_bytes.clone());
+    let selected_abs_path = use_memo(move || controller.read().selected_abs_path.clone());
+    let selected_commit = use_memo(move || controller.read().selected_commit.clone());
+    let selected_stash = use_memo(move || controller.read().selected_stash.clone());
+    let selected_branch = use_memo(move || controller.read().selected_branch.clone());
+    let selected_branch_path = use_memo(move || controller.read().selected_branch_path.clone());
     let active_panel = controller_state.focused_panel;
     let mut list_width = use_signal(|| 336.0_f64);
     let mut resizing = use_signal(|| false);
@@ -113,9 +112,9 @@ pub(super) fn GitDashboard() -> Element {
                             repo_root,
                             selected_branch,
                             selected_path: selected_branch_path,
-                            diff_viewport,
-                            diff_rows,
-                            loading: ui.diff_loading,
+                            diff_viewport: diff.viewport,
+                            diff_rows: diff.rows,
+                            loading: (diff.loading)(),
                             error: ui.branch_files_error.clone(),
                         }
                     } else if active_panel == GitPanel::Commits {
@@ -123,18 +122,18 @@ pub(super) fn GitDashboard() -> Element {
                             repository: repository.clone(),
                             repo_root,
                             selected_commit,
-                            diff_viewport,
-                            diff_rows,
-                            loading: ui.diff_loading,
+                            diff_viewport: diff.viewport,
+                            diff_rows: diff.rows,
+                            loading: (diff.loading)(),
                         }
                     } else if active_panel == GitPanel::Stash {
                         StashDiffCard {
                             repository: repository.clone(),
                             repo_root,
                             selected_stash,
-                            diff_viewport,
-                            diff_rows,
-                            loading: ui.diff_loading,
+                            diff_viewport: diff.viewport,
+                            diff_rows: diff.rows,
+                            loading: (diff.loading)(),
                         }
                     } else {
                         DiffCard {
@@ -142,9 +141,9 @@ pub(super) fn GitDashboard() -> Element {
                             selected_path,
                             selected_path_bytes,
                             selected_abs_path,
-                            diff_viewport,
-                            diff_rows,
-                            loading: ui.diff_loading,
+                            diff_viewport: diff.viewport,
+                            diff_rows: diff.rows,
+                            loading: (diff.loading)(),
                         }
                     }
                 }

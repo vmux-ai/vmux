@@ -360,14 +360,31 @@ impl GitPageSnapshot {
         next: GitDiffViewport,
         revealed: &[(usize, usize)],
     ) -> Option<GitDiffAppend> {
+        let previous_lines = self
+            .diff_viewport
+            .as_ref()
+            .map(|viewport| u32::try_from(viewport.lines.len()).unwrap_or(u32::MAX))
+            .unwrap_or_default();
         if !self.append_diff(&next) {
             return None;
         }
         self.diff_loading = false;
         self.project_diff_rows(revealed, Self::DIFF_CONTEXT_LINES);
+        let requested_from = previous_lines
+            .saturating_sub(u32::try_from(Self::DIFF_CONTEXT_LINES + 1).unwrap_or(u32::MAX));
+        let first = self
+            .diff_rows
+            .partition_point(|row| row.end() <= requested_from);
+        let rows = self.diff_rows[first..].to_vec();
+        let rows_from = rows
+            .first()
+            .copied()
+            .map(GitDiffRow::start)
+            .unwrap_or(requested_from);
         Some(GitDiffAppend {
             viewport: next,
-            rows: self.diff_rows.clone(),
+            rows_from,
+            rows,
         })
     }
 
@@ -428,6 +445,7 @@ impl GitPageSnapshot {
 #[vmux_api::contract]
 pub struct GitDiffAppend {
     pub viewport: GitDiffViewport,
+    pub rows_from: u32,
     pub rows: Vec<GitDiffRow>,
 }
 
@@ -445,7 +463,7 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 8)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 9)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
@@ -456,6 +474,8 @@ pub struct GitUiState {
     pub controller: GitPageControllerState,
     pub header_dropdown: HeaderDropdown,
     pub selection_reveal: Option<GitSelectionReveal>,
+    pub diff_update: Option<GitDiffAppend>,
+    pub diff_update_revision: u64,
 }
 
 impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
@@ -475,11 +495,9 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
         if let Some(snapshot) = patch.snapshot {
             self.snapshot = *snapshot;
         }
-        if let Some(diff_append) = patch.diff_append
-            && self.snapshot.append_diff(&diff_append.viewport)
-        {
-            self.snapshot.diff_loading = false;
-            self.snapshot.diff_rows = diff_append.rows;
+        if let Some(diff_append) = patch.diff_append {
+            self.diff_update = Some(*diff_append);
+            self.diff_update_revision = self.diff_update_revision.wrapping_add(1).max(1);
         }
         if let Some(directory) = patch.directory {
             self.directory = *directory;
@@ -578,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_append_patch_keeps_existing_ui_lines() {
+    fn diff_append_update_stays_bounded() {
         let first = GitPageSnapshot {
             diff_loading: true,
             diff_viewport: Some(GitDiffViewport {
@@ -606,6 +624,7 @@ mod tests {
                         markers: Vec::new(),
                         error: String::new(),
                     },
+                    rows_from: 0,
                     rows: vec![GitDiffRow::Line(0), GitDiffRow::Line(3)],
                 }
                 .into(),
@@ -614,13 +633,14 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
-        assert!(!decoded.snapshot.diff_loading);
-        assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 4);
-        assert_eq!(decoded.snapshot.diff_rows.len(), 2);
+        assert!(decoded.snapshot.diff_loading);
+        assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);
+        assert_eq!(decoded.diff_update_revision, 1);
+        assert_eq!(decoded.diff_update.unwrap().viewport.lines.len(), 2);
     }
 
     #[test]
-    fn stale_diff_append_patch_keeps_the_consistent_viewport() {
+    fn newer_diff_append_replaces_the_previous_update() {
         let first = GitPageSnapshot {
             diff_loading: true,
             diff_viewport: Some(GitDiffViewport {
@@ -649,7 +669,22 @@ mod tests {
                         markers: Vec::new(),
                         error: String::new(),
                     },
+                    rows_from: 0,
                     rows: vec![GitDiffRow::Line(3)],
+                }
+                .into(),
+                GitDiffAppend {
+                    viewport: GitDiffViewport {
+                        generation: 4,
+                        first_line: 2,
+                        total_lines: 5,
+                        has_more: true,
+                        lines: vec![diff_line(5)],
+                        markers: Vec::new(),
+                        error: String::new(),
+                    },
+                    rows_from: 1,
+                    rows: vec![GitDiffRow::Line(2)],
                 }
                 .into(),
             ],
@@ -660,5 +695,9 @@ mod tests {
         assert!(decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);
         assert_eq!(decoded.snapshot.diff_rows, [GitDiffRow::Line(0)]);
+        assert_eq!(decoded.diff_update_revision, 2);
+        let update = decoded.diff_update.unwrap();
+        assert_eq!(update.viewport.generation, 4);
+        assert_eq!(update.rows_from, 1);
     }
 }
