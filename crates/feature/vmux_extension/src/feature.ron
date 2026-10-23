@@ -1,7 +1,7 @@
 (
     pages: [
         (
-            url: "vmux://extensions/",
+            url: "vmux://tools/extensions",
             title: "Extensions",
             title_message_id: "extensions-title",
             keywords: ["extension", "extensions", "addon", "install"],
@@ -12,6 +12,7 @@
                 "PageReady",
                 "ThemeUiState",
                 "ExtensionsUiState",
+                "ToolsUiState",
                 "ExtToggleRequest",
                 "ExtUninstallRequest",
                 "ExtensionPopupOpenRequest",

@@ -113,12 +113,17 @@ impl ToolRouteOption {
                 url: route.url(),
             });
         }
+        options.push(Self {
+            id: "extensions".to_string(),
+            label: translate("extensions-title"),
+            url: "vmux://tools/extensions".to_string(),
+        });
         options
     }
 }
 
 #[component]
-fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
+pub fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
     let mut open = use_signal(|| false);
     let options = ToolRouteOption::all(providers);
     let selected_label = options

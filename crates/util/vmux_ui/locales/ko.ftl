@@ -1077,3 +1077,6 @@ project-already-exists = 이 프로젝트는 이미 존재합니다
 project-import-not-repository = 선택한 폴더가 Git 저장소가 아닙니다
 project-import-name-conflict = 고유한 프로젝트 이름을 선택할 수 없습니다
 project-clone-invalid = 올바른 GitHub 저장소를 입력하세요
+project-archive = 프로젝트 보관
+project-restore = 프로젝트 복원
+project-archived = 보관됨

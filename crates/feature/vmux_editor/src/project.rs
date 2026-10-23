@@ -11,6 +11,7 @@ pub struct ProjectEntry {
     pub ahead: u32,
     pub ongoing_sessions: u32,
     pub stale_sessions: u32,
+    pub archived: bool,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -54,6 +55,12 @@ pub struct ProjectImportRequest;
 #[vmux_api::ui_event(Eq)]
 pub struct ProjectCloneRequest {
     pub repository: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct ProjectArchiveRequest {
+    pub url: String,
+    pub archived: bool,
 }
 
 pub struct ProjectRoute;

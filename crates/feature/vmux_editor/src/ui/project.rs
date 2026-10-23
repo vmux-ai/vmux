@@ -30,8 +30,8 @@ use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIco
 use super::project_manager::{ProjectControls, ProjectFilterMenu, ProjectPresentation};
 use super::state::FileUi;
 use crate::project::{
-    ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectEntry,
-    ProjectImportRequest, ProjectUiState, ProjectView,
+    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
+    ProjectEntry, ProjectImportRequest, ProjectUiState, ProjectView,
 };
 
 #[component]
@@ -164,6 +164,7 @@ fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
         TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-5".to_string() }
     };
     let meta = rsx! { ProjectMeta { entry: entry.clone() } };
+    let actions = rsx! { ProjectActions { entry: entry.clone() } };
     if view == ManagerView::Grid {
         return rsx! {
             ManagerCard {
@@ -173,7 +174,7 @@ fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
                 title: entry.name,
                 subtitle: entry.source,
                 meta,
-                actions: rsx! {},
+                actions,
             }
         };
     }
@@ -185,7 +186,7 @@ fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
             title: entry.name,
             subtitle: entry.source,
             meta,
-            actions: rsx! {},
+            actions,
         }
     }
 }
@@ -199,6 +200,12 @@ fn ProjectMeta(entry: ProjectEntry) -> Element {
     );
     let stale = format!("{} {}", entry.stale_sessions, translate("sessions-stale"));
     rsx! {
+        if entry.archived {
+            ManagerBadge { tone: ManagerTone::Neutral,
+                uppercase: false,
+                span { {translate("project-archived")} }
+            }
+        }
         if entry.ongoing_sessions > 0 {
             ManagerBadge { tone: ManagerTone::Green,
                 uppercase: false,
@@ -209,6 +216,35 @@ fn ProjectMeta(entry: ProjectEntry) -> Element {
             ManagerBadge { tone: ManagerTone::Amber,
                 uppercase: false,
                 span { "{stale}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProjectActions(entry: ProjectEntry) -> Element {
+    let archived = entry.archived;
+    let label = if archived {
+        translate("project-restore")
+    } else {
+        translate("project-archive")
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
+            title: label.clone(),
+            aria_label: label,
+            onclick: move |event| {
+                event.stop_propagation();
+                let _ = send(&ProjectArchiveRequest {
+                    url: entry.url.clone(),
+                    archived: !archived,
+                });
+            },
+            LineIconView {
+                icon: if archived { LineIcon::RotateCcw } else { LineIcon::Archive },
+                class: "size-3.5".to_string(),
             }
         }
     }

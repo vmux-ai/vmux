@@ -116,6 +116,7 @@ impl ProjectEntry {
 pub(super) enum ProjectFilter {
     Ongoing,
     Stale,
+    Archived,
 }
 
 impl ProjectFilter {
@@ -123,6 +124,7 @@ impl ProjectFilter {
         translate(match self {
             Self::Ongoing => "session-stage-in-progress",
             Self::Stale => "sessions-stale",
+            Self::Archived => "project-archived",
         })
     }
 
@@ -130,13 +132,15 @@ impl ProjectFilter {
         match self {
             Self::Ongoing => "bg-success",
             Self::Stale => "bg-muted-foreground",
+            Self::Archived => "bg-muted-foreground",
         }
     }
 
     fn matches(self, entry: &ProjectEntry) -> bool {
         match self {
-            Self::Ongoing => entry.ongoing_sessions > 0,
-            Self::Stale => entry.stale_sessions > 0,
+            Self::Ongoing => !entry.archived && entry.ongoing_sessions > 0,
+            Self::Stale => !entry.archived && entry.stale_sessions > 0,
+            Self::Archived => entry.archived,
         }
     }
 
@@ -150,6 +154,9 @@ pub(super) struct ProjectFilters(Vec<ProjectFilter>);
 
 impl ProjectFilters {
     fn matches(&self, entry: &ProjectEntry) -> bool {
+        if self.0.is_empty() {
+            return !entry.archived;
+        }
         self.0.iter().all(|filter| filter.matches(entry))
     }
 
@@ -191,7 +198,11 @@ pub(super) fn ProjectFilterMenu(
     needle: String,
     onselect: EventHandler<ProjectFilter>,
 ) -> Element {
-    let options = [ProjectFilter::Ongoing, ProjectFilter::Stale];
+    let options = [
+        ProjectFilter::Ongoing,
+        ProjectFilter::Stale,
+        ProjectFilter::Archived,
+    ];
     rsx! {
         FilterMenu { title: translate("common-status"),
             for filter in options {

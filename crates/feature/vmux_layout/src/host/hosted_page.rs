@@ -89,7 +89,14 @@ fn open(
     let mut opened = std::collections::HashSet::new();
 
     for (task_entity, task) in &tasks {
-        let Some((page, manifest)) = pages.iter().find(|(page, _)| page.answers_for(&task.url))
+        let Some((page, manifest)) = pages
+            .iter()
+            .filter_map(|candidate @ (page, _)| {
+                page.specificity(&task.url)
+                    .map(|specificity| (specificity, candidate))
+            })
+            .max_by_key(|(specificity, _)| *specificity)
+            .map(|(_, candidate)| candidate)
         else {
             continue;
         };
@@ -194,6 +201,30 @@ mod tests {
         assert!(page.answers_for("vmux://debug/?section=input#keyboard"));
         assert!(page.answers_for("vmux://debug/panel?section=input#keyboard"));
         assert!(!page.answers_for("vmux://debugger/?section=input"));
+    }
+
+    #[test]
+    fn an_exact_page_wins_over_a_parent_subtree() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(Update, open);
+        app.world_mut()
+            .spawn(HostedPage::subtree("vmux://tools/", "Tools"));
+        app.world_mut()
+            .spawn(HostedPage::page("vmux://tools/extensions", "Extensions"));
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PageOpenTask {
+            id: PageOpenId::new(),
+            stack,
+            url: "vmux://tools/extensions".into(),
+            request_id: None,
+        });
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PageMetadata>(stack).unwrap().title,
+            "Extensions"
+        );
     }
 
     #[test]

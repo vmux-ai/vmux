@@ -1080,3 +1080,6 @@ project-already-exists = هذا المشروع موجود بالفعل
 project-import-not-repository = المجلد المحدد ليس مستودع Git
 project-import-name-conflict = تعذر اختيار اسم مشروع فريد
 project-clone-invalid = أدخل مستودع GitHub صالحًا
+project-archive = أرشفة المشروع
+project-restore = استعادة المشروع
+project-archived = مؤرشف

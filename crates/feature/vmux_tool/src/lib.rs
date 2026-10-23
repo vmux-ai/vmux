@@ -59,6 +59,8 @@ mod route;
 pub mod state;
 #[cfg(ui)]
 mod ui;
+#[cfg(ui)]
+pub use ui::ToolsRouteSelector;
 
 #[vmux_page::page]
 pub struct ToolPlugin;

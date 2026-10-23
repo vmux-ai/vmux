@@ -202,6 +202,23 @@ pub struct PrewarmPage {
     pub pool_size: usize,
 }
 
+impl PrewarmPage {
+    pub fn answers_for(&self, url: &str) -> bool {
+        if self.url == url {
+            return true;
+        }
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return false;
+        };
+        let candidate = if scheme.eq_ignore_ascii_case("vmux") {
+            rest.split('/').next().unwrap_or_default()
+        } else {
+            scheme
+        };
+        candidate.eq_ignore_ascii_case(self.host)
+    }
+}
+
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostedPage {
     pub url: &'static str,
@@ -233,6 +250,11 @@ impl HostedPage {
         }
         .matches(url)
     }
+
+    pub fn specificity(&self, url: &str) -> Option<(bool, usize)> {
+        self.answers_for(url)
+            .then_some((PageRoute::same_page(self.url, url), self.url.len()))
+    }
 }
 
 struct PageRoute<'a> {
@@ -241,6 +263,14 @@ struct PageRoute<'a> {
 }
 
 impl PageRoute<'_> {
+    fn same_page(left: &str, right: &str) -> bool {
+        PageRoute {
+            url: left,
+            owns_subtree: false,
+        }
+        .matches(right)
+    }
+
     fn matches(&self, url: &str) -> bool {
         if let Some(scheme) = self.url.strip_suffix("://") {
             return url
@@ -798,6 +828,26 @@ mod tests {
         assert!(hosted.answers_for("git:///Users/me/repo"));
         assert!(hosted.answers_for("GIT://Users/me/repo"));
         assert!(!hosted.answers_for("https://example.com"));
+    }
+
+    #[test]
+    fn a_prewarmed_host_answers_for_a_specific_route() {
+        let git = PrewarmPage {
+            host: "git",
+            url: "git://",
+            title: "Git",
+            pool_size: 1,
+        };
+        let projects = PrewarmPage {
+            host: "projects",
+            url: "vmux://projects/",
+            title: "Projects",
+            pool_size: 1,
+        };
+
+        assert!(git.answers_for("git://Users/me/repository"));
+        assert!(projects.answers_for("vmux://projects/github.com/vmux-ai/vmux"));
+        assert!(!projects.answers_for("vmux://sessions/"));
     }
 
     #[test]

@@ -1080,3 +1080,6 @@ project-already-exists = Dieses Projekt existiert bereits
 project-import-not-repository = Der ausgewählte Ordner ist kein Git-Repository
 project-import-name-conflict = Kein eindeutiger Projektname verfügbar
 project-clone-invalid = Gib ein gültiges GitHub-Repository ein
+project-archive = Projekt archivieren
+project-restore = Projekt wiederherstellen
+project-archived = Archiviert

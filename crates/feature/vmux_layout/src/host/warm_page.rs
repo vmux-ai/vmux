@@ -41,9 +41,10 @@ fn handle_registered_page_open(
     pages: Query<&PrewarmPage>,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     spares: Query<(Entity, &WarmPageSpare), With<PageReady>>,
+    mut metadata: Query<&mut PageMetadata>,
     mut commands: Commands,
 ) {
-    let pages: HashMap<&str, &PrewarmPage> = pages.iter().map(|page| (page.url, page)).collect();
+    let pages = pages.iter().collect::<Vec<_>>();
     let mut available: HashMap<&str, Vec<Entity>> = HashMap::new();
     for (entity, spare) in &spares {
         available.entry(spare.url).or_default().push(entity);
@@ -51,7 +52,11 @@ fn handle_registered_page_open(
     let mut handled_stacks = HashSet::new();
 
     for (entity, task) in &tasks {
-        let Some(page) = pages.get(task.url.as_str()).copied() else {
+        let Some(page) = pages
+            .iter()
+            .copied()
+            .find(|page| page.answers_for(&task.url))
+        else {
             continue;
         };
         if handled_stacks.insert((task.stack, page.url)) {
@@ -62,6 +67,10 @@ fn handle_registered_page_open(
                 ..default()
             });
             if let Some(spare) = available.get_mut(page.url).and_then(Vec::pop) {
+                if let Ok(mut page_metadata) = metadata.get_mut(spare) {
+                    page_metadata.url.clone_from(&task.url);
+                    page_metadata.title = page.title.to_string();
+                }
                 commands
                     .entity(spare)
                     .insert((ChildOf(task.stack), KeyboardOwner))
@@ -190,6 +199,10 @@ mod tests {
                     url: "vmux://history/",
                 },
                 PageReady {},
+                PageMetadata {
+                    url: "vmux://history/".to_string(),
+                    ..default()
+                },
             ))
             .id();
         let task = app
@@ -197,7 +210,7 @@ mod tests {
             .spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: "vmux://history/".to_string(),
+                url: "vmux://history/2026-10-23".to_string(),
                 request_id: None,
             })
             .id();
@@ -211,6 +224,10 @@ mod tests {
             Some(stack)
         );
         assert!(app.world().get::<WarmPageSpare>(spare).is_none());
+        assert_eq!(
+            app.world().get::<PageMetadata>(spare).unwrap().url,
+            "vmux://history/2026-10-23"
+        );
         assert_eq!(app.world().resource::<ReadyEvents>().0, [spare]);
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
     }

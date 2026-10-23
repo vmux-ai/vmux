@@ -7,15 +7,15 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::components::manager::{
-    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
-    ManagerPage, ManagerRow, ManagerSkeleton, ManagerThumbnail, ManagerTone,
+    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage,
+    ManagerRow, ManagerSearch, ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ExtensionsUiState"]
+    states = ["ThemeUiState", "ExtensionsUiState", "ToolsUiState"]
 )]
 pub(crate) struct ExtensionPage;
 
@@ -46,6 +46,7 @@ impl From<&ExtRow> for Approval {
 pub fn Page() -> Element {
     use_theme();
     let state = use_ui_state::<ExtensionsUiState>().state;
+    let tools = use_ui_state::<vmux_tool::state::ToolsUiState>().state;
 
     let snapshot = state();
     let installing = &snapshot.installing;
@@ -53,33 +54,35 @@ pub fn Page() -> Element {
 
     rsx! {
         ManagerPage {
-            ManagerHeader {
-                title: translate("extensions-title"),
-                count: snapshot.extensions.len(),
-                search_value: snapshot.query.clone(),
-                search_placeholder: translate("extensions-search"),
-                onsearch: move |event: FormEvent| {
-                    let _ = send(&ExtFilterRequest { query: event.value() });
-                },
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Enter {
-                        let query = browse_query.clone();
-                        if !query.trim().is_empty() {
-                            let _ = send(&ExtBrowseStoreRequest { query });
+            ManagerToolbar {
+                vmux_tool::ToolsRouteSelector {
+                    active: "extensions".to_string(),
+                    providers: tools().snapshot.providers,
+                }
+                ManagerSearch {
+                    value: snapshot.query.clone(),
+                    placeholder: translate("extensions-search"),
+                    onsearch: move |event: FormEvent| {
+                        let _ = send(&ExtFilterRequest { query: event.value() });
+                    },
+                    onkeydown: move |event: KeyboardEvent| {
+                        if event.key() == Key::Enter {
+                            let query = browse_query.clone();
+                            if !query.trim().is_empty() {
+                                let _ = send(&ExtBrowseStoreRequest { query });
+                            }
                         }
+                    },
+                }
+                if snapshot.pending {
+                    ManagerButton {
+                        variant: ManagerButtonVariant::Primary,
+                        onclick: move |_| {
+                            let _ = send(&vmux_api::service::RelaunchRequest);
+                        },
+                        {translate("extensions-relaunch")}
                     }
-                },
-                actions: rsx! {
-                    if snapshot.pending {
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Primary,
-                            onclick: move |_| {
-                                let _ = send(&vmux_api::service::RelaunchRequest);
-                            },
-                            {translate("extensions-relaunch")}
-                        }
-                    }
-                },
+                }
             }
             if !installing.is_empty() {
                 div { class: "shrink-0 px-5 pt-3",

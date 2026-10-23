@@ -1080,3 +1080,6 @@ project-already-exists = Этот проект уже существует
 project-import-not-repository = Выбранная папка не является репозиторием Git
 project-import-name-conflict = Не удалось выбрать уникальное название проекта
 project-clone-invalid = Введите допустимый репозиторий GitHub
+project-archive = Архивировать проект
+project-restore = Восстановить проект
+project-archived = В архиве

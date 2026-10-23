@@ -1077,3 +1077,6 @@ project-already-exists = 此專案已存在
 project-import-not-repository = 所選資料夾不是Git儲存庫
 project-import-name-conflict = 無法選擇唯一的專案名稱
 project-clone-invalid = 請輸入有效的GitHub儲存庫
+project-archive = 封存專案
+project-restore = 還原專案
+project-archived = 已封存

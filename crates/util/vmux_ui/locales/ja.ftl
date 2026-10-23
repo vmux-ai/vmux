@@ -1060,3 +1060,6 @@ project-already-exists = このプロジェクトはすでに存在します
 project-import-not-repository = 選択したフォルダはGitリポジトリではありません
 project-import-name-conflict = 一意のプロジェクト名を作成できませんでした
 project-clone-invalid = 有効なGitHubリポジトリを入力してください
+project-archive = プロジェクトをアーカイブ
+project-restore = プロジェクトを復元
+project-archived = アーカイブ済み

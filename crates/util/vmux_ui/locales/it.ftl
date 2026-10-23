@@ -1080,3 +1080,6 @@ project-already-exists = Questo progetto esiste già
 project-import-not-repository = La cartella selezionata non è un repository Git
 project-import-name-conflict = Impossibile scegliere un nome progetto univoco
 project-clone-invalid = Inserisci un repository GitHub valido
+project-archive = Archivia progetto
+project-restore = Ripristina progetto
+project-archived = Archiviato

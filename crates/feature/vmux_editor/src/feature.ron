@@ -224,6 +224,7 @@
                 "GitRepositoryRequest",
                 "ProjectCloneRequest",
                 "ProjectCreateRequest",
+                "ProjectArchiveRequest",
                 "OpenRequest",
                 "ResumeSession",
                 "FileEditorGotoDeclarationRequest",

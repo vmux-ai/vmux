@@ -1080,3 +1080,6 @@ project-already-exists = Dit project bestaat al
 project-import-not-repository = De geselecteerde map is geen Git-repository
 project-import-name-conflict = Kon geen unieke projectnaam kiezen
 project-clone-invalid = Voer een geldige GitHub-repository in
+project-archive = Project archiveren
+project-restore = Project herstellen
+project-archived = Gearchiveerd

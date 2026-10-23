@@ -53,7 +53,12 @@ impl Plugin for EditorPlugin {
             Self::MANIFEST
                 .plugin()
                 .route(vmux_ecs::host_spawn::HostSpawnRoute::scheme("file")),
-            ProjectsPage::MANIFEST.plugin(),
+            ProjectsPage::MANIFEST
+                .plugin()
+                .hosted(vmux_ecs::page::HostedPage::subtree(
+                    ProjectsPage::URL,
+                    ProjectsPage::MANIFEST.title,
+                )),
         ));
     }
 }

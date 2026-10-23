@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bevy::ecs::system::SystemParam;
@@ -5,7 +6,9 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_git::worktree::RepoInfo;
+use serde::{Deserialize, Serialize};
+use vmux_ecs::page::PrewarmPage;
+use vmux_git::worktree::RepoLabel;
 use vmux_git::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
 };
@@ -13,8 +16,8 @@ use vmux_session::host::ScopeProjectionRequest;
 use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
-    ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest, ProjectEntry,
-    ProjectImportRequest, ProjectRoute, ProjectUiState, ProjectView,
+    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
+    ProjectEntry, ProjectImportRequest, ProjectRoute, ProjectUiState, ProjectView,
 };
 
 pub(super) struct ProjectPagePlugin;
@@ -26,16 +29,28 @@ impl Plugin for ProjectPagePlugin {
                 ProjectCreateRequest,
                 ProjectImportRequest,
                 ProjectCloneRequest,
+                ProjectArchiveRequest,
             )>::default())
             .add_observer(create)
             .add_observer(import)
             .add_observer(clone)
+            .add_observer(archive)
+            .add_systems(PreStartup, prewarm)
             .add_systems(Update, (queue, finish_catalogs, finish_imports).chain())
             .add_systems(
                 PostUpdate,
                 (finish_repository_operations, sync_session_counts).chain(),
             );
     }
+}
+
+fn prewarm(mut commands: Commands) {
+    commands.spawn(PrewarmPage {
+        host: "projects",
+        url: ProjectRoute::ROOT,
+        title: "Projects",
+        pool_size: 1,
+    });
 }
 
 #[derive(Component)]
@@ -51,7 +66,7 @@ impl ProjectCatalogTask {
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
     ) -> Self {
         let task = IoTaskPool::get().spawn(async move {
-            let state = ProjectCatalog::read(&root);
+            let state = ProjectCatalog::read(&root, &ProjectArchive::load(&root));
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -141,6 +156,42 @@ impl ProjectOperationPages<'_, '_> {
 
 #[derive(Component)]
 struct ProjectImportTask(Task<Result<(), String>>);
+
+#[derive(Default, Serialize, Deserialize)]
+struct ProjectArchive {
+    projects: BTreeSet<String>,
+}
+
+impl ProjectArchive {
+    fn path(root: &Path) -> PathBuf {
+        root.join(".archive.ron")
+    }
+
+    fn load(root: &Path) -> Self {
+        let Ok(source) = std::fs::read_to_string(Self::path(root)) else {
+            return Self::default();
+        };
+        ron::from_str(&source).unwrap_or_default()
+    }
+
+    fn contains(&self, url: &str) -> bool {
+        self.projects.contains(url)
+    }
+
+    fn set(&mut self, url: &str, archived: bool) {
+        if archived {
+            self.projects.insert(url.to_string());
+        } else {
+            self.projects.remove(url);
+        }
+    }
+
+    fn save(&self, root: &Path) -> Result<(), String> {
+        let source = ron::ser::to_string(self).map_err(|error| error.to_string())?;
+        vmux_path::AtomicFile::write(Self::path(root), source.as_bytes())
+            .map_err(|error| error.to_string())
+    }
+}
 
 struct ProjectName(String);
 
@@ -391,6 +442,58 @@ fn clone(
     });
 }
 
+fn archive(
+    trigger: On<UiInput<ProjectArchiveRequest>>,
+    projects: vmux_ecs::profile::Projects,
+    states: Query<(
+        Entity,
+        &vmux_ecs::PageMetadata,
+        &vmux_ecs::UiState<ProjectUiState>,
+    )>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    let Some(Ok(_)) = ProjectRoute::resolve(&request.url, root) else {
+        return;
+    };
+    let mut archive = ProjectArchive::load(root);
+    archive.set(&request.url, request.archived);
+    if let Err(error) = archive.save(root) {
+        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            trigger.event().webview,
+            &ProjectUiState {
+                view: ProjectView::Error(error),
+            },
+        ));
+        return;
+    }
+    for (entity, page, state) in &states {
+        if !ProjectRoute::is_root(&page.url) {
+            continue;
+        }
+        let Some(mut current) = state.current().cloned() else {
+            continue;
+        };
+        let ProjectView::Catalog(catalog) = &mut current.view else {
+            continue;
+        };
+        let Some(entry) = catalog
+            .entries
+            .iter_mut()
+            .find(|entry| entry.url == request.url)
+        else {
+            continue;
+        };
+        entry.archived = request.archived;
+        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            entity, &current,
+        ));
+    }
+}
+
 fn queue(
     pages: Query<(Entity, &vmux_ecs::PageMetadata), Changed<vmux_ecs::PageMetadata>>,
     states: Query<&vmux_ecs::UiState<ProjectUiState>>,
@@ -628,9 +731,9 @@ struct ProjectCatalog;
 impl ProjectCatalog {
     const MAX_DEPTH: usize = 6;
 
-    fn read(root: &Path) -> ProjectUiState {
+    fn read(root: &Path, archive: &ProjectArchive) -> ProjectUiState {
         let mut entries = Vec::new();
-        Self::walk(root, root, 0, &mut entries);
+        Self::walk(root, root, 0, archive, &mut entries);
         entries.sort_by(|left, right| {
             left.name
                 .to_lowercase()
@@ -669,7 +772,13 @@ impl ProjectCatalog {
         state
     }
 
-    fn walk(root: &Path, directory: &Path, depth: usize, entries: &mut Vec<ProjectEntry>) {
+    fn walk(
+        root: &Path,
+        directory: &Path,
+        depth: usize,
+        archive: &ProjectArchive,
+        entries: &mut Vec<ProjectEntry>,
+    ) {
         if depth > 0 && directory.join(".git").exists() {
             let Some(url) = ProjectRoute::from_path(root, directory) else {
                 return;
@@ -686,19 +795,23 @@ impl ProjectCatalog {
                 .and_then(Path::parent)
                 .map(|source| source.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let info = RepoInfo::read(&path).unwrap_or_default();
+            let branch = RepoLabel::read(&path)
+                .map(|label| label.branch)
+                .unwrap_or_default();
+            let archived = archive.contains(&url);
             entries.push(ProjectEntry {
                 name: name.to_string(),
                 source,
                 path: path.to_string_lossy().into_owned(),
                 url,
-                branch: info.branch,
-                base_ref: info.base_ref,
-                is_worktree: info.is_worktree,
-                uncommitted: info.uncommitted,
-                ahead: info.ahead,
+                branch,
+                base_ref: String::new(),
+                is_worktree: false,
+                uncommitted: 0,
+                ahead: 0,
                 ongoing_sessions: 0,
                 stale_sessions: 0,
+                archived,
             });
             return;
         }
@@ -714,7 +827,7 @@ impl ProjectCatalog {
                 continue;
             }
             if entry.path().is_dir() {
-                Self::walk(root, &entry.path(), depth + 1, entries);
+                Self::walk(root, &entry.path(), depth + 1, archive, entries);
             }
         }
     }
@@ -734,7 +847,7 @@ mod tests {
         std::fs::create_dir_all(vmux.join("client/.git")).unwrap();
         std::fs::create_dir_all(dashboard.join(".git")).unwrap();
 
-        let state = ProjectCatalog::read(root.path());
+        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
 
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
@@ -752,6 +865,25 @@ mod tests {
             "vmux://projects/github.com/mistralai/dashboard"
         );
         assert!(!catalog.operation_pending);
+    }
+
+    #[test]
+    fn catalog_marks_archived_projects_without_removing_their_files() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("github.com/vmux-ai/vmux");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let url = "vmux://projects/github.com/vmux-ai/vmux";
+        let mut archive = ProjectArchive::default();
+        archive.set(url, true);
+
+        let state = ProjectCatalog::read(root.path(), &archive);
+
+        let ProjectView::Catalog(catalog) = state.view else {
+            panic!("expected project catalog");
+        };
+        assert_eq!(catalog.entries.len(), 1);
+        assert!(catalog.entries[0].archived);
+        assert!(project.exists());
     }
 
     #[test]
@@ -823,7 +955,7 @@ mod tests {
         std::fs::create_dir(&imports).unwrap();
         std::os::unix::fs::symlink(external.path(), imports.join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path());
+        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };
@@ -852,7 +984,7 @@ mod tests {
         std::fs::create_dir(external.path().join(".git")).unwrap();
         std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path());
+        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };

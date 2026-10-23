@@ -1077,3 +1077,6 @@ project-already-exists = 此项目已存在
 project-import-not-repository = 所选文件夹不是Git仓库
 project-import-name-conflict = 无法选择唯一的项目名称
 project-clone-invalid = 请输入有效的GitHub仓库
+project-archive = 归档项目
+project-restore = 恢复项目
+project-archived = 已归档

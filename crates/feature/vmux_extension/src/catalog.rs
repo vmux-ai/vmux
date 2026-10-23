@@ -387,12 +387,12 @@ mod tests {
         app.add_observer(page_ready);
         app.world_mut().spawn((
             crate::ExtensionPlugin::MANIFEST,
-            HostedPage::page("vmux://extensions/", "Extensions"),
+            HostedPage::page("vmux://tools/extensions", "Extensions"),
         ));
         let extension = app
             .world_mut()
             .spawn(PageMetadata {
-                url: "vmux://extensions/".to_string(),
+                url: "vmux://tools/extensions".to_string(),
                 ..default()
             })
             .id();
