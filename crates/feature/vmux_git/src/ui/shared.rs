@@ -429,11 +429,6 @@ pub fn DiffView(
                 div {
                     key: "diff-next-{rows.len()}",
                     class: "flex flex-col gap-2 p-3",
-                    onvisible: move |_| {
-                        if has_more && !loading {
-                            let _ = send(&GitDiffNextRequest);
-                        }
-                    },
                     div { class: "h-8 rounded-md bg-card/70" }
                     for width in ["w-11/12", "w-9/12", "w-10/12", "w-7/12"] {
                         Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }

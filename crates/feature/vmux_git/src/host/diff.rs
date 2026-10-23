@@ -164,65 +164,103 @@ struct BranchDiffProgress {
     paths: Vec<Vec<u8>>,
     loaded: HashSet<Vec<u8>>,
     in_flight: HashSet<Vec<u8>>,
+    continuation: Option<(Vec<u8>, u32)>,
     next: usize,
 }
 
-impl BranchDiffProgress {
-    const PAGE_SIZE: usize = 2;
+#[derive(Default)]
+struct BranchDiffBatch {
+    paths: Vec<Vec<u8>>,
+    top_line: u32,
+    has_more: bool,
+}
 
+impl BranchDiffProgress {
     fn new(paths: Vec<Vec<u8>>) -> Self {
         Self {
             paths,
             loaded: HashSet::new(),
             in_flight: HashSet::new(),
+            continuation: None,
             next: 0,
         }
     }
 
-    fn next(&mut self) -> (Vec<Vec<u8>>, bool) {
-        let mut paths = Vec::new();
-        while self.next < self.paths.len() && paths.len() < Self::PAGE_SIZE {
-            let path = self.paths[self.next].clone();
-            self.next += 1;
-            if !self.loaded.contains(&path) && self.in_flight.insert(path.clone()) {
-                paths.push(path);
-            }
+    fn next(&mut self) -> BranchDiffBatch {
+        if let Some((path, top_line)) = self.continuation.take() {
+            self.in_flight.insert(path.clone());
+            return BranchDiffBatch {
+                paths: vec![path],
+                top_line,
+                has_more: true,
+            };
         }
         self.advance();
-        (paths, self.next < self.paths.len())
+        let Some(path) = self.paths.get(self.next).cloned() else {
+            return BranchDiffBatch::default();
+        };
+        self.next += 1;
+        self.in_flight.insert(path.clone());
+        self.advance();
+        BranchDiffBatch {
+            paths: vec![path],
+            top_line: 0,
+            has_more: self.has_more(),
+        }
     }
 
-    fn seek(&mut self, path: &[u8]) -> Option<(Vec<Vec<u8>>, bool)> {
+    fn seek(&mut self, path: &[u8]) -> Option<BranchDiffBatch> {
         if !self.paths.iter().any(|candidate| candidate == path)
             || self.loaded.contains(path)
             || !self.in_flight.insert(path.to_vec())
         {
             return None;
         }
-        Some((vec![path.to_vec()], self.has_more()))
+        Some(BranchDiffBatch {
+            paths: vec![path.to_vec()],
+            top_line: 0,
+            has_more: self.has_more(),
+        })
     }
 
     fn contains(&self, path: &[u8]) -> bool {
-        self.loaded.contains(path) || self.in_flight.contains(path)
+        self.loaded.contains(path)
+            || self.in_flight.contains(path)
+            || self
+                .continuation
+                .as_ref()
+                .is_some_and(|(candidate, _)| candidate == path)
     }
 
-    fn complete(&mut self, paths: &[Vec<u8>], succeeded: bool) {
+    fn complete(
+        &mut self,
+        paths: &[Vec<u8>],
+        top_line: u32,
+        loaded_lines: u32,
+        page_complete: bool,
+        succeeded: bool,
+    ) {
         for path in paths {
             self.in_flight.remove(path);
-            if succeeded {
+            if succeeded && page_complete {
                 self.loaded.insert(path.clone());
+            } else {
+                let next_line = if succeeded {
+                    top_line.saturating_add(loaded_lines)
+                } else {
+                    top_line
+                };
+                self.continuation = Some((path.clone(), next_line));
             }
-        }
-        if !succeeded {
-            self.next = 0;
         }
         self.advance();
     }
 
     fn has_more(&self) -> bool {
-        self.paths[self.next.min(self.paths.len())..]
-            .iter()
-            .any(|path| !self.loaded.contains(path) && !self.in_flight.contains(path))
+        self.continuation.is_some()
+            || self.paths[self.next.min(self.paths.len())..]
+                .iter()
+                .any(|path| !self.loaded.contains(path) && !self.in_flight.contains(path))
     }
 
     fn advance(&mut self) {
@@ -281,11 +319,11 @@ impl GitDiffQuery {
                 .is_some_and(|identity| file.accepts(identity.document, identity.refresh))
     }
 
-    fn next_branch(&mut self) -> Option<(Vec<Vec<u8>>, bool)> {
+    fn next_branch(&mut self) -> Option<BranchDiffBatch> {
         self.branch.as_mut().map(BranchDiffProgress::next)
     }
 
-    fn seek_branch(&mut self, path: &[u8]) -> Option<(Vec<Vec<u8>>, bool)> {
+    fn seek_branch(&mut self, path: &[u8]) -> Option<BranchDiffBatch> {
         self.branch.as_mut()?.seek(path)
     }
 
@@ -295,11 +333,18 @@ impl GitDiffQuery {
             .is_some_and(|branch| branch.contains(path))
     }
 
-    pub(super) fn complete_branch(&mut self, paths: &[Vec<u8>], succeeded: bool) -> bool {
+    pub(super) fn complete_branch(
+        &mut self,
+        paths: &[Vec<u8>],
+        top_line: u32,
+        loaded_lines: u32,
+        page_complete: bool,
+        succeeded: bool,
+    ) -> bool {
         let Some(branch) = self.branch.as_mut() else {
             return false;
         };
-        branch.complete(paths, succeeded);
+        branch.complete(paths, top_line, loaded_lines, page_complete, succeeded);
         branch.has_more()
     }
 }
@@ -509,15 +554,16 @@ fn load_next(
         .filter(|source| source.dirty)
         .map(|source| source.content.clone());
     state.snapshot.diff_loading = true;
-    let (branch_paths, branch_has_more) = query.next_branch().unwrap_or_default();
+    let batch = query.next_branch().unwrap_or_default();
     commands.spawn((
         GitJob::new(entity),
         GitRepository::at(query.target.repo_root.clone()),
         DiffJob {
             path: query.target.path.clone(),
             scope: query.target.scope.clone(),
-            branch_paths,
-            branch_has_more,
+            branch_paths: batch.paths,
+            branch_top_line: batch.top_line,
+            branch_has_more: batch.has_more,
             generation: query.generation,
             top_line: loaded,
             rows: DIFF_WINDOW_ROWS,
@@ -575,7 +621,7 @@ fn start_pending_seek(
             .unwrap_or_default();
         let batch = query.seek_branch(&pending.path_bytes);
         commands.entity(entity).remove::<PendingGitDiffSeek>();
-        let Some((branch_paths, branch_has_more)) = batch else {
+        let Some(batch) = batch else {
             continue;
         };
         state.snapshot.diff_loading = true;
@@ -585,8 +631,9 @@ fn start_pending_seek(
             DiffJob {
                 path: query.target.path.clone(),
                 scope: query.target.scope.clone(),
-                branch_paths,
-                branch_has_more,
+                branch_paths: batch.paths,
+                branch_top_line: batch.top_line,
+                branch_has_more: batch.has_more,
                 generation: query.generation,
                 top_line: loaded,
                 rows: DIFF_WINDOW_ROWS,
@@ -677,7 +724,7 @@ fn start_requests(
             page_revision: pending.page_revision,
             branch,
         };
-        let (branch_paths, branch_has_more) = query.next_branch().unwrap_or_default();
+        let batch = query.next_branch().unwrap_or_default();
         commands
             .entity(entity)
             .remove::<PendingGitDiff>()
@@ -688,8 +735,9 @@ fn start_requests(
             DiffJob {
                 path: target.path,
                 scope: target.scope,
-                branch_paths,
-                branch_has_more,
+                branch_paths: batch.paths,
+                branch_top_line: batch.top_line,
+                branch_has_more: batch.has_more,
                 generation,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
@@ -858,6 +906,7 @@ mod tests {
                     path: PathBuf::new(),
                     scope: target.scope,
                     branch_paths: Vec::new(),
+                    branch_top_line: 0,
                     branch_has_more: false,
                     generation: 1,
                     top_line: 0,
@@ -881,15 +930,16 @@ mod tests {
             .collect();
         let mut progress = BranchDiffProgress::new(paths);
 
-        let (first, first_has_more) = progress.next();
-        assert_eq!(first.len(), BranchDiffProgress::PAGE_SIZE);
-        assert!(first_has_more);
+        let first = progress.next();
+        assert_eq!(first.paths, [b"file-0.rs".to_vec()]);
+        assert!(first.has_more);
         assert!(progress.seek(b"file-9.rs").is_some());
         assert!(progress.seek(b"file-9.rs").is_none());
-        let (second, second_has_more) = progress.next();
+        progress.complete(&first.paths, first.top_line, 40, true, true);
+        let second = progress.next();
 
-        assert_eq!(second, [b"file-2.rs".to_vec(), b"file-3.rs".to_vec()]);
-        assert!(second_has_more);
+        assert_eq!(second.paths, [b"file-1.rs".to_vec()]);
+        assert!(second.has_more);
     }
 
     #[test]
@@ -899,12 +949,32 @@ mod tests {
             .collect();
         let mut progress = BranchDiffProgress::new(paths);
 
-        let (first, _) = progress.next();
-        progress.complete(&first, false);
-        let (retry, has_more) = progress.next();
+        let first = progress.next();
+        progress.complete(&first.paths, first.top_line, 0, false, false);
+        let retry = progress.next();
 
-        assert_eq!(retry, first);
-        assert!(has_more);
+        assert_eq!(retry.paths, first.paths);
+        assert_eq!(retry.top_line, first.top_line);
+        assert!(retry.has_more);
+    }
+
+    #[test]
+    fn large_branch_file_continues_before_the_next_file() {
+        let mut progress =
+            BranchDiffProgress::new(vec![b"large.lock".to_vec(), b"src/lib.rs".to_vec()]);
+
+        let first = progress.next();
+        progress.complete(&first.paths, first.top_line, 800, false, true);
+        let continuation = progress.next();
+
+        assert_eq!(continuation.paths, [b"large.lock".to_vec()]);
+        assert_eq!(continuation.top_line, 800);
+
+        progress.complete(&continuation.paths, continuation.top_line, 120, true, true);
+        let next = progress.next();
+
+        assert_eq!(next.paths, [b"src/lib.rs".to_vec()]);
+        assert_eq!(next.top_line, 0);
     }
 
     #[test]

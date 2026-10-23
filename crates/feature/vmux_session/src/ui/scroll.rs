@@ -7,8 +7,24 @@ pub type Container = Signal<Option<Rc<MountedData>>>;
 
 mod imp {
     use super::Container;
+    use dioxus::html::ScrollBehavior;
+    use dioxus::html::geometry::PixelsVector2D;
+    use dioxus::prelude::spawn;
 
-    pub fn to_bottom(_container: Container) {
-        vmux_ui::scroll::ScrollIntoView::element_to("chat-scroll", i32::MAX as f64);
+    pub fn to_bottom(container: Container) {
+        let Some(element) = container() else {
+            return;
+        };
+        spawn(async move {
+            let Ok(size) = element.get_scroll_size().await else {
+                return;
+            };
+            let _ = element
+                .scroll(
+                    PixelsVector2D::new(0.0, size.height),
+                    ScrollBehavior::Instant,
+                )
+                .await;
+        });
     }
 }

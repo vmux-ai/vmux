@@ -772,11 +772,11 @@ pub(super) fn SessionMetaPanel(
 ) -> Element {
     let presentation = SessionPresentation::new(&session, repository, &stages, &session.stage);
     rsx! {
-        aside { class: "hidden min-h-0 w-[19rem] shrink-0 flex-col bg-foreground/[0.018] lg:flex",
-            header { class: "flex h-11 shrink-0 items-center px-4",
+        aside { class: "flex h-full min-h-0 w-[19rem] shrink-0 flex-col border-l border-foreground/[0.06] bg-background/35",
+            header { class: "flex h-12 shrink-0 items-center px-5",
                 h2 { class: "text-xs font-semibold text-foreground/90", {translate("editor-properties")} }
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-4 pb-4",
+            div { class: "min-h-0 flex-1 overflow-y-auto px-5 pb-5",
                 SessionDescription { session: session.clone() }
                 SessionProperties { session, presentation, stages }
             }
@@ -823,9 +823,9 @@ fn SessionProperties(
                         stages,
                     }
                 } else {
-                    MetadataPill {
-                        dot: StageVisual::for_id(&session.stage).dot.to_string(),
-                        label: translate_humanized(&session.stage),
+                    div { class: "flex min-w-0 items-center gap-2 text-[10px] text-foreground/75",
+                        span { class: "size-1.5 shrink-0 rounded-full {StageVisual::for_id(&session.stage).dot}" }
+                        span { class: "truncate", {translate_humanized(&session.stage)} }
                     }
                 }
             }
@@ -844,30 +844,32 @@ fn SessionProperties(
                 }
             }
             SessionDetailField { label: translate("common-status"),
-                MetadataPill {
-                    dot: runtime.dot.to_string(),
-                    label: runtime_label(&session.runtime),
+                div { class: "flex min-w-0 items-center gap-2 text-[10px] text-foreground/75",
+                    span { class: "size-1.5 shrink-0 rounded-full {runtime.dot}" }
+                    span { class: "truncate", {runtime_label(&session.runtime)} }
                 }
             }
             if !context.project.is_empty() {
                 SessionDetailField { label: translate("resume-column-project"),
-                    MetadataPill { label: context.project.clone(), icon: Some(LineIcon::Package) }
+                    div { class: "flex min-w-0 items-center gap-2 text-[10px] text-foreground/75",
+                        LineIconView { icon: LineIcon::Package, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                        span { class: "truncate", "{context.project}" }
+                    }
                 }
             }
             if !context.branch.is_empty() {
                 SessionDetailField { label: translate("resume-column-branch"),
-                    MetadataPill { label: context.branch.clone(), icon: Some(LineIcon::GitBranch), mono: true }
+                    div { class: "flex min-w-0 items-center gap-2 text-[10px] text-foreground/75",
+                        LineIconView { icon: LineIcon::GitBranch, class: "size-3 shrink-0 text-muted-foreground".to_string() }
+                        code { class: "truncate font-mono", "{context.branch}" }
+                    }
                 }
             }
             SessionDetailField { label: translate("resume-column-updated"),
-                MetadataPill { label: updated }
+                span { class: "truncate text-[10px] text-foreground/75", "{updated}" }
             }
             SessionDetailField { label: translate("schema-id"),
-                MetadataPill {
-                    label: compact_id,
-                    title: session.sid.clone(),
-                    mono: true,
-                }
+                code { class: "truncate font-mono text-[10px] text-foreground/70", title: "{session.sid}", "{compact_id}" }
             }
             if !session.cwd.is_empty() {
                 SessionDetailText {
@@ -1084,7 +1086,7 @@ fn StagePicker(target: StageTarget, selected: String, stages: Vec<StageSummary>)
             on_dismiss: move |_| open.set(false),
             button {
                 r#type: "button",
-                class: "inline-flex h-6 max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/[0.035] py-0.5 pl-2 pr-2 text-[10px] text-foreground/75 outline-none ring-1 ring-inset ring-foreground/[0.08] hover:bg-foreground/[0.06] focus-visible:ring-primary/35",
+                class: "inline-flex h-7 max-w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 text-[10px] text-foreground/75 outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055]",
                 title: translate("sessions-stage"),
                 aria_expanded: open(),
                 onclick: move |_| open.set(!open()),

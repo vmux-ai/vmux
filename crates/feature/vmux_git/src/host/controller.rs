@@ -150,15 +150,8 @@ impl GitPageControllerState {
         true
     }
 
-    fn select_branch_collection(
-        &mut self,
-        collection: GitBranchCollection,
-        repository: &GitRepositorySnapshot,
-    ) {
+    fn select_branch_collection(&mut self, collection: GitBranchCollection) {
         self.branch_collection = collection;
-        self.selected_branch = collection.selected_reference(repository, "");
-        self.selected_branch_path.clear();
-        self.selected_branch_path_bytes.clear();
     }
 
     fn select_branch(&mut self, reference: &str, repository: &GitRepositorySnapshot) -> bool {
@@ -967,15 +960,12 @@ fn branch_file_select_request(
 
 fn select_branch_collection(
     trigger: On<UiInput<GitBranchCollectionSelectRequest>>,
-    mut pages: Query<(&GitState, &mut GitPageControllerState)>,
+    mut pages: Query<&mut GitPageControllerState>,
 ) {
-    let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
         return;
     };
-    let Some(repository) = state.repository() else {
-        return;
-    };
-    controller.select_branch_collection(trigger.event().payload.collection, repository);
+    controller.select_branch_collection(trigger.event().payload.collection);
 }
 
 fn branch_select_request(
@@ -1186,6 +1176,25 @@ mod tests {
 
         controller.apply_url_commit(Some("g".repeat(40)));
         assert!(!controller.selected_commit_is_object_id());
+    }
+
+    #[test]
+    fn browsing_branch_collections_preserves_the_selected_reference() {
+        let mut controller = GitPageControllerState {
+            selected_branch: "vmx-226-session-management".to_string(),
+            selected_branch_path: "crates/feature/vmux_session/src/ui.rs".to_string(),
+            selected_branch_path_bytes: b"crates/feature/vmux_session/src/ui.rs".to_vec(),
+            ..Default::default()
+        };
+
+        controller.select_branch_collection(GitBranchCollection::Tags);
+
+        assert_eq!(controller.branch_collection, GitBranchCollection::Tags);
+        assert_eq!(controller.selected_branch, "vmx-226-session-management");
+        assert_eq!(
+            controller.selected_branch_path,
+            "crates/feature/vmux_session/src/ui.rs"
+        );
     }
 
     #[test]

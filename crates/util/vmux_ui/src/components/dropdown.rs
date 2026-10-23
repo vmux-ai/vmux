@@ -86,6 +86,27 @@ document.addEventListener('keydown', keydown, true);
 document.addEventListener('input', input, true);
 "#;
 
+const DROPDOWN_OUTSIDE_SCRIPT: &str = r#"
+globalThis.__vmuxDropdownOutsideCleanup?.();
+let active = true;
+const cleanup = () => {
+  if (!active) return;
+  active = false;
+  document.removeEventListener('mousedown', dismiss, true);
+  if (globalThis.__vmuxDropdownOutsideCleanup === cleanup) {
+    delete globalThis.__vmuxDropdownOutsideCleanup;
+  }
+};
+const dismiss = event => {
+  const root = document.querySelector('[data-vmux-dropdown-open="true"]');
+  if (!root || root.contains(event.target)) return;
+  cleanup();
+  dioxus.send(true);
+};
+globalThis.__vmuxDropdownOutsideCleanup = cleanup;
+document.addEventListener('mousedown', dismiss, true);
+"#;
+
 #[component]
 pub fn Dropdown(
     open: bool,
@@ -100,6 +121,7 @@ pub fn Dropdown(
         div {
             class: root_class,
             "data-vmux-dropdown-root": "",
+            "data-vmux-dropdown-open": if open { "true" } else { "false" },
             "data-vmux-dropdown-keyboard": if keyboard_navigation { "true" } else { "false" },
             onkeydown: move |event: KeyboardEvent| {
                 if open && event.key() == Key::Escape {
@@ -110,22 +132,28 @@ pub fn Dropdown(
             },
             if open {
                 DropdownBlurDismiss { on_dismiss }
+                DropdownOutsideDismiss { on_dismiss }
                 if keyboard_navigation {
                     DropdownKeyboardNavigation {}
-                }
-                div {
-                    class: "fixed inset-0 z-20",
-                    aria_hidden: "true",
-                    onmousedown: move |event: MouseEvent| {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        on_dismiss.call(());
-                    },
                 }
             }
             {children}
         }
     }
+}
+
+#[component]
+fn DropdownOutsideDismiss(on_dismiss: EventHandler<()>) -> Element {
+    use_future(move || async move {
+        let mut eval = document::eval(DROPDOWN_OUTSIDE_SCRIPT);
+        if eval.recv::<bool>().await.is_ok_and(|dismiss| dismiss) {
+            on_dismiss.call(());
+        }
+    });
+    use_drop(move || {
+        let _ = document::eval("globalThis.__vmuxDropdownOutsideCleanup?.();");
+    });
+    rsx! {}
 }
 
 #[component]

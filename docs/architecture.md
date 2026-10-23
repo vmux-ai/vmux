@@ -820,7 +820,10 @@ inactive views release their watches and tasks, and watcher bursts coalesce into
 watcher never runs a Git command or filters paths synchronously. Each Git child process drains
 stdin, stdout and stderr concurrently, has bounded output and a timeout, and is terminated when its
 operation entity is discarded. Catalogs and diffs page at their source, so opening a page cannot
-schedule work in proportion to the total repository history or block the ECS schedule.
+schedule work in proportion to the total repository history or block the ECS schedule. Branch
+review advances one file and one bounded line window at a time; viewport demand requests another
+window. A large lockfile therefore cannot produce an unbounded first render, and an idle review
+cannot silently materialize the rest of the branch in the page DOM.
 
 The host counts columns in **display cells** — `DisplayCells`, one per narrow character and
 two per wide one — because wrapping and selection are grid problems and the host has no

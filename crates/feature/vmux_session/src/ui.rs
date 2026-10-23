@@ -79,9 +79,9 @@ fn SessionDetail(session_id: String) -> Element {
                 if let Some((session, repository, stages)) = details {
                     div {
                         class: if details_open() {
-                            "hidden min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:block lg:w-[19rem] lg:translate-x-0"
+                            "hidden h-full min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-[19rem] lg:translate-x-0"
                         } else {
-                            "pointer-events-none hidden min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:block lg:w-0"
+                            "pointer-events-none hidden h-full min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-0"
                         },
                         aria_hidden: (!details_open()).to_string(),
                         manager::SessionMetaPanel { session, repository, stages }
