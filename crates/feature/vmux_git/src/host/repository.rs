@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
 use bevy::prelude::Component;
@@ -291,26 +291,15 @@ impl GitRepository {
         if candidates.is_empty() {
             return false;
         }
-        let mut child = match GitCommand::command(&self.0)
-            .args(["check-ignore", "--stdin", "-z"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(_) => return true,
-        };
-        let Some(mut stdin) = child.stdin.take() else {
-            return true;
-        };
+        let input_capacity = candidates.iter().map(|candidate| candidate.len() + 1).sum();
+        let mut input = Vec::with_capacity(input_capacity);
         for candidate in &candidates {
-            if stdin.write_all(candidate).is_err() || stdin.write_all(&[0]).is_err() {
-                return true;
-            }
+            input.extend_from_slice(candidate);
+            input.push(0);
         }
-        drop(stdin);
-        let Ok(output) = child.wait_with_output() else {
+        let Ok(output) =
+            GitCommand::output_with_input(&self.0, &["check-ignore", "--stdin", "-z"], &input)
+        else {
             return true;
         };
         if !matches!(output.status.code(), Some(0 | 1)) {
@@ -1334,6 +1323,32 @@ impl GitCommand {
         ))
     }
 
+    fn output_with_input(root: &Path, args: &[&str], input: &[u8]) -> Result<Output, GitError> {
+        let mut child = Self::command(root)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| GitError("git stdin unavailable".into()))?;
+        std::thread::scope(|scope| {
+            let writer = scope.spawn(move || stdin.write_all(input));
+            let output = child
+                .wait_with_output()
+                .map_err(|error| GitError(format!("failed to wait for git: {error}")))?;
+            writer
+                .join()
+                .map_err(|_| GitError("git stdin writer panicked".into()))?
+                .map_err(|error| GitError(format!("failed to write git stdin: {error}")))?;
+            Ok(output)
+        })
+    }
+
     pub(crate) fn error(stdout: &str, stderr: &str) -> GitError {
         let error = stderr.trim();
         GitError(if error.is_empty() {
@@ -1891,6 +1906,18 @@ mod tests {
 
         assert!(!repository.has_unignored_changes([ignored.as_path()]));
         assert!(repository.has_unignored_changes([source.as_path()]));
+    }
+
+    #[test]
+    fn ignored_watch_path_batches_larger_than_pipe_capacity_complete() {
+        let repo = test_repo::init();
+        test_repo::write(repo.path(), ".gitignore", "target/\n");
+        let paths = (0..20_000)
+            .map(|index| repo.path().join(format!("target/generated-{index:05}.bin")))
+            .collect::<Vec<_>>();
+        let repository = GitRepository::at(repo.path());
+
+        assert!(!repository.has_unignored_changes(paths.iter().map(PathBuf::as_path)));
     }
 
     #[test]
