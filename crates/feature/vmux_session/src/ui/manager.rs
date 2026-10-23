@@ -1,8 +1,6 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use vmux_api::command_bar::OpenRequest;
-use vmux_api::open_target::OpenTarget;
 #[cfg(test)]
 use vmux_session::SessionSummaryProjection;
 use vmux_session::{SessionSummary, StageSummary};
@@ -11,7 +9,7 @@ use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerArea, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch,
+    ManagerArea, ManagerEmpty, ManagerIconButton, ManagerPage, ManagerSearch, ManagerSearchPopover,
     ManagerSidebarItem, ManagerSidebarSection, ManagerToolbar, ManagerView, ManagerViewToggle,
     ManagerWorkspace,
 };
@@ -75,14 +73,55 @@ fn SessionsManagerToolbar(
 ) -> Element {
     rsx! {
         ManagerToolbar { content_class: "flex h-full w-full items-center gap-2.5".to_string(),
-            Dropdown {
-                open: presentation.filter_requested,
-                class: "min-w-0 flex-1".to_string(),
-                keyboard_navigation: true,
-                on_dismiss: move |_| controls.dismiss_filter(),
+            div { class: "min-w-0 flex-1" }
+            ManagerViewToggle {
+                view: controls.view(),
+                list_label: translate("sessions-view-list"),
+                grid_label: translate("sessions-view-board"),
+                grid_icon: LineIcon::Columns3,
+                onchange: move |view| controls.set_view(view),
+            }
+            SessionsManagerActions {
+                controls,
+                presentation,
+                align_left: false,
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionsManagerActions(
+    controls: ManagerControls,
+    presentation: Rc<ManagerPresentation>,
+    align_left: bool,
+) -> Element {
+    let mut search_open = use_signal(|| false);
+    let open = search_open() || presentation.filter_requested;
+    let active = !controls.query().is_empty() || !presentation.selected_filters.is_empty();
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-1",
+            ManagerSearchPopover {
+                open,
+                active,
+                label: translate("sessions-search"),
+                align_left,
+                ontoggle: move |_| {
+                    search_open.set(!open);
+                    if open && controls.query().starts_with('#') {
+                        controls.dismiss_filter();
+                    }
+                },
+                ondismiss: move |_| {
+                    search_open.set(false);
+                    if controls.query().starts_with('#') {
+                        controls.dismiss_filter();
+                    }
+                },
                 ManagerSearch {
                     value: controls.query(),
                     placeholder: translate("sessions-search"),
+                    autofocus: true,
                     onsearch: move |query: String| controls.set_query(query),
                     onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
                         if event.key() == Key::Backspace && controls.query().is_empty() {
@@ -122,20 +161,10 @@ fn SessionsManagerToolbar(
                     }
                 }
             }
-            ManagerViewToggle {
-                view: controls.view(),
-                list_label: translate("sessions-view-list"),
-                grid_label: translate("sessions-view-board"),
-                grid_icon: LineIcon::Columns3,
-                onchange: move |view| controls.set_view(view),
-            }
-            ManagerButton {
-                variant: ManagerButtonVariant::Primary,
+            ManagerIconButton {
+                label: translate("sessions-start"),
                 onclick: move |_| StartPage::open(),
-                span { class: "inline-flex items-center gap-1.5",
-                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                    span { {translate("sessions-start")} }
-                }
+                LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
             }
         }
     }
@@ -148,12 +177,22 @@ fn SessionsManagerContent(
 ) -> Element {
     rsx! {
         ManagerWorkspace {
-            active: ManagerArea::Sessions,
-            onnavigate: move |url| {
-                let _ = send(&OpenRequest {
-                    value: url,
-                    open: Some(OpenTarget::InPlace),
+            active: presentation.selected_stage.is_none().then_some(ManagerArea::Inbox),
+            onnavigate: move |area: ManagerArea| {
+                if area == ManagerArea::Inbox {
+                    controls.select_stage(None);
+                    return;
+                }
+                let _ = send(&ChatOpenPage {
+                    url: area.url().to_string(),
                 });
+            },
+            sidebar_actions: rsx! {
+                SessionsManagerActions {
+                    controls,
+                    presentation: Rc::clone(&presentation),
+                    align_left: true,
+                }
             },
             sidebar: rsx! {
                 SessionCategories {
@@ -218,20 +257,8 @@ fn SessionCategories(
     selected: Option<String>,
     onselect: EventHandler<Option<String>>,
 ) -> Element {
-    let inbox_count = groups
-        .iter()
-        .filter(|group| !group.stage.terminal)
-        .map(|group| group.sessions.len())
-        .sum::<usize>();
     rsx! {
         ManagerSidebarSection { title: translate("common-status"),
-            ManagerSidebarItem {
-                label: translate("sessions-inbox"),
-                count: inbox_count,
-                selected: selected.is_none(),
-                icon: Some(LineIcon::Inbox),
-                onclick: move |_| onselect.call(None),
-            }
             for group in groups {
                 if !group.sessions.is_empty() {
                     ManagerSidebarItem {

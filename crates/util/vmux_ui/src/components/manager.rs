@@ -1,7 +1,9 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
+use crate::components::dropdown::Dropdown;
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
+use crate::components::tooltip::Tooltip;
 use crate::i18n::translate;
 use crate::icon::{BuiltinIconView, LineIcon, LineIconView};
 use crate::platform::Platform;
@@ -77,30 +79,28 @@ pub fn ManagerPage(children: Element) -> Element {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagerArea {
-    Sessions,
+    Inbox,
     Projects,
 }
 
 impl ManagerArea {
-    const ALL: [Self; 2] = [Self::Sessions, Self::Projects];
-
     fn label(self) -> String {
         translate(match self {
-            Self::Sessions => "sessions-title",
+            Self::Inbox => "sessions-inbox",
             Self::Projects => "layout-projects",
         })
     }
 
-    fn url(self) -> &'static str {
+    pub fn url(self) -> &'static str {
         match self {
-            Self::Sessions => "vmux://sessions/",
+            Self::Inbox => "vmux://sessions/",
             Self::Projects => "vmux://projects/",
         }
     }
 
     fn icon(self) -> BuiltinIcon {
         match self {
-            Self::Sessions => BuiltinIcon::MessagesRound,
+            Self::Inbox => BuiltinIcon::MessagesRound,
             Self::Projects => BuiltinIcon::Project,
         }
     }
@@ -108,22 +108,29 @@ impl ManagerArea {
 
 #[component]
 pub fn ManagerWorkspace(
-    active: ManagerArea,
-    onnavigate: EventHandler<String>,
+    active: Option<ManagerArea>,
+    onnavigate: EventHandler<ManagerArea>,
+    #[props(default = rsx! {})] sidebar_actions: Element,
     #[props(default = rsx! {})] sidebar: Element,
     children: Element,
 ) -> Element {
     rsx! {
         div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
             aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
+                div { class: "flex h-7 shrink-0 items-center justify-end gap-1 px-1",
+                    {sidebar_actions}
+                }
                 nav { class: "flex shrink-0 flex-col gap-0.5",
-                    for area in ManagerArea::ALL {
-                        ManagerAreaLink {
-                            key: "{area:?}",
-                            area,
-                            selected: area == active,
-                            onselect: move |url| onnavigate.call(url),
-                        }
+                    ManagerAreaLink {
+                        area: ManagerArea::Inbox,
+                        selected: active == Some(ManagerArea::Inbox),
+                        onselect: move |area| onnavigate.call(area),
+                    }
+                    div { class: "h-1" }
+                    ManagerAreaLink {
+                        area: ManagerArea::Projects,
+                        selected: active == Some(ManagerArea::Projects),
+                        onselect: move |area| onnavigate.call(area),
                     }
                 }
                 div { class: "mt-3 min-h-0 flex-1 overflow-y-auto", {sidebar} }
@@ -134,21 +141,22 @@ pub fn ManagerWorkspace(
 }
 
 #[component]
-fn ManagerAreaLink(area: ManagerArea, selected: bool, onselect: EventHandler<String>) -> Element {
+fn ManagerAreaLink(
+    area: ManagerArea,
+    selected: bool,
+    onselect: EventHandler<ManagerArea>,
+) -> Element {
     let class = if selected {
         "bg-foreground/[0.075] text-foreground"
     } else {
         "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
     };
     rsx! {
-        a {
-            href: area.url(),
+        button {
+            r#type: "button",
             aria_current: if selected { "page" } else { "false" },
-            class: "flex h-8 items-center gap-2 rounded-md px-2 text-[11px] font-medium transition-colors {class}",
-            onclick: move |event| {
-                event.prevent_default();
-                onselect.call(area.url().to_string());
-            },
+            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium transition-colors {class}",
+            onclick: move |_| onselect.call(area),
             BuiltinIconView { icon: area.icon(), class: "size-3.5 shrink-0".to_string() }
             span { class: "truncate", {area.label()} }
         }
@@ -312,6 +320,7 @@ pub fn ManagerControls(children: Element, #[props(default)] class: String) -> El
 pub fn ManagerSearch(
     value: String,
     placeholder: String,
+    #[props(default)] autofocus: bool,
     #[props(default)] onsearch: Option<EventHandler<String>>,
     #[props(default)] ondebounced: Option<EventHandler<String>>,
     #[props(default = 150)] debounce_ms: u32,
@@ -343,6 +352,7 @@ pub fn ManagerSearch(
                 class: "h-full min-w-0 flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/55",
                 placeholder,
                 value: draft(),
+                autofocus,
                 autocomplete: "off",
                 spellcheck: "false",
                 oninput: move |event: FormEvent| {
@@ -374,6 +384,67 @@ pub fn ManagerSearch(
                 },
             }
             {suffix}
+        }
+    }
+}
+
+#[component]
+pub fn ManagerIconButton(
+    label: String,
+    #[props(default)] active: bool,
+    #[props(default)] disabled: bool,
+    onclick: EventHandler<MouseEvent>,
+    children: Element,
+) -> Element {
+    let class = if active {
+        "flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground/[0.08] text-foreground"
+    } else {
+        "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+    };
+    rsx! {
+        Tooltip { label: label.clone(),
+            button {
+                r#type: "button",
+                class,
+                aria_label: label,
+                aria_pressed: active,
+                disabled,
+                onclick: move |event| onclick.call(event),
+                {children}
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ManagerSearchPopover(
+    open: bool,
+    active: bool,
+    label: String,
+    #[props(default)] align_left: bool,
+    ontoggle: EventHandler<()>,
+    ondismiss: EventHandler<()>,
+    children: Element,
+) -> Element {
+    let position = if align_left { "left-0" } else { "right-0" };
+    rsx! {
+        Dropdown {
+            open,
+            class: "shrink-0".to_string(),
+            keyboard_navigation: true,
+            on_dismiss: move |_| ondismiss.call(()),
+            ManagerIconButton {
+                label,
+                active,
+                onclick: move |_| ontoggle.call(()),
+                LineIconView { icon: LineIcon::Search, class: "size-3.5".to_string() }
+            }
+            if open {
+                div {
+                    class: "absolute {position} top-8 z-50 w-[min(28rem,calc(100vw-2rem))]",
+                    {children}
+                }
+            }
         }
     }
 }

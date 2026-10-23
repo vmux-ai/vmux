@@ -20,8 +20,9 @@ use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
     ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
-    ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSidebarItem, ManagerSidebarSection,
-    ManagerSkeleton, ManagerTone, ManagerToolbar, ManagerView, ManagerViewToggle, ManagerWorkspace,
+    ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSearchPopover,
+    ManagerSidebarItem, ManagerSidebarSection, ManagerSkeleton, ManagerTone, ManagerToolbar,
+    ManagerView, ManagerViewToggle, ManagerWorkspace,
 };
 use vmux_ui::components::page::{PageContent, PageHeader};
 use vmux_ui::components::sheet::SheetHeaderChevron;
@@ -77,47 +78,7 @@ pub(super) fn ProjectList(
     rsx! {
         ManagerPage {
             ManagerToolbar {
-                Dropdown {
-                    open: presentation.filter_requested,
-                    class: "min-w-0 flex-1".to_string(),
-                    keyboard_navigation: true,
-                    on_dismiss: move |_| controls.dismiss_filter(),
-                    ManagerSearch {
-                        value: controls.query(),
-                        placeholder: translate("layout-projects"),
-                        onsearch: move |query: String| controls.set_query(query),
-                        onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
-                            if event.key() == Key::Backspace && controls.query().is_empty() {
-                                controls.pop_filter();
-                            }
-                        })),
-                        prefix: rsx! {
-                            for (index, filter) in presentation.selected_filters.iter().cloned().enumerate() {
-                                FilterPill {
-                                    key: "project-filter-pill-{index}",
-                                    label: filter.label,
-                                    dot: filter.dot,
-                                    clear_label: translate("common-remove-filter"),
-                                    onclear: move |_| controls.remove_filter(index),
-                                }
-                            }
-                        },
-                        suffix: rsx! {
-                            FilterTrigger {
-                                active: presentation.filter_requested,
-                                label: translate("common-filter"),
-                                onclick: move |_| controls.toggle_filter(),
-                            }
-                        },
-                    }
-                    if presentation.filter_requested {
-                        ProjectFilterMenu {
-                            entries: entries.clone(),
-                            needle: presentation.filter_needle.clone(),
-                            onselect: move |filter| controls.apply_filter(filter),
-                        }
-                    }
-                }
+                div { class: "min-w-0 flex-1" }
                 if count > 0 {
                     ManagerViewToggle {
                         view: controls.view(),
@@ -126,15 +87,34 @@ pub(super) fn ProjectList(
                         onchange: move |view| controls.set_view(view),
                     }
                 }
-                ProjectAdd { pending }
+                ProjectManagerActions {
+                    entries: entries.clone(),
+                    presentation: presentation.clone(),
+                    controls,
+                    pending,
+                    align_left: false,
+                }
             }
             ManagerWorkspace {
-                active: ManagerArea::Projects,
-                onnavigate: move |url| {
+                active: controls.selected_filter().is_none().then_some(ManagerArea::Projects),
+                onnavigate: move |area: ManagerArea| {
+                    if area == ManagerArea::Projects {
+                        controls.select_filter(None);
+                        return;
+                    }
                     let _ = send(&OpenRequest {
-                        value: url,
+                        value: area.url().to_string(),
                         open: Some(OpenTarget::InPlace),
                     });
+                },
+                sidebar_actions: rsx! {
+                    ProjectManagerActions {
+                        entries: entries.clone(),
+                        presentation: presentation.clone(),
+                        controls,
+                        pending,
+                        align_left: true,
+                    }
                 },
                 sidebar: rsx! { ProjectCategories { entries: entries.clone(), controls } },
                 ManagerList {
@@ -171,18 +151,82 @@ pub(super) fn ProjectList(
 }
 
 #[component]
+fn ProjectManagerActions(
+    entries: Vec<ProjectEntry>,
+    presentation: ProjectPresentation,
+    controls: ProjectControls,
+    pending: bool,
+    align_left: bool,
+) -> Element {
+    let mut search_open = use_signal(|| false);
+    let open = search_open() || presentation.filter_requested;
+    let active = !controls.query().is_empty() || !presentation.selected_filters.is_empty();
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-1",
+            ManagerSearchPopover {
+                open,
+                active,
+                label: translate("layout-projects"),
+                align_left,
+                ontoggle: move |_| {
+                    search_open.set(!open);
+                    if open && controls.query().starts_with('#') {
+                        controls.dismiss_filter();
+                    }
+                },
+                ondismiss: move |_| {
+                    search_open.set(false);
+                    if controls.query().starts_with('#') {
+                        controls.dismiss_filter();
+                    }
+                },
+                ManagerSearch {
+                    value: controls.query(),
+                    placeholder: translate("layout-projects"),
+                    autofocus: true,
+                    onsearch: move |query: String| controls.set_query(query),
+                    onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                        if event.key() == Key::Backspace && controls.query().is_empty() {
+                            controls.pop_filter();
+                        }
+                    })),
+                    prefix: rsx! {
+                        for (index, filter) in presentation.selected_filters.iter().cloned().enumerate() {
+                            FilterPill {
+                                key: "project-filter-pill-{index}",
+                                label: filter.label,
+                                dot: filter.dot,
+                                clear_label: translate("common-remove-filter"),
+                                onclear: move |_| controls.remove_filter(index),
+                            }
+                        }
+                    },
+                    suffix: rsx! {
+                        FilterTrigger {
+                            active: presentation.filter_requested,
+                            label: translate("common-filter"),
+                            onclick: move |_| controls.toggle_filter(),
+                        }
+                    },
+                }
+                if presentation.filter_requested {
+                    ProjectFilterMenu {
+                        entries,
+                        needle: presentation.filter_needle,
+                        onselect: move |filter| controls.apply_filter(filter),
+                    }
+                }
+            }
+            ProjectAdd { pending, compact: true }
+        }
+    }
+}
+
+#[component]
 fn ProjectCategories(entries: Vec<ProjectEntry>, controls: ProjectControls) -> Element {
     let selected = controls.selected_filter();
-    let active = entries.iter().filter(|entry| !entry.archived).count();
     rsx! {
         ManagerSidebarSection { title: translate("common-status"),
-            ManagerSidebarItem {
-                label: translate_humanized("common-active"),
-                count: active,
-                selected: selected.is_none(),
-                icon: Some(LineIcon::Package),
-                onclick: move |_| controls.select_filter(None),
-            }
             for filter in [ProjectFilter::Ongoing, ProjectFilter::Stale, ProjectFilter::Archived] {
                 if filter.count(&entries) > 0 {
                     ManagerSidebarItem {
@@ -413,7 +457,7 @@ enum ProjectPrompt {
 }
 
 #[component]
-fn ProjectAdd(pending: bool) -> Element {
+fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
     let mut open = use_signal(|| false);
     let mut prompt = use_signal(|| None::<ProjectPrompt>);
     let mut draft = use_signal(String::new);
@@ -423,14 +467,24 @@ fn ProjectAdd(pending: bool) -> Element {
             open: open(),
             class: "shrink-0".to_string(),
             on_dismiss: move |_| open.set(false),
-            Button {
-                variant: ButtonVariant::Primary,
-                size: ButtonSize::Sm,
-                class: "h-8 gap-1.5 text-xs".to_string(),
-                disabled: pending,
-                onclick: move |_| open.set(!open()),
-                LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                span { {translate("common-add")} }
+            if compact {
+                ManagerIconButton {
+                    label: translate("common-add"),
+                    disabled: pending,
+                    active: open(),
+                    onclick: move |_| open.set(!open()),
+                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                }
+            } else {
+                Button {
+                    variant: ButtonVariant::Primary,
+                    size: ButtonSize::Sm,
+                    class: "h-8 gap-1.5 text-xs".to_string(),
+                    disabled: pending,
+                    onclick: move |_| open.set(!open()),
+                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                    span { {translate("common-add")} }
+                }
             }
             if open() {
                 div { class: "absolute right-0 top-9 z-50 w-72 rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
@@ -598,10 +652,10 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                 }
             }
             ManagerWorkspace {
-                active: ManagerArea::Projects,
-                onnavigate: move |url| {
+                active: Some(ManagerArea::Projects),
+                onnavigate: move |area: ManagerArea| {
                     let _ = send(&OpenRequest {
-                        value: url,
+                        value: area.url().to_string(),
                         open: Some(OpenTarget::InPlace),
                     });
                 },
