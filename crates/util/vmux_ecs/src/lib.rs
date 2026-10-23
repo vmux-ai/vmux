@@ -6,8 +6,8 @@ pub use component::{
     ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
     CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
     JsonArguments, KeyboardOwner, LastActivatedAt, LastVisitedAt, Order, PagePresented, Pin,
-    ProcessAnchor, Ready, RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid,
-    Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
+    ProcessAnchor, Ready, RegistrationOrder, Revision, Terminal, TransitionType, UnixMillis, Url,
+    Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
 #[cfg(all(host, feature = "host"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};

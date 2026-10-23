@@ -17,6 +17,45 @@ impl UnixMillis {
     }
 }
 
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct Revision(u64);
+
+impl Revision {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    pub const fn next(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+}
+
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
 
