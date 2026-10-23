@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
+use vmux_api::space::ProjectRowKind;
 use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
 use vmux_ecs::{Description, EntityTarget};
 use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
@@ -258,11 +259,54 @@ impl ActiveWorkspaceProject {
             .take_while(|project| project.depth > 0)
             .cloned()
             .collect();
-        let choices = projects
-            .projects
+        let active_identity =
+            vmux_git::worktree::CheckoutInfo::try_from(std::path::Path::new(&root.path))
+                .ok()
+                .map(|checkout| {
+                    vmux_git::worktree::LinkedRepoRoot::find(&checkout.root)
+                        .unwrap_or(checkout.root)
+                        .canonicalize()
+                        .unwrap_or_default()
+                });
+        let mut candidates = Vec::new();
+        for project in &projects.projects {
+            if project.depth != 0 || project.missing || project.kind != ProjectRowKind::Project {
+                continue;
+            }
+            let path = std::path::Path::new(&project.path);
+            let identity = vmux_git::worktree::CheckoutInfo::try_from(path)
+                .ok()
+                .map(|checkout| {
+                    vmux_git::worktree::LinkedRepoRoot::find(&checkout.root)
+                        .unwrap_or(checkout.root)
+                })
+                .unwrap_or_else(|| path.to_path_buf());
+            let identity = identity.canonicalize().unwrap_or(identity);
+            if candidates.iter().any(
+                |(held, _): &(std::path::PathBuf, vmux_api::space::ProjectRow)| held == &identity,
+            ) {
+                continue;
+            }
+            let mut projected = project.clone();
+            projected.path = identity.to_string_lossy().into_owned();
+            projected.display_path = vmux_path::DisplayPath::project(&identity);
+            projected.label = identity
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| projected.label.clone());
+            projected.is_active = active_identity.as_ref() == Some(&identity);
+            projected.is_worktree = false;
+            candidates.push((identity, projected));
+        }
+        let choices = candidates
             .iter()
-            .filter(|project| project.depth == 0 && !project.missing)
-            .cloned()
+            .filter(|(identity, _)| {
+                !candidates
+                    .iter()
+                    .any(|(other, _)| identity != other && identity.starts_with(other))
+            })
+            .map(|(_, project)| project.clone())
             .collect();
         let boundary = projects
             .boundary

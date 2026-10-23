@@ -7,7 +7,10 @@ use self::state::LayoutUi;
 use dioxus::prelude::*;
 pub(crate) use error::ErrorPage;
 use vmux_command::CommandBarPanel;
-use vmux_ui::hooks::use_theme;
+use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::hooks::{send, use_theme};
+
+use crate::event::LayoutOverlayEvent;
 
 mod active_session;
 mod bookmark;
@@ -70,6 +73,36 @@ fn ExtensionPopup() -> Element {
         ExtensionPopupModal {
             popup: ui.extension_popup,
             preferred_size: ui.extension_popup_size,
+        }
+    }
+}
+
+#[component]
+pub(super) fn LayoutDropdown(
+    id: String,
+    open: bool,
+    #[props(default)] class: String,
+    #[props(default)] keyboard_navigation: bool,
+    on_dismiss: EventHandler<()>,
+    children: Element,
+) -> Element {
+    let overlay_id = id.clone();
+    use_effect(move || {
+        let _ = send(&LayoutOverlayEvent {
+            id: overlay_id.clone(),
+            active: open,
+        });
+    });
+    use_drop(move || {
+        let _ = send(&LayoutOverlayEvent { id, active: false });
+    });
+    rsx! {
+        Dropdown {
+            open,
+            class,
+            keyboard_navigation,
+            on_dismiss,
+            {children}
         }
     }
 }

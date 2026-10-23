@@ -36,6 +36,7 @@ pub(super) enum DiffScope {
     File,
     Branch(String),
     Commit(String),
+    Stash(String),
 }
 
 #[derive(Clone, Component)]

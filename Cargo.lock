@@ -10687,6 +10687,7 @@ dependencies = [
  "vmux_history",
  "vmux_input",
  "vmux_page",
+ "vmux_path",
  "vmux_session",
  "vmux_tool",
  "vmux_ui",

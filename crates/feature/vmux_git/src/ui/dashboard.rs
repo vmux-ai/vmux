@@ -4,8 +4,7 @@ use dioxus::prelude::*;
 
 use super::branches::BranchesCard;
 use super::changes::ChangesCard;
-use super::command_log::CommandLogCard;
-use super::diff::{BranchDiffCard, CommitDiffCard, DiffCard};
+use super::diff::{BranchDiffCard, CommitDiffCard, DiffCard, StashDiffCard};
 use super::history::{HistoryCard, StashCard};
 use super::shortcuts::GitShortcutHelp;
 use super::state::GitPageState;
@@ -32,6 +31,7 @@ pub(super) fn GitDashboard() -> Element {
     let selected_path_bytes = use_memo(move || controller().selected_path_bytes);
     let selected_abs_path = use_memo(move || controller().selected_abs_path);
     let selected_commit = use_memo(move || controller().selected_commit);
+    let selected_stash = use_memo(move || controller().selected_stash);
     let selected_branch = use_memo(move || controller().selected_branch);
     let selected_branch_path = use_memo(move || controller().selected_branch_path);
     let active_panel = controller_state.focused_panel;
@@ -125,6 +125,15 @@ pub(super) fn GitDashboard() -> Element {
                             diff_rows,
                             loading: ui.diff_loading,
                         }
+                    } else if active_panel == GitPanel::Stash {
+                        StashDiffCard {
+                            repository: repository.clone(),
+                            repo_root,
+                            selected_stash,
+                            diff_viewport,
+                            diff_rows,
+                            loading: ui.diff_loading,
+                        }
                     } else {
                         DiffCard {
                             repo_root,
@@ -137,9 +146,6 @@ pub(super) fn GitDashboard() -> Element {
                         }
                     }
                 }
-            }
-            if !ui.command_log.is_empty() {
-                CommandLogCard { command_log: ui.command_log }
             }
         }
         if resizing() {

@@ -98,6 +98,41 @@ pub(super) fn CommitDiffCard(
 }
 
 #[component]
+pub(super) fn StashDiffCard(
+    repository: GitRepositorySnapshot,
+    repo_root: ReadSignal<String>,
+    selected_stash: ReadSignal<String>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
+    loading: bool,
+) -> Element {
+    let selected_stash = selected_stash();
+    let selected = repository
+        .stashes
+        .iter()
+        .find(|stash| stash.reference == selected_stash)
+        .cloned();
+    rsx! {
+        RevisionDiffCard {
+            repo_root,
+            diff_viewport,
+            diff_rows,
+            loading,
+            available: selected.is_some(),
+            title: selected
+                .as_ref()
+                .map(|stash| stash.message.clone())
+                .unwrap_or_default(),
+            subtitle: selected_stash,
+            file_path: String::new(),
+            empty: translate("git-no-stashes"),
+            icon: LineIcon::Package,
+            error: String::new(),
+        }
+    }
+}
+
+#[component]
 fn RevisionDiffCard(
     repo_root: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,

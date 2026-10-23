@@ -495,6 +495,27 @@ impl GitRepository {
         Ok(self.highlight_diff(&stdout))
     }
 
+    pub fn stash_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
+        let (stdout, stderr, ok) = GitCommand::read(
+            &self.0,
+            &[
+                "stash",
+                "show",
+                "--patch",
+                "--include-untracked",
+                "--find-renames",
+                "--find-copies",
+                "--submodule=diff",
+                "--unified=3",
+                reference,
+            ],
+        )?;
+        if !ok {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        Ok(self.highlight_diff(&stdout))
+    }
+
     pub fn branch_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
         let stdout = self.branch_diff_text(reference, 3, Path::new(""))?;
         Ok(self.highlight_diff(&stdout))

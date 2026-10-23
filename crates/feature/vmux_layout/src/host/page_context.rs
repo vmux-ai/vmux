@@ -43,11 +43,14 @@ impl TabWorkspaceSelection {
             return Err("project path is not a directory".to_string());
         }
         if !checkout.trim().is_empty() {
-            return Self::from_checkout(
-                &project_dir,
-                std::path::Path::new(checkout),
-                (!branch.trim().is_empty()).then_some(branch.trim()),
-            );
+            let checkout = std::path::Path::new(checkout);
+            if checkout.is_dir() {
+                return Self::from_checkout(
+                    &project_dir,
+                    checkout,
+                    (!branch.trim().is_empty()).then_some(branch.trim()),
+                );
+            }
         }
         if !branch.trim().is_empty() {
             let activation = crate::worktree::TabWorktreeActivation::checkout_branch(

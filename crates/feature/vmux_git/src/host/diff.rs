@@ -105,14 +105,18 @@ impl GitDiffTarget {
                 path_bytes: Vec::new(),
                 scope: DiffScope::Commit(controller.selected_commit.clone()),
             }),
-            GitPanel::Files | GitPanel::Stash if !controller.selected_abs_path.is_empty() => {
-                Some(Self {
-                    repo_root,
-                    path: PathBuf::from(&controller.selected_abs_path),
-                    path_bytes: controller.selected_path_bytes.clone(),
-                    scope: DiffScope::File,
-                })
-            }
+            GitPanel::Stash if !controller.selected_stash.is_empty() => Some(Self {
+                repo_root,
+                path: PathBuf::new(),
+                path_bytes: Vec::new(),
+                scope: DiffScope::Stash(controller.selected_stash.clone()),
+            }),
+            GitPanel::Files if !controller.selected_abs_path.is_empty() => Some(Self {
+                repo_root,
+                path: PathBuf::from(&controller.selected_abs_path),
+                path_bytes: controller.selected_path_bytes.clone(),
+                scope: DiffScope::File,
+            }),
             _ => None,
         }
     }
@@ -664,7 +668,7 @@ fn start_requests(
                     .map(|query| query.catalog.paths())
                     .unwrap_or_default(),
             )),
-            DiffScope::File | DiffScope::Commit(_) => None,
+            DiffScope::File | DiffScope::Commit(_) | DiffScope::Stash(_) => None,
         };
         let mut query = GitDiffQuery {
             target: target.clone(),

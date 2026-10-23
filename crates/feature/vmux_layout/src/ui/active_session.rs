@@ -5,7 +5,6 @@ use vmux_ecs::event::{ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
-use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
 use vmux_ui::hooks::send;
@@ -18,6 +17,8 @@ use crate::event::{
     ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, SideSheetSectionRequest,
     TabBoundary, WorkspaceBranch,
 };
+
+use super::LayoutDropdown;
 
 #[component]
 pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
@@ -172,7 +173,8 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     rsx! {
         div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible",
             div { class: "flex min-w-0 flex-col gap-0.5 p-1 @max-[12rem]:p-0.5",
-                Dropdown {
+                LayoutDropdown {
+                    id: format!("active-project-{pane_id}"),
                     open: choosing(),
                     class: "w-full min-w-0".to_string(),
                     on_dismiss: move |_| choosing.set(false),
@@ -189,7 +191,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                     }
                     if choosing() {
-                        div { class: "absolute left-0 right-0 top-8 z-50 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
+                        div { class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto rounded-lg bg-card p-1 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
                             for choice in project_choices.iter() {
                                 ActiveWorkspaceChoice {
                                     key: "{choice.path}",
@@ -224,7 +226,8 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch}" }
                         }
                     } else {
-                        Dropdown {
+                        LayoutDropdown {
+                            id: format!("active-branch-{pane_id}"),
                             open: choosing_branch(),
                             class: "w-full min-w-0".to_string(),
                             on_dismiss: move |_| choosing_branch.set(false),
@@ -238,7 +241,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                             }
                             if choosing_branch() {
-                                div { class: "absolute left-0 right-0 top-8 z-50 max-h-64 min-w-0 overflow-y-auto rounded-md bg-background p-1 shadow-xl",
+                                div { class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto rounded-lg bg-card p-1 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
                                     for branch in branch_choices {
                                         ActiveWorkspaceBranchChoice {
                                             key: "{branch.branch}",

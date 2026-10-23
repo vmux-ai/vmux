@@ -690,6 +690,7 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     repository.branch_diff_lines_for_paths(reference, &job.branch_paths)
                 }
                 DiffScope::Commit(reference) => repository.commit_diff_lines(reference),
+                DiffScope::Stash(reference) => repository.stash_diff_lines(reference),
             };
             match result {
                 Ok(all_lines) => {

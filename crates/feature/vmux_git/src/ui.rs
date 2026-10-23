@@ -3,7 +3,6 @@ pub use shared::{DiffView, GitFooter};
 
 mod branches;
 mod changes;
-mod command_log;
 mod dashboard;
 mod diff;
 mod empty;

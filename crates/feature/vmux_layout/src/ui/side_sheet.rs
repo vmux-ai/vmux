@@ -6,7 +6,6 @@ use vmux_ecs::event::space::{
     SpacesListEvent,
 };
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
-use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::send;
@@ -14,6 +13,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::scroll::ScrollIntoView;
 
+use super::LayoutDropdown;
 use super::active_session::ActiveSessionPanel;
 use super::bookmark::{
     BookmarkContext, BookmarkDragState, BookmarkInput, BookmarksSection, LayoutContextMenu,
@@ -256,7 +256,8 @@ fn SideSheetSpaceRow(
     let deletable = spaces.spaces.len() > 1;
 
     rsx! {
-        Dropdown {
+        LayoutDropdown {
+            id: format!("space-switch-{}", space.id),
             open: open(),
             on_dismiss: move |_| open.set(false),
             LayoutContextMenu {
