@@ -108,6 +108,22 @@ impl ProjectPageRevision {
     }
 }
 
+#[derive(SystemParam)]
+struct ProjectCollectionViews<'w, 's> {
+    hierarchy: vmux_layout::space::SpaceHierarchy<'w, 's>,
+    values: Query<'w, 's, &'static vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
+}
+
+impl ProjectCollectionViews<'_, '_> {
+    fn get(&self, entity: Entity) -> vmux_ecs::CollectionView {
+        self.hierarchy
+            .get(entity)
+            .and_then(|space| self.values.get(space).ok())
+            .copied()
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Component)]
 struct PendingProjectOperation {
     webview: Entity,
@@ -619,18 +635,13 @@ fn queue(
     states: Query<&vmux_ecs::UiState<ProjectUiState>>,
     mut revisions: Query<&mut ProjectPageRevision>,
     projects: vmux_ecs::profile::Projects,
-    hierarchy: vmux_layout::space::SpaceHierarchy,
-    collection_views: Query<&vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
+    collection_views: ProjectCollectionViews,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for (entity, mut page) in &mut pages {
         let url = page.url.clone();
-        let collection_view = hierarchy
-            .get(entity)
-            .and_then(|space| collection_views.get(space).ok())
-            .copied()
-            .unwrap_or_default();
+        let collection_view = collection_views.get(entity);
         if !ProjectRoute::is_page(&url) {
             let Ok(mut revision) = revisions.get_mut(entity) else {
                 continue;
