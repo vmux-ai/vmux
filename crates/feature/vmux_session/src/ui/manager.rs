@@ -9,8 +9,8 @@ use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerControls as ManagerControlsRow, ManagerEmpty,
-    ManagerPage, ManagerSearch, ManagerToolbar, ManagerView, ManagerViewToggle,
+    ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerPage, ManagerSearch, ManagerToolbar,
+    ManagerView, ManagerViewToggle,
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
@@ -118,6 +118,13 @@ fn SessionsManagerToolbar(
                     }
                 }
             }
+            ManagerViewToggle {
+                view: controls.view(),
+                list_label: translate("sessions-view-list"),
+                grid_label: translate("sessions-view-board"),
+                grid_icon: LineIcon::Columns3,
+                onchange: move |view| controls.set_view(view),
+            }
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| StartPage::open(),
@@ -143,15 +150,6 @@ fn SessionsManagerContent(
                 onselect: move |stage| controls.select_stage(stage),
             }
             div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                ManagerControlsRow { class: "shrink-0 px-3 py-2".to_string(),
-                    ManagerViewToggle {
-                        view: controls.view(),
-                        list_label: translate("sessions-view-list"),
-                        grid_label: translate("sessions-view-board"),
-                        grid_icon: LineIcon::Columns3,
-                        onchange: move |view| controls.set_view(view),
-                    }
-                }
                 div { class: "flex min-h-0 flex-1 overflow-hidden",
                     if presentation.snapshot.sessions.is_empty() {
                         ManagerEmpty {
