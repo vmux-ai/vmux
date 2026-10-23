@@ -9,12 +9,10 @@ use vmux_api::command_bar::{
     PathCompleteResponse,
 };
 use vmux_ecs::UiStateWrite;
+use vmux_ecs::search::{Cancel, Ready, Request, SearchPlugin, State};
 
 use super::search_driver::HistoryQuery;
-use super::{
-    NewPalette, OpenVersion, PaletteSnapshot, PendingPaletteRequest, RequestDelay,
-    RequestGeneration,
-};
+use super::{NewPalette, OpenVersion, PaletteSnapshot};
 
 const COMPLETION_DEBOUNCE: Duration = Duration::from_millis(60);
 const HISTORY_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -24,26 +22,37 @@ pub(super) struct PaletteSearchPlugin;
 
 impl Plugin for PaletteSearchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(update)
-            .add_observer(receive_files)
-            .add_observer(receive_history)
-            .add_systems(PreUpdate, attach)
-            .add_systems(Update, (request_files, request_history));
+        app.add_plugins((
+            SearchPlugin::<CompletionSearch>::new(COMPLETION_DEBOUNCE),
+            SearchPlugin::<HistorySearch>::new(HISTORY_DEBOUNCE),
+        ))
+        .add_observer(update)
+        .add_observer(receive_files)
+        .add_observer(receive_history)
+        .add_observer(request_files)
+        .add_observer(request_history)
+        .add_systems(PreUpdate, attach);
     }
 }
+
+pub(super) struct CompletionSearch;
+
+pub(super) struct HistorySearch;
 
 #[derive(Component, Default)]
 pub(super) struct PaletteSearch {
     open: OpenVersion,
     start: bool,
     query: String,
-    completion_generation: RequestGeneration,
-    history_generation: RequestGeneration,
 }
 
 fn attach(pages: Query<Entity, NewPalette<PaletteSearch>>, mut commands: Commands) {
     for page in &pages {
-        commands.entity(page).insert(PaletteSearch::default());
+        commands.entity(page).insert((
+            PaletteSearch::default(),
+            State::<CompletionSearch>::default(),
+            State::<HistorySearch>::default(),
+        ));
     }
 }
 
@@ -62,8 +71,8 @@ fn update(
     };
     if opened {
         search.query.clear();
-        search.completion_generation.advance();
-        search.history_generation.advance();
+        commands.trigger(Cancel::<CompletionSearch>::new(target));
+        commands.trigger(Cancel::<HistorySearch>::new(target));
         snapshot.0.open_id = request.open_id;
         snapshot.0.completions.clear();
         snapshot.0.completions_partial = false;
@@ -81,7 +90,7 @@ fn update(
 
 fn receive_files(
     trigger: On<UiStateWrite<CommandBarUiState>>,
-    mut palettes: Query<(&PaletteSearch, &mut PaletteSnapshot)>,
+    mut palettes: Query<(&State<CompletionSearch>, &mut PaletteSnapshot)>,
 ) {
     let Some(response) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<PathCompleteResponse>>::payload(
@@ -93,7 +102,7 @@ fn receive_files(
     let Ok((search, mut snapshot)) = palettes.get_mut(trigger.event().webview()) else {
         return;
     };
-    if !search.completion_generation.matches(response.request_id) {
+    if !search.matches(response.request_id) {
         return;
     }
     snapshot.0.completions.clone_from(&response.completions);
@@ -103,7 +112,7 @@ fn receive_files(
 
 fn receive_history(
     trigger: On<UiStateWrite<CommandBarUiState>>,
-    mut palettes: Query<(&PaletteSearch, &mut PaletteSnapshot)>,
+    mut palettes: Query<(&State<HistorySearch>, &mut PaletteSnapshot)>,
 ) {
     let Some(response) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
         HistorySuggestionsResponse,
@@ -113,7 +122,7 @@ fn receive_history(
     let Ok((search, mut snapshot)) = palettes.get_mut(trigger.event().webview()) else {
         return;
     };
-    if !search.history_generation.matches(response.request_id) {
+    if !search.matches(response.request_id) {
         return;
     }
     snapshot.0.history.clone_from(&response.entries);
@@ -121,112 +130,59 @@ fn receive_history(
 
 fn queue_files(
     target: Entity,
-    search: &mut PaletteSearch,
+    search: &PaletteSearch,
     snapshot: &mut PaletteSnapshot,
     commands: &mut Commands,
 ) {
-    let generation = search.completion_generation.advance();
     let Some(query) = CompletionQuery::parse(&search.query) else {
+        commands.trigger(Cancel::<CompletionSearch>::new(target));
         snapshot.0.completions.clear();
         snapshot.0.completions_partial = false;
         snapshot.0.completions_total = 0;
         return;
     };
-    commands.spawn((
-        Name::new("Command Palette Completion Debounce"),
-        CompletionRequestDelay(RequestDelay::new(
-            target,
-            generation,
-            query,
-            COMPLETION_DEBOUNCE,
-        )),
-        PendingPaletteRequest,
-    ));
+    commands.trigger(Request::<CompletionSearch>::new(target, query));
 }
-
-#[derive(Component)]
-struct CompletionRequestDelay(RequestDelay);
 
 fn queue_history(
     target: Entity,
-    search: &mut PaletteSearch,
+    search: &PaletteSearch,
     snapshot: &mut PaletteSnapshot,
     commands: &mut Commands,
 ) {
-    let generation = search.history_generation.advance();
     snapshot.0.history.clear();
     if search.start {
+        commands.trigger(Cancel::<HistorySearch>::new(target));
         return;
     }
     let Some(query) = HistoryQuery::parse(&search.query) else {
+        commands.trigger(Cancel::<HistorySearch>::new(target));
         return;
     };
-    commands.spawn((
-        Name::new("Command Palette History Debounce"),
-        HistoryRequestDelay(RequestDelay::new(
-            target,
-            generation,
-            query.to_string(),
-            HISTORY_DEBOUNCE,
-        )),
-        PendingPaletteRequest,
-    ));
+    commands.trigger(Request::<HistorySearch>::new(target, query.to_string()));
 }
 
-fn request_files(
-    delays: Query<(Entity, &CompletionRequestDelay)>,
-    searches: Query<&PaletteSearch>,
-    mut commands: Commands,
-) {
-    for (entity, delay) in &delays {
-        if !delay.0.ready() {
-            continue;
-        }
-        commands.entity(entity).despawn();
-        let Ok(search) = searches.get(delay.0.target) else {
-            continue;
-        };
-        if !search.completion_generation.matches(delay.0.generation) {
-            continue;
-        }
-        commands.trigger(UiInput {
-            webview: delay.0.target,
-            payload: PathCompleteRequest {
-                request_id: delay.0.generation,
-                query: delay.0.query.clone(),
-            },
-        });
-    }
+fn request_files(trigger: On<Ready<CompletionSearch>>, mut commands: Commands) {
+    let ready = trigger.event();
+    commands.trigger(UiInput {
+        webview: ready.target,
+        payload: PathCompleteRequest {
+            request_id: ready.revision,
+            query: ready.query.clone(),
+        },
+    });
 }
 
-#[derive(Component)]
-struct HistoryRequestDelay(RequestDelay);
-
-fn request_history(
-    delays: Query<(Entity, &HistoryRequestDelay)>,
-    searches: Query<&PaletteSearch>,
-    mut commands: Commands,
-) {
-    for (entity, delay) in &delays {
-        if !delay.0.ready() {
-            continue;
-        }
-        commands.entity(entity).despawn();
-        let Ok(search) = searches.get(delay.0.target) else {
-            continue;
-        };
-        if !search.history_generation.matches(delay.0.generation) {
-            continue;
-        }
-        commands.trigger(UiInput {
-            webview: delay.0.target,
-            payload: HistorySuggestionsRequest {
-                query: delay.0.query.clone(),
-                limit: HISTORY_SUGGESTION_LIMIT,
-                request_id: delay.0.generation,
-            },
-        });
-    }
+fn request_history(trigger: On<Ready<HistorySearch>>, mut commands: Commands) {
+    let ready = trigger.event();
+    commands.trigger(UiInput {
+        webview: ready.target,
+        payload: HistorySuggestionsRequest {
+            query: ready.query.clone(),
+            limit: HISTORY_SUGGESTION_LIMIT,
+            request_id: ready.revision,
+        },
+    });
 }
 
 #[cfg(test)]

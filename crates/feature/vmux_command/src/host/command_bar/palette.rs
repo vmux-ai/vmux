@@ -935,6 +935,8 @@ fn detach(pages: Query<Entity, DetachedPalette>, mut commands: Commands) {
         page.remove::<menu::OpenMenu>();
         page.remove::<(
             search::PaletteSearch,
+            vmux_ecs::search::State<search::CompletionSearch>,
+            vmux_ecs::search::State<search::HistorySearch>,
             prompt::PalettePrompt,
             branch::PaletteBranch,
             media::PaletteMedia,
