@@ -64,6 +64,7 @@ pub struct SessionDirectorySelection {
 #[vmux_api::contract(Default, Eq)]
 #[derive(bevy_ecs::prelude::Resource)]
 pub struct SessionRepositories {
+    pub ready: bool,
     pub sessions: Vec<SessionRepository>,
 }
 

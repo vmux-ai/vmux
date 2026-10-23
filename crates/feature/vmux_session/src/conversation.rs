@@ -20,6 +20,7 @@ pub(crate) struct ConversationPlugin;
 impl Plugin for ConversationPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SnapshotReceived>()
+            .add_message::<ConversationAppendReceived>()
             .add_message::<OperationReceived>()
             .add_message::<OperationCommitted>()
             .register_persisted::<Document>()
@@ -84,6 +85,12 @@ pub enum DocumentKind {
 
 #[derive(Message, Clone, Debug)]
 pub struct SnapshotReceived {
+    pub session: SessionId,
+    pub messages: Vec<Message>,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct ConversationAppendReceived {
     pub session: SessionId,
     pub messages: Vec<Message>,
 }
@@ -239,24 +246,33 @@ fn sync_agent(
 
 fn materialize(
     mut snapshots: MessageReader<SnapshotReceived>,
+    mut appended: MessageReader<ConversationAppendReceived>,
     mut received: MessageReader<OperationReceived>,
     mut committed: MessageReader<OperationCommitted>,
     sessions: Query<(Entity, &SessionId, Option<&Children>), With<Session>>,
     existing: Query<
-        (Entity, &EventIdentity, &CreatedAt, Has<SnapshotEvent>),
+        (
+            Entity,
+            &EventIdentity,
+            &MessageContent,
+            &CreatedAt,
+            Has<SnapshotEvent>,
+        ),
         (With<ConversationEvent>, With<MaterializedEvent>),
     >,
     mut materializer: EventMaterializer,
 ) {
-    if snapshots.is_empty() && received.is_empty() && committed.is_empty() {
+    if snapshots.is_empty() && appended.is_empty() && received.is_empty() && committed.is_empty() {
         return;
     }
     let snapshots = snapshots.read().collect::<Vec<_>>();
+    let appended = appended.read().collect::<Vec<_>>();
     let received = received.read().collect::<Vec<_>>();
     let committed = committed.read().collect::<Vec<_>>();
     let requested = snapshots
         .iter()
         .map(|snapshot| &snapshot.session)
+        .chain(appended.iter().map(|append| &append.session))
         .chain(received.iter().map(|operation| &operation.0.session_id))
         .chain(committed.iter().map(|operation| &operation.0.session_id))
         .cloned()
@@ -268,6 +284,8 @@ fn materialize(
         entity_keys: HashMap::new(),
         timestamps: HashMap::new(),
         snapshot_events: HashMap::new(),
+        latest_sequences: HashMap::new(),
+        latest_users: HashMap::new(),
     };
     for (session, id, children) in &sessions {
         if !requested.contains(id) {
@@ -275,7 +293,8 @@ fn materialize(
         }
         index.sessions.insert(id.clone(), session);
         for child in children.into_iter().flat_map(|children| children.iter()) {
-            let Ok((entity, identity, timestamp, from_snapshot)) = existing.get(child) else {
+            let Ok((entity, identity, message, timestamp, from_snapshot)) = existing.get(child)
+            else {
                 continue;
             };
             index
@@ -289,6 +308,7 @@ fn materialize(
                 (identity.event_id.clone(), identity.client_op_id.clone()),
             );
             index.timestamps.insert(entity, *timestamp);
+            index.record_sequence(session, identity, &message.0);
             if from_snapshot {
                 index.snapshot_events.entry(session).or_default().insert(
                     identity.event_id.clone(),
@@ -321,6 +341,9 @@ fn materialize(
             materializer.commands.entity(entity).despawn();
         }
     }
+    for request in appended {
+        materializer.append(&mut index, &request.session, &request.messages);
+    }
     for operation in received {
         materializer.apply(
             &mut index,
@@ -346,6 +369,24 @@ struct EventIndex {
     entity_keys: HashMap<Entity, (EventId, Option<ClientOpId>)>,
     timestamps: HashMap<Entity, CreatedAt>,
     snapshot_events: HashMap<Entity, HashMap<EventId, (Entity, Option<ClientOpId>)>>,
+    latest_sequences: HashMap<Entity, u64>,
+    latest_users: HashMap<Entity, (u64, EventId)>,
+}
+
+impl EventIndex {
+    fn record_sequence(&mut self, session: Entity, identity: &EventIdentity, message: &Message) {
+        let sequence = self.latest_sequences.entry(session).or_default();
+        *sequence = (*sequence).max(identity.sequence);
+        if matches!(message, Message::User { .. })
+            && self
+                .latest_users
+                .get(&session)
+                .is_none_or(|(latest, _)| *latest <= identity.sequence)
+        {
+            self.latest_users
+                .insert(session, (identity.sequence, identity.event_id.clone()));
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -360,6 +401,51 @@ struct EventMaterializer<'w, 's> {
 }
 
 impl EventMaterializer<'_, '_> {
+    fn append(&mut self, index: &mut EventIndex, session_id: &SessionId, messages: &[Message]) {
+        let Some(&session) = index.sessions.get(session_id) else {
+            return;
+        };
+        let mut sequence = index
+            .latest_sequences
+            .get(&session)
+            .copied()
+            .unwrap_or_default();
+        let mut reply_to = index
+            .latest_users
+            .get(&session)
+            .map(|(_, event_id)| event_id.clone());
+        let created_at = vmux_ecs::UnixMillis::now().0.max(0) as u64;
+        for (offset, message) in messages.iter().enumerate() {
+            sequence = sequence.saturating_add(1);
+            let event_id =
+                EventId::new(format!("session:{}:event:{sequence}", session_id.as_str()));
+            let is_user = matches!(message, Message::User { .. });
+            let event = SerializedEvent {
+                event_id: event_id.clone(),
+                session_id: session_id.clone(),
+                actor_id: if is_user {
+                    MemberId::local(session_id)
+                } else {
+                    MemberId::agent(session_id)
+                },
+                client_op_id: None,
+                server_seq: sequence,
+                created_at_ms: created_at.saturating_add(offset as u64),
+                reply_to: if is_user { None } else { reply_to.clone() },
+                message: message.clone(),
+            };
+            self.apply(
+                index,
+                event,
+                MessageDelivery::Committed,
+                MaterializationSource::Snapshot,
+            );
+            if is_user {
+                reply_to = Some(event_id);
+            }
+        }
+    }
+
     fn apply(
         &mut self,
         index: &mut EventIndex,
@@ -425,6 +511,7 @@ impl EventMaterializer<'_, '_> {
         index
             .events
             .insert((session, event.event_id.clone()), entity);
+        index.record_sequence(session, &identity, &event.message);
         if let Some(client_op_id) = event.client_op_id.clone() {
             index.operations.insert((session, client_op_id), entity);
         }
@@ -613,6 +700,49 @@ mod tests {
             .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
             .unwrap();
         assert_eq!(transcript.messages, vec![Message::user("operation")]);
+    }
+
+    #[test]
+    fn append_preserves_the_snapshot_and_orders_new_messages() {
+        let mut app = App::new();
+        app.add_plugins(ConversationPlugin);
+        let session_id = SessionId("session-1".into());
+        let session = app.world_mut().spawn((Session, session_id.clone())).id();
+        app.world_mut()
+            .resource_mut::<Messages<SnapshotReceived>>()
+            .write(SnapshotReceived {
+                session: session_id.clone(),
+                messages: vec![Message::user("first")],
+            });
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<ConversationAppendReceived>>()
+            .write(ConversationAppendReceived {
+                session: session_id,
+                messages: vec![
+                    Message::Assistant {
+                        blocks: vec![AssistantBlock::Text("second".into())],
+                    },
+                    Message::user("third"),
+                ],
+            });
+
+        app.update();
+
+        let transcript = app
+            .world_mut()
+            .run_system_once(move |transcripts: Transcripts| transcripts.get(session))
+            .unwrap();
+        assert_eq!(
+            transcript.messages,
+            vec![
+                Message::user("first"),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("second".into())],
+                },
+                Message::user("third"),
+            ]
+        );
     }
 
     #[test]

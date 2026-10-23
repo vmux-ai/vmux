@@ -14,9 +14,10 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_optimistic_map, use_theme, use_ui_state};
 use vmux_ui::i18n::{translate, translate_humanized};
-use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
 
 use crate::event::{
     ChatOpenPage, SessionRepositories, SessionRepository, SessionsDescriptionUpdate,
@@ -627,6 +628,7 @@ fn SessionGroupContents(
                             key: "{session.id}",
                             view,
                             repository: repositories.get(&session.id),
+                            repository_ready: repositories.ready,
                             stage: stage.clone(),
                             session,
                         }
@@ -645,6 +647,7 @@ fn SessionItem(
     view: ManagerView,
     session: SessionSummary,
     repository: Option<SessionRepository>,
+    repository_ready: bool,
     stage: String,
 ) -> Element {
     let stages = use_context::<Memo<Vec<StageSummary>>>()();
@@ -654,9 +657,9 @@ fn SessionItem(
     rsx! {
         Collapse { leaving,
             if view == ManagerView::List {
-                SessionListItem { session, presentation, resume }
+                SessionListItem { session, presentation, resume, repository_ready }
             } else {
-                SessionBoardItem { session, presentation, resume }
+                SessionBoardItem { session, presentation, resume, repository_ready }
             }
         }
     }
@@ -667,6 +670,7 @@ fn SessionListItem(
     session: SessionSummary,
     presentation: SessionPresentation,
     resume: ResumeTarget,
+    repository_ready: bool,
 ) -> Element {
     let open_session = resume.clone();
     rsx! {
@@ -692,7 +696,10 @@ fn SessionListItem(
                 }
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
-                SessionContextView { context: presentation.context.clone() }
+                SessionContextView {
+                    context: presentation.context.clone(),
+                    loading: !repository_ready,
+                }
                 if presentation.runtime.visible {
                     MetadataPill {
                         dot: presentation.runtime.dot.to_string(),
@@ -718,6 +725,7 @@ fn SessionBoardItem(
     session: SessionSummary,
     presentation: SessionPresentation,
     resume: ResumeTarget,
+    repository_ready: bool,
 ) -> Element {
     let open_session = resume.clone();
     rsx! {
@@ -754,7 +762,10 @@ fn SessionBoardItem(
                 if presentation.runtime.visible {
                     MetadataPill { dot: presentation.runtime.dot.to_string(), label: runtime_label(&session.runtime) }
                 }
-                SessionContextView { context: presentation.context.clone() }
+                SessionContextView {
+                    context: presentation.context.clone(),
+                    loading: !repository_ready,
+                }
             }
             div { class: "mt-3 flex items-center gap-1.5 pt-1 text-[10px] text-muted-foreground/70",
                 time { class: "tabular-nums", "{presentation.updated}" }
@@ -978,10 +989,7 @@ fn SessionActions(
                         event.stop_propagation();
                         let _ = send(&ChatOpenPage { url: git_url.clone() });
                     },
-                    GitSymbolView {
-                        symbol: GitSymbol::Repository,
-                        class: "size-3.5".to_string(),
-                    }
+                    GitIconView { class: "size-3.5".to_string() }
                 }
             }
             if !archived {
@@ -1157,13 +1165,16 @@ fn StagePickerOption(
 }
 
 #[component]
-fn SessionContextView(context: SessionContext) -> Element {
+fn SessionContextView(context: SessionContext, loading: bool) -> Element {
     rsx! {
         div { class: "flex min-w-0 items-center gap-1.5",
-            if !context.project.is_empty() {
+            if loading {
+                Skeleton { class: "h-[18px] w-16 rounded-md bg-foreground/[0.055]" }
+                Skeleton { class: "h-[18px] w-12 rounded-md bg-foreground/[0.045]" }
+            } else if !context.project.is_empty() {
                 MetadataPill { label: context.project, icon: Some(LineIcon::Package) }
             }
-            if !context.branch.is_empty() {
+            if !loading && !context.branch.is_empty() {
                 MetadataPill { label: context.branch, icon: Some(LineIcon::GitBranch), mono: true }
             }
         }
@@ -1374,6 +1385,7 @@ mod tests {
             SessionFilter::Project("vmux".into()),
         ];
         let repositories = SessionRepositories {
+            ready: true,
             sessions: vec![SessionRepository {
                 id: "codex".into(),
                 project: "vmux".into(),

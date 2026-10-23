@@ -567,7 +567,10 @@ fn sync_repositories(
         };
         sessions.push(repository);
     }
-    let next = SessionRepositories { sessions };
+    let next = SessionRepositories {
+        ready: true,
+        sessions,
+    };
     if *repositories != next {
         *repositories = next;
     }

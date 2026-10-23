@@ -12,9 +12,9 @@ pub use catalog::{
 };
 #[cfg(host)]
 pub use conversation::{
-    ConversationEvent, Document, DocumentKind, EventIdentity, MaterializedEvent, Member,
-    MessageContent, MessageDelivery, OperationCommitted, OperationReceived, SnapshotReceived,
-    Transcript, Transcripts,
+    ConversationAppendReceived, ConversationEvent, Document, DocumentKind, EventIdentity,
+    MaterializedEvent, Member, MessageContent, MessageDelivery, OperationCommitted,
+    OperationReceived, SnapshotReceived, Transcript, Transcripts,
 };
 #[cfg(feature = "app")]
 pub use host::SessionPlugin;

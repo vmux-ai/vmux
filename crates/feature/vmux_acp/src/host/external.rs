@@ -13,9 +13,9 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
 use vmux_ecs::{CreatedAt, PageOpenRequest, PageOpenTarget};
 use vmux_session::{
-    AgentConversationTitle, AgentFamily, AgentId, CreateRequest, Created, ProviderCatalog,
-    ProviderKind, ProviderSession, ProviderSessionId, Route, Session, SessionId, SnapshotReceived,
-    TranscriptLoading, Transcripts,
+    AgentConversationTitle, AgentFamily, AgentId, ConversationAppendReceived, CreateRequest,
+    Created, ProviderCatalog, ProviderKind, ProviderSession, ProviderSessionId, Route, Session,
+    SessionId, SnapshotReceived, TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 
@@ -41,7 +41,9 @@ pub(super) fn add(app: &mut App) {
                 finish,
                 project,
                 associate,
-                queue_conversations,
+                request_conversation_refreshes,
+                queue_initial_conversations,
+                queue_conversation_refreshes,
                 finish_conversations,
             )
                 .chain(),
@@ -57,6 +59,13 @@ const PROVIDER_LINE_LIMIT: usize = 2 * 1024 * 1024;
 struct SourceSnapshot(HashMap<SourceKind, Vec<ProviderSession>>);
 
 impl SourceSnapshot {
+    fn get(&self, kind: &str, sid: &str) -> Option<&ProviderSession> {
+        self.0
+            .values()
+            .flatten()
+            .find(|session| session.kind == kind && session.sid == sid)
+    }
+
     fn association(
         &self,
         agent: &str,
@@ -193,10 +202,26 @@ struct ScanTask(Task<Vec<SourceRead>>);
 struct ConversationLoadPending;
 
 #[derive(Component)]
+struct ConversationRefreshRequested(i64);
+
+#[derive(Component)]
+struct ConversationRevision(i64);
+
+#[derive(Component)]
+struct ConversationCursor(u64);
+
+#[derive(Component)]
 struct ConversationLoadTask {
     session: Entity,
     sid: SessionId,
-    task: Task<Result<Vec<vmux_api::session::Message>, String>>,
+    revision: i64,
+    task: Task<Result<ConversationRead, String>>,
+}
+
+struct ConversationRead {
+    messages: Vec<vmux_api::session::Message>,
+    cursor: u64,
+    snapshot: bool,
 }
 
 struct ConversationSource {
@@ -214,11 +239,58 @@ impl ConversationSource {
         })
     }
 
-    fn read(self, paths: &SourcePaths) -> Result<Vec<vmux_api::session::Message>, String> {
+    fn read(
+        self,
+        paths: &SourcePaths,
+        cursor: Option<u64>,
+        known: Vec<vmux_api::session::Message>,
+    ) -> Result<ConversationRead, String> {
         match self.kind.as_str() {
-            "acp:codex" => codex::Reader::at(&paths.codex).conversation(&self.sid, self.created_at),
-            _ => Ok(Vec::new()),
+            "acp:codex" => {
+                let read = codex::Reader::at(&paths.codex).conversation(
+                    &self.sid,
+                    self.created_at,
+                    cursor,
+                )?;
+                let snapshot = cursor.is_none() && known.is_empty();
+                let messages = if read.tail && !known.is_empty() {
+                    KnownConversation(known).unseen(read.messages)
+                } else {
+                    read.messages
+                };
+                Ok(ConversationRead {
+                    messages,
+                    cursor: read.cursor,
+                    snapshot,
+                })
+            }
+            _ => Ok(ConversationRead {
+                messages: Vec::new(),
+                cursor: cursor.unwrap_or_default(),
+                snapshot: false,
+            }),
         }
+    }
+}
+
+struct KnownConversation(Vec<vmux_api::session::Message>);
+
+impl KnownConversation {
+    const LIMIT: usize = 512;
+
+    fn tail(messages: &[vmux_api::session::Message]) -> Vec<vmux_api::session::Message> {
+        let start = messages.len().saturating_sub(Self::LIMIT);
+        messages[start..].to_vec()
+    }
+
+    fn unseen(&self, incoming: Vec<vmux_api::session::Message>) -> Vec<vmux_api::session::Message> {
+        let limit = self.0.len().min(incoming.len());
+        for overlap in (1..=limit).rev() {
+            if self.0[self.0.len() - overlap..] == incoming[..overlap] {
+                return incoming[overlap..].to_vec();
+            }
+        }
+        incoming
     }
 }
 
@@ -727,8 +799,49 @@ fn associate(
     }
 }
 
-fn queue_conversations(
+fn request_conversation_refreshes(
+    snapshot: Res<SourceSnapshot>,
+    mut sessions: Query<
+        (
+            Entity,
+            &ProviderKind,
+            &ProviderSessionId,
+            &mut vmux_ecs::LastActivatedAt,
+            Option<&ConversationRevision>,
+            Option<&mut ConversationRefreshRequested>,
+        ),
+        With<Session>,
+    >,
+    mut commands: Commands,
+) {
+    if !snapshot.is_changed() {
+        return;
+    }
+    for (session, kind, provider_sid, mut activated_at, revision, requested) in &mut sessions {
+        let Some(source) = snapshot.get(&kind.0, &provider_sid.0) else {
+            continue;
+        };
+        if activated_at.0 < source.updated_at {
+            activated_at.0 = source.updated_at;
+        }
+        if ConversationSource::new(&kind.0, &provider_sid.0, source.created_at).is_none()
+            || revision.is_some_and(|revision| revision.0 >= source.updated_at)
+        {
+            continue;
+        }
+        if let Some(mut requested) = requested {
+            requested.0 = requested.0.max(source.updated_at);
+        } else {
+            commands
+                .entity(session)
+                .insert(ConversationRefreshRequested(source.updated_at));
+        }
+    }
+}
+
+fn queue_initial_conversations(
     paths: Single<&SourcePaths>,
+    snapshot: Res<SourceSnapshot>,
     sessions: Query<
         (
             Entity,
@@ -736,6 +849,8 @@ fn queue_conversations(
             &ProviderKind,
             &ProviderSessionId,
             &CreatedAt,
+            Option<&ConversationRefreshRequested>,
+            Option<&ConversationCursor>,
         ),
         (
             With<Session>,
@@ -747,27 +862,95 @@ fn queue_conversations(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (session, sid, kind, provider_sid, created_at) in &sessions {
+    for (session, sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
         if !transcripts.get(session).messages.is_empty() {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         }
         let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
+            commands.entity(session).remove::<TranscriptLoading>();
             continue;
         };
+        let revision = requested.map_or_else(
+            || {
+                snapshot
+                    .get(&kind.0, &provider_sid.0)
+                    .map_or(0, |source| source.updated_at)
+            },
+            |requested| requested.0,
+        );
+        let cursor = cursor.map(|cursor| cursor.0);
         let paths = paths.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = source.read(&paths);
+            let result = source.read(&paths, cursor, Vec::new());
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
             result
         });
-        commands.entity(session).insert(ConversationLoadPending);
+        commands
+            .entity(session)
+            .insert(ConversationLoadPending)
+            .remove::<ConversationRefreshRequested>();
         commands.spawn(ConversationLoadTask {
             session,
             sid: sid.clone(),
+            revision,
+            task,
+        });
+    }
+}
+
+fn queue_conversation_refreshes(
+    paths: Single<&SourcePaths>,
+    sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &ProviderKind,
+            &ProviderSessionId,
+            &CreatedAt,
+            &ConversationRefreshRequested,
+            Option<&ConversationCursor>,
+        ),
+        (
+            With<Session>,
+            Without<TranscriptLoading>,
+            Without<ConversationLoadPending>,
+        ),
+    >,
+    transcripts: Transcripts,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (session, sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
+        let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
+            commands
+                .entity(session)
+                .remove::<ConversationRefreshRequested>();
+            continue;
+        };
+        let revision = requested.0;
+        let cursor = cursor.map(|cursor| cursor.0);
+        let known = KnownConversation::tail(&transcripts.get(session).messages);
+        let paths = paths.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = source.read(&paths, cursor, known);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(session)
+            .insert(ConversationLoadPending)
+            .remove::<ConversationRefreshRequested>();
+        commands.spawn(ConversationLoadTask {
+            session,
+            sid: sid.clone(),
+            revision,
             task,
         });
     }
@@ -775,35 +958,41 @@ fn queue_conversations(
 
 fn finish_conversations(
     mut tasks: Query<(Entity, &mut ConversationLoadTask)>,
-    loading: Query<(), With<TranscriptLoading>>,
-    transcripts: Transcripts,
     mut snapshots: MessageWriter<SnapshotReceived>,
+    mut appended: MessageWriter<ConversationAppendReceived>,
     mut commands: Commands,
 ) {
     for (task_entity, mut task) in &mut tasks {
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        let still_loading = loading.contains(task.session);
-        let conversation_empty = transcripts.get(task.session).messages.is_empty();
-        if still_loading && conversation_empty {
-            match result {
-                Ok(messages) if !messages.is_empty() => {
-                    snapshots.write(SnapshotReceived {
-                        session: task.sid.clone(),
-                        messages,
-                    });
-                    commands.entity(task.session).remove::<TranscriptLoading>();
+        match result {
+            Ok(read) => {
+                if !read.messages.is_empty() {
+                    if read.snapshot {
+                        snapshots.write(SnapshotReceived {
+                            session: task.sid.clone(),
+                            messages: read.messages,
+                        });
+                    } else {
+                        appended.write(ConversationAppendReceived {
+                            session: task.sid.clone(),
+                            messages: read.messages,
+                        });
+                    }
                 }
-                Ok(_) => {}
-                Err(error) => {
-                    bevy::log::warn!("failed to read provider conversation: {error}");
-                }
+                commands
+                    .entity(task.session)
+                    .insert(ConversationCursor(read.cursor));
+            }
+            Err(error) => {
+                bevy::log::warn!("failed to read provider conversation: {error}");
             }
         }
         commands
             .entity(task.session)
-            .remove::<ConversationLoadPending>();
+            .insert(ConversationRevision(task.revision))
+            .remove::<(ConversationLoadPending, TranscriptLoading)>();
         commands.entity(task_entity).despawn();
     }
 }
@@ -1225,5 +1414,86 @@ mod tests {
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].name, "new");
+    }
+
+    #[test]
+    fn known_conversation_removes_only_the_shared_boundary() {
+        let known = KnownConversation(vec![
+            vmux_api::session::Message::user("first"),
+            vmux_api::session::Message::Assistant {
+                blocks: vec![vmux_api::session::AssistantBlock::Text("second".into())],
+            },
+        ]);
+        let incoming = vec![
+            vmux_api::session::Message::Assistant {
+                blocks: vec![vmux_api::session::AssistantBlock::Text("second".into())],
+            },
+            vmux_api::session::Message::user("third"),
+        ];
+
+        assert_eq!(
+            known.unseen(incoming),
+            vec![vmux_api::session::Message::user("third")]
+        );
+    }
+
+    #[test]
+    fn newer_provider_activity_requests_an_imported_conversation_refresh() {
+        let mut app = App::new();
+        app.init_resource::<SourceSnapshot>()
+            .add_systems(Update, request_conversation_refreshes);
+        app.world_mut()
+            .resource_mut::<SourceSnapshot>()
+            .0
+            .entry(SourceKind::Codex)
+            .or_default()
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                created_at: 100,
+                updated_at: 300,
+                ..Default::default()
+            });
+        let stale = app
+            .world_mut()
+            .spawn((
+                Session,
+                ProviderKind("acp:codex".into()),
+                ProviderSessionId("provider-session".into()),
+                vmux_ecs::LastActivatedAt(200),
+                ConversationRevision(200),
+            ))
+            .id();
+        let current = app
+            .world_mut()
+            .spawn((
+                Session,
+                ProviderKind("acp:codex".into()),
+                ProviderSessionId("provider-session".into()),
+                vmux_ecs::LastActivatedAt(300),
+                ConversationRevision(300),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<ConversationRefreshRequested>(stale)
+                .map(|requested| requested.0),
+            Some(300)
+        );
+        assert!(
+            app.world()
+                .get::<ConversationRefreshRequested>(current)
+                .is_none()
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_ecs::LastActivatedAt>(stale)
+                .unwrap()
+                .0,
+            300
+        );
     }
 }

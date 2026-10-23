@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, Duration, Utc};
@@ -8,7 +8,10 @@ use serde::Deserialize;
 use vmux_api::session::{AssistantBlock, Message};
 use vmux_session::ProviderSession;
 
-use super::{BoundedLines, PromptText, Reader as ProviderReader, Timestamp};
+use super::{
+    BoundedLines, PROVIDER_LINE_LIMIT, PROVIDER_READ_LIMIT, PromptText, Reader as ProviderReader,
+    Timestamp,
+};
 
 pub(super) struct Reader {
     index: PathBuf,
@@ -16,10 +19,18 @@ pub(super) struct Reader {
     previous: HashMap<String, ProviderSession>,
 }
 
+pub(super) struct ConversationRead {
+    pub(super) messages: Vec<Message>,
+    pub(super) cursor: u64,
+    pub(super) tail: bool,
+}
+
 impl Reader {
     const MAX_SESSION_DEPTH: usize = 8;
     const MAX_SESSION_ENTRIES: usize = 100_000;
     const MAX_SESSION_FILES: usize = 50_000;
+    const CONVERSATION_TAIL_BYTES: u64 = 16 * 1024 * 1024;
+    const CONVERSATION_TAIL_MESSAGES: usize = 512;
 
     pub(super) fn at(root: &Path) -> Self {
         Self {
@@ -36,22 +47,90 @@ impl Reader {
         self
     }
 
-    pub(super) fn conversation(&self, sid: &str, created_at: i64) -> Result<Vec<Message>, String> {
+    pub(super) fn conversation(
+        &self,
+        sid: &str,
+        created_at: i64,
+        cursor: Option<u64>,
+    ) -> Result<ConversationRead, String> {
         let Some(path) = self.rollout(sid, created_at)? else {
-            return Ok(Vec::new());
+            return Ok(ConversationRead {
+                messages: Vec::new(),
+                cursor: cursor.unwrap_or_default(),
+                tail: cursor.is_none(),
+            });
         };
-        let file = File::open(&path).map_err(|error| error.to_string())?;
-        let mut messages = Vec::new();
-        for line in BoundedLines::new(BufReader::new(file)) {
+        Self::conversation_file(&path, cursor, Self::CONVERSATION_TAIL_BYTES)
+    }
+
+    fn conversation_file(
+        path: &Path,
+        cursor: Option<u64>,
+        tail_bytes: u64,
+    ) -> Result<ConversationRead, String> {
+        let mut file = File::open(path).map_err(|error| error.to_string())?;
+        let physical_length = file.metadata().map_err(|error| error.to_string())?.len();
+        let length = Self::complete_length(&mut file, physical_length)?;
+        let incremental = cursor.filter(|cursor| {
+            *cursor <= length && length.saturating_sub(*cursor) <= PROVIDER_READ_LIMIT as u64
+        });
+        let tail = incremental.is_none();
+        let start = incremental.unwrap_or_else(|| length.saturating_sub(tail_bytes));
+        file.seek(SeekFrom::Start(start))
+            .map_err(|error| error.to_string())?;
+        let remaining = length.saturating_sub(start);
+        let mut reader = BufReader::new(file.take(remaining));
+        if tail && start > 0 {
+            reader
+                .skip_until(b'\n')
+                .map_err(|error| error.to_string())?;
+        }
+        let mut messages = VecDeque::new();
+        for line in BoundedLines::new(reader) {
             let Ok(line) = serde_json::from_str::<CodexConversationLine>(&line) else {
                 continue;
             };
             let Some(message) = line.message() else {
                 continue;
             };
-            messages.push(message);
+            if messages.len() == Self::CONVERSATION_TAIL_MESSAGES {
+                messages.pop_front();
+            }
+            messages.push_back(message);
         }
-        Ok(messages)
+        Ok(ConversationRead {
+            messages: messages.into_iter().collect(),
+            cursor: length,
+            tail,
+        })
+    }
+
+    fn complete_length(file: &mut File, length: u64) -> Result<u64, String> {
+        if length == 0 {
+            return Ok(0);
+        }
+        file.seek(SeekFrom::Start(length - 1))
+            .map_err(|error| error.to_string())?;
+        let mut last = [0];
+        file.read_exact(&mut last)
+            .map_err(|error| error.to_string())?;
+        if last[0] == b'\n' {
+            return Ok(length);
+        }
+        let search_start = length.saturating_sub(PROVIDER_LINE_LIMIT as u64 + 1);
+        file.seek(SeekFrom::Start(search_start))
+            .map_err(|error| error.to_string())?;
+        let mut trailing = Vec::new();
+        file.take(length - search_start)
+            .read_to_end(&mut trailing)
+            .map_err(|error| error.to_string())?;
+        if let Some(offset) = trailing.iter().rposition(|byte| *byte == b'\n') {
+            return Ok(search_start + offset as u64 + 1);
+        }
+        if search_start == 0 {
+            return Ok(0);
+        }
+        Ok(length)
     }
 
     fn rollout(&self, sid: &str, created_at: i64) -> Result<Option<PathBuf>, String> {
@@ -536,8 +615,9 @@ mod tests {
         );
 
         let messages = Reader::at(fixture.path())
-            .conversation(sid, Timestamp::parse("2026-10-18T16:16:34.454Z"))
-            .unwrap();
+            .conversation(sid, Timestamp::parse("2026-10-18T16:16:34.454Z"), None)
+            .unwrap()
+            .messages;
 
         assert_eq!(
             messages,
@@ -548,6 +628,58 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn codex_conversation_reads_only_the_bounded_file_tail() {
+        let fixture = Fixture::new();
+        let path = "sessions/rollout.jsonl";
+        fixture.write(
+            path,
+            &format!(
+                "{}\n{}\n{}\n",
+                "x".repeat(256),
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"old"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"latest"}]}}"#,
+            ),
+        );
+
+        let read = Reader::conversation_file(&fixture.path().join(path), None, 180).unwrap();
+
+        assert!(read.tail);
+        assert_eq!(
+            read.messages,
+            vec![Message::Assistant {
+                blocks: vec![AssistantBlock::Text("latest".into())],
+            }]
+        );
+    }
+
+    #[test]
+    fn codex_conversation_resumes_after_the_last_complete_record() {
+        let fixture = Fixture::new();
+        let path = fixture.path().join("sessions/rollout.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let first = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}"#;
+        let second = r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second"}]}}"#;
+        std::fs::write(&path, format!("{first}\n{}", &second[..second.len() / 2])).unwrap();
+
+        let initial = Reader::conversation_file(&path, None, 1024).unwrap();
+
+        assert_eq!(initial.messages, vec![Message::user("first")]);
+        assert_eq!(initial.cursor, first.len() as u64 + 1);
+        std::fs::write(&path, format!("{first}\n{second}\n")).unwrap();
+
+        let appended = Reader::conversation_file(&path, Some(initial.cursor), 1024).unwrap();
+
+        assert!(!appended.tail);
+        assert_eq!(
+            appended.messages,
+            vec![Message::Assistant {
+                blocks: vec![AssistantBlock::Text("second".into())],
+            }]
+        );
+        assert_eq!(appended.cursor, std::fs::metadata(path).unwrap().len());
     }
 
     #[test]
