@@ -62,7 +62,7 @@ fn handle_registered_page_open(
         if handled_stacks.insert((task.stack, page.url)) {
             commands.entity(task.stack).despawn_children();
             commands.entity(task.stack).insert(PageMetadata {
-                url: page.url.to_string(),
+                url: task.url.clone(),
                 title: page.title.to_string(),
                 ..default()
             });
@@ -81,7 +81,7 @@ fn handle_registered_page_open(
                 });
             } else {
                 let webview = commands
-                    .spawn(crate::cef::Browser::hosted_page(page.url, page.title))
+                    .spawn(crate::cef::Browser::hosted_page(&task.url, page.title))
                     .id();
                 commands
                     .entity(webview)
@@ -228,6 +228,10 @@ mod tests {
             app.world().get::<PageMetadata>(spare).unwrap().url,
             "vmux://history/2026-10-23"
         );
+        assert_eq!(
+            app.world().get::<PageMetadata>(stack).unwrap().url,
+            "vmux://history/2026-10-23"
+        );
         assert_eq!(app.world().resource::<ReadyEvents>().0, [spare]);
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
     }
@@ -249,7 +253,7 @@ mod tests {
             .spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: "vmux://history/".to_string(),
+                url: "vmux://history/2026-10-23".to_string(),
                 request_id: None,
             })
             .id();
@@ -259,11 +263,12 @@ mod tests {
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
         let pages = app
             .world_mut()
-            .query_filtered::<&ChildOf, (With<Browser>, With<HostsPage>)>()
+            .query_filtered::<(&ChildOf, &PageMetadata), (With<Browser>, With<HostsPage>)>()
             .iter(app.world())
-            .filter(|child| child.parent() == stack)
-            .count();
-        assert_eq!(pages, 1);
+            .filter(|(child, _)| child.parent() == stack)
+            .map(|(_, page)| page.url.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(pages, ["vmux://history/2026-10-23"]);
     }
 
     #[test]

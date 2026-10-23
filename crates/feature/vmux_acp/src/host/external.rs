@@ -11,10 +11,11 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
-use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{CreatedAt, PageOpenRequest, PageOpenTarget};
 use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, CreateRequest, Created, ProviderCatalog,
-    ProviderSession, Route, Session, SessionId,
+    ProviderKind, ProviderSession, ProviderSessionId, Route, Session, SessionId, SnapshotReceived,
+    TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 
@@ -32,7 +33,19 @@ pub(super) fn add(app: &mut App) {
         .add_observer(open)
         .add_observer(attach)
         .add_systems(Startup, start)
-        .add_systems(Update, (watch, scan, finish, project).chain());
+        .add_systems(
+            Update,
+            (
+                watch,
+                scan,
+                finish,
+                project,
+                associate,
+                queue_conversations,
+                finish_conversations,
+            )
+                .chain(),
+        );
 }
 
 const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
@@ -42,6 +55,43 @@ const PROVIDER_LINE_LIMIT: usize = 2 * 1024 * 1024;
 
 #[derive(Resource, Default)]
 struct SourceSnapshot(HashMap<SourceKind, Vec<ProviderSession>>);
+
+impl SourceSnapshot {
+    fn association(
+        &self,
+        agent: &str,
+        resume: &str,
+        name: &str,
+        cwd: &str,
+        created_at: i64,
+    ) -> Option<&ProviderSession> {
+        let family = AgentFamily::of(agent);
+        if let Some(session) = self
+            .0
+            .values()
+            .flatten()
+            .find(|session| AgentFamily::of(&session.agent) == family && session.sid == resume)
+        {
+            return Some(session);
+        }
+        let mut fallback = None;
+        let mut matches = 0;
+        for session in self.0.values().flatten() {
+            if AgentFamily::of(&session.agent) != family
+                || session.cwd != cwd
+                || session.created_at != created_at
+            {
+                continue;
+            }
+            if session.name == name || session.conversation_title == name {
+                return Some(session);
+            }
+            matches += 1;
+            fallback = Some(session);
+        }
+        if matches == 1 { fallback } else { None }
+    }
+}
 
 #[derive(Resource, Default)]
 struct PendingImports {
@@ -138,6 +188,39 @@ struct ScanRequested(HashSet<SourceKind>);
 
 #[derive(Component)]
 struct ScanTask(Task<Vec<SourceRead>>);
+
+#[derive(Component)]
+struct ConversationLoadPending;
+
+#[derive(Component)]
+struct ConversationLoadTask {
+    session: Entity,
+    sid: SessionId,
+    task: Task<Result<Vec<vmux_api::session::Message>, String>>,
+}
+
+struct ConversationSource {
+    kind: String,
+    sid: String,
+    created_at: i64,
+}
+
+impl ConversationSource {
+    fn new(kind: &str, sid: &str, created_at: i64) -> Option<Self> {
+        (kind == "acp:codex").then(|| Self {
+            kind: kind.to_string(),
+            sid: sid.to_string(),
+            created_at,
+        })
+    }
+
+    fn read(self, paths: &SourcePaths) -> Result<Vec<vmux_api::session::Message>, String> {
+        match self.kind.as_str() {
+            "acp:codex" => codex::Reader::at(&paths.codex).conversation(&self.sid, self.created_at),
+            _ => Ok(Vec::new()),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum SourceKind {
@@ -553,8 +636,27 @@ fn finish(
 
 fn project(
     snapshot: Res<SourceSnapshot>,
-    imported: Query<(&AgentId, &AcpSessionId), With<Session>>,
-    changed: Query<(), (With<Session>, Or<(Changed<AgentId>, Changed<AcpSessionId>)>)>,
+    imported: Query<
+        (
+            &AgentId,
+            Option<&ProviderKind>,
+            Option<&ProviderSessionId>,
+            Option<&AcpSessionId>,
+        ),
+        With<Session>,
+    >,
+    changed: Query<
+        (),
+        (
+            With<Session>,
+            Or<(
+                Changed<AgentId>,
+                Changed<ProviderKind>,
+                Changed<ProviderSessionId>,
+                Changed<AcpSessionId>,
+            )>,
+        ),
+    >,
     mut removed: RemovedComponents<AcpSessionId>,
     mut catalog: ResMut<ProviderCatalog>,
 ) {
@@ -564,7 +666,16 @@ fn project(
     }
     let imported = imported
         .iter()
-        .map(|(agent, sid)| (AgentFamily::of(&agent.0), sid.0.clone()))
+        .filter_map(|(agent, kind, provider_sid, resume)| {
+            let sid = provider_sid
+                .map(|sid| sid.0.clone())
+                .or_else(|| resume.map(|sid| sid.0.clone()))?;
+            let family = kind
+                .and_then(|kind| kind.0.strip_prefix("acp:"))
+                .map(AgentFamily::of)
+                .unwrap_or_else(|| AgentFamily::of(&agent.0));
+            Some((family, sid))
+        })
         .collect::<HashSet<_>>();
     let mut sessions = Vec::new();
     for source in SourceKind::ALL {
@@ -581,6 +692,119 @@ fn project(
     sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
     if catalog.sessions != sessions {
         catalog.sessions = sessions;
+    }
+}
+
+fn associate(
+    snapshot: Res<SourceSnapshot>,
+    sessions: Query<
+        (
+            Entity,
+            &AgentId,
+            &AcpSessionId,
+            &Name,
+            &vmux_ecs::Cwd,
+            &CreatedAt,
+        ),
+        (With<Session>, Without<ProviderSessionId>),
+    >,
+    mut commands: Commands,
+) {
+    if snapshot.0.is_empty() {
+        return;
+    }
+    for (entity, agent, resume, name, cwd, created_at) in &sessions {
+        let cwd = cwd.0.to_string_lossy();
+        let Some(source) =
+            snapshot.association(&agent.0, &resume.0, name.as_str(), &cwd, created_at.0)
+        else {
+            continue;
+        };
+        commands.entity(entity).insert((
+            ProviderKind(source.kind.clone()),
+            ProviderSessionId(source.sid.clone()),
+        ));
+    }
+}
+
+fn queue_conversations(
+    paths: Single<&SourcePaths>,
+    sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &ProviderKind,
+            &ProviderSessionId,
+            &CreatedAt,
+        ),
+        (
+            With<Session>,
+            With<TranscriptLoading>,
+            Without<ConversationLoadPending>,
+        ),
+    >,
+    transcripts: Transcripts,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (session, sid, kind, provider_sid, created_at) in &sessions {
+        if !transcripts.get(session).messages.is_empty() {
+            commands.entity(session).remove::<TranscriptLoading>();
+            continue;
+        }
+        let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
+            continue;
+        };
+        let paths = paths.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = source.read(&paths);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(session).insert(ConversationLoadPending);
+        commands.spawn(ConversationLoadTask {
+            session,
+            sid: sid.clone(),
+            task,
+        });
+    }
+}
+
+fn finish_conversations(
+    mut tasks: Query<(Entity, &mut ConversationLoadTask)>,
+    loading: Query<(), With<TranscriptLoading>>,
+    transcripts: Transcripts,
+    mut snapshots: MessageWriter<SnapshotReceived>,
+    mut commands: Commands,
+) {
+    for (task_entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        let still_loading = loading.contains(task.session);
+        let conversation_empty = transcripts.get(task.session).messages.is_empty();
+        if still_loading && conversation_empty {
+            match result {
+                Ok(messages) if !messages.is_empty() => {
+                    snapshots.write(SnapshotReceived {
+                        session: task.sid.clone(),
+                        messages,
+                    });
+                    commands.entity(task.session).remove::<TranscriptLoading>();
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    bevy::log::warn!("failed to read provider conversation: {error}");
+                }
+            }
+        }
+        commands
+            .entity(task.session)
+            .remove::<ConversationLoadPending>();
+        commands.entity(task_entity).despawn();
     }
 }
 
@@ -668,7 +892,9 @@ fn attach(
     };
     commands.entity(event.entity).insert((
         import.agent,
-        AcpSessionId(import.source.sid),
+        AcpSessionId(import.source.sid.clone()),
+        ProviderKind(import.source.kind),
+        ProviderSessionId(import.source.sid),
         AgentConversationTitle(title),
     ));
     opens.write(PageOpenRequest {
@@ -874,6 +1100,14 @@ mod tests {
             app.world().get::<AcpSessionId>(session),
             Some(&AcpSessionId("provider-session".into()))
         );
+        assert_eq!(
+            app.world().get::<ProviderKind>(session),
+            Some(&ProviderKind("acp:codex".into()))
+        );
+        assert_eq!(
+            app.world().get::<ProviderSessionId>(session),
+            Some(&ProviderSessionId("provider-session".into()))
+        );
         let opened = app
             .world_mut()
             .resource_mut::<Messages<PageOpenRequest>>()
@@ -885,6 +1119,49 @@ mod tests {
             opened[0].target,
             PageOpenTarget::Stack(entity) if entity == stack
         ));
+    }
+
+    #[test]
+    fn provider_association_survives_a_changed_acp_resume_identity() {
+        let mut app = App::new();
+        app.init_resource::<SourceSnapshot>()
+            .add_systems(Update, associate);
+        app.world_mut()
+            .resource_mut::<SourceSnapshot>()
+            .0
+            .entry(SourceKind::Codex)
+            .or_default()
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "source-session".into(),
+                agent: "codex".into(),
+                name: "Review pull request".into(),
+                cwd: "/work/dashboard".into(),
+                created_at: 100,
+                ..Default::default()
+            });
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                AgentId("codex".into()),
+                AcpSessionId("replacement-session".into()),
+                Name::new("Review pull request"),
+                vmux_ecs::Cwd(PathBuf::from("/work/dashboard")),
+                CreatedAt(100),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<ProviderKind>(session),
+            Some(&ProviderKind("acp:codex".into()))
+        );
+        assert_eq!(
+            app.world().get::<ProviderSessionId>(session),
+            Some(&ProviderSessionId("source-session".into()))
+        );
     }
 
     #[test]

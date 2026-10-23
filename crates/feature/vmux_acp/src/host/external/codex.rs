@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, Duration, Utc};
 use serde::Deserialize;
+use vmux_api::session::{AssistantBlock, Message};
 use vmux_session::ProviderSession;
 
 use super::{BoundedLines, PromptText, Reader as ProviderReader, Timestamp};
@@ -33,6 +34,74 @@ impl Reader {
             self.previous.insert(session.sid.clone(), session.clone());
         }
         self
+    }
+
+    pub(super) fn conversation(&self, sid: &str, created_at: i64) -> Result<Vec<Message>, String> {
+        let Some(path) = self.rollout(sid, created_at)? else {
+            return Ok(Vec::new());
+        };
+        let file = File::open(&path).map_err(|error| error.to_string())?;
+        let mut messages = Vec::new();
+        for line in BoundedLines::new(BufReader::new(file)) {
+            let Ok(line) = serde_json::from_str::<CodexConversationLine>(&line) else {
+                continue;
+            };
+            let Some(message) = line.message() else {
+                continue;
+            };
+            messages.push(message);
+        }
+        Ok(messages)
+    }
+
+    fn rollout(&self, sid: &str, created_at: i64) -> Result<Option<PathBuf>, String> {
+        let Some(created_at) = chrono::DateTime::<Utc>::from_timestamp_millis(created_at) else {
+            return Ok(None);
+        };
+        let suffix = format!("-{sid}.jsonl");
+        for offset in [-1, 0, 1] {
+            let date = created_at.date_naive() + Duration::days(offset);
+            let directory = self
+                .sessions
+                .join(format!("{:04}", date.year()))
+                .join(format!("{:02}", date.month()))
+                .join(format!("{:02}", date.day()));
+            let metadata = match std::fs::symlink_metadata(&directory) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.to_string()),
+            };
+            if metadata.file_type().is_symlink() {
+                return Err("Codex rollout directory is a symlink".to_string());
+            }
+            let entries = std::fs::read_dir(directory).map_err(|error| error.to_string())?;
+            for entry in entries {
+                let entry = entry.map_err(|error| error.to_string())?;
+                let kind = entry.file_type().map_err(|error| error.to_string())?;
+                if !kind.is_file() || kind.is_symlink() {
+                    continue;
+                }
+                let path = entry.path();
+                let matches = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.ends_with(&suffix));
+                if !matches {
+                    continue;
+                }
+                let file = File::open(&path).map_err(|error| error.to_string())?;
+                let Some(line) = BoundedLines::new(BufReader::new(file)).next() else {
+                    continue;
+                };
+                let Ok(meta) = serde_json::from_str::<CodexMetaLine>(&line) else {
+                    continue;
+                };
+                if meta.payload.session_id == sid {
+                    return Ok(Some(path));
+                }
+            }
+        }
+        Ok(None)
     }
 
     fn indexed(&self) -> Result<HashMap<String, CodexIndexed>, String> {
@@ -347,6 +416,61 @@ struct CodexMeta {
     updated_at: i64,
 }
 
+#[derive(Deserialize)]
+struct CodexConversationLine {
+    #[serde(rename = "type")]
+    kind: String,
+    payload: CodexConversationPayload,
+}
+
+impl CodexConversationLine {
+    fn message(self) -> Option<Message> {
+        if self.kind != "response_item" || self.payload.kind != "message" {
+            return None;
+        }
+        let expected = match self.payload.role.as_str() {
+            "user" => "input_text",
+            "assistant" => "output_text",
+            _ => return None,
+        };
+        let mut parts = Vec::new();
+        for content in self.payload.content {
+            if content.kind == expected && !content.text.trim().is_empty() {
+                parts.push(content.text);
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        let text = parts.join("\n");
+        match self.payload.role.as_str() {
+            "user" => Some(Message::user(text)),
+            "assistant" => Some(Message::Assistant {
+                blocks: vec![AssistantBlock::Text(text)],
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CodexConversationPayload {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    role: String,
+    #[serde(default)]
+    content: Vec<CodexConversationContent>,
+}
+
+#[derive(Deserialize)]
+struct CodexConversationContent {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    text: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +519,35 @@ mod tests {
         assert_eq!(sessions[0].sid, "01a14fcc-f46a-7c12-b000-779be98d72ae");
         assert_eq!(sessions[0].cwd, "/work/vmux");
         assert_eq!(sessions[0].name, "Casual greeting");
+    }
+
+    #[test]
+    fn codex_reader_loads_visible_conversation_without_starting_the_agent() {
+        let fixture = Fixture::new();
+        let sid = "01a14fcc-f46a-7c12-b000-779be98d72ae";
+        fixture.write(
+            "sessions/2026/10/18/rollout-2026-10-18T18-16-34-01a14fcc-f46a-7c12-b000-779be98d72ae.jsonl",
+            r#"{"type":"session_meta","payload":{"session_id":"01a14fcc-f46a-7c12-b000-779be98d72ae","timestamp":"2026-10-18T16:16:34.454Z","cwd":"/work/vmux"}}
+{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"hidden"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix session loading"}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done"}]}}
+{"type":"custom_tool_call_output","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hidden"}]}}
+"#,
+        );
+
+        let messages = Reader::at(fixture.path())
+            .conversation(sid, Timestamp::parse("2026-10-18T16:16:34.454Z"))
+            .unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::user("Fix session loading"),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("Done".into())],
+                },
+            ]
+        );
     }
 
     #[test]

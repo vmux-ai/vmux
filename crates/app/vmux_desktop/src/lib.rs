@@ -60,6 +60,7 @@ impl Plugin for VmuxPlugin {
                 .set(bevy::log::LogPlugin {
                     filter: "bevy_camera_controller=warn".into(),
                     custom_layer: crate::log_forward::file_log_layer,
+                    fmt_layer: crate::log_forward::stderr_log_layer,
                     ..default()
                 }),
             vmux_app::VmuxPlugin::builder().desktop().build(),
