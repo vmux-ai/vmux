@@ -80,7 +80,15 @@ pub struct HostedPagePlugin;
 
 impl Plugin for HostedPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, open.in_set(PageOpenSet::HandleKnownPages))
+        if !app.is_plugin_added::<vmux_ecs::page::PagePlugin>() {
+            app.add_plugins(vmux_ecs::page::PagePlugin);
+        }
+        app.add_message::<PageOpenRequest>()
+            .add_systems(
+                Update,
+                open.in_set(PageOpenSet::HandleKnownPages)
+                    .after(PageOpenSet::ResolveTarget),
+            )
             .add_systems(Update, open_traversed_history.in_set(HostHistorySet::Apply))
             .add_systems(Update, record_history.in_set(HostHistorySet::Record));
     }
