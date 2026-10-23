@@ -562,19 +562,6 @@ struct PendingRepoRoot {
 #[derive(Component)]
 struct RepoRootTask(vmux_git::GitTask<Option<String>>);
 
-fn remember_project(
-    settings: &mut AppSettings,
-    saves: &mut MessageWriter<SettingsSaveRequest>,
-    space_id: &str,
-    project: SpaceProject,
-) -> bool {
-    if settings.remember_space_project(space_id, project) {
-        saves.write(SettingsSaveRequest);
-        return true;
-    }
-    false
-}
-
 fn remember(
     bound: Query<(
         Entity,
@@ -643,12 +630,11 @@ fn remember(
                 }
             }
         };
-        if remember_project(
-            settings.bypass_change_detection(),
-            &mut saves,
-            &space_id,
-            project,
-        ) {
+        if settings
+            .bypass_change_detection()
+            .remember_space_project(&space_id, project)
+        {
+            saves.write(SettingsSaveRequest);
             settings.set_changed();
         }
     }
@@ -700,12 +686,11 @@ fn finish_repo_root_resolutions(
                 Some(root) => SpaceProject::checked_out(&root, &pending.dir),
                 None => SpaceProject::at(&pending.dir),
             };
-            if remember_project(
-                settings.bypass_change_detection(),
-                &mut saves,
-                &pending.space_id,
-                project,
-            ) {
+            if settings
+                .bypass_change_detection()
+                .remember_space_project(&pending.space_id, project)
+            {
+                saves.write(SettingsSaveRequest);
                 settings.set_changed();
             }
         }

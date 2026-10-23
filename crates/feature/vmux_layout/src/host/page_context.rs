@@ -85,46 +85,87 @@ impl ProjectActivationOutcome {
             },
         }
     }
+}
 
-    fn publish(
-        self,
-        webview: Entity,
-        tab: Option<Entity>,
-        child_of: &Query<&ChildOf>,
-        pages: &Query<(Entity, &PageMetadata)>,
-        commands: &mut Commands,
-    ) {
+#[derive(bevy::ecs::system::SystemParam)]
+struct ProjectActivationContext<'w, 's> {
+    tabs: Query<'w, 's, &'static mut Tab>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    pages: Query<'w, 's, (Entity, &'static PageMetadata)>,
+    commands: Commands<'w, 's>,
+}
+
+impl ProjectActivationContext<'_, '_> {
+    fn publish(&mut self, outcome: ProjectActivationOutcome, webview: Entity, tab: Option<Entity>) {
         let event = GitWorkspaceChanged {
-            path: self.path,
-            branch: self.branch,
-            error: self.error,
+            path: outcome.path,
+            branch: outcome.branch,
+            error: outcome.error,
         };
         let Some(tab) = tab else {
-            commands.trigger(
+            self.commands.trigger(
                 vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
             );
             return;
         };
-        for (page, metadata) in pages {
+        for (page, metadata) in &self.pages {
             if !vmux_git::GitUrl::is_page(&metadata.url) {
                 continue;
             }
             let mut current = page;
             loop {
                 if current == tab {
-                    commands.trigger(
+                    self.commands.trigger(
                         vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
                             page, &event,
                         ),
                     );
                     break;
                 }
-                let Ok(parent) = child_of.get(current) else {
+                let Ok(parent) = self.child_of.get(current) else {
                     break;
                 };
                 current = parent.parent();
             }
         }
+    }
+
+    fn apply(
+        &mut self,
+        selection: TabWorkspaceSelection,
+        tab_entity: Entity,
+    ) -> Result<String, String> {
+        let mut tab = self
+            .tabs
+            .get_mut(tab_entity)
+            .map_err(|error| error.to_string())?;
+        tab.startup_dir = Some(selection.startup_dir.clone());
+        if crate::worktree::WorktreeName::is_generated(&tab.name)
+            && let Some(name) = std::path::Path::new(&selection.project_dir)
+                .file_name()
+                .and_then(|name| name.to_str())
+            && !name.is_empty()
+        {
+            tab.name = name.to_string();
+        }
+        let mut entity = self.commands.entity(tab_entity);
+        entity.insert((
+            TabWorkspace {
+                project_dir: selection.project_dir,
+            },
+            TabDirDecided,
+        ));
+        match selection.worktree {
+            Some((metadata, ready)) => {
+                entity
+                    .insert((metadata, ready))
+                    .remove::<TabWorktreeUnavailable>();
+            }
+            None => {
+                entity.remove::<(TabWorktree, TabWorktreeReady, TabWorktreeUnavailable)>();
+            }
+        }
+        Ok(selection.startup_dir)
     }
 }
 
@@ -241,52 +282,6 @@ impl TabWorkspaceSelection {
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct WorkspaceWriter<'w, 's> {
-    tabs: Query<'w, 's, &'static mut Tab>,
-    commands: Commands<'w, 's>,
-}
-
-impl WorkspaceWriter<'_, '_> {
-    fn apply(
-        &mut self,
-        selection: TabWorkspaceSelection,
-        tab_entity: Entity,
-    ) -> Result<String, String> {
-        let mut tab = self
-            .tabs
-            .get_mut(tab_entity)
-            .map_err(|error| error.to_string())?;
-        tab.startup_dir = Some(selection.startup_dir.clone());
-        if crate::worktree::WorktreeName::is_generated(&tab.name)
-            && let Some(name) = std::path::Path::new(&selection.project_dir)
-                .file_name()
-                .and_then(|name| name.to_str())
-            && !name.is_empty()
-        {
-            tab.name = name.to_string();
-        }
-        let mut entity = self.commands.entity(tab_entity);
-        entity.insert((
-            TabWorkspace {
-                project_dir: selection.project_dir,
-            },
-            TabDirDecided,
-        ));
-        match selection.worktree {
-            Some((metadata, ready)) => {
-                entity
-                    .insert((metadata, ready))
-                    .remove::<TabWorktreeUnavailable>();
-            }
-            None => {
-                entity.remove::<(TabWorktree, TabWorktreeReady, TabWorktreeUnavailable)>();
-            }
-        }
-        Ok(selection.startup_dir)
-    }
-}
-
 fn git_page_ready(
     trigger: On<UiInput<PageReady>>,
     tabs: TabHierarchy,
@@ -323,16 +318,13 @@ fn git_page_ready(
 
 fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
-    child_of: Query<&ChildOf>,
-    tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
-    pages: Query<(Entity, &PageMetadata)>,
     managed_root: Res<ManagedWorktreeRoot>,
     runtime: Res<vmux_git::GitRuntime>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     running: Query<(Entity, &ProjectActivationTask)>,
     mut revisions: ResMut<ProjectActivationRevisions>,
-    mut commands: Commands,
+    mut context: ProjectActivationContext,
 ) {
     let webview = trigger.event().webview;
     let ProjectActivateRequest {
@@ -349,26 +341,29 @@ fn project_activate(
         })
         .unwrap_or(webview);
     let tab_entity = loop {
-        if tab_entities.contains(current) {
+        if context.tabs.contains(current) {
             break Some(current);
         }
-        let Ok(parent) = child_of.get(current) else {
+        let Ok(parent) = context.child_of.get(current) else {
             break None;
         };
         current = parent.parent();
     };
     let Some(tab_entity) = tab_entity else {
-        ProjectActivationOutcome::from_result(
-            branch.clone(),
-            Err("tab workspace is unavailable".to_string()),
-        )
-        .publish(webview, None, &child_of, &pages, &mut commands);
+        context.publish(
+            ProjectActivationOutcome::from_result(
+                branch.clone(),
+                Err("tab workspace is unavailable".to_string()),
+            ),
+            webview,
+            None,
+        );
         return;
     };
     let revision = revisions.next(tab_entity);
     for (entity, task) in &running {
         if task.tab == tab_entity {
-            commands.entity(entity).despawn();
+            context.commands.entity(entity).despawn();
         }
     }
     let path = path.clone();
@@ -381,14 +376,17 @@ fn project_activate(
         TabWorkspaceSelection::resolve(&path, &task_branch, &checkout, &managed_root)
     }) else {
         revisions.finish(tab_entity, revision);
-        ProjectActivationOutcome::from_result(
-            branch,
-            Err("Git operation queue is busy".to_string()),
-        )
-        .publish(webview, Some(tab_entity), &child_of, &pages, &mut commands);
+        context.publish(
+            ProjectActivationOutcome::from_result(
+                branch,
+                Err("Git operation queue is busy".to_string()),
+            ),
+            webview,
+            Some(tab_entity),
+        );
         return;
     };
-    commands.spawn(ProjectActivationTask {
+    context.commands.spawn(ProjectActivationTask {
         webview,
         tab: tab_entity,
         branch,
@@ -399,38 +397,33 @@ fn project_activate(
 
 fn poll_project_activations(
     mut tasks: Query<(Entity, &mut ProjectActivationTask)>,
-    tabs: Query<(), With<Tab>>,
-    child_of: Query<&ChildOf>,
-    pages: Query<(Entity, &PageMetadata)>,
     mut revisions: ResMut<ProjectActivationRevisions>,
-    mut writer: WorkspaceWriter,
+    mut context: ProjectActivationContext,
 ) {
     for (entity, mut activation) in &mut tasks {
         if !revisions.accepts(activation.tab, activation.revision) {
-            writer.commands.entity(entity).despawn();
+            context.commands.entity(entity).despawn();
             continue;
         }
-        if !tabs.contains(activation.tab) {
+        if !context.tabs.contains(activation.tab) {
             revisions.finish(activation.tab, activation.revision);
-            writer.commands.entity(entity).despawn();
+            context.commands.entity(entity).despawn();
             continue;
         }
         let Some(output) = activation.task.poll() else {
             continue;
         };
         let result = match output {
-            Ok(result) => result.and_then(|selection| writer.apply(selection, activation.tab)),
+            Ok(result) => result.and_then(|selection| context.apply(selection, activation.tab)),
             Err(_) => Err("Git workspace worker panicked".to_string()),
         };
-        ProjectActivationOutcome::from_result(activation.branch.clone(), result).publish(
+        context.publish(
+            ProjectActivationOutcome::from_result(activation.branch.clone(), result),
             activation.webview,
             Some(activation.tab),
-            &child_of,
-            &pages,
-            &mut writer.commands,
         );
         revisions.finish(activation.tab, activation.revision);
-        writer.commands.entity(entity).despawn();
+        context.commands.entity(entity).despawn();
     }
 }
 
