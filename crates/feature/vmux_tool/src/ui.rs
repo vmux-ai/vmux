@@ -164,7 +164,7 @@ pub fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) 
                             },
                             onclick: move |_| {
                                 open.set(false);
-                                let _ = send(&ToolsNavigateRequest { url: option.url.clone() });
+                                send(&ToolsNavigateRequest { url: option.url.clone() });
                             },
                             span { class: "min-w-0 flex-1 truncate", "{option.label}" }
                             if option.id == active {
@@ -248,7 +248,7 @@ fn ToolManager(state: ToolsUiState) -> Element {
                     value: view.query.clone(),
                     placeholder: translate("tools-search"),
                     onsearch: move |query: String| {
-                        let _ = send(&ToolsFilterRequest { query });
+                        send(&ToolsFilterRequest { query });
                     },
                     onkeydown: None,
                 }
@@ -620,7 +620,7 @@ fn ToolActions(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
 }
 
 fn send_operation(provider: ToolProvider, kind: ToolOperationKind, id: String, value: String) {
-    let _ = match kind {
+    match kind {
         ToolOperationKind::Install => send(&ToolInstallRequest { provider, id }),
         ToolOperationKind::Update => send(&ToolUpdateRequest { provider, id }),
         ToolOperationKind::Uninstall => send(&ToolUninstallRequest { provider, id }),
@@ -634,7 +634,7 @@ fn send_operation(provider: ToolProvider, kind: ToolOperationKind, id: String, v
         ToolOperationKind::Unlink => send(&ToolUnlinkRequest { provider, id }),
         ToolOperationKind::Apply => send(&ToolApplyRequest { provider }),
         ToolOperationKind::Import => send(&ToolImportRequest { provider, value }),
-    };
+    }
 }
 
 fn status_label(status: ToolStatus) -> String {
@@ -704,7 +704,7 @@ fn operation_variant(kind: ToolOperationKind) -> ManagerButtonVariant {
 }
 
 fn open_tool_file(path: String) {
-    let _ = send(&ToolOpenRequest { path });
+    send(&ToolOpenRequest { path });
 }
 
 #[cfg(test)]

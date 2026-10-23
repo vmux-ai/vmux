@@ -208,7 +208,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                                 onclick: move |_| {
                                     choosing.set(false);
-                                    let _ = send(&ProjectPickerRequest {
+                                    send(&ProjectPickerRequest {
                                         current_dir: picker_root.clone(),
                                         pane_id: Some(pane_id),
                                     });
@@ -265,7 +265,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         expanded,
                         label: toggle_label,
                         onclick: move |_| {
-                            let _ = send(&SideSheetSectionRequest::new(
+                            send(&SideSheetSectionRequest::new(
                                 pane_id,
                                 "projects",
                                 !expanded,
@@ -308,7 +308,7 @@ fn ActiveWorkspaceBranchChoice(
             class: "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
             onclick: move |_| {
                 on_pick.call(());
-                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
+                send(&vmux_ecs::event::space::ProjectActivateRequest {
                     path: project_path.clone(),
                     branch: branch_name.clone(),
                     checkout: checkout.clone(),
@@ -338,7 +338,7 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
             title: "{project.display_path}",
             onclick: move |_| {
                 on_pick.call(());
-                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
+                send(&vmux_ecs::event::space::ProjectActivateRequest {
                     path: path.clone(),
                     branch: String::new(),
                     checkout: String::new(),
@@ -381,12 +381,12 @@ fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
                 title: project.display_path.clone(),
                 on_activate: move |()| {
                     if opens_tree {
-                        let _ = send(&ProjectTreeToggle {
+                        send(&ProjectTreeToggle {
                             path: path.clone(),
                             pane_id: pane_id.to_string(),
                         });
                     } else {
-                        let _ = send(&SideSheetProjectOpenRequest {
+                        send(&SideSheetProjectOpenRequest {
                             pane_id,
                             path: path.clone(),
                         });

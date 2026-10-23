@@ -199,7 +199,7 @@ fn CrumbMenuList(
                                     key: "{crumb.path}",
                                     class: CRUMB_ITEM_CLASS,
                                     onclick: move |_| {
-                                        let _ = send(&FileOpenEvent { path: target.clone() });
+                                        send(&FileOpenEvent { path: target.clone() });
                                         on_close.call(());
                                     },
                                     TypeIcon {
@@ -228,7 +228,7 @@ fn CrumbMenuList(
                                     key: "{entry.path}",
                                     class: if active { CRUMB_ITEM_ACTIVE_CLASS } else { CRUMB_ITEM_CLASS },
                                     onclick: move |_| {
-                                        let _ = send(&FileOpenEvent { path: target.clone() });
+                                        send(&FileOpenEvent { path: target.clone() });
                                         on_close.call(());
                                     },
                                     TypeIcon {
@@ -252,7 +252,7 @@ fn CrumbMenuList(
                                     key: "{row.line}-{row.name}",
                                     class: if active { CRUMB_ITEM_ACTIVE_CLASS } else { CRUMB_ITEM_CLASS },
                                     onclick: move |_| {
-                                        let _ = send(&ExplorerGoto { path: String::new(), line });
+                                        send(&ExplorerGoto { path: String::new(), line });
                                         on_close.call(());
                                     },
                                     OutlineGlyph { kind: row.kind }
@@ -286,7 +286,7 @@ struct CrumbMenus {
 impl CrumbMenus {
     fn show(mut self, next: CrumbMenu) {
         if let CrumbMenuKind::Siblings { dir, .. } = &next.kind {
-            let _ = send(&FileBreadcrumbRequest { path: dir.clone() });
+            send(&FileBreadcrumbRequest { path: dir.clone() });
         }
         self.open.set(Some(next));
     }

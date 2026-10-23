@@ -183,7 +183,7 @@ fn SessionsManagerContent(
                     controls.select_stage(None);
                     return;
                 }
-                let _ = send(&ChatOpenPage {
+                send(&ChatOpenPage {
                     url: area.url().to_string(),
                 });
             },
@@ -232,7 +232,7 @@ struct StartPage;
 
 impl StartPage {
     fn open() {
-        let _ = send(&ChatOpenPage {
+        send(&ChatOpenPage {
             url: "vmux://start/".to_string(),
         });
     }
@@ -944,7 +944,7 @@ fn EditableDescription(session_id: String, value: String) -> Element {
             allow_empty: true,
             trim: false,
             on_commit: move |description| {
-                let _ = send(&SessionsDescriptionUpdate {
+                send(&SessionsDescriptionUpdate {
                     id: session_id.clone(),
                     description,
                 });
@@ -990,7 +990,7 @@ fn SessionActions(
                     visibility: visibility.to_string(),
                     onclick: move |event: MouseEvent| {
                         event.stop_propagation();
-                        let _ = send(&ChatOpenPage { url: git_url.clone() });
+                        send(&ChatOpenPage { url: git_url.clone() });
                     },
                     GitIconView { class: "size-3.5".to_string() }
                 }
@@ -1153,7 +1153,7 @@ fn StagePickerOption(
                 if let Some(mutations) = mutations {
                     mutations.change(target.clone(), stage_id.clone());
                 } else {
-                    let _ = send(&SessionsStageChange {
+                    send(&SessionsStageChange {
                         id: target.id.clone(),
                         kind: target.kind.clone(),
                         sid: target.sid.clone(),

@@ -33,7 +33,23 @@ impl fmt::Display for EventListenerError {
     }
 }
 
-pub fn send<T>(payload: &T) -> Result<(), EventListenerError>
+pub fn send<T>(payload: &T)
+where
+    T: UiEvent
+        + for<'a> rkyv::Serialize<
+            rkyv::api::high::HighSerializer<
+                rkyv::util::AlignedVec,
+                rkyv::ser::allocator::ArenaHandle<'a>,
+                rkyv::rancor::Error,
+            >,
+        >,
+{
+    if let Err(error) = try_send(payload) {
+        dioxus::logger::tracing::warn!("sending UI event {} failed: {error}", T::id());
+    }
+}
+
+pub fn try_send<T>(payload: &T) -> Result<(), EventListenerError>
 where
     T: UiEvent
         + for<'a> rkyv::Serialize<
@@ -71,6 +87,6 @@ impl Host {
     }
 
     pub(crate) fn announce_ready() -> Result<(), EventListenerError> {
-        send(&PageReady)
+        try_send(&PageReady)
     }
 }

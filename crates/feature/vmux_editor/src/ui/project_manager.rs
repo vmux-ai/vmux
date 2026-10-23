@@ -44,7 +44,7 @@ impl ProjectControls {
             ManagerView::List => vmux_ecs::CollectionView::List,
             ManagerView::Grid => vmux_ecs::CollectionView::Grid,
         };
-        let _ = send(&ProjectCollectionViewRequest { view });
+        send(&ProjectCollectionViewRequest { view });
     }
 
     pub(super) fn toggle_filter(mut self) {

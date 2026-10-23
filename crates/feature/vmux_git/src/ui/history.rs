@@ -78,7 +78,7 @@ pub(super) fn HistoryCard(
                 onscroll: move |event: Event<ScrollData>| {
                     let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                     if remaining <= 192 && progress.has_more && !progress.loading {
-                        let _ = send(&GitCatalogNextRequest {
+                        send(&GitCatalogNextRequest {
                             catalog: GitCatalog::Commits,
                         });
                     }
@@ -106,7 +106,7 @@ pub(super) fn HistoryCard(
                         onclick: {
                             let sha = commit.sha.clone();
                             move |_| {
-                                let _ = send(&GitCommitSelectRequest {
+                                send(&GitCommitSelectRequest {
                                     commit: sha.clone(),
                                 });
                             }
@@ -184,7 +184,7 @@ pub(super) fn StashCard(
                     onscroll: move |event: Event<ScrollData>| {
                         let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                         if remaining <= 192 && progress.has_more && !progress.loading {
-                            let _ = send(&GitCatalogNextRequest {
+                            send(&GitCatalogNextRequest {
                                 catalog: GitCatalog::Stashes,
                             });
                         }
@@ -203,7 +203,7 @@ pub(super) fn StashCard(
                             onclick: {
                                 let reference = stash.reference.clone();
                                 move |_| {
-                                    let _ = send(&GitStashSelectRequest {
+                                    send(&GitStashSelectRequest {
                                         reference: reference.clone(),
                                     });
                                 }

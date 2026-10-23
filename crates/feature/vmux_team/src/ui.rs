@@ -98,7 +98,7 @@ fn ProfileSection(
                                     if let Some(profile_id) = profile_id
                                         && profile_id != switch_active_id
                                     {
-                                        let _ = send(&TeamProfileSwitchRequest { profile_id });
+                                        send(&TeamProfileSwitchRequest { profile_id });
                                     }
                                 }),
                                 attributes: vec![],
@@ -151,7 +151,7 @@ fn ProfileSection(
                             class: "flex w-11 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.04] text-muted-foreground transition-colors hover:bg-foreground/[0.075] hover:text-foreground",
                             title: translate("team-edit-profile"),
                             onclick: move |_| {
-                                let _ = send(&TeamProfileFormOpenRequest {
+                                send(&TeamProfileFormOpenRequest {
                                     profile_id: Some(edit_active_id.clone()),
                                     draft: active.name.clone(),
                                 });
@@ -173,7 +173,7 @@ fn ProfileSection(
                         r#type: "button",
                         class: "flex h-10 items-center justify-center gap-2 rounded-lg bg-foreground/[0.03] text-sm font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.065] hover:text-foreground",
                         onclick: move |_| {
-                            let _ = send(&TeamProfileFormOpenRequest {
+                            send(&TeamProfileFormOpenRequest {
                                 profile_id: None,
                                 draft: String::new(),
                             });
@@ -205,7 +205,7 @@ fn ProfileFormView(form: TeamProfileForm) -> Element {
             autofocus: true,
             autocomplete: "off",
             oninput: move |event: FormEvent| {
-                let _ = send(&TeamProfileFormInputRequest { draft: event.value() });
+                send(&TeamProfileFormInputRequest { draft: event.value() });
             },
             onkeydown: move |event: KeyboardEvent| match event.key() {
                 Key::Enter if !finished() => {
@@ -216,7 +216,7 @@ fn ProfileFormView(form: TeamProfileForm) -> Element {
                 Key::Escape if !finished() => {
                     event.prevent_default();
                     finished.set(true);
-                    let _ = send(&TeamProfileFormCloseRequest);
+                    send(&TeamProfileFormCloseRequest);
                 }
                 _ => {}
             },
@@ -237,21 +237,21 @@ impl ProfileFormSubmission {
     fn submit(&self) {
         let name = self.0.draft.trim().to_string();
         if name.is_empty() {
-            let _ = send(&TeamProfileFormCloseRequest);
+            send(&TeamProfileFormCloseRequest);
             return;
         }
         match &self.0.profile_id {
             Some(profile_id) => {
-                let _ = send(&TeamProfileUpdateRequest {
+                send(&TeamProfileUpdateRequest {
                     profile_id: profile_id.clone(),
                     name,
                 });
             }
             None => {
-                let _ = send(&TeamProfileCreateRequest { name });
+                send(&TeamProfileCreateRequest { name });
             }
         }
-        let _ = send(&TeamProfileFormCloseRequest);
+        send(&TeamProfileFormCloseRequest);
     }
 }
 

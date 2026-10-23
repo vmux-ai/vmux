@@ -66,7 +66,7 @@ impl WindowDragReporter {
             let Ok(rect) = region.get_client_rect().await else {
                 return;
             };
-            let _ = send(&WindowDragRegionEvent {
+            send(&WindowDragRegionEvent {
                 id,
                 removed: false,
                 blocked,
@@ -79,7 +79,7 @@ impl WindowDragReporter {
     }
 
     fn remove(&self) {
-        let _ = send(&WindowDragRegionEvent {
+        send(&WindowDragRegionEvent {
             id: self.id.clone(),
             removed: true,
             ..Default::default()

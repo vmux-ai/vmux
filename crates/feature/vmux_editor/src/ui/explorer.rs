@@ -41,27 +41,27 @@ struct TreeMenu {
 }
 
 fn open_file(path: String) {
-    let _ = send(&FileOpenEvent { path });
+    send(&FileOpenEvent { path });
 }
 
 fn toggle_dir(path: String) {
-    let _ = send(&ExplorerTreeToggle { path });
+    send(&ExplorerTreeToggle { path });
 }
 
 fn prefetch_dir(path: String) {
-    let _ = send(&ExplorerTreePrefetch { path });
+    send(&ExplorerTreePrefetch { path });
 }
 
 fn refresh_dir(path: String) {
-    let _ = send(&ExplorerTreeRefresh { path });
+    send(&ExplorerTreeRefresh { path });
 }
 
 fn collapse_all_dirs() {
-    let _ = send(&ExplorerCollapseAll);
+    send(&ExplorerCollapseAll);
 }
 
 fn goto_line(line: u32) {
-    let _ = send(&ExplorerGoto {
+    send(&ExplorerGoto {
         path: String::new(),
         line,
     });
@@ -240,7 +240,7 @@ impl SearchState {
             self.clear();
             return;
         }
-        let _ = send(&ExplorerSearchRequest {
+        send(&ExplorerSearchRequest {
             query: results.query.clone(),
             regex: results.regex,
             case_sensitive: results.case_sensitive,
@@ -249,7 +249,7 @@ impl SearchState {
     }
 
     fn draft(self, query: String, regex: bool, case_sensitive: bool, whole_word: bool) {
-        let _ = send(&ExplorerSearchDraftRequest {
+        send(&ExplorerSearchDraftRequest {
             query,
             regex,
             case_sensitive,
@@ -258,7 +258,7 @@ impl SearchState {
     }
 
     fn clear(self) {
-        let _ = send(&ExplorerSearchClear);
+        send(&ExplorerSearchClear);
     }
 
     fn is_collapsed(self, path: &str) -> bool {
@@ -269,17 +269,17 @@ impl SearchState {
     }
 
     fn toggle_group(self, path: &str) {
-        let _ = send(&ExplorerSearchGroupToggle {
+        send(&ExplorerSearchGroupToggle {
             path: path.to_string(),
         });
     }
 
     fn collapse_all(self) {
-        let _ = send(&ExplorerSearchCollapseAll);
+        send(&ExplorerSearchCollapseAll);
     }
 
     fn open(self, path: &str, hit: &ExplorerSearchMatch) {
-        let _ = send(&ExplorerSearchOpen {
+        send(&ExplorerSearchOpen {
             path: path.to_string(),
             line: hit.line,
             col: hit.col,
@@ -1093,7 +1093,7 @@ fn SidebarViewSwitch(view: ReadSignal<SidebarView>) -> Element {
             onclick: move |event: Event<MouseData>| {
                 event.stop_propagation();
                 let next = view.peek().other();
-                let _ = send(&ExplorerPanelViewSet {
+                send(&ExplorerPanelViewSet {
                     search: next.is_search(),
                 });
             },
@@ -1331,7 +1331,7 @@ pub fn ExplorerPanel(
                         label: translate("editor-new-file"),
                         on_press: move |_| {
                             let focus = tree_focus.key.peek().clone();
-                            let _ = send(&ExplorerCreateFilePromptRequest { path: focus });
+                            send(&ExplorerCreateFilePromptRequest { path: focus });
                         },
                     }
                     TitleButton {
@@ -1339,7 +1339,7 @@ pub fn ExplorerPanel(
                         label: translate("editor-new-folder"),
                         on_press: move |_| {
                             let focus = tree_focus.key.peek().clone();
-                            let _ = send(&ExplorerCreateDirectoryPromptRequest { path: focus });
+                            send(&ExplorerCreateDirectoryPromptRequest { path: focus });
                         },
                     }
                     TitleButton {
@@ -1374,7 +1374,7 @@ pub fn ExplorerPanel(
                     title: translate("editor-open-editors"),
                     open: show_open,
                     on_toggle: EventHandler::new(move |_| {
-                        let _ = send(&ExplorerOpenEditorsToggle);
+                        send(&ExplorerOpenEditorsToggle);
                     }),
                 }
                 div { class: "{open_body}",
@@ -1394,7 +1394,7 @@ pub fn ExplorerPanel(
                                             "group flex cursor-default items-center gap-1 py-0.5 pl-5 pr-2 text-foreground/75 transition-[background-color,opacity,transform] duration-150 hover:bg-foreground/[0.08]"
                                         },
                                         onclick: move |_| {
-                                            let _ = send(&FileOpenEvent {
+                                            send(&FileOpenEvent {
                                                 path: open_path.clone(),
                                             });
                                         },
@@ -1402,7 +1402,7 @@ pub fn ExplorerPanel(
                                             class: "inline-block w-3 shrink-0 cursor-default text-center text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground",
                                             onclick: move |e: Event<MouseData>| {
                                                 e.stop_propagation();
-                                                let _ = send(&ExplorerCloseEditor {
+                                                send(&ExplorerCloseEditor {
                                                     path: close_path.clone(),
                                                 });
                                             },
@@ -1441,7 +1441,7 @@ pub fn ExplorerPanel(
                         title: root_name(),
                         open: show_files,
                         on_toggle: EventHandler::new(move |_| {
-                            let _ = send(&ExplorerFilesToggle);
+                            send(&ExplorerFilesToggle);
                         }),
                     }
                 }
@@ -1581,7 +1581,7 @@ pub fn ExplorerPanel(
                     title: translate("editor-outline"),
                     open: show_outline,
                     on_toggle: EventHandler::new(move |_| {
-                        let _ = send(&ExplorerOutlineToggle);
+                        send(&ExplorerOutlineToggle);
                     }),
                 }
                 StickyOutline { rows: sticky_outline, on_pick: move |line: u32| goto_line(line) }
@@ -1660,7 +1660,7 @@ pub fn ExplorerPanel(
                             onclick: {
                                 let path = current.path.clone();
                                 move |_| {
-                                    let _ = send(&ExplorerCreateFilePromptRequest {
+                                    send(&ExplorerCreateFilePromptRequest {
                                         path: path.clone(),
                                     });
                                     menu.set(None);
@@ -1673,7 +1673,7 @@ pub fn ExplorerPanel(
                             onclick: {
                                 let path = current.path.clone();
                                 move |_| {
-                                    let _ = send(&ExplorerCreateDirectoryPromptRequest {
+                                    send(&ExplorerCreateDirectoryPromptRequest {
                                         path: path.clone(),
                                     });
                                     menu.set(None);
@@ -1704,7 +1704,7 @@ pub fn ExplorerPanel(
                                 let path = current.path.clone();
                                 let name = current.name.clone();
                                 move |_| {
-                                    let _ = send(&ExplorerRenamePromptRequest {
+                                    send(&ExplorerRenamePromptRequest {
                                         path: path.clone(),
                                         name: name.clone(),
                                     });
@@ -1719,7 +1719,7 @@ pub fn ExplorerPanel(
                                 let path = current.path.clone();
                                 let name = current.name.clone();
                                 move |_| {
-                                    let _ = send(&ExplorerDeletePromptRequest {
+                                    send(&ExplorerDeletePromptRequest {
                                         path: path.clone(),
                                         name: name.clone(),
                                     });
@@ -1737,7 +1737,7 @@ pub fn ExplorerPanel(
                     open: true,
                     on_open_change: Callback::new(move |open: bool| {
                         if !open {
-                            let _ = send(&ExplorerPromptDismissRequest);
+                            send(&ExplorerPromptDismissRequest);
                         }
                     }),
                     attributes: vec![],
@@ -1753,7 +1753,7 @@ pub fn ExplorerPanel(
                                 autofocus: true,
                                 value: "{current.draft}",
                                 oninput: move |e| {
-                                    let _ = send(&ExplorerPromptDraftRequest { draft: e.value() });
+                                    send(&ExplorerPromptDraftRequest { draft: e.value() });
                                 },
                                 oncompositionstart: move |_| ime.start(),
                                 oncompositionend: move |_| ime.commit(),
@@ -1762,21 +1762,21 @@ pub fn ExplorerPanel(
                                     if ime.swallows(&e) { return; }
                                     if e.key() == Key::Enter {
                                         e.prevent_default();
-                                        let _ = send(&ExplorerPromptSubmitRequest);
+                                        send(&ExplorerPromptSubmitRequest);
                                     } else if e.key() == Key::Escape {
-                                        let _ = send(&ExplorerPromptDismissRequest);
+                                        send(&ExplorerPromptDismissRequest);
                                     }
                                 },
                             }
                         }
                         div { class: "flex justify-end gap-2",
                             Button { size: ButtonSize::Xs, variant: ButtonVariant::Ghost, onclick: move |_| {
-                                let _ = send(&ExplorerPromptDismissRequest);
+                                send(&ExplorerPromptDismissRequest);
                             },
                                 {translate("common-cancel")}
                             }
                             Button { size: ButtonSize::Xs, variant: if current.destructive { ButtonVariant::Destructive } else { ButtonVariant::Primary }, onclick: move |_| {
-                                let _ = send(&ExplorerPromptSubmitRequest);
+                                send(&ExplorerPromptSubmitRequest);
                             },
                                 {if current.destructive { translate("common-delete") } else { translate("common-save") }}
                             }
@@ -1793,7 +1793,7 @@ pub fn ExplorerPanel(
                         "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-red-500/90 px-3 py-2 text-left text-xs text-white shadow-lg"
                     },
                     onclick: move |_| {
-                        let _ = send(&ExplorerNoticeDismissRequest);
+                        send(&ExplorerNoticeDismissRequest);
                     },
                     "{message}"
                 }

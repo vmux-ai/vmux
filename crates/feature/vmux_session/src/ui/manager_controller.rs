@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use dioxus::prelude::*;
 use vmux_session::SessionSummary;
 use vmux_ui::components::manager::ManagerView;
-use vmux_ui::hooks::{OptimisticMap, send};
+use vmux_ui::hooks::{OptimisticMap, send, try_send};
 
 use crate::event::{ResumeSession, SessionsCleanup, SessionsStageChange};
 
@@ -132,7 +132,7 @@ impl SessionStageMutations {
         self.optimistic
             .set(target.id.clone(), target.stage.clone(), stage.clone());
         let id = target.id.clone();
-        if send(&SessionsStageChange {
+        if try_send(&SessionsStageChange {
             id: target.id,
             kind: target.kind,
             sid: target.sid,
@@ -167,7 +167,7 @@ impl SessionStageMutations {
                 target.stage.clone(),
                 archive_stage.clone(),
             );
-            if send(&SessionsStageChange {
+            if try_send(&SessionsStageChange {
                 id: target.id.clone(),
                 kind: target.kind.clone(),
                 sid: target.sid.clone(),
@@ -198,7 +198,7 @@ impl SessionStageMutations {
             return;
         }
         self.leaving.write().insert(id.clone());
-        if send(&SessionsCleanup { id: id.clone() }).is_err() {
+        if try_send(&SessionsCleanup { id: id.clone() }).is_err() {
             self.leaving.write().remove(&id);
             return;
         }
@@ -228,7 +228,7 @@ impl From<&SessionSummary> for ResumeTarget {
 
 impl ResumeTarget {
     pub fn open(&self) {
-        let _ = send(&ResumeSession {
+        send(&ResumeSession {
             kind: self.kind.clone(),
             sid: self.sid.clone(),
             cwd: self.cwd.clone(),

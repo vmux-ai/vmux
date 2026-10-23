@@ -217,10 +217,10 @@ fn EditorLineRow(
                 editor_dragging.set(false);
                 if e.modifiers().meta() {
                     editor_drag_origin.set(None);
-                    let _ = send(&FileDefinitionRequest { line: ln, col });
+                    send(&FileDefinitionRequest { line: ln, col });
                 } else {
                     editor_drag_origin.set(Some((at.x as i32, at.y as i32)));
-                    let _ = send(&FilePointerEvent {
+                    send(&FilePointerEvent {
                         line: ln,
                         col,
                         extend: e.modifiers().shift(),
@@ -255,7 +255,7 @@ fn EditorLineRow(
                 );
                 if editor_dragging() {
                     e.prevent_default();
-                    let _ = send(&FilePointerEvent {
+                    send(&FilePointerEvent {
                         line: ln,
                         col,
                         extend: true,
@@ -272,13 +272,13 @@ fn EditorLineRow(
                 }
                 if hover_pos() != Some((ln, col)) {
                     hover_pos.set(Some((ln, col)));
-                    let _ = send(&FileHoverDismissRequest);
+                    send(&FileHoverDismissRequest);
                     spawn(async move {
                         Platform::sleep(HOVER_DELAY_MS).await;
                         if hover_pos() != Some((ln, col)) {
                             return;
                         }
-                        let _ = send(&FileHoverRequest { line: ln, col });
+                        send(&FileHoverRequest { line: ln, col });
                     });
                 }
             },
@@ -433,7 +433,7 @@ fn FoldMarker(line: u32, collapsed: bool, revealed: bool) -> Element {
             onmousedown: move |e: Event<MouseData>| {
                 e.stop_propagation();
                 e.prevent_default();
-                let _ = send(&FileFoldToggle { line });
+                send(&FileFoldToggle { line });
             },
             svg {
                 class: if collapsed { "h-3 w-3 -rotate-90" } else { "h-3 w-3" },

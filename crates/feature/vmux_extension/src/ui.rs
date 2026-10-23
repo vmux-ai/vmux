@@ -63,13 +63,13 @@ pub fn Page() -> Element {
                     value: snapshot.query.clone(),
                     placeholder: translate("extensions-search"),
                     onsearch: move |query: String| {
-                        let _ = send(&ExtFilterRequest { query });
+                        send(&ExtFilterRequest { query });
                     },
                     onkeydown: move |event: KeyboardEvent| {
                         if event.key() == Key::Enter {
                             let query = browse_query.clone();
                             if !query.trim().is_empty() {
-                                let _ = send(&ExtBrowseStoreRequest { query });
+                                send(&ExtBrowseStoreRequest { query });
                             }
                         }
                     },
@@ -78,7 +78,7 @@ pub fn Page() -> Element {
                     ManagerButton {
                         variant: ManagerButtonVariant::Primary,
                         onclick: move |_| {
-                            let _ = send(&vmux_api::service::RelaunchRequest);
+                            send(&vmux_api::service::RelaunchRequest);
                         },
                         {translate("extensions-relaunch")}
                     }
@@ -157,7 +157,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
                         attributes: vec![],
                         on_click: Some(EventHandler::new(move |_| {
                             asking.set(Some(false));
-                            let _ = send(&ExtToggleRequest {
+                            send(&ExtToggleRequest {
                                 id: approve_id.clone(),
                                 enabled: true,
                                 approve_permissions: true,
@@ -187,7 +187,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
                             asking.set(Some(true));
                             return;
                         }
-                        let _ = send(&ExtToggleRequest {
+                        send(&ExtToggleRequest {
                             id: toggle_id.clone(),
                             enabled: enabling,
                             approve_permissions: false,
@@ -198,7 +198,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
                 ManagerButton {
                     variant: ManagerButtonVariant::Danger,
                     onclick: move |_| {
-                        let _ = send(&ExtUninstallRequest { id: remove_id.clone() });
+                        send(&ExtUninstallRequest { id: remove_id.clone() });
                     },
                     {translate("common-remove")}
                 }

@@ -74,7 +74,7 @@ fn StatusItemButton(
             class: "shrink-0 rounded px-1 py-0.5 transition-colors hover:bg-foreground/[0.10] hover:text-foreground {extra}",
             title,
             onclick: move |_| {
-                let _ = send(&FileStatusPickerOpen::from(picker.clone()));
+                send(&FileStatusPickerOpen::from(picker.clone()));
             },
             "{label}"
         }
@@ -87,7 +87,7 @@ pub(super) fn EncodingRecovery() -> Element {
         button {
             class: "shrink-0 rounded-md bg-foreground/10 px-3 py-1 font-sans text-xs font-medium text-foreground transition-colors hover:bg-foreground/20",
             onclick: move |_| {
-                let _ = send(&FileStatusPickerOpen::from(EditorPicker::encoding_reopen()));
+                send(&FileStatusPickerOpen::from(EditorPicker::encoding_reopen()));
             },
             {translate("editor-status-encoding-reopen")}
         }

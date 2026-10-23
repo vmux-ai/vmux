@@ -61,7 +61,7 @@ pub(super) fn BookmarksSection(
             class: "@container group relative z-30 {SHEET_SECTION}",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
-                let _ = send(&BookmarkMenuRootRequest);
+                send(&BookmarkMenuRootRequest);
             },
             div {
                 "data-bookmark-drop": "root",
@@ -88,7 +88,7 @@ pub(super) fn BookmarksSection(
                                 onclick: move |event: MouseEvent| {
                                     event.prevent_default();
                                     event.stop_propagation();
-                                    let _ = send(&BookmarkFolderEditOpenRequest {
+                                    send(&BookmarkFolderEditOpenRequest {
                                         parent: None,
                                         draft: translate("layout-new-folder"),
                                     });
@@ -107,7 +107,7 @@ pub(super) fn BookmarksSection(
                     expanded,
                     label: bookmarks_title,
                     onclick: move |_| {
-                        let _ = send(&SideSheetSectionRequest::new(
+                        send(&SideSheetSectionRequest::new(
                             pane_id,
                             "bookmarks",
                             !expanded,
@@ -404,7 +404,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                 on_open: {
                     let uuid = row.uuid.clone();
                     move |_| {
-                        let _ = send(&BookmarkMenuPinRequest { uuid: uuid.clone() });
+                        send(&BookmarkMenuPinRequest { uuid: uuid.clone() });
                     }
                 },
                 trigger: rsx! {
@@ -430,7 +430,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                                     event.stop_propagation();
                                     return;
                                 }
-                                let _ = send(&BookmarkOpenRequest { url: u.clone() });
+                                send(&BookmarkOpenRequest { url: u.clone() });
                             }
                         },
                         title: "{row.metadata.title}",
@@ -447,14 +447,14 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone() }); } },
+                            on_select: { let u = url_open.clone(); move |_: String| { send(&BookmarkOpenRequest { url: u.clone() }); } },
                             attributes: vec![],
                             {translate("common-open")}
                         }
                         ContextMenuItem {
                             index: 1usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid_unpin.clone(); move |_: String| { let _ = send(&BookmarkUnpinRequest { uuid: id.clone() }); } },
+                            on_select: { let id = uuid_unpin.clone(); move |_: String| { send(&BookmarkUnpinRequest { uuid: id.clone() }); } },
                             attributes: vec![],
                             {translate("layout-unpin-page")}
                         }
@@ -462,7 +462,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                             ContextMenuItem {
                                 index: 2usize,
                                 value: Into::<ReadSignal<String>>::into(menu_val),
-                                on_select: { let id = row.uuid.clone(); move |_: String| { let _ = send(&BookmarkRemoveRequest { uuid: id.clone() }); } },
+                                on_select: { let id = row.uuid.clone(); move |_: String| { send(&BookmarkRemoveRequest { uuid: id.clone() }); } },
                                 attributes: vec![],
                                 {translate("layout-remove-bookmark")}
                             }
@@ -524,7 +524,7 @@ fn update_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Ev
 }
 
 fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDragTarget) {
-    let _ = send(&BookmarkDropRequest {
+    send(&BookmarkDropRequest {
         source: item.into(),
         target: target.into(),
     });
@@ -605,11 +605,11 @@ fn bookmark_drop_targeted(
 }
 
 fn set_bookmark_text_input_active(active: bool) {
-    let _ = send(&BookmarkTextInputRequest { active });
+    send(&BookmarkTextInputRequest { active });
 }
 
 fn set_bookmark_context_menu_active(active: bool) {
-    let _ = send(&BookmarkContextMenuRequest { active });
+    send(&BookmarkContextMenuRequest { active });
 }
 
 #[component]
@@ -631,7 +631,7 @@ fn BookmarkEditInput(
             autocomplete: "off",
             onfocus: move |_| set_bookmark_text_input_active(true),
             oninput: move |event: FormEvent| {
-                let _ = send(&BookmarkEditInputRequest {
+                send(&BookmarkEditInputRequest {
                     draft: event.value(),
                 });
             },
@@ -640,13 +640,13 @@ fn BookmarkEditInput(
                     event.prevent_default();
                     finished.set(true);
                     set_bookmark_text_input_active(false);
-                    let _ = send(&BookmarkEditSubmitRequest);
+                    send(&BookmarkEditSubmitRequest);
                 }
                 Key::Escape if !finished() => {
                     event.prevent_default();
                     finished.set(true);
                     set_bookmark_text_input_active(false);
-                    let _ = send(&BookmarkEditCloseRequest);
+                    send(&BookmarkEditCloseRequest);
                 }
                 _ => {}
             },
@@ -654,7 +654,7 @@ fn BookmarkEditInput(
                 set_bookmark_text_input_active(false);
                 if !finished() {
                     finished.set(true);
-                    let _ = send(&BookmarkEditSubmitRequest);
+                    send(&BookmarkEditSubmitRequest);
                 }
             },
         }
@@ -712,7 +712,7 @@ fn BookmarkFolder(
                         let uuid = folder.uuid.clone();
                         let active_page = active_page.clone();
                         move |_| {
-                            let _ = send(&BookmarkMenuFolderRequest {
+                            send(&BookmarkMenuFolderRequest {
                                 uuid: uuid.clone(),
                                 active_page: active_page.clone(),
                             });
@@ -740,7 +740,7 @@ fn BookmarkFolder(
                                             if bookmark_drag_blocks_click(drag_state) {
                                                 return;
                                             }
-                                            let _ = send(&BookmarkFolderToggleRequest {
+                                            send(&BookmarkFolderToggleRequest {
                                                 uuid: id.clone(),
                                             });
                                         }
@@ -761,7 +761,7 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid.clone(); move |_: String| { let _ = send(&BookmarkFolderToggleRequest { uuid: id.clone() }); } },
+                            on_select: { let id = uuid.clone(); move |_: String| { send(&BookmarkFolderToggleRequest { uuid: id.clone() }); } },
                             attributes: vec![],
                             {if collapsed { translate("common-expand") } else { translate("common-collapse") }}
                         }
@@ -774,7 +774,7 @@ fn BookmarkFolder(
                                 let page = active_page.clone();
                                 move |_: String| {
                                     if let Some(page) = page.clone() {
-                                        let _ = send(&BookmarkAddRequest {
+                                        send(&BookmarkAddRequest {
                                             metadata: PageMetadata {
                                                 title: page.title,
                                                 url: page.url,
@@ -794,11 +794,11 @@ fn BookmarkFolder(
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: move |_: String| {
                                 if collapsed {
-                                    let _ = send(&BookmarkFolderToggleRequest {
+                                    send(&BookmarkFolderToggleRequest {
                                         uuid: new_folder_uuid.clone(),
                                     });
                                 }
-                                let _ = send(&BookmarkFolderEditOpenRequest {
+                                send(&BookmarkFolderEditOpenRequest {
                                     parent: Some(new_folder_uuid.clone()),
                                     draft: translate("layout-new-folder"),
                                 });
@@ -813,7 +813,7 @@ fn BookmarkFolder(
                                 let name = folder.name.clone();
                                 let id = uuid.clone();
                                 move |_: String| {
-                                    let _ = send(&BookmarkRenameEditOpenRequest {
+                                    send(&BookmarkRenameEditOpenRequest {
                                         uuid: id.clone(),
                                         folder: true,
                                         draft: name.clone(),
@@ -830,7 +830,7 @@ fn BookmarkFolder(
                                 on_select: {
                                     let id = uuid.clone();
                                     move |_: String| {
-                                        let _ = send(&BookmarkFolderMoveRequest {
+                                        send(&BookmarkFolderMoveRequest {
                                             uuid: id.clone(),
                                             parent: None,
                                         });
@@ -849,7 +849,7 @@ fn BookmarkFolder(
                                     let id = uuid.clone();
                                     let target_uuid = target.uuid.clone();
                                     move |_: String| {
-                                        let _ = send(&BookmarkFolderMoveRequest {
+                                        send(&BookmarkFolderMoveRequest {
                                             uuid: id.clone(),
                                             parent: Some(target_uuid.clone()),
                                         });
@@ -865,7 +865,7 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: remove_index,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid.clone(); move |_: String| { let _ = send(&BookmarkFolderRemoveRequest { uuid: id.clone() }); } },
+                            on_select: { let id = uuid.clone(); move |_: String| { send(&BookmarkFolderRemoveRequest { uuid: id.clone() }); } },
                             attributes: vec![],
                             {translate("layout-remove-folder")}
                         }
@@ -941,7 +941,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                 on_open: {
                     let uuid = row.uuid.clone();
                     move |_| {
-                        let _ = send(&BookmarkMenuEntryRequest { uuid: uuid.clone() });
+                        send(&BookmarkMenuEntryRequest { uuid: uuid.clone() });
                     }
                 },
                 trigger: rsx! {
@@ -971,7 +971,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                                         if bookmark_drag_blocks_click(drag_state) {
                                             return;
                                         }
-                                        let _ = send(&BookmarkOpenRequest { url: u.clone() });
+                                        send(&BookmarkOpenRequest { url: u.clone() });
                                     }
                                 },
                             }
@@ -983,7 +983,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                     ContextMenuItem {
                         index: 0usize,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone() }); } },
+                        on_select: { let u = url_open.clone(); move |_: String| { send(&BookmarkOpenRequest { url: u.clone() }); } },
                         attributes: vec![],
                         {translate("common-open")}
                     }
@@ -994,7 +994,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                             let name = title.clone();
                             let id = uuid_rename.clone();
                             move |_: String| {
-                                let _ = send(&BookmarkRenameEditOpenRequest {
+                                send(&BookmarkRenameEditOpenRequest {
                                     uuid: id.clone(),
                                     folder: false,
                                     draft: name.clone(),
@@ -1012,9 +1012,9 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                             let pinned = row.pinned;
                             move |_: String| {
                                 if pinned {
-                                    let _ = send(&BookmarkUnpinRequest { uuid: id.clone() });
+                                    send(&BookmarkUnpinRequest { uuid: id.clone() });
                                 } else {
-                                    let _ = send(&BookmarkPinRequest { uuid: id.clone() });
+                                    send(&BookmarkPinRequest { uuid: id.clone() });
                                 }
                             }
                         },
@@ -1028,7 +1028,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                             on_select: {
                                 let id = row.uuid.clone();
                                 move |_: String| {
-                                    let _ = send(&BookmarkMoveRequest {
+                                    send(&BookmarkMoveRequest {
                                         uuid: id.clone(),
                                         folder: None,
                                     });
@@ -1047,7 +1047,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                                 let id = row.uuid.clone();
                                 let target_uuid = target.uuid.clone();
                                 move |_: String| {
-                                    let _ = send(&BookmarkMoveRequest {
+                                    send(&BookmarkMoveRequest {
                                         uuid: id.clone(),
                                         folder: Some(target_uuid.clone()),
                                     });
@@ -1063,7 +1063,7 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                     ContextMenuItem {
                         index: remove_index,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let id = uuid_remove.clone(); move |_: String| { let _ = send(&BookmarkRemoveRequest { uuid: id.clone() }); } },
+                        on_select: { let id = uuid_remove.clone(); move |_: String| { send(&BookmarkRemoveRequest { uuid: id.clone() }); } },
                         attributes: vec![],
                         {translate("common-remove")}
                     }
