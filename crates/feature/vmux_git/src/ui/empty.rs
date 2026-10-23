@@ -74,7 +74,7 @@ pub(super) fn EmptyRepository() -> Element {
                                             },
                                             onclick: move |_| {
                                                 open.set(false);
-                                                let _ = send(&GitRepositoryRequest {
+                                                send(&GitRepositoryRequest {
                                                     path: pick_path.clone(),
                                                 });
                                             },
@@ -92,7 +92,7 @@ pub(super) fn EmptyRepository() -> Element {
                                 class: "flex h-9 w-full items-center gap-2 border-0 px-2 text-ui text-muted-foreground outline-none hover:text-foreground",
                                 onclick: move |_| {
                                     open.set(false);
-                                    let _ = send(&GitRepositoryPickerRequest { path: workspace.clone() });
+                                    send(&GitRepositoryPickerRequest { path: workspace.clone() });
                                 },
                                 LineIconView { icon: LineIcon::Plus, class: "size-4 shrink-0" }
                                 span { {translate("agent-project-choose-another")} }

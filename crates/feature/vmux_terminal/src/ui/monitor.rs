@@ -45,7 +45,7 @@ pub fn Page() -> Element {
                         value: snapshot.query.clone(),
                         placeholder: translate("services-filter"),
                         onsearch: move |query| {
-                            let _ = send(&ProcessSearchRequest { query });
+                            send(&ProcessSearchRequest { query });
                         },
                     }
                     span { class: "text-[10px] tabular-nums text-muted-foreground", "{process_count}" }
@@ -55,7 +55,7 @@ pub fn Page() -> Element {
                             variant: ManagerButtonVariant::Danger,
                             onclick: move |event: Event<MouseData>| {
                                 event.stop_propagation();
-                                let _ = send(&ProcessKillAllEvent { kill_all: true });
+                                send(&ProcessKillAllEvent { kill_all: true });
                             },
                             {translate("services-kill-all")}
                         }
@@ -210,14 +210,14 @@ fn ProcessRow(process: ProcessEntry) -> Element {
         if !managed {
             return;
         }
-        let _ = send(&ProcessNavigateEvent {
+        send(&ProcessNavigateEvent {
             process_id: nav_id.clone(),
             navigate: true,
         });
     };
     let onkill = move |event: Event<MouseData>| {
         event.stop_propagation();
-        let _ = send(&ProcessKillEvent {
+        send(&ProcessKillEvent {
             process_id: kill_id.clone(),
             kill: true,
         });

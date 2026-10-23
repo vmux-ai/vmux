@@ -159,7 +159,7 @@ pub(super) fn RepositoryHeader(
                     open: repository_open,
                     class: "min-w-0".to_string(),
                     on_dismiss: move |_| {
-                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                     },
                     ProjectSelectTrigger {
                         label: repository.repo_name.clone(),
@@ -172,7 +172,7 @@ pub(super) fn RepositoryHeader(
                             } else {
                                 HeaderDropdown::Repository
                             };
-                            let _ = send(&HeaderDropdownRequest { open });
+                            send(&HeaderDropdownRequest { open });
                         },
                     }
                     if repository_open {
@@ -181,12 +181,12 @@ pub(super) fn RepositoryHeader(
                             selected_path: repository.repo_root.clone(),
                             class: "max-h-72 min-w-64 overflow-y-auto".to_string(),
                             on_pick: move |project: ProjectRow| {
-                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                let _ = send(&GitRepositoryRequest { path: project.path });
+                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                send(&GitRepositoryRequest { path: project.path });
                             },
                             on_add: move |_| {
-                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                let _ = send(&GitRepositoryPickerRequest {
+                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                send(&GitRepositoryPickerRequest {
                                     path: project_picker_dir.clone(),
                                 });
                             },
@@ -208,7 +208,7 @@ pub(super) fn RepositoryHeader(
                     open: branch_open,
                     class: "min-w-0".to_string(),
                     on_dismiss: move |_| {
-                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                     },
                     DropdownTrigger {
                         label: branch_label.clone(),
@@ -220,7 +220,7 @@ pub(super) fn RepositoryHeader(
                             } else {
                                 HeaderDropdown::Branch
                             };
-                            let _ = send(&HeaderDropdownRequest { open });
+                            send(&HeaderDropdownRequest { open });
                         },
                         leading: rsx! {
                             IdentityOrb {
@@ -246,7 +246,7 @@ pub(super) fn RepositoryHeader(
                                     class: "min-h-0 overflow-y-auto",
                                     onscroll: move |event: Event<ScrollData>| {
                                         if ScrollPreload::LIST.reached(&event) && selected_branches_progress.has_more && !selected_branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: selected_catalog });
+                                            send(&GitCatalogNextRequest { catalog: selected_catalog });
                                         }
                                     },
                                     match branch_collection {
@@ -264,7 +264,7 @@ pub(super) fn RepositoryHeader(
                                                             selected_branch: selected_branch.clone(),
                                                             checked_out,
                                                             onselected: move |_| {
-                                                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                                                             },
                                                         }
                                                     }
@@ -285,7 +285,7 @@ pub(super) fn RepositoryHeader(
                                                             selected_branch: selected_branch.clone(),
                                                             checked_out,
                                                             onselected: move |_| {
-                                                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                                                             },
                                                         }
                                                     }
@@ -300,7 +300,7 @@ pub(super) fn RepositoryHeader(
                                                     index,
                                                     selected_branch: selected_branch.clone(),
                                                     onselected: move |_| {
-                                                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                                                     },
                                                 }
                                             }
@@ -319,7 +319,7 @@ pub(super) fn RepositoryHeader(
                                     class: "min-h-0 overflow-y-auto",
                                     onscroll: move |event: Event<ScrollData>| {
                                         if ScrollPreload::LIST.reached(&event) && branches_progress.has_more && !branches_progress.loading {
-                                            let _ = send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
+                                            send(&GitCatalogNextRequest { catalog: GitCatalog::LocalBranches });
                                         }
                                     },
                                     for branch in repository.branches.iter() {
@@ -335,12 +335,12 @@ pub(super) fn RepositoryHeader(
                                                         "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
                                                     },
                                                     onclick: move |_| {
-                                                        let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                                        let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
-                                                        let _ = send(&GitBranchCollectionSelectRequest {
+                                                        send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                        send(&GitPanelSelectRequest { panel: GitPanel::Branches });
+                                                        send(&GitBranchCollectionSelectRequest {
                                                             collection: GitBranchCollection::Local,
                                                         });
-                                                        let _ = send(&GitBranchSelectRequest {
+                                                        send(&GitBranchSelectRequest {
                                                             reference: name.clone(),
                                                         });
                                                     },
@@ -380,7 +380,7 @@ pub(super) fn RepositoryHeader(
                             open: commit_open,
                             class: "min-w-0".to_string(),
                             on_dismiss: move |_| {
-                                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                             },
                             DropdownTrigger {
                                 label: revision_label.clone(),
@@ -392,7 +392,7 @@ pub(super) fn RepositoryHeader(
                                     } else {
                                         HeaderDropdown::Commit
                                     };
-                                    let _ = send(&HeaderDropdownRequest { open });
+                                    send(&HeaderDropdownRequest { open });
                                 },
                                 leading: rsx! {
                                     LineIconView { icon: LineIcon::GitCommit, class: "size-3.5 shrink-0" }
@@ -405,7 +405,7 @@ pub(super) fn RepositoryHeader(
                                         class: "max-h-80 overflow-y-auto",
                                         onscroll: move |event: Event<ScrollData>| {
                                             if ScrollPreload::LIST.reached(&event) && commits_progress.has_more && !commits_progress.loading {
-                                                let _ = send(&GitCatalogNextRequest {
+                                                send(&GitCatalogNextRequest {
                                                     catalog: GitCatalog::Commits,
                                                 });
                                             }
@@ -424,9 +424,9 @@ pub(super) fn RepositoryHeader(
                                                         },
                                                         title: "{commit.summary}",
                                                         onclick: move |_| {
-                                                            let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                                                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-                                                            let _ = send(&GitCommitSelectRequest { commit: sha.clone() });
+                                                            send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                                                            send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                                                            send(&GitCommitSelectRequest { commit: sha.clone() });
                                                         },
                                                         code { class: "shrink-0 font-mono text-[10px] text-git-reference", "{commit.short_sha}" }
                                                         span { class: "min-w-0 flex-1 truncate font-medium", "{commit.summary}" }
@@ -481,14 +481,14 @@ fn RepositoryActions(
                 class: "h-8 gap-1.5 px-2.5 text-[11px] font-medium".to_string(),
                 onclick: move |_| {
                     if checkout_start.is_empty() {
-                        let _ = send(&ProjectActivateRequest {
+                        send(&ProjectActivateRequest {
                             path: push_path.clone(),
                             branch: checkout_branch.clone(),
                             checkout: checkout_path.clone(),
                             pane_id: None,
                         });
                     } else {
-                        let _ = send(&GitCreateBranchRequest {
+                        send(&GitCreateBranchRequest {
                             repo_root: push_path.clone(),
                             branch: checkout_branch.clone(),
                             start_point: checkout_start.clone(),
@@ -505,7 +505,7 @@ fn RepositoryActions(
                 class: "h-8 gap-1.5 px-2.5 text-[11px] font-medium".to_string(),
                 disabled: !can_push,
                 onclick: move |_| {
-                    let _ = send(&GitPushRequest { path: push_path.clone() });
+                    send(&GitPushRequest { path: push_path.clone() });
                 },
                 LineIconView { icon: LineIcon::Upload, class: "size-4" }
                 span { {translate("git-push-label")} }
@@ -536,7 +536,7 @@ fn ViewPicker(
             open,
             class: "shrink-0".to_string(),
             on_dismiss: move |_| {
-                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
             },
             div { class: "flex items-center rounded-md hover:bg-foreground/[0.055]",
                 DropdownTrigger {
@@ -548,7 +548,7 @@ fn ViewPicker(
                         } else {
                             HeaderDropdown::View
                         };
-                        let _ = send(&HeaderDropdownRequest { open });
+                        send(&HeaderDropdownRequest { open });
                     },
                     leading: rsx! {
                         LineIconView { icon, class: "size-3.5 shrink-0" }
@@ -566,8 +566,8 @@ fn ViewPicker(
                         title: translate("git-branch-changes"),
                         aria_label: translate("git-branch-changes"),
                         onclick: move |_| {
-                            let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
-                            let _ = send(&GitBranchDiffSelectRequest);
+                            send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                            send(&GitBranchDiffSelectRequest);
                         },
                         LineIconView { icon: LineIcon::X, class: "size-3" }
                     }
@@ -581,7 +581,7 @@ fn ViewPicker(
                         label: translate("git-changes"),
                         count: changes,
                         onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
+                            send(&GitPanelSelectRequest { panel: GitPanel::Files });
                         },
                     }
                     div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
@@ -591,7 +591,7 @@ fn ViewPicker(
                         label: translate("git-branch-changes"),
                         count: 0,
                         onselect: move |_| {
-                            let _ = send(&GitBranchDiffSelectRequest);
+                            send(&GitBranchDiffSelectRequest);
                         },
                     }
                     ViewPickerItem {
@@ -601,9 +601,9 @@ fn ViewPicker(
                         count: commits,
                         onselect: move |_| {
                             if first_commit.is_empty() {
-                                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
+                                send(&GitPanelSelectRequest { panel: GitPanel::Commits });
                             } else {
-                                let _ = send(&GitCommitSelectRequest {
+                                send(&GitCommitSelectRequest {
                                     commit: first_commit.clone(),
                                 });
                             }
@@ -615,7 +615,7 @@ fn ViewPicker(
                         label: translate("git-stashes"),
                         count: stashes,
                         onselect: move |_| {
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
+                            send(&GitPanelSelectRequest { panel: GitPanel::Stash });
                         },
                     }
                 }
@@ -641,7 +641,7 @@ fn ViewPickerItem(
                 "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
             },
             onclick: move |_| {
-                let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
+                send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                 onselect.call(());
             },
             LineIconView { icon, class: "size-3.5 shrink-0" }

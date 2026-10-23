@@ -172,7 +172,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             on_pick: move |project: ProjectRow| {
                                 choosing.set(false);
                                 optimistic_project.set(Some(project.clone()));
-                                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
+                                send(&vmux_ecs::event::space::ProjectActivateRequest {
                                     path: project.path,
                                     branch: String::new(),
                                     checkout: String::new(),
@@ -181,14 +181,14 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             },
                             on_add: move |_| {
                                 choosing.set(false);
-                                let _ = send(&ProjectPickerRequest {
+                                send(&ProjectPickerRequest {
                                     current_dir: picker_root.clone(),
                                     pane_id: Some(pane_id),
                                 });
                             },
                             on_open_selected: move |project: ProjectRow| {
                                 choosing.set(false);
-                                let _ = send(&SideSheetProjectPageOpenRequest {
+                                send(&SideSheetProjectPageOpenRequest {
                                     pane_id,
                                     path: project.path,
                                 });
@@ -267,7 +267,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
                 } },
                 onclick: move |_| {
-                    let _ = send(&SideSheetSectionRequest::new(
+                    send(&SideSheetSectionRequest::new(
                         pane_id,
                         "projects",
                         !expanded,
@@ -321,12 +321,12 @@ fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
                 title: project.display_path.clone(),
                 on_activate: move |_| {
                     if opens_tree {
-                        let _ = send(&ProjectTreeToggle {
+                        send(&ProjectTreeToggle {
                             path: path.clone(),
                             pane_id: pane_id.to_string(),
                         });
                     } else {
-                        let _ = send(&SideSheetProjectOpenRequest {
+                        send(&SideSheetProjectOpenRequest {
                             pane_id,
                             path: path.clone(),
                         });

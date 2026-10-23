@@ -125,7 +125,7 @@ fn Mirror(
             onkeydown: move |event| {
                 if SoftwareKeyboardShortcut::matches(&event) {
                     event.prevent_default();
-                    let _ = send(&SimulatorSoftwareKeyboard);
+                    send(&SimulatorSoftwareKeyboard);
                     return;
                 }
                 if ClipboardShortcut::send(&event) {
@@ -155,7 +155,7 @@ fn Mirror(
                 press.set(Some(next));
                 home_progress.set(next.home_progress());
                 if let Some(touch) = touch {
-                    let _ = send(&touch);
+                    send(&touch);
                 }
             },
             onpointerup: move |event: Event<PointerData>| {
@@ -226,7 +226,7 @@ fn Mirror(
                             press.set(Some(session));
                             home_progress.set(0.0);
                             if let Some(touch) = touch {
-                                let _ = send(&touch);
+                                send(&touch);
                             }
                         },
                     }
@@ -368,16 +368,16 @@ impl ClipboardShortcut {
         }
         match event.key().to_string().to_ascii_lowercase().as_str() {
             "a" => {
-                let _ = send(&SimulatorClipboardSelectAllRequest);
+                send(&SimulatorClipboardSelectAllRequest);
             }
             "c" => {
-                let _ = send(&SimulatorClipboardCopyRequest);
+                send(&SimulatorClipboardCopyRequest);
             }
             "x" => {
-                let _ = send(&SimulatorClipboardCutRequest);
+                send(&SimulatorClipboardCutRequest);
             }
             "v" => {
-                let _ = send(&SimulatorClipboardPasteRequest);
+                send(&SimulatorClipboardPasteRequest);
             }
             _ => return false,
         }
@@ -399,7 +399,7 @@ impl Keystroke {
                 _ => None,
             };
             if let Some(button) = button {
-                let _ = send(&SimulatorInputHardwareButtonRequest { button });
+                send(&SimulatorInputHardwareButtonRequest { button });
                 return true;
             }
         }
@@ -408,18 +408,18 @@ impl Keystroke {
             let Some(code) = BrowserCode::new(event.code().to_string()).hid_code() else {
                 return false;
             };
-            let _ = send(&SimulatorInputModifiedKeyRequest { code, modifiers });
+            send(&SimulatorInputModifiedKeyRequest { code, modifiers });
             return true;
         }
         let browser_key = BrowserKey::new(key);
         if let Some(code) = browser_key.hid_code() {
-            let _ = send(&SimulatorInputKeyRequest { code });
+            send(&SimulatorInputKeyRequest { code });
             return true;
         }
         let Some(text) = browser_key.text() else {
             return false;
         };
-        let _ = send(&SimulatorInputTextRequest { text });
+        send(&SimulatorInputTextRequest { text });
         true
     }
 
@@ -856,11 +856,11 @@ impl PointerRelease {
         match self {
             Self::Touch(touch) => {
                 home_progress.set(0.0);
-                let _ = send(&touch);
+                send(&touch);
             }
             Self::Home => {
                 home_progress.set(1.0);
-                let _ = send(&SimulatorInputHardwareButtonRequest {
+                send(&SimulatorInputHardwareButtonRequest {
                     button: HardwareButton::Home,
                 });
                 spawn(async move {

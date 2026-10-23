@@ -101,13 +101,13 @@ pub(super) fn LayoutDropdown(
     });
     let overlay_id = id.clone();
     use_effect(move || {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: overlay_id.clone(),
             active: open,
         });
     });
     use_drop(move || {
-        let _ = send(&LayoutOverlayEvent { id, active: false });
+        send(&LayoutOverlayEvent { id, active: false });
     });
     rsx! {
         Dropdown {

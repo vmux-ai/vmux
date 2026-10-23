@@ -79,7 +79,7 @@ pub(super) fn HistoryCard(
                 class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                 onscroll: move |event: Event<ScrollData>| {
                     if ScrollPreload::LIST.reached(&event) && progress.has_more && !progress.loading {
-                        let _ = send(&GitCatalogNextRequest {
+                        send(&GitCatalogNextRequest {
                             catalog: GitCatalog::Commits,
                         });
                     }
@@ -107,7 +107,7 @@ pub(super) fn HistoryCard(
                         onclick: {
                             let sha = commit.sha.clone();
                             move |_| {
-                                let _ = send(&GitCommitSelectRequest {
+                                send(&GitCommitSelectRequest {
                                     commit: sha.clone(),
                                 });
                             }
@@ -124,7 +124,7 @@ pub(super) fn HistoryCard(
                         class: "flex flex-col gap-2 px-2.5 py-2",
                         onvisible: move |_| {
                             if progress.has_more && !progress.loading {
-                                let _ = send(&GitCatalogNextRequest {
+                                send(&GitCatalogNextRequest {
                                     catalog: GitCatalog::Commits,
                                 });
                             }
@@ -194,7 +194,7 @@ pub(super) fn StashCard(
                     class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                     onscroll: move |event: Event<ScrollData>| {
                         if ScrollPreload::LIST.reached(&event) && progress.has_more && !progress.loading {
-                            let _ = send(&GitCatalogNextRequest {
+                            send(&GitCatalogNextRequest {
                                 catalog: GitCatalog::Stashes,
                             });
                         }
@@ -213,7 +213,7 @@ pub(super) fn StashCard(
                             onclick: {
                                 let reference = stash.reference.clone();
                                 move |_| {
-                                    let _ = send(&GitStashSelectRequest {
+                                    send(&GitStashSelectRequest {
                                         reference: reference.clone(),
                                     });
                                 }
@@ -229,7 +229,7 @@ pub(super) fn StashCard(
                             class: "flex flex-col gap-2 px-2.5 py-2",
                             onvisible: move |_| {
                                 if progress.has_more && !progress.loading {
-                                    let _ = send(&GitCatalogNextRequest {
+                                    send(&GitCatalogNextRequest {
                                         catalog: GitCatalog::Stashes,
                                     });
                                 }

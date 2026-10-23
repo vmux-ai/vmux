@@ -32,7 +32,7 @@ impl ExplorerPane {
 
     pub(crate) fn toggle(self, mode: Memo<Mode>) {
         let next = !(self.visible)();
-        let _ = send(&ExplorerPanelSetVisible { visible: next });
+        send(&ExplorerPanelSetVisible { visible: next });
         if next {
             return;
         }
@@ -62,7 +62,7 @@ impl ExplorerPane {
         self.resizing.set(false);
         let px = self.rendered_width();
         self.drag_width.set(None);
-        let _ = send(&ExplorerPanelWidth { px });
+        send(&ExplorerPanelWidth { px });
     }
 }
 
@@ -75,7 +75,7 @@ pub(super) fn PaneWidth() -> Element {
                 let Ok(size) = event.get_border_box_size() else {
                     return;
                 };
-                let _ = send(&ExplorerPanelViewportWidth {
+                send(&ExplorerPanelViewportWidth {
                     px: size.width.max(0.0) as u32,
                 });
             },

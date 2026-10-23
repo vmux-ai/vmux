@@ -186,13 +186,13 @@ fn SideSheetContent() -> Element {
                 onmousemove: move |event: Event<MouseData>| {
                     let x = event.client_coordinates().x as f32 - sheet_left;
                     let width = crate::event::SideSheetResizeEvent::live(x).clamped();
-                    let _ = send(&crate::event::SideSheetResizeEvent::live(width));
+                    send(&crate::event::SideSheetResizeEvent::live(width));
                 },
                 onmouseup: move |event: Event<MouseData>| {
                     let x = event.client_coordinates().x as f32 - sheet_left;
                     let width = crate::event::SideSheetResizeEvent::settled(x).clamped();
                     sheet_resizing.set(false);
-                    let _ = send(&crate::event::SideSheetResizeEvent::settled(width));
+                    send(&crate::event::SideSheetResizeEvent::settled(width));
                 },
             }
         }
@@ -289,7 +289,7 @@ fn SideSheetSpaceRow(
                                     class: "pointer-events-auto min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-ui font-medium text-foreground outline-none hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.055] @max-[12rem]:text-ui-xs",
                                     onclick: move |event| {
                                         event.stop_propagation();
-                                        let _ = send(&SpaceFormOpenRequest {
+                                        send(&SpaceFormOpenRequest {
                                             space_id: Some(edit_id.clone()),
                                             draft: edit_name.clone(),
                                         });
@@ -319,7 +319,7 @@ fn SideSheetSpaceRow(
                         index: 0usize,
                         value: Into::<ReadSignal<String>>::into(menu_value),
                         on_select: move |_: String| {
-                            let _ = send(&SpaceFormOpenRequest {
+                            send(&SpaceFormOpenRequest {
                                 space_id: Some(menu_id.clone()),
                                 draft: menu_name.clone(),
                             });
@@ -345,7 +345,7 @@ fn SideSheetSpaceRow(
                         class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&SpaceOpenPageRequest { create: true });
+                            send(&SpaceOpenPageRequest { create: true });
                         },
                         Icon { class: "size-3.5 shrink-0",
                             path { d: "M12 5v14" }
@@ -376,7 +376,7 @@ fn SpaceChoice(space: SpaceRow, deletable: bool, onselect: EventHandler<()>) -> 
                 aria_label: space.display_name(),
                 onclick: move |_| {
                     onselect.call(());
-                    let _ = send(&SpaceAttachRequest { space_id: select_id.clone() });
+                    send(&SpaceAttachRequest { space_id: select_id.clone() });
                 },
             }
             div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2 px-2",
@@ -399,7 +399,7 @@ fn SpaceChoice(space: SpaceRow, deletable: bool, onselect: EventHandler<()>) -> 
                             onclick: move |event| {
                                 event.prevent_default();
                                 event.stop_propagation();
-                                let _ = send(&SpaceDeleteRequest { space_id: delete_id.clone() });
+                                send(&SpaceDeleteRequest { space_id: delete_id.clone() });
                             },
                             LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }
                         }
@@ -430,18 +430,18 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
         if !finished() {
             finished.set(true);
             BookmarkInput::set_active(false);
-            let _ = send(&SpaceFormCloseRequest);
+            send(&SpaceFormCloseRequest);
         }
     });
     use_effect(move || {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: "space-name-input".to_string(),
             active: true,
         });
     });
     use_drop(move || {
         BookmarkInput::set_active(false);
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: "space-name-input".to_string(),
             active: false,
         });
@@ -460,7 +460,7 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
             onfocus: move |_| BookmarkInput::set_active(true),
             onclick: move |event: MouseEvent| event.stop_propagation(),
             oninput: move |event: FormEvent| {
-                let _ = send(&SpaceFormInputRequest { draft: event.value() });
+                send(&SpaceFormInputRequest { draft: event.value() });
             },
             onkeydown: move |event: KeyboardEvent| match event.key() {
                 Key::Enter if !finished() => {
@@ -473,7 +473,7 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
                     event.prevent_default();
                     finished.set(true);
                     BookmarkInput::set_active(false);
-                    let _ = send(&SpaceFormCloseRequest);
+                    send(&SpaceFormCloseRequest);
                 }
                 _ => {}
             },
@@ -485,7 +485,7 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
                 }
             },
             onaction: move |_| {
-                let _ = send(&SpaceFormRegenerateRequest);
+                send(&SpaceFormRegenerateRequest);
             },
             LineIconView { icon: LineIcon::RefreshCw, class: "size-3.5".to_string() }
         }
@@ -501,12 +501,12 @@ impl SpaceRenameSubmission {
         if let Some(space_id) = self.0.space_id.as_ref()
             && !name.is_empty()
         {
-            let _ = send(&SpaceRenameRequest {
+            send(&SpaceRenameRequest {
                 space_id: space_id.clone(),
                 name,
             });
         }
-        let _ = send(&SpaceFormCloseRequest);
+        send(&SpaceFormCloseRequest);
     }
 }
 
@@ -554,7 +554,7 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
                         expanded,
                         label: fold_title,
                         onclick: move |_| {
-                            let _ = send(&crate::event::SideSheetSectionRequest::new(
+                            send(&crate::event::SideSheetSectionRequest::new(
                                 pane_id,
                                 "pane",
                                 !expanded,

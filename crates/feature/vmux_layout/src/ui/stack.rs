@@ -73,7 +73,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             event.stop_propagation();
                             return;
                         }
-                        let _ = send(&crate::event::SideSheetStackActivateRequest {
+                        send(&crate::event::SideSheetStackActivateRequest {
                             pane_id,
                             stack_id,
                         });
@@ -100,7 +100,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         onclick: move |evt| {
                             evt.prevent_default();
                             evt.stop_propagation();
-                            let _ = send(&crate::event::SideSheetStackCloseRequest {
+                            send(&crate::event::SideSheetStackCloseRequest {
                                 pane_id,
                                 stack_id,
                             });
@@ -117,7 +117,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| {
-                        let _ = send(&BookmarkAddRequest {
+                        send(&BookmarkAddRequest {
                             metadata: bookmark_metadata.clone(),
                             folder: None,
                         });
@@ -139,7 +139,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             };
                             let folder_uuid = folder.uuid.clone();
                             move |_: String| {
-                                let _ = send(&BookmarkAddRequest {
+                                send(&BookmarkAddRequest {
                                     metadata: metadata.clone(),
                                     folder: Some(folder_uuid.clone()),
                                 });
@@ -156,7 +156,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     index: pin_index,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| {
-                        let _ = send(&BookmarkPinUrlRequest {
+                        send(&BookmarkPinUrlRequest {
                             metadata: pin_metadata.clone(),
                         });
                     },
@@ -180,7 +180,7 @@ pub(super) fn NewStackRow(pane_id: u64) -> Element {
                 }
             },
             onclick: move |_| {
-                let _ = send(&crate::event::SideSheetStackCreateRequest { pane_id });
+                send(&crate::event::SideSheetStackCreateRequest { pane_id });
             },
         }
     }

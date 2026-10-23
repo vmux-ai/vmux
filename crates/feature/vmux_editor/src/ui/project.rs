@@ -97,7 +97,7 @@ pub(super) fn ProjectList(
                                     grid_label: translate("tools-view-grid"),
                                     onchange: move |view| {
                                         controls.set_view(view);
-                                        let _ = send(&ViewPreference::request(view));
+                                        send(&ViewPreference::request(view));
                                     },
                                 }
                             }
@@ -362,7 +362,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         danger: false,
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&ProjectArchiveRequest {
+                            send(&ProjectArchiveRequest {
                                 url: archive_url.clone(),
                                 archived: !archived,
                             });
@@ -407,7 +407,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         on_click: Some(EventHandler::new(move |event: MouseEvent| {
                             event.stop_propagation();
                             confirm_open.set(false);
-                            let _ = send(&ProjectDeleteRequest { url: delete_url.clone() });
+                            send(&ProjectDeleteRequest { url: delete_url.clone() });
                         })),
                         {translate("common-delete")}
                     }
@@ -499,7 +499,7 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
                         description: translate("project-import-description"),
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&ProjectImportRequest);
+                            send(&ProjectImportRequest);
                         },
                     }
                     ProjectAddItem {
@@ -572,10 +572,10 @@ impl ProjectPrompt {
     fn submit(self, draft: String) {
         match self {
             Self::New => {
-                let _ = send(&ProjectCreateRequest { name: draft });
+                send(&ProjectCreateRequest { name: draft });
             }
             Self::Clone => {
-                let _ = send(&ProjectCloneRequest { repository: draft });
+                send(&ProjectCloneRequest { repository: draft });
             }
         }
     }
@@ -614,7 +614,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             return;
         }
         requested_git.set(requested_root.clone());
-        let _ = send(&GitRepositoryRequest {
+        send(&GitRepositoryRequest {
             path: requested_root.clone(),
         });
     });
@@ -955,7 +955,7 @@ fn ProjectFileButton(path: String, name: String, context: String, is_dir: bool) 
             class: "group flex min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left hover:bg-foreground/[0.04]",
             title: "{path}",
             onclick: move |_| {
-                let _ = send(&FileDirectoryOpenRequest { path: open_path.clone() });
+                send(&FileDirectoryOpenRequest { path: open_path.clone() });
             },
             TypeIcon { path: icon_path, is_dir, class: "size-4 shrink-0".to_string() }
             div { class: "min-w-0 flex-1",

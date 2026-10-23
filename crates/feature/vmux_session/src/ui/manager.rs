@@ -1295,7 +1295,7 @@ fn EditableDescription(session_id: String, value: String) -> Element {
             allow_empty: true,
             trim: false,
             on_commit: move |description| {
-                let _ = send(&SessionsDescriptionUpdate {
+                send(&SessionsDescriptionUpdate {
                     id: session_id.clone(),
                     description,
                 });
@@ -1586,7 +1586,7 @@ fn StagePickerOption(
                 if let Some(mutations) = mutations {
                     mutations.change(target.clone(), stage_id.clone());
                 } else {
-                    let _ = send(&SessionsStageChange {
+                    send(&SessionsStageChange {
                         id: target.id.clone(),
                         kind: target.kind.clone(),
                         sid: target.sid.clone(),
