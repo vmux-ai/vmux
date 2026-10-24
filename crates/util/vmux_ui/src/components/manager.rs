@@ -110,32 +110,42 @@ impl ManagerArea {
 pub fn WorkspaceLayout(
     active: Option<ManagerArea>,
     onnavigate: EventHandler<ManagerArea>,
-    #[props(default = rsx! {})] sidebar_actions: Element,
+    header: Element,
     #[props(default = rsx! {})] sidebar: Element,
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 overflow-hidden",
-            aside { class: "hidden w-44 shrink-0 flex-col p-2 sm:flex",
-                div { class: "flex h-7 shrink-0 items-center justify-end gap-1 px-1",
-                    {sidebar_actions}
-                }
-                nav { class: "flex shrink-0 flex-col gap-0.5",
-                    ManagerAreaLink {
-                        area: ManagerArea::Inbox,
-                        selected: active == Some(ManagerArea::Inbox),
-                        onselect: move |area| onnavigate.call(area),
+        div { class: "flex min-h-0 flex-1 flex-col overflow-hidden",
+            {header}
+            div { class: "flex min-h-0 flex-1 overflow-hidden",
+                aside { class: "hidden w-44 shrink-0 flex-col px-2 pb-2 sm:flex",
+                    nav { class: "flex shrink-0 flex-col gap-0.5",
+                        ManagerAreaLink {
+                            area: ManagerArea::Inbox,
+                            selected: active == Some(ManagerArea::Inbox),
+                            onselect: move |area| onnavigate.call(area),
+                        }
+                        div { class: "h-1" }
+                        ManagerAreaLink {
+                            area: ManagerArea::Projects,
+                            selected: active == Some(ManagerArea::Projects),
+                            onselect: move |area| onnavigate.call(area),
+                        }
                     }
-                    div { class: "h-1" }
-                    ManagerAreaLink {
-                        area: ManagerArea::Projects,
-                        selected: active == Some(ManagerArea::Projects),
-                        onselect: move |area| onnavigate.call(area),
-                    }
+                    div { class: "mt-3 min-h-0 flex-1 overflow-y-auto", {sidebar} }
                 }
-                div { class: "mt-3 min-h-0 flex-1 overflow-y-auto", {sidebar} }
+                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
             }
-            div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
+        }
+    }
+}
+
+#[component]
+pub fn WorkspaceHeader(children: Element, #[props(default = rsx! {})] actions: Element) -> Element {
+    rsx! {
+        header { class: "relative z-40 flex h-14 shrink-0 items-center gap-2 px-2.5",
+            div { class: "flex min-w-0 flex-1 items-center gap-2", {children} }
+            div { class: "flex shrink-0 items-center gap-1", {actions} }
         }
     }
 }

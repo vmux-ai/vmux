@@ -9,9 +9,9 @@ use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerArea, ManagerControls, ManagerEmpty, ManagerIconButton, ManagerPage, ManagerSearch,
-    ManagerSearchPopover, ManagerSidebarItem, ManagerSidebarSection, ManagerView,
-    ManagerViewToggle, WorkspaceLayout,
+    ManagerArea, ManagerEmpty, ManagerIconButton, ManagerPage, ManagerSearch, ManagerSearchPopover,
+    ManagerSidebarItem, ManagerSidebarSection, ManagerView, ManagerViewToggle, WorkspaceHeader,
+    WorkspaceLayout,
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
@@ -21,7 +21,7 @@ use vmux_ui::hooks::{
     use_ui_state,
 };
 use vmux_ui::i18n::{translate, translate_humanized};
-use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
+use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView};
 use vmux_ui::navigation::PageNavigation;
 
 use crate::event::{
@@ -115,7 +115,6 @@ fn SessionsManagerActions(
     controls: CollectionController<SessionFilter>,
     filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
-    align_left: bool,
 ) -> Element {
     let mut search_open = use_signal(|| false);
     let open = search_open();
@@ -126,7 +125,6 @@ fn SessionsManagerActions(
                 open,
                 active,
                 label: translate("sessions-search"),
-                align_left,
                 ontoggle: move |_| {
                     search_open.set(!open);
                     if open && controls.query().starts_with('#') {
@@ -208,12 +206,29 @@ fn SessionsManagerContent(
                 }
                 PageNavigation::replace(area.url());
             },
-            sidebar_actions: rsx! {
-                SessionsManagerActions {
-                    controls,
-                    filter_picker,
-                    presentation: Rc::clone(&presentation),
-                    align_left: true,
+            header: rsx! {
+                WorkspaceHeader {
+                    actions: rsx! {
+                        SessionsManagerActions {
+                            controls,
+                            filter_picker,
+                            presentation: Rc::clone(&presentation),
+                        }
+                        if !presentation.snapshot.sessions.is_empty() {
+                            ManagerViewToggle {
+                                view: controls.view(),
+                                list_label: translate("sessions-view-list"),
+                                grid_label: translate("sessions-view-board"),
+                                grid_icon: LineIcon::Columns3,
+                                onchange: move |view| controls.set_view(view),
+                            }
+                        }
+                    },
+                    BuiltinIconView {
+                        icon: vmux_api::BuiltinIcon::MessagesRound,
+                        class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                    }
+                    span { class: "truncate text-xs font-medium text-foreground/90", {translate("sessions-inbox")} }
                 }
             },
             sidebar: rsx! {
@@ -226,19 +241,6 @@ fn SessionsManagerContent(
                     },
                 }
             },
-            if !presentation.snapshot.sessions.is_empty() {
-                div { class: "shrink-0 px-2 pb-2 pt-2",
-                    ManagerControls {
-                        ManagerViewToggle {
-                            view: controls.view(),
-                            list_label: translate("sessions-view-list"),
-                            grid_label: translate("sessions-view-board"),
-                            grid_icon: LineIcon::Columns3,
-                            onchange: move |view| controls.set_view(view),
-                        }
-                    }
-                }
-            }
             if presentation.snapshot.sessions.is_empty() {
                 ManagerEmpty {
                     title: translate("sessions-empty"),
@@ -723,26 +725,15 @@ fn SessionListItem(
     repository_ready: bool,
 ) -> Element {
     let open_session = resume.clone();
-    let project_seed = if !presentation.context.project_url.is_empty() {
-        presentation.context.project_url.clone()
-    } else if presentation.context.project.is_empty() {
-        session.cwd.clone()
-    } else {
-        presentation.context.project.clone()
-    };
     rsx! {
         div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| open_session.open(),
             span { class: "size-3 shrink-0" }
-            if repository_ready {
-                Identicon {
-                    seed: project_seed,
-                    alt: presentation.context.project.clone(),
-                    class: "size-4 shrink-0 rounded-md".to_string(),
-                }
-            } else {
-                Skeleton { class: "size-4 shrink-0 rounded-md" }
+            Identicon {
+                seed: session.id.clone(),
+                alt: presentation.title.clone(),
+                class: "size-4 shrink-0 rounded-md".to_string(),
             }
             SessionIdPill { label: presentation.compact_id.clone(), title: session.sid.clone() }
             span { class: "flex size-4 shrink-0 items-center justify-center",
@@ -793,26 +784,15 @@ fn SessionBoardItem(
     repository_ready: bool,
 ) -> Element {
     let open_session = resume.clone();
-    let project_seed = if !presentation.context.project_url.is_empty() {
-        presentation.context.project_url.clone()
-    } else if presentation.context.project.is_empty() {
-        session.cwd.clone()
-    } else {
-        presentation.context.project.clone()
-    };
     rsx! {
         article {
             class: "glass group relative cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-glass-hover",
             onclick: move |_| open_session.open(),
             div { class: "flex items-start gap-2",
-                if repository_ready {
-                    Identicon {
-                        seed: project_seed,
-                        alt: presentation.context.project.clone(),
-                        class: "size-5 shrink-0 rounded-md".to_string(),
-                    }
-                } else {
-                    Skeleton { class: "size-5 shrink-0 rounded-md" }
+                Identicon {
+                    seed: session.id.clone(),
+                    alt: presentation.title.clone(),
+                    class: "size-5 shrink-0 rounded-md".to_string(),
                 }
                 div { class: "min-w-0 flex-1",
                     div { class: "truncate text-xs font-medium text-foreground/90", "{presentation.title}" }
@@ -1282,13 +1262,27 @@ fn StagePickerOption(
 
 #[component]
 fn SessionContextView(context: SessionContext, loading: bool) -> Element {
+    let project_seed = if context.project_url.is_empty() {
+        context.project.clone()
+    } else {
+        context.project_url.clone()
+    };
     rsx! {
         div { class: "flex min-w-0 items-center gap-1.5",
             if loading {
                 Skeleton { class: "h-[18px] w-16 rounded-md bg-foreground/[0.055]" }
                 Skeleton { class: "h-[18px] w-12 rounded-md bg-foreground/[0.045]" }
             } else if !context.project.is_empty() {
-                MetadataPill { label: context.project, icon: Some(LineIcon::Package) }
+                MetadataPill {
+                    label: context.project.clone(),
+                    leading: rsx! {
+                        Identicon {
+                            seed: project_seed,
+                            alt: context.project,
+                            class: "size-2.5 shrink-0 rounded-sm".to_string(),
+                        }
+                    },
+                }
             }
             if !loading && !context.branch.is_empty() {
                 MetadataPill { label: context.branch, icon: Some(LineIcon::GitBranch), mono: true }
@@ -1303,6 +1297,7 @@ fn MetadataPill(
     #[props(default)] title: String,
     #[props(default)] dot: String,
     #[props(default)] icon: Option<LineIcon>,
+    #[props(default = rsx! {})] leading: Element,
     #[props(default)] mono: bool,
 ) -> Element {
     let label_class = if mono { "font-mono" } else { "" };
@@ -1319,6 +1314,7 @@ fn MetadataPill(
             if let Some(icon) = icon {
                 LineIconView { icon, class: "size-2.5 shrink-0 opacity-65".to_string() }
             }
+            {leading}
             span { class: "max-w-32 truncate {label_class}", "{label}" }
         }
     }

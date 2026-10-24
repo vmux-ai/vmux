@@ -125,8 +125,8 @@ pub(super) fn ChatHeader(
         .unwrap_or_else(|| title.clone());
     rsx! {
         PageHeader {
-            class: "session-chat-header relative z-10 shrink-0 bg-transparent px-5 pb-2 pt-[calc(0.75rem+env(safe-area-inset-top))]".to_string(),
-            content_class: "flex min-h-10 w-full items-center gap-2".to_string(),
+            class: "session-chat-header relative z-40 flex h-14 shrink-0 items-center bg-transparent px-2.5".to_string(),
+            content_class: "flex min-w-0 flex-1 items-center gap-2".to_string(),
             Breadcrumbs { class: "min-w-0 flex-1".to_string(),
                 BreadcrumbSelector {
                     label: project_name.clone(),

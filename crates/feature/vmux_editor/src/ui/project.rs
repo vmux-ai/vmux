@@ -17,12 +17,12 @@ use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty,
-    ManagerGridSize, ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
-    ManagerSearchPopover, ManagerSidebarItem, ManagerSkeleton, ManagerTone, ManagerView,
-    ManagerViewToggle, WorkspaceLayout,
+    ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
+    ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSearchPopover,
+    ManagerSidebarItem, ManagerSkeleton, ManagerTone, ManagerView, ManagerViewToggle,
+    WorkspaceHeader, WorkspaceLayout,
 };
-use vmux_ui::components::page::{PageContent, PageHeader};
+use vmux_ui::components::page::PageContent;
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
@@ -87,30 +87,36 @@ pub(super) fn ProjectList(
                     }
                     PageNavigation::replace(area.url());
                 },
-                sidebar_actions: rsx! {
-                    ProjectManagerActions {
-                        entries: entries.clone(),
-                        presentation: presentation.clone(),
-                        controls,
-                        pending,
-                        align_left: true,
+                header: rsx! {
+                    WorkspaceHeader {
+                        actions: rsx! {
+                            ProjectManagerActions {
+                                entries: entries.clone(),
+                                presentation: presentation.clone(),
+                                controls,
+                                pending,
+                            }
+                            if count > 0 {
+                                ManagerViewToggle {
+                                    view: controls.view(),
+                                    list_label: translate("tools-view-list"),
+                                    grid_label: translate("tools-view-grid"),
+                                    onchange: move |view| {
+                                        controls.set_view(view);
+                                        let _ = send(&ViewPreference::request(view));
+                                    },
+                                }
+                            }
+                        },
+                        vmux_ui::icon::BuiltinIconView {
+                            icon: vmux_api::BuiltinIcon::Project,
+                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                        }
+                        span { class: "truncate text-xs font-medium text-foreground/90", {translate("layout-projects")} }
                     }
                 },
                 sidebar: rsx! { ProjectCategories { entries: entries.clone(), controls } },
                 ManagerList {
-                    if count > 0 {
-                        ManagerControls {
-                            ManagerViewToggle {
-                                view: controls.view(),
-                                list_label: translate("tools-view-list"),
-                                grid_label: translate("tools-view-grid"),
-                                onchange: move |view| {
-                                    controls.set_view(view);
-                                    let _ = send(&ViewPreference::request(view));
-                                },
-                            }
-                        }
-                    }
                     if view.is_none() && error.is_empty() {
                         ManagerSkeleton {}
                     } else if !error.is_empty() {
@@ -149,7 +155,6 @@ fn ProjectManagerActions(
     presentation: ProjectPresentation,
     controls: CollectionController<ProjectFilter>,
     pending: bool,
-    align_left: bool,
 ) -> Element {
     let mut search_open = use_signal(|| false);
     let open = search_open();
@@ -160,7 +165,6 @@ fn ProjectManagerActions(
                 open,
                 active,
                 label: translate("layout-projects"),
-                align_left,
                 ontoggle: move |_| {
                     search_open.set(!open);
                     if open && controls.query().starts_with('#') {
@@ -635,12 +639,22 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                 onnavigate: move |area: ManagerArea| {
                     PageNavigation::replace(area.url());
                 },
-                PageHeader {
-                    div { class: "flex min-h-10 items-center gap-2",
+                header: rsx! {
+                    WorkspaceHeader {
+                        actions: rsx! {
+                            Button {
+                                variant: ButtonVariant::Primary,
+                                size: ButtonSize::Sm,
+                                class: "h-8 gap-1.5 text-xs".to_string(),
+                                onclick: move |_| PageNavigation::replace(start_url.clone()),
+                                LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                                span { {translate("sessions-start")} }
+                            }
+                        },
                         Identicon {
                             seed: project_identity,
                             alt: project_name.clone(),
-                            class: "size-7 shrink-0 rounded-lg".to_string(),
+                            class: "size-5 shrink-0 rounded-md".to_string(),
                         }
                         Breadcrumbs { class: "min-w-0 flex-1".to_string(),
                             BreadcrumbItem {
@@ -654,16 +668,8 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
                                 active: true,
                             }
                         }
-                        Button {
-                            variant: ButtonVariant::Primary,
-                            size: ButtonSize::Sm,
-                            class: "h-8 gap-1.5 text-xs".to_string(),
-                            onclick: move |_| PageNavigation::replace(start_url.clone()),
-                            LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                            span { {translate("sessions-start")} }
-                        }
                     }
-                }
+                },
                 PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
                     ProjectSessionsPanel {}
                     ProjectGitPanel { root: root.clone() }
