@@ -4,7 +4,6 @@ use bevy::prelude::*;
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::FileDirEntry;
-use vmux_ecs::event::space::ProjectActivateRequest;
 
 use crate::event::{
     GitDirectoryActivateRequest, GitDirectoryAscendRequest, GitDirectoryDescendRequest,
@@ -567,15 +566,6 @@ fn poll_loads(
             continue;
         };
         let repo_root = repo_root.to_string_lossy().into_owned();
-        commands.trigger(UiInput {
-            webview: entity,
-            payload: ProjectActivateRequest {
-                path: repo_root.clone(),
-                branch: String::new(),
-                checkout: String::new(),
-                pane_id: None,
-            },
-        });
         commands.trigger(UiInput {
             webview: entity,
             payload: GitRepositoryRequest { path: repo_root },

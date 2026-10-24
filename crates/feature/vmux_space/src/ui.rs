@@ -8,7 +8,7 @@ use crate::event::{
 use dioxus::prelude::*;
 use vmux_api::input::KeyContextRequest;
 use vmux_ecs::event::team::TeamProfileSwitchRequest;
-use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
@@ -230,9 +230,9 @@ fn SpaceActions(space_id: String, name: String, deletable: bool) -> Element {
                 LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5".to_string() }
             }
             if open() {
-                div {
-                    class: "absolute right-0 top-7 z-30 w-36 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
-                    onclick: move |event| event.stop_propagation(),
+                DropdownPopup {
+                    class: "absolute right-0 top-7 z-30 w-36 p-1",
+                    onclick: move |event: MouseEvent| event.stop_propagation(),
                     button {
                         r#type: "button",
                         class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",

@@ -32,6 +32,8 @@ pub mod __private {
 
 extern crate self as vmux_tool;
 
+pub const EXTENSIONS_URL: &str = "vmux://tools/extensions";
+
 pub(crate) struct Feature;
 
 impl vmux_ecs::manifest::FeatureManifestSource for Feature {
@@ -45,6 +47,8 @@ mod command_bar;
 #[cfg(not(target_os = "ios"))]
 mod connection;
 mod dotfiles;
+#[cfg(ui)]
+mod extension;
 mod homebrew;
 #[cfg(all(host, ui))]
 mod host;

@@ -5,13 +5,13 @@ use vmux_ecs::event::{ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
+use vmux_ui::components::dropdown::DropdownPopup;
+use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::components::sheet::SheetHeaderChevron;
-use vmux_ui::components::tree_row::{SidebarTreeRow, SidebarTreeRowGroup};
+use vmux_ui::components::tree_row::{FileTreeRow, FileTreeRowGroup};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{translate, translate_humanized};
-use vmux_ui::icon::{
-    BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconView,
-};
+use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconView};
 
 use crate::event::{
     ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, SideSheetSectionRequest,
@@ -161,10 +161,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
         .into_iter()
         .filter(|branch| branch.branch != current_branch)
         .collect::<Vec<_>>();
-    let project_choices = choices
-        .into_iter()
-        .filter(|choice| !choice.is_active)
-        .collect::<Vec<_>>();
+    let project_choices = choices;
     let toggle_label = if expanded {
         translate("common-collapse")
     } else {
@@ -178,44 +175,34 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     open: choosing(),
                     class: "w-full min-w-0".to_string(),
                     on_dismiss: move |_| choosing.set(false),
-                    button {
-                        r#type: "button",
-                        class: "group flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left text-foreground hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
-                        aria_expanded: choosing(),
+                    ProjectSelectTrigger {
+                        label: root.label.clone(),
+                        title: root.display_path.clone(),
+                        open: choosing(),
+                        class: "w-full @max-[12rem]:gap-1.5 @max-[12rem]:px-1".to_string(),
                         onclick: move |_| choosing.set(!choosing()),
-                        BuiltinIconView {
-                            icon: vmux_api::BuiltinIcon::Project,
-                            class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
-                        }
-                        span { class: "w-0 min-w-0 flex-1 truncate text-[10px] font-medium", "{root.label}" }
-                        LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                     }
                     if choosing() {
-                        div { class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto rounded-lg bg-card p-1 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
-                            for choice in project_choices.iter() {
-                                ActiveWorkspaceChoice {
-                                    key: "{choice.path}",
-                                    project: choice.clone(),
-                                    pane_id,
-                                    on_pick: move |_| choosing.set(false),
-                                }
-                            }
-                            if !project_choices.is_empty() {
-                                div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
-                            }
-                            button {
-                                r#type: "button",
-                                class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
-                                onclick: move |_| {
-                                    choosing.set(false);
-                                    let _ = send(&ProjectPickerRequest {
-                                        current_dir: picker_root.clone(),
-                                        pane_id: Some(pane_id),
-                                    });
-                                },
-                                LineIconView { icon: LineIcon::Plus, class: "size-3.5 shrink-0".to_string() }
-                                span { {translate("common-add")} }
-                            }
+                        ProjectSelectPopup {
+                            projects: project_choices.clone(),
+                            selected_path: root.path.clone(),
+                            class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto".to_string(),
+                            on_pick: move |project: ProjectRow| {
+                                choosing.set(false);
+                                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
+                                    path: project.path,
+                                    branch: String::new(),
+                                    checkout: String::new(),
+                                    pane_id: Some(pane_id),
+                                });
+                            },
+                            on_add: move |_| {
+                                choosing.set(false);
+                                let _ = send(&ProjectPickerRequest {
+                                    current_dir: picker_root.clone(),
+                                    pane_id: Some(pane_id),
+                                });
+                            },
                         }
                     }
                 }
@@ -241,7 +228,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                             }
                             if choosing_branch() {
-                                div { class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto rounded-lg bg-card p-1 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                                DropdownPopup { class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto p-1",
                                     for branch in branch_choices {
                                         ActiveWorkspaceBranchChoice {
                                             key: "{branch.branch}",
@@ -325,45 +312,6 @@ fn ActiveWorkspaceBranchChoice(
 }
 
 #[component]
-fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandler<()>) -> Element {
-    let path = project.path.clone();
-    rsx! {
-        button {
-            r#type: "button",
-            class: if project.is_active {
-                "flex w-full min-w-0 items-center gap-2 rounded-md bg-primary/[0.10] px-2 py-1.5 text-left text-foreground"
-            } else {
-                "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
-            },
-            title: "{project.display_path}",
-            onclick: move |_| {
-                on_pick.call(());
-                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
-                    path: path.clone(),
-                    branch: String::new(),
-                    checkout: String::new(),
-                    pane_id: Some(pane_id),
-                });
-            },
-            div { class: "min-w-0 flex-1",
-                div { class: "truncate text-[10px] font-medium", "{project.label}" }
-                if !project.branch.is_empty() {
-                    div { class: "truncate font-mono text-[9px] text-muted-foreground", "{project.branch}" }
-                }
-            }
-            if project.is_active {
-                span { class: "shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-semibold text-primary", {translate("common-current")} }
-            } else if project.is_worktree {
-                LineIconView {
-                    icon: LineIcon::GitFork,
-                    class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
-                }
-            }
-        }
-    }
-}
-
-#[component]
 fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
     let path = project.path.clone();
     let opens_tree = matches!(
@@ -371,8 +319,8 @@ fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
         vmux_api::space::ProjectRowKind::Project | vmux_api::space::ProjectRowKind::Directory
     );
     rsx! {
-        SidebarTreeRowGroup {
-            SidebarTreeRow {
+        FileTreeRowGroup {
+            FileTreeRow {
                 path: project.path.clone(),
                 label: project.label.clone(),
                 is_dir: opens_tree,

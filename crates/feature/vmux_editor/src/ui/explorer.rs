@@ -10,7 +10,7 @@ use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
 use vmux_ui::components::tree_row::{
-    SIDEBAR_STICKY_SURFACE, SIDEBAR_TREE_LIST_GROUP, SIDEBAR_TREE_ROW_BASE, TreeRowAccent,
+    FILE_TREE_LIST_GROUP, FILE_TREE_ROW_BASE, FILE_TREE_STICKY_SURFACE, TreeRowAccent,
 };
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
@@ -746,7 +746,7 @@ fn TitleButtonIcon(glyph: TitleGlyph) -> Element {
 fn StickyOverlay(children: Element) -> Element {
     rsx! {
         div { class: "sticky top-0 z-[12] h-0",
-            div { class: "absolute inset-x-0 top-0 {SIDEBAR_STICKY_SURFACE}", {children} }
+            div { class: "absolute inset-x-0 top-0 {FILE_TREE_STICKY_SURFACE}", {children} }
         }
     }
 }
@@ -935,7 +935,7 @@ fn SearchView(view: ReadSignal<SidebarView>) -> Element {
             div { class: "min-h-0 flex-1 overflow-y-auto pb-4",
                 if let Some(summary) = summary {
                     div { class: "px-3 py-1 text-[10px] text-muted-foreground", "{summary}" }
-                    div { class: "{SIDEBAR_TREE_LIST_GROUP}",
+                    div { class: "{FILE_TREE_LIST_GROUP}",
                         for file in files {
                             SearchFileGroup {
                                 key: "{file.path}",
@@ -978,7 +978,7 @@ fn SearchFileGroup(
     rsx! {
         div {
             div {
-                class: "{SIDEBAR_STICKY_SURFACE} sticky top-0 z-[11] flex h-[22px] cursor-default items-center gap-1 px-1 text-foreground/85 transition-colors duration-100 hover:bg-foreground/[0.08]",
+                class: "{FILE_TREE_STICKY_SURFACE} sticky top-0 z-[11] flex h-[22px] cursor-default items-center gap-1 px-1 text-foreground/85 transition-colors duration-100 hover:bg-foreground/[0.08]",
                 title: "{file.path}",
                 onclick: move |_| search.toggle_group(&path_toggle),
                 Chevron { expanded: !collapsed, loading: false }
@@ -1032,7 +1032,7 @@ fn SearchHitRow(
         div {
             id: "{tree_row_id(&key)}",
             tabindex: "-1",
-            class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()} pl-6",
+            class: "{FILE_TREE_ROW_BASE} {accent.classes()} pl-6",
             title: "{path}:{hit.line}",
             onkeydown: move |event: Event<KeyboardData>| {
                 let forward = match event.key() {
@@ -1453,7 +1453,7 @@ pub fn ExplorerPanel(
                 }
                 div { class: "{files_body}",
                     div {
-                        class: "{SIDEBAR_TREE_LIST_GROUP} min-h-0 overflow-hidden",
+                        class: "{FILE_TREE_LIST_GROUP} min-h-0 overflow-hidden",
                         onmounted: move |event: Event<MountedData>| files_sticky.mounted(event.data()),
                         if tree_empty {
                             if root_loading() {
@@ -1493,7 +1493,7 @@ pub fn ExplorerPanel(
                                             div {
                                                 id: "{tree_row_id(&row.path)}",
                                                 tabindex: "-1",
-                                                class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()}",
+                                                class: "{FILE_TREE_ROW_BASE} {accent.classes()}",
                                                 style: "padding-left:{pad}px;",
                                                 title: "{row.path}",
                                                 onmouseenter: move |_| {
@@ -1587,7 +1587,7 @@ pub fn ExplorerPanel(
                 StickyOutline { rows: sticky_outline, on_pick: move |line: u32| goto_line(line) }
                 div { class: "{outline_body}",
                     div {
-                        class: "{SIDEBAR_TREE_LIST_GROUP} min-h-0 overflow-hidden",
+                        class: "{FILE_TREE_LIST_GROUP} min-h-0 overflow-hidden",
                         onmounted: move |event: Event<MountedData>| outline_sticky.mounted(event.data()),
                         for s in outline() {
                             {
@@ -1604,7 +1604,7 @@ pub fn ExplorerPanel(
                                         key: "{key}",
                                         id: "{tree_row_id(&key)}",
                                         tabindex: "-1",
-                                        class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()}",
+                                        class: "{FILE_TREE_ROW_BASE} {accent.classes()}",
                                         style: "padding-left:{pad}px;",
                                         onkeydown: move |e: Event<KeyboardData>| {
                                             let forward = match e.key() {

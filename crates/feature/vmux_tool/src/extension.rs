@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+use crate::state::ToolProviderMetadata;
+use crate::ui::ToolsRouteSelector;
 use dioxus::prelude::*;
 use vmux_api::extension::*;
 use vmux_ui::components::alert_dialog::{
@@ -7,17 +9,11 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::components::manager::{
-    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage,
-    ManagerRow, ManagerSearch, ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
+    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerRow,
+    ManagerSearch, ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
 };
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-
-#[vmux_page::page(
-    component = Page,
-    states = ["ThemeUiState", "ExtensionsUiState", "ToolsUiState"]
-)]
-pub(crate) struct ExtensionPage;
 
 #[derive(Clone, PartialEq)]
 struct Approval {
@@ -43,77 +39,73 @@ impl From<&ExtRow> for Approval {
 }
 
 #[component]
-pub fn Page() -> Element {
-    use_theme();
-    let state = use_ui_state::<ExtensionsUiState>().state;
-    let tools = use_ui_state::<vmux_tool::state::ToolsUiState>().state;
-
-    let snapshot = state();
-    let installing = &snapshot.installing;
-    let browse_query = snapshot.query.clone();
+pub(crate) fn ExtensionManager(
+    state: ExtensionsUiState,
+    providers: Vec<ToolProviderMetadata>,
+) -> Element {
+    let installing = &state.installing;
+    let browse_query = state.query.clone();
 
     rsx! {
-        ManagerPage {
-            ManagerToolbar {
-                vmux_tool::ToolsRouteSelector {
-                    active: "extensions".to_string(),
-                    providers: tools().snapshot.providers,
-                }
-                ManagerSearch {
-                    value: snapshot.query.clone(),
-                    placeholder: translate("extensions-search"),
-                    onsearch: move |query: String| {
-                        let _ = send(&ExtFilterRequest { query });
-                    },
-                    onkeydown: move |event: KeyboardEvent| {
-                        if event.key() == Key::Enter {
-                            let query = browse_query.clone();
-                            if !query.trim().is_empty() {
-                                let _ = send(&ExtBrowseStoreRequest { query });
-                            }
+        ManagerToolbar {
+            ToolsRouteSelector {
+                active: "extensions".to_string(),
+                providers,
+            }
+            ManagerSearch {
+                value: state.query.clone(),
+                placeholder: translate("extensions-search"),
+                onsearch: move |query: String| {
+                    let _ = send(&ExtFilterRequest { query });
+                },
+                onkeydown: move |event: KeyboardEvent| {
+                    if event.key() == Key::Enter {
+                        let query = browse_query.clone();
+                        if !query.trim().is_empty() {
+                            let _ = send(&ExtBrowseStoreRequest { query });
                         }
+                    }
+                },
+            }
+            if state.pending {
+                ManagerButton {
+                    variant: ManagerButtonVariant::Primary,
+                    onclick: move |_| {
+                        let _ = send(&vmux_api::service::RelaunchRequest);
                     },
+                    {translate("extensions-relaunch")}
                 }
-                if snapshot.pending {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Primary,
-                        onclick: move |_| {
-                            let _ = send(&vmux_api::service::RelaunchRequest);
-                        },
-                        {translate("extensions-relaunch")}
+            }
+        }
+        if !installing.is_empty() {
+            div { class: "shrink-0 px-5 pt-3",
+                for item in installing.iter() {
+                    div { class: "truncate text-[10px] text-muted-foreground/70",
+                        {format!(
+                            "{}: {}{}",
+                            item.key,
+                            item.message,
+                            item.pct.map(|percent| format!(" {percent}%")).unwrap_or_default()
+                        )}
                     }
                 }
             }
-            if !installing.is_empty() {
-                div { class: "shrink-0 px-5 pt-3",
-                    for item in installing.iter() {
-                        div { class: "truncate text-[10px] text-muted-foreground/70",
-                            {format!(
-                                "{}: {}{}",
-                                item.key,
-                                item.message,
-                                item.pct.map(|percent| format!(" {percent}%")).unwrap_or_default()
-                            )}
-                        }
-                    }
+        }
+        ManagerList {
+            if !state.loaded {
+                ManagerSkeleton {}
+            } else if state.visible.is_empty() {
+                ManagerEmpty {
+                    title: if state.extensions.is_empty() { translate("extensions-empty") } else { translate("extensions-no-match") },
+                    detail: if state.extensions.is_empty() {
+                        translate("extensions-empty-detail")
+                    } else {
+                        translate("extensions-no-match-detail")
+                    },
                 }
             }
-            ManagerList {
-                if !snapshot.loaded {
-                    ManagerSkeleton {}
-                } else if snapshot.visible.is_empty() {
-                    ManagerEmpty {
-                        title: if snapshot.extensions.is_empty() { translate("extensions-empty") } else { translate("extensions-no-match") },
-                        detail: if snapshot.extensions.is_empty() {
-                            translate("extensions-empty-detail")
-                        } else {
-                            translate("extensions-no-match-detail")
-                        },
-                    }
-                }
-                for extension in snapshot.visible.iter() {
-                    ExtensionRow { extension: extension.clone() }
-                }
+            for extension in state.visible.iter() {
+                ExtensionRow { extension: extension.clone() }
             }
         }
     }

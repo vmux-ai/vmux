@@ -1,5 +1,9 @@
 #[vmux_api::contract(Default, Eq)]
+pub struct ProjectId(pub String);
+
+#[vmux_api::contract(Default, Eq)]
 pub struct ProjectEntry {
+    pub id: ProjectId,
     pub name: String,
     pub source: String,
     pub path: String,
@@ -12,6 +16,21 @@ pub struct ProjectEntry {
     pub ongoing_sessions: u32,
     pub stale_sessions: u32,
     pub archived: bool,
+}
+
+impl ProjectEntry {
+    pub fn identity_seed(&self) -> &str {
+        if !self.id.0.trim().is_empty() {
+            return &self.id.0;
+        }
+        if !self.url.trim().is_empty() {
+            return &self.url;
+        }
+        if !self.path.trim().is_empty() {
+            return &self.path;
+        }
+        &self.name
+    }
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -31,11 +50,12 @@ pub enum ProjectView {
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ProjectDetailView {
+    pub id: ProjectId,
     pub name: String,
     pub path: String,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 2)]
+#[vmux_api::ui_state(Default, Eq, version = 3)]
 pub struct ProjectUiState {
     pub view: ProjectView,
     pub collection_view: vmux_ecs::CollectionView,

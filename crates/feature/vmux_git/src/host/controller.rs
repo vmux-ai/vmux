@@ -101,6 +101,7 @@ impl GitPageControllerState {
     pub(super) fn reset(&mut self, branch: String) {
         *self = GitPageControllerState {
             selected_branch: branch,
+            selected_branch_collection: GitBranchCollection::Local,
             ..Default::default()
         };
     }
@@ -157,16 +158,12 @@ impl GitPageControllerState {
     }
 
     fn select_branch(&mut self, reference: &str, repository: &GitRepositorySnapshot) -> bool {
-        if !self
-            .branch_collection
-            .references(repository)
-            .iter()
-            .any(|candidate| candidate == reference)
-        {
+        if !self.branch_collection.contains(repository, reference) {
             return false;
         }
         self.select_panel(GitPanel::Branches);
         self.selected_branch = reference.to_string();
+        self.selected_branch_collection = self.branch_collection;
         self.selected_branch_path.clear();
         self.selected_branch_path_bytes.clear();
         true
@@ -198,6 +195,7 @@ impl GitPageControllerState {
 
     fn select_branch_diff(&mut self, repository: &GitRepositorySnapshot) {
         self.branch_collection = GitBranchCollection::Local;
+        self.selected_branch_collection = GitBranchCollection::Local;
         self.selected_branch.clone_from(&repository.branch);
         self.selected_branch_path.clear();
         self.selected_branch_path_bytes.clear();
@@ -453,25 +451,33 @@ fn dispatch_git_key(
                 commands.trigger(UiInput { webview, payload });
             }
         }
-        (GitPanel::Branches, "Enter" | " " | "Space" | "c")
-            if controller.operations.checkout_branch =>
-        {
-            let Some(branch) = repository
-                .branches
-                .iter()
-                .find(|branch| branch.name == controller.selected_branch)
+        (GitPanel::Branches, "c") if controller.operations.checkout_branch => {
+            let Some(checkout) = controller
+                .selected_branch_collection
+                .checkout(repository, &controller.selected_branch)
             else {
                 return;
             };
-            commands.trigger(UiInput {
-                webview,
-                payload: ProjectActivateRequest {
-                    path: repository.repo_root.clone(),
-                    branch: branch.name.clone(),
-                    checkout: branch.checkout.clone(),
-                    pane_id: None,
-                },
-            });
+            if checkout.start_point.is_empty() {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: ProjectActivateRequest {
+                        path: repository.repo_root.clone(),
+                        branch: checkout.branch,
+                        checkout: checkout.checkout,
+                        pane_id: None,
+                    },
+                });
+            } else {
+                commands.trigger(UiInput {
+                    webview,
+                    payload: GitCreateBranchRequest {
+                        repo_root: repository.repo_root.clone(),
+                        branch: checkout.branch,
+                        start_point: checkout.start_point,
+                    },
+                });
+            }
         }
         (GitPanel::Branches, "r") if controller.operations.rebase => commands.trigger(UiInput {
             webview,
@@ -584,9 +590,19 @@ fn reconcile(mut pages: Query<(&GitState, &mut GitPageControllerState), Changed<
         {
             next.selected_commit.clear();
         }
-        next.selected_branch = next
-            .branch_collection
-            .selected_reference(repository, &next.selected_branch);
+        if !next
+            .selected_branch_collection
+            .contains(repository, &next.selected_branch)
+        {
+            match GitBranchCollection::containing(repository, &next.selected_branch) {
+                Some(collection) => next.selected_branch_collection = collection,
+                None => {
+                    next.selected_branch = GitBranchCollection::Local
+                        .selected_reference(repository, &next.selected_branch);
+                    next.selected_branch_collection = GitBranchCollection::Local;
+                }
+            }
+        }
         let next_branch_file = if state.snapshot.branch_files_reference == next.selected_branch {
             state
                 .snapshot
@@ -666,7 +682,7 @@ fn operations(mut pages: OperationPages) {
             .files
             .iter()
             .find(|entry| entry.path_bytes == controller.selected_path_bytes);
-        let branch = if controller.branch_collection == GitBranchCollection::Local
+        let branch = if controller.selected_branch_collection == GitBranchCollection::Local
             && state.snapshot.local_branches.loaded
         {
             repository
@@ -687,6 +703,9 @@ fn operations(mut pages: OperationPages) {
                 .iter()
                 .any(|entry| entry.reference == controller.selected_stash);
         let staged = repository.files.iter().any(|entry| entry.staged);
+        let checkout = controller
+            .selected_branch_collection
+            .checkout(repository, &controller.selected_branch);
         let branch_selected = branch.is_some();
         let branch_mutable = branch.is_some_and(|branch| !branch.current);
         let next = GitOperationEligibility {
@@ -697,7 +716,7 @@ fn operations(mut pages: OperationPages) {
             discard: file.is_some_and(|entry| entry.can_discard()),
             commit: staged,
             push: !repository.branch.is_empty(),
-            checkout_branch: branch_selected,
+            checkout_branch: checkout.is_some_and(|checkout| !checkout.current),
             create_branch: branch_selected,
             delete_branch: branch
                 .is_some_and(|branch| !branch.current && branch.checkout.is_empty()),
@@ -983,7 +1002,6 @@ fn select_branch_collection(
 fn branch_select_request(
     trigger: On<UiInput<GitBranchSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitPageControllerState)>,
-    mut commands: Commands,
 ) {
     let Ok((state, mut controller)) = pages.get_mut(trigger.event().webview) else {
         return;
@@ -992,26 +1010,7 @@ fn branch_select_request(
         return;
     };
     let reference = &trigger.event().payload.reference;
-    let activate = controller.branch_collection == GitBranchCollection::Local;
-    if !controller.select_branch(reference, repository) || !activate {
-        return;
-    }
-    let Some(branch) = repository
-        .branches
-        .iter()
-        .find(|branch| branch.name == *reference)
-    else {
-        return;
-    };
-    commands.trigger(UiInput {
-        webview: trigger.event().webview,
-        payload: ProjectActivateRequest {
-            path: repository.repo_root.clone(),
-            branch: branch.name.clone(),
-            checkout: branch.checkout.clone(),
-            pane_id: None,
-        },
-    });
+    controller.select_branch(reference, repository);
 }
 
 fn branch_diff_select_request(
@@ -1183,16 +1182,6 @@ fn submit_commit(
 mod tests {
     use super::*;
 
-    #[derive(Resource, Default)]
-    struct ProjectActivations(Vec<ProjectActivateRequest>);
-
-    fn capture_project_activation(
-        trigger: On<UiInput<ProjectActivateRequest>>,
-        mut activations: ResMut<ProjectActivations>,
-    ) {
-        activations.0.push(trigger.event().payload.clone());
-    }
-
     #[test]
     fn url_commit_selects_a_commit_without_locking_other_panels() {
         let mut controller = GitPageControllerState::default();
@@ -1233,6 +1222,10 @@ mod tests {
         controller.select_branch_collection(GitBranchCollection::Tags);
 
         assert_eq!(controller.branch_collection, GitBranchCollection::Tags);
+        assert_eq!(
+            controller.selected_branch_collection,
+            GitBranchCollection::Local
+        );
         assert_eq!(controller.selected_branch, "vmx-226-session-management");
         assert_eq!(
             controller.selected_branch_path,
@@ -1241,11 +1234,9 @@ mod tests {
     }
 
     #[test]
-    fn selecting_a_local_branch_activates_its_workspace() {
+    fn selecting_a_local_branch_only_changes_the_viewed_reference() {
         let mut app = App::new();
-        app.init_resource::<ProjectActivations>()
-            .add_observer(branch_select_request)
-            .add_observer(capture_project_activation);
+        app.add_observer(branch_select_request);
         let page = app
             .world_mut()
             .spawn((
@@ -1294,14 +1285,12 @@ mod tests {
         });
         app.update();
 
+        let controller = app.world().get::<GitPageControllerState>(page).unwrap();
+        assert_eq!(controller.focused_panel, GitPanel::Branches);
+        assert_eq!(controller.selected_branch, "feature");
         assert_eq!(
-            app.world().resource::<ProjectActivations>().0,
-            [ProjectActivateRequest {
-                path: "/repo".to_string(),
-                branch: "feature".to_string(),
-                checkout: String::new(),
-                pane_id: None,
-            }]
+            controller.selected_branch_collection,
+            GitBranchCollection::Local
         );
     }
 

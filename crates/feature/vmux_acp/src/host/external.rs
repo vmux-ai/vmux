@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Read};
 use std::path::PathBuf;
 use std::sync::{Mutex, mpsc};
@@ -11,11 +11,12 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
-use vmux_ecs::{CreatedAt, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget};
 use vmux_session::{
-    AgentConversationTitle, AgentFamily, AgentId, ConversationAppendReceived, CreateRequest,
-    Created, ProviderCatalog, ProviderKind, ProviderSession, ProviderSessionId, Route, Session,
-    SessionId, SnapshotReceived, TranscriptLoading, Transcripts,
+    AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
+    ConversationAppendReceived, CreateRequest, Created, ProviderArchiveCompleted,
+    ProviderArchiveWriteRequest, ProviderCatalog, ProviderKind, ProviderSession, ProviderSessionId,
+    Route, Session, SessionDuplicate, SessionId, SnapshotReceived, TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 
@@ -30,12 +31,16 @@ pub(super) fn add(app: &mut App) {
     app.init_resource::<SourceSnapshot>()
         .init_resource::<PendingImports>()
         .init_resource::<ProviderCatalog>()
+        .init_resource::<ArchiveQueue>()
+        .init_resource::<ArchiveOverlay>()
         .add_observer(open)
         .add_observer(attach)
         .add_systems(Startup, start)
         .add_systems(
             Update,
             (
+                archive,
+                finish_archives,
                 watch,
                 scan,
                 finish,
@@ -195,8 +200,88 @@ impl Runtime {
 #[derive(Component)]
 struct ScanRequested(HashSet<SourceKind>);
 
+impl ScanRequested {
+    fn one(source: SourceKind) -> Self {
+        Self(HashSet::from([source]))
+    }
+}
+
 #[derive(Component)]
-struct ScanTask(Task<Vec<SourceRead>>);
+struct ScanTask {
+    started_at: Instant,
+    task: Task<Vec<SourceRead>>,
+}
+
+#[derive(Component)]
+struct ArchiveTask {
+    request: ProviderArchiveWriteRequest,
+    task: Task<Result<ArchiveState, String>>,
+}
+
+impl ArchiveTask {
+    fn spawn(
+        request: ProviderArchiveWriteRequest,
+        root: PathBuf,
+        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    ) -> Self {
+        let sid = request.id.0.clone();
+        let archived = request.archived;
+        let task = IoTaskPool::get().spawn(async move {
+            let result = codex::Reader::at(&root).set_archive(&sid, archived);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        Self { request, task }
+    }
+}
+
+#[derive(Resource, Default)]
+struct ArchiveQueue(VecDeque<ProviderArchiveWriteRequest>);
+
+#[derive(Resource, Default)]
+struct ArchiveOverlay(HashMap<SourceKind, HashMap<String, ArchiveOverlayEntry>>);
+
+struct ArchiveOverlayEntry {
+    state: ArchiveState,
+    completed_at: Instant,
+}
+
+impl ArchiveOverlay {
+    fn record(&mut self, source: SourceKind, id: String, state: ArchiveState) {
+        self.0.entry(source).or_default().insert(
+            id,
+            ArchiveOverlayEntry {
+                state,
+                completed_at: Instant::now(),
+            },
+        );
+    }
+
+    fn apply(
+        &mut self,
+        source: SourceKind,
+        scan_started_at: Instant,
+        sessions: &mut [ProviderSession],
+    ) {
+        let Some(entries) = self.0.get_mut(&source) else {
+            return;
+        };
+        for session in sessions {
+            let Some(entry) = entries.get(&session.sid) else {
+                continue;
+            };
+            if entry.completed_at > scan_started_at {
+                session.archive = Some(entry.state);
+            }
+        }
+        entries.retain(|_, entry| entry.completed_at > scan_started_at);
+        if entries.is_empty() {
+            self.0.remove(&source);
+        }
+    }
+}
 
 #[derive(Component)]
 struct ConversationLoadPending;
@@ -658,6 +743,88 @@ fn watch(
     }
 }
 
+fn archive(
+    paths: Single<&SourcePaths>,
+    mut requests: MessageReader<ProviderArchiveWriteRequest>,
+    tasks: Query<(), With<ArchiveTask>>,
+    mut queue: ResMut<ArchiveQueue>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut completed: MessageWriter<ProviderArchiveCompleted>,
+    mut commands: Commands,
+) {
+    for request in requests.read().cloned() {
+        if request.kind.0 != "acp:codex" {
+            completed.write(ProviderArchiveCompleted {
+                kind: request.kind,
+                id: request.id,
+                archived: request.archived,
+                revision: request.revision,
+                success: false,
+            });
+            continue;
+        }
+        queue.0.push_back(request);
+    }
+    if !tasks.is_empty() {
+        return;
+    }
+    let Some(request) = queue.0.pop_front() else {
+        return;
+    };
+    commands.spawn(ArchiveTask::spawn(
+        request,
+        paths.codex.clone(),
+        proxy.as_deref().map(|proxy| (**proxy).clone()),
+    ));
+}
+
+fn finish_archives(
+    mut tasks: Query<(Entity, &mut ArchiveTask)>,
+    mut snapshot: ResMut<SourceSnapshot>,
+    mut overlay: ResMut<ArchiveOverlay>,
+    runtime: Single<Entity, With<Runtime>>,
+    mut requested: Query<&mut ScanRequested, With<Runtime>>,
+    mut completed: MessageWriter<ProviderArchiveCompleted>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        let success = result.is_ok();
+        match result {
+            Ok(archive) => {
+                overlay.record(SourceKind::Codex, task.request.id.0.clone(), archive);
+                if let Some(session) = snapshot.0.get_mut(&SourceKind::Codex).and_then(|sessions| {
+                    sessions
+                        .iter_mut()
+                        .find(|session| session.sid == task.request.id.0)
+                }) {
+                    session.archive = Some(archive);
+                }
+                if let Ok(mut requested) = requested.get_mut(*runtime) {
+                    requested.0.insert(SourceKind::Codex);
+                } else {
+                    commands
+                        .entity(*runtime)
+                        .insert(ScanRequested::one(SourceKind::Codex));
+                }
+            }
+            Err(error) => {
+                bevy::log::warn!("failed to archive Codex session: {error}");
+            }
+        }
+        completed.write(ProviderArchiveCompleted {
+            kind: task.request.kind.clone(),
+            id: task.request.id.clone(),
+            archived: task.request.archived,
+            revision: task.request.revision,
+            success,
+        });
+        commands.entity(entity).despawn();
+    }
+}
+
 fn scan(
     runtime: Single<(Entity, &SourcePaths, &ScanRequested), (With<Runtime>, Without<ScanTask>)>,
     snapshot: Res<SourceSnapshot>,
@@ -667,6 +834,7 @@ fn scan(
     let (entity, paths, requested) = *runtime;
     let readers = paths.readers(&requested.0, &snapshot);
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let started_at = Instant::now();
     let task = IoTaskPool::get().spawn(async move {
         let reads = readers.read();
         if let Some(wake) = wake {
@@ -677,22 +845,24 @@ fn scan(
     commands
         .entity(entity)
         .remove::<ScanRequested>()
-        .insert(ScanTask(task));
+        .insert(ScanTask { started_at, task });
 }
 
 fn finish(
     task: Single<(Entity, &mut ScanTask)>,
     mut snapshot: ResMut<SourceSnapshot>,
+    mut overlay: ResMut<ArchiveOverlay>,
     mut commands: Commands,
 ) {
     let (entity, mut task) = task.into_inner();
-    let Some(reads) = future::block_on(future::poll_once(&mut task.0)) else {
+    let Some(reads) = future::block_on(future::poll_once(&mut task.task)) else {
         return;
     };
     let mut next = snapshot.0.clone();
     for read in reads {
         match read.sessions {
-            Ok(sessions) => {
+            Ok(mut sessions) => {
+                overlay.apply(read.source, task.started_at, &mut sessions);
                 next.insert(read.source, sessions);
             }
             Err(error) => {
@@ -715,7 +885,7 @@ fn project(
             Option<&ProviderSessionId>,
             Option<&AcpSessionId>,
         ),
-        With<Session>,
+        (With<Session>, Without<SessionDuplicate>),
     >,
     changed: Query<
         (),
@@ -726,13 +896,15 @@ fn project(
                 Changed<ProviderKind>,
                 Changed<ProviderSessionId>,
                 Changed<AcpSessionId>,
+                Changed<SessionDuplicate>,
             )>,
         ),
     >,
     mut removed: RemovedComponents<AcpSessionId>,
+    mut removed_duplicates: RemovedComponents<SessionDuplicate>,
     mut catalog: ResMut<ProviderCatalog>,
 ) {
-    let removed = removed.read().next().is_some();
+    let removed = removed.read().next().is_some() || removed_duplicates.read().next().is_some();
     if !snapshot.is_changed() && changed.is_empty() && !removed && !catalog.is_added() {
         return;
     }
@@ -804,23 +976,53 @@ fn request_conversation_refreshes(
     mut sessions: Query<
         (
             Entity,
+            &SessionId,
             &ProviderKind,
             &ProviderSessionId,
             &mut vmux_ecs::LastActivatedAt,
+            Option<&ArchivedAt>,
             Option<&ConversationRevision>,
             Option<&mut ConversationRefreshRequested>,
         ),
-        With<Session>,
+        (With<Session>, Without<SessionDuplicate>),
     >,
+    mut archive_requests: MessageWriter<ArchiveRequest>,
     mut commands: Commands,
 ) {
     if !snapshot.is_changed() {
         return;
     }
-    for (session, kind, provider_sid, mut activated_at, revision, requested) in &mut sessions {
+    for (
+        session,
+        session_id,
+        kind,
+        provider_sid,
+        mut activated_at,
+        archived_at,
+        revision,
+        requested,
+    ) in &mut sessions
+    {
         let Some(source) = snapshot.get(&kind.0, &provider_sid.0) else {
             continue;
         };
+        match source.archive {
+            Some(ArchiveState::Archived(at))
+                if archived_at.is_none_or(|current| current.0 != at.max(1)) =>
+            {
+                archive_requests.write(ArchiveRequest {
+                    id: session_id.clone(),
+                    archived_at: Some(at),
+                });
+            }
+            Some(ArchiveState::Active(_)) if archived_at.is_some() => {
+                archive_requests.write(ArchiveRequest {
+                    id: session_id.clone(),
+                    archived_at: None,
+                });
+            }
+            _ => {}
+        }
         if activated_at.0 < source.updated_at {
             activated_at.0 = source.updated_at;
         }
@@ -856,6 +1058,7 @@ fn queue_initial_conversations(
             With<Session>,
             With<TranscriptLoading>,
             Without<ConversationLoadPending>,
+            Without<SessionDuplicate>,
         ),
     >,
     transcripts: Transcripts,
@@ -918,6 +1121,7 @@ fn queue_conversation_refreshes(
             With<Session>,
             Without<TranscriptLoading>,
             Without<ConversationLoadPending>,
+            Without<SessionDuplicate>,
         ),
     >,
     transcripts: Transcripts,
@@ -1002,7 +1206,17 @@ fn open(
     parents: Query<&ChildOf>,
     catalog: Res<ProviderCatalog>,
     agents: AgentCatalog,
-    existing: Query<(Entity, &SessionId, &AgentId, &AcpSessionId), With<Session>>,
+    existing: Query<
+        (
+            Entity,
+            &SessionId,
+            &AgentId,
+            &AcpSessionId,
+            Option<&ProviderKind>,
+            Option<&ProviderSessionId>,
+        ),
+        (With<Session>, Without<SessionDuplicate>),
+    >,
     mut pending: ResMut<PendingImports>,
     mut creates: MessageWriter<CreateRequest>,
     mut opens: MessageWriter<PageOpenRequest>,
@@ -1019,9 +1233,14 @@ fn open(
     };
     let stack = parent.parent();
     let family = AgentFamily::of(&source.agent);
-    if let Some((_, id, _, _)) = existing
-        .iter()
-        .find(|(_, _, agent, sid)| AgentFamily::of(&agent.0) == family && sid.0 == source.sid)
+    if let Some((_, id, _, _, _, _)) =
+        existing
+            .iter()
+            .find(|(_, _, agent, resume, kind, provider_sid)| {
+                kind.is_some_and(|kind| kind.0 == source.kind)
+                    && provider_sid.is_some_and(|sid| sid.0 == source.sid)
+                    || AgentFamily::of(&agent.0) == family && resume.0 == source.sid
+            })
     {
         opens.write(PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
@@ -1354,6 +1573,64 @@ mod tests {
     }
 
     #[test]
+    fn provider_resume_reuses_the_canonical_session_after_resume_identity_changes() {
+        let cwd = tempfile::tempdir().unwrap();
+        let cwd = cwd.path().canonicalize().unwrap();
+        let mut app = App::new();
+        app.init_resource::<ProviderCatalog>()
+            .init_resource::<PendingImports>()
+            .init_resource::<AppSettings>()
+            .add_message::<CreateRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_observer(open);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+                ..Default::default()
+            });
+        let id = SessionId::new("canonical-session");
+        app.world_mut().spawn((
+            Session,
+            id.clone(),
+            AgentId("codex".into()),
+            AcpSessionId("replacement-resume-session".into()),
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-session".into()),
+        ));
+        let stack = app.world_mut().spawn_empty().id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+            },
+        });
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<CreateRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].url, Route::Session(id).url());
+    }
+
+    #[test]
     fn provider_resume_rejects_a_missing_working_directory() {
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
@@ -1441,6 +1718,7 @@ mod tests {
     fn newer_provider_activity_requests_an_imported_conversation_refresh() {
         let mut app = App::new();
         app.init_resource::<SourceSnapshot>()
+            .add_message::<ArchiveRequest>()
             .add_systems(Update, request_conversation_refreshes);
         app.world_mut()
             .resource_mut::<SourceSnapshot>()
@@ -1458,6 +1736,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
+                SessionId::new("stale"),
                 ProviderKind("acp:codex".into()),
                 ProviderSessionId("provider-session".into()),
                 vmux_ecs::LastActivatedAt(200),
@@ -1468,6 +1747,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
+                SessionId::new("current"),
                 ProviderKind("acp:codex".into()),
                 ProviderSessionId("provider-session".into()),
                 vmux_ecs::LastActivatedAt(300),
@@ -1495,5 +1775,32 @@ mod tests {
                 .0,
             300
         );
+    }
+
+    #[test]
+    fn archive_overlay_keeps_a_write_newer_than_the_scan() {
+        let scan_started_at = Instant::now();
+        let mut overlay = ArchiveOverlay::default();
+        overlay.record(
+            SourceKind::Codex,
+            "provider-session".into(),
+            ArchiveState::Archived(300),
+        );
+        overlay
+            .0
+            .get_mut(&SourceKind::Codex)
+            .unwrap()
+            .get_mut("provider-session")
+            .unwrap()
+            .completed_at = scan_started_at + Duration::from_nanos(1);
+        let mut scanned = vec![ProviderSession {
+            sid: "provider-session".into(),
+            archive: Some(ArchiveState::Active(200)),
+            ..Default::default()
+        }];
+
+        overlay.apply(SourceKind::Codex, scan_started_at, &mut scanned);
+
+        assert_eq!(scanned[0].archive, Some(ArchiveState::Archived(300)));
     }
 }

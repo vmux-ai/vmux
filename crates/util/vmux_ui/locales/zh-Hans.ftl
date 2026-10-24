@@ -6,6 +6,7 @@ common-uninstall = 卸载
 common-update = 更新
 common-retry = 重试
 common-refresh = 刷新
+common-no-results = 无结果
 common-remove = 移除
 common-add = 添加
 common-archive = 归档

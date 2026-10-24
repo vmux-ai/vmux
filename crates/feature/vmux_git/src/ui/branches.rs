@@ -9,7 +9,9 @@ use vmux_ui::components::error_state::ErrorState;
 use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::components::tree_row::{SidebarTreeChildren, SidebarTreeRow, SidebarTreeRowGroup};
+use vmux_ui::components::tree_row::{
+    FileTree, FileTreeChildren, FileTreeHeader, FileTreeRow, FileTreeRowGroup, FileTreeScroller,
+};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -91,6 +93,7 @@ pub(super) fn BranchPromptDialog() -> Element {
 #[component]
 pub(super) fn BranchesCard(
     files: Vec<GitBranchFileEntry>,
+    files_ready: bool,
     files_total: u32,
     files_loading: bool,
     files_has_more: bool,
@@ -109,7 +112,7 @@ pub(super) fn BranchesCard(
     let visible_file_count = visible_files.len();
     let tree = BranchFileTree::from_files(visible_files);
     rsx! {
-        section { class: "flex h-full min-h-0 flex-col",
+        FileTree {
             div { class: "shrink-0 px-2 pb-1.5 pt-2",
                 ManagerSearch {
                     value: file_query(),
@@ -118,13 +121,13 @@ pub(super) fn BranchesCard(
                     onkeydown: None,
                 }
             }
-            div { class: "flex h-7 shrink-0 items-center justify-between px-3 text-[10px] font-semibold text-muted-foreground",
+            FileTreeHeader {
                 span { {translate("git-files")} }
                 span { class: "tabular-nums", "{files_total}" }
             }
-            div {
-                class: "min-h-0 flex-1 overflow-y-auto px-2 pb-2",
-                onscroll: move |event| {
+            FileTreeScroller {
+                class: "flex-1 px-2 pb-2".to_string(),
+                onscroll: move |event: Event<ScrollData>| {
                     let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
                     let preload_distance = event.client_height().saturating_mul(2).max(480);
                     if remaining <= preload_distance && files_has_more && !files_loading {
@@ -159,11 +162,15 @@ pub(super) fn BranchesCard(
                         }
                     }
                 } else {
-                    BranchFileTreeView {
-                        tree,
-                        selected_path_bytes: selected_path_bytes.clone(),
-                        active_path,
-                        onfileselect,
+                    div {
+                        aria_disabled: !files_ready,
+                        class: if files_ready { "" } else { "pointer-events-none opacity-45" },
+                        BranchFileTreeView {
+                            tree,
+                            selected_path_bytes: selected_path_bytes.clone(),
+                            active_path,
+                            onfileselect,
+                        }
                     }
                     if files_loading {
                         div { class: "flex flex-col gap-2 px-2.5 py-2",
@@ -228,8 +235,8 @@ fn BranchFileTreeNodes(
                     let expanded = !collapsed.read().contains(&path);
                     rsx! {
                         div { key: "branch-dir-{path}",
-                            SidebarTreeRowGroup {
-                                SidebarTreeRow {
+                            FileTreeRowGroup {
+                                FileTreeRow {
                                     path: directory.path.clone(),
                                     label: directory.label,
                                     is_dir: true,
@@ -245,7 +252,7 @@ fn BranchFileTreeNodes(
                                     },
                                 }
                             }
-                            SidebarTreeChildren { expanded,
+                            FileTreeChildren { expanded,
                                 BranchFileTreeNodes {
                                     nodes: directory.children,
                                     depth: depth + 1,
@@ -293,8 +300,8 @@ fn BranchFileRow(
     let status_class = entry.change.class();
     rsx! {
         div { id: "{entry.row_id()}",
-            SidebarTreeRowGroup {
-                SidebarTreeRow {
+            FileTreeRowGroup {
+                FileTreeRow {
                     path: entry.path.clone(),
                     label: entry.name().to_string(),
                     is_dir: false,
@@ -445,6 +452,7 @@ pub(super) fn BranchRow(
     index: usize,
     remote: bool,
     selected_branch: String,
+    #[props(default)] checked_out: bool,
     onselected: EventHandler<()>,
 ) -> Element {
     let name = branch.name.clone();
@@ -488,8 +496,13 @@ pub(super) fn BranchRow(
                         span { class: "text-destructive", "−{branch.deletions}" }
                     }
                 }
-                if branch.current {
-                    span { class: "shrink-0 rounded-full bg-ansi-2/10 px-1.5 text-[8px] font-medium text-ansi-2", {translate("common-current")} }
+                if checked_out {
+                    span { title: translate("common-current"),
+                        LineIconView {
+                            icon: LineIcon::Check,
+                            class: "size-3.5 shrink-0 text-success",
+                        }
+                    }
                 } else if !branch.upstream.is_empty() {
                     span { class: "max-w-[42%] shrink truncate font-mono text-[8px] text-muted-foreground", "{branch.upstream}" }
                 }

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::extension::ExtensionManager;
 use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
@@ -9,8 +10,10 @@ use crate::state::{
     ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, ToolsUiState,
 };
 use dioxus::prelude::*;
+use vmux_api::extension::ExtensionsUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
+use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerControls,
     ManagerDetails, ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
@@ -25,7 +28,7 @@ use crate::route::ToolRoute;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ToolsUiState"],
+    states = ["ThemeUiState", "ToolsUiState", "ExtensionsUiState"],
     subtree
 )]
 pub struct ToolsPage;
@@ -33,8 +36,33 @@ pub struct ToolsPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ToolsUiState>().state;
-    rsx! { ToolManager { state: state() } }
+    let tools = use_ui_state::<ToolsUiState>().state;
+    let state = tools();
+    let route = state.view.route.clone();
+    let title = ToolRouteOption::selected_label(&route, state.snapshot.providers.clone());
+    rsx! {
+        document::Title { "{title}" }
+        ManagerPage {
+            if route == "extensions" {
+                ExtensionsRoute {
+                    providers: state.snapshot.providers,
+                }
+            } else {
+                ToolManager { state }
+            }
+        }
+    }
+}
+
+#[component]
+fn ExtensionsRoute(providers: Vec<ToolProviderMetadata>) -> Element {
+    let extensions = use_ui_state::<ExtensionsUiState>().state;
+    rsx! {
+        ExtensionManager {
+            state: extensions(),
+            providers,
+        }
+    }
 }
 
 impl ToolProviderMetadata {
@@ -116,9 +144,17 @@ impl ToolRouteOption {
         options.push(Self {
             id: "extensions".to_string(),
             label: translate("extensions-title"),
-            url: "vmux://tools/extensions".to_string(),
+            url: crate::EXTENSIONS_URL.to_string(),
         });
         options
+    }
+
+    fn selected_label(active: &str, providers: Vec<ToolProviderMetadata>) -> String {
+        Self::all(providers)
+            .into_iter()
+            .find(|option| option.id == active)
+            .map(|option| option.label)
+            .unwrap_or_else(|| translate("tools-title"))
     }
 }
 
@@ -132,43 +168,47 @@ pub fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) 
         .map(|option| option.label.clone())
         .unwrap_or_else(|| translate("tools-title"));
     rsx! {
-        Dropdown {
-            open: open(),
-            class: "shrink-0".to_string(),
-            on_dismiss: move |_| open.set(false),
-            button {
-                r#type: "button",
-                class: "flex h-7 min-w-32 max-w-48 items-center gap-2 rounded-md px-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-foreground/[0.045]",
-                aria_expanded: open(),
-                onclick: move |_| open.set(!open()),
-                span { class: "min-w-0 flex-1 truncate text-left", "{selected_label}" }
-                LineIconView {
-                    icon: LineIcon::ChevronDown,
-                    class: if open() {
-                        "size-3 shrink-0 rotate-180 text-muted-foreground".to_string()
-                    } else {
-                        "size-3 shrink-0 text-muted-foreground".to_string()
-                    },
+        nav { class: "flex min-w-0 shrink-0 items-center text-xs",
+            span { class: "px-1.5 font-medium text-muted-foreground", {translate("tools-title")} }
+            BreadcrumbSeparator {}
+            Dropdown {
+                open: open(),
+                class: "min-w-0 shrink-0".to_string(),
+                on_dismiss: move |_| open.set(false),
+                button {
+                    r#type: "button",
+                    class: "flex h-7 min-w-0 max-w-40 items-center gap-1 rounded-md px-1.5 font-semibold text-foreground transition-colors hover:bg-foreground/[0.045]",
+                    aria_expanded: open(),
+                    onclick: move |_| open.set(!open()),
+                    span { class: "min-w-0 truncate text-left", "{selected_label}" }
+                    LineIconView {
+                        icon: LineIcon::ChevronDown,
+                        class: if open() {
+                            "size-3 shrink-0 rotate-180 text-muted-foreground transition-transform".to_string()
+                        } else {
+                            "size-3 shrink-0 text-muted-foreground transition-transform".to_string()
+                        },
+                    }
                 }
-            }
-            if open() {
-                div { class: "absolute left-0 top-8 z-30 min-w-full w-48 rounded-md bg-background p-1 shadow-xl ring-1 ring-inset ring-foreground/[0.12]",
-                    for option in options {
-                        button {
-                            key: "{option.id}",
-                            r#type: "button",
-                            class: if option.id == active {
-                                "flex w-full items-center gap-2 rounded-md bg-foreground/[0.07] px-2 py-1.5 text-left text-[11px] text-foreground"
-                            } else {
-                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
-                            },
-                            onclick: move |_| {
-                                open.set(false);
-                                let _ = send(&ToolsNavigateRequest { url: option.url.clone() });
-                            },
-                            span { class: "min-w-0 flex-1 truncate", "{option.label}" }
-                            if option.id == active {
-                                LineIconView { icon: LineIcon::Check, class: "size-3 shrink-0".to_string() }
+                if open() {
+                    DropdownPopup { class: "absolute left-0 top-8 z-30 w-48 p-1",
+                        for option in options {
+                            button {
+                                key: "{option.id}",
+                                r#type: "button",
+                                class: if option.id == active {
+                                    "flex w-full items-center gap-2 rounded-md bg-foreground/[0.07] px-2 py-1.5 text-left text-[11px] text-foreground"
+                                } else {
+                                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                                },
+                                onclick: move |_| {
+                                    open.set(false);
+                                    let _ = send(&ToolsNavigateRequest { url: option.url.clone() });
+                                },
+                                span { class: "min-w-0 flex-1 truncate", "{option.label}" }
+                                if option.id == active {
+                                    LineIconView { icon: LineIcon::Check, class: "size-3 shrink-0".to_string() }
+                                }
                             }
                         }
                     }
@@ -238,42 +278,41 @@ fn ToolManager(state: ToolsUiState) -> Element {
         })
     });
     rsx! {
-        ManagerPage {
-            ManagerToolbar {
-                ToolsRouteSelector {
-                    active: view.route.clone(),
-                    providers: snapshot.providers.clone(),
-                }
-                ManagerSearch {
-                    value: view.query.clone(),
-                    placeholder: translate("tools-search"),
-                    onsearch: move |query: String| {
-                        let _ = send(&ToolsFilterRequest { query });
-                    },
-                    onkeydown: None,
-                }
-                if let Some(provider) = apply_provider {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Secondary,
-                        disabled: pending.contains(&ToolOperationKey::new(
+        ManagerToolbar {
+            ToolsRouteSelector {
+                active: view.route.clone(),
+                providers: snapshot.providers.clone(),
+            }
+            ManagerSearch {
+                value: view.query.clone(),
+                placeholder: translate("tools-search"),
+                onsearch: move |query: String| {
+                    let _ = send(&ToolsFilterRequest { query });
+                },
+                onkeydown: None,
+            }
+            if let Some(provider) = apply_provider {
+                ManagerButton {
+                    variant: ManagerButtonVariant::Secondary,
+                    disabled: pending.contains(&ToolOperationKey::new(
+                        provider.clone(),
+                        ToolOperationKind::Apply,
+                        "",
+                    )),
+                    onclick: move |_| {
+                        send_operation(
                             provider.clone(),
                             ToolOperationKind::Apply,
-                            "",
-                        )),
-                        onclick: move |_| {
-                            send_operation(
-                                provider.clone(),
-                                ToolOperationKind::Apply,
-                                String::new(),
-                                String::new(),
-                            );
-                        },
-                        {translate("tools-apply")}
-                    }
+                            String::new(),
+                            String::new(),
+                        );
+                    },
+                    {translate("tools-apply")}
                 }
             }
-            div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
-                ManagerList {
+        }
+        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
+            ManagerList {
                     if snapshot.loaded && view.visible_count > 0 {
                         ManagerControls {
                             ManagerViewToggle {
@@ -341,14 +380,13 @@ fn ToolManager(state: ToolsUiState) -> Element {
                             }
                         }
                     }
-                }
-                if let Some((item, provider)) = selected_tool {
-                    ToolDetails {
-                        item,
-                        provider,
-                        pending: pending.clone(),
-                        onclose: move |_| selected.set(None),
-                    }
+            }
+            if let Some((item, provider)) = selected_tool {
+                ToolDetails {
+                    item,
+                    provider,
+                    pending: pending.clone(),
+                    onclose: move |_| selected.set(None),
                 }
             }
         }

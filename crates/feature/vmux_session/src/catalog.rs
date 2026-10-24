@@ -7,17 +7,19 @@ use bevy_ecs::prelude::*;
 #[cfg(host)]
 use bevy_ecs::system::SystemParam;
 #[cfg(host)]
+use std::collections::{HashMap, HashSet};
+#[cfg(host)]
 use vmux_api::session::{AssistantBlock, Message};
 #[cfg(host)]
-use vmux_ecs::{CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
+use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 
 #[cfg(host)]
-use crate::model::SourceUpdatedAt;
+use crate::model::{ProviderArchiveOperations, SourceUpdatedAt};
 #[cfg(host)]
 use crate::{
-    AgentConversationTitle, AgentFamily, AgentId, ArchiveTarget, ConversationEvent, MessageContent,
-    ProviderKind, ProviderSessionId, ProviderStage, RunState, Session, SessionId, Stage,
-    StageChangedAt, StageDefinition, StageId, Transcripts,
+    AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
+    ProviderArchive, ProviderKind, ProviderSessionId, ProviderStage, RunState, Session,
+    SessionDuplicate, SessionId, Stage, StageChangedAt, StageDefinition, StageId, Transcripts,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -89,7 +91,6 @@ pub struct StageSummary {
     pub name: String,
     pub order: u32,
     pub terminal: bool,
-    pub archive: bool,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -105,6 +106,7 @@ pub struct SessionSummary {
     pub created_at: i64,
     pub last_activated_at: i64,
     pub stage_changed_at: i64,
+    pub archived_at: i64,
     pub agent: String,
     pub agent_name: String,
     pub agent_icon: String,
@@ -151,7 +153,7 @@ impl SessionSummaryProjection {
         let title = Self::title(session);
         let stage = Self::stage(session, stages);
         let terminal = stage.is_some_and(|stage| stage.terminal);
-        let archived = stage.is_some_and(|stage| stage.archive);
+        let archived = session.archived_at > 0;
         let age = SessionAge::from_millis(session.last_activated_at, now);
         let stale = Self::stale(session, terminal, age);
         Self {
@@ -225,12 +227,6 @@ impl SessionSummaryProjection {
     }
 }
 
-impl CatalogSnapshot {
-    pub fn archive_stage(&self) -> Option<&StageSummary> {
-        self.stages.iter().find(|stage| stage.archive)
-    }
-}
-
 #[cfg(host)]
 pub(crate) struct CatalogPlugin;
 
@@ -239,7 +235,7 @@ impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CatalogSnapshot>()
             .init_resource::<ProviderCatalog>()
-            .add_systems(PostUpdate, project);
+            .add_systems(PostUpdate, project.after(crate::model::CanonicalizeSet));
     }
 }
 
@@ -257,12 +253,13 @@ type SessionCatalog<'w, 's> = Query<
         &'static CreatedAt,
         &'static LastActivatedAt,
         &'static StageChangedAt,
+        Option<&'static ArchivedAt>,
         Option<&'static AgentId>,
         Option<&'static vmux_ecs::team::Profile>,
         Option<&'static RunState>,
         Option<&'static AgentConversationTitle>,
     ),
-    With<Session>,
+    (With<Session>, Without<SessionDuplicate>),
 >;
 
 #[cfg(host)]
@@ -281,10 +278,13 @@ type ChangedSessions<'w, 's> = Query<
             Changed<CreatedAt>,
             Changed<LastActivatedAt>,
             Changed<StageChangedAt>,
+            Changed<ArchivedAt>,
             Changed<AgentId>,
             Changed<vmux_ecs::team::Profile>,
             Changed<RunState>,
             Changed<AgentConversationTitle>,
+            Changed<ProviderKind>,
+            Changed<ProviderSessionId>,
         )>,
     ),
 >;
@@ -301,7 +301,6 @@ type ChangedStages<'w, 's> = Query<
             Changed<Name>,
             Changed<Order>,
             Changed<Terminal>,
-            Changed<ArchiveTarget>,
         )>,
     ),
 >;
@@ -336,6 +335,22 @@ struct CatalogChanges<'w, 's> {
             )>,
         ),
     >,
+    provider_archives: Query<
+        'w,
+        's,
+        (),
+        (
+            With<ProviderArchive>,
+            Or<(
+                Added<ProviderArchive>,
+                Changed<ProviderKind>,
+                Changed<ProviderSessionId>,
+                Changed<SourceUpdatedAt>,
+                Changed<ArchivedAt>,
+            )>,
+        ),
+    >,
+    duplicates: Query<'w, 's, (), Or<(Added<SessionDuplicate>, Changed<SessionDuplicate>)>>,
     removed_sessions: RemovedComponents<'w, 's, Session>,
     removed_ids: RemovedComponents<'w, 's, SessionId>,
     removed_names: RemovedComponents<'w, 's, Name>,
@@ -349,7 +364,7 @@ struct CatalogChanges<'w, 's> {
     removed_stage_ids: RemovedComponents<'w, 's, StageId>,
     removed_orders: RemovedComponents<'w, 's, Order>,
     removed_terminal: RemovedComponents<'w, 's, Terminal>,
-    removed_archive_targets: RemovedComponents<'w, 's, ArchiveTarget>,
+    removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
     removed_agents: RemovedComponents<'w, 's, AgentId>,
     removed_profiles: RemovedComponents<'w, 's, vmux_ecs::team::Profile>,
     removed_states: RemovedComponents<'w, 's, RunState>,
@@ -357,6 +372,8 @@ struct CatalogChanges<'w, 's> {
     removed_events: RemovedComponents<'w, 's, ConversationEvent>,
     removed_messages: RemovedComponents<'w, 's, MessageContent>,
     removed_provider_stages: RemovedComponents<'w, 's, ProviderStage>,
+    removed_provider_archives: RemovedComponents<'w, 's, ProviderArchive>,
+    removed_duplicates: RemovedComponents<'w, 's, SessionDuplicate>,
     removed_provider_kinds: RemovedComponents<'w, 's, ProviderKind>,
     removed_provider_ids: RemovedComponents<'w, 's, ProviderSessionId>,
 }
@@ -367,7 +384,9 @@ impl CatalogChanges<'_, '_> {
         let mut any = !self.sessions.is_empty()
             || !self.stages.is_empty()
             || !self.events.is_empty()
-            || !self.provider_stages.is_empty();
+            || !self.provider_stages.is_empty()
+            || !self.provider_archives.is_empty()
+            || !self.duplicates.is_empty();
         any |= self.removed_sessions.read().count() > 0;
         any |= self.removed_ids.read().count() > 0;
         any |= self.removed_names.read().count() > 0;
@@ -381,7 +400,7 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_stage_ids.read().count() > 0;
         any |= self.removed_orders.read().count() > 0;
         any |= self.removed_terminal.read().count() > 0;
-        any |= self.removed_archive_targets.read().count() > 0;
+        any |= self.removed_archived_at.read().count() > 0;
         any |= self.removed_agents.read().count() > 0;
         any |= self.removed_profiles.read().count() > 0;
         any |= self.removed_states.read().count() > 0;
@@ -389,6 +408,8 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_events.read().count() > 0;
         any |= self.removed_messages.read().count() > 0;
         any |= self.removed_provider_stages.read().count() > 0;
+        any |= self.removed_provider_archives.read().count() > 0;
+        any |= self.removed_duplicates.read().count() > 0;
         any |= self.removed_provider_kinds.read().count() > 0;
         any |= self.removed_provider_ids.read().count() > 0;
         any
@@ -398,11 +419,13 @@ impl CatalogChanges<'_, '_> {
 #[cfg(host)]
 fn project(
     sessions: SessionCatalog,
-    stages: Query<
-        (&StageId, &Name, &Order, Has<Terminal>, Has<ArchiveTarget>),
-        With<StageDefinition>,
+    linked_sessions: Query<
+        (Entity, &ProviderKind, &ProviderSessionId),
+        (With<Session>, Without<SessionDuplicate>),
     >,
+    stages: Query<(&StageId, &Name, &Order, Has<Terminal>), With<StageDefinition>>,
     providers: Res<ProviderCatalog>,
+    operations: Res<ProviderArchiveOperations>,
     provider_stages: Query<
         (
             &ProviderKind,
@@ -413,21 +436,30 @@ fn project(
         ),
         With<ProviderStage>,
     >,
+    provider_archives: Query<
+        (
+            &ProviderKind,
+            &ProviderSessionId,
+            &SourceUpdatedAt,
+            Option<&ArchivedAt>,
+        ),
+        With<ProviderArchive>,
+    >,
     transcripts: Transcripts,
     mut changes: CatalogChanges,
     mut catalog: ResMut<CatalogSnapshot>,
 ) {
-    if !catalog.is_added() && !providers.is_changed() && !changes.any() {
+    if !catalog.is_added() && !providers.is_changed() && !operations.is_changed() && !changes.any()
+    {
         return;
     }
     let mut next = CatalogSnapshot::default();
-    for (id, name, order, terminal, archive) in &stages {
+    for (id, name, order, terminal) in &stages {
         next.stages.push(StageSummary {
             id: id.0.clone(),
             name: name.as_str().to_string(),
             order: order.0,
             terminal,
-            archive,
         });
     }
     next.stages.sort_by_key(|stage| stage.order);
@@ -437,12 +469,10 @@ fn project(
         .find(|stage| !stage.terminal)
         .map(|stage| stage.id.clone())
         .unwrap_or_default();
-    let archive_stage = next
-        .stages
+    let linked_sessions = linked_sessions
         .iter()
-        .find(|stage| stage.archive)
-        .map(|stage| stage.id.clone())
-        .unwrap_or_default();
+        .map(|(entity, kind, id)| (entity, (kind.0.clone(), id.0.clone())))
+        .collect::<HashMap<_, _>>();
     for (
         entity,
         id,
@@ -453,6 +483,7 @@ fn project(
         created_at,
         last_activated_at,
         stage_changed_at,
+        archived_at,
         agent,
         profile,
         runtime,
@@ -469,6 +500,14 @@ fn project(
                 AgentFamily::of(&agent.0).name(fallback)
             })
             .unwrap_or_default();
+        let archived_at = linked_sessions
+            .get(&entity)
+            .and_then(|(kind, id)| operations.archived_at(kind, id))
+            .unwrap_or_else(|| {
+                archived_at
+                    .map(|archived_at| archived_at.0)
+                    .unwrap_or_default()
+            });
         next.sessions.push(SessionSummary {
             id: id.0.clone(),
             kind: "session".to_string(),
@@ -481,6 +520,7 @@ fn project(
             created_at: created_at.0,
             last_activated_at: last_activated_at.0,
             stage_changed_at: stage_changed_at.0,
+            archived_at,
             agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
             agent_name,
             agent_icon: profile
@@ -498,34 +538,72 @@ fn project(
             last_message: conversation.last_message,
         });
     }
+    let linked_sessions = linked_sessions.values().cloned().collect::<HashSet<_>>();
+    let provider_stages = provider_stages
+        .iter()
+        .map(|(kind, id, stage, changed_at, source_updated_at)| {
+            (
+                (kind.0.clone(), id.0.clone()),
+                (stage.0.0.clone(), changed_at.0, source_updated_at.0),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let provider_archives = provider_archives
+        .iter()
+        .map(|(kind, id, source_updated_at, archived_at)| {
+            (
+                (kind.0.clone(), id.0.clone()),
+                (
+                    source_updated_at.0,
+                    archived_at.map(|archived_at| archived_at.0),
+                ),
+            )
+        })
+        .collect::<HashMap<_, _>>();
     for session in &providers.sessions {
+        let key = (session.kind.clone(), session.sid.clone());
+        if linked_sessions.contains(&key) {
+            continue;
+        }
         let provider_updated_at = session.source_updated_at();
         let stage_override =
             provider_stages
-                .iter()
-                .find(|(kind, id, _, changed_at, source_updated_at)| {
-                    let source_updated_at = if source_updated_at.0 == 0 {
-                        changed_at.0
+                .get(&key)
+                .filter(|(_, changed_at, source_updated_at)| {
+                    let source_updated_at = if *source_updated_at == 0 {
+                        *changed_at
                     } else {
-                        source_updated_at.0
+                        *source_updated_at
                     };
-                    kind.0 == session.kind
-                        && id.0 == session.sid
-                        && source_updated_at >= provider_updated_at
+                    source_updated_at >= provider_updated_at
                 });
-        let (stage, stage_changed_at) = match session.archive {
-            Some(ArchiveState::Archived(at)) => (
-                archive_stage.clone(),
-                if at > 0 { at } else { session.updated_at },
-            ),
-            Some(ArchiveState::Active(_)) | None => (
-                stage_override
-                    .map(|(_, _, stage, _, _)| stage.0.0.clone())
-                    .unwrap_or_else(|| default_stage.clone()),
-                stage_override
-                    .map(|(_, _, _, changed_at, _)| changed_at.0)
-                    .unwrap_or(provider_updated_at),
-            ),
+        let stage = stage_override
+            .map(|(stage, _, _)| stage.clone())
+            .unwrap_or_else(|| default_stage.clone());
+        let stage_changed_at = stage_override
+            .map(|(_, changed_at, _)| *changed_at)
+            .unwrap_or(provider_updated_at);
+        let archive_override = provider_archives
+            .get(&key)
+            .filter(|(source_updated_at, _)| {
+                session.archive.is_none()
+                    || *source_updated_at
+                        >= session
+                            .archive
+                            .map(ArchiveState::updated_at)
+                            .unwrap_or_default()
+            });
+        let archived_at = if let Some(pending) = operations.archived_at(&session.kind, &session.sid)
+        {
+            pending
+        } else if let Some((_, archived_at)) = archive_override {
+            archived_at.unwrap_or_default()
+        } else {
+            match session.archive {
+                Some(ArchiveState::Archived(at)) if at > 0 => at,
+                Some(ArchiveState::Archived(_)) => session.updated_at,
+                Some(ArchiveState::Active(_)) | None => 0,
+            }
         };
         next.sessions.push(SessionSummary {
             id: session.catalog_id(),
@@ -539,6 +617,7 @@ fn project(
             created_at: session.created_at,
             last_activated_at: session.updated_at,
             stage_changed_at,
+            archived_at,
             agent: session.agent.clone(),
             agent_name: AgentFamily::of(&session.agent).name(&session.agent_name),
             runtime: "inactive".to_string(),
@@ -742,7 +821,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_archive_state_overrides_local_stage_state() {
+    fn provider_archive_state_is_independent_from_stage_state() {
         let mut app = App::new();
         app.add_plugins(DomainPlugin);
         app.update();
@@ -770,8 +849,8 @@ mod tests {
         app.update();
 
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
-        assert_eq!(session.stage, "done");
-        assert_eq!(session.stage_changed_at, 20);
+        assert_eq!(session.stage, "in_progress");
+        assert_eq!(session.archived_at, 20);
 
         app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].archive =
             Some(ArchiveState::Active(30));
@@ -780,6 +859,7 @@ mod tests {
 
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
         assert_eq!(session.stage, "in_progress");
+        assert_eq!(session.archived_at, 0);
         assert!(session.stage_changed_at > 30);
 
         app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].archive =
@@ -788,7 +868,51 @@ mod tests {
 
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
         assert_eq!(session.stage, "in_progress");
+        assert_eq!(session.archived_at, 0);
         assert_eq!(session.stage_changed_at, 101);
+    }
+
+    #[test]
+    fn provider_archive_override_is_fallback_until_native_state_catches_up() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "External task".into(),
+                cwd: "/tmp/project".into(),
+                updated_at: 10,
+                ..Default::default()
+            });
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ProviderArchiveRequest>>()
+            .write(crate::ProviderArchiveRequest {
+                kind: ProviderKind("acp:codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                archived: true,
+                source_updated_at: 10,
+                native: false,
+            });
+        app.update();
+
+        let archived = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert!(archived.archived_at > 0);
+        assert_eq!(archived.stage, "in_progress");
+
+        let native_updated_at = archived.archived_at + 1;
+        let provider = &mut app.world_mut().resource_mut::<ProviderCatalog>().sessions[0];
+        provider.archive = Some(ArchiveState::Active(native_updated_at));
+        app.update();
+
+        let active = &app.world().resource::<CatalogSnapshot>().sessions[0];
+        assert_eq!(active.archived_at, 0);
+        assert_eq!(active.stage, "in_progress");
     }
 
     #[test]

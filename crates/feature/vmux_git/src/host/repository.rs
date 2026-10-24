@@ -35,6 +35,11 @@ struct BranchDiffContext {
     submodules: Vec<(PathBuf, GitRepository, String)>,
 }
 
+struct BranchBase {
+    reference: String,
+    merge_base: String,
+}
+
 enum DiffFileContent {
     Text(String),
     TooLarge(u64),
@@ -92,23 +97,40 @@ impl<T> CatalogPage<T> {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct BranchFilesCatalog(Vec<GitBranchFileEntry>);
+pub(crate) struct BranchFilesCatalog {
+    files: Vec<GitBranchFileEntry>,
+    source: PathBuf,
+    base_ref: String,
+    merge_base: String,
+}
 
 impl BranchFilesCatalog {
     pub(crate) fn page(&self, offset: usize, limit: usize) -> BranchFilesPage {
-        let end = offset.saturating_add(limit).min(self.0.len());
+        let end = offset.saturating_add(limit).min(self.files.len());
         BranchFilesPage {
-            files: self.0.get(offset..end).unwrap_or_default().to_vec(),
-            total: u32::try_from(self.0.len()).unwrap_or(u32::MAX),
-            has_more: end < self.0.len(),
+            files: self.files.get(offset..end).unwrap_or_default().to_vec(),
+            total: u32::try_from(self.files.len()).unwrap_or(u32::MAX),
+            has_more: end < self.files.len(),
         }
     }
 
     pub(crate) fn paths(&self) -> Vec<Vec<u8>> {
-        self.0
+        self.files
             .iter()
             .map(|entry| entry.path_bytes.clone())
             .collect()
+    }
+
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
+    }
+
+    pub(crate) fn merge_base(&self) -> &str {
+        &self.merge_base
+    }
+
+    pub(crate) fn base_ref(&self) -> &str {
+        &self.base_ref
     }
 }
 
@@ -527,14 +549,37 @@ impl GitRepository {
         self.branch_diff_lines_for_paths_at(reference, Path::new(""), &paths)
     }
 
+    pub(crate) fn branch_diff_lines_for_paths_against(
+        &self,
+        reference: &str,
+        merge_base: &str,
+        paths: &[Vec<u8>],
+    ) -> Result<Vec<DiffLine>, GitError> {
+        let paths = paths
+            .iter()
+            .map(|path| PathBuf::from(OsString::from_vec(path.clone())))
+            .collect::<Vec<_>>();
+        self.branch_diff_lines_for_paths_at_against(reference, merge_base, Path::new(""), &paths)
+    }
+
     pub(crate) fn branch_files_catalog(
         &self,
         reference: &str,
     ) -> Result<BranchFilesCatalog, GitError> {
-        let mut files = self.branch_files(reference, Path::new(""))?;
+        let repository = self
+            .branch_checkout(reference)
+            .unwrap_or_else(|| self.clone());
+        let base = repository.branch_base(reference)?;
+        let mut files =
+            repository.branch_files_against(reference, Path::new(""), &base.merge_base)?;
         files.sort_by(|left, right| left.path_bytes.cmp(&right.path_bytes));
         files.dedup_by(|left, right| left.path_bytes == right.path_bytes);
-        Ok(BranchFilesCatalog(files))
+        Ok(BranchFilesCatalog {
+            files,
+            source: repository.path().to_path_buf(),
+            base_ref: base.reference,
+            merge_base: base.merge_base,
+        })
     }
 
     fn branch_files(
@@ -542,18 +587,20 @@ impl GitRepository {
         reference: &str,
         prefix: &Path,
     ) -> Result<Vec<GitBranchFileEntry>, GitError> {
-        let base = crate::host::worktree::BaseRef::resolve(&self.0)
-            .ok_or_else(|| GitError("no base branch found".to_string()))?;
-        let (merge_base, stderr, ok) =
-            GitCommand::read(&self.0, &["merge-base", reference, base.as_str()])?;
-        if !ok {
-            return Err(GitCommand::error(&merge_base, &stderr));
-        }
-        let merge_base = merge_base.trim();
+        let repository = self
+            .branch_checkout(reference)
+            .unwrap_or_else(|| self.clone());
+        let base = repository.branch_base(reference)?;
+        repository.branch_files_against(reference, prefix, &base.merge_base)
+    }
+
+    fn branch_files_against(
+        &self,
+        reference: &str,
+        prefix: &Path,
+        merge_base: &str,
+    ) -> Result<Vec<GitBranchFileEntry>, GitError> {
         let current = self.branch_is_current(reference);
-        if !current && let Some(checkout) = self.branch_checkout(reference) {
-            return checkout.branch_files(reference, prefix);
-        }
         let submodules = if current {
             self.branch_submodules()
         } else {
@@ -614,6 +661,20 @@ impl GitRepository {
         Ok(files)
     }
 
+    fn branch_base(&self, reference: &str) -> Result<BranchBase, GitError> {
+        let base = crate::host::worktree::BaseRef::resolve_for(&self.0, reference)
+            .ok_or_else(|| GitError("no base branch found".to_string()))?;
+        let (merge_base, stderr, ok) =
+            GitCommand::read(&self.0, &["merge-base", reference, base.as_str()])?;
+        if !ok {
+            return Err(GitCommand::error(&merge_base, &stderr));
+        }
+        Ok(BranchBase {
+            reference: base.branch().to_string(),
+            merge_base: merge_base.trim().to_string(),
+        })
+    }
+
     fn branch_diff_text(
         &self,
         reference: &str,
@@ -628,24 +689,25 @@ impl GitRepository {
     }
 
     fn branch_diff_context(&self, reference: &str) -> Result<BranchDiffContext, GitError> {
-        let base = crate::host::worktree::BaseRef::resolve(&self.0)
-            .ok_or_else(|| GitError("no base branch found".to_string()))?;
-        let (merge_base, stderr, ok) =
-            GitCommand::read(&self.0, &["merge-base", reference, base.as_str()])?;
-        if !ok {
-            return Err(GitCommand::error(&merge_base, &stderr));
-        }
-        let merge_base = merge_base.trim();
+        let base = self.branch_base(reference)?;
+        Ok(self.branch_diff_context_against(reference, base.merge_base))
+    }
+
+    fn branch_diff_context_against(
+        &self,
+        reference: &str,
+        merge_base: String,
+    ) -> BranchDiffContext {
         let current = self.branch_is_current(reference);
-        Ok(BranchDiffContext {
-            merge_base: merge_base.trim().to_string(),
+        BranchDiffContext {
+            merge_base,
             selected: (!current).then(|| reference.to_string()),
             submodules: if current {
                 self.branch_submodules()
             } else {
                 Vec::new()
             },
-        })
+        }
     }
 
     fn branch_diff_text_with(
@@ -718,7 +780,18 @@ impl GitRepository {
         if let Some(checkout) = self.branch_checkout(reference) {
             return checkout.branch_diff_lines_for_paths_at(reference, prefix, paths);
         }
-        let branch = self.branch_diff_context(reference)?;
+        let base = self.branch_base(reference)?;
+        self.branch_diff_lines_for_paths_at_against(reference, &base.merge_base, prefix, paths)
+    }
+
+    fn branch_diff_lines_for_paths_at_against(
+        &self,
+        reference: &str,
+        merge_base: &str,
+        prefix: &Path,
+        paths: &[PathBuf],
+    ) -> Result<Vec<DiffLine>, GitError> {
+        let branch = self.branch_diff_context_against(reference, merge_base.to_string());
         let mut root_paths = Vec::new();
         let mut nested_paths = vec![Vec::new(); branch.submodules.len()];
         for path in paths {

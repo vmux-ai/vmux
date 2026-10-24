@@ -3,9 +3,12 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use vmux_api::command_bar::OpenRequest;
+use vmux_api::open_target::OpenTarget;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::checkbox::{Checkbox, CheckboxTone};
 use vmux_ui::components::error_state::ErrorState;
@@ -416,6 +419,17 @@ pub fn DiffView(
                     let viewed_fingerprint = section.fingerprint;
                     let viewed_count_identity = identity.clone();
                     let viewed_count_layout = layout;
+                    let file_url = file_path
+                        .as_ref()
+                        .map(|file_path| {
+                            vmux_path::FileUrl::from_path(
+                                &Path::new(&repo_root()).join(file_path),
+                                None,
+                                None,
+                                None,
+                            )
+                        })
+                        .unwrap_or_default();
                     let section_class = if file_path.is_some() && section.index > 0 {
                         "mt-3 w-full min-w-0 overflow-clip rounded-lg bg-foreground/[0.035]"
                     } else if file_path.is_some() {
@@ -430,7 +444,18 @@ pub fn DiffView(
                                     id: "git-diff-file-{file_path}",
                                     class: "sticky left-0 top-0 z-10 flex h-9 w-full min-w-0 scroll-mt-2 items-center gap-2 rounded-t-lg bg-inherit px-3 font-sans text-[11px] font-semibold text-foreground backdrop-blur-xl",
                                     TypeIcon { path: file_path.clone(), is_dir: false, class: "size-3.5 shrink-0" }
-                                    span { class: "min-w-0 flex-1 truncate font-mono", "{file_path}" }
+                                    button {
+                                        r#type: "button",
+                                        class: "min-w-0 flex-1 truncate text-left font-mono transition-colors hover:text-primary hover:underline",
+                                        title: file_path.clone(),
+                                        onclick: move |_| {
+                                            let _ = send(&OpenRequest {
+                                                value: file_url.clone(),
+                                                open: Some(OpenTarget::InNewStack),
+                                            });
+                                        },
+                                        "{file_path}"
+                                    }
                                     label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
                                         Checkbox {
                                             checked: viewed,

@@ -6,6 +6,7 @@ common-uninstall = 제거
 common-update = 업데이트
 common-retry = 다시 시도
 common-refresh = 새로고침
+common-no-results = 결과 없음
 common-remove = 삭제
 common-add = 추가
 common-archive = 보관

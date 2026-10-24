@@ -85,6 +85,7 @@ impl PagePlacement {
         }
         match self.reuse {
             PageReuse::Exact => request_url == existing_url,
+            PageReuse::Group => true,
             PageReuse::Route => {
                 let Some(request) = vmux_api::VmuxRoute::parse(request_url) else {
                     return false;
@@ -113,6 +114,7 @@ impl Default for PagePlacement {
 pub enum PageReuse {
     #[default]
     Exact,
+    Group,
     Route,
     Fragmentless,
 }
@@ -835,6 +837,18 @@ mod tests {
         assert!(hosted.answers_for("git:///Users/me/repo"));
         assert!(hosted.answers_for("GIT://Users/me/repo"));
         assert!(!hosted.answers_for("https://example.com"));
+    }
+
+    #[test]
+    fn group_reuse_matches_changed_state_inside_one_feature() {
+        let git = PagePlacement {
+            group: "git",
+            reuse: PageReuse::Group,
+            ..PagePlacement::DEFAULT
+        };
+
+        assert!(git.reuses("git://", git, "git:///repo?branch=feature"));
+        assert!(!git.reuses("git://", PagePlacement::DEFAULT, "https://example.com"));
     }
 
     #[test]

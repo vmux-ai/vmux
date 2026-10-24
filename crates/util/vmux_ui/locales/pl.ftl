@@ -6,6 +6,7 @@ common-uninstall = Odinstaluj
 common-update = Aktualizuj
 common-retry = Ponów
 common-refresh = Odśwież
+common-no-results = Brak wyników
 common-remove = Usuń
 common-add = Dodaj
 common-archive = Archiwizuj

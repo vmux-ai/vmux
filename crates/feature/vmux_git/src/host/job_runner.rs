@@ -308,7 +308,6 @@ struct DiffOutput {
     branch_lines: Option<Arc<Vec<DiffLine>>>,
     branch_top_line: u32,
     branch_page_complete: bool,
-    prefetch: bool,
 }
 
 #[derive(Component, Clone, Debug)]
@@ -427,7 +426,7 @@ fn cancel_orphaned_jobs(
 
 fn deliver_repository_outputs(
     outputs: Query<(Entity, &GitJob, &RepositoryJob, &RepositoryOutput)>,
-    active: Query<(), With<vmux_ecs::KeyboardOwner>>,
+    presented: Query<(), With<vmux_ecs::PagePresented>>,
     mut watch: Option<NonSendMut<super::watch::GitWatch>>,
     mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut states: super::state::GitStates,
@@ -443,7 +442,7 @@ fn deliver_repository_outputs(
             Ok(event) => {
                 let mut snapshot = event.snapshot.clone();
                 snapshot.path = request.path.to_string_lossy().into_owned();
-                if active.contains(webview)
+                if presented.contains(webview)
                     && let Some(watch) = watch.as_deref_mut()
                     && let Err(error) =
                         watch.subscribe_page(webview, &request.path, event.watch.clone())
@@ -497,7 +496,9 @@ fn deliver_catalog_outputs(
                 let has_more = match page {
                     GitCatalogPage::LocalBranches(entries, has_more) => {
                         if output.offset == 0 {
-                            repository.branches.clone_from(entries);
+                            if repository.branches.as_slice() != entries.as_slice() {
+                                repository.branches.clone_from(entries);
+                            }
                         } else {
                             repository.branches.extend(entries.clone());
                         }
@@ -505,7 +506,9 @@ fn deliver_catalog_outputs(
                     }
                     GitCatalogPage::RemoteBranches(entries, has_more) => {
                         if output.offset == 0 {
-                            repository.remote_branches.clone_from(entries);
+                            if repository.remote_branches.as_slice() != entries.as_slice() {
+                                repository.remote_branches.clone_from(entries);
+                            }
                         } else {
                             repository.remote_branches.extend(entries.clone());
                         }
@@ -513,7 +516,9 @@ fn deliver_catalog_outputs(
                     }
                     GitCatalogPage::Tags(entries, has_more) => {
                         if output.offset == 0 {
-                            repository.tags.clone_from(entries);
+                            if repository.tags.as_slice() != entries.as_slice() {
+                                repository.tags.clone_from(entries);
+                            }
                         } else {
                             repository.tags.extend(entries.clone());
                         }
@@ -521,7 +526,9 @@ fn deliver_catalog_outputs(
                     }
                     GitCatalogPage::Commits(entries, has_more) => {
                         if output.offset == 0 {
-                            repository.commits.clone_from(entries);
+                            if repository.commits.as_slice() != entries.as_slice() {
+                                repository.commits.clone_from(entries);
+                            }
                         } else {
                             repository.commits.extend(entries.clone());
                         }
@@ -529,7 +536,9 @@ fn deliver_catalog_outputs(
                     }
                     GitCatalogPage::Stashes(entries, has_more) => {
                         if output.offset == 0 {
-                            repository.stashes.clone_from(entries);
+                            if repository.stashes.as_slice() != entries.as_slice() {
+                                repository.stashes.clone_from(entries);
+                            }
                         } else {
                             repository.stashes.extend(entries.clone());
                         }
@@ -537,6 +546,7 @@ fn deliver_catalog_outputs(
                     }
                 };
                 let progress = state.snapshot.catalog_mut(output.catalog);
+                progress.initialized = true;
                 progress.loaded = true;
                 progress.loading = false;
                 progress.has_more = has_more;
@@ -557,6 +567,7 @@ fn deliver_catalog_outputs(
 
 fn deliver_diff_outputs(
     outputs: Query<(Entity, &GitJob, &DiffOutput)>,
+    presented: Query<(), With<vmux_ecs::PagePresented>>,
     mut views: Query<(
         &mut super::state::GitState,
         &mut super::state::GitDiffRevealRanges,
@@ -609,7 +620,11 @@ fn deliver_diff_outputs(
                 view.snapshot.diff_viewport = Some(event);
                 revealed.0.clear();
             }
-            if output.prefetch && branch_has_more && succeeded {
+            if presented.contains(webview)
+                && branch_has_more
+                && succeeded
+                && query.continue_prefetch(loaded_lines)
+            {
                 commands.trigger(bevy_cef::prelude::UiInput {
                     webview,
                     payload: crate::event::GitDiffNextRequest,
@@ -626,7 +641,7 @@ fn deliver_diff_outputs(
 }
 
 fn deliver_branch_files_outputs(
-    outputs: Query<(Entity, &GitJob, &BranchFilesOutput)>,
+    mut outputs: Query<(Entity, &GitJob, &mut BranchFilesOutput)>,
     mut queries: Query<&mut super::diff::GitBranchFilesQuery>,
     mut states: Query<(
         &mut super::state::GitState,
@@ -634,7 +649,7 @@ fn deliver_branch_files_outputs(
     )>,
     mut commands: Commands,
 ) {
-    for (entity, job, output) in &outputs {
+    for (entity, job, mut output) in &mut outputs {
         let Ok(mut query) = queries.get_mut(job.webview) else {
             commands.entity(entity).despawn();
             continue;
@@ -647,24 +662,27 @@ fn deliver_branch_files_outputs(
             commands.entity(entity).despawn();
             continue;
         };
-        match &output.result {
+        match &mut output.result {
             Ok(catalog) => {
-                let page = query.replace(catalog.clone());
-                state.snapshot.branch_files.clear();
-                state.snapshot.branch_files.extend(page.files.clone());
+                let base_ref = catalog.base_ref().to_string();
+                let page = query.replace(std::mem::take(catalog));
+                state
+                    .snapshot
+                    .branch_files_reference
+                    .clone_from(&output.reference);
+                state.snapshot.branch_files_base_ref = base_ref;
+                state.snapshot.branch_files = page.files;
                 state.snapshot.branch_files_total = page.total;
                 state.snapshot.branch_files_has_more = page.has_more;
                 state.snapshot.branch_files_error.clear();
             }
             Err(error) => {
                 state.snapshot.branch_files_has_more = false;
-                state.snapshot.branch_files_error.clone_from(&error.message);
+                state.snapshot.branch_files_error = std::mem::take(&mut error.message);
                 if controller.focused_panel == crate::state::GitPanel::Branches
                     && controller.selected_branch == output.reference
                 {
                     state.snapshot.diff_loading = false;
-                    state.snapshot.diff_rows.clear();
-                    state.snapshot.diff_viewport = None;
                 }
             }
         }
@@ -754,15 +772,30 @@ fn deliver_failure_outputs(
 
 #[derive(SystemParam)]
 struct PendingGitJobs<'w, 's, J: Component> {
-    queues: Query<'w, 's, &'static GitJobs>,
+    queues: Query<'w, 's, (Entity, &'static GitJobs)>,
     pending: Query<'w, 's, &'static J>,
     repositories: Query<'w, 's, &'static GitRepository>,
     running: Query<'w, 's, (), With<GitJobRunning>>,
+    reads: Query<'w, 's, (), With<super::job::GitReadJob>>,
+    presented: Query<'w, 's, (), With<vmux_ecs::PagePresented>>,
     wake: Option<Res<'w, EventLoopProxyWrapper>>,
     runtime: Res<'w, GitRuntime>,
 }
 
 impl<J: Component + Clone> PendingGitJobs<'_, '_, J> {
+    fn candidate(&self, owner: Entity, queue: &GitJobs) -> Option<Entity> {
+        if queue.iter().any(|entity| self.running.contains(entity)) {
+            return None;
+        }
+        for entity in queue.iter() {
+            if self.reads.contains(entity) && !self.presented.contains(owner) {
+                continue;
+            }
+            return Some(entity);
+        }
+        None
+    }
+
     fn spawn<T: Send + Sync + 'static>(
         &self,
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
@@ -790,16 +823,13 @@ impl<J: Component + Clone> PendingGitJobs<'_, '_, J> {
     )> {
         let wake = self.wake.as_deref().map(|wake| (**wake).clone());
         let mut ready = Vec::new();
-        for queue in &self.queues {
+        for (owner, queue) in &self.queues {
             if ready.len() >= 8 {
                 break;
             }
-            let Some(entity) = queue.iter().next() else {
+            let Some(entity) = self.candidate(owner, queue) else {
                 continue;
             };
-            if self.running.contains(entity) {
-                continue;
-            }
             let Ok(job) = self.pending.get(entity) else {
                 continue;
             };
@@ -818,16 +848,13 @@ impl<J: Component + Clone> PendingGitJobs<'_, '_, J> {
     )> {
         let wake = self.wake.as_deref().map(|wake| (**wake).clone());
         let mut ready = Vec::new();
-        for queue in &self.queues {
+        for (owner, queue) in &self.queues {
             if ready.len() >= 8 {
                 break;
             }
-            let Some(entity) = queue.iter().next() else {
+            let Some(entity) = self.candidate(owner, queue) else {
                 continue;
             };
-            if self.running.contains(entity) {
-                continue;
-            }
             let Ok(job) = self.pending.get(entity) else {
                 continue;
             };
@@ -919,7 +946,6 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     branch_lines: None,
                     branch_top_line: job.branch_top_line,
                     branch_page_complete: true,
-                    prefetch: false,
                 };
             }
             let result = match &job.scope {
@@ -931,6 +957,17 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                 },
                 DiffScope::Branch(reference) => match job.branch_lines.clone() {
                     Some(lines) => Ok(lines),
+                    None if !job.branch_source.as_os_str().is_empty()
+                        && !job.branch_merge_base.is_empty() =>
+                    {
+                        GitRepository::at(job.branch_source.clone())
+                            .branch_diff_lines_for_paths_against(
+                                reference,
+                                &job.branch_merge_base,
+                                &job.branch_paths,
+                            )
+                            .map(Arc::new)
+                    }
                     None => repository
                         .branch_diff_lines_for_paths(reference, &job.branch_paths)
                         .map(Arc::new),
@@ -992,7 +1029,6 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                             .then_some(all_lines),
                         branch_top_line: job.branch_top_line,
                         branch_page_complete,
-                        prefetch: job.prefetch,
                     }
                 }
                 Err(error) => DiffOutput {
@@ -1009,7 +1045,6 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                     branch_lines: None,
                     branch_top_line: job.branch_top_line,
                     branch_page_complete: false,
-                    prefetch: false,
                 },
             }
         }) else {
@@ -1447,8 +1482,85 @@ mod tests {
 
     fn owner(app: &mut App) -> Entity {
         app.world_mut()
-            .spawn(super::super::state::GitState::default())
+            .spawn((
+                super::super::state::GitState::default(),
+                vmux_ecs::PagePresented,
+            ))
             .id()
+    }
+
+    #[test]
+    fn hidden_pages_defer_read_jobs_until_presented() {
+        let mut app = app();
+        let webview = owner(&mut app);
+        app.world_mut()
+            .entity_mut(webview)
+            .remove::<vmux_ecs::PagePresented>();
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<super::super::state::GitState>(webview)
+                .unwrap();
+            state.snapshot.workspace = "/tmp/repository".to_string();
+            state.snapshot.nonce = 1;
+        }
+        let job = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                RepositoryJob {
+                    path: "/tmp/repository".into(),
+                    refresh_catalogs: false,
+                    revision: 1,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<RepositoryJob>(job).is_some());
+        assert!(app.world().get::<GitJobRunning>(job).is_none());
+
+        app.world_mut()
+            .entity_mut(webview)
+            .insert(vmux_ecs::PagePresented);
+        app.update();
+
+        assert!(app.world().get::<GitJobRunning>(job).is_some());
+    }
+
+    #[test]
+    fn hidden_reads_do_not_block_an_accepted_mutation() {
+        let (repo, file) = dirty_repo();
+        let mut app = app();
+        let webview = owner(&mut app);
+        app.world_mut()
+            .entity_mut(webview)
+            .remove::<vmux_ecs::PagePresented>();
+        let read = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                RepositoryJob {
+                    path: repo.path().to_path_buf(),
+                    refresh_catalogs: false,
+                    revision: 1,
+                },
+            ))
+            .id();
+        let mutation = app
+            .world_mut()
+            .spawn((
+                GitJob::new(webview),
+                GitRepository::at(repo.path()),
+                StageJob { path: file },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<GitJobRunning>(read).is_none());
+        assert!(app.world().get::<GitJobRunning>(mutation).is_some());
     }
 
     #[test]
@@ -1631,9 +1743,10 @@ mod tests {
                 scope: DiffScope::File,
                 branch_paths: Vec::new(),
                 branch_lines: None,
+                branch_source: PathBuf::new(),
+                branch_merge_base: String::new(),
                 branch_top_line: 0,
                 branch_has_more: false,
-                prefetch: false,
                 generation: 7,
                 top_line: 0,
                 rows: 50,
@@ -1683,9 +1796,10 @@ mod tests {
                 scope: DiffScope::File,
                 branch_paths: Vec::new(),
                 branch_lines: None,
+                branch_source: PathBuf::new(),
+                branch_merge_base: String::new(),
                 branch_top_line: 0,
                 branch_has_more: false,
-                prefetch: false,
                 generation: 7,
                 top_line: 0,
                 rows: 50,

@@ -939,95 +939,21 @@ fn EditorWorkspace() -> Element {
                 {measure_wide_text}
             }
 
-            div {
-                class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.025] px-3 font-sans text-xs text-muted-foreground",
-                ExplorerToggleButton { pane: explorer, mode }
-                EditorTabStrip { tabs: editor_tabs }
-                if find_open() {
-                    FindBar {
-                        query: find_query(),
-                        forward: find_forward(),
-                        regex: find_regex(),
-                        vim: keymap() == KeymapKind::Vim,
-                        total: find_total(),
-                        index: find_index(),
-                    }
-                }
-                if mode() == Mode::Text {
-                    if is_markdown() || git_has_diff() {
-                        div { class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
-                            if is_markdown() {
-                                button {
-                                    class: file_mode_class(file_view_mode() == FileViewMode::Note),
-                                    title: translate("editor-rendered-markdown"),
-                                    onclick: move |_| {
-                                        let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
-                                    },
-                                    {translate("editor-note")}
-                                }
-                            }
-                            button {
-                                class: file_mode_class(
-                                    file_view_mode() == FileViewMode::Editor
-                                        || (file_view_mode() == FileViewMode::Note
-                                            && !is_markdown()),
-                                ),
-                                title: translate("editor-source-editor"),
-                                onclick: move |_| {
-                                    let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
-                                },
-                                {translate("editor-editor")}
-                            }
-                            if git_has_diff() {
-                                button {
-                                    class: file_mode_class(file_view_mode() == FileViewMode::Diff),
-                                    title: translate("editor-git-diff"),
-                                    onclick: move |_| {
-                                        let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
-                                    },
-                                    {translate("editor-diff")}
-                                }
-                            }
-                        }
-                    }
-                }
-                {
-                    tidy().and_then(|state| state.count).map(|count| {
-                        rsx! {
-                            div {
-                                class: "flex shrink-0 items-center gap-1.5 text-[11px]",
-                                span {
-                                    class: "select-none text-primary",
-                                    {translate_with(
-                                        "editor-unchanged-previews",
-                                        &[("count", TranslationValue::Number(count as i64))],
-                                    )}
-                                }
-                                button {
-                                    class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
-                                    onclick: move |_| {
-                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Tidy });
-                                    },
-                                    {translate("editor-tidy")}
-                                }
-                                button {
-                                    class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
-                                    onclick: move |_| {
-                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Always });
-                                    },
-                                    {translate("editor-always")}
-                                }
-                                button {
-                                    class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
-                                    onclick: move |_| {
-                                        let _ = send(&FileTidyRequest { choice: TidyChoice::Dismiss });
-                                    },
-                                    "\u{2715}"
-                                }
-                            }
-                        }
-                    })
-                }
+            EditorHeader {
+                pane: explorer,
+                mode,
+                editor_tabs,
+                find_open: find_open(),
+                find_query: find_query(),
+                find_forward: find_forward(),
+                find_regex: find_regex(),
+                keymap: keymap(),
+                find_total: find_total(),
+                find_index: find_index(),
+                is_markdown: is_markdown(),
+                git_has_diff: git_has_diff(),
+                view_mode: file_view_mode(),
+                tidy: tidy(),
             }
 
             EditorBreadcrumbs {
@@ -1834,6 +1760,130 @@ fn EditorWorkspace() -> Element {
                         line_ending: line_ending(),
                         encoding: encoding(),
                         language: language(),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn EditorHeader(
+    pane: ExplorerPane,
+    mode: Memo<Mode>,
+    editor_tabs: Vec<OpenEditorItem>,
+    find_open: bool,
+    find_query: String,
+    find_forward: bool,
+    find_regex: bool,
+    keymap: KeymapKind,
+    find_total: u32,
+    find_index: u32,
+    is_markdown: bool,
+    git_has_diff: bool,
+    view_mode: FileViewMode,
+    tidy: Option<FileTidyState>,
+) -> Element {
+    rsx! {
+        div {
+            class: "flex h-9 shrink-0 items-center gap-2 bg-foreground/[0.025] px-3 font-sans text-xs text-muted-foreground",
+            ExplorerToggleButton { pane, mode }
+            EditorTabStrip { tabs: editor_tabs }
+            if find_open {
+                FindBar {
+                    query: find_query,
+                    forward: find_forward,
+                    regex: find_regex,
+                    vim: keymap == KeymapKind::Vim,
+                    total: find_total,
+                    index: find_index,
+                }
+            }
+            if mode() == Mode::Text && (is_markdown || git_has_diff) {
+                div { class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
+                    if is_markdown {
+                        button {
+                            class: file_mode_class(view_mode == FileViewMode::Note),
+                            title: translate("editor-rendered-markdown"),
+                            onclick: move |_| {
+                                let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
+                            },
+                            {translate("editor-note")}
+                        }
+                    }
+                    button {
+                        class: file_mode_class(
+                            view_mode == FileViewMode::Editor
+                                || (view_mode == FileViewMode::Note && !is_markdown),
+                        ),
+                        title: translate("editor-source-editor"),
+                        onclick: move |_| {
+                            let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
+                        },
+                        {translate("editor-editor")}
+                    }
+                    if git_has_diff {
+                        button {
+                            class: file_mode_class(view_mode == FileViewMode::Diff),
+                            title: translate("editor-git-diff"),
+                            onclick: move |_| {
+                                let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
+                            },
+                            {translate("editor-diff")}
+                        }
+                    }
+                }
+            }
+            if mode() == Mode::Text {
+                div {
+                    class: "flex shrink-0 items-center gap-0.5 text-[10px] font-medium",
+                    title: translate("schema-keymap"),
+                    button {
+                        class: file_mode_class(keymap == KeymapKind::Vscode),
+                        onclick: move |_| {
+                            let _ = send(&FileKeymapSet { keymap: KeymapKind::Vscode });
+                        },
+                        {translate("editor-keymap-standard")}
+                    }
+                    button {
+                        class: file_mode_class(keymap == KeymapKind::Vim),
+                        onclick: move |_| {
+                            let _ = send(&FileKeymapSet { keymap: KeymapKind::Vim });
+                        },
+                        {translate("editor-keymap-vim")}
+                    }
+                }
+            }
+            if let Some(count) = tidy.and_then(|state| state.count) {
+                div {
+                    class: "flex shrink-0 items-center gap-1.5 text-[11px]",
+                    span {
+                        class: "select-none text-primary",
+                        {translate_with(
+                            "editor-unchanged-previews",
+                            &[("count", TranslationValue::Number(count as i64))],
+                        )}
+                    }
+                    button {
+                        class: "rounded-full bg-primary/20 px-2 py-0.5 font-medium text-primary hover:bg-primary/30",
+                        onclick: move |_| {
+                            let _ = send(&FileTidyRequest { choice: TidyChoice::Tidy });
+                        },
+                        {translate("editor-tidy")}
+                    }
+                    button {
+                        class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
+                        onclick: move |_| {
+                            let _ = send(&FileTidyRequest { choice: TidyChoice::Always });
+                        },
+                        {translate("editor-always")}
+                    }
+                    button {
+                        class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
+                        onclick: move |_| {
+                            let _ = send(&FileTidyRequest { choice: TidyChoice::Dismiss });
+                        },
+                        "\u{2715}"
                     }
                 }
             }

@@ -4,9 +4,9 @@ use dioxus::prelude::*;
 use vmux_session::SessionSummary;
 use vmux_ui::hooks::{CollectionController, OptimisticMap, send};
 
-use crate::event::{ResumeSession, SessionsCleanup, SessionsStageChange};
+use crate::event::{ResumeSession, SessionsArchive, SessionsCleanup, SessionsStageChange};
 
-use super::manager_model::{SessionFilter, SessionFilterStep, StageTarget};
+use super::manager_model::{ArchiveTarget, SessionFilter, SessionFilterStep, StageTarget};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct SessionFilterPicker {
@@ -67,30 +67,29 @@ impl SessionFilterPicker {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct SessionStageMutations {
-    optimistic: OptimisticMap<String, String>,
+pub(super) struct SessionMutations {
+    stages: OptimisticMap<String, String>,
+    archives: OptimisticMap<String, bool>,
     leaving: Signal<HashSet<String>>,
-    archive_stage: Memo<String>,
 }
 
-impl SessionStageMutations {
-    pub fn new(optimistic: OptimisticMap<String, String>, archive_stage: Memo<String>) -> Self {
+impl SessionMutations {
+    pub fn new(
+        stages: OptimisticMap<String, String>,
+        archives: OptimisticMap<String, bool>,
+    ) -> Self {
         Self {
-            optimistic,
+            stages,
+            archives,
             leaving: use_signal(HashSet::new),
-            archive_stage,
         }
-    }
-
-    pub fn archive_stage(self) -> String {
-        (self.archive_stage)()
     }
 
     pub fn change(self, target: StageTarget, stage: String) {
         if target.stage == stage {
             return;
         }
-        self.optimistic
+        self.stages
             .set(target.id.clone(), target.stage.clone(), stage.clone());
         let id = target.id.clone();
         if send(&SessionsStageChange {
@@ -101,19 +100,15 @@ impl SessionStageMutations {
         })
         .is_err()
         {
-            self.optimistic.clear(&id);
+            self.stages.clear(&id);
         }
     }
 
-    pub fn archive(mut self, targets: Vec<StageTarget>) {
-        let archive_stage = self.archive_stage();
-        if archive_stage.is_empty() {
-            return;
-        }
+    pub fn archive(mut self, targets: Vec<ArchiveTarget>) {
         let leaving = self.leaving.read();
         let targets = targets
             .into_iter()
-            .filter(|target| target.stage != archive_stage && !leaving.contains(&target.id))
+            .filter(|target| !target.archived && !leaving.contains(&target.id))
             .collect::<Vec<_>>();
         drop(leaving);
         if targets.is_empty() {
@@ -123,20 +118,16 @@ impl SessionStageMutations {
             .write()
             .extend(targets.iter().map(|target| target.id.clone()));
         for target in &targets {
-            self.optimistic.set(
-                target.id.clone(),
-                target.stage.clone(),
-                archive_stage.clone(),
-            );
-            if send(&SessionsStageChange {
-                id: target.id.clone(),
-                kind: target.kind.clone(),
-                sid: target.sid.clone(),
-                stage: archive_stage.clone(),
-            })
-            .is_err()
-            {
-                self.optimistic.clear(&target.id);
+            self.archives.set(target.id.clone(), target.archived, true);
+        }
+        if send(&SessionsArchive {
+            ids: targets.iter().map(|target| target.id.clone()).collect(),
+            archived: true,
+        })
+        .is_err()
+        {
+            for target in &targets {
+                self.archives.clear(&target.id);
                 self.leaving.write().remove(&target.id);
             }
         }

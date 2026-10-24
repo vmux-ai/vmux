@@ -702,6 +702,11 @@ pub struct LayoutOverlayEvent {
     pub active: bool,
 }
 
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct LayoutOverlayDismissEffect {
+    pub revision: u64,
+}
+
 #[vmux_api::ui_event]
 pub struct RemoteCopyEvent;
 

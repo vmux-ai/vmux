@@ -3,11 +3,11 @@ pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
 pub use component::{
-    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CollectionView, CreatedAt, Cwd,
-    Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments,
-    KeyboardOwner, LastActivatedAt, LastVisitedAt, Order, Pin, ProcessAnchor, Ready,
-    RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount,
-    VisitedUrl, WindowFullscreen, WindowFullscreenSet,
+    ActivateRequest, Active, ArchivedAt, Bookmark, BookmarkOrder, Collapsed, CollectionView,
+    CreatedAt, Cwd, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
+    JsonArguments, KeyboardOwner, LastActivatedAt, LastVisitedAt, Order, PagePresented, Pin,
+    ProcessAnchor, Ready, RegistrationOrder, Terminal, TransitionType, UnixMillis, Url, Uuid,
+    Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
 #[cfg(all(host, feature = "host"))]
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};

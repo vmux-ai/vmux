@@ -10,12 +10,12 @@ use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
 use vmux_ecs::{Description, EntityTarget};
 use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
 
-use crate::cef::LayoutCef;
+use crate::cef::{Browser, LayoutCef};
 use crate::event::{
     ActiveSession, ActiveSessionState, ActiveTask, ActiveWorkspaceProject, BookmarkEntryState,
     BookmarkFolderState, BookmarkPinState, BookmarkTreeState, BookmarkUiState, HeaderState,
     PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
-    StackRevealTarget, TabBoundaryState, TabListState, TabStripRow, TabStripState,
+    StackRevealTarget, TabBoundary, TabBoundaryState, TabListState, TabStripRow, TabStripState,
 };
 use crate::side_sheet::{SideSheetSections, SideSheetSectionsExpanded};
 use crate::state::LayoutUiState;
@@ -259,25 +259,7 @@ impl ActiveWorkspaceProject {
             .take_while(|project| project.depth > 0)
             .cloned()
             .collect();
-        let mut choices: Vec<vmux_api::space::ProjectRow> = Vec::new();
-        for project in &projects.projects {
-            if project.depth != 0 || project.missing || project.kind != ProjectRowKind::Project {
-                continue;
-            }
-            let existing = choices.iter_mut().find(|held| {
-                held.display_path == project.display_path && held.label == project.label
-            });
-            if let Some(existing) = existing {
-                if project.is_active && !existing.is_active {
-                    existing.clone_from(project);
-                    existing.is_worktree = false;
-                }
-                continue;
-            }
-            let mut projected = project.clone();
-            projected.is_worktree = false;
-            choices.push(projected);
-        }
+        let choices = Self::choices(projects);
         let boundary = projects
             .boundary
             .as_ref()
@@ -297,6 +279,77 @@ impl ActiveWorkspaceProject {
                 .unwrap_or_default(),
             expanded: false,
         })
+    }
+
+    fn viewed(projects: &TabBoundaryState, path: &str, name: &str, branch: &str) -> Option<Self> {
+        let index = projects.projects.iter().position(|project| {
+            project.depth == 0
+                && project.kind == ProjectRowKind::Project
+                && (project.path == path || project.display_path == path)
+        });
+        let root = index
+            .map(|index| projects.projects[index].clone())
+            .unwrap_or_else(|| vmux_api::space::ProjectRow {
+                path: path.to_string(),
+                label: name.to_string(),
+                display_path: path.to_string(),
+                is_active: true,
+                branch: branch.to_string(),
+                ..Default::default()
+            });
+        let children = index
+            .map(|index| {
+                projects
+                    .projects
+                    .iter()
+                    .skip(index + 1)
+                    .take_while(|project| project.depth > 0)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut choices = Self::choices(projects);
+        if !choices.iter().any(|choice| choice.path == root.path) {
+            choices.push(root.clone());
+        }
+        let branches = projects
+            .boundary
+            .as_ref()
+            .filter(|boundary| boundary.effective_dir == path || boundary.project_dir == path)
+            .map(|_| projects.branches.clone())
+            .unwrap_or_default();
+        Some(Self {
+            root,
+            children,
+            choices,
+            project_dir: path.to_string(),
+            branch: branch.to_string(),
+            branches,
+            expanded: false,
+        })
+    }
+
+    fn choices(projects: &TabBoundaryState) -> Vec<vmux_api::space::ProjectRow> {
+        let mut choices: Vec<vmux_api::space::ProjectRow> = Vec::new();
+        for project in &projects.projects {
+            if project.depth != 0 || project.missing || project.kind != ProjectRowKind::Project {
+                continue;
+            }
+            let existing = choices.iter_mut().find(|held| {
+                held.display_path == project.display_path && held.label == project.label
+            });
+            if let Some(existing) = existing {
+                if project.is_active && !existing.is_active {
+                    existing.clone_from(project);
+                    existing.is_worktree = false;
+                }
+                continue;
+            }
+            let mut projected = project.clone();
+            projected.is_worktree = false;
+            choices.push(projected);
+        }
+        choices
     }
 }
 
@@ -394,6 +447,71 @@ struct SessionProjection<'w, 's> {
     removed_states: RemovedComponents<'w, 's, RunState>,
     removed_stage_definitions: RemovedComponents<'w, 's, StageDefinition>,
     removed_stage_ids: RemovedComponents<'w, 's, StageId>,
+}
+
+#[derive(Clone)]
+struct GitPageSelection {
+    path: String,
+    name: String,
+    branch: String,
+}
+
+#[derive(SystemParam)]
+struct GitSelectionProjection<'w, 's> {
+    pages: Query<
+        'w,
+        's,
+        (
+            &'static ChildOf,
+            &'static vmux_git::state::RepositoryPath,
+            &'static vmux_git::state::RepositoryName,
+            &'static vmux_git::state::ViewedBranch,
+        ),
+        With<Browser>,
+    >,
+    changed: Query<
+        'w,
+        's,
+        (),
+        (
+            With<Browser>,
+            Or<(
+                Changed<vmux_git::state::RepositoryPath>,
+                Changed<vmux_git::state::RepositoryName>,
+                Changed<vmux_git::state::ViewedBranch>,
+            )>,
+        ),
+    >,
+    removed_paths: RemovedComponents<'w, 's, vmux_git::state::RepositoryPath>,
+    removed_names: RemovedComponents<'w, 's, vmux_git::state::RepositoryName>,
+    removed_branches: RemovedComponents<'w, 's, vmux_git::state::ViewedBranch>,
+}
+
+impl GitSelectionProjection<'_, '_> {
+    fn is_changed(&mut self) -> bool {
+        let mut changed = !self.changed.is_empty();
+        changed |= Self::drain_removed(&mut self.removed_paths);
+        changed |= Self::drain_removed(&mut self.removed_names);
+        changed |= Self::drain_removed(&mut self.removed_branches);
+        changed
+    }
+
+    fn drain_removed<T: Component>(removed: &mut RemovedComponents<T>) -> bool {
+        let changed = !removed.is_empty();
+        removed.clear();
+        changed
+    }
+
+    fn page(&self, page: &StackNode) -> Option<GitPageSelection> {
+        let stack = Entity::from_bits(page.id);
+        self.pages.iter().find_map(|(parent, path, name, branch)| {
+            (parent.parent() == stack).then(|| GitPageSelection {
+                path: path.0.clone(),
+                name: name.0.clone(),
+                branch: branch.0.clone(),
+            })
+        })
+    }
 }
 
 impl SessionProjection<'_, '_> {
@@ -616,6 +734,7 @@ fn publish_active_session(
     changed_sections: Query<(), Changed<SideSheetSectionsExpanded>>,
     mut removed_sections: RemovedComponents<SideSheetSectionsExpanded>,
     mut sessions: SessionProjection,
+    mut git: GitSelectionProjection,
     mut last: Local<std::collections::HashMap<Entity, ActiveSessionState>>,
     mut commands: Commands,
 ) {
@@ -623,6 +742,7 @@ fn publish_active_session(
     let empty_projects = TabBoundaryState::default();
     let empty_team = TeamUiState::default();
     let sessions_changed = sessions.is_changed();
+    let git_changed = git.is_changed();
     let sections_changed = !changed_sections.is_empty() || removed_sections.read().next().is_some();
     for (entity, panes, projects, team) in &layouts {
         let projection_changed = panes.as_ref().is_some_and(|value| value.is_changed())
@@ -630,6 +750,7 @@ fn publish_active_session(
             || team.as_ref().is_some_and(|value| value.is_changed());
         if last.contains_key(&entity)
             && !sessions_changed
+            && !git_changed
             && !projection_changed
             && !sections_changed
         {
@@ -649,6 +770,20 @@ fn publish_active_session(
             .unwrap_or(&empty_team);
         let session = ActiveSession::from_projections(panes, projects, team).map(|mut active| {
             active.task = sessions.task(&active.page);
+            if let Some(selection) = git.page(&active.page) {
+                active.project = ActiveWorkspaceProject::viewed(
+                    projects,
+                    &selection.path,
+                    &selection.name,
+                    &selection.branch,
+                );
+                let boundary = active.boundary.get_or_insert_with(TabBoundary::default);
+                boundary.effective_dir.clone_from(&selection.path);
+                boundary.project_dir.clone_from(&selection.path);
+                boundary.repository.clone_from(&selection.name);
+                boundary.is_git_repo = true;
+                boundary.branch.clone_from(&selection.branch);
+            }
             if let Some(project) = active.project.as_mut() {
                 project.expanded = sections.under(Entity::from_bits(active.pane_id)).projects;
             }

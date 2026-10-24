@@ -359,7 +359,7 @@ pub(super) fn StickyScope(
     }
     rsx! {
         div { class: "sticky top-0 z-[12] h-0",
-            div { class: "absolute inset-x-0 top-0 border-b border-foreground/10 bg-background/95 backdrop-blur",
+            div { class: "absolute inset-x-0 top-0 bg-background/95 backdrop-blur",
                 for line in lines {
                     StickyScopeRow {
                         key: "{line.line_no}",

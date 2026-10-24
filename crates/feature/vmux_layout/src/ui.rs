@@ -86,6 +86,17 @@ pub(super) fn LayoutDropdown(
     on_dismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
+    let dismiss_revision = LayoutUi::current().value().overlay_dismiss_revision;
+    let mut observed_dismiss_revision = use_signal(|| dismiss_revision);
+    use_effect(move || {
+        if dismiss_revision <= *observed_dismiss_revision.peek() {
+            return;
+        }
+        observed_dismiss_revision.set(dismiss_revision);
+        if open {
+            on_dismiss.call(());
+        }
+    });
     let overlay_id = id.clone();
     use_effect(move || {
         let _ = send(&LayoutOverlayEvent {

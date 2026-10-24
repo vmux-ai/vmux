@@ -16,7 +16,7 @@ use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, Context
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::tree_row::{
-    SIDEBAR_TREE_COLUMN, SIDEBAR_TREE_SCROLLER, SidebarTreeRow, SidebarTreeRowGroup,
+    FILE_TREE_COLUMN, FILE_TREE_SCROLLER, FileTreeRow, FileTreeRowGroup,
 };
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -153,8 +153,8 @@ pub(super) fn BookmarksSection(
                         if pins.is_empty() && rows.is_empty() && !creating_folder {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-pins-bookmarks")} }
                         } else {
-                            div { class: SIDEBAR_TREE_SCROLLER,
-                            div { class: "{SIDEBAR_TREE_COLUMN} gap-1",
+                            div { class: FILE_TREE_SCROLLER,
+                            div { class: "{FILE_TREE_COLUMN} gap-1",
                                 for node in rows.iter() {
                                     match node {
                                         BookmarkTreeState::Folder(folder) => rsx! {
@@ -726,8 +726,8 @@ fn BookmarkFolder(
                                 let item = drag_item.clone();
                                 move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                             },
-                            SidebarTreeRowGroup {
-                                SidebarTreeRow {
+                            FileTreeRowGroup {
+                                FileTreeRow {
                                     path: uuid.clone(),
                                     label: folder.name.clone(),
                                     is_dir: true,
@@ -951,8 +951,8 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                             let item = drag_item.clone();
                             move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                         },
-                        SidebarTreeRowGroup {
-                            SidebarTreeRow {
+                        FileTreeRowGroup {
+                            FileTreeRow {
                                 path: row.metadata.url.clone(),
                                 label: title.clone(),
                                 is_dir: false,

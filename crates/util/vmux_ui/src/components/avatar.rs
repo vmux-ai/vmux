@@ -1,6 +1,7 @@
 use crate::cn::cn;
 use crate::favicon::FaviconSource;
 use dioxus::prelude::*;
+use vmux_api::avatar::IdenticonSpec;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
 const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
@@ -94,6 +95,32 @@ pub fn AgentThumbnail(
     let class = cn([AGENT_THUMBNAIL, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
+    }
+}
+
+#[component]
+pub fn Identicon(seed: String, #[props(default)] alt: String, class: String) -> Element {
+    let identicon = IdenticonSpec::from_seed(&seed);
+    rsx! {
+        svg {
+            class,
+            view_box: "0 0 36 36",
+            role: "img",
+            title { "{alt}" }
+            rect { width: "36", height: "36", rx: "8", fill: identicon.background }
+            for (index, visible) in identicon.tiles.iter().copied().enumerate() {
+                if visible {
+                    rect {
+                        x: "{IdenticonSpec::coordinate(index % 3)}",
+                        y: "{IdenticonSpec::coordinate(index / 3)}",
+                        width: "8",
+                        height: "8",
+                        rx: "2.25",
+                        fill: if index % 2 == 0 { identicon.foreground } else { identicon.accent },
+                    }
+                }
+            }
+        }
     }
 }
 

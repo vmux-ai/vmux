@@ -14,6 +14,15 @@ pub enum GitPanel {
     Stash,
 }
 
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct RepositoryPath(pub String);
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct RepositoryName(pub String);
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ViewedBranch(pub String);
+
 impl GitPanel {
     pub fn from_key(key: &str) -> Option<Self> {
         match key {
@@ -45,6 +54,14 @@ pub enum GitBranchCollection {
     Local,
     Remote,
     Tags,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchCheckout {
+    pub branch: String,
+    pub checkout: String,
+    pub start_point: String,
+    pub current: bool,
 }
 
 impl From<GitBranchCollection> for GitCatalog {
@@ -86,9 +103,22 @@ impl GitBranchCollection {
         }
     }
 
+    pub fn contains(self, repository: &GitRepositorySnapshot, reference: &str) -> bool {
+        match self {
+            Self::Local => repository
+                .branches
+                .iter()
+                .any(|entry| entry.name == reference),
+            Self::Remote => repository
+                .remote_branches
+                .iter()
+                .any(|entry| entry.name == reference),
+            Self::Tags => repository.tags.iter().any(|entry| entry.name == reference),
+        }
+    }
+
     pub fn selected_reference(self, repository: &GitRepositorySnapshot, selected: &str) -> String {
-        let references = self.references(repository);
-        if references.iter().any(|reference| reference == selected) {
+        if self.contains(repository, selected) {
             return selected.to_string();
         }
         if self == Self::Local
@@ -99,7 +129,73 @@ impl GitBranchCollection {
         if self == Self::Local && !repository.branch.is_empty() {
             return repository.branch.clone();
         }
-        references.into_iter().next().unwrap_or_default()
+        match self {
+            Self::Local => repository.branches.first().map(|entry| entry.name.clone()),
+            Self::Remote => repository
+                .remote_branches
+                .first()
+                .map(|entry| entry.name.clone()),
+            Self::Tags => repository.tags.first().map(|entry| entry.name.clone()),
+        }
+        .unwrap_or_default()
+    }
+
+    pub fn contains_any(repository: &GitRepositorySnapshot, reference: &str) -> bool {
+        Self::containing(repository, reference).is_some()
+    }
+
+    pub fn containing(repository: &GitRepositorySnapshot, reference: &str) -> Option<Self> {
+        if reference.is_empty() {
+            return None;
+        }
+        [Self::Local, Self::Remote, Self::Tags]
+            .into_iter()
+            .find(|collection| collection.contains(repository, reference))
+    }
+
+    pub fn checkout(
+        self,
+        repository: &GitRepositorySnapshot,
+        reference: &str,
+    ) -> Option<BranchCheckout> {
+        if reference.is_empty() || self == Self::Tags {
+            return None;
+        }
+        let branch = match self {
+            Self::Local => repository
+                .branches
+                .iter()
+                .find(|branch| branch.name == reference),
+            Self::Remote => repository
+                .branches
+                .iter()
+                .find(|branch| branch.upstream == reference),
+            Self::Tags => None,
+        };
+        if let Some(branch) = branch {
+            return Some(BranchCheckout {
+                branch: branch.name.clone(),
+                checkout: branch.checkout.clone(),
+                start_point: String::new(),
+                current: branch.current,
+            });
+        }
+        let branch = reference
+            .split_once('/')
+            .map(|(_, branch)| branch)
+            .unwrap_or(reference)
+            .to_string();
+        Some(BranchCheckout {
+            branch,
+            checkout: String::new(),
+            start_point: reference.to_string(),
+            current: false,
+        })
+    }
+
+    pub fn is_checked_out(self, repository: &GitRepositorySnapshot, reference: &str) -> bool {
+        self.checkout(repository, reference)
+            .is_some_and(|checkout| checkout.current)
     }
 }
 
@@ -153,6 +249,7 @@ pub struct GitPageControllerState {
     pub selected_branch_path: String,
     pub selected_branch_path_bytes: Vec<u8>,
     pub branch_collection: GitBranchCollection,
+    pub selected_branch_collection: GitBranchCollection,
     pub selected_stash: String,
     pub confirm_discard: Vec<u8>,
     pub focused_panel: GitPanel,
@@ -232,6 +329,7 @@ pub struct GitPageSnapshot {
     pub diff_loading: bool,
     pub branch_files: Vec<crate::event::GitBranchFileEntry>,
     pub branch_files_reference: String,
+    pub branch_files_base_ref: String,
     pub branch_files_total: u32,
     pub branch_files_loading: bool,
     pub branch_files_has_more: bool,
@@ -252,10 +350,20 @@ pub struct GitPageSnapshot {
 
 #[vmux_api::contract(Copy, Eq, Default)]
 pub struct GitCatalogProgress {
+    pub initialized: bool,
     pub loaded: bool,
     pub loading: bool,
     pub has_more: bool,
     pub failed: bool,
+}
+
+impl GitCatalogProgress {
+    pub(crate) fn refresh(&mut self) {
+        *self = Self {
+            initialized: self.initialized,
+            ..Default::default()
+        };
+    }
 }
 
 impl Default for GitPageSnapshot {
@@ -268,6 +376,7 @@ impl Default for GitPageSnapshot {
             diff_loading: false,
             branch_files: Vec::new(),
             branch_files_reference: String::new(),
+            branch_files_base_ref: String::new(),
             branch_files_total: 0,
             branch_files_loading: false,
             branch_files_has_more: false,
@@ -317,6 +426,14 @@ impl GitPageSnapshot {
         self.tags = GitCatalogProgress::default();
         self.commits = GitCatalogProgress::default();
         self.stashes = GitCatalogProgress::default();
+    }
+
+    pub(crate) fn refresh_catalogs(&mut self) {
+        self.local_branches.refresh();
+        self.remote_branches.refresh();
+        self.tags.refresh();
+        self.commits.refresh();
+        self.stashes.refresh();
     }
 
     pub(crate) fn has_failed_catalog(&self) -> bool {
@@ -517,6 +634,78 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn repository_with_branches() -> GitRepositorySnapshot {
+        GitRepositorySnapshot {
+            path: "/tmp/repo".to_string(),
+            repo_root: "/tmp/repo".to_string(),
+            repo_name: "repo".to_string(),
+            is_worktree: false,
+            branch: "main".to_string(),
+            base_ref: "main".to_string(),
+            upstream: "origin/main".to_string(),
+            ahead: 0,
+            behind: 0,
+            files: Vec::new(),
+            commits: Vec::new(),
+            branches: vec![
+                crate::event::GitBranchEntry {
+                    name: "main".to_string(),
+                    current: true,
+                    upstream: "origin/main".to_string(),
+                    checkout: "/tmp/repo".to_string(),
+                    short_sha: String::new(),
+                    ahead: 0,
+                    behind: 0,
+                    changed_files: 0,
+                    insertions: 0,
+                    deletions: 0,
+                },
+                crate::event::GitBranchEntry {
+                    name: "feature".to_string(),
+                    current: false,
+                    upstream: "origin/feature".to_string(),
+                    checkout: String::new(),
+                    short_sha: String::new(),
+                    ahead: 0,
+                    behind: 0,
+                    changed_files: 0,
+                    insertions: 0,
+                    deletions: 0,
+                },
+            ],
+            remote_branches: Vec::new(),
+            tags: Vec::new(),
+            stashes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn remote_checkout_reuses_its_tracking_branch() {
+        let repository = repository_with_branches();
+
+        let checkout = GitBranchCollection::Remote
+            .checkout(&repository, "origin/feature")
+            .unwrap();
+
+        assert_eq!(checkout.branch, "feature");
+        assert!(checkout.start_point.is_empty());
+        assert!(!checkout.current);
+        assert!(GitBranchCollection::Remote.is_checked_out(&repository, "origin/main"));
+    }
+
+    #[test]
+    fn remote_checkout_creates_a_tracking_branch_when_missing() {
+        let repository = repository_with_branches();
+
+        let checkout = GitBranchCollection::Remote
+            .checkout(&repository, "upstream/topic/nested")
+            .unwrap();
+
+        assert_eq!(checkout.branch, "topic/nested");
+        assert_eq!(checkout.start_point, "upstream/topic/nested");
+        assert!(!checkout.current);
+    }
 
     fn diff_line(number: u32) -> crate::event::DiffLine {
         crate::event::DiffLine {

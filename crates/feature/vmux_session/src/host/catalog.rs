@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -14,16 +14,17 @@ use vmux_git::RepoInfoCache;
 #[cfg(test)]
 use vmux_session::SessionSummary;
 use vmux_session::{
-    AgentId, CatalogSnapshot, CleanupRequest, CreateRequest, Created, DescriptionUpdateRequest,
-    ProviderKind, ProviderSessionId, ProviderStageChangeRequest, RenameRequest, Route, SessionId,
+    AgentId, ArchiveRequest, CatalogSnapshot, CleanupRequest, CreateRequest, Created,
+    DescriptionUpdateRequest, ProviderArchiveRequest, ProviderCatalog, ProviderKind,
+    ProviderSessionId, ProviderStageChangeRequest, RenameRequest, Route, SessionId,
     StageChangeRequest, StageId,
 };
 
 use super::session::SessionView;
 use crate::event::{
-    SessionDirectorySelection, SessionRepositories, SessionRepository, SessionsChooseDirectory,
-    SessionsCleanup, SessionsCreate, SessionsDescriptionUpdate, SessionsRename,
-    SessionsStageChange,
+    SessionDirectorySelection, SessionRepositories, SessionRepository, SessionsArchive,
+    SessionsChooseDirectory, SessionsCleanup, SessionsCreate, SessionsDescriptionUpdate,
+    SessionsRename, SessionsStageChange,
 };
 use crate::state::{ChatUiState, SessionCatalogUiState, SessionDetailUiState, SessionScopeUiState};
 
@@ -44,6 +45,7 @@ impl Plugin for CatalogPlugin {
                 SessionsRename,
                 SessionsDescriptionUpdate,
                 SessionsStageChange,
+                SessionsArchive,
                 SessionsCleanup,
             )>::default())
             .add_observer(create)
@@ -52,6 +54,7 @@ impl Plugin for CatalogPlugin {
             .add_observer(rename)
             .add_observer(update_description)
             .add_observer(change_stage)
+            .add_observer(archive)
             .add_observer(cleanup)
             .add_observer(scope_projection)
             .add_observer(ready)
@@ -355,6 +358,82 @@ fn change_stage(
     });
 }
 
+fn archive(
+    trigger: On<UiInput<SessionsArchive>>,
+    views: CatalogViews,
+    catalog: Res<CatalogSnapshot>,
+    providers: Res<ProviderCatalog>,
+    sessions: Query<(
+        &SessionId,
+        Option<&ProviderKind>,
+        Option<&ProviderSessionId>,
+    )>,
+    mut requests: MessageWriter<ArchiveRequest>,
+    mut provider_requests: MessageWriter<ProviderArchiveRequest>,
+) {
+    if !views.contains(trigger.event().webview) {
+        return;
+    }
+    let request = &trigger.event().payload;
+    let requested = request
+        .ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let summaries = catalog
+        .sessions
+        .iter()
+        .filter(|session| requested.contains(session.id.as_str()))
+        .map(|session| (session.id.as_str(), session))
+        .collect::<HashMap<_, _>>();
+    let links = sessions
+        .iter()
+        .filter_map(|(id, kind, provider_id)| {
+            Some((id.0.as_str(), (kind?.clone(), provider_id?.clone())))
+        })
+        .collect::<HashMap<_, _>>();
+    let source_updated_at = vmux_ecs::UnixMillis::now().0;
+    for id in &request.ids {
+        let Some(session) = summaries.get(id.as_str()) else {
+            continue;
+        };
+        if !session.managed {
+            let native = providers
+                .get(&session.kind, &session.sid)
+                .is_some_and(|provider| provider.archive.is_some());
+            provider_requests.write(ProviderArchiveRequest {
+                kind: ProviderKind(session.kind.clone()),
+                id: ProviderSessionId(session.sid.clone()),
+                archived: request.archived,
+                source_updated_at,
+                native,
+            });
+            continue;
+        }
+        let native = links.get(id.as_str()).is_some_and(|(kind, provider_id)| {
+            providers
+                .get(&kind.0, &provider_id.0)
+                .is_some_and(|provider| provider.archive.is_some())
+        });
+        if let Some((kind, provider_id)) = links.get(id.as_str()) {
+            provider_requests.write(ProviderArchiveRequest {
+                kind: kind.clone(),
+                id: provider_id.clone(),
+                archived: request.archived,
+                source_updated_at,
+                native,
+            });
+        }
+        if native {
+            continue;
+        }
+        requests.write(ArchiveRequest {
+            id: SessionId(id.clone()),
+            archived_at: request.archived.then_some(source_updated_at),
+        });
+    }
+}
+
 fn cleanup(
     trigger: On<UiInput<SessionsCleanup>>,
     views: CatalogViews,
@@ -562,7 +641,10 @@ fn sync_repositories(
                 id: session.id.clone(),
                 project: SessionProject::fallback(path, session.managed),
                 branch: String::new(),
-                url: String::new(),
+                url: (!session.cwd.is_empty())
+                    .then(|| vmux_git::GitUrl::from_path(path))
+                    .flatten()
+                    .unwrap_or_default(),
             },
         };
         sessions.push(repository);

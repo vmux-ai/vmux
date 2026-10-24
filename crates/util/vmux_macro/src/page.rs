@@ -66,6 +66,7 @@ struct PagePlacementFile {
 enum PageReuseFile {
     #[default]
     Exact,
+    Group,
     Route,
     Fragmentless,
 }
@@ -263,6 +264,7 @@ impl PageManifestFile {
                 let refresh = placement.refresh;
                 let reuse = match placement.reuse {
                     PageReuseFile::Exact => quote! { ::vmux_ecs::page::PageReuse::Exact },
+                    PageReuseFile::Group => quote! { ::vmux_ecs::page::PageReuse::Group },
                     PageReuseFile::Route => quote! { ::vmux_ecs::page::PageReuse::Route },
                     PageReuseFile::Fragmentless => {
                         quote! { ::vmux_ecs::page::PageReuse::Fragmentless }

@@ -6,6 +6,7 @@ use bevy::prelude::*;
 pub(super) struct ProcessSnapshot {
     pub samples: HashMap<u32, ProcSample>,
     pub local: Vec<(u32, LocalProcess)>,
+    pub cpu_ready: bool,
 }
 
 pub(super) struct ProcSample {
@@ -67,6 +68,7 @@ pub(super) struct ProcessSampler {
     sample_poll: Timer,
     discovery: DiscoveryGate,
     discovered: bool,
+    sampled: bool,
     local: HashMap<u32, MacLocalProcess>,
     counters: HashMap<u32, ProcessCounter>,
 }
@@ -78,6 +80,7 @@ impl Default for ProcessSampler {
             sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
             discovery: DiscoveryGate::default(),
             discovered: false,
+            sampled: false,
             local: HashMap::new(),
             counters: HashMap::new(),
         }
@@ -103,7 +106,10 @@ impl ProcessSampler {
             self.discovery.finish();
         }
         self.sample_poll.reset();
-        Some(self.snapshot(service_roots))
+        let mut snapshot = self.snapshot(service_roots);
+        snapshot.cpu_ready = self.sampled;
+        self.sampled = true;
+        Some(snapshot)
     }
 
     fn discover(&mut self) {
@@ -177,7 +183,11 @@ impl ProcessSampler {
             self.local.remove(&pid);
         }
         self.counters.retain(|pid, _| pids.contains(pid));
-        ProcessSnapshot { samples, local }
+        ProcessSnapshot {
+            samples,
+            local,
+            cpu_ready: false,
+        }
     }
 }
 
@@ -389,6 +399,7 @@ fn unix_time() -> u64 {
 pub(super) struct ProcessSampler {
     sample_poll: Timer,
     discovery: DiscoveryGate,
+    sampled: bool,
     system: sysinfo::System,
 }
 
@@ -398,6 +409,7 @@ impl Default for ProcessSampler {
         Self {
             sample_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
             discovery: DiscoveryGate::default(),
+            sampled: false,
             system: sysinfo::System::new(),
         }
     }
@@ -436,7 +448,10 @@ impl ProcessSampler {
                 .with_exe(sysinfo::UpdateKind::OnlyIfNotSet)
                 .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet),
         );
-        Some(monitored.snapshot(&self.system))
+        let mut snapshot = monitored.snapshot(&self.system);
+        snapshot.cpu_ready = self.sampled;
+        self.sampled = true;
+        Some(snapshot)
     }
 }
 
@@ -529,7 +544,11 @@ impl MonitoredProcesses {
                 ));
             }
         }
-        ProcessSnapshot { samples, local }
+        ProcessSnapshot {
+            samples,
+            local,
+            cpu_ready: false,
+        }
     }
 }
 

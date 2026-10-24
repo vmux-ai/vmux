@@ -16,11 +16,10 @@ pub fn Page() -> Element {
     use_theme();
     let state = GitPageState::use_state();
     use_context_provider(|| state);
-    let GitPageState {
-        snapshot,
-        controller,
-        ..
-    } = state;
+    let repository_loaded = state.use_selector(|state| state.snapshot.repository.is_some());
+    let shortcut_help_visible = state.use_selector(|state| state.controller.shortcut_help_visible);
+    let branch_prompt_visible =
+        state.use_selector(|state| state.controller.branch_prompt.is_some());
 
     rsx! {
         document::Title { {translate("git-title")} }
@@ -29,7 +28,7 @@ pub fn Page() -> Element {
             tabindex: "-1",
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {
-                if event.key() == Key::Escape && (state.controller)().shortcut_help_visible {
+                if event.key() == Key::Escape && shortcut_help_visible() {
                     event.prevent_default();
                     event.stop_propagation();
                     let _ = send(&GitShortcutHelpRequest { visible: false });
@@ -47,18 +46,18 @@ pub fn Page() -> Element {
                     },
                     repeat: event.is_auto_repeating(),
                 };
-                let captured = request.captures_browser_default(snapshot().repository.is_some());
+                let captured = request.captures_browser_default(repository_loaded());
                 if send(&request).is_ok() && captured {
                     event.prevent_default();
                     event.stop_propagation();
                 }
             },
-            if snapshot().repository.is_some() {
+            if repository_loaded() {
                 GitDashboard {}
             } else {
                 EmptyRepository {}
             }
-            if controller().branch_prompt.is_some() {
+            if branch_prompt_visible() {
                 BranchPromptDialog {}
             }
         }

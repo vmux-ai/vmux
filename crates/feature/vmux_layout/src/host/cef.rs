@@ -11,7 +11,11 @@ use vmux_flex::prelude::*;
 pub struct Browser;
 
 #[derive(Component)]
-#[require(crate::LayoutUiStateUpdates, ReloadRevision)]
+#[require(
+    crate::LayoutUiStateUpdates,
+    ReloadRevision,
+    crate::overlay::LayoutOverlayDismissRevision
+)]
 pub struct LayoutCef;
 
 impl LayoutCef {

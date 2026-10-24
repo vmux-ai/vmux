@@ -20,6 +20,9 @@ impl UnixMillis {
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
 
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PagePresented;
+
 #[derive(Component, Reflect)]
 #[reflect(Component, Default)]
 #[require(Save)]
@@ -150,6 +153,12 @@ impl LastActivatedAt {
             .map(|(entity, _)| entity)
     }
 }
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+pub struct ArchivedAt(pub i64);
 
 #[derive(EntityEvent, Clone, Copy, Debug)]
 pub struct ActivateRequest {

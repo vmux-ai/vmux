@@ -6,6 +6,10 @@
             manifest_url: "vmux://git/",
             title_message_id: "git-title",
             keywords: ["repository", "changes", "commit", "branch", "source control"],
+            placement: Some((
+                group: "git",
+                reuse: Group,
+            )),
             icon: "GitBranch",
             command_bar: true,
             bookmark: Some(40),
@@ -72,6 +76,7 @@
                 "GitStashPushRequest",
                 "ProjectActivateRequest",
                 "ProjectPickerRequest",
+                "OpenRequest",
                 "KeyContextRequest",
                 "KeyStroke",
                 "KeyClaimsUiState",

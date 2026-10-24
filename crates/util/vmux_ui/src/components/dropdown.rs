@@ -1,26 +1,9 @@
 use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
+use dioxus_primitives::dioxus_attributes::attributes;
+use dioxus_primitives::merge_attributes;
 
 use crate::cn::cn;
-
-const DROPDOWN_BLUR_SCRIPT: &str = r#"
-globalThis.__vmuxDropdownBlurCleanup?.();
-let active = true;
-const cleanup = () => {
-  if (!active) return;
-  active = false;
-  window.removeEventListener("blur", dismiss);
-  if (globalThis.__vmuxDropdownBlurCleanup === cleanup) {
-    delete globalThis.__vmuxDropdownBlurCleanup;
-  }
-};
-const dismiss = () => {
-  cleanup();
-  dioxus.send(true);
-};
-globalThis.__vmuxDropdownBlurCleanup = cleanup;
-window.addEventListener("blur", dismiss);
-"#;
 
 const DROPDOWN_KEYBOARD_SCRIPT: &str = r#"
 globalThis.__vmuxDropdownKeyboardCleanup?.();
@@ -87,27 +70,38 @@ document.addEventListener('keydown', keydown, true);
 document.addEventListener('input', input, true);
 "#;
 
-const DROPDOWN_OUTSIDE_SCRIPT: &str = r#"
+const DROPDOWN_DISMISS_SCRIPT: &str = r#"
 const owner = __VMUX_DROPDOWN_OWNER__;
-const cleanups = globalThis.__vmuxDropdownOutsideCleanups ??= new Map();
-cleanups.get(owner)?.();
+const entries = globalThis.__vmuxDropdownDismissEntries ??= new Map();
+for (const [other, entry] of [...entries]) {
+  if (other !== owner) entry.dismiss();
+}
+entries.get(owner)?.cleanup();
 let active = true;
 const cleanup = () => {
   if (!active) return;
   active = false;
-  document.removeEventListener('mousedown', outside, true);
-  if (cleanups.get(owner) === cleanup) {
-    cleanups.delete(owner);
+  document.removeEventListener('pointerdown', outside, true);
+  window.removeEventListener('pointerdown', outside, true);
+  window.removeEventListener('blur', dismiss, true);
+  if (entries.get(owner)?.cleanup === cleanup) {
+    entries.delete(owner);
   }
 };
-const outside = event => {
-  const root = document.querySelector(`[data-vmux-dropdown-owner="${owner}"]`);
-  if (!root || root.contains(event.target)) return;
+const dismiss = () => {
+  if (!active) return;
   cleanup();
   dioxus.send(true);
 };
-cleanups.set(owner, cleanup);
-document.addEventListener('mousedown', outside, true);
+const outside = event => {
+  const root = document.querySelector(`[data-vmux-dropdown-owner="${owner}"]`);
+  if (root && event.composedPath().includes(root)) return;
+  dismiss();
+};
+entries.set(owner, { cleanup, dismiss });
+document.addEventListener('pointerdown', outside, true);
+window.addEventListener('pointerdown', outside, true);
+window.addEventListener('blur', dismiss, true);
 "#;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -115,12 +109,12 @@ struct DropdownOutsideOwner(usize);
 
 impl DropdownOutsideOwner {
     fn install_script(self) -> String {
-        DROPDOWN_OUTSIDE_SCRIPT.replace("__VMUX_DROPDOWN_OWNER__", &self.0.to_string())
+        DROPDOWN_DISMISS_SCRIPT.replace("__VMUX_DROPDOWN_OWNER__", &self.0.to_string())
     }
 
     fn cleanup_script(self) -> String {
         format!(
-            "globalThis.__vmuxDropdownOutsideCleanups?.get({})?.();",
+            "globalThis.__vmuxDropdownDismissEntries?.get({})?.cleanup();",
             self.0
         )
     }
@@ -136,7 +130,11 @@ pub fn Dropdown(
 ) -> Element {
     let outside_owner = DropdownOutsideOwner(current_scope_id().0);
     let layer = if open { "z-[100]" } else { "z-auto" };
-    let root_class = cn(["relative", layer, class.as_str()]);
+    let root_class = cn([
+        "relative [&_button]:transition-[background-color,color,opacity,transform] [&_button]:duration-150 [&_button]:ease-out [&_svg]:transition-transform [&_svg]:duration-150 motion-reduce:[&_button]:transition-none motion-reduce:[&_svg]:transition-none",
+        layer,
+        class.as_str(),
+    ]);
     rsx! {
         div {
             class: root_class,
@@ -152,8 +150,7 @@ pub fn Dropdown(
                 }
             },
             if open {
-                DropdownBlurDismiss { on_dismiss }
-                DropdownOutsideDismiss { owner: outside_owner, on_dismiss }
+                DropdownDismiss { owner: outside_owner, on_dismiss }
                 if keyboard_navigation {
                     DropdownKeyboardNavigation {}
                 }
@@ -164,7 +161,31 @@ pub fn Dropdown(
 }
 
 #[component]
-fn DropdownOutsideDismiss(owner: DropdownOutsideOwner, on_dismiss: EventHandler<()>) -> Element {
+pub fn DropdownPopup(
+    #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
+    #[props(default)] onclick: Option<EventHandler<MouseEvent>>,
+    children: Element,
+) -> Element {
+    let base = attributes!(div {
+        class: "origin-top rounded-lg bg-popover shadow-[0_16px_48px_rgba(0,0,0,0.32)] animate-[dx-fade-zoom-in_120ms_ease-out_forwards] will-change-[transform,opacity] motion-reduce:animate-none",
+        "data-vmux-dropdown-popup": "",
+    });
+    let merged = merge_attributes(vec![base, attributes]);
+    rsx! {
+        div {
+            onclick: move |event| {
+                if let Some(handler) = onclick {
+                    handler.call(event);
+                }
+            },
+            ..merged,
+            {children}
+        }
+    }
+}
+
+#[component]
+fn DropdownDismiss(owner: DropdownOutsideOwner, on_dismiss: EventHandler<()>) -> Element {
     use_future(move || async move {
         let script = owner.install_script();
         let mut eval = document::eval(&script);
@@ -174,20 +195,6 @@ fn DropdownOutsideDismiss(owner: DropdownOutsideOwner, on_dismiss: EventHandler<
     });
     use_drop(move || {
         let _ = document::eval(&owner.cleanup_script());
-    });
-    rsx! {}
-}
-
-#[component]
-fn DropdownBlurDismiss(on_dismiss: EventHandler<()>) -> Element {
-    use_future(move || async move {
-        let mut eval = document::eval(DROPDOWN_BLUR_SCRIPT);
-        if eval.recv::<bool>().await.is_ok_and(|dismiss| dismiss) {
-            on_dismiss.call(());
-        }
-    });
-    use_drop(move || {
-        let _ = document::eval("globalThis.__vmuxDropdownBlurCleanup?.();");
     });
     rsx! {}
 }

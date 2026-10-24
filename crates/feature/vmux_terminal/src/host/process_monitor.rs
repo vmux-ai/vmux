@@ -254,6 +254,7 @@ pub(crate) struct ServiceProcessSnapshot(pub(crate) Vec<vmux_api::protocol::Proc
 struct ProcessMonitor {
     process_poll: Timer,
     sampler: ProcessSampler,
+    cpu_ready: bool,
 }
 
 impl Default for ProcessMonitor {
@@ -261,6 +262,7 @@ impl Default for ProcessMonitor {
         Self {
             process_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
             sampler: ProcessSampler::default(),
+            cpu_ready: false,
         }
     }
 }
@@ -493,6 +495,7 @@ fn sample_process_usage(
     ) else {
         return;
     };
+    runtime.cpu_ready = snapshot.cpu_ready;
 
     for (pid, mut usage) in &mut service_processes {
         *usage = Usage::subtree(pid.0, &snapshot.samples);
@@ -532,7 +535,7 @@ fn sample_process_usage(
 }
 
 fn broadcast_to_monitors(
-    runtime: Query<(Entity, Has<ProcessMonitorDirty>), With<ProcessMonitor>>,
+    runtime: Query<(Entity, &ProcessMonitor, Has<ProcessMonitorDirty>)>,
     service_processes: Query<(&ProcessId, &ProcessPid, &ServiceProcess, &Usage, &Order)>,
     local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
     connected: Option<Single<(), With<ServiceConnected>>>,
@@ -552,7 +555,7 @@ fn broadcast_to_monitors(
     if monitors.is_empty() {
         return;
     }
-    let Ok((runtime_entity, dirty)) = runtime.single() else {
+    let Ok((runtime_entity, runtime, dirty)) = runtime.single() else {
         return;
     };
     if !dirty && claimed.is_empty() && monitors.iter().all(|(_, _, view_dirty)| !view_dirty) {
@@ -592,6 +595,11 @@ fn broadcast_to_monitors(
         processes.push(process);
     }
 
+    if !runtime.cpu_ready {
+        for process in &mut processes {
+            process.cpu_label.clear();
+        }
+    }
     let total_count = processes.len() as u32;
     let managed_count = processes.iter().filter(|process| process.managed).count() as u32;
     let total_cpu_percent = processes
@@ -658,10 +666,22 @@ fn broadcast_to_monitors(
             managed_count,
             cpu: ProcessUsageUiState {
                 label: "CPU".to_string(),
-                value: format!("{total_cpu_percent:.1}%"),
-                peak: format!("↑ {peak_cpu_percent:.1}%"),
-                line: cpu_graph.line,
-                area: cpu_graph.area,
+                value: runtime
+                    .cpu_ready
+                    .then(|| format!("{total_cpu_percent:.1}%"))
+                    .unwrap_or_default(),
+                peak: runtime
+                    .cpu_ready
+                    .then(|| format!("↑ {peak_cpu_percent:.1}%"))
+                    .unwrap_or_default(),
+                line: runtime
+                    .cpu_ready
+                    .then_some(cpu_graph.line)
+                    .unwrap_or_default(),
+                area: runtime
+                    .cpu_ready
+                    .then_some(cpu_graph.area)
+                    .unwrap_or_default(),
             },
             memory: ProcessUsageUiState {
                 label: locale.translate("services-memory"),

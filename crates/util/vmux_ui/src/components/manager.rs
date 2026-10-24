@@ -1,6 +1,6 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
-use crate::components::dropdown::Dropdown;
+use crate::components::dropdown::{Dropdown, DropdownPopup};
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
 use crate::components::tooltip::Tooltip;
@@ -152,14 +152,11 @@ fn ManagerAreaLink(
         "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
     };
     rsx! {
-        a {
-            href: area.url(),
+        button {
+            r#type: "button",
             aria_current: if selected { "page" } else { "false" },
             class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium transition-colors {class}",
-            onclick: move |event| {
-                event.prevent_default();
-                onselect.call(area);
-            },
+            onclick: move |_| onselect.call(area),
             BuiltinIconView { icon: area.icon(), class: "size-3.5 shrink-0".to_string() }
             span { class: "truncate", {area.label()} }
         }
@@ -443,7 +440,7 @@ pub fn ManagerSearchPopover(
                 LineIconView { icon: LineIcon::Search, class: "size-3.5".to_string() }
             }
             if open {
-                div {
+                DropdownPopup {
                     class: "absolute {position} top-8 z-50 w-[min(28rem,calc(100vw-2rem))]",
                     {children}
                 }

@@ -30,16 +30,31 @@ impl ManagerPresentation {
             .collect()
     }
 
+    pub fn archive_observations(snapshot: &CatalogSnapshot) -> HashMap<String, bool> {
+        snapshot
+            .sessions
+            .iter()
+            .map(|session| (session.id.clone(), session.archived_at > 0))
+            .collect()
+    }
+
     pub fn new(
         mut snapshot: CatalogSnapshot,
         repositories: SessionRepositories,
         query: &str,
         filters: &[SessionFilter],
         mut stage_for: impl FnMut(&String, &String) -> String,
+        mut archived_for: impl FnMut(&String, bool) -> bool,
     ) -> Self {
         for session in &mut snapshot.sessions {
             session.stage = stage_for(&session.id, &session.stage);
+            session.archived_at = if archived_for(&session.id, session.archived_at > 0) {
+                session.archived_at.max(1)
+            } else {
+                0
+            };
         }
+        snapshot.sessions.retain(|session| session.archived_at == 0);
         let filter_requested = query.starts_with('#');
         let filter_needle = query
             .strip_prefix('#')
@@ -402,7 +417,6 @@ impl StageGroup {
                                     name: "sessions-stale".into(),
                                     order: 0,
                                     terminal: false,
-                                    archive: false,
                                 },
                                 sessions: Vec::new(),
                             },
@@ -426,7 +440,6 @@ impl StageGroup {
                     name: session.stage.clone(),
                     order: u32::MAX,
                     terminal: false,
-                    archive: false,
                 },
                 sessions: vec![session.clone()],
             });
@@ -437,18 +450,33 @@ impl StageGroup {
 
 pub(super) struct StageGroupPresentation {
     pub dot: &'static str,
-    pub archivable: Vec<StageTarget>,
+    pub archivable: Vec<ArchiveTarget>,
 }
 
 impl StageGroupPresentation {
-    pub fn new(stage: &StageSummary, sessions: &[SessionSummary], archive_stage: &str) -> Self {
+    pub fn new(stage: &StageSummary, sessions: &[SessionSummary]) -> Self {
         Self {
             dot: StageVisual::for_id(&stage.id).dot,
             archivable: sessions
                 .iter()
-                .filter(|session| session.stage != archive_stage)
-                .map(StageTarget::from_session)
+                .filter(|session| session.archived_at == 0)
+                .map(ArchiveTarget::from_session)
                 .collect(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub(super) struct ArchiveTarget {
+    pub id: String,
+    pub archived: bool,
+}
+
+impl ArchiveTarget {
+    pub fn from_session(session: &SessionSummary) -> Self {
+        Self {
+            id: session.id.clone(),
+            archived: session.archived_at > 0,
         }
     }
 }
@@ -541,14 +569,10 @@ impl SessionPresentation {
         stage: &str,
     ) -> Self {
         let summary = SessionSummaryProjection::new(session, stages, vmux_ecs::UnixMillis::now().0);
-        let archived = stages
-            .iter()
-            .find(|candidate| candidate.id == stage)
-            .is_some_and(|candidate| candidate.archive);
         Self {
             context: SessionContext::from(repository),
             stage_target: StageTarget::from_session(session),
-            archived,
+            archived: session.archived_at > 0,
             runtime: RuntimeVisual::for_id(&session.runtime),
             agent: AgentPresentation::from_session(session),
             stage_dot: StageVisual::for_id(stage).dot,

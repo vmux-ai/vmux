@@ -24,6 +24,10 @@
             icon: "Toolbox",
             command_bar: true,
             manifest: true,
+            placement: Some((
+                group: "tools",
+                reuse: Group,
+            )),
             permissions: [
                 "PageReady",
                 "ThemeUiState",
@@ -32,6 +36,12 @@
                 "AgentSetupPrereqRequest",
                 "AgentSetupUiState",
                 "ToolsUiState",
+                "ExtensionsUiState",
+                "ExtToggleRequest",
+                "ExtUninstallRequest",
+                "ExtBrowseStoreRequest",
+                "ExtFilterRequest",
+                "RelaunchRequest",
                 "ToolsRefreshRequest",
                 "ToolsFilterRequest",
                 "ToolOpenRequest",

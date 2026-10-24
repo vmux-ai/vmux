@@ -1,31 +1,5 @@
 (
-    pages: [
-        (
-            url: "vmux://tools/extensions",
-            title: "Extensions",
-            title_message_id: "extensions-title",
-            keywords: ["extension", "extensions", "addon", "install"],
-            icon: "Puzzle",
-            command_bar: true,
-            manifest: true,
-            permissions: [
-                "PageReady",
-                "ThemeUiState",
-                "ExtensionsUiState",
-                "ToolsUiState",
-                "ExtToggleRequest",
-                "ExtUninstallRequest",
-                "ExtensionPopupOpenRequest",
-                "ExtensionPopupBoundsRequest",
-                "ExtensionPopupCloseRequest",
-                "ExtPinRequest",
-                "ExtOpenManagerRequest",
-                "ExtBrowseStoreRequest",
-                "ExtFilterRequest",
-                "RelaunchRequest",
-            ],
-        ),
-    ],
+    pages: [],
     tools: [
             (
                 name: "browser_install_extension",

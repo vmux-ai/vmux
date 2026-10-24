@@ -12,7 +12,9 @@ use vmux_api::command_bar::CommandBarUiState;
 use vmux_ecs::team::Profile;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
-use vmux_session::{AgentFamily, AgentId, ProviderCatalog, Route, Session, SessionId, Transcripts};
+use vmux_session::{
+    AgentFamily, AgentId, ProviderCatalog, Route, Session, SessionDuplicate, SessionId, Transcripts,
+};
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, SessionView};
@@ -48,7 +50,7 @@ type Sessions<'w, 's> = Query<
         Option<&'static AgentId>,
         Option<&'static Profile>,
     ),
-    With<Session>,
+    (With<Session>, Without<SessionDuplicate>),
 >;
 
 #[derive(SystemParam)]
@@ -199,7 +201,10 @@ impl ResumeCatalog<'_, '_> {
 
 fn prompt_history(
     trigger: On<UiInput<PromptHistoryRequest>>,
-    sessions: Query<(Entity, &Cwd, &AgentId, &LastActivatedAt), With<Session>>,
+    sessions: Query<
+        (Entity, &Cwd, &AgentId, &LastActivatedAt),
+        (With<Session>, Without<SessionDuplicate>),
+    >,
     transcripts: Transcripts,
     mut commands: Commands,
 ) {

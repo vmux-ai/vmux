@@ -179,6 +179,7 @@ pub struct PagePlacement {
 pub enum PageReuse {
     #[default]
     Exact,
+    Group,
     Route,
     Fragmentless,
 }

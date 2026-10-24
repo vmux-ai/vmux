@@ -6,6 +6,7 @@ use vmux_ecs::event::space::{
     SpacesListEvent,
 };
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
+use vmux_ui::components::dropdown::DropdownPopup;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::send;
@@ -344,7 +345,7 @@ fn SideSheetSpaceRow(
                 }
             }
             if open() {
-                div { class: "absolute left-2 right-2 top-12 z-40 isolate rounded-xl border-0 bg-background/95 p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.30)] outline-none ring-0",
+                DropdownPopup { class: "absolute left-2 right-2 top-12 z-40 isolate p-1.5 outline-none",
                     for choice in spaces.spaces {
                         SpaceChoice {
                             key: "{choice.id}",

@@ -1,19 +1,21 @@
 use std::path::PathBuf;
 
 #[cfg(host)]
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_ecs::prelude::*;
+#[cfg(host)]
+use bevy_ecs::system::SystemParam;
 use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 #[cfg(host)]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use vmux_api::session::SessionId;
 #[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 #[cfg(host)]
 use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order, PageMetadata};
-use vmux_ecs::{Cwd, Description};
+use vmux_ecs::{ArchivedAt, Cwd, Description};
 
 #[cfg(host)]
 use crate::{AgentConversationTitle, TitlePending};
@@ -28,22 +30,52 @@ impl Plugin for EntityPlugin {
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
             .register_persisted::<ProviderStage>()
+            .register_persisted::<ProviderArchive>()
             .register_persisted::<SourceUpdatedAt>()
             .register_persisted::<ProviderKind>()
             .register_persisted::<ProviderSessionId>()
             .register_persisted::<AgentConversationTitle>()
             .register_persisted::<TitlePending>()
             .register_persisted::<LocalTask>()
+            .init_resource::<ProviderArchiveOperations>()
             .add_message::<CreateRequest>()
+            .add_message::<ArchiveRequest>()
+            .add_message::<ProviderArchiveRequest>()
+            .add_message::<ProviderArchiveWriteRequest>()
+            .add_message::<ProviderArchiveCompleted>()
             .add_message::<CleanupRequest>()
             .add_observer(activate)
-            .add_systems(Update, (create, cleanup).in_set(MutationSet));
+            .add_systems(
+                Update,
+                (
+                    create,
+                    archive,
+                    archive_provider,
+                    finish_provider_archives,
+                    cleanup,
+                )
+                    .chain()
+                    .in_set(MutationSet),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    canonicalize_provider_sessions,
+                    bevy_ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(CanonicalizeSet),
+            );
     }
 }
 
 #[cfg(host)]
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MutationSet;
+
+#[cfg(host)]
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CanonicalizeSet;
 
 #[cfg(host)]
 pub(crate) struct MetadataPlugin;
@@ -72,7 +104,6 @@ impl Plugin for StagePlugin {
             .register_persisted::<StageChangedAt>()
             .register_type::<StageId>()
             .register_type::<StageDefinition>()
-            .register_type::<ArchiveTarget>()
             .add_message::<StageChangeRequest>()
             .add_message::<ProviderStageChangeRequest>()
             .add_systems(
@@ -87,6 +118,9 @@ impl Plugin for StagePlugin {
 #[require(Save, Cwd, Description)]
 #[type_path = "vmux_session"]
 pub struct Session;
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionDuplicate(pub Entity);
 
 #[derive(
     Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
@@ -164,6 +198,12 @@ pub struct ProviderStage;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
+#[require(Save, SourceUpdatedAt)]
+#[type_path = "vmux_session"]
+pub struct ProviderArchive;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
 pub(crate) struct SourceUpdatedAt(pub i64);
@@ -188,11 +228,6 @@ pub struct ProviderSessionId(pub String);
 #[reflect(Component)]
 #[type_path = "vmux_session"]
 pub struct StageDefinition;
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct ArchiveTarget;
 
 #[derive(Message, Clone, Debug)]
 pub struct CreateRequest {
@@ -276,6 +311,38 @@ pub struct StageChangeRequest {
 }
 
 #[derive(Message, Clone, Debug)]
+pub struct ArchiveRequest {
+    pub id: SessionId,
+    pub archived_at: Option<i64>,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct ProviderArchiveRequest {
+    pub kind: ProviderKind,
+    pub id: ProviderSessionId,
+    pub archived: bool,
+    pub source_updated_at: i64,
+    pub native: bool,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct ProviderArchiveWriteRequest {
+    pub kind: ProviderKind,
+    pub id: ProviderSessionId,
+    pub archived: bool,
+    pub revision: u64,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct ProviderArchiveCompleted {
+    pub kind: ProviderKind,
+    pub id: ProviderSessionId,
+    pub archived: bool,
+    pub revision: u64,
+    pub success: bool,
+}
+
+#[derive(Message, Clone, Debug)]
 pub struct ProviderStageChangeRequest {
     pub kind: ProviderKind,
     pub id: ProviderSessionId,
@@ -286,6 +353,85 @@ pub struct ProviderStageChangeRequest {
 #[derive(Message, Clone, Debug)]
 pub struct CleanupRequest {
     pub id: SessionId,
+}
+
+#[cfg(host)]
+#[derive(Resource, Default)]
+pub(crate) struct ProviderArchiveOperations {
+    next_revision: u64,
+    pending: HashMap<(String, String), ProviderArchiveOperation>,
+}
+
+#[cfg(host)]
+struct ProviderArchiveOperation {
+    archived: bool,
+    source_updated_at: i64,
+    revision: u64,
+    in_flight: Option<u64>,
+}
+
+#[cfg(host)]
+impl ProviderArchiveOperations {
+    fn request(&mut self, request: &ProviderArchiveRequest) -> Option<ProviderArchiveWriteRequest> {
+        self.next_revision = self.next_revision.wrapping_add(1).max(1);
+        let revision = self.next_revision;
+        let key = (request.kind.0.clone(), request.id.0.clone());
+        let operation = self.pending.entry(key).or_insert(ProviderArchiveOperation {
+            archived: request.archived,
+            source_updated_at: request.source_updated_at,
+            revision,
+            in_flight: None,
+        });
+        operation.archived = request.archived;
+        operation.source_updated_at = request.source_updated_at;
+        operation.revision = revision;
+        if operation.in_flight.is_some() {
+            return None;
+        }
+        operation.in_flight = Some(revision);
+        Some(ProviderArchiveWriteRequest {
+            kind: request.kind.clone(),
+            id: request.id.clone(),
+            archived: request.archived,
+            revision,
+        })
+    }
+
+    fn complete(
+        &mut self,
+        result: &ProviderArchiveCompleted,
+    ) -> Option<ProviderArchiveWriteRequest> {
+        let key = (result.kind.0.clone(), result.id.0.clone());
+        let Some(operation) = self.pending.get_mut(&key) else {
+            return None;
+        };
+        if operation.in_flight != Some(result.revision) {
+            return None;
+        }
+        if operation.revision == result.revision {
+            self.pending.remove(&key);
+            return None;
+        }
+        operation.in_flight = Some(operation.revision);
+        Some(ProviderArchiveWriteRequest {
+            kind: result.kind.clone(),
+            id: result.id.clone(),
+            archived: operation.archived,
+            revision: operation.revision,
+        })
+    }
+
+    pub(crate) fn archived_at(&self, kind: &str, id: &str) -> Option<i64> {
+        self.pending
+            .get(&(kind.to_string(), id.to_string()))
+            .map(|operation| {
+                if operation.archived {
+                    operation.source_updated_at.max(1)
+                } else {
+                    0
+                }
+            })
+    }
 }
 
 #[derive(EntityEvent, Clone, Copy, Debug)]
@@ -332,7 +478,6 @@ impl SessionConfiguration {
     fn validate(&self) {
         let mut ids = HashSet::new();
         let mut orders = HashSet::new();
-        let mut archive_targets = 0;
         for stage in &self.stages {
             assert!(
                 !stage.id.trim().is_empty(),
@@ -340,18 +485,10 @@ impl SessionConfiguration {
             );
             assert!(ids.insert(stage.id.as_str()), "duplicate Session stage ID");
             assert!(orders.insert(stage.order), "duplicate Session stage order");
-            if stage.archive {
-                archive_targets += 1;
-                assert!(stage.terminal, "archive Session stage must be terminal");
-            }
         }
         assert!(
             ids.contains(self.default_stage.as_str()),
             "default Session stage must reference a configured stage"
-        );
-        assert_eq!(
-            archive_targets, 1,
-            "exactly one archive Session stage is required"
         );
     }
 }
@@ -362,7 +499,6 @@ struct StageSeed {
     id: String,
     name: String,
     terminal: bool,
-    archive: bool,
     order: u32,
 }
 
@@ -370,23 +506,13 @@ struct StageSeed {
 fn ensure_stages(
     configuration: Res<Configuration>,
     definitions: Query<
-        (
-            Entity,
-            &StageId,
-            &Name,
-            &Order,
-            Has<vmux_ecs::Terminal>,
-            Has<ArchiveTarget>,
-        ),
+        (Entity, &StageId, &Name, &Order, Has<vmux_ecs::Terminal>),
         With<StageDefinition>,
     >,
     mut commands: Commands,
 ) {
     for stage in &configuration.stages {
-        if definitions
-            .iter()
-            .any(|(_, id, _, _, _, _)| id.0 == stage.id)
-        {
+        if definitions.iter().any(|(_, id, _, _, _)| id.0 == stage.id) {
             continue;
         }
         let mut entity = commands.spawn((
@@ -397,9 +523,6 @@ fn ensure_stages(
         ));
         if stage.terminal {
             entity.insert(vmux_ecs::Terminal);
-        }
-        if stage.archive {
-            entity.insert(ArchiveTarget);
         }
     }
 }
@@ -581,6 +704,99 @@ fn change_stage(
 }
 
 #[cfg(host)]
+fn archive(
+    mut requests: MessageReader<ArchiveRequest>,
+    sessions: Query<(Entity, &SessionId, Option<&ArchivedAt>), With<Session>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        for (entity, id, current) in &sessions {
+            if id != &request.id {
+                continue;
+            }
+            if let Some(archived_at) = request.archived_at.map(|value| value.max(1)) {
+                if current.is_none_or(|current| current.0 != archived_at) {
+                    commands.entity(entity).insert(ArchivedAt(archived_at));
+                }
+            } else if current.is_some() {
+                commands.entity(entity).remove::<ArchivedAt>();
+            }
+        }
+    }
+}
+
+#[cfg(host)]
+fn archive_provider(
+    mut requests: MessageReader<ProviderArchiveRequest>,
+    mut operations: ResMut<ProviderArchiveOperations>,
+    mut overrides: Query<
+        (
+            Entity,
+            &ProviderKind,
+            &ProviderSessionId,
+            &mut SourceUpdatedAt,
+            Option<&ArchivedAt>,
+        ),
+        With<ProviderArchive>,
+    >,
+    mut writes: MessageWriter<ProviderArchiveWriteRequest>,
+    mut commands: Commands,
+) {
+    let mut latest = HashMap::<(String, String), ProviderArchiveRequest>::new();
+    for request in requests.read().cloned() {
+        latest.insert((request.kind.0.clone(), request.id.0.clone()), request);
+    }
+    for request in latest.into_values() {
+        if request.native {
+            if let Some(write) = operations.request(&request) {
+                writes.write(write);
+            }
+            continue;
+        }
+        let now = vmux_ecs::UnixMillis::now().0;
+        let mut found = false;
+        for (entity, kind, id, mut source_updated_at, archived_at) in &mut overrides {
+            if kind != &request.kind || id != &request.id {
+                continue;
+            }
+            source_updated_at.0 = request.source_updated_at;
+            if request.archived && archived_at.is_none() {
+                commands.entity(entity).insert(ArchivedAt(now));
+            } else if !request.archived && archived_at.is_some() {
+                commands.entity(entity).remove::<ArchivedAt>();
+            }
+            found = true;
+            break;
+        }
+        if found {
+            continue;
+        }
+        let mut entity = commands.spawn((
+            ProviderArchive,
+            request.kind.clone(),
+            request.id.clone(),
+            SourceUpdatedAt(request.source_updated_at),
+        ));
+        if request.archived {
+            entity.insert(ArchivedAt(now));
+        }
+    }
+}
+
+#[cfg(host)]
+fn finish_provider_archives(
+    mut completed: MessageReader<ProviderArchiveCompleted>,
+    mut operations: ResMut<ProviderArchiveOperations>,
+    mut writes: MessageWriter<ProviderArchiveWriteRequest>,
+) {
+    for result in completed.read() {
+        if let Some(write) = operations.complete(result) {
+            writes.write(write);
+        }
+    }
+}
+
+#[cfg(host)]
 fn change_provider_stage(
     mut requests: MessageReader<ProviderStageChangeRequest>,
     definitions: Query<&StageId, With<StageDefinition>>,
@@ -639,6 +855,156 @@ fn cleanup(
                 commands.trigger(Cleanup { entity });
                 commands.entity(entity).despawn();
             }
+        }
+    }
+}
+
+#[cfg(host)]
+struct ProviderSessionCandidate {
+    entity: Entity,
+    duplicate: Option<Entity>,
+    archived: bool,
+    active: bool,
+    targeted: bool,
+    activated_at: i64,
+    stage_changed_at: i64,
+}
+
+#[cfg(host)]
+#[derive(SystemParam)]
+struct CanonicalizationChanges<'w, 's> {
+    sessions: Query<
+        'w,
+        's,
+        (),
+        (
+            With<Session>,
+            Or<(
+                Added<Session>,
+                Changed<ProviderKind>,
+                Changed<ProviderSessionId>,
+                Changed<LastActivatedAt>,
+                Changed<StageChangedAt>,
+                Changed<ArchivedAt>,
+                Changed<crate::RunState>,
+            )>,
+        ),
+    >,
+    targets: Query<'w, 's, (), Or<(Added<EntityTarget<Session>>, Changed<EntityTarget<Session>>)>>,
+    removed_sessions: RemovedComponents<'w, 's, Session>,
+    removed_provider_kinds: RemovedComponents<'w, 's, ProviderKind>,
+    removed_provider_ids: RemovedComponents<'w, 's, ProviderSessionId>,
+    removed_activated_at: RemovedComponents<'w, 's, LastActivatedAt>,
+    removed_stage_changed_at: RemovedComponents<'w, 's, StageChangedAt>,
+    removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
+    removed_run_state: RemovedComponents<'w, 's, crate::RunState>,
+    removed_targets: RemovedComponents<'w, 's, EntityTarget<Session>>,
+}
+
+#[cfg(host)]
+impl CanonicalizationChanges<'_, '_> {
+    fn any(&mut self) -> bool {
+        !self.sessions.is_empty()
+            || !self.targets.is_empty()
+            || self.removed_sessions.read().count() > 0
+            || self.removed_provider_kinds.read().count() > 0
+            || self.removed_provider_ids.read().count() > 0
+            || self.removed_activated_at.read().count() > 0
+            || self.removed_stage_changed_at.read().count() > 0
+            || self.removed_archived_at.read().count() > 0
+            || self.removed_run_state.read().count() > 0
+            || self.removed_targets.read().count() > 0
+    }
+}
+
+#[cfg(host)]
+impl ProviderSessionCandidate {
+    fn priority(&self) -> (bool, bool, bool, i64, i64, u32) {
+        (
+            !self.archived,
+            self.active,
+            self.targeted,
+            self.activated_at,
+            self.stage_changed_at,
+            self.entity.index().index(),
+        )
+    }
+}
+
+#[cfg(host)]
+fn canonicalize_provider_sessions(
+    mut changes: CanonicalizationChanges,
+    sessions: Query<
+        (
+            Entity,
+            &ProviderKind,
+            &ProviderSessionId,
+            Option<&LastActivatedAt>,
+            Option<&StageChangedAt>,
+            Has<ArchivedAt>,
+            Option<&crate::RunState>,
+            Option<&SessionDuplicate>,
+        ),
+        With<Session>,
+    >,
+    duplicates: Query<(Entity, &SessionDuplicate), With<Session>>,
+    targets: Query<&EntityTarget<Session>>,
+    mut commands: Commands,
+) {
+    if !changes.any() {
+        return;
+    }
+    let targeted = targets
+        .iter()
+        .map(EntityTarget::entity)
+        .collect::<HashSet<_>>();
+    let mut groups = HashMap::<(String, String), Vec<ProviderSessionCandidate>>::new();
+    for (entity, kind, id, activated_at, stage_changed_at, archived, runtime, duplicate) in
+        &sessions
+    {
+        if kind.0.is_empty() || id.0.is_empty() {
+            continue;
+        }
+        groups
+            .entry((kind.0.clone(), id.0.clone()))
+            .or_default()
+            .push(ProviderSessionCandidate {
+                entity,
+                duplicate: duplicate.map(|duplicate| duplicate.0),
+                archived,
+                active: matches!(
+                    runtime,
+                    Some(crate::RunState::Streaming | crate::RunState::AwaitingApproval { .. })
+                ),
+                targeted: targeted.contains(&entity),
+                activated_at: activated_at.map(|value| value.0).unwrap_or_default(),
+                stage_changed_at: stage_changed_at.map(|value| value.0).unwrap_or_default(),
+            });
+    }
+    let mut expected = HashMap::<Entity, Entity>::new();
+    for group in groups.into_values() {
+        let Some(canonical) = group
+            .iter()
+            .max_by_key(|candidate| candidate.priority())
+            .map(|candidate| candidate.entity)
+        else {
+            continue;
+        };
+        for candidate in group {
+            if candidate.entity == canonical {
+                continue;
+            }
+            expected.insert(candidate.entity, canonical);
+            if candidate.duplicate != Some(canonical) {
+                commands
+                    .entity(candidate.entity)
+                    .insert(SessionDuplicate(canonical));
+            }
+        }
+    }
+    for (entity, _) in &duplicates {
+        if !expected.contains_key(&entity) {
+            commands.entity(entity).remove::<SessionDuplicate>();
         }
     }
 }
@@ -758,12 +1124,34 @@ mod tests {
                 ("canceled".into(), 40),
             ]
         );
-        let archive = app
+    }
+
+    #[test]
+    fn archive_is_independent_from_stage() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, StagePlugin));
+        let session = app
             .world_mut()
-            .query_filtered::<(&StageId, Has<ArchiveTarget>), With<StageDefinition>>()
-            .iter(app.world())
-            .find_map(|(id, archive)| archive.then(|| id.0.clone()));
-        assert_eq!(archive.as_deref(), Some("done"));
+            .spawn((Session, SessionId("session-1".into())))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<ArchiveRequest>>()
+            .write(ArchiveRequest {
+                id: SessionId("session-1".into()),
+                archived_at: Some(10),
+            });
+        app.update();
+        assert_eq!(app.world().get::<ArchivedAt>(session).unwrap().0, 10);
+
+        app.world_mut()
+            .resource_mut::<Messages<ArchiveRequest>>()
+            .write(ArchiveRequest {
+                id: SessionId("session-1".into()),
+                archived_at: None,
+            });
+        app.update();
+        assert!(app.world().get::<ArchivedAt>(session).is_none());
     }
 
     #[test]
@@ -866,6 +1254,50 @@ mod tests {
     }
 
     #[test]
+    fn provider_archive_change_creates_and_updates_one_durable_override() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, StagePlugin));
+        let request = ProviderArchiveRequest {
+            kind: ProviderKind("acp:codex".into()),
+            id: ProviderSessionId("provider-session".into()),
+            archived: true,
+            source_updated_at: 10,
+            native: false,
+        };
+
+        app.world_mut()
+            .resource_mut::<Messages<ProviderArchiveRequest>>()
+            .write(request.clone());
+        app.update();
+
+        let mut overrides = app.world_mut().query_filtered::<(
+            Entity,
+            &SourceUpdatedAt,
+            Option<&ArchivedAt>,
+        ), With<ProviderArchive>>();
+        let (entity, source_updated_at, archived_at) = overrides.single(app.world()).unwrap();
+        assert_eq!(source_updated_at.0, 10);
+        assert!(archived_at.is_some());
+
+        app.world_mut()
+            .resource_mut::<Messages<ProviderArchiveRequest>>()
+            .write(ProviderArchiveRequest {
+                archived: false,
+                source_updated_at: 20,
+                ..request
+            });
+        app.update();
+
+        let mut overrides = app
+            .world_mut()
+            .query_filtered::<(Entity, &SourceUpdatedAt, Has<ArchivedAt>), With<ProviderArchive>>();
+        let (updated, source_updated_at, archived) = overrides.single(app.world()).unwrap();
+        assert_eq!(updated, entity);
+        assert_eq!(source_updated_at.0, 20);
+        assert!(!archived);
+    }
+
+    #[test]
     fn duplicate_creation_requests_create_one_session() {
         let mut app = App::new();
         app.add_plugins((EntityPlugin, StagePlugin));
@@ -917,6 +1349,7 @@ mod tests {
         assert!(filter.is_allowed::<SessionId>());
         assert!(filter.is_allowed::<AgentId>());
         assert!(filter.is_allowed::<ProviderStage>());
+        assert!(filter.is_allowed::<ProviderArchive>());
         assert!(filter.is_allowed::<ProviderKind>());
         assert!(filter.is_allowed::<ProviderSessionId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());

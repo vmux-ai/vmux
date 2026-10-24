@@ -247,6 +247,41 @@ impl BaseRef {
     ];
 
     pub fn resolve(root: &Path) -> Option<Self> {
+        let current = Self::current(root);
+        match current {
+            Some(current) => Self::resolve_for(root, &current),
+            None => Self::default(root),
+        }
+    }
+
+    pub fn resolve_for(root: &Path, reference: &str) -> Option<Self> {
+        let default = Self::default(root);
+        let branch = Self::branch_name(reference);
+        if !branch.is_empty() {
+            if let Some(configured) = Self::configured(root, branch)
+                && configured.exists(root)
+            {
+                return Some(configured);
+            }
+            if default
+                .as_ref()
+                .is_some_and(|candidate| candidate.branch() == branch)
+            {
+                return default;
+            }
+        }
+        default
+    }
+
+    fn branch_name(reference: &str) -> &str {
+        reference
+            .strip_prefix("refs/remotes/origin/")
+            .or_else(|| reference.strip_prefix("refs/heads/"))
+            .or_else(|| reference.strip_prefix("origin/"))
+            .unwrap_or(reference)
+    }
+
+    fn default(root: &Path) -> Option<Self> {
         if let Ok((stdout, _, true)) =
             GitCommand::run(root, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         {
@@ -263,6 +298,29 @@ impl BaseRef {
             }
         }
         None
+    }
+
+    fn current(root: &Path) -> Option<String> {
+        let Ok((stdout, _, true)) = GitCommand::run(root, &["symbolic-ref", "--short", "HEAD"])
+        else {
+            return None;
+        };
+        let branch = stdout.trim();
+        (!branch.is_empty()).then(|| branch.to_string())
+    }
+
+    fn configured(root: &Path, branch: &str) -> Option<Self> {
+        let key = format!("branch.{branch}.vmux-base");
+        let Ok((stdout, _, true)) = GitCommand::run(root, &["config", "--get", &key]) else {
+            return None;
+        };
+        let reference = stdout.trim();
+        (!reference.is_empty()).then(|| Self(reference.to_string()))
+    }
+
+    fn exists(&self, root: &Path) -> bool {
+        GitCommand::run(root, &["rev-parse", "--verify", "--quiet", self.as_str()])
+            .is_ok_and(|(_, _, ok)| ok)
     }
 
     pub fn as_str(&self) -> &str {
@@ -452,6 +510,7 @@ impl CheckoutInfo {
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
+        self.record_base_or_rollback(path, branch, base, true)?;
         Ok(WorktreeInfo {
             path: path.to_path_buf(),
             branch: branch.to_string(),
@@ -519,6 +578,7 @@ impl CheckoutInfo {
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
+        self.record_base_or_rollback(&normalized_path, branch, base_ref, false)?;
         Ok(WorktreeInfo {
             path: normalized_path,
             branch: branch.to_string(),
@@ -540,6 +600,57 @@ impl CheckoutInfo {
             return Err(GitCommand::error(&stdout, &stderr));
         }
         let _ = GitCommand::run(&self.root, &["branch", "-D", branch]);
+        Ok(())
+    }
+
+    fn record_base(&self, branch: &str, base: &str) -> Result<(), GitError> {
+        let key = format!("branch.{branch}.vmux-base");
+        let (stdout, stderr, ok) = GitCommand::run(&self.root, &["config", "--local", &key, base])?;
+        if !ok {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        Ok(())
+    }
+
+    fn record_base_or_rollback(
+        &self,
+        path: &Path,
+        branch: &str,
+        base: &str,
+        delete_branch: bool,
+    ) -> Result<(), GitError> {
+        let Err(error) = self.record_base(branch, base) else {
+            return Ok(());
+        };
+        if let Err(rollback) = self.rollback_worktree(path, branch, delete_branch) {
+            return Err(GitError(format!(
+                "{}; failed to roll back worktree: {}",
+                error.0, rollback.0
+            )));
+        }
+        Err(error)
+    }
+
+    fn rollback_worktree(
+        &self,
+        path: &Path,
+        branch: &str,
+        delete_branch: bool,
+    ) -> Result<(), GitError> {
+        let path = path.to_string_lossy();
+        let (stdout, stderr, removed) = GitCommand::run(
+            &self.root,
+            &["worktree", "remove", "--force", path.as_ref()],
+        )?;
+        if !removed {
+            return Err(GitCommand::error(&stdout, &stderr));
+        }
+        if delete_branch {
+            let (stdout, stderr, deleted) = GitCommand::run(&self.root, &["branch", "-D", branch])?;
+            if !deleted {
+                return Err(GitCommand::error(&stdout, &stderr));
+            }
+        }
         Ok(())
     }
 
@@ -1024,6 +1135,31 @@ mod tests {
                 .any(|p| p.canonicalize().ok() == wt.canonicalize().ok()),
             "worktree appears in list: {listed:?}"
         );
+        let (base, _, ok) = GitCommand::run(
+            repo.path(),
+            &["config", "--get", "branch.vmux/feat.vmux-base"],
+        )
+        .unwrap();
+        assert!(ok);
+        assert_eq!(base.trim(), "main");
+    }
+
+    #[test]
+    fn base_ref_defaults_to_main_without_configuration() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::run(repo.path(), &["checkout", "-qb", "parent"]);
+        test_repo::write(repo.path(), "parent.txt", "parent\n");
+        test_repo::run(repo.path(), &["add", "parent.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "parent"]);
+        test_repo::run(repo.path(), &["checkout", "-qb", "child"]);
+        test_repo::write(repo.path(), "child.txt", "child\n");
+        test_repo::run(repo.path(), &["add", "child.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "child"]);
+
+        let base = BaseRef::resolve(repo.path()).unwrap();
+
+        assert_eq!(base.branch(), "main");
     }
 
     #[test]

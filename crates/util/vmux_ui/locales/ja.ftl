@@ -6,6 +6,7 @@ common-uninstall = アンインストール
 common-update = 更新
 common-retry = 再試行
 common-refresh = 再読み込み
+common-no-results = 一致なし
 common-remove = 削除
 common-add = 追加
 common-archive = アーカイブ

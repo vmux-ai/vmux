@@ -51,6 +51,12 @@ pub struct SessionsStageChange {
 }
 
 #[vmux_api::ui_event(Default)]
+pub struct SessionsArchive {
+    pub ids: Vec<String>,
+    pub archived: bool,
+}
+
+#[vmux_api::ui_event(Default)]
 pub struct SessionsCleanup {
     pub id: String,
 }

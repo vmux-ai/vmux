@@ -10256,6 +10256,7 @@ dependencies = [
 name = "vmux_api"
 version = "0.0.35"
 dependencies = [
+ "base64 0.22.1",
  "bevy_ecs",
  "bevy_reflect",
  "rkyv",
@@ -10587,7 +10588,6 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "crossbeam-channel",
- "dioxus",
  "libc",
  "polling",
  "reqwest",
@@ -10605,9 +10605,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
- "vmux_page",
  "vmux_tool",
- "vmux_ui",
  "zip",
 ]
 

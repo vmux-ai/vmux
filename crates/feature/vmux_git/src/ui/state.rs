@@ -4,14 +4,14 @@ use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::{GitDiffRow, GitDiffViewport};
 use crate::state::{
-    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, GitUiState, HeaderDropdown,
+    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, GitUiState,
 };
 
 #[derive(Clone, Copy)]
 pub(super) struct GitPageState {
+    root: Signal<GitUiState>,
     pub(super) snapshot: Memo<GitPageSnapshot>,
     pub(super) controller: Memo<GitPageControllerState>,
-    pub(super) header_dropdown: Memo<HeaderDropdown>,
     pub(super) projects: Memo<GitProjects>,
     pub(super) diff: GitDiffState,
     pub(super) active_branch_file: Signal<String>,
@@ -23,9 +23,9 @@ impl GitPageState {
     pub(super) fn use_state() -> Self {
         let root = use_ui_state::<GitUiState>().state;
         let state = Self {
+            root,
             snapshot: use_memo(move || root.read().snapshot.clone()),
             controller: use_memo(move || root.read().controller.clone()),
-            header_dropdown: use_memo(move || root.read().header_dropdown),
             projects: use_memo(move || root.read().projects.clone()),
             diff: GitDiffState::new(),
             active_branch_file: use_signal(String::new),
@@ -34,6 +34,13 @@ impl GitPageState {
         };
         state.subscribe(root);
         state
+    }
+
+    pub(super) fn use_selector<T>(self, select: impl Fn(&GitUiState) -> T + 'static) -> Memo<T>
+    where
+        T: Clone + PartialEq + 'static,
+    {
+        use_memo(move || select(&self.root.read()))
     }
 
     fn subscribe(self, root: Signal<GitUiState>) {
@@ -81,6 +88,10 @@ impl GitDiffState {
     }
 
     fn synchronize(self, snapshot: &GitPageSnapshot) {
+        let mut loading = self.loading;
+        if *loading.peek() != snapshot.diff_loading {
+            loading.set(snapshot.diff_loading);
+        }
         let replace = {
             let viewport = self.viewport.peek();
             let rows = self.rows.peek();
@@ -93,8 +104,6 @@ impl GitDiffState {
         viewport.set(snapshot.diff_viewport.clone());
         let mut rows = self.rows;
         rows.set(snapshot.diff_rows.clone());
-        let mut loading = self.loading;
-        loading.set(snapshot.diff_loading);
     }
 
     fn replaces(
@@ -106,7 +115,7 @@ impl GitDiffState {
         match (current, incoming) {
             (None, None) => snapshot.diff_loading,
             (None, Some(_)) => true,
-            (Some(_), None) => true,
+            (Some(_), None) => !snapshot.diff_loading,
             (Some(current), Some(incoming)) => {
                 incoming.generation != current.generation
                     || incoming.first_line != current.first_line

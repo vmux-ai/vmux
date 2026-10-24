@@ -13,7 +13,7 @@ use crate::ui::DiffView;
 
 #[component]
 pub(super) fn BranchDiffCard(
-    repository: GitRepositorySnapshot,
+    base_ref: String,
     files: Vec<GitBranchFileEntry>,
     active_path: Signal<String>,
     repo_root: ReadSignal<String>,
@@ -26,12 +26,18 @@ pub(super) fn BranchDiffCard(
     #[props(default)] onviewedchange: Option<EventHandler<usize>>,
 ) -> Element {
     let selected_branch_value = selected_branch();
-    let comparison = if repository.base_ref.is_empty() {
+    let comparison = if base_ref.is_empty() {
         selected_branch_value.clone()
     } else {
-        format!("{}…{}", repository.base_ref, selected_branch_value)
+        format!("{}…{}", base_ref, selected_branch_value)
     };
-    let available = !selected_branch_value.is_empty();
+    let has_files = !files.is_empty();
+    let available = !selected_branch_value.is_empty() && (loading || has_files);
+    let empty = if selected_branch_value.is_empty() {
+        translate("git-no-branches")
+    } else {
+        translate("git-no-changes")
+    };
     let active_files = files;
     rsx! {
         RevisionDiffCard {
@@ -43,7 +49,7 @@ pub(super) fn BranchDiffCard(
             title: comparison,
             subtitle: String::new(),
             file_path: String::new(),
-            empty: translate("git-select-file"),
+            empty,
             icon: LineIcon::File,
             error,
             show_header: false,

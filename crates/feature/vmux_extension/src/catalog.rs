@@ -8,7 +8,6 @@ use vmux_api::extension::{
 };
 use vmux_ecs::PageMetadata;
 use vmux_ecs::UiStateWrite;
-use vmux_ecs::page::HostedPage;
 use vmux_layout::LayoutUiStateUpdates;
 
 use crate::store;
@@ -38,15 +37,7 @@ impl Plugin for ExtensionCatalogPlugin {
             .add_systems(Update, (finish, publish).chain());
 
         #[cfg(ui)]
-        app.add_plugins(
-            crate::ui::ExtensionPage::MANIFEST
-                .plugin()
-                .hosted(HostedPage::page(
-                    crate::ui::ExtensionPage::URL,
-                    crate::ui::ExtensionPage::PAGE.title,
-                )),
-        )
-        .add_systems(Update, open_page);
+        app.add_systems(Update, open_page);
     }
 }
 
@@ -176,7 +167,6 @@ fn spawn(
 fn page_ready(
     trigger: On<UiInput<vmux_api::PageReady>>,
     pages: Query<(Has<vmux_layout::LayoutCef>, Option<&PageMetadata>)>,
-    extension_pages: Query<(&HostedPage, &vmux_ecs::page::PageManifest)>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -184,14 +174,20 @@ fn page_ready(
         return;
     };
     let extension = metadata.is_some_and(|metadata| {
-        extension_pages.iter().any(|(page, manifest)| {
-            manifest.url == crate::ExtensionPlugin::MANIFEST.url && page.answers_for(&metadata.url)
-        })
+        let Some(route) = vmux_api::VmuxRoute::parse(&metadata.url) else {
+            return false;
+        };
+        let Some(expected) = vmux_api::VmuxRoute::parse(vmux_tool::EXTENSIONS_URL) else {
+            return false;
+        };
+        route.same_page(&expected)
     });
     if layout || extension {
         commands
             .entity(webview)
             .insert(ExtensionSubscriber::default());
+    } else {
+        commands.entity(webview).remove::<ExtensionSubscriber>();
     }
 }
 
@@ -342,8 +338,8 @@ fn open_page(
 ) {
     for _ in requests.read() {
         pages.write(vmux_layout::stack::OpenRequest {
-            url: Some(crate::ui::ExtensionPage::URL.to_string()),
-            focus_existing: false,
+            url: Some(vmux_tool::EXTENSIONS_URL.to_string()),
+            focus_existing: true,
         });
     }
 }
@@ -386,14 +382,10 @@ mod tests {
     fn page_ready_subscribes_only_extension_and_layout_pages() {
         let mut app = App::new();
         app.add_observer(page_ready);
-        app.world_mut().spawn((
-            crate::ExtensionPlugin::MANIFEST,
-            HostedPage::page("vmux://tools/extensions", "Extensions"),
-        ));
         let extension = app
             .world_mut()
             .spawn(PageMetadata {
-                url: "vmux://tools/extensions".to_string(),
+                url: vmux_tool::EXTENSIONS_URL.to_string(),
                 ..default()
             })
             .id();

@@ -1,13 +1,12 @@
 use dioxus::prelude::*;
-use vmux_ecs::event::space::ProjectActivateRequest;
-use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{BuiltinIconView, GitSymbol, GitSymbolView, LineIcon, LineIconView};
 
 use super::state::GitPageState;
-use crate::event::GitRepositoryPickerRequest;
+use crate::event::{GitRepositoryPickerRequest, GitRepositoryRequest};
 
 #[component]
 pub(super) fn EmptyRepository() -> Element {
@@ -55,7 +54,7 @@ pub(super) fn EmptyRepository() -> Element {
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 shrink-0 text-muted-foreground" }
                     }
                     if open() {
-                        div { class: "absolute left-0 right-0 top-11 z-40 rounded-lg border-0 bg-background p-1.5 text-left shadow-[0_16px_48px_rgba(0,0,0,0.28)] outline-none",
+                        DropdownPopup { class: "absolute left-0 right-0 top-11 z-40 p-1.5 text-left outline-none",
                             if rows.is_empty() {
                                 div { class: "px-2 py-2 text-ui text-muted-foreground", {translate("agent-project-none")} }
                             }
@@ -76,11 +75,8 @@ pub(super) fn EmptyRepository() -> Element {
                                             },
                                             onclick: move |_| {
                                                 open.set(false);
-                                                let _ = send(&ProjectActivateRequest {
+                                                let _ = send(&GitRepositoryRequest {
                                                     path: pick_path.clone(),
-                                                    branch: String::new(),
-                                                    checkout: String::new(),
-                                                    pane_id: None,
                                                 });
                                             },
                                             span { class: "min-w-0 flex-1 truncate text-left font-medium", "{project.label}" }

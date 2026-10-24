@@ -13,15 +13,15 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::avatar::{AgentThumbnail, Identicon};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
-use vmux_ui::components::dropdown::Dropdown;
+use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
-    ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSearchPopover,
-    ManagerSidebarItem, ManagerSidebarSection, ManagerSkeleton, ManagerTone, ManagerView,
+    ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty,
+    ManagerGridSize, ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
+    ManagerSearchPopover, ManagerSidebarItem, ManagerSkeleton, ManagerTone, ManagerView,
     ManagerViewToggle, ManagerWorkspace,
 };
 use vmux_ui::components::page::{PageContent, PageHeader};
@@ -92,17 +92,6 @@ pub(super) fn ProjectList(
                     });
                 },
                 sidebar_actions: rsx! {
-                    if count > 0 {
-                        ManagerViewToggle {
-                            view: controls.view(),
-                            list_label: translate("tools-view-list"),
-                            grid_label: translate("tools-view-grid"),
-                            onchange: move |view| {
-                                controls.set_view(view);
-                                let _ = send(&ViewPreference::request(view));
-                            },
-                        }
-                    }
                     ProjectManagerActions {
                         entries: entries.clone(),
                         presentation: presentation.clone(),
@@ -113,6 +102,19 @@ pub(super) fn ProjectList(
                 },
                 sidebar: rsx! { ProjectCategories { entries: entries.clone(), controls } },
                 ManagerList {
+                    if count > 0 {
+                        ManagerControls {
+                            ManagerViewToggle {
+                                view: controls.view(),
+                                list_label: translate("tools-view-list"),
+                                grid_label: translate("tools-view-grid"),
+                                onchange: move |view| {
+                                    controls.set_view(view);
+                                    let _ = send(&ViewPreference::request(view));
+                                },
+                            }
+                        }
+                    }
                     if view.is_none() && error.is_empty() {
                         ManagerSkeleton {}
                     } else if !error.is_empty() {
@@ -228,23 +230,19 @@ fn ProjectCategories(
     controls: CollectionController<ProjectFilter>,
 ) -> Element {
     let selected = ProjectFilter::selected(&controls.filters());
+    let filter = ProjectFilter::Archived;
     rsx! {
-        ManagerSidebarSection { title: translate("common-status"),
-            for filter in [ProjectFilter::Ongoing, ProjectFilter::Stale, ProjectFilter::Archived] {
-                if filter.count(&entries) > 0 {
-                    ManagerSidebarItem {
-                        key: "project-category-{filter:?}",
-                        label: filter.label(),
-                        count: filter.count(&entries),
-                        selected: selected == Some(filter),
-                        dot: filter.dot().to_string(),
-                        onclick: move |_| {
-                            controls.update_filters(|filters| {
-                                ProjectFilter::select(filters, Some(filter));
-                            });
-                        },
-                    }
-                }
+        if filter.count(&entries) > 0 {
+            ManagerSidebarItem {
+                label: filter.label(),
+                count: filter.count(&entries),
+                selected: selected == Some(filter),
+                icon: LineIcon::Archive,
+                onclick: move |_| {
+                    controls.update_filters(|filters| {
+                        ProjectFilter::select(filters, Some(filter));
+                    });
+                },
             }
         }
     }
@@ -255,7 +253,11 @@ fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
     let url = entry.url.clone();
     let select = move |_| ProjectEntry::open(url.clone());
     let icon = rsx! {
-        TypeIcon { path: entry.path.clone(), is_dir: true, class: "size-5".to_string() }
+        Identicon {
+            seed: entry.identity_seed().to_string(),
+            alt: entry.name.clone(),
+            class: "size-6 shrink-0 rounded-lg".to_string(),
+        }
     };
     let meta = rsx! { ProjectMeta { entry: entry.clone() } };
     let actions = rsx! { ProjectActions { entry: entry.clone() } };
@@ -352,9 +354,9 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                 }
             }
             if open() {
-                div {
-                    class: "absolute right-0 top-8 z-30 w-40 rounded-[var(--radius)] bg-background p-1 shadow-xl",
-                    onclick: move |event| event.stop_propagation(),
+                DropdownPopup {
+                    class: "absolute right-0 top-8 z-30 w-40 p-1",
+                    onclick: move |event: MouseEvent| event.stop_propagation(),
                     ProjectActionMenuItem {
                         icon: LineIcon::MessagesRound,
                         label: translate("sessions-resume"),
@@ -494,7 +496,7 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
                 }
             }
             if open() {
-                div { class: "absolute right-0 top-9 z-50 w-72 rounded-lg bg-card p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.28)]",
+                DropdownPopup { class: "absolute right-0 top-9 z-50 w-72 p-1.5",
                     ProjectAddItem {
                         icon: LineIcon::Plus,
                         title: translate("project-new"),
@@ -617,6 +619,7 @@ fn ProjectAddItem(
 pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     let root = detail.path;
     let project_name = detail.name;
+    let project_identity = detail.id.0;
     let mut requested_git = use_signal(String::new);
     let requested_root = root.clone();
     use_effect(move || {
@@ -635,8 +638,10 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
         ManagerPage {
             PageHeader {
                 div { class: "flex min-h-10 items-center gap-3",
-                div { class: "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.055]",
-                    TypeIcon { path: root.clone(), is_dir: true, class: "size-5".to_string() }
+                Identicon {
+                    seed: project_identity,
+                    alt: project_name.clone(),
+                    class: "size-9 shrink-0 rounded-xl".to_string(),
                 }
                 div { class: "min-w-0 flex-1",
                     Tooltip { label: header_root,

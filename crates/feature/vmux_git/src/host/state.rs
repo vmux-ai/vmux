@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::KeyboardOwner;
+use vmux_ecs::PagePresented;
 use vmux_ecs::page::PageReady;
 use vmux_path::PathIdentity;
 
@@ -12,9 +12,11 @@ use crate::event::GitDiffViewport;
 use crate::event::{
     GitOperationError, GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
 };
+#[cfg(test)]
+use crate::state::GitCatalogProgress;
 use crate::state::{
-    GitCatalogProgress, GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState,
-    HeaderDropdown,
+    GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState, HeaderDropdown,
+    RepositoryName, RepositoryPath, ViewedBranch,
 };
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
@@ -35,7 +37,12 @@ impl Plugin for StatePlugin {
             .add_observer(repository_request)
             .add_systems(
                 Update,
-                (cleanup_inactive_views, project_diff, publish)
+                (
+                    cleanup_inactive_views,
+                    project_diff,
+                    sync_selection,
+                    publish,
+                )
                     .chain()
                     .after(super::controller::ControllerSet::Operations),
             );
@@ -117,11 +124,11 @@ impl GitState {
         mut repository: GitRepositorySnapshot,
         refresh_catalogs: bool,
     ) {
-        let mut preserve_catalogs = false;
+        let mut same_repository = false;
         if let Some(previous) = self.snapshot.repository.take()
             && previous.repo_root == repository.repo_root
         {
-            preserve_catalogs = !refresh_catalogs;
+            same_repository = true;
             repository.commits = previous.commits;
             repository.branches = previous.branches;
             repository.remote_branches = previous.remote_branches;
@@ -130,12 +137,12 @@ impl GitState {
         }
         self.snapshot.workspace.clone_from(&repository.repo_root);
         self.snapshot.repository = Some(repository);
-        if !preserve_catalogs {
-            self.snapshot.local_branches = GitCatalogProgress::default();
-            self.snapshot.remote_branches = GitCatalogProgress::default();
-            self.snapshot.tags = GitCatalogProgress::default();
-            self.snapshot.commits = GitCatalogProgress::default();
-            self.snapshot.stashes = GitCatalogProgress::default();
+        if same_repository {
+            if refresh_catalogs {
+                self.snapshot.refresh_catalogs();
+            }
+        } else {
+            self.snapshot.invalidate_catalogs();
         }
         self.snapshot.nonce = self.snapshot.nonce.wrapping_add(1).max(1);
         self.snapshot.loading = false;
@@ -263,7 +270,7 @@ impl GitStates<'_, '_> {
                 event.operation.as_str(),
                 "stage" | "unstage" | "discard" | "stage all" | "hunk"
             ) {
-                state.snapshot.invalidate_catalogs();
+                state.snapshot.refresh_catalogs();
             }
         } else {
             state.snapshot.message.clone_from(&event.message);
@@ -379,7 +386,52 @@ fn cleanup_inactive_views(pages: ChangedGitPages, mut commands: Commands) {
         let projects = page.url.trim_end_matches('/') == "vmux://projects"
             || page.url.starts_with("vmux://projects/");
         if !crate::GitUrl::is_page(&page.url) && !projects {
-            commands.entity(entity).remove::<GitState>();
+            commands
+                .entity(entity)
+                .remove::<(GitState, RepositoryPath, RepositoryName, ViewedBranch)>();
+        }
+    }
+}
+
+fn sync_selection(
+    pages: Query<
+        (
+            Entity,
+            &GitState,
+            &GitPageControllerState,
+            Option<&RepositoryPath>,
+            Option<&RepositoryName>,
+            Option<&ViewedBranch>,
+        ),
+        Or<(Changed<GitState>, Changed<GitPageControllerState>)>,
+    >,
+    mut commands: Commands,
+) {
+    for (entity, state, controller, current_path, current_name, current_branch) in &pages {
+        let Some(repository) = state.repository() else {
+            if current_path.is_some() || current_name.is_some() || current_branch.is_some() {
+                commands
+                    .entity(entity)
+                    .remove::<(RepositoryPath, RepositoryName, ViewedBranch)>();
+            }
+            continue;
+        };
+        let branch = if controller.focused_panel == crate::state::GitPanel::Branches
+            && !controller.selected_branch.is_empty()
+        {
+            controller.selected_branch.clone()
+        } else {
+            repository.branch.clone()
+        };
+        let mut page = commands.entity(entity);
+        if current_path.map(|path| path.0.as_str()) != Some(repository.repo_root.as_str()) {
+            page.insert(RepositoryPath(repository.repo_root.clone()));
+        }
+        if current_name.map(|name| name.0.as_str()) != Some(repository.repo_name.as_str()) {
+            page.insert(RepositoryName(repository.repo_name.clone()));
+        }
+        if current_branch.map(|current| current.0.as_str()) != Some(branch.as_str()) {
+            page.insert(ViewedBranch(branch));
         }
     }
 }
@@ -387,7 +439,7 @@ fn cleanup_inactive_views(pages: ChangedGitPages, mut commands: Commands) {
 fn repository_request(
     trigger: On<UiInput<GitRepositoryRequest>>,
     mut watch: Option<NonSendMut<GitWatch>>,
-    active: Query<(), With<KeyboardOwner>>,
+    presented: Query<(), With<PagePresented>>,
     mut states: GitStates,
     mut commands: Commands,
 ) {
@@ -396,7 +448,7 @@ fn repository_request(
     let Some(revision) = states.start_repository(webview, &path) else {
         return;
     };
-    if !active.contains(webview) {
+    if !presented.contains(webview) {
         if let Some(watch) = watch.as_deref_mut() {
             watch.release_subscription(webview);
         }
@@ -656,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn repository_ref_refresh_invalidates_loaded_catalogs() {
+    fn repository_ref_refresh_preserves_initialized_catalogs() {
         let repo = test_repo::init();
         test_repo::write(repo.path(), "file.txt", "content\n");
         test_repo::run(repo.path(), &["add", "."]);
@@ -668,6 +720,7 @@ mod tests {
             snapshot: GitPageSnapshot {
                 repository: Some(repository),
                 local_branches: GitCatalogProgress {
+                    initialized: true,
                     loaded: true,
                     ..Default::default()
                 },
@@ -679,5 +732,6 @@ mod tests {
         state.replace_repository(next.snapshot, true);
 
         assert!(!state.snapshot.local_branches.loaded);
+        assert!(state.snapshot.local_branches.initialized);
     }
 }

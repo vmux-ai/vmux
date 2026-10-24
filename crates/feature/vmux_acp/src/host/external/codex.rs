@@ -142,7 +142,9 @@ impl Reader {
         };
         let connection = Connection::open_with_flags(
             path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
         .map_err(|error| error.to_string())?;
         connection
@@ -173,6 +175,59 @@ impl Reader {
             archives.insert(id, state);
         }
         Ok(Some(archives))
+    }
+
+    pub(super) fn set_archive(&self, sid: &str, archived: bool) -> Result<ArchiveState, String> {
+        let mut delay = 40;
+        for attempt in 0..3 {
+            match self.set_archive_once(sid, archived) {
+                Ok(state) => return Ok(state),
+                Err(error) if attempt < 2 && Self::archive_error_is_transient(&error) => {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    delay *= 2;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!()
+    }
+
+    fn set_archive_once(&self, sid: &str, archived: bool) -> Result<ArchiveState, String> {
+        let Some(path) = self.state_database()? else {
+            return Err("Codex state database is unavailable".to_string());
+        };
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(|error| error.to_string())?;
+        connection
+            .busy_timeout(std::time::Duration::from_millis(500))
+            .map_err(|error| error.to_string())?;
+        let now = Utc::now().timestamp();
+        let archived_at = archived.then_some(now);
+        let changed = connection
+            .execute(
+                "UPDATE threads SET archived = ?1, archived_at = ?2, updated_at = ?3 WHERE id = ?4",
+                rusqlite::params![archived, archived_at, now, sid],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed != 1 {
+            return Err(format!("Codex session not found: {sid}"));
+        }
+        let now = Self::milliseconds(now);
+        Ok(if archived {
+            ArchiveState::Archived(now)
+        } else {
+            ArchiveState::Active(now)
+        })
+    }
+
+    fn archive_error_is_transient(error: &str) -> bool {
+        let error = error.to_ascii_lowercase();
+        error.contains("database is locked") || error.contains("database is busy")
     }
 
     fn state_database(&self) -> Result<Option<PathBuf>, String> {
@@ -206,7 +261,18 @@ impl Reader {
                 selected = Some((version, entry.path()));
             }
         }
-        Ok(selected.map(|(_, path)| path))
+        let Some((_, path)) = selected else {
+            return Ok(None);
+        };
+        let root = self
+            .root
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let path = path.canonicalize().map_err(|error| error.to_string())?;
+        if path.parent() != Some(root.as_path()) {
+            return Err("Codex state database escaped its root".to_string());
+        }
+        Ok(Some(path))
     }
 
     fn milliseconds(value: i64) -> i64 {
@@ -740,6 +806,26 @@ mod tests {
             active[0].archive,
             Some(ArchiveState::Active(1_760_806_100_000))
         );
+    }
+
+    #[test]
+    fn codex_writer_updates_the_native_archive_state() {
+        let fixture = Fixture::new();
+        let sid = "01a14fcc-f46a-7c12-b000-779be98d72ae";
+        fixture.archive(sid, false, None, 1_760_806_000);
+        let reader = Reader::at(fixture.path());
+
+        let archived = reader.set_archive(sid, true).unwrap();
+        let states = reader.archives().unwrap().unwrap();
+
+        assert!(matches!(archived, ArchiveState::Archived(_)));
+        assert_eq!(states.get(sid), Some(&archived));
+
+        let active = reader.set_archive(sid, false).unwrap();
+        let states = reader.archives().unwrap().unwrap();
+
+        assert!(matches!(active, ArchiveState::Active(_)));
+        assert_eq!(states.get(sid), Some(&active));
     }
 
     #[test]

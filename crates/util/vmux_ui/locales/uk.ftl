@@ -6,6 +6,7 @@ common-uninstall = Видалити
 common-update = Оновити
 common-retry = Повторити
 common-refresh = Оновити
+common-no-results = Немає збігів
 common-remove = Прибрати
 common-add = Додати
 common-archive = Архівувати

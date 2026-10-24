@@ -52,8 +52,6 @@ impl ProjectEntry {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProjectFilter {
-    Ongoing,
-    Stale,
     Archived,
 }
 
@@ -73,7 +71,7 @@ impl ProjectFilter {
         filters
             .iter()
             .map(|filter| ProjectFilterPresentation {
-                label: format!("{} · {}", translate("common-status"), filter.label()),
+                label: filter.label(),
                 dot: filter.dot().to_string(),
             })
             .collect()
@@ -88,24 +86,18 @@ impl ProjectFilter {
 
     pub(super) fn label(self) -> String {
         translate(match self {
-            Self::Ongoing => "session-stage-in-progress",
-            Self::Stale => "sessions-stale",
             Self::Archived => "project-archived",
         })
     }
 
     pub(super) fn dot(self) -> &'static str {
         match self {
-            Self::Ongoing => "bg-success",
-            Self::Stale => "bg-muted-foreground",
             Self::Archived => "bg-muted-foreground",
         }
     }
 
     fn matches(self, entry: &ProjectEntry) -> bool {
         match self {
-            Self::Ongoing => !entry.archived && entry.ongoing_sessions > 0,
-            Self::Stale => !entry.archived && entry.stale_sessions > 0,
             Self::Archived => entry.archived,
         }
     }
@@ -146,13 +138,9 @@ pub(super) fn ProjectFilterMenu(
     needle: String,
     onselect: EventHandler<ProjectFilter>,
 ) -> Element {
-    let options = [
-        ProjectFilter::Ongoing,
-        ProjectFilter::Stale,
-        ProjectFilter::Archived,
-    ];
+    let options = [ProjectFilter::Archived];
     rsx! {
-        FilterMenu { title: translate("common-status"),
+        FilterMenu { title: translate("common-filter"),
             for filter in options {
                 if needle.is_empty() || filter.label().to_ascii_lowercase().contains(&needle) {
                     FilterOption {

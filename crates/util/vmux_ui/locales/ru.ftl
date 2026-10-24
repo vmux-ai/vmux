@@ -6,6 +6,7 @@ common-uninstall = Удалить
 common-update = Обновить
 common-retry = Повторить
 common-refresh = Обновить
+common-no-results = Нет совпадений
 common-remove = Убрать
 common-add = Добавить
 common-archive = Архивировать

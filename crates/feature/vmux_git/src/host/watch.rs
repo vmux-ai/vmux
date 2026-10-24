@@ -8,7 +8,7 @@ use super::GitUpdateSet;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_ecs::KeyboardOwner;
+use vmux_ecs::PagePresented;
 use vmux_path::PathIdentity;
 
 use super::runtime::{GitRuntime, GitTask};
@@ -149,7 +149,7 @@ struct GitWatchRelevanceTask {
 struct GitWatchRefreshes<'w, 's> {
     states: super::state::GitStates<'w, 's>,
     files: super::status::FileGitStates<'w, 's>,
-    active: Query<'w, 's, (), With<KeyboardOwner>>,
+    presented: Query<'w, 's, (), With<PagePresented>>,
     wake: Option<Res<'w, EventLoopProxyWrapper>>,
     commands: Commands<'w, 's>,
 }
@@ -940,8 +940,8 @@ impl GitWatch {
 
 fn sync_page_subscriptions(
     watch: Option<NonSendMut<GitWatch>>,
-    pages: Query<(Entity, &super::state::GitState, Has<KeyboardOwner>)>,
-    activated: Query<(Entity, &super::state::GitState), Added<KeyboardOwner>>,
+    pages: Query<(Entity, &super::state::GitState, Has<PagePresented>)>,
+    activated: Query<(Entity, &super::state::GitState), Added<PagePresented>>,
     files: Query<(), With<super::status::FileGit>>,
     mut removed_files: RemovedComponents<super::status::FileGit>,
     mut commands: Commands,
@@ -1014,7 +1014,7 @@ fn drain(
     }
     let mut relevance = GitWatchRelevanceBatch::default();
     for (entity, subscription) in &watch.subscriptions {
-        if !refreshes.active.contains(*entity) {
+        if !refreshes.presented.contains(*entity) {
             continue;
         }
         let metadata = subscription.targets.iter().any(|target| {
@@ -1089,7 +1089,7 @@ fn poll_relevance_tasks(
         refreshes.commands.entity(task_entity).despawn();
         let output = output.unwrap_or_else(|_| task.fallback.clone());
         for (entity, roots) in output.entities {
-            let current = refreshes.active.contains(entity)
+            let current = refreshes.presented.contains(entity)
                 && watch
                     .subscriptions
                     .get(&entity)
@@ -1173,11 +1173,11 @@ fn info(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: Single<&mut RepoInfoCache>,
     entities: Query<(), ()>,
-    active_owners: Query<(), With<KeyboardOwner>>,
+    presented_owners: Query<(), With<PagePresented>>,
 ) {
     let repo_info = repo_info.bypass_change_detection();
     repo_info.leases.retain(|owner, lease| {
-        entities.contains(*owner) && (!lease.active_only || active_owners.contains(*owner))
+        entities.contains(*owner) && (!lease.active_only || presented_owners.contains(*owner))
     });
     let active = repo_info
         .leases
@@ -1494,7 +1494,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_systems(PostUpdate, info);
         app.insert_non_send(GitWatch::test());
-        let owner = app.world_mut().spawn(KeyboardOwner).id();
+        let owner = app.world_mut().spawn(PagePresented).id();
         let mut cache = RepoInfoCache {
             entries: HashMap::from([
                 (
@@ -1535,7 +1535,7 @@ mod tests {
         assert!(watch.repo_info_subscriptions.contains_key(&first_path));
         assert!(watch.repo_info_subscriptions.contains_key(&second_path));
 
-        app.world_mut().entity_mut(owner).remove::<KeyboardOwner>();
+        app.world_mut().entity_mut(owner).remove::<PagePresented>();
         app.update();
         assert!(
             app.world()
@@ -1562,7 +1562,7 @@ mod tests {
                         ..Default::default()
                     },
                 },
-                KeyboardOwner,
+                PagePresented,
             ))
             .id();
 
@@ -1585,7 +1585,7 @@ mod tests {
                 .subscriptions
                 .contains_key(&page)
         );
-        app.world_mut().entity_mut(page).remove::<KeyboardOwner>();
+        app.world_mut().entity_mut(page).remove::<PagePresented>();
         app.update();
         assert!(app.world().non_send::<GitWatch>().subscriptions.is_empty());
     }

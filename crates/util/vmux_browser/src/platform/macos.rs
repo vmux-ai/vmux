@@ -133,6 +133,7 @@ fn apply_metadata(receiver: Single<&PageMetadataReceiver>, mut pages: Query<&mut
         }
         if let Some(favicon) = update.favicon
             && !favicon.is_empty()
+            && !metadata.url.starts_with("vmux://")
         {
             metadata.icon = PageIcon::favicon(favicon);
         }
@@ -1092,7 +1093,7 @@ mod tests {
     }
 
     #[test]
-    fn document_metadata_updates_the_hosted_page() {
+    fn document_title_updates_an_internal_page_without_replacing_its_icon() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, super::apply_metadata);
@@ -1103,7 +1104,7 @@ mod tests {
             .spawn(vmux_ecs::PageMetadata {
                 title: "vmux://history/".to_string(),
                 url: "vmux://history/".to_string(),
-                icon: vmux_api::PageIcon::None,
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Clock),
                 bg_color: None,
             })
             .id();
@@ -1123,7 +1124,7 @@ mod tests {
         assert_eq!(metadata.title, "History");
         assert_eq!(
             metadata.icon,
-            vmux_api::PageIcon::favicon("vmux://history/assets/favicons/history.svg")
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Clock)
         );
     }
 
