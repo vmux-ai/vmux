@@ -689,8 +689,8 @@ impl StackOpenTarget<'_, '_> {
         let Some(existing) = self.url(stack) else {
             return true;
         };
-        !Self::same_url(url, existing)
-            && !(self.placements.group_entrypoint(url) && self.placements.same_group(url, existing))
+        !(Self::same_url(url, existing)
+            || self.placements.group_entrypoint(url) && self.placements.same_group(url, existing))
     }
 
     fn same_url(left: &str, right: &str) -> bool {
