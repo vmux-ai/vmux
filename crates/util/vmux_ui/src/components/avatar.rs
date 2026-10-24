@@ -92,7 +92,7 @@ pub fn AgentThumbnail(
     #[props(default)] alt: String,
     #[props(default)] class: String,
 ) -> Element {
-    let src = src.or_else(|| FaviconSource::agent(&seed));
+    let src = AgentThumbnailSource::resolve(src, &seed);
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
     let image_class = if src
         .as_deref()
@@ -113,6 +113,14 @@ pub fn AgentThumbnail(
     let class = cn([image_class, blend_class, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
+    }
+}
+
+struct AgentThumbnailSource;
+
+impl AgentThumbnailSource {
+    fn resolve(src: Option<String>, seed: &str) -> Option<String> {
+        FaviconSource::agent(seed).or(src)
     }
 }
 
@@ -277,7 +285,22 @@ impl AvatarRandom {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentThumbnailBackground, GeneratedAvatar};
+    use super::{AgentThumbnailBackground, AgentThumbnailSource, GeneratedAvatar};
+
+    #[test]
+    fn known_agent_brand_overrides_a_generic_profile_icon() {
+        assert_eq!(
+            AgentThumbnailSource::resolve(
+                Some("vmux://acp/assets/favicons/acp.svg".into()),
+                "codex"
+            ),
+            Some("assets/agent-logos/codex.png".into())
+        );
+        assert_eq!(
+            AgentThumbnailSource::resolve(Some("custom.svg".into()), "custom-agent"),
+            Some("custom.svg".into())
+        );
+    }
 
     #[test]
     fn agent_thumbnail_uses_the_brand_in_its_icon_url_before_the_page_title() {

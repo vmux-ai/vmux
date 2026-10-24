@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 #[cfg(test)]
 use vmux_session::SessionSummaryProjection;
 use vmux_session::{SessionSummary, StageSummary};
-use vmux_ui::components::avatar::AgentThumbnail;
+use vmux_ui::components::avatar::{AgentThumbnail, Identicon};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
@@ -723,17 +723,26 @@ fn SessionListItem(
     repository_ready: bool,
 ) -> Element {
     let open_session = resume.clone();
+    let project_seed = if !presentation.context.project_url.is_empty() {
+        presentation.context.project_url.clone()
+    } else if presentation.context.project.is_empty() {
+        session.cwd.clone()
+    } else {
+        presentation.context.project.clone()
+    };
     rsx! {
         div {
             class: "group relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-xs transition-colors hover:bg-foreground/[0.03]",
             onclick: move |_| open_session.open(),
             span { class: "size-3 shrink-0" }
-            AgentThumbnail {
-                src: presentation.agent.icon.clone(),
-                seed: presentation.agent.id.clone(),
-                background: presentation.agent.color.clone(),
-                alt: presentation.agent.name.clone(),
-                class: "size-4 shrink-0 text-[5px]".to_string(),
+            if repository_ready {
+                Identicon {
+                    seed: project_seed,
+                    alt: presentation.context.project.clone(),
+                    class: "size-4 shrink-0 rounded-md".to_string(),
+                }
+            } else {
+                Skeleton { class: "size-4 shrink-0 rounded-md" }
             }
             SessionIdPill { label: presentation.compact_id.clone(), title: session.sid.clone() }
             span { class: "flex size-4 shrink-0 items-center justify-center",
@@ -746,6 +755,13 @@ fn SessionListItem(
                 }
             }
             div { class: "flex min-w-0 shrink-0 items-center gap-1.5",
+                AgentThumbnail {
+                    src: presentation.agent.icon.clone(),
+                    seed: presentation.agent.id.clone(),
+                    background: presentation.agent.color.clone(),
+                    alt: presentation.agent.name.clone(),
+                    class: "size-4 shrink-0 text-[5px]".to_string(),
+                }
                 SessionContextView {
                     context: presentation.context.clone(),
                     loading: !repository_ready,
@@ -777,17 +793,26 @@ fn SessionBoardItem(
     repository_ready: bool,
 ) -> Element {
     let open_session = resume.clone();
+    let project_seed = if !presentation.context.project_url.is_empty() {
+        presentation.context.project_url.clone()
+    } else if presentation.context.project.is_empty() {
+        session.cwd.clone()
+    } else {
+        presentation.context.project.clone()
+    };
     rsx! {
         article {
             class: "glass group relative cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-glass-hover",
             onclick: move |_| open_session.open(),
             div { class: "flex items-start gap-2",
-                AgentThumbnail {
-                    src: presentation.agent.icon.clone(),
-                    seed: presentation.agent.id.clone(),
-                    background: presentation.agent.color.clone(),
-                    alt: presentation.agent.name.clone(),
-                    class: "size-5 text-[6px]".to_string(),
+                if repository_ready {
+                    Identicon {
+                        seed: project_seed,
+                        alt: presentation.context.project.clone(),
+                        class: "size-5 shrink-0 rounded-md".to_string(),
+                    }
+                } else {
+                    Skeleton { class: "size-5 shrink-0 rounded-md" }
                 }
                 div { class: "min-w-0 flex-1",
                     div { class: "truncate text-xs font-medium text-foreground/90", "{presentation.title}" }
@@ -807,6 +832,13 @@ fn SessionBoardItem(
                 p { class: "mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-muted-foreground/65", "{presentation.preview}" }
             }
             div { class: "mt-3 flex min-w-0 flex-wrap items-center gap-1.5",
+                AgentThumbnail {
+                    src: presentation.agent.icon.clone(),
+                    seed: presentation.agent.id.clone(),
+                    background: presentation.agent.color.clone(),
+                    alt: presentation.agent.name.clone(),
+                    class: "size-4 shrink-0 text-[5px]".to_string(),
+                }
                 if presentation.runtime.visible {
                     MetadataPill { dot: presentation.runtime.dot.to_string(), label: runtime_label(&session.runtime) }
                 }

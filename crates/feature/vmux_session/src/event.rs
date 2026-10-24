@@ -87,6 +87,7 @@ impl SessionRepositories {
 pub struct SessionRepository {
     pub id: String,
     pub project: String,
+    pub project_url: String,
     pub branch: String,
     pub url: String,
 }

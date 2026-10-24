@@ -506,6 +506,7 @@ impl StageTarget {
 #[derive(Clone, PartialEq)]
 pub(super) struct SessionContext {
     pub project: String,
+    pub project_url: String,
     pub branch: String,
     pub git_url: String,
 }
@@ -515,11 +516,13 @@ impl SessionContext {
         match repository {
             Some(repository) => Self {
                 project: repository.project,
+                project_url: repository.project_url,
                 branch: repository.branch,
                 git_url: repository.url,
             },
             None => Self {
                 project: String::new(),
+                project_url: String::new(),
                 branch: String::new(),
                 git_url: String::new(),
             },

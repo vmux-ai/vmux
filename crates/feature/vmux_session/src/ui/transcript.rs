@@ -7,7 +7,6 @@ use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -64,11 +63,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let agent = chat.agent();
     let agent_name = chat.header_name();
     let icon = chat.identity.icon();
-    let agent_avatar = if icon.is_empty() {
-        FaviconSource::agent(&agent)
-    } else {
-        Some(icon)
-    };
+    let agent_avatar = (!icon.is_empty()).then_some(icon);
     let agent_color = chat.accent().css;
     let user_name = chat.user.name();
     let user_color = chat.user.color();
@@ -130,6 +125,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                             key: "{loaded_start as usize + i}",
                             absolute_index: loaded_start as usize + i,
                             item,
+                            agent_id: agent.clone(),
                             agent_name: agent_name.clone(),
                             agent_avatar: agent_avatar.clone(),
                             agent_color: agent_color.clone(),

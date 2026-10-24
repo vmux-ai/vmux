@@ -1,6 +1,14 @@
 use crate::cn::cn;
+use crate::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use crate::i18n::translate;
+use crate::icon::{LineIcon, LineIconView};
 use dioxus::prelude::*;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct BreadcrumbOption {
+    pub label: String,
+    pub value: String,
+}
 
 #[component]
 pub fn Breadcrumbs(
@@ -61,5 +69,54 @@ pub fn BreadcrumbItem(
 pub fn BreadcrumbSeparator() -> Element {
     rsx! {
         span { class: "shrink-0 text-xs text-muted-foreground/45", "/" }
+    }
+}
+
+#[component]
+pub fn BreadcrumbSelector(
+    label: String,
+    options: Vec<BreadcrumbOption>,
+    onselect: EventHandler<String>,
+) -> Element {
+    let mut open = use_signal(|| false);
+    rsx! {
+        Dropdown {
+            open: open(),
+            keyboard_navigation: true,
+            class: "min-w-0 shrink-0".to_string(),
+            on_dismiss: move |_| open.set(false),
+            button {
+                r#type: "button",
+                class: "flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
+                aria_expanded: open(),
+                onclick: move |_| open.set(!open()),
+                span { class: "truncate", "{label}" }
+                LineIconView {
+                    icon: LineIcon::ChevronDown,
+                    class: if open() {
+                        "size-3 shrink-0 rotate-180 transition-transform".to_string()
+                    } else {
+                        "size-3 shrink-0 transition-transform".to_string()
+                    },
+                }
+            }
+            if open() {
+                DropdownPopup { align: DropdownAlign::Start, class: "w-40 p-1",
+                    for option in options {
+                        button {
+                            key: "{option.value}",
+                            r#type: "button",
+                            "data-vmux-dropdown-option": "",
+                            class: "flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground data-[vmux-dropdown-active=true]:bg-foreground/[0.07] data-[vmux-dropdown-active=true]:text-foreground",
+                            onclick: move |_| {
+                                open.set(false);
+                                onselect.call(option.value.clone());
+                            },
+                            span { class: "truncate", "{option.label}" }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

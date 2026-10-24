@@ -14,6 +14,7 @@ use crate::event::{
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
 use crate::state::ChatUiState;
+use vmux_api::avatar::IdenticonSpec;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
 use vmux_api::{PageIcon, ProcessId};
@@ -25,7 +26,6 @@ use vmux_ecs::agent::{
     AgentRequestRouteSet, AgentSessionRoot,
 };
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
-use vmux_ecs::team::Profile;
 use vmux_ecs::{
     Description, EntityTarget, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
     PendingPromptAttachments,
@@ -444,7 +444,7 @@ type ChatSessions<'w, 's> = Query<
     (
         Entity,
         Option<&'static AgentConversationTitle>,
-        Option<&'static Profile>,
+        &'static SessionId,
     ),
     With<Session>,
 >;
@@ -457,7 +457,7 @@ type ChangedChatSessions<'w, 's> = Query<
         With<Session>,
         Or<(
             Changed<AgentConversationTitle>,
-            Changed<Profile>,
+            Changed<SessionId>,
             Changed<Children>,
         )>,
     ),
@@ -471,7 +471,7 @@ fn report_tab_identity(
     mut commands: Commands,
 ) {
     for session_entity in &changed_sessions {
-        let Ok((_, title, profile)) = sessions.get(session_entity) else {
+        let Ok((_, title, id)) = sessions.get(session_entity) else {
             continue;
         };
         for (target, children) in &stacks {
@@ -486,10 +486,7 @@ fn report_tab_identity(
                 if let Some(title) = title {
                     reported.title = Some(title.0.clone());
                 }
-                reported.icon = profile
-                    .and_then(|profile| profile.icon.as_deref())
-                    .filter(|icon| !icon.is_empty())
-                    .map(PageIcon::favicon);
+                reported.icon = Some(PageIcon::favicon(IdenticonSpec::favicon(&id.0)));
                 if current != Some(&reported) {
                     commands.entity(child).insert(reported);
                 }
@@ -839,14 +836,6 @@ mod tests {
             app.update();
         }
 
-        fn icon(&self, app: &mut App, icon: &str) {
-            app.world_mut().entity_mut(self.session).insert(
-                vmux_ecs::team::Profile::registry("Codex", "codex")
-                    .with_icon(Some(icon.to_string())),
-            );
-            app.update();
-        }
-
         fn reported(&self, app: &App) -> vmux_ecs::PageIdentity {
             app.world()
                 .get::<vmux_ecs::PageIdentity>(self.view)
@@ -886,11 +875,10 @@ mod tests {
     }
 
     #[test]
-    fn agent_activity_keeps_the_acp_favicon_visible() {
+    fn agent_activity_keeps_the_session_identicon_visible() {
         let mut app = App::new();
         let conversation = Conversation::start(&mut app);
         conversation.rename(&mut app, "working session");
-        conversation.icon(&mut app, "https://cdn.example/codex.svg");
         let favicon = conversation.reported(&app).icon;
         conversation.run(
             &mut app,
@@ -903,7 +891,9 @@ mod tests {
         assert_eq!(conversation.reported(&app).icon, favicon);
         assert_eq!(
             favicon,
-            Some(vmux_api::PageIcon::favicon("https://cdn.example/codex.svg"))
+            Some(vmux_api::PageIcon::favicon(IdenticonSpec::favicon(
+                "session"
+            )))
         );
     }
 

@@ -49,6 +49,7 @@ pub fn UserBubble(
 
 #[component]
 pub fn AssistantTurn(
+    agent_id: String,
     name: String,
     avatar_src: Option<String>,
     avatar_background: String,
@@ -61,7 +62,7 @@ pub fn AssistantTurn(
         div { class: "chat-message-enter chat-assistant-turn group flex w-full gap-3 px-1 py-1 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
             AgentThumbnail {
                 src: avatar_src,
-                seed: name.clone(),
+                seed: agent_id,
                 background: avatar_background,
                 alt: name.clone(),
                 class: "mt-0.5 h-8 w-8 text-[10px]".to_string(),
@@ -166,6 +167,7 @@ pub fn MessageCopyButton(text: String) -> Element {
 pub fn ChatItemRow(
     absolute_index: usize,
     item: ChatItem,
+    agent_id: String,
     agent_name: String,
     agent_avatar: Option<String>,
     agent_color: String,
@@ -226,6 +228,7 @@ pub fn ChatItemRow(
             TurnView {
                 turn_index: key,
                 turn: turn.clone(),
+                agent_id,
                 agent_name,
                 agent_avatar,
                 agent_color,
@@ -268,6 +271,7 @@ fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Eleme
 pub fn TurnView(
     turn_index: usize,
     turn: ChatTurn,
+    agent_id: String,
     agent_name: String,
     agent_avatar: Option<String>,
     agent_color: String,
@@ -317,6 +321,7 @@ pub fn TurnView(
             class: "flex w-full flex-col gap-2 [contain-intrinsic-size:auto_180px] [content-visibility:auto]",
             if !turn.rows.is_empty() || turn.running || duration_label.is_some() {
                 AssistantTurn {
+                    agent_id,
                     name: agent_name,
                     avatar_src: agent_avatar,
                     avatar_background: agent_color,

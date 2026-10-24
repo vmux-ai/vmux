@@ -8,8 +8,6 @@ use self::keys::use_chat_keys;
 use self::state::use_chat;
 use self::transcript::ChatTranscript;
 use dioxus::prelude::*;
-use vmux_ui::components::manager::{ManagerArea, WorkspaceLayout};
-use vmux_ui::navigation::PageNavigation;
 
 pub use manager::SessionCollection;
 
@@ -65,6 +63,10 @@ fn SessionDetail(session_id: String) -> Element {
             })
     };
     let details_available = details.is_some();
+    let header_session = details.as_ref().map(|(session, _, _)| session.clone());
+    let header_repository = details
+        .as_ref()
+        .and_then(|(_, repository, _)| repository.clone());
     let mut details_open = use_signal(|| false);
 
     rsx! {
@@ -74,31 +76,29 @@ fn SessionDetail(session_id: String) -> Element {
             tabindex: "-1",
             onkeydown: move |event| keys.on_root_keydown(event),
             style { dangerous_inner_html: MD_CSS }
-            WorkspaceLayout {
-                active: Some(ManagerArea::Inbox),
-                onnavigate: move |area: ManagerArea| PageNavigation::replace(area.url()),
-                div { class: "flex min-h-0 flex-1 overflow-hidden",
-                    section { class: "flex min-w-0 flex-1 flex-col",
-                        ChatHeader {
-                            chat,
-                            details_available,
-                            details_open: details_open(),
-                            on_details_toggle: move |_| details_open.set(!details_open()),
-                        }
-                        ChatTranscript { chat }
-                        ChatApprovalDock { chat }
-                        ChatDock { chat }
+            div { class: "flex min-h-0 flex-1 overflow-hidden",
+                section { class: "flex min-w-0 flex-1 flex-col",
+                    ChatHeader {
+                        chat,
+                        session: header_session,
+                        repository: header_repository,
+                        details_available,
+                        details_open: details_open(),
+                        on_details_toggle: move |_| details_open.set(!details_open()),
                     }
-                    if let Some((session, repository, stages)) = details {
-                        div {
-                            class: if details_open() {
-                                "hidden h-full min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-[19rem] lg:translate-x-0"
-                            } else {
-                                "pointer-events-none hidden h-full min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-0"
-                            },
-                            aria_hidden: (!details_open()).to_string(),
-                            manager::SessionMetaPanel { session, repository, stages }
-                        }
+                    ChatTranscript { chat }
+                    ChatApprovalDock { chat }
+                    ChatDock { chat }
+                }
+                if let Some((session, repository, stages)) = details {
+                    div {
+                        class: if details_open() {
+                            "hidden h-full min-h-0 shrink-0 overflow-hidden opacity-100 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-[19rem] lg:translate-x-0"
+                        } else {
+                            "pointer-events-none hidden h-full min-h-0 shrink-0 translate-x-3 overflow-hidden opacity-0 transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none lg:flex lg:w-0"
+                        },
+                        aria_hidden: (!details_open()).to_string(),
+                        manager::SessionMetaPanel { session, repository, stages }
                     }
                 }
             }

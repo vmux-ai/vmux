@@ -146,25 +146,55 @@ impl DirectoryPicker {
 struct SessionProject;
 
 impl SessionProject {
+    fn root(path: &Path, managed: bool) -> PathBuf {
+        if managed {
+            for ancestor in path.ancestors() {
+                if ancestor
+                    .file_name()
+                    .is_some_and(|name| name == ".worktrees")
+                {
+                    return ancestor.parent().unwrap_or(path).to_path_buf();
+                }
+            }
+        }
+        path.to_path_buf()
+    }
+
     fn fallback(path: &Path, managed: bool) -> String {
         if !managed {
             return String::new();
         }
-        for ancestor in path.ancestors() {
-            if ancestor
-                .file_name()
-                .is_some_and(|name| name == ".worktrees")
-            {
-                return ancestor
-                    .parent()
-                    .and_then(Path::file_name)
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-            }
-        }
-        path.file_name()
+        Self::root(path, managed)
+            .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default()
+    }
+
+    fn url(root: Option<&Path>, path: &Path) -> String {
+        let Some(root) = root else {
+            return String::new();
+        };
+        let Ok(relative) = path.strip_prefix(root) else {
+            return String::new();
+        };
+        let Ok(mut url) = url::Url::parse("vmux://projects/") else {
+            return String::new();
+        };
+        let Ok(mut segments) = url.path_segments_mut() else {
+            return String::new();
+        };
+        segments.pop_if_empty();
+        for component in relative.components() {
+            let std::path::Component::Normal(component) = component else {
+                return String::new();
+            };
+            let Some(component) = component.to_str() else {
+                return String::new();
+            };
+            segments.push(component);
+        }
+        drop(segments);
+        url.into()
     }
 }
 
@@ -584,6 +614,7 @@ fn publish_detail(
 
 fn sync_repositories(
     catalog: Res<CatalogSnapshot>,
+    projects: vmux_ecs::profile::Projects,
     mut cache: Option<Single<&mut RepoInfoCache>>,
     active: Query<
         Entity,
@@ -622,6 +653,7 @@ fn sync_repositories(
         }
     }
     let mut sessions = Vec::with_capacity(catalog.sessions.len());
+    let projects_root = projects.path().ok();
     for session in &catalog.sessions {
         let path = Path::new(&session.cwd);
         let info = cache
@@ -631,12 +663,17 @@ fn sync_repositories(
             Some(info) => SessionRepository {
                 id: session.id.clone(),
                 project: info.project_name(),
+                project_url: SessionProject::url(projects_root, info.project_root()),
                 branch: info.branch,
                 url: vmux_git::GitUrl::from_path(&info.repo_root).unwrap_or_default(),
             },
             None => SessionRepository {
                 id: session.id.clone(),
                 project: SessionProject::fallback(path, session.managed),
+                project_url: SessionProject::url(
+                    projects_root,
+                    &SessionProject::root(path, session.managed),
+                ),
                 branch: String::new(),
                 url: (!session.cwd.is_empty())
                     .then(|| vmux_git::GitUrl::from_path(path))
@@ -1043,6 +1080,24 @@ mod tests {
         assert_eq!(
             SessionProject::fallback(Path::new("/Users/example/.vibe"), false),
             ""
+        );
+    }
+
+    #[test]
+    fn project_url_preserves_the_managed_project_identity() {
+        assert_eq!(
+            SessionProject::url(
+                Some(Path::new("/projects")),
+                Path::new("/projects/github.com/vmux-ai/vmux cloud"),
+            ),
+            "vmux://projects/github.com/vmux-ai/vmux%20cloud"
+        );
+        assert_eq!(
+            SessionProject::url(
+                Some(Path::new("/projects")),
+                &SessionProject::root(Path::new("/projects/vmux-cloud/.worktrees/vmx-226"), true,),
+            ),
+            "vmux://projects/vmux-cloud"
         );
     }
 }

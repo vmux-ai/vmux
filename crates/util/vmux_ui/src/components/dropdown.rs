@@ -129,7 +129,7 @@ if (!popup || !root) {
     frame = 0;
     if (!active || !popup.isConnected || !root.isConnected) return;
     if (!popup.matches(':popover-open')) {
-      try { popup.showPopover(); } catch (error) { return; }
+      try { popup.showPopover(); } catch (error) {}
     }
     const anchor = root.getBoundingClientRect();
     popup.style.width = baseWidth;
@@ -283,6 +283,10 @@ impl DropdownPopupOwner {
             self.id()
         )
     }
+
+    fn raise(self) {
+        crate::transport::Host::show_element_popover(&self.id());
+    }
 }
 
 #[component]
@@ -346,6 +350,7 @@ pub fn DropdownPopup(
     let merged = merge_attributes(vec![base, attributes]);
     rsx! {
         div {
+            onmounted: move |_| owner.raise(),
             onclick: move |event| {
                 if let Some(handler) = onclick {
                     handler.call(event);
