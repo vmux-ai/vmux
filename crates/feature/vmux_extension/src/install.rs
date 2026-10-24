@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::Receiver;
-use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress, ExtensionsUiState};
+use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress, UiExtensions};
 
 #[cfg(test)]
 use crate::crx::ChromeExtensionId;
@@ -88,7 +88,7 @@ struct PackageInstaller {
 
 struct InstallOutput {
     entry: store::ExtEntry,
-    snapshot: ExtensionsUiState,
+    snapshot: UiExtensions,
 }
 
 impl ResolvedInstall {

@@ -18,7 +18,7 @@ use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, SettingsEditRequest, SettingsFilterRequest,
     SettingsRequest,
 };
-use crate::state::SettingsUiState;
+use crate::state::UiSettings;
 use crate::{AppSettings, SettingsSaveRequest};
 
 use super::projection::SettingsRenderProjection;
@@ -67,7 +67,7 @@ impl Plugin for StatePlugin {
 )]
 pub struct Settings;
 
-type SettingsUiStateUpdates = UiState<SettingsUiState>;
+type SettingsUiStateUpdates = UiState<UiSettings>;
 
 #[derive(Component, Default)]
 pub(super) struct SettingsViewState {

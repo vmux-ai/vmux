@@ -10,12 +10,16 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage,
     ManagerRow, ManagerSearch, ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
 };
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ExtensionsUiState", "ToolsUiState"]
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_api::extension::UiExtensions,
+        vmux_tool::state::UiTools,
+    ]
 )]
 pub(crate) struct ExtensionPage;
 
@@ -45,8 +49,8 @@ impl From<&ExtRow> for Approval {
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ExtensionsUiState>().state;
-    let tools = use_ui_state::<vmux_tool::state::ToolsUiState>().state;
+    let state = UiState::<UiExtensions>::use_context().state;
+    let tools = UiState::<vmux_tool::state::UiTools>::use_context().state;
 
     let snapshot = state();
     let installing = &snapshot.installing;

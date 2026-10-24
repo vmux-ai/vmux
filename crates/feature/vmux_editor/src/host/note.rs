@@ -140,7 +140,7 @@ fn send(
             .and_then(|index| note.blocks.get(index as usize))
             .filter(|block| matches!(block.block, MdBlock::List { .. }))
             .map(|_| edit.cursor_line());
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(
             entity,
             &FileNoteEvent {
                 title: note.title,

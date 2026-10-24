@@ -40,7 +40,7 @@ mod macos {
         UnpinRequest,
     };
     use vmux_layout::stack::OpenRequest;
-    use vmux_layout::state::LayoutUiState;
+    use vmux_layout::state::UiLayout;
     use vmux_page::menu::{
         OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet,
     };
@@ -549,7 +549,7 @@ mod macos {
     ) {
         for request in new_folders.read() {
             revision.0 = revision.0.wrapping_add(1);
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 request.webview,
                 &BookmarkMenuEffect {
                     create_folder: BookmarkFolderCreateEffect {
@@ -562,7 +562,7 @@ mod macos {
         }
         for request in renames.read() {
             revision.0 = revision.0.wrapping_add(1);
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 request.webview,
                 &BookmarkMenuEffect {
                     rename: BookmarkRenameEffect {

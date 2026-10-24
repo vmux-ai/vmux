@@ -10,9 +10,9 @@
             manifest: true,
             permissions: [
                 "PageReady",
-                "ThemeUiState",
-                "ExtensionsUiState",
-                "ToolsUiState",
+                "UiTheme",
+                "UiExtensions",
+                "UiTools",
                 "ExtToggleRequest",
                 "ExtUninstallRequest",
                 "ExtensionPopupOpenRequest",

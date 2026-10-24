@@ -3,10 +3,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::time::{Duration, Instant};
 use vmux_api::command_bar::{
-    CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
-    CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
-    CommandPaletteRemoveAttachmentRequest, CommandPaletteSubmitRequest, CommandPaletteUiState,
-    OpenId,
+    CommandBarOpenEvent, CommandPaletteActivateRequest, CommandPaletteDraftRequest,
+    CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
+    CommandPaletteRemoveAttachmentRequest, CommandPaletteSubmitRequest, OpenId, UiCommandBar,
+    UiCommandBarPatch, UiCommandPalette,
 };
 use vmux_api::prompt_media::ChatAttachPaths;
 use vmux_ecs::UiStateWrite;
@@ -86,7 +86,7 @@ impl Plugin for PalettePlugin {
 }
 
 #[derive(Component, Default)]
-struct PaletteSnapshot(CommandPaletteUiState);
+struct PaletteSnapshot(UiCommandPalette);
 
 #[derive(Component, Default)]
 struct PaletteOpen(CommandBarOpenEvent);
@@ -272,7 +272,7 @@ fn attach_panel(
 }
 
 fn open(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
+    trigger: On<UiStateWrite<UiCommandBar>>,
     mut palettes: Query<(
         &mut PaletteOpen,
         &mut PaletteDraftInput,
@@ -281,11 +281,9 @@ fn open(
     )>,
     mut commands: Commands,
 ) {
-    let Some(opened) =
-        <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
-            trigger.event().update(),
-        )
-    else {
+    let Some(opened) = <UiCommandBarPatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
+        trigger.event().update(),
+    ) else {
         return;
     };
     let Ok((mut current, mut draft, mut snapshot, start)) =
@@ -913,7 +911,7 @@ fn publish(
     mut commands: Commands,
 ) {
     for (target, snapshot) in &snapshots {
-        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
             target,
             &snapshot.0,
         ));
@@ -1090,7 +1088,7 @@ mod tests {
         app.update();
 
         app.world_mut()
-            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            .trigger(UiStateWrite::<UiCommandBar>::from_event(
                 page,
                 &CommandBarOpenEvent {
                     pages: vec![CommandBarPage {
@@ -1125,13 +1123,13 @@ mod tests {
         app.update();
 
         app.world_mut()
-            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            .trigger(UiStateWrite::<UiCommandBar>::from_event(
                 page,
                 &CommandBarOpenEvent::default(),
             ));
         app.update();
         app.world_mut()
-            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            .trigger(UiStateWrite::<UiCommandBar>::from_event(
                 page,
                 &CommandBarOpenEvent {
                     pages: vec![CommandBarPage {
@@ -1160,7 +1158,7 @@ mod tests {
         let page = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(page).insert(HostsLauncher);
         app.world_mut()
-            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            .trigger(UiStateWrite::<UiCommandBar>::from_event(
                 page,
                 &CommandBarOpenEvent {
                     commands: vec![CommandBarCommandEntry {
@@ -1201,7 +1199,7 @@ mod tests {
                 query: ">close".to_string(),
                 ..Default::default()
             },
-            PaletteSnapshot(CommandPaletteUiState {
+            PaletteSnapshot(UiCommandPalette {
                 open_id,
                 ..Default::default()
             }),
@@ -1252,7 +1250,7 @@ mod tests {
                 query: ">close".to_string(),
                 ..Default::default()
             },
-            PaletteSnapshot(CommandPaletteUiState {
+            PaletteSnapshot(UiCommandPalette {
                 open_id,
                 ..Default::default()
             }),
@@ -1315,7 +1313,7 @@ mod tests {
                     query: "unfinished".to_string(),
                     ..Default::default()
                 },
-                PaletteSnapshot(CommandPaletteUiState {
+                PaletteSnapshot(UiCommandPalette {
                     open_id,
                     prompt_history: vec!["first".to_string(), "second".to_string()],
                     ..Default::default()
@@ -1386,7 +1384,7 @@ mod tests {
                 navigating: true,
                 ..Default::default()
             },
-            PaletteSnapshot(CommandPaletteUiState {
+            PaletteSnapshot(UiCommandPalette {
                 open_id,
                 ..Default::default()
             }),

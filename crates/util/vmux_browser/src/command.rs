@@ -43,7 +43,7 @@ use vmux_layout::{
     pane::{Pane, PaneHoverCooldown, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded},
     stack::{CloseStackRequest, FocusedStack, Stack},
-    state::LayoutUiState,
+    state::UiLayout,
 };
 
 use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
@@ -688,7 +688,7 @@ fn reload_notify_header(
         return;
     };
     let effect = revision.next_effect();
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &effect));
 }
 
 fn hard_reload_notify_header(
@@ -708,7 +708,7 @@ fn hard_reload_notify_header(
         return;
     };
     let effect = revision.next_effect();
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &effect));
 }
 
 fn side_sheet_resize(

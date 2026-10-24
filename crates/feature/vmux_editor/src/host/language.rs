@@ -378,7 +378,7 @@ fn rename(
     if current.is_empty() || !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         entity,
         &FileRenameState {
             open: true,
@@ -573,7 +573,7 @@ fn request_hover(
 }
 
 fn dismiss_hover(trigger: On<UiInput<FileHoverDismissRequest>>, mut commands: Commands) {
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         trigger.event().webview,
         &FileHoverState::default(),
     ));
@@ -701,7 +701,7 @@ fn request_rename(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         entity,
         &FileRenameState::default(),
     ));
@@ -727,7 +727,7 @@ fn request_rename(
 
 fn edit_rename(
     trigger: On<UiInput<FileRenameDraftRequest>>,
-    states: Query<&vmux_ecs::FileUiStateUpdates>,
+    states: Query<&vmux_ecs::UiFileUpdates>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -742,11 +742,11 @@ fn edit_rename(
         return;
     }
     rename.draft.clone_from(&trigger.event().payload.draft);
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &rename));
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &rename));
 }
 
 fn dismiss_rename(trigger: On<UiInput<FileRenameDismissRequest>>, mut commands: Commands) {
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         trigger.event().webview,
         &FileRenameState::default(),
     ));

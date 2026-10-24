@@ -8,7 +8,7 @@ use vmux_api::chat::{
     PromptHistory, PromptHistoryRequest, ResumableSessionEntry, ResumableSessions,
     ResumeListRequest, ResumeSession,
 };
-use vmux_api::command_bar::CommandBarUiState;
+use vmux_api::command_bar::UiCommandBar;
 use vmux_ecs::team::Profile;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
@@ -16,7 +16,7 @@ use vmux_session::{AgentFamily, AgentId, ProviderCatalog, Route, Session, Sessio
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, ChatView};
-use crate::state::ChatUiState;
+use crate::state::UiChat;
 
 pub(super) struct Plugin;
 
@@ -225,7 +225,7 @@ fn prompt_history(
     if prompts.len() > 100 {
         prompts.drain(..prompts.len() - 100);
     }
-    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
         trigger.event().webview,
         &PromptHistory { prompts },
     ));
@@ -238,7 +238,7 @@ fn list(
 ) {
     let request = &trigger.event().payload;
     let response = catalog.page(request.request_id, &request.query, request.offset);
-    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
         trigger.event().webview,
         &response,
     ));
@@ -282,17 +282,14 @@ fn query(
         let response = catalog.page(request_id, &request.query, 0);
         projection.finish(&response);
     }
-    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-        webview,
-        &projection.0,
-    ));
+    commands.trigger(UiStateWrite::<UiChat>::from_event(webview, &projection.0));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::event::ChatResumeState;
-    use vmux_api::command_bar::CommandBarUiStatePatch;
+    use vmux_api::command_bar::UiCommandBarPatch;
 
     #[derive(Resource, Default)]
     struct Responses {
@@ -302,26 +299,25 @@ mod tests {
     }
 
     impl Responses {
-        fn command_bar(
-            trigger: On<UiStateWrite<CommandBarUiState>>,
-            mut responses: ResMut<Responses>,
-        ) {
-            if let Some(resume) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-                ResumableSessions,
-            >>::payload(trigger.event().update())
+        fn command_bar(trigger: On<UiStateWrite<UiCommandBar>>, mut responses: ResMut<Responses>) {
+            if let Some(resume) =
+                <UiCommandBarPatch as vmux_api::UiStatePatch<ResumableSessions>>::payload(
+                    trigger.event().update(),
+                )
             {
                 responses.resumes.push(resume.clone());
             }
-            if let Some(history) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-                PromptHistory,
-            >>::payload(trigger.event().update())
+            if let Some(history) =
+                <UiCommandBarPatch as vmux_api::UiStatePatch<PromptHistory>>::payload(
+                    trigger.event().update(),
+                )
             {
                 responses.prompt_histories.push(history.clone());
             }
         }
 
-        fn chat(trigger: On<UiStateWrite<ChatUiState>>, mut responses: ResMut<Responses>) {
-            if let Some(resume) = <crate::state::ChatUiStatePatch as vmux_api::UiStatePatch<
+        fn chat(trigger: On<UiStateWrite<UiChat>>, mut responses: ResMut<Responses>) {
+            if let Some(resume) = <crate::state::UiChatPatch as vmux_api::UiStatePatch<
                 ChatResumeState,
             >>::payload(trigger.event().update())
             {

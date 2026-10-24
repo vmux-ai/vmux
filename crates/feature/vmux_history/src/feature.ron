@@ -11,8 +11,8 @@
             command_bar: true,
             permissions: [
                 "PageReady",
-                "ThemeUiState",
-                "HistoryUiState",
+                "UiTheme",
+                "UiHistory",
                 "HistoryQueryRequest",
                 "HistoryLoadMoreRequest",
                 "HistoryDeleteRequest",

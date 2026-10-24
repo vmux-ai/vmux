@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use vmux_api::team::{
     ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, TeamProfileCreateRequest,
     TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
-    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
+    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, UiTeam,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
@@ -13,21 +13,21 @@ use vmux_ui::components::select::{
 };
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::favicon::FaviconSource;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::translate;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "TeamUiState"]
+    states = [vmux_ui::theme::UiTheme, vmux_api::team::UiTeam]
 )]
 pub(crate) struct TeamPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let team = use_ui_state::<TeamUiState>().state;
+    let team = UiState::<UiTeam>::use_context().state;
 
-    let TeamUiState {
+    let UiTeam {
         profiles,
         active_profile,
         agents,

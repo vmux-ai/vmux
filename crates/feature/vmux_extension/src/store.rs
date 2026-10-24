@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::webstore::ChromeWebStore;
-use vmux_api::extension::{ExtRow, ExtStatus, ExtensionsUiState};
+use vmux_api::extension::{ExtRow, ExtStatus, UiExtensions};
 
 use sha2::{Digest, Sha256};
 
@@ -408,7 +408,7 @@ impl Index {
         a != b
     }
 
-    pub fn snapshot(&self, profile: &str, loaded: &[String]) -> ExtensionsUiState {
+    pub fn snapshot(&self, profile: &str, loaded: &[String]) -> UiExtensions {
         let mut extensions = Vec::new();
         for entry in &self.entries {
             if !entry.installed_for(profile) {
@@ -436,7 +436,7 @@ impl Index {
             });
         }
         let visible = extensions.clone();
-        ExtensionsUiState {
+        UiExtensions {
             loaded: true,
             extensions,
             visible,
@@ -469,7 +469,7 @@ impl ExtEntry {
 }
 
 impl ExtensionStore {
-    pub(crate) fn snapshot(&self, profile: &str) -> Result<ExtensionsUiState, String> {
+    pub(crate) fn snapshot(&self, profile: &str) -> Result<UiExtensions, String> {
         let index = self.load_index()?;
         let loaded = self.loaded_ids(profile);
         Ok(index.snapshot(profile, &loaded))

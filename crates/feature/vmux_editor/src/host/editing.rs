@@ -166,7 +166,7 @@ fn open_file_find(
         .as_deref()
         .is_some_and(|settings| settings.editor.keymap == KeymapKind::Vim);
     state.revision = state.revision.wrapping_add(1).max(1);
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         entity,
         &FileFindEvent {
             open: state.open,
@@ -190,7 +190,7 @@ fn close_file_find(
     state.open = false;
     state.query.clear();
     state.revision = state.revision.wrapping_add(1).max(1);
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         entity,
         &FileFindEvent {
             open: state.open,
@@ -374,7 +374,7 @@ fn apply_edit_request(
             if let Some(scroll) = vp.set_top(target)
                 && browsers.can_emit_to(&entity)
             {
-                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
+                commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &scroll));
             }
             edit.core.top_row = vp.top_row;
             if vp.follow_scrolled_cursor(&mut edit) {
@@ -396,7 +396,7 @@ fn apply_edit_request(
             if let Some(scroll) = vp.set_top(target)
                 && browsers.can_emit_to(&entity)
             {
-                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
+                commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &scroll));
             }
             edit.core.top_row = vp.top_row;
             continue;
@@ -473,7 +473,7 @@ fn apply_edit_request(
                 Err(unmappable) => {
                     tracing::warn!(path = %path.display(), "editor save refused: {unmappable}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::UiFileWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {unmappable}"),
@@ -503,7 +503,7 @@ fn apply_edit_request(
                 Err(e) => {
                     tracing::warn!(path = %path.display(), "editor save failed: {e}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::UiFileWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {e}"),
@@ -574,7 +574,7 @@ fn apply_edit_request(
         if let Some(scroll) = vp.set_top(top)
             && browsers.can_emit_to(&entity)
         {
-            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
+            commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &scroll));
         }
         edit.core.top_row = vp.top_row;
     }
@@ -594,7 +594,7 @@ fn apply_edit_request(
     if text_changed || dirty_changed {
         diff_source.content = edit.core.buffer.text();
         diff_source.dirty = edit.core.dirty;
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(
             entity,
             &FileDirtyEvent {
                 dirty: edit.core.dirty,
@@ -702,7 +702,7 @@ fn file_property_edit(
         match vmux_knowledge::Frontmatter::from(text.as_str()).apply(&trigger.event().payload) {
             Ok(updated) => updated,
             Err(message) => {
-                commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::UiFileWrite::from_event(
                     entity,
                     &FileErrorEvent {
                         message,
@@ -781,7 +781,7 @@ fn file_find_request(
         });
     }
     if changed && !request.done {
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(
             entity,
             &FileFindEvent {
                 open: state.open,

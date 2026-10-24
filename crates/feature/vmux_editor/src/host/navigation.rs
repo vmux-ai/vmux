@@ -108,7 +108,7 @@ impl GotoActions<'_, '_> {
             && browsers.can_emit_to(&entity)
         {
             self.commands
-                .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &scroll));
+                .trigger(vmux_ecs::UiFileWrite::from_event(entity, &scroll));
         }
         edit.core.top_row = viewport.top_row;
     }
@@ -259,7 +259,7 @@ fn knowledge_link_open(
                 Ok(path) => path,
                 Err(error) => {
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::UiFileWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: error,
@@ -421,10 +421,10 @@ mod tests {
     use crate::keymap::EditorKeymap;
     use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
-    use vmux_ecs::event::FileUiState;
+    use vmux_ecs::event::UiFile;
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<FileUiState>);
+    struct Emitted(Vec<UiFile>);
 
     struct GotoSession {
         app: App,
@@ -452,15 +452,15 @@ mod tests {
                 .add_message::<crate::lsp::manager::LspGoto>()
                 .add_plugins((
                     NavigationPlugin,
-                    vmux_ecs::UiStatePlugin::<FileUiState>::default(),
+                    vmux_ecs::UiStatePlugin::<UiFile>::default(),
                 ))
                 .init_resource::<Emitted>()
                 .add_observer(
                     |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
-                        if trigger.event().id() != FileUiState::id() {
+                        if trigger.event().id() != UiFile::id() {
                             return;
                         }
-                        let event = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(
+                        let event = rkyv::from_bytes::<UiFile, rkyv::rancor::Error>(
                             trigger.event().payload(),
                         )
                         .unwrap();

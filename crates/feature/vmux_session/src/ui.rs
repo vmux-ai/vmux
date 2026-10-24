@@ -14,7 +14,13 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        crate::state::UiChat,
+        crate::state::UiSessionCatalog,
+        crate::state::UiSessionDetail,
+        vmux_api::input::UiKeyClaims,
+    ],
     subtree,
     preserve_title,
     no_favicon,
@@ -36,7 +42,7 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
-    let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
+    let detail = vmux_ui::hooks::UiState::<crate::state::UiSessionDetail>::use_context();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();
@@ -67,14 +73,13 @@ fn SessionDetail(session_id: String) -> Element {
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 section { class: "flex min-w-0 flex-1 flex-col",
                     ChatHeader {
-                        chat,
                         details_available,
                         details_open: details_open(),
                         on_details_toggle: move |_| details_open.set(!details_open()),
                     }
-                    ChatTranscript { chat }
-                    ChatApprovalDock { chat }
-                    ChatDock { chat }
+                    ChatTranscript {}
+                    ChatApprovalDock {}
+                    ChatDock {}
                 }
                 if let Some((session, repository, stages)) = details {
                     div {

@@ -86,7 +86,7 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 HostedPagePlugin,
                 BookmarkPlugin,
-                vmux_ecs::UiStatePlugin::<crate::state::LayoutUiState>::default(),
+                vmux_ecs::UiStatePlugin::<crate::state::UiLayout>::default(),
                 crate::workspace_snapshot_publish::SnapshotPlugin,
                 crate::pending_stack::PendingStackPlugin,
             ));

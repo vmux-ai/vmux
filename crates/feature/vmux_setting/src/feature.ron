@@ -448,8 +448,8 @@
             bookmark: Some(150),
             permissions: [
                 "PageReady",
-                "ThemeUiState",
-                "SettingsUiState",
+                "UiTheme",
+                "UiSettings",
                 "CheckForUpdatesEvent",
                 "SettingsRequest",
                 "SettingsEditRequest",

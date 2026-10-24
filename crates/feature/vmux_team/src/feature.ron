@@ -9,8 +9,8 @@
             command_bar: true,
             permissions: [
                 "PageReady",
-                "ThemeUiState",
-                "TeamUiState",
+                "UiTheme",
+                "UiTeam",
                 "TeamEvent",
                 "TeamOpenRequest",
                 "TeamMemberFocusRequest",

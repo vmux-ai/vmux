@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::CommandBar;
-use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
+use vmux_api::command_bar::{CommandBarOpenEvent, UiCommandBar, UiCommandBarPatch};
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::overlay::OverlayShownInline;
 
@@ -34,12 +34,10 @@ fn sync_inline(
     }
 }
 
-fn active(trigger: On<UiStateWrite<CommandBarUiState>>, mut commands: Commands) {
-    let Some(opened) =
-        <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
-            trigger.event().update(),
-        )
-    else {
+fn active(trigger: On<UiStateWrite<UiCommandBar>>, mut commands: Commands) {
+    let Some(opened) = <UiCommandBarPatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
+        trigger.event().update(),
+    ) else {
         return;
     };
     let Ok(mut webview) = commands.get_entity(trigger.event().webview()) else {
@@ -70,7 +68,7 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut()
-            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            .trigger(UiStateWrite::<UiCommandBar>::from_event(
                 webview,
                 &CommandBarOpenEvent {
                     open_id: vmux_api::command_bar::OpenId(1),
@@ -81,7 +79,7 @@ mod tests {
         assert!(app.world().get::<CommandBarPanelActive>(webview).is_some());
 
         app.world_mut()
-            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            .trigger(UiStateWrite::<UiCommandBar>::from_event(
                 webview,
                 &CommandBarOpenEvent::default(),
             ));

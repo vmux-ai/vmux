@@ -50,7 +50,8 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 }
 
 #[component]
-pub(super) fn ChatTranscript(chat: Chat) -> Element {
+pub(super) fn ChatTranscript() -> Element {
+    let chat = use_context::<Chat>();
     let mut scroll_container = chat.transcript.scroll_container;
     let mut at_bottom = chat.transcript.at_bottom;
     let mut last_top = chat.transcript.last_top;
@@ -103,9 +104,9 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     }
                 }
                 if !transcript_loading && chat.installing_splash() {
-                    InstallIntro { chat, detail: chat.install_detail() }
+                    InstallIntro { detail: chat.install_detail() }
                 } else if !transcript_loading && items.is_empty() && chat.status() == "idle" {
-                    ReadyIntro { chat }
+                    ReadyIntro {}
                 }
                 if !transcript_loading {
                     for (i , item) in items.iter().cloned().enumerate() {
@@ -171,11 +172,12 @@ fn TranscriptSkeleton() -> Element {
 }
 
 #[component]
-fn InstallIntro(chat: Chat, detail: String) -> Element {
+fn InstallIntro(detail: String) -> Element {
+    let chat = use_context::<Chat>();
     let accent = AgentAccent::for_agent(&chat.agent());
     rsx! {
         div { class: "my-auto flex flex-col items-center gap-3 py-12 text-center",
-            AgentBanner { chat }
+            AgentBanner {}
             div { class: "flex max-w-sm items-center gap-2 text-xs text-muted-foreground",
                 span { class: "h-1.5 w-1.5 shrink-0 rounded-full {accent.accent_bg}" }
                 span { class: "truncate", "{detail}" }
@@ -185,10 +187,10 @@ fn InstallIntro(chat: Chat, detail: String) -> Element {
 }
 
 #[component]
-fn ReadyIntro(chat: Chat) -> Element {
+fn ReadyIntro() -> Element {
     rsx! {
         div { class: "flex flex-col items-center gap-3 py-16 text-center",
-            AgentBanner { chat }
+            AgentBanner {}
             p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
         }
     }
@@ -214,7 +216,8 @@ fn HandoffDivider(source: String, truncated: bool) -> Element {
 }
 
 #[component]
-pub(super) fn QueuedPrompts(chat: Chat) -> Element {
+pub(super) fn QueuedPrompts() -> Element {
+    let chat = use_context::<Chat>();
     let queued = chat.queue.queued();
     if queued.is_empty() {
         return rsx! {};

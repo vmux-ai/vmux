@@ -10,11 +10,11 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[component]
 pub(super) fn ChatHeader(
-    chat: Chat,
     details_available: bool,
     details_open: bool,
     on_details_toggle: EventHandler<MouseEvent>,
 ) -> Element {
+    let chat = use_context::<Chat>();
     let name = chat.header_name();
     let title = chat.title();
     let subtitle = translate_with(
@@ -34,7 +34,7 @@ pub(super) fn ChatHeader(
                     alt: user_name.clone(),
                     class: "absolute left-0 top-0 h-8 w-8 border-2 border-zinc-100 text-[10px] dark:border-zinc-900".to_string(),
                 }
-                AgentAvatar { chat, size_class: "absolute left-5 top-0 h-8 w-8 border-2 border-zinc-100 text-[10px] dark:border-zinc-900" }
+                AgentAvatar { size_class: "absolute left-5 top-0 h-8 w-8 border-2 border-zinc-100 text-[10px] dark:border-zinc-900" }
             }
             div { class: "min-w-0 flex-1",
                 div {
@@ -67,7 +67,8 @@ pub(super) fn ChatHeader(
 }
 
 #[component]
-fn AgentAvatar(chat: Chat, size_class: String) -> Element {
+fn AgentAvatar(size_class: String) -> Element {
+    let chat = use_context::<Chat>();
     let agent = chat.agent();
     if agent.is_empty() {
         return rsx! {
@@ -98,7 +99,8 @@ fn AgentAvatar(chat: Chat, size_class: String) -> Element {
 }
 
 #[component]
-pub(super) fn AgentBanner(chat: Chat) -> Element {
+pub(super) fn AgentBanner() -> Element {
+    let chat = use_context::<Chat>();
     let name = chat.header_name();
     let user_name = chat.user.name();
     let user_color = chat.user.color();
@@ -111,7 +113,7 @@ pub(super) fn AgentBanner(chat: Chat) -> Element {
                 alt: user_name.clone(),
                 class: "h-10 w-10 border-2 border-zinc-100 text-xs dark:border-zinc-900".to_string(),
             }
-            AgentAvatar { chat, size_class: "h-10 w-10 border-2 border-zinc-100 text-xs dark:border-zinc-900" }
+            AgentAvatar { size_class: "h-10 w-10 border-2 border-zinc-100 text-xs dark:border-zinc-900" }
         }
         h2 { class: "text-xl font-semibold capitalize tracking-tight text-foreground",
             "{name}"

@@ -8,7 +8,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
-use vmux_ecs::{FileUiStateUpdates, FileUiStateWrite};
+use vmux_ecs::{UiFileUpdates, UiFileWrite};
 
 use crate::event::{
     DiffKind, FileGitState, FileStatus, GitCommitDraftRequest, GitCommitRequest,
@@ -863,12 +863,12 @@ fn dispatch_requests(
 
 fn publish_file_state(
     files: Query<(Entity, &FileGit), Changed<FileGit>>,
-    pages: Query<(), With<FileUiStateUpdates>>,
+    pages: Query<(), With<UiFileUpdates>>,
     mut commands: Commands,
 ) {
     for (entity, file) in &files {
         if pages.contains(entity) {
-            commands.trigger(FileUiStateWrite::from_event(entity, &file.state));
+            commands.trigger(UiFileWrite::from_event(entity, &file.state));
         }
     }
 }
@@ -879,10 +879,10 @@ mod tests {
     use crate::host::repository::test_repo;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::BinEvent;
-    use vmux_ecs::event::FileUiState;
+    use vmux_ecs::event::UiFile;
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<FileUiState>);
+    struct Emitted(Vec<UiFile>);
 
     #[derive(Resource)]
     struct TestDiff(Option<GitDiffViewport>);
@@ -896,12 +896,11 @@ mod tests {
 
     impl Emitted {
         fn record(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
-            if trigger.event().id() != FileUiState::id() {
+            if trigger.event().id() != UiFile::id() {
                 return;
             }
             let state =
-                rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(trigger.event().payload())
-                    .unwrap();
+                rkyv::from_bytes::<UiFile, rkyv::rancor::Error>(trigger.event().payload()).unwrap();
             emitted.0.push(state);
         }
     }
@@ -1046,7 +1045,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_ecs::UiStatePlugin::<FileUiState>::default(),
+            vmux_ecs::UiStatePlugin::<UiFile>::default(),
             StatusPlugin,
         ))
         .init_resource::<Emitted>()
@@ -1054,7 +1053,7 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
-                FileUiStateUpdates::default(),
+                UiFileUpdates::default(),
                 FileGit::new(&file, 1),
                 GitDiffSource::default(),
             ))

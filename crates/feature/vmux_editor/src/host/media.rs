@@ -107,7 +107,7 @@ fn send_initial(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(
             entity,
             &FileMediaEvent {
                 kind: media.kind,
@@ -313,7 +313,7 @@ fn project_preview(
             .collect(),
     };
     commands.entity(entity).insert(projection);
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &state));
 }
 
 fn file_open_external(

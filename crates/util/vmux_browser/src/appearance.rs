@@ -7,7 +7,7 @@ use vmux_layout::LayoutCef;
 
 use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
 use vmux_ui::i18n::Locale;
-use vmux_ui::theme::{ThemeScheme, ThemeUiState};
+use vmux_ui::theme::{ThemeScheme, UiTheme};
 
 pub(crate) struct BrowserLocale(String);
 
@@ -56,11 +56,11 @@ impl BrowserAppearance<'_> {
         }
     }
 
-    fn theme(&self, resolved: Option<ResolvedScheme>) -> ThemeUiState {
+    fn theme(&self, resolved: Option<ResolvedScheme>) -> UiTheme {
         let locale = BrowserLocale::requested(&self.0.appearance.locale);
         let resolved =
             resolved.unwrap_or_else(|| ResolvedScheme::resolve(self.0.appearance.mode, None));
-        ThemeUiState {
+        UiTheme {
             radius: self.0.layout.radius,
             catalog: locale.catalog(),
             locale: locale.0,
@@ -76,7 +76,7 @@ pub(crate) struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiStatePlugin::<ThemeUiState>::default())
+        app.add_plugins(UiStatePlugin::<UiTheme>::default())
             .add_observer(webview_ready_send_theme)
             .add_systems(Update, sync_to_cef.before(CefSystems::CreateAndResize))
             .add_systems(Update, reassert_color_scheme);
@@ -109,7 +109,7 @@ fn webview_ready_send_theme(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    commands.trigger(UiStateWrite::<ThemeUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiTheme>::from_event(
         entity,
         &BrowserAppearance(&settings).theme(resolved.as_ref().map(|resolved| resolved.0)),
     ));
@@ -156,7 +156,7 @@ fn sync_to_cef(
     }
     let payload = appearance.theme(resolved.as_ref().map(|resolved| resolved.0));
     for entity in &ready {
-        commands.trigger(UiStateWrite::<ThemeUiState>::from_event(entity, &payload));
+        commands.trigger(UiStateWrite::<UiTheme>::from_event(entity, &payload));
     }
 }
 

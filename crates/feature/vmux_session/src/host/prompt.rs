@@ -17,7 +17,7 @@ use super::composer::{ComposerChanged, ComposerState};
 use super::conversation::Submitted;
 #[cfg(host)]
 use super::session::{ChatAttachmentProjection, ChatView};
-use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishUiChat};
 #[cfg(host)]
 use crate::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
@@ -139,16 +139,15 @@ fn submit(
     }
     enqueue_prompt(&mut queue, &mut state, text, attachments);
     let effect = composer.effect(String::new(), true);
-    commands
-        .trigger(vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect));
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        webview, &effect,
+    ));
     commands.trigger(ComposerChanged::new(webview));
     if selected.clear_selected() {
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &selected.state(),
-            ),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &selected.state(),
+        ));
     }
 }
 
@@ -254,9 +253,9 @@ fn escape(
     };
     if !running && queue.items.is_empty() && !composer.draft().is_empty() {
         let effect = composer.effect(String::new(), true);
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview, &effect,
+        ));
         commands.trigger(ComposerChanged::new(webview));
     }
 }
@@ -401,7 +400,7 @@ fn project_media(mut runtimes: ChangedMediaPicker) {
 }
 
 fn emit_media(
-    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut refreshes: MessageReader<RepublishUiChat>,
     mut runtimes: Query<(Ref<Media>, &mut ChatUiStateProjection), With<ChatRuntime>>,
 ) {
     let refresh = refreshes.read().next().is_some();
@@ -415,7 +414,7 @@ fn emit_media(
 }
 
 fn emit_attachments(
-    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut refreshes: MessageReader<RepublishUiChat>,
     attachments: Single<Ref<Attachments>, With<ChatRuntime>>,
     focus: Single<Ref<ChatPromptFocusRevision>, With<ChatRuntime>>,
     mut projection: Single<&mut ChatUiStateProjection, With<ChatRuntime>>,

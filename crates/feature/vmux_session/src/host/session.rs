@@ -15,7 +15,7 @@ use crate::event::{
     ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
-use crate::state::ChatUiState;
+use crate::state::UiChat;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
 use vmux_api::{PageIcon, ProcessId};
@@ -37,7 +37,7 @@ use vmux_session::{
     MessageContent, PromptQueue, Route, RunState, Session, SessionId, Transcripts,
 };
 
-type ChatUiStateUpdates = UiState<ChatUiState>;
+type ChatUiStateUpdates = UiState<UiChat>;
 
 #[derive(SystemParam)]
 pub(crate) struct SessionViews<'w, 's> {

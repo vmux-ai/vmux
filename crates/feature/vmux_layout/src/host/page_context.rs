@@ -104,7 +104,7 @@ impl ProjectActivationContext<'_, '_> {
         };
         let Some(tab) = tab else {
             self.commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
+                vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(webview, &event),
             );
             return;
         };
@@ -116,9 +116,7 @@ impl ProjectActivationContext<'_, '_> {
             loop {
                 if current == tab {
                     self.commands.trigger(
-                        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
-                            page, &event,
-                        ),
+                        vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(page, &event),
                     );
                     break;
                 }
@@ -306,7 +304,7 @@ fn git_page_ready(
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
     commands.trigger(
-        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+        vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(
             webview,
             &GitPageContext {
                 working_directory: path,
@@ -438,7 +436,7 @@ mod tests {
     struct WorkspaceWrites(Vec<Entity>);
 
     fn capture_context(
-        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::UiGit>>,
         mut writes: ResMut<ContextWrites>,
     ) {
         if let Some(context) = &trigger.event().update().context {
@@ -447,7 +445,7 @@ mod tests {
     }
 
     fn capture_workspace(
-        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::UiGit>>,
         mut writes: ResMut<WorkspaceWrites>,
     ) {
         if trigger.event().update().workspace.is_some() {

@@ -2,7 +2,7 @@ use super::conversation::{Agents, Conversation, ConversationTranscript, LiveTurn
 use super::model::{Models, Picker};
 use super::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
 use crate::event::ChatComposerEffect;
-use crate::state::{ChatUiState, ChatUiStatePatch};
+use crate::state::{UiChat, UiChatPatch};
 use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 #[cfg(not(host))]
@@ -17,10 +17,10 @@ impl Plugin for ChatUiStatePlugin {
         #[cfg(not(host))]
         app.add_message::<UiStateEmit>();
         #[cfg(host)]
-        app.add_plugins(UiStatePlugin::<ChatUiState>::default())
+        app.add_plugins(UiStatePlugin::<UiChat>::default())
             .add_observer(project_mcp);
         app.add_message::<PublishComposerEffect>()
-            .add_message::<RepublishChatUiState>()
+            .add_message::<RepublishUiChat>()
             .add_systems(Startup, spawn_runtime)
             .add_systems(Update, publish_composer_effects)
             .add_systems(Last, emit_ui);
@@ -34,19 +34,19 @@ pub struct ChatRuntime;
 pub struct PublishComposerEffect(pub ChatComposerEffect);
 
 #[derive(Message)]
-pub struct RepublishChatUiState;
+pub struct RepublishUiChat;
 
 #[derive(Component, Default)]
 pub struct ChatUiStateProjection {
     #[cfg(not(host))]
-    state: ChatUiState,
-    patches: Vec<ChatUiStatePatch>,
+    state: UiChat,
+    patches: Vec<UiChatPatch>,
 }
 
 impl ChatUiStateProjection {
     pub fn write<T>(&mut self, payload: &T)
     where
-        T: Clone + Into<ChatUiStatePatch>,
+        T: Clone + Into<UiChatPatch>,
     {
         let patch = payload.clone().into();
         #[cfg(not(host))]
@@ -89,7 +89,7 @@ fn publish_composer_effects(
 
 #[cfg(host)]
 fn project_mcp(
-    trigger: On<UiStateWrite<vmux_api::mcp::McpServersUiState>>,
+    trigger: On<UiStateWrite<vmux_api::mcp::UiMcpServers>>,
     views: Query<(), With<super::session::ChatView>>,
     mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
 ) {
@@ -136,7 +136,7 @@ fn emit_ui(
     let patches = std::mem::take(&mut projection.patches);
     for target in targets {
         for patch in &patches {
-            commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, patch));
+            commands.trigger(UiStateWrite::<UiChat>::from_event(target, patch));
         }
     }
 }
@@ -148,12 +148,12 @@ mod tests {
 
     #[test]
     fn patches_build_a_retained_tree() {
-        let event = <ChatUiState as vmux_api::UiState>::from_updates(
+        let event = <UiChat as vmux_api::UiState>::from_updates(
             None,
             vec![ChatSnapshot::default().into(), ModelState::default().into()],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<ChatUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiChat, rkyv::rancor::Error>(&bytes).unwrap();
         assert!(decoded.snapshot_ready);
         assert!(decoded.model_ready);
     }

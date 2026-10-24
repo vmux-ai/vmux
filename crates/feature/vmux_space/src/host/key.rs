@@ -6,7 +6,7 @@ use vmux_ecs::UiStateWrite;
 use vmux_ecs::manifest::FeaturePlugin;
 
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
-use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, SpacesUiState};
+use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, UiSpaces};
 
 pub(crate) struct SpaceKeyPlugin;
 
@@ -51,10 +51,7 @@ fn select_next(
     };
     selection.0 = (selection.0 + 1).min(snapshot.0.spaces.len().saturating_sub(1));
     snapshot.0.selected = selection.0 as u32;
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
-        caller,
-        &snapshot.0,
-    ));
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(caller, &snapshot.0));
 }
 
 fn select_previous(
@@ -72,10 +69,7 @@ fn select_previous(
     };
     selection.0 = selection.0.saturating_sub(1);
     snapshot.0.selected = selection.0 as u32;
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
-        caller,
-        &snapshot.0,
-    ));
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(caller, &snapshot.0));
 }
 
 fn attach_selected(

@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::use_ui_state;
+use vmux_ui::hooks::UiState;
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::{GitDiffRow, GitDiffViewport};
 use crate::state::{
-    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, GitUiState, HeaderDropdown,
+    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, HeaderDropdown, UiGit,
 };
 
 #[derive(Clone, Copy)]
@@ -20,7 +20,7 @@ pub(super) struct GitPageState {
 
 impl GitPageState {
     pub(super) fn use_state() -> Self {
-        let root = use_ui_state::<GitUiState>().state;
+        let root = UiState::<UiGit>::use_context().state;
         let state = Self {
             snapshot: use_memo(move || root.read().snapshot.clone()),
             controller: use_memo(move || root.read().controller.clone()),
@@ -34,7 +34,7 @@ impl GitPageState {
         state
     }
 
-    fn subscribe(self, root: Signal<GitUiState>) {
+    fn subscribe(self, root: Signal<UiGit>) {
         use_effect(move || {
             let root = root.read();
             self.diff.synchronize(&root.snapshot);

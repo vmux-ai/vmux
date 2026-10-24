@@ -188,7 +188,7 @@ fn emit(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &search.0));
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &search.0));
         commands.entity(entity).remove::<GlobalSearchDirty>();
     }
 }

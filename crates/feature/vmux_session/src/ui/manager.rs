@@ -16,7 +16,7 @@ use vmux_ui::components::manager::{
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::hooks::{send, use_optimistic_map, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_optimistic_map, use_theme};
 use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
 
@@ -24,7 +24,7 @@ use crate::event::{
     ChatOpenPage, SessionRepositories, SessionRepository, SessionsDescriptionUpdate,
     SessionsStageChange,
 };
-use crate::state::SessionCatalogUiState;
+use crate::state::UiSessionCatalog;
 
 use super::manager_controller::*;
 use super::manager_model::*;
@@ -32,7 +32,7 @@ use super::manager_model::*;
 #[component]
 pub fn SessionsManager() -> Element {
     use_theme();
-    let ui = use_ui_state::<SessionCatalogUiState>();
+    let ui = UiState::<UiSessionCatalog>::use_context();
     let controls = ManagerControls::use_state();
     let catalog = ui.use_selector(|state| state.catalog.clone());
     let repositories = ui.use_selector(|state| state.repositories.clone());

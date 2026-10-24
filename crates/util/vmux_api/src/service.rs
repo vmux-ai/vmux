@@ -6,18 +6,18 @@ pub trait ServiceMessageVariant: bevy_ecs::message::Message + Sized {
 }
 
 #[vmux_api::ui_state(Default)]
-pub struct ProcessesUiState {
+pub struct UiProcesses {
     pub connected: bool,
     pub query: String,
     pub total_count: u32,
     pub managed_count: u32,
-    pub cpu: ProcessUsageUiState,
-    pub memory: ProcessUsageUiState,
+    pub cpu: UiProcessUsage,
+    pub memory: UiProcessUsage,
     pub processes: Vec<ProcessEntry>,
 }
 
 #[vmux_api::contract(Default)]
-pub struct ProcessUsageUiState {
+pub struct UiProcessUsage {
     pub label: String,
     pub value: String,
     pub peak: String,

@@ -10,8 +10,6 @@ pub use component::{
     VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
 #[cfg(all(host, feature = "host"))]
-pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
-#[cfg(all(host, feature = "host"))]
 pub use launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged,
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
@@ -34,6 +32,8 @@ pub use process_id::ProcessId;
 #[cfg(all(host, feature = "host"))]
 pub use process_id::ProcessPresentationRequest;
 #[cfg(all(host, feature = "host"))]
+pub use ui_file::{UiFileUpdates, UiFileWrite};
+#[cfg(all(host, feature = "host"))]
 pub use ui_state::{UiState, UiStatePlugin, UiStateWrite};
 #[cfg(all(host, feature = "host"))]
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
@@ -48,8 +48,6 @@ pub mod browser;
 pub mod cli;
 mod component;
 pub mod event;
-#[cfg(all(host, feature = "host"))]
-mod file_ui_state;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
 #[cfg(all(host, feature = "host"))]
@@ -82,6 +80,8 @@ pub mod service;
 pub mod team;
 #[cfg(all(host, feature = "host"))]
 pub mod terminal;
+#[cfg(all(host, feature = "host"))]
+mod ui_file;
 #[cfg(all(host, feature = "host"))]
 mod ui_state;
 #[cfg(all(host, feature = "host"))]

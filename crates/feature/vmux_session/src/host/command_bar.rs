@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession};
-use vmux_api::command_bar::{CommandBarResultItem, CommandBarSection, CommandBarUiStatePatch};
+use vmux_api::command_bar::{CommandBarResultItem, CommandBarSection, UiCommandBarPatch};
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -82,15 +82,13 @@ fn query(
 }
 
 fn receive(
-    trigger: On<UiStateWrite<vmux_api::command_bar::CommandBarUiState>>,
+    trigger: On<UiStateWrite<vmux_api::command_bar::UiCommandBar>>,
     mut states: Query<&mut ResumeState>,
     mut results: ResumeResults,
 ) {
-    let Some(response) =
-        <CommandBarUiStatePatch as vmux_api::UiStatePatch<ResumableSessions>>::payload(
-            trigger.event().update(),
-        )
-    else {
+    let Some(response) = <UiCommandBarPatch as vmux_api::UiStatePatch<ResumableSessions>>::payload(
+        trigger.event().update(),
+    ) else {
         return;
     };
     let target = trigger.event().webview();

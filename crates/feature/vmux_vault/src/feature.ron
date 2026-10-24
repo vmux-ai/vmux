@@ -11,8 +11,8 @@
             manifest: true,
             permissions: [
                 "PageReady",
-                "ThemeUiState",
-                "VaultUiState",
+                "UiTheme",
+                "UiVault",
                 "VaultRefreshRequest",
                 "VaultCreateRequest",
                 "VaultConnectRequest",

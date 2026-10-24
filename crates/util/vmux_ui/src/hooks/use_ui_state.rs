@@ -2,21 +2,25 @@ use crate::listener_guard::GuardedListener;
 use crate::transport::Host;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
-use vmux_api::UiState;
+use vmux_api::UiState as UiStateContract;
 
 struct UiStateListener {
     error: Signal<Option<String>>,
 }
 
-pub struct UiStateBinding<T> {
+pub struct UiState<T> {
     pub state: Signal<T>,
     pub error: Signal<Option<String>>,
 }
 
-impl<T> UiStateBinding<T>
+impl<T> UiState<T>
 where
     T: 'static,
 {
+    pub fn use_context() -> Self {
+        use_context::<Self>()
+    }
+
     pub fn use_selector<S>(self, select: impl Fn(&T) -> S + 'static) -> Memo<S>
     where
         S: Clone + PartialEq + 'static,
@@ -27,7 +31,7 @@ where
 
 fn use_ui_state_listener<T, F>(on_state: F) -> UiStateListener
 where
-    T: UiState + rkyv::Archive + 'static,
+    T: UiStateContract + rkyv::Archive + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     F: FnMut(T) + 'static,
@@ -71,23 +75,23 @@ where
     UiStateListener { error }
 }
 
-impl<T> Clone for UiStateBinding<T> {
+impl<T> Clone for UiState<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for UiStateBinding<T> {}
+impl<T> Copy for UiState<T> {}
 
-pub fn use_ui_state<T>() -> UiStateBinding<T>
+pub fn use_ui_state<T>() -> UiState<T>
 where
-    T: UiState + rkyv::Archive + Default + 'static,
+    T: UiStateContract + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
     let mut state = use_signal(T::default);
     let listener = use_ui_state_listener::<T, _>(move |event| state.set(event));
-    let binding = UiStateBinding {
+    let binding = UiState {
         state,
         error: listener.error,
     };

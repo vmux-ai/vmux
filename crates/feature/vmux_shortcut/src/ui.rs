@@ -2,24 +2,24 @@
 
 use crate::{
     ShortcutProbeClearRequest, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutStroke,
-    ShortcutUiState,
+    UiShortcuts,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ShortcutUiState"]
+    states = [vmux_ui::theme::UiTheme, crate::UiShortcuts]
 )]
 pub(crate) struct ShortcutPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ShortcutUiState>().state;
+    let state = UiState::<UiShortcuts>::use_context().state;
     let state = state();
     let probe = state.probe;
     let groups = state.groups;

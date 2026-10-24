@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_ecs::FileUiStateWrite;
+use vmux_ecs::UiFileWrite;
 use vmux_ecs::event::*;
 use vmux_ecs::page::PageReady;
 use vmux_setting::{AppSettings, SettingsSaveRequest};
@@ -95,7 +95,7 @@ fn send_initial_meta(
             continue;
         }
         if let Some((undecodable, message)) = buffer.load_error() {
-            commands.trigger(FileUiStateWrite::from_event(
+            commands.trigger(UiFileWrite::from_event(
                 entity,
                 &FileErrorEvent {
                     message: message.to_string(),
@@ -126,7 +126,7 @@ fn send_initial_text_meta(
             continue;
         }
         let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
-        commands.trigger(FileUiStateWrite::from_event(
+        commands.trigger(UiFileWrite::from_event(
             entity,
             &FileMetaEvent {
                 revision: revision.get(),
@@ -183,7 +183,7 @@ fn send_file_theme(
                 )
             })
             .unwrap_or_else(|| (String::new(), 0.0, 0.0));
-        commands.trigger(FileUiStateWrite::from_event(
+        commands.trigger(UiFileWrite::from_event(
             entity,
             &FileThemeEvent {
                 font_family,
@@ -211,7 +211,7 @@ fn send_file_view_mode(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(FileUiStateWrite::from_event(entity, &event));
+        commands.trigger(UiFileWrite::from_event(entity, &event));
         commands.entity(entity).insert(FileViewModeSent);
     }
     if mode.is_changed() || revision.is_changed() {
@@ -219,7 +219,7 @@ fn send_file_view_mode(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(FileUiStateWrite::from_event(entity, &event));
+            commands.trigger(UiFileWrite::from_event(entity, &event));
         }
     }
 }
@@ -238,7 +238,7 @@ fn send_file_keymap(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(FileUiStateWrite::from_event(entity, &event));
+        commands.trigger(UiFileWrite::from_event(entity, &event));
         commands.entity(entity).insert(FileKeymapSent);
     }
     if settings
@@ -249,7 +249,7 @@ fn send_file_keymap(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(FileUiStateWrite::from_event(entity, &event));
+            commands.trigger(UiFileWrite::from_event(entity, &event));
         }
     }
 }

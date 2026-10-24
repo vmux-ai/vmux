@@ -2,15 +2,15 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_ecs::page::PageReady;
 
-use crate::state::HistoryUiState;
+use crate::state::UiHistory;
 
-type HistoryUiStateUpdates = vmux_ecs::UiState<HistoryUiState>;
+type HistoryUiStateUpdates = vmux_ecs::UiState<UiHistory>;
 
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<HistoryUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiHistory>::default())
             .add_observer(page_ready);
     }
 }

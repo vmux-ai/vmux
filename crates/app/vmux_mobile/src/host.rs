@@ -10,26 +10,26 @@ use vmux_session::event::{
 };
 use vmux_session::host::{
     Attach, Attachments, Browsed, Conversation, Models, PublishComposerEffect, RemoveAttachment,
-    Reported, RepublishChatUiState, Submitted,
+    Reported, RepublishUiChat, Submitted,
 };
-use vmux_session::state::ChatUiState;
+use vmux_session::state::UiChat;
 use vmux_start::roster::RepublishLauncher;
 use vmux_team::roster::{Members, RepublishTeam};
 
 use crate::runtime::RuntimeHandle;
 use vmux_api::BinEvent;
 use vmux_api::command_bar::{
-    CommandBarUiState, DismissRequest as CommandBarDismissRequest,
-    ExRequest as CommandBarExRequest, InvokeRequest as CommandBarInvokeRequest,
-    OpenRequest as CommandBarOpenRequest, PickRequest as CommandBarPickRequest,
-    PromptRequest as CommandBarPromptRequest, SwitchTabRequest,
+    DismissRequest as CommandBarDismissRequest, ExRequest as CommandBarExRequest,
+    InvokeRequest as CommandBarInvokeRequest, OpenRequest as CommandBarOpenRequest,
+    PickRequest as CommandBarPickRequest, PromptRequest as CommandBarPromptRequest,
+    SwitchTabRequest, UiCommandBar,
 };
 use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
 use vmux_api::session::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
-use vmux_api::team::TeamUiState;
+use vmux_api::team::UiTeam;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::Platform;
@@ -178,20 +178,18 @@ impl PageHost for MobileHost {
 
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
         match id {
-            ChatUiState::ID => {
+            UiChat::ID => {
                 self.poll_models();
                 self.poll_media();
-                self.runtime
-                    .listen(ChatUiState::ID, on_bytes, RepublishChatUiState);
+                self.runtime.listen(UiChat::ID, on_bytes, RepublishUiChat);
             }
-            CommandBarUiState::ID => {
+            UiCommandBar::ID => {
                 self.runtime
-                    .listen(CommandBarUiState::ID, on_bytes, RepublishLauncher);
+                    .listen(UiCommandBar::ID, on_bytes, RepublishLauncher);
             }
-            TeamUiState::ID => {
+            UiTeam::ID => {
                 self.poll_team();
-                self.runtime
-                    .listen(TeamUiState::ID, on_bytes, RepublishTeam);
+                self.runtime.listen(UiTeam::ID, on_bytes, RepublishTeam);
             }
             _ => return Err(EventListenerError::Unsupported),
         }

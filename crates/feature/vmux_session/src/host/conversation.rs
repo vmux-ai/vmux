@@ -9,7 +9,7 @@ use vmux_api::session::{
 };
 
 use super::prompt::AttachmentPreviews;
-use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishUiChat};
 use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
 
 pub struct ChatConversationPlugin;
@@ -187,7 +187,7 @@ type ChangedChatProjection<'w, 's> = Query<
 >;
 
 fn emit_snapshot(
-    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut refreshes: MessageReader<RepublishUiChat>,
     mut runtimes: ChatProjectionOutput,
 ) {
     let refresh = refreshes.read().next().is_some();

@@ -362,7 +362,7 @@ fn publish_git_projects(
         commands
             .entity(entity)
             .insert(GitProjectsProjection(rows.0.clone()));
-        commands.trigger(UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+        commands.trigger(UiStateWrite::<vmux_git::state::UiGit>::from_event(
             entity,
             &vmux_git::state::GitProjects {
                 rows: rows.0.clone(),

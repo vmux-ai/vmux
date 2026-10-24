@@ -4,25 +4,25 @@ use crate::event::{
     ChatResumeState, ChatSelectorState, ChatSnapshot, ChatTranscriptState, ComposerContext,
     ModeState, ModelState, SessionDirectorySelection, SessionRepositories,
 };
-use vmux_api::mcp::McpServersUiState;
+use vmux_api::mcp::UiMcpServers;
 use vmux_session::{CatalogSnapshot, SessionSummary, StageSummary};
 
 use crate::event::SessionRepository;
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct SessionCatalogUiStatePatch {
+pub struct UiSessionCatalogPatch {
     pub catalog: Option<Box<CatalogSnapshot>>,
     pub repositories: Option<Box<SessionRepositories>>,
 }
 
-#[vmux_api::ui_state(Default, patch = SessionCatalogUiStatePatch, version = 1)]
-pub struct SessionCatalogUiState {
+#[vmux_api::ui_state(Default, patch = UiSessionCatalogPatch, version = 1)]
+pub struct UiSessionCatalog {
     pub catalog: CatalogSnapshot,
     pub repositories: SessionRepositories,
 }
 
-impl vmux_api::UiStateProjection<SessionCatalogUiStatePatch> for SessionCatalogUiState {
-    fn apply(&mut self, patch: SessionCatalogUiStatePatch) {
+impl vmux_api::UiStateProjection<UiSessionCatalogPatch> for UiSessionCatalog {
+    fn apply(&mut self, patch: UiSessionCatalogPatch) {
         if let Some(catalog) = patch.catalog {
             self.catalog = *catalog;
         }
@@ -32,7 +32,7 @@ impl vmux_api::UiStateProjection<SessionCatalogUiStatePatch> for SessionCatalogU
     }
 }
 
-impl SessionCatalogUiState {
+impl UiSessionCatalog {
     pub fn session(&self, id: &str) -> Option<&SessionSummary> {
         self.catalog
             .sessions
@@ -42,20 +42,20 @@ impl SessionCatalogUiState {
 }
 
 #[vmux_api::ui_state(Default, Eq)]
-pub struct SessionDetailUiState {
+pub struct UiSessionDetail {
     pub session: Option<SessionSummary>,
     pub repository: Option<SessionRepository>,
     pub stages: Vec<StageSummary>,
 }
 
 #[vmux_api::ui_state(Default, Eq)]
-pub struct SessionScopeUiState {
+pub struct UiSessionScope {
     pub sessions: Vec<SessionSummary>,
     pub stages: Vec<StageSummary>,
 }
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct ChatUiStatePatch {
+pub struct UiChatPatch {
     pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: Option<Box<ChatSnapshot>>,
     pub composer: Option<ComposerContext>,
@@ -73,11 +73,11 @@ pub struct ChatUiStatePatch {
     pub resume: Option<Box<ChatResumeState>>,
     pub composer_effect: Option<ChatComposerEffect>,
     pub prompt_focus: Option<ChatPromptFocusEffect>,
-    pub mcp: Option<Box<McpServersUiState>>,
+    pub mcp: Option<Box<UiMcpServers>>,
 }
 
-#[vmux_api::ui_state(Default, patch = ChatUiStatePatch, version = 4)]
-pub struct ChatUiState {
+#[vmux_api::ui_state(Default, patch = UiChatPatch, version = 4)]
+pub struct UiChat {
     pub session_directory: Option<SessionDirectorySelection>,
     pub snapshot: ChatSnapshot,
     pub snapshot_ready: bool,
@@ -99,11 +99,11 @@ pub struct ChatUiState {
     pub resume: ChatResumeState,
     pub composer_effect: ChatComposerEffect,
     pub prompt_focus: Option<ChatPromptFocusEffect>,
-    pub mcp: McpServersUiState,
+    pub mcp: UiMcpServers,
 }
 
-impl vmux_api::UiStateProjection<ChatUiStatePatch> for ChatUiState {
-    fn apply(&mut self, patch: ChatUiStatePatch) {
+impl vmux_api::UiStateProjection<UiChatPatch> for UiChat {
+    fn apply(&mut self, patch: UiChatPatch) {
         if let Some(session_directory) = patch.session_directory {
             self.session_directory = Some(session_directory);
         }

@@ -11,7 +11,7 @@ use crate::host::viewport::FileViewport;
 
 #[derive(Component, Clone, Debug)]
 #[require(
-    vmux_ecs::FileUiStateUpdates,
+    vmux_ecs::UiFileUpdates,
     FileDocumentRevision,
     crate::host::panel::FilePanel,
     crate::host::directory::FileDirectoryNavigation,

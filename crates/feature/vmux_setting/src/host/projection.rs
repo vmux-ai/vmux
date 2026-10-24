@@ -11,7 +11,7 @@ use crate::event::{CurrentUpdateCheckStatus, UpdateCheckStatus};
 use crate::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
 use crate::state::{
     SettingsBindingRow, SettingsRenderField, SettingsRenderFieldId, SettingsRenderFieldKind,
-    SettingsRenderItem, SettingsRenderItemId, SettingsSection, SettingsUiState,
+    SettingsRenderItem, SettingsRenderItemId, SettingsSection, UiSettings,
 };
 
 use super::state::{Settings, SettingsViewState};
@@ -21,7 +21,7 @@ pub(super) struct ProjectionPlugin;
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_status)
-            .add_plugins(vmux_ecs::UiStatePlugin::<SettingsUiState>::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<UiSettings>::default())
             .add_systems(
                 Update,
                 (localize_metadata, project_schema, project_fields, publish).chain(),
@@ -37,7 +37,7 @@ fn spawn_status(mut commands: Commands) {
 }
 
 #[derive(Component, Default)]
-pub(super) struct SettingsRenderProjection(SettingsUiState);
+pub(super) struct SettingsRenderProjection(UiSettings);
 
 impl SettingsRenderProjection {
     pub(super) fn field(&self, path: &str) -> Option<&SettingsRenderField> {
@@ -107,7 +107,7 @@ fn project_fields(
         {
             continue;
         }
-        let next = SettingsUiState::projected(&settings, &schema, &status.0, &locale, &view);
+        let next = UiSettings::projected(&settings, &schema, &status.0, &locale, &view);
         if projection.0 != next {
             projection.0 = next;
         }
@@ -122,14 +122,14 @@ fn publish(
         if !ready.is_changed() && !projection.is_changed() {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<SettingsUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiSettings>::from_event(
             entity,
             &projection.0,
         ));
     }
 }
 
-impl SettingsUiState {
+impl UiSettings {
     fn projected(
         settings: &AppSettings,
         schema: &SettingsSchema,
@@ -720,15 +720,14 @@ mod projection_tests {
     ];
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<SettingsUiState>);
+    struct Emitted(Vec<UiSettings>);
 
     fn record_settings_state(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>) {
-        if trigger.event().id() != SettingsUiState::id() {
+        if trigger.event().id() != UiSettings::id() {
             return;
         }
         let state =
-            rkyv::from_bytes::<SettingsUiState, rkyv::rancor::Error>(trigger.event().payload())
-                .unwrap();
+            rkyv::from_bytes::<UiSettings, rkyv::rancor::Error>(trigger.event().payload()).unwrap();
         emitted.0.push(state);
     }
 
