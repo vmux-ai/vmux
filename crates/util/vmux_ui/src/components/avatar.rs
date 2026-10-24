@@ -6,6 +6,7 @@ use vmux_api::avatar::IdenticonSpec;
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
 const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
 const AGENT_THUMBNAIL_FILLED: &str = "[&_img]:size-full [&_img]:object-cover";
+const AGENT_THUMBNAIL_CODEX: &str = "[&_img]:mix-blend-multiply";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -101,7 +102,15 @@ pub fn AgentThumbnail(
     } else {
         AGENT_THUMBNAIL
     };
-    let class = cn([image_class, class.as_str()]);
+    let blend_class = if src
+        .as_deref()
+        .is_some_and(AgentThumbnailBackground::image_has_white_backdrop)
+    {
+        AGENT_THUMBNAIL_CODEX
+    } else {
+        ""
+    };
+    let class = cn([image_class, blend_class, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
     }
@@ -134,6 +143,10 @@ impl AgentThumbnailBackground {
 
     fn image_is_filled(src: &str) -> bool {
         src.ends_with("/claude.png") || src.ends_with("/vibe.png")
+    }
+
+    fn image_has_white_backdrop(src: &str) -> bool {
+        src.to_ascii_lowercase().contains("codex")
     }
 }
 

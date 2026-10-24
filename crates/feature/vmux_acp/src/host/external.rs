@@ -71,6 +71,7 @@ pub(super) fn add(app: &mut App) {
 
 const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
 const SCAN_MAX_LATENCY: Duration = Duration::from_secs(2);
+const ACTIVITY_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const CATALOG_CONCURRENCY: usize = 2;
 const CATALOG_REQUEST_TIMEOUT: Duration = Duration::from_secs(32);
 const PROVIDER_READ_LIMIT: usize = 256 * 1024 * 1024;
@@ -996,8 +997,9 @@ impl SourceWatchEvents {
                     let mut changes = SourceChanges::default();
                     changes.insert(change);
                     let mut disconnected = false;
-                    while let Some(remaining) = SCAN_MAX_LATENCY.checked_sub(started.elapsed()) {
-                        let timeout = SCAN_DEBOUNCE.min(remaining);
+                    while let Some(remaining) = changes.max_latency().checked_sub(started.elapsed())
+                    {
+                        let timeout = changes.debounce().min(remaining);
                         match input_rx.recv_timeout(timeout) {
                             Ok(change) => changes.insert(change),
                             Err(mpsc::RecvTimeoutError::Timeout) => break,
@@ -1058,6 +1060,22 @@ impl SourceChanges {
 
     fn is_empty(&self) -> bool {
         self.scans.is_empty() && self.codex_activity.is_empty()
+    }
+
+    fn debounce(&self) -> Duration {
+        if self.codex_activity.is_empty() {
+            SCAN_DEBOUNCE
+        } else {
+            ACTIVITY_REFRESH_INTERVAL
+        }
+    }
+
+    fn max_latency(&self) -> Duration {
+        if self.codex_activity.is_empty() {
+            SCAN_MAX_LATENCY
+        } else {
+            ACTIVITY_REFRESH_INTERVAL
+        }
     }
 }
 
@@ -1970,7 +1988,7 @@ mod tests {
             changes: Mutex::new(receiver),
             watcher: notify::recommended_watcher(|_| {}).ok(),
             watched: HashMap::new(),
-            sources: SourceKind::all(),
+            sources: SourceKind::ALL.into_iter().collect(),
         };
 
         runtime.ensure_watches(&paths);
@@ -1995,7 +2013,7 @@ mod tests {
             changes: Mutex::new(receiver),
             watcher: notify::recommended_watcher(|_| {}).ok(),
             watched: HashMap::new(),
-            sources: SourceKind::all(),
+            sources: SourceKind::ALL.into_iter().collect(),
         };
 
         runtime.ensure_watches(&paths);

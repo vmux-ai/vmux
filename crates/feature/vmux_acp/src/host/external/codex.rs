@@ -1034,9 +1034,10 @@ mod tests {
         let messages = lines
             .into_iter()
             .filter_map(|line| {
+                let fallback_id = ConversationIdentity::of(line);
                 serde_json::from_str::<CodexConversationLine>(line)
                     .unwrap()
-                    .message()
+                    .message(fallback_id)
             })
             .collect::<Vec<_>>();
 
@@ -1117,8 +1118,9 @@ mod tests {
         ];
 
         for line in lines {
+            let fallback_id = ConversationIdentity::of(line);
             let line = serde_json::from_str::<CodexConversationLine>(line).unwrap();
-            assert!(line.message().is_none());
+            assert!(line.message(fallback_id).is_none());
         }
     }
 
@@ -1145,7 +1147,7 @@ mod tests {
         });
         let line = serde_json::from_value::<CodexConversationLine>(line).unwrap();
 
-        let Some(Message::User { text, attachments }) = line.message() else {
+        let Some(Message::User { text, attachments }) = line.message("fallback".into()) else {
             panic!()
         };
 

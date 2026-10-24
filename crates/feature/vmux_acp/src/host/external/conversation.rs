@@ -49,7 +49,7 @@ impl FileConversation {
         }
         let mut messages = VecDeque::new();
         let mut lines = BoundedLines::new(reader);
-        while let Some(line) = lines.next() {
+        for line in lines.by_ref() {
             for message in decoder.messages(&line) {
                 if tail && messages.len() == Self::TAIL_MESSAGES {
                     messages.pop_front();

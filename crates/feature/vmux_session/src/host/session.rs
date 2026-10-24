@@ -6,10 +6,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use super::composer::{ComposerSelectors, ComposerState};
-use super::group::ChatMessages;
 use super::key::{ChatListSelection, ChatSelectorProjection};
 use super::projection::ChatTurnProjection;
-use crate::activity::ActivityIcon;
 use crate::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_SIZE, ChatAttachment, ChatBranch,
     ChatBranchesState, ChatItem, ChatMediaState, ChatResumeState, ChatSnapshot,
@@ -33,8 +31,7 @@ use vmux_ecs::{
     PendingPromptAttachments,
 };
 use vmux_session::{
-    AgentConversationTitle, AgentId, ConversationEvent, CreateRequest, Created, EventIdentity,
-    MessageContent, PromptQueue, Route, RunState, Session, SessionId, Transcripts,
+    AgentConversationTitle, AgentId, CreateRequest, Created, PromptQueue, Route, Session, SessionId,
 };
 
 type ChatUiStateUpdates = UiState<ChatUiState>;
@@ -441,17 +438,13 @@ fn resume_agent_choice(
         .remove::<ChatSynced>();
 }
 
-const TAB_ACTIVITY_TAIL_ITEMS: usize = 1;
-
 type ChatSessions<'w, 's> = Query<
     'w,
     's,
     (
         Entity,
         Option<&'static AgentConversationTitle>,
-        &'static RunState,
         Option<&'static Profile>,
-        &'static AgentId,
     ),
     With<Session>,
 >;
@@ -464,24 +457,8 @@ type ChangedChatSessions<'w, 's> = Query<
         With<Session>,
         Or<(
             Changed<AgentConversationTitle>,
-            Changed<RunState>,
             Changed<Profile>,
-            Changed<AgentId>,
             Changed<Children>,
-        )>,
-    ),
->;
-
-type ChangedConversationEvents<'w, 's> = Query<
-    'w,
-    's,
-    &'static ChildOf,
-    (
-        With<ConversationEvent>,
-        Or<(
-            Added<ConversationEvent>,
-            Changed<EventIdentity>,
-            Changed<MessageContent>,
         )>,
     ),
 >;
@@ -489,21 +466,14 @@ type ChangedConversationEvents<'w, 's> = Query<
 fn report_tab_identity(
     sessions: ChatSessions,
     changed_sessions: ChangedChatSessions,
-    changed_events: ChangedConversationEvents,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
-    transcripts: Transcripts,
     views: Query<Option<&PageIdentity>, With<SessionView>>,
     mut commands: Commands,
 ) {
-    let mut changed = changed_sessions
-        .iter()
-        .collect::<std::collections::HashSet<_>>();
-    changed.extend(changed_events.iter().map(ChildOf::parent));
-    for session_entity in changed {
-        let Ok((_, title, state, profile, agent_id)) = sessions.get(session_entity) else {
+    for session_entity in &changed_sessions {
+        let Ok((_, title, profile)) = sessions.get(session_entity) else {
             continue;
         };
-        let transcript = transcripts.get(session_entity);
         for (target, children) in &stacks {
             if target.entity() != session_entity {
                 continue;
@@ -516,33 +486,16 @@ fn report_tab_identity(
                 if let Some(title) = title {
                     reported.title = Some(title.0.clone());
                 }
-                reported.icon = tab_activity_icon(&transcript.messages, state, profile, agent_id);
+                reported.icon = profile
+                    .and_then(|profile| profile.icon.as_deref())
+                    .filter(|icon| !icon.is_empty())
+                    .map(PageIcon::favicon);
                 if current != Some(&reported) {
                     commands.entity(child).insert(reported);
                 }
             }
         }
     }
-}
-
-fn tab_activity_icon(
-    messages: &[vmux_api::session::Message],
-    state: &RunState,
-    profile: Option<&Profile>,
-    agent_id: &AgentId,
-) -> Option<PageIcon> {
-    let running = matches!(state, RunState::Streaming);
-    let page = ChatMessages::new(&[], messages, &[], &[], running).tail(TAB_ACTIVITY_TAIL_ITEMS);
-    let activity = ChatTurnProjection::current_activity(&page.items, state.status())?;
-    let accent = crate::tab::Accent::for_agent(
-        profile
-            .map(|profile| profile.avatar.color.as_str())
-            .unwrap_or_default(),
-        &agent_id.0,
-    );
-    Some(PageIcon::favicon(
-        ActivityIcon::from(activity).favicon(&accent.css),
-    ))
 }
 
 #[derive(Component)]
@@ -783,7 +736,6 @@ pub struct ChatSynced;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::chat::{ChatBlock, ChatTurn};
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 
@@ -887,6 +839,14 @@ mod tests {
             app.update();
         }
 
+        fn icon(&self, app: &mut App, icon: &str) {
+            app.world_mut().entity_mut(self.session).insert(
+                vmux_ecs::team::Profile::registry("Codex", "codex")
+                    .with_icon(Some(icon.to_string())),
+            );
+            app.update();
+        }
+
         fn reported(&self, app: &App) -> vmux_ecs::PageIdentity {
             app.world()
                 .get::<vmux_ecs::PageIdentity>(self.view)
@@ -926,19 +886,12 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_agent_reports_no_icon_so_its_own_shows_through() {
+    fn agent_activity_keeps_the_acp_favicon_visible() {
         let mut app = App::new();
         let conversation = Conversation::start(&mut app);
-        conversation.run(&mut app, vmux_session::RunState::Idle);
-
-        assert_eq!(conversation.reported(&app).icon, None);
-    }
-
-    #[test]
-    fn the_icon_tracks_what_the_agent_is_doing() {
-        let mut app = App::new();
-        let conversation = Conversation::start(&mut app);
-
+        conversation.rename(&mut app, "working session");
+        conversation.icon(&mut app, "https://cdn.example/codex.svg");
+        let favicon = conversation.reported(&app).icon;
         conversation.run(
             &mut app,
             vmux_session::RunState::AwaitingApproval {
@@ -947,46 +900,11 @@ mod tests {
                 args: serde_json::Value::Null,
             },
         );
-        let awaiting = conversation.reported(&app).icon;
-        assert!(awaiting.is_some());
-
-        conversation.run(&mut app, vmux_session::RunState::Errored("boom".into()));
-        assert_ne!(conversation.reported(&app).icon, awaiting);
-
-        conversation.run(&mut app, vmux_session::RunState::Idle);
-        assert_eq!(conversation.reported(&app).icon, None);
-    }
-
-    #[test]
-    fn a_streaming_agent_is_read_from_the_last_block_of_the_running_turn() {
-        let mut thinking_turn = ChatTurn {
-            running: true,
-            blocks: vec![ChatBlock::Thinking(String::new())],
-            ..Default::default()
-        };
-        ChatTurnProjection::apply(&mut thinking_turn);
-        let thinking = ChatTurnProjection::current_activity(
-            &[vmux_api::chat::ChatItem::Turn(thinking_turn)],
-            "streaming",
-        )
-        .map(ActivityIcon::from);
-        let mut writing_turn = ChatTurn {
-            running: true,
-            blocks: vec![
-                ChatBlock::Thinking(String::new()),
-                ChatBlock::Text(String::new()),
-            ],
-            ..Default::default()
-        };
-        ChatTurnProjection::apply(&mut writing_turn);
-        let writing = ChatTurnProjection::current_activity(
-            &[vmux_api::chat::ChatItem::Turn(writing_turn)],
-            "streaming",
-        )
-        .map(ActivityIcon::from);
-
-        assert_eq!(thinking, Some(ActivityIcon::Thinking));
-        assert_eq!(writing, Some(ActivityIcon::Writing));
+        assert_eq!(conversation.reported(&app).icon, favicon);
+        assert_eq!(
+            favicon,
+            Some(vmux_api::PageIcon::favicon("https://cdn.example/codex.svg"))
+        );
     }
 
     #[test]

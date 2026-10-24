@@ -88,19 +88,6 @@ impl ChatTurnProjection {
         (subagents, tasks)
     }
 
-    pub(super) fn current_activity(items: &[ChatItem], status: &str) -> Option<ChatActivityKind> {
-        match status {
-            "installing" => Some(ChatActivityKind::Installing),
-            "awaiting" => Some(ChatActivityKind::Awaiting),
-            "errored" => Some(ChatActivityKind::Error),
-            "streaming" => items.iter().rev().find_map(|item| match item {
-                ChatItem::Turn(turn) if turn.running => Some(turn.activity.clone()),
-                _ => None,
-            }),
-            _ => None,
-        }
-    }
-
     fn project_row(
         turn: &ChatTurn,
         index: usize,

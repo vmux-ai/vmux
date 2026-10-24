@@ -484,7 +484,11 @@ mod wasm {
             return rsx! { BuiltinIconView { icon: *builtin, class: icon_class } };
         }
         let favicon_url = icon.favicon_url().to_string();
-        if url.starts_with("vmux://sessions/") && !favicon_url.is_empty() {
+        let session_detail = url
+            .strip_prefix("vmux://sessions/")
+            .and_then(|path| path.split(['?', '#']).next())
+            .is_some_and(|path| !path.trim_matches('/').is_empty());
+        if session_detail && !favicon_url.is_empty() {
             return rsx! {
                 span { class: "inline-flex {img_class}",
                     AgentThumbnail {
