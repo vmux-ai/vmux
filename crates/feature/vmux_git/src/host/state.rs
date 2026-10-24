@@ -393,20 +393,21 @@ fn cleanup_inactive_views(pages: ChangedGitPages, mut commands: Commands) {
     }
 }
 
-fn sync_selection(
-    pages: Query<
-        (
-            Entity,
-            &GitState,
-            &GitPageControllerState,
-            Option<&RepositoryPath>,
-            Option<&RepositoryName>,
-            Option<&ViewedBranch>,
-        ),
-        Or<(Changed<GitState>, Changed<GitPageControllerState>)>,
-    >,
-    mut commands: Commands,
-) {
+type ChangedGitSelections<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static GitState,
+        &'static GitPageControllerState,
+        Option<&'static RepositoryPath>,
+        Option<&'static RepositoryName>,
+        Option<&'static ViewedBranch>,
+    ),
+    Or<(Changed<GitState>, Changed<GitPageControllerState>)>,
+>;
+
+fn sync_selection(pages: ChangedGitSelections, mut commands: Commands) {
     for (entity, state, controller, current_path, current_name, current_branch) in &pages {
         let Some(repository) = state.repository() else {
             if current_path.is_some() || current_name.is_some() || current_branch.is_some() {
