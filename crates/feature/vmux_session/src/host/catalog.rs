@@ -331,7 +331,7 @@ fn update_description(
 fn change_stage(
     trigger: On<UiInput<SessionsStageChange>>,
     views: CatalogViews,
-    providers: Res<vmux_session::ProviderCatalog>,
+    providers: Res<ProviderCatalog>,
     mut requests: MessageWriter<StageChangeRequest>,
     mut provider_requests: MessageWriter<ProviderStageChangeRequest>,
 ) {
