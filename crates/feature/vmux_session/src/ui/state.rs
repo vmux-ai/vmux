@@ -645,7 +645,6 @@ pub struct Transcript {
     root: Signal<ChatUiState>,
     pub at_bottom: Signal<bool>,
     pub initial_follow: Signal<bool>,
-    pub last_top: Signal<i32>,
     pub scroll_container: scroll::Container,
     generation: Signal<u64>,
     follow_task: Signal<Option<Task>>,
@@ -656,7 +655,6 @@ pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
         root,
         at_bottom: use_signal(|| true),
         initial_follow: use_signal(|| true),
-        last_top: use_signal(|| 0),
         scroll_container: use_signal(|| None),
         generation: use_signal(|| 0),
         follow_task: use_signal(|| None),
@@ -681,8 +679,6 @@ impl Transcript {
             initial_follow.set(true);
             let mut at_bottom = self.at_bottom;
             at_bottom.set(true);
-            let mut last_top = self.last_top;
-            last_top.set(0);
         }
         if *self.initial_follow.peek() {
             scroll::settle_bottom(self.scroll_container, self.initial_follow, self.follow_task);

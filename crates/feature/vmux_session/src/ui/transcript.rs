@@ -3,6 +3,7 @@ use super::error::ChatErrorCard;
 use super::item::ChatItemRow;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
+use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::AgentAccent;
@@ -52,7 +53,6 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
     let mut at_bottom = chat.transcript.at_bottom;
-    let mut last_top = chat.transcript.last_top;
     let transcript = chat.transcript.current();
     let transcript_loading = chat.transcript_loading() || !chat.transcript.ready();
     let loaded_start = transcript.loaded_start;
@@ -77,19 +77,25 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
             },
             class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-8 pt-3 sm:px-4 md:px-6",
+            onwheel: move |event: Event<WheelData>| {
+                let delta = match event.data().delta() {
+                    WheelDelta::Pixels(delta) => delta.y,
+                    WheelDelta::Lines(delta) => delta.y,
+                    WheelDelta::Pages(delta) => delta.y,
+                };
+                if delta < 0.0 {
+                    at_bottom.set(false);
+                }
+            },
             onscroll: move |e: Event<ScrollData>| {
                 let top = e.scroll_top() as i32;
                 let dist = e.scroll_height() - top - e.client_height();
                 if *chat.transcript.initial_follow.peek() {
-                    last_top.set(top);
                     return;
                 }
                 if dist <= 48 {
                     at_bottom.set(true);
-                } else if top < *last_top.peek() - 4 {
-                    at_bottom.set(false);
                 }
-                last_top.set(top);
                 if top <= 160 {
                     chat.request_history();
                 }
