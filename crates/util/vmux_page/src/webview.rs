@@ -68,6 +68,7 @@ impl WebView {
         appearance: Appearance,
     ) -> Result<Self, wry::Error> {
         let dom = Dom::mount(page.component, instance, &embed);
+        let lifecycle = embed.lifecycle.clone();
         let current_page = Rc::new(Cell::new(page));
         let outbox = embed.outbox.clone();
         let message = PageMessage::new(
@@ -75,6 +76,7 @@ impl WebView {
             outbox.clone(),
             dom.reads(),
             embed.waker,
+            lifecycle,
         );
         let routes = PageRoutes::new(current_page.clone(), dom.clone(), embed.assets);
         let title_outbox = outbox.clone();
@@ -148,6 +150,12 @@ impl WebView {
 
     pub fn render(&self) {
         self.dom.flush_to_page();
+    }
+
+    pub fn evaluate_script(&self, script: &str) {
+        if let Err(error) = self.webview.evaluate_script(script) {
+            error!("vmux_page: script evaluation failed: {error}");
+        }
     }
 
     pub fn deliver(&self, id: &str, payload: &[u8]) {

@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-use crate::state::ToolProviderMetadata;
-use crate::ui::ToolsRouteSelector;
 use dioxus::prelude::*;
 use vmux_api::extension::*;
 use vmux_ui::components::alert_dialog::{
@@ -39,22 +37,16 @@ impl From<&ExtRow> for Approval {
 }
 
 #[component]
-pub(crate) fn ExtensionManager(
-    state: ExtensionsUiState,
-    providers: Vec<ToolProviderMetadata>,
-) -> Element {
+pub(crate) fn ExtensionManager(state: ExtensionsUiState) -> Element {
     let installing = &state.installing;
     let browse_query = state.query.clone();
 
     rsx! {
         ManagerToolbar {
-            ToolsRouteSelector {
-                active: "extensions".to_string(),
-                providers,
-            }
             ManagerSearch {
                 value: state.query.clone(),
                 placeholder: translate("extensions-search"),
+                minimal: true,
                 onsearch: move |query: String| {
                     let _ = send(&ExtFilterRequest { query });
                 },

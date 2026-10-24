@@ -152,10 +152,54 @@ fn finish_picks(mut pending: Query<(Entity, &mut PendingProjectPicker)>, mut com
 }
 
 #[derive(Resource, Default)]
-struct ActiveProjectRows {
+pub struct ActiveProjectRows {
     space: Option<String>,
     rows: Vec<ProjectRow>,
     repositories: Vec<ProjectRow>,
+}
+
+impl ActiveProjectRows {
+    pub fn layout_rows(&self, space: Option<&str>, source: &[ProjectRow]) -> Vec<ProjectRow> {
+        if self.space.as_deref() != space || self.rows.is_empty() {
+            return Self::active_source_rows(source);
+        }
+        let mut rows = Vec::new();
+        for root in &self.rows {
+            rows.push(root.clone());
+            if !root.is_active {
+                continue;
+            }
+            let Some(index) = source
+                .iter()
+                .position(|row| row.depth == 0 && row.path == root.path)
+            else {
+                continue;
+            };
+            rows.extend(
+                source
+                    .iter()
+                    .skip(index + 1)
+                    .take_while(|row| row.depth > 0)
+                    .cloned(),
+            );
+        }
+        rows
+    }
+
+    fn active_source_rows(source: &[ProjectRow]) -> Vec<ProjectRow> {
+        let Some(index) = source
+            .iter()
+            .position(|row| row.depth == 0 && row.is_active)
+        else {
+            return Vec::new();
+        };
+        source
+            .iter()
+            .skip(index)
+            .take_while(|row| row.depth > 0 || row.is_active)
+            .cloned()
+            .collect()
+    }
 }
 
 type ActiveProjectScanResult = (Option<String>, ProjectCatalog);
@@ -486,6 +530,10 @@ impl SpaceProjects<'_, '_> {
             return Vec::new();
         };
         self.rows_of(space_id, Some(space))
+    }
+
+    pub fn active_space_id(&self) -> Option<&str> {
+        self.active_space.id()
     }
 
     pub fn active_projects(&self) -> Vec<ProjectRow> {
@@ -1007,6 +1055,38 @@ mod tests {
                 .to_string_lossy()
         );
         assert!(catalog.rows[0].is_active);
+    }
+
+    #[test]
+    fn layout_rows_keep_only_catalog_roots_and_the_active_tree() {
+        let fixture = GitProjectRowsFixture::start();
+        let mut source = vec![
+            fixture.row(&fixture.cloud_worktree, true),
+            fixture.row(&fixture.cloud, false),
+            fixture.row(&fixture.cloud.join("client"), false),
+            fixture.row(&fixture.dashboard, false),
+        ];
+        let mut child = fixture.row(&fixture.cloud_worktree.join("src"), false);
+        child.depth = 1;
+        child.kind = ProjectRowKind::Directory;
+        source.insert(1, child.clone());
+        let catalog = ProjectCatalog::from_rows(&source);
+        let active = ActiveProjectRows {
+            space: Some("work".to_string()),
+            rows: catalog.rows,
+            repositories: catalog.repositories,
+        };
+
+        let rows = active.layout_rows(Some("work"), &source);
+
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.depth == 0)
+                .map(|row| row.label.as_str())
+                .collect::<Vec<_>>(),
+            ["vmux-cloud", "dashboard"]
+        );
+        assert!(rows.iter().any(|row| row.path == child.path));
     }
 
     #[test]

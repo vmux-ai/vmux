@@ -20,6 +20,8 @@ pub enum LifecycleUpdate {
     HostEventDelivered,
     ListenerRegistered,
     ListenersCleared,
+    DropdownOpened,
+    PageInteracted,
     MeasurementStarted,
     MeasurementFinished,
     MeasurementsCleared,

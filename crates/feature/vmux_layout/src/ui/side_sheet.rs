@@ -8,6 +8,7 @@ use vmux_ecs::event::space::{
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::dropdown::DropdownPopup;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::motion::Collapsible;
 use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -215,6 +216,7 @@ fn SideSheetSpaceCard(
     active_session: Option<ActiveSession>,
 ) -> Element {
     let mut expanded = use_signal(|| true);
+    let content_class = if expanded() { "overflow-visible" } else { "" };
     rsx! {
         div { class: SHEET_SECTION,
             SideSheetSpaceRow {
@@ -224,15 +226,11 @@ fn SideSheetSpaceCard(
                 expanded: expanded(),
                 on_toggle: move |_| expanded.set(!expanded()),
             }
-            div { class: if expanded() {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                },
-                div { class: if expanded() { "min-h-0 overflow-visible" } else { "min-h-0 overflow-hidden" },
-                    if let Some(session) = active_session {
-                        ActiveSessionPanel { session }
-                    }
+            Collapsible {
+                expanded: expanded(),
+                content_class: content_class.to_string(),
+                if let Some(session) = active_session {
+                    ActiveSessionPanel { session }
                 }
             }
         }
@@ -505,7 +503,6 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
     } else {
         translate("layout-unfold-stack")
     };
-    let collapsed_stack = pane.collapsed_stack.clone();
     rsx! {
         div { class: if pane.is_active && any_loading {
                 format!("group {SHEET_SECTION} pane-loading-ring")
@@ -549,21 +546,12 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
             }
             div { class: "pt-0.5",
                 div { class: "flex flex-col gap-0.5",
-                    if !expanded && let Some(stack) = collapsed_stack {
-                        SideSheetStackRow { stack, pane_id }
-                    }
-                    div { class: if expanded {
-                            "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                        } else {
-                            "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                        },
-                        div { class: "min-h-0 overflow-hidden",
-                            div { class: "flex flex-col",
-                                for stack in pane.stacks.iter() {
-                                    SideSheetStackRow { stack: stack.clone(), pane_id }
-                                }
-                                NewStackRow { pane_id }
+                    Collapsible { expanded,
+                        div { class: "flex flex-col",
+                            for stack in pane.stacks.iter() {
+                                SideSheetStackRow { stack: stack.clone(), pane_id }
                             }
+                            NewStackRow { pane_id }
                         }
                     }
                 }

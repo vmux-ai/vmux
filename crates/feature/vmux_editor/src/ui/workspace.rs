@@ -829,6 +829,16 @@ fn EditorWorkspace() -> Element {
 
             PaneWidth {}
 
+            EditorBreadcrumbs {
+                display_path: path(),
+                abs_path: breadcrumb_path,
+                repo_root: git_repo_root(),
+                branch: git_state().branch,
+                leaf_is_dir: mode() == Mode::Dir,
+                outline: breadcrumb_outline,
+                caret_line: breadcrumb_caret_line,
+            }
+
         div {
             class: "flex min-h-0 flex-1 flex-row overflow-hidden",
 
@@ -937,16 +947,6 @@ fn EditorWorkspace() -> Element {
                     }
                 },
                 {measure_wide_text}
-            }
-
-            EditorBreadcrumbs {
-                display_path: path(),
-                abs_path: breadcrumb_path,
-                repo_root: git_repo_root(),
-                branch: git_state().branch,
-                leaf_is_dir: mode() == Mode::Dir,
-                outline: breadcrumb_outline,
-                caret_line: breadcrumb_caret_line,
             }
 
             EditorHeader {

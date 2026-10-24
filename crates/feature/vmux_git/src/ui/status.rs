@@ -1,17 +1,16 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_api::command_bar::OpenRequest;
-use vmux_api::open_target::OpenTarget;
 use vmux_api::space::ProjectRow;
 use vmux_ecs::event::space::ProjectActivateRequest;
-use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
+use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
 use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 use crate::event::*;
 use crate::state::{GitBranchCollection, GitCatalogProgress, GitPanel, HeaderDropdown};
@@ -87,6 +86,40 @@ pub(super) fn RepositoryHeader(
         .first()
         .map(|commit| commit.sha.clone())
         .unwrap_or_default();
+    let git_url = crate::GitUrl::from_path(std::path::Path::new(&repository.repo_root))
+        .unwrap_or_else(|| crate::GIT_PAGE_URL.to_string());
+    let editor_url = vmux_path::FileUrl::from_path(
+        std::path::Path::new(&repository.repo_root),
+        None,
+        None,
+        None,
+    );
+    let page_options = vec![
+        BreadcrumbOption {
+            label: translate("git-title"),
+            value: git_url,
+            identity_seed: String::new(),
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+        },
+        BreadcrumbOption {
+            label: translate("editor-editor"),
+            value: editor_url,
+            identity_seed: String::new(),
+            icon: Some(vmux_api::BuiltinIcon::Files),
+        },
+        BreadcrumbOption {
+            label: translate("layout-projects"),
+            value: "vmux://projects/".to_string(),
+            identity_seed: String::new(),
+            icon: Some(vmux_api::BuiltinIcon::Project),
+        },
+        BreadcrumbOption {
+            label: translate("sessions-title"),
+            value: "vmux://sessions/".to_string(),
+            identity_seed: String::new(),
+            icon: Some(vmux_api::BuiltinIcon::MessagesRound),
+        },
+    ];
     let project_picker_dir = repository.repo_root.clone();
     let mut root_projects = projects
         .into_iter()
@@ -149,6 +182,22 @@ pub(super) fn RepositoryHeader(
                             },
                         }
                     }
+                }
+                BreadcrumbSeparator {}
+                BreadcrumbSelector {
+                    label: translate("git-title"),
+                    options: page_options,
+                    onselect: move |url| PageNavigation::replace(url),
+                }
+                BreadcrumbSeparator {}
+                ViewPicker {
+                    open_dropdown,
+                    focused_panel,
+                    changes: repository.files.len(),
+                    commits: repository.commits.len(),
+                    stashes: repository.stashes.len(),
+                    first_commit,
+                    commit_selected: selected_commit_entry.is_some(),
                 }
                 BreadcrumbSeparator {}
                 Dropdown {
@@ -313,17 +362,6 @@ pub(super) fn RepositoryHeader(
                         }
                     }
                 }
-                BreadcrumbSeparator {}
-                ViewPicker {
-                    open_dropdown,
-                    focused_panel,
-                    repository_root: repository.repo_root.clone(),
-                    changes: repository.files.len(),
-                    commits: repository.commits.len(),
-                    stashes: repository.stashes.len(),
-                    first_commit,
-                    commit_selected: selected_commit_entry.is_some(),
-                }
                 if focused_panel == GitPanel::Commits && selected_commit_entry.is_some() {
                     div { class: "flex min-w-0 items-center",
                         BreadcrumbSeparator {}
@@ -453,7 +491,6 @@ pub(super) fn RepositoryHeader(
 fn ViewPicker(
     open_dropdown: HeaderDropdown,
     focused_panel: GitPanel,
-    repository_root: String,
     changes: usize,
     commits: usize,
     stashes: usize,
@@ -550,48 +587,6 @@ fn ViewPicker(
                         count: stashes,
                         onselect: move |_| {
                             let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
-                        },
-                    }
-                    div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
-                    ViewPickerItem {
-                        active: false,
-                        icon: LineIcon::File,
-                        label: translate("editor-editor"),
-                        count: 0,
-                        onselect: move |_| {
-                            let _ = send(&OpenRequest {
-                                value: vmux_path::FileUrl::from_path(
-                                    std::path::Path::new(&repository_root),
-                                    None,
-                                    None,
-                                    None,
-                                ),
-                                open: Some(OpenTarget::InPlace),
-                            });
-                        },
-                    }
-                    ViewPickerItem {
-                        active: false,
-                        icon: LineIcon::Notebook,
-                        label: translate("layout-projects"),
-                        count: 0,
-                        onselect: move |_| {
-                            let _ = send(&OpenRequest {
-                                value: "vmux://projects/".to_string(),
-                                open: Some(OpenTarget::InPlace),
-                            });
-                        },
-                    }
-                    ViewPickerItem {
-                        active: false,
-                        icon: LineIcon::MessagesRound,
-                        label: translate("sessions-title"),
-                        count: 0,
-                        onselect: move |_| {
-                            let _ = send(&OpenRequest {
-                                value: "vmux://sessions/".to_string(),
-                                open: Some(OpenTarget::InPlace),
-                            });
                         },
                     }
                 }

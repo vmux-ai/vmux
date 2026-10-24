@@ -15,8 +15,8 @@ use crate::event::{
 #[cfg(test)]
 use crate::state::GitCatalogProgress;
 use crate::state::{
-    GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState, HeaderDropdown,
-    RepositoryName, RepositoryPath, ViewedBranch,
+    CheckedOutBranch, GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState,
+    HeaderDropdown, RepositoryName, RepositoryPath,
 };
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
@@ -388,7 +388,7 @@ fn cleanup_inactive_views(pages: ChangedGitPages, mut commands: Commands) {
         if !crate::GitUrl::is_page(&page.url) && !projects {
             commands
                 .entity(entity)
-                .remove::<(GitState, RepositoryPath, RepositoryName, ViewedBranch)>();
+                .remove::<(GitState, RepositoryPath, RepositoryName, CheckedOutBranch)>();
         }
     }
 }
@@ -399,31 +399,24 @@ type ChangedGitSelections<'w, 's> = Query<
     (
         Entity,
         &'static GitState,
-        &'static GitPageControllerState,
         Option<&'static RepositoryPath>,
         Option<&'static RepositoryName>,
-        Option<&'static ViewedBranch>,
+        Option<&'static CheckedOutBranch>,
     ),
-    Or<(Changed<GitState>, Changed<GitPageControllerState>)>,
+    Changed<GitState>,
 >;
 
 fn sync_selection(pages: ChangedGitSelections, mut commands: Commands) {
-    for (entity, state, controller, current_path, current_name, current_branch) in &pages {
+    for (entity, state, current_path, current_name, current_branch) in &pages {
         let Some(repository) = state.repository() else {
             if current_path.is_some() || current_name.is_some() || current_branch.is_some() {
                 commands
                     .entity(entity)
-                    .remove::<(RepositoryPath, RepositoryName, ViewedBranch)>();
+                    .remove::<(RepositoryPath, RepositoryName, CheckedOutBranch)>();
             }
             continue;
         };
-        let branch = if controller.focused_panel == crate::state::GitPanel::Branches
-            && !controller.selected_branch.is_empty()
-        {
-            controller.selected_branch.clone()
-        } else {
-            repository.branch.clone()
-        };
+        let branch = repository.branch.clone();
         let mut page = commands.entity(entity);
         if current_path.map(|path| path.0.as_str()) != Some(repository.repo_root.as_str()) {
             page.insert(RepositoryPath(repository.repo_root.clone()));
@@ -432,7 +425,7 @@ fn sync_selection(pages: ChangedGitSelections, mut commands: Commands) {
             page.insert(RepositoryName(repository.repo_name.clone()));
         }
         if current_branch.map(|current| current.0.as_str()) != Some(branch.as_str()) {
-            page.insert(ViewedBranch(branch));
+            page.insert(CheckedOutBranch(branch));
         }
     }
 }

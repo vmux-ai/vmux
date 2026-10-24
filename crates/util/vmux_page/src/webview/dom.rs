@@ -297,6 +297,11 @@ impl PageHost for SurfaceHost {
         });
     }
 
+    fn show_dropdown_popover(&self, element_id: &str) {
+        self.lifecycle.update(LifecycleUpdate::DropdownOpened);
+        self.show_element_popover(element_id);
+    }
+
     fn scroll_element_into_view(&self, element_id: &str) {
         self.request(DomRequest::ScrollIntoView {
             element: element_id.to_string(),

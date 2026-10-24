@@ -108,7 +108,7 @@ fn HeaderContent() -> Element {
                 WindowDragRegion {
                     id: "leading",
                     revision: tab_drag_region_revision.clone(),
-                    class: "h-10 shrink-0 self-stretch",
+                    class: "h-9 shrink-0 self-stretch",
                     style: "margin-left:min(56px,var(--vmux-tab-row-pad-left));width:max(0px,calc(var(--vmux-tab-row-pad-left) - 56px));",
                 }
                 if let Some(err) = tabs_error {
@@ -129,7 +129,7 @@ fn HeaderContent() -> Element {
                         WindowDragRegion {
                             id: "trailing",
                             revision: tab_drag_region_revision.clone(),
-                            class: "h-10 min-w-0 flex-1 self-stretch",
+                            class: "h-9 min-w-0 flex-1 self-stretch",
                             style: "",
                         }
                     }
@@ -261,13 +261,13 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         "cursor-pointer"
     };
     let tab_box_classes = cn([
-        "group relative flex h-10 w-[var(--tab-width)] min-w-[var(--tab-width)] max-w-[var(--tab-width)] basis-[var(--tab-width)] shrink-0 grow-0 select-none items-start",
+        "group relative flex h-9 w-[var(--tab-width)] min-w-[var(--tab-width)] max-w-[var(--tab-width)] basis-[var(--tab-width)] shrink-0 grow-0 select-none items-start",
         cursor_classes,
     ]);
     let inactive_hover_classes = if visual.active() {
         ""
     } else {
-        "hover:bg-card hover:text-foreground"
+        "bg-card/75 hover:bg-card hover:text-foreground"
     };
 
     let trunc = StackTitle::truncate_class(&display_title);
@@ -277,7 +277,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                 .to_string(),
             cn([
                 skirt_classes,
-                "mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "mt-1 flex h-8 w-full items-center gap-2 rounded-t-md border-b-0 px-3 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
             ]),
             cn([
                 "min-w-0 flex-1",
@@ -290,7 +290,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         (
             String::new(),
             cn([
-                "my-1 flex h-8 w-full items-center gap-2 rounded-lg px-3.5 text-muted-foreground transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "my-1 flex h-7 w-full items-center gap-2 rounded-lg px-3 text-muted-foreground transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
                 inactive_hover_classes,
             ]),
             cn([

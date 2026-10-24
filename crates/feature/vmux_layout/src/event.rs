@@ -94,7 +94,7 @@ fn default_window_pad() -> f32 {
     WINDOW_PAD_PX
 }
 
-pub const HEADER_HEIGHT_PX: f32 = 84.0;
+pub const HEADER_HEIGHT_PX: f32 = 76.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
 pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;

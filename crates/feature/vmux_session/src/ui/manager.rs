@@ -13,7 +13,7 @@ use vmux_ui::components::manager::{
     ManagerSidebarItem, ManagerSidebarSection, ManagerView, ManagerViewToggle, WorkspaceHeader,
     WorkspaceLayout,
 };
-use vmux_ui::components::motion::Collapse;
+use vmux_ui::components::motion::{Collapse, Collapsible};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{
@@ -667,28 +667,21 @@ fn SessionGroupContents(
     } else {
         "mt-1 space-y-1"
     };
-    let collapse_class = if collapsed {
-        "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-    } else {
-        "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-    };
     rsx! {
-        div { class: "{collapse_class}",
-            div { class: "min-h-0 overflow-hidden",
-                div { class: "{items_class}",
-                    for session in sessions.into_iter().take(visible) {
-                        SessionItem {
-                            key: "{session.id}",
-                            view,
-                            repository: repositories.get(&session.id),
-                            repository_ready: repositories.ready,
-                            stage: stage.clone(),
-                            session,
-                        }
+        Collapsible { expanded: !collapsed,
+            div { class: "{items_class}",
+                for session in sessions.into_iter().take(visible) {
+                    SessionItem {
+                        key: "{session.id}",
+                        view,
+                        repository: repositories.get(&session.id),
+                        repository_ready: repositories.ready,
+                        stage: stage.clone(),
+                        session,
                     }
-                    if visible < total {
-                        div { class: "h-1", onvisible: move |event| on_more.call(event) }
-                    }
+                }
+                if visible < total {
+                    div { class: "h-1", onvisible: move |event| on_more.call(event) }
                 }
             }
         }

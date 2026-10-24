@@ -193,7 +193,7 @@ pub fn ChatItemRow(
                 if let Some(context) = context {
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "agent-themed-activity flex h-5 w-5 shrink-0 items-center justify-center rounded-md",
+                            span { class: "flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/75",
                                 LineIconView { icon: LineIcon::Shield, class: "h-3 w-3" }
                             }
                             span { class: "font-medium", {translate("agent-prompt-context")} }
@@ -397,7 +397,7 @@ pub fn WorkingIndicator() -> Element {
 fn ToolArg(argument: ChatToolArgument) -> Element {
     let key = argument.name;
     let label = argument.label;
-    let row_class = "relative flex min-w-0 items-center gap-3 py-1.5 pl-1 before:absolute before:-left-3 before:top-1/2 before:h-px before:w-2 before:bg-foreground/20";
+    let row_class = "flex min-w-0 items-center gap-3 py-1.5";
     let label_class =
         "shrink-0 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground/80";
     match argument.value {
@@ -411,14 +411,14 @@ fn ToolArg(argument: ChatToolArgument) -> Element {
             }
         },
         ChatToolArgumentValue::Code(text) => rsx! {
-            div { class: "relative py-1.5 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+            div { class: "py-1.5",
                 if !key.is_empty() {
                     div { class: "mb-1.5 flex items-center gap-1.5 {label_class}",
                         span { class: "h-1.5 w-1.5 rounded-full bg-success/70" }
                         "{label}"
                     }
                 }
-                pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words border-l border-foreground/20 py-1 pl-3 font-mono text-[11px] leading-relaxed text-foreground/80", "{text}" }
+                pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-foreground/[0.035] px-2 py-1.5 font-mono text-[11px] leading-relaxed text-foreground/80", "{text}" }
             }
         },
         ChatToolArgumentValue::Text(text) => rsx! {
@@ -453,11 +453,11 @@ fn ToolArg(argument: ChatToolArgument) -> Element {
             }
         },
         ChatToolArgumentValue::List(values) => rsx! {
-            div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+            div { class: "py-1",
                 if !key.is_empty() {
                     div { class: "mb-1 {label_class}", "{label}" }
                 }
-                div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
+                div { class: "flex flex-col rounded-md bg-foreground/[0.025] px-2",
                     for value in values {
                         ToolArg { argument: value }
                     }
@@ -465,11 +465,11 @@ fn ToolArg(argument: ChatToolArgument) -> Element {
             }
         },
         ChatToolArgumentValue::Object(values) => rsx! {
-            div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+            div { class: "py-1",
                 if !key.is_empty() {
                     div { class: "mb-1 {label_class}", "{label}" }
                 }
-                div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
+                div { class: "flex flex-col rounded-md bg-foreground/[0.025] px-2",
                     for value in values {
                         ToolArg { argument: value }
                     }
@@ -492,14 +492,14 @@ fn ToolArguments(arguments: ChatToolArguments) -> Element {
     match arguments {
         ChatToolArguments::None => rsx! {},
         ChatToolArguments::Fields(fields) => rsx! {
-            div { class: "ml-1 mt-2 flex flex-col border-l border-foreground/20 pl-3", aria_label: "Tool arguments",
+            div { class: "mt-2 flex flex-col rounded-lg bg-foreground/[0.035] px-3 py-1", aria_label: "Tool arguments",
                 for argument in fields {
                     ToolArg { argument }
                 }
             }
         },
         ChatToolArguments::Value(value) => rsx! {
-            div { class: "ml-1 mt-2 border-l border-foreground/20 pl-3",
+            div { class: "mt-2 rounded-lg bg-foreground/[0.035] px-3 py-1",
                 ToolArg { argument: ChatToolArgument { name: String::new(), label: String::new(), value } }
             }
         },
@@ -551,7 +551,7 @@ fn ToolCall(call: ChatToolCall) -> Element {
                     ToolArguments { arguments: call.arguments.clone() }
                 }
                 if !children.is_empty() {
-                    div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
+                    div { class: "mt-1.5 flex flex-col gap-1 rounded-lg bg-foreground/[0.025] px-2 py-1",
                         for child in children {
                             ToolChild { key: "{child.index()}", child }
                         }
@@ -627,7 +627,7 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
                     }
                 }
                 if !children.is_empty() {
-                    div { class: "agent-context-tree ml-0.5 mt-2 flex flex-col gap-1 border-l border-violet-500/25 pl-3",
+                    div { class: "mt-2 flex flex-col gap-1 rounded-lg bg-foreground/[0.025] px-2 py-1",
                         for child in children {
                             ToolChild { key: "{child.index()}", child }
                         }
@@ -817,14 +817,14 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
     let key = result_key;
     let content = content.as_str();
     let tone = if is_error {
-        "text-red-600 dark:text-red-300"
+        "text-red-500"
     } else {
-        "text-teal-700/80 dark:text-teal-300/80"
+        "text-foreground/70"
     };
     let panel = if is_error {
         "bg-red-500/[0.045] ring-red-500/15"
     } else {
-        "bg-teal-500/[0.035] ring-teal-500/10"
+        "bg-foreground/[0.045] ring-foreground/[0.06]"
     };
     let label = if is_error {
         translate("common-error")
@@ -847,19 +847,19 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     let key = result_key;
     let content = content.as_str();
     let tone = if is_error {
-        "text-red-600 dark:text-red-300"
+        "text-red-500"
     } else {
-        "text-teal-700/80 dark:text-teal-300/80"
+        "text-foreground/70"
     };
     let panel = if is_error {
         "bg-red-500/[0.045] ring-red-500/15"
     } else {
-        "bg-teal-500/[0.035] ring-teal-500/10"
+        "bg-foreground/[0.045] ring-foreground/[0.06]"
     };
     let row = if is_error {
         "hover:bg-red-500/[0.035]"
     } else {
-        "hover:bg-teal-500/[0.035]"
+        "hover:bg-foreground/[0.025]"
     };
     let label = if is_error {
         translate("common-error")

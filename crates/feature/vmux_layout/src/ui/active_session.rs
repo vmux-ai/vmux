@@ -6,6 +6,7 @@ use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::dropdown::DropdownPopup;
+use vmux_ui::components::motion::Collapsible;
 use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::tree_row::{FileTreeRow, FileTreeRowGroup};
@@ -249,7 +250,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
             div {
                 role: "button",
                 tabindex: "0",
-                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-3 text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5 @max-[12rem]:px-1.5",
+                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5",
                 aria_expanded: expanded,
                 onclick: move |_| {
                     let _ = send(&SideSheetSectionRequest::new(
@@ -291,18 +292,12 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            div { class: if expanded {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                },
-                div { class: "min-h-0 overflow-hidden pb-1",
-                    for child in children {
-                        ActiveWorkspaceProjectRow {
-                            key: "{child.path}",
-                            project: child,
-                            pane_id,
-                        }
+            Collapsible { expanded, content_class: "pb-1".to_string(),
+                for child in children {
+                    ActiveWorkspaceProjectRow {
+                        key: "{child.path}",
+                        project: child,
+                        pane_id,
                     }
                 }
             }

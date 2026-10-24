@@ -21,7 +21,7 @@ pub struct RepositoryPath(pub String);
 pub struct RepositoryName(pub String);
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub struct ViewedBranch(pub String);
+pub struct CheckedOutBranch(pub String);
 
 impl GitPanel {
     pub fn from_key(key: &str) -> Option<Self> {

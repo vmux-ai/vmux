@@ -14,6 +14,7 @@ use vmux_ecs::PageMetadata;
 use vmux_ui::components::context_menu::ContextMenuTrigger;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::motion::Collapsible;
 use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::tree_row::{
     FILE_TREE_COLUMN, FILE_TREE_SCROLLER, FileTreeRow, FileTreeRowGroup,
@@ -116,13 +117,8 @@ pub(super) fn BookmarksSection(
                     }
                 }
             }
-            div { class: if expanded {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                },
-                div { class: "overflow-hidden",
-                    div { class: "px-1.5 pb-0 pt-0.5",
+            Collapsible { expanded,
+                div { class: "px-1.5 pb-0 pt-0.5",
                         if !pins.is_empty() {
                             div {
                                 "data-bookmark-drop": "",
@@ -177,7 +173,6 @@ pub(super) fn BookmarksSection(
                             }
                             }
                         }
-                    }
                 }
             }
         }

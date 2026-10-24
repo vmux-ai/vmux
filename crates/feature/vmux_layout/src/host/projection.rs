@@ -465,7 +465,7 @@ struct GitSelectionProjection<'w, 's> {
             &'static ChildOf,
             &'static vmux_git::state::RepositoryPath,
             &'static vmux_git::state::RepositoryName,
-            &'static vmux_git::state::ViewedBranch,
+            &'static vmux_git::state::CheckedOutBranch,
         ),
         With<Browser>,
     >,
@@ -478,13 +478,13 @@ struct GitSelectionProjection<'w, 's> {
             Or<(
                 Changed<vmux_git::state::RepositoryPath>,
                 Changed<vmux_git::state::RepositoryName>,
-                Changed<vmux_git::state::ViewedBranch>,
+                Changed<vmux_git::state::CheckedOutBranch>,
             )>,
         ),
     >,
     removed_paths: RemovedComponents<'w, 's, vmux_git::state::RepositoryPath>,
     removed_names: RemovedComponents<'w, 's, vmux_git::state::RepositoryName>,
-    removed_branches: RemovedComponents<'w, 's, vmux_git::state::ViewedBranch>,
+    removed_branches: RemovedComponents<'w, 's, vmux_git::state::CheckedOutBranch>,
 }
 
 impl GitSelectionProjection<'_, '_> {

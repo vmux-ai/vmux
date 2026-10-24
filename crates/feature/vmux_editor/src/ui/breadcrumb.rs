@@ -4,10 +4,14 @@ use dioxus::prelude::*;
 use std::path::Path;
 use vmux_ecs::event::*;
 use vmux_ui::components::avatar::Identicon;
-use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator, Breadcrumbs};
+use vmux_ui::components::breadcrumb::{
+    BreadcrumbItem, BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator, Breadcrumbs,
+};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
+use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 use super::explorer::OutlineGlyph;
 use super::state::FileUi;
@@ -40,6 +44,35 @@ pub fn EditorBreadcrumbs(
         .unwrap_or_default()
         .to_string();
     let git_url = vmux_git::GitUrl::from_path(Path::new(&repo_root));
+    let editor_url = vmux_path::FileUrl::from_path(Path::new(&abs_path), None, None, None);
+    let mut page_options = vec![BreadcrumbOption {
+        label: translate("editor-editor"),
+        value: editor_url,
+        identity_seed: String::new(),
+        icon: Some(vmux_api::BuiltinIcon::Files),
+    }];
+    if let Some(git_url) = git_url.clone() {
+        page_options.push(BreadcrumbOption {
+            label: translate("git-title"),
+            value: git_url,
+            identity_seed: String::new(),
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+        });
+    }
+    page_options.extend([
+        BreadcrumbOption {
+            label: translate("layout-projects"),
+            value: "vmux://projects/".to_string(),
+            identity_seed: String::new(),
+            icon: Some(vmux_api::BuiltinIcon::Project),
+        },
+        BreadcrumbOption {
+            label: translate("sessions-title"),
+            value: "vmux://sessions/".to_string(),
+            identity_seed: String::new(),
+            icon: Some(vmux_api::BuiltinIcon::MessagesRound),
+        },
+    ]);
 
     rsx! {
         div {
@@ -60,6 +93,12 @@ pub fn EditorBreadcrumbs(
                 }
                 BreadcrumbSeparator {}
             }
+            BreadcrumbSelector {
+                label: translate("editor-editor"),
+                options: page_options,
+                onselect: move |url| PageNavigation::replace(url),
+            }
+            BreadcrumbSeparator {}
             if !branch.is_empty() {
                 BreadcrumbItem {
                     label: branch,
@@ -134,6 +173,7 @@ pub fn EditorBreadcrumbs(
                                         class: if last { "truncate text-foreground/90" } else { "truncate" },
                                         "{label}"
                                     }
+                                    LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 opacity-55".to_string() }
                                 }
                                 if !last {
                                     CrumbChevron {}
@@ -152,6 +192,7 @@ pub fn EditorBreadcrumbs(
                         let line = crumb.row.line;
                         let name = crumb.row.name.clone();
                         let kind = crumb.row.kind;
+                        let has_siblings = rows.len() > 1;
                         rsx! {
                             span {
                                 key: "{line}-{name}",
@@ -176,6 +217,9 @@ pub fn EditorBreadcrumbs(
                                     },
                                     OutlineGlyph { kind }
                                     span { class: "truncate", "{name}" }
+                                    if has_siblings {
+                                        LineIconView { icon: LineIcon::ChevronDown, class: "ml-1 size-3 shrink-0 opacity-55".to_string() }
+                                    }
                                 }
                             }
                         }

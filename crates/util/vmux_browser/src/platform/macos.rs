@@ -142,6 +142,7 @@ fn apply_metadata(receiver: Single<&PageMetadataReceiver>, mut pages: Query<&mut
 
 fn apply_lifecycle(
     receiver: Single<&PageLifecycleReceiver>,
+    renderer: Option<NonSend<PageRenderer>>,
     mut pages: Query<&mut crate::HostedPageLifecycle>,
 ) {
     while let Ok(envelope) = receiver.0.try_recv() {
@@ -170,6 +171,18 @@ fn apply_lifecycle(
                 page.listeners = page.listeners.saturating_add(1);
             }
             LifecycleUpdate::ListenersCleared => page.listeners = 0,
+            LifecycleUpdate::DropdownOpened | LifecycleUpdate::PageInteracted => {
+                if let Some(renderer) = renderer.as_ref() {
+                    for (entity, surface) in &renderer.0 {
+                        if *entity == envelope.webview {
+                            continue;
+                        }
+                        let _ = surface.evaluate_script(
+                            "for (const popup of document.querySelectorAll('[data-vmux-dropdown-popup]:popover-open')) popup.hidePopover();",
+                        );
+                    }
+                }
+            }
             LifecycleUpdate::MeasurementStarted => {
                 page.measurements = page.measurements.saturating_add(1);
             }

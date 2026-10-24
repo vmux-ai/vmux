@@ -165,7 +165,7 @@ fn RevisionDiffCard(
     let empty_path = use_signal(String::new);
     let identity = title.clone();
     rsx! {
-        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-card/60 ring-1 ring-inset ring-foreground/[0.10]",
+        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-transparent",
             if show_header {
                 div { class: "flex min-h-12 shrink-0 items-center gap-2.5 bg-foreground/[0.025] px-3",
                     if file_path.is_empty() {
@@ -223,7 +223,7 @@ pub(super) fn DiffCard(
     loading: bool,
 ) -> Element {
     rsx! {
-        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-card/60 ring-1 ring-inset ring-foreground/[0.10]",
+        section { class: "flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-transparent",
             div { class: "flex h-10 shrink-0 items-center gap-2 bg-card/45 px-3",
                 TypeIcon { path: selected_path(), is_dir: false, class: "size-3.5 shrink-0" }
                 span { class: "min-w-0 flex-1 truncate font-mono text-[11px] font-medium",

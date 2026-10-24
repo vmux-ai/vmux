@@ -309,6 +309,11 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       window.ipc.postMessage('link:' + href);
     });
   };
+  const reportInteractions = () => {
+    document.addEventListener('pointerdown', () => {
+      window.ipc.postMessage('interaction:');
+    }, true);
+  };
   const reportFavicon = () => {
     const icon = document.querySelector('link[rel~="icon"][href]');
     window.ipc.postMessage('favicon:' + (icon ? icon.href : ''));
@@ -328,6 +333,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       if (started) return;
       started = true;
       holdLinks();
+      reportInteractions();
       watchFavicon();
       pumpEdits();
     },

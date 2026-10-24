@@ -5,8 +5,6 @@ use vmux_api::avatar::IdenticonSpec;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
 const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
-const AGENT_THUMBNAIL_FILLED: &str = "[&_img]:size-full [&_img]:object-cover";
-const AGENT_THUMBNAIL_CODEX: &str = "[&_img]:mix-blend-multiply";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -94,23 +92,7 @@ pub fn AgentThumbnail(
 ) -> Element {
     let src = AgentThumbnailSource::resolve(src, &seed);
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
-    let image_class = if src
-        .as_deref()
-        .is_some_and(AgentThumbnailBackground::image_is_filled)
-    {
-        AGENT_THUMBNAIL_FILLED
-    } else {
-        AGENT_THUMBNAIL
-    };
-    let blend_class = if src
-        .as_deref()
-        .is_some_and(AgentThumbnailBackground::image_has_white_backdrop)
-    {
-        AGENT_THUMBNAIL_CODEX
-    } else {
-        ""
-    };
-    let class = cn([image_class, blend_class, class.as_str()]);
+    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
     }
@@ -143,21 +125,13 @@ struct AgentThumbnailBackground;
 
 impl AgentThumbnailBackground {
     fn resolve(background: &str, seed: &str, src: Option<&str>) -> String {
+        if src.is_some() {
+            return "var(--muted)".to_string();
+        }
         if !background.trim().is_empty() {
             return background.to_string();
         }
-        if let Some(color) = src.and_then(vmux_api::avatar::AvatarSpec::brand_color) {
-            return color.to_string();
-        }
         vmux_api::avatar::AvatarSpec::agent_color(seed)
-    }
-
-    fn image_is_filled(src: &str) -> bool {
-        src.ends_with("/claude.png") || src.ends_with("/vibe.png")
-    }
-
-    fn image_has_white_backdrop(src: &str) -> bool {
-        src.to_ascii_lowercase().contains("codex")
     }
 }
 
@@ -303,18 +277,18 @@ mod tests {
     }
 
     #[test]
-    fn agent_thumbnail_uses_the_brand_in_its_icon_url_before_the_page_title() {
+    fn agent_thumbnail_uses_a_neutral_surface_behind_logos() {
         assert_eq!(
             AgentThumbnailBackground::resolve(
                 "",
                 "hey",
                 Some("https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg")
             ),
-            "#ff7000"
+            "var(--muted)"
         );
         assert_eq!(
             AgentThumbnailBackground::resolve("#123456", "hey", Some("mistral-vibe.svg")),
-            "#123456"
+            "var(--muted)"
         );
     }
 

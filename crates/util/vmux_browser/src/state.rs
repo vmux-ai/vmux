@@ -839,13 +839,15 @@ fn push_pane_tree_emit(
 fn push_projects_host_emit(
     mut projection: LayoutProjection,
     space_projects: SpaceProjects,
+    active_projects: Res<vmux_space::ActiveProjectRows>,
     mut repo_info: Option<Single<&mut RepoInfoCache>>,
 ) {
     let Some(target) = projection.target() else {
         return;
     };
     let cef_e = target.entity;
-    let mut projects = space_projects.active_rows();
+    let source = space_projects.active_rows();
+    let mut projects = active_projects.layout_rows(space_projects.active_space_id(), &source);
     for row in &mut projects {
         let display_path = match row.display_path.is_empty() {
             true => &row.path,

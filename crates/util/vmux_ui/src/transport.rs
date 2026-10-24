@@ -12,6 +12,10 @@ pub trait PageHost {
 
     fn show_element_popover(&self, _element_id: &str) {}
 
+    fn show_dropdown_popover(&self, element_id: &str) {
+        self.show_element_popover(element_id);
+    }
+
     fn scroll_element_into_view(&self, _element_id: &str) {}
 
     fn scroll_element_into_view_vertical(&self, _element_id: &str) {}
@@ -89,6 +93,10 @@ impl Host {
 
     pub(crate) fn show_element_popover(id: &str) {
         let _ = Self::with_installed(|host| host.show_element_popover(id));
+    }
+
+    pub(crate) fn show_dropdown_popover(id: &str) {
+        let _ = Self::with_installed(|host| host.show_dropdown_popover(id));
     }
 
     pub(crate) fn select_element_text(id: &str) {

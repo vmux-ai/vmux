@@ -331,6 +331,7 @@ pub fn ManagerSearch(
     value: String,
     placeholder: String,
     #[props(default)] autofocus: bool,
+    #[props(default)] minimal: bool,
     #[props(default)] onsearch: Option<EventHandler<String>>,
     #[props(default)] ondebounced: Option<EventHandler<String>>,
     #[props(default = 150)] debounce_ms: u32,
@@ -350,8 +351,13 @@ pub fn ManagerSearch(
             task.cancel();
         }
     });
+    let class = if minimal {
+        "relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 px-0.5"
+    } else {
+        "relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md bg-foreground/[0.025] px-2.5 ring-1 ring-inset ring-foreground/[0.08] focus-within:bg-foreground/[0.05] focus-within:ring-foreground/[0.16]"
+    };
     rsx! {
-        div { class: "relative z-30 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md bg-foreground/[0.025] px-2.5 ring-1 ring-inset ring-foreground/[0.08] focus-within:bg-foreground/[0.05] focus-within:ring-foreground/[0.16]",
+        div { class,
             LineIconView {
                 icon: LineIcon::Search,
                 class: "size-3.5 shrink-0 text-muted-foreground",

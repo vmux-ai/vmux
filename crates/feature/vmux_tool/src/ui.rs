@@ -12,13 +12,14 @@ use crate::state::{
 use dioxus::prelude::*;
 use vmux_api::extension::ExtensionsUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
-use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
+use vmux_ui::components::breadcrumb::{
+    BreadcrumbItem, BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator, Breadcrumbs,
+};
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerControls,
-    ManagerDetails, ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
-    ManagerSection, ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView,
-    ManagerViewToggle,
+    ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
+    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSection,
+    ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView, ManagerViewToggle,
+    WorkspaceHeader,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -43,10 +44,12 @@ pub fn Page() -> Element {
     rsx! {
         document::Title { "{title}" }
         ManagerPage {
+            ToolsHeader {
+                active: route.clone(),
+                providers: state.snapshot.providers.clone(),
+            }
             if route == "extensions" {
-                ExtensionsRoute {
-                    providers: state.snapshot.providers,
-                }
+                ExtensionsRoute {}
             } else {
                 ToolManager { state }
             }
@@ -55,12 +58,11 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn ExtensionsRoute(providers: Vec<ToolProviderMetadata>) -> Element {
+fn ExtensionsRoute() -> Element {
     let extensions = use_ui_state::<ExtensionsUiState>().state;
     rsx! {
         ExtensionManager {
             state: extensions(),
-            providers,
         }
     }
 }
@@ -123,9 +125,34 @@ struct ToolRouteOption {
     id: String,
     label: String,
     url: String,
+    icon: vmux_api::BuiltinIcon,
+}
+
+impl From<ToolRouteOption> for BreadcrumbOption {
+    fn from(option: ToolRouteOption) -> Self {
+        Self {
+            label: option.label,
+            value: option.url,
+            identity_seed: String::new(),
+            icon: Some(option.icon),
+        }
+    }
 }
 
 impl ToolRouteOption {
+    fn icon(route: &str) -> vmux_api::BuiltinIcon {
+        match route {
+            "acp" => vmux_api::BuiltinIcon::Sparkles,
+            "lsp" => vmux_api::BuiltinIcon::Brain,
+            "homebrew" => vmux_api::BuiltinIcon::Hammer,
+            "npm" => vmux_api::BuiltinIcon::Layers,
+            "mcp" => vmux_api::BuiltinIcon::Server,
+            "dotfiles" => vmux_api::BuiltinIcon::Files,
+            "extensions" => vmux_api::BuiltinIcon::Puzzle,
+            _ => vmux_api::BuiltinIcon::Toolbox,
+        }
+    }
+
     fn all(providers: Vec<ToolProviderMetadata>) -> Vec<Self> {
         let mut options = Vec::new();
         let mut seen = BTreeSet::new();
@@ -135,16 +162,19 @@ impl ToolRouteOption {
             }
             let route = ToolRoute::named(provider.route.clone());
             let label = provider.localized_route_title();
+            let icon = Self::icon(&provider.route);
             options.push(Self {
                 id: provider.route,
                 label,
                 url: route.url(),
+                icon,
             });
         }
         options.push(Self {
             id: "extensions".to_string(),
             label: translate("extensions-title"),
             url: crate::EXTENSIONS_URL.to_string(),
+            icon: Self::icon("extensions"),
         });
         options
     }
@@ -159,59 +189,44 @@ impl ToolRouteOption {
 }
 
 #[component]
-pub fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
-    let mut open = use_signal(|| false);
+fn ToolsHeader(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
     let options = ToolRouteOption::all(providers);
     let selected_label = options
         .iter()
         .find(|option| option.id == active)
         .map(|option| option.label.clone())
         .unwrap_or_else(|| translate("tools-title"));
+    let selected_icon = options
+        .iter()
+        .find(|option| option.id == active)
+        .map(|option| option.icon)
+        .unwrap_or(vmux_api::BuiltinIcon::Toolbox);
     rsx! {
-        nav { class: "flex min-w-0 shrink-0 items-center text-xs",
-            span { class: "px-1.5 font-medium text-muted-foreground", {translate("tools-title")} }
-            BreadcrumbSeparator {}
-            Dropdown {
-                open: open(),
-                class: "min-w-0 shrink-0".to_string(),
-                on_dismiss: move |_| open.set(false),
-                button {
-                    r#type: "button",
-                    class: "flex h-7 min-w-0 max-w-40 items-center gap-1 rounded-md px-1.5 font-semibold text-foreground transition-colors hover:bg-foreground/[0.045]",
-                    aria_expanded: open(),
-                    onclick: move |_| open.set(!open()),
-                    span { class: "min-w-0 truncate text-left", "{selected_label}" }
-                    LineIconView {
-                        icon: LineIcon::ChevronDown,
-                        class: if open() {
-                            "size-3 shrink-0 rotate-180 text-muted-foreground transition-transform".to_string()
-                        } else {
-                            "size-3 shrink-0 text-muted-foreground transition-transform".to_string()
-                        },
-                    }
-                }
-                if open() {
-                    DropdownPopup { class: "w-48 p-1",
-                        for option in options {
-                            button {
-                                key: "{option.id}",
-                                r#type: "button",
-                                class: if option.id == active {
-                                    "flex w-full items-center gap-2 rounded-md bg-foreground/[0.07] px-2 py-1.5 text-left text-[11px] text-foreground"
-                                } else {
-                                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
-                                },
-                                onclick: move |_| {
-                                    open.set(false);
-                                    let _ = send(&ToolsNavigateRequest { url: option.url.clone() });
-                                },
-                                span { class: "min-w-0 flex-1 truncate", "{option.label}" }
-                                if option.id == active {
-                                    LineIconView { icon: LineIcon::Check, class: "size-3 shrink-0".to_string() }
-                                }
-                            }
+        WorkspaceHeader {
+            Breadcrumbs { class: "min-w-0 flex-1".to_string(),
+                BreadcrumbItem {
+                    label: translate("tools-title"),
+                    leading: rsx! {
+                        vmux_ui::icon::BuiltinIconView {
+                            icon: vmux_api::BuiltinIcon::Toolbox,
+                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
                         }
-                    }
+                    },
+                }
+                BreadcrumbSeparator {}
+                BreadcrumbSelector {
+                    label: selected_label,
+                    active: true,
+                    leading: rsx! {
+                        vmux_ui::icon::BuiltinIconView {
+                            icon: selected_icon,
+                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                        }
+                    },
+                    options: options.into_iter().map(Into::into).collect(),
+                    onselect: move |url| {
+                        let _ = send(&ToolsNavigateRequest { url });
+                    },
                 }
             }
         }
@@ -279,13 +294,10 @@ fn ToolManager(state: ToolsUiState) -> Element {
     });
     rsx! {
         ManagerToolbar {
-            ToolsRouteSelector {
-                active: view.route.clone(),
-                providers: snapshot.providers.clone(),
-            }
             ManagerSearch {
                 value: view.query.clone(),
                 placeholder: translate("tools-search"),
+                minimal: true,
                 onsearch: move |query: String| {
                     let _ = send(&ToolsFilterRequest { query });
                 },
@@ -310,19 +322,17 @@ fn ToolManager(state: ToolsUiState) -> Element {
                     {translate("tools-apply")}
                 }
             }
+            if snapshot.loaded && view.visible_count > 0 {
+                ManagerViewToggle {
+                    view: manager_view(),
+                    list_label: translate("tools-view-list"),
+                    grid_label: translate("tools-view-grid"),
+                    onchange: move |view| manager_view.set(view),
+                }
+            }
         }
         div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
             ManagerList {
-                    if snapshot.loaded && view.visible_count > 0 {
-                        ManagerControls {
-                            ManagerViewToggle {
-                                view: manager_view(),
-                                list_label: translate("tools-view-list"),
-                                grid_label: translate("tools-view-grid"),
-                                onchange: move |view| manager_view.set(view),
-                            }
-                        }
-                    }
                     if view.show_brewfile {
                         HomebrewSourceCard {
                             root: snapshot.root.clone(),

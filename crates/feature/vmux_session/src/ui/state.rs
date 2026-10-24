@@ -169,7 +169,7 @@ impl Chat {
         let chat = *self;
         use_effect(move || PromptFocus::end(PROMPT_INPUT_ID));
         use_effect(move || {
-            let _ = chat.transcript.current().items.len();
+            let _ = chat.transcript.revision();
             let _ = chat.run.status();
             chat.transcript.follow();
         });
@@ -675,6 +675,10 @@ impl Transcript {
 
     pub fn ready(self) -> bool {
         self.root.read().transcript_revision > 0
+    }
+
+    pub fn revision(self) -> u64 {
+        self.root.read().transcript_revision
     }
 
     pub(super) fn note_scroll_input(self) {
