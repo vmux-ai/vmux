@@ -15,8 +15,8 @@ use crate::event::{
 #[cfg(test)]
 use crate::state::GitCatalogProgress;
 use crate::state::{
-    CheckedOutBranch, GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState,
-    HeaderDropdown, RepositoryName, RepositoryPath,
+    CheckedOutBranch, GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, HeaderDropdown,
+    RepositoryName, RepositoryPath, UiGit, ViewedBranch,
 };
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
@@ -25,13 +25,13 @@ use super::job::RepositoryJob;
 use super::job_runner::GitJob;
 use super::watch::GitWatch;
 
-type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
+type UiGitUpdates = vmux_ecs::UiState<UiGit>;
 
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiGit>::default())
             .add_plugins(UiEventPlugin::<(GitRepositoryRequest,)>::default())
             .add_observer(page_ready)
             .add_observer(repository_request)
@@ -51,7 +51,7 @@ impl Plugin for StatePlugin {
 
 #[derive(Component, Default)]
 #[require(
-    GitUiStateUpdates,
+    UiGitUpdates,
     GitPageControllerState,
     HeaderDropdown,
     GitDirectoryNavigation,
@@ -476,25 +476,25 @@ type GitStateQuery<'w, 's> = Query<
 fn publish(views: GitStateQuery, mut commands: Commands) {
     for (entity, view, controller, header_dropdown, directory) in &views {
         if view.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 entity,
                 &view.snapshot,
             ));
         }
         if controller.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 entity,
                 &*controller,
             ));
         }
         if header_dropdown.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 entity,
                 &*header_dropdown,
             ));
         }
         if directory.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 entity,
                 &directory.state(),
             ));

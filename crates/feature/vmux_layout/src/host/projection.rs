@@ -6,19 +6,19 @@ use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
 use vmux_api::space::ProjectRowKind;
-use vmux_ecs::event::team::{TeamMemberRow, TeamUiState};
+use vmux_ecs::event::team::{TeamMemberRow, UiTeam};
 use vmux_ecs::{Description, EntityTarget};
 use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
 
 use crate::cef::{Browser, LayoutCef};
 use crate::event::{
     ActiveSession, ActiveSessionState, ActiveTask, ActiveWorkspaceProject, BookmarkEntryState,
-    BookmarkFolderState, BookmarkPinState, BookmarkTreeState, BookmarkUiState, HeaderState,
-    PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
-    StackRevealTarget, TabBoundary, TabBoundaryState, TabListState, TabStripRow, TabStripState,
+    BookmarkFolderState, BookmarkPinState, BookmarkTreeState, HeaderState, PaneTreeState,
+    SideSheetPane, SideSheetState, StackNavigationState, StackNode, StackRevealTarget, TabBoundary,
+    TabBoundaryState, TabListState, TabStripRow, TabStripState, UiBookmark,
 };
 use crate::side_sheet::{SideSheetSections, SideSheetSectionsExpanded};
-use crate::state::LayoutUiState;
+use crate::state::UiLayout;
 
 pub struct LayoutUiProjectionPlugin;
 
@@ -54,7 +54,7 @@ pub struct PaneTreeProjection(pub PaneTreeState);
 pub struct ProjectProjection(pub TabBoundaryState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct TeamProjection(pub TeamUiState);
+pub struct TeamProjection(pub UiTeam);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct StackProjection(pub StackNavigationState);
@@ -81,7 +81,7 @@ struct SideSheetProjection {
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-struct BookmarkUiProjection(BookmarkUiState);
+struct BookmarkUiProjection(UiBookmark);
 
 impl TabStripProjection {
     fn from_sources(tabs: &TabListState, header: Option<&HeaderState>) -> Self {
@@ -129,7 +129,7 @@ struct BookmarkUiBuilder {
 }
 
 impl BookmarkUiBuilder {
-    fn build(bookmarks: &BookmarkStateEvent, active_page: Option<&StackNode>) -> BookmarkUiState {
+    fn build(bookmarks: &BookmarkStateEvent, active_page: Option<&StackNode>) -> UiBookmark {
         let active_route = active_page.and_then(|page| vmux_api::VmuxRoute::parse(&page.url));
         let mut pins = Vec::with_capacity(bookmarks.pins.len());
         for row in &bookmarks.pins {
@@ -165,7 +165,7 @@ impl BookmarkUiBuilder {
             }
         }
 
-        BookmarkUiState {
+        UiBookmark {
             pins,
             rows: builder.rows,
             folders: bookmarks.folders.clone(),
@@ -357,7 +357,7 @@ impl ActiveSession {
     fn from_projections(
         panes: &PaneTreeState,
         projects: &TabBoundaryState,
-        team: &TeamUiState,
+        team: &UiTeam,
     ) -> Option<Self> {
         let pane = panes
             .panes
@@ -573,7 +573,7 @@ impl HeaderState {
     fn from_projections(
         stacks: &StackNavigationState,
         bookmarks: &BookmarkStateEvent,
-        team: &TeamUiState,
+        team: &UiTeam,
     ) -> Self {
         let active = stacks.stacks.iter().find(|stack| stack.is_active).cloned();
         let user = team.members.iter().find(|member| member.is_user).cloned();
@@ -740,7 +740,7 @@ fn publish_active_session(
 ) {
     let empty_panes = PaneTreeState::default();
     let empty_projects = TabBoundaryState::default();
-    let empty_team = TeamUiState::default();
+    let empty_team = UiTeam::default();
     let sessions_changed = sessions.is_changed();
     let git_changed = git.is_changed();
     let sections_changed = !changed_sections.is_empty() || removed_sections.read().next().is_some();
@@ -793,14 +793,14 @@ fn publish_active_session(
         if last.get(&entity) == Some(&event) {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity, &event,
         ));
         last.insert(entity, event);
     }
 }
 
-fn capture_tab_list(trigger: On<vmux_ecs::UiStateWrite<LayoutUiState>>, mut commands: Commands) {
+fn capture_tab_list(trigger: On<vmux_ecs::UiStateWrite<UiLayout>>, mut commands: Commands) {
     let Some(tabs) = &trigger.event().update().tabs else {
         return;
     };
@@ -824,7 +824,7 @@ fn project_header(
 ) {
     let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
-    let empty_team = TeamUiState::default();
+    let empty_team = UiTeam::default();
     for (entity, stacks, bookmarks, team, current) in &layouts {
         let stacks = stacks
             .map(|projection| &projection.0)
@@ -867,7 +867,7 @@ fn publish_header(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.0,
         ));
@@ -879,7 +879,7 @@ fn publish_tab_strip(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.0,
         ));
@@ -936,7 +936,7 @@ fn publish_side_sheet(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.state,
         ));
@@ -948,7 +948,7 @@ fn publish_bookmark_ui(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_ecs::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiLayout>::from_event(
             entity,
             &projection.0,
         ));
@@ -1221,7 +1221,7 @@ mod tests {
         let state = HeaderState::from_projections(
             &StackNavigationState::default(),
             &BookmarkStateEvent::default(),
-            &TeamUiState {
+            &UiTeam {
                 members: vec![user.clone(), agent.clone()],
                 ..Default::default()
             },

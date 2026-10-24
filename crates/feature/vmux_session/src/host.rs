@@ -26,7 +26,7 @@ pub use session::{
     ChatSynced, ChatTranscriptProjection, PendingAgentChoice, SessionView, SessionViews,
     StartRequest, TranscriptPage, TranscriptTail, USER_CHOICE_REQUESTED,
 };
-pub use state::{ChatRuntime, PublishComposerEffect, RepublishChatUiState};
+pub use state::{ChatRuntime, PublishComposerEffect, RepublishUiChat};
 #[cfg(host)]
 pub use tool::ChatToolPlugin;
 

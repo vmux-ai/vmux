@@ -53,7 +53,7 @@ mod swap;
 mod webview_reveal;
 mod zoom;
 
-pub type LayoutUiStateUpdates = vmux_ecs::UiState<crate::state::LayoutUiState>;
+pub type LayoutUiStateUpdates = vmux_ecs::UiState<crate::state::UiLayout>;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {

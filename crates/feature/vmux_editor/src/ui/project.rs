@@ -3,8 +3,8 @@ use std::path::Path;
 use dioxus::prelude::*;
 use vmux_ecs::event::{FileDirEntry, FileDirectoryOpenRequest, OpenEditorItem};
 use vmux_git::event::GitRepositoryRequest;
-use vmux_git::state::GitUiState;
-use vmux_session::state::SessionScopeUiState;
+use vmux_git::state::UiGit;
+use vmux_session::state::UiSessionScope;
 use vmux_session::{SessionSummary, SessionSummaryProjection, StageSummary};
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
@@ -27,7 +27,7 @@ use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{CollectionController, send, use_collection_controller, use_ui_state};
+use vmux_ui::hooks::{CollectionController, UiState, send, use_collection_controller};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 use vmux_ui::navigation::{NavigationGesture, PageNavigation};
@@ -38,13 +38,13 @@ use super::project_manager::{
 use super::state::FileUi;
 use crate::project::{
     ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
-    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectUiState,
-    ProjectView,
+    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectView,
+    UiProject,
 };
 
 #[component]
 pub(super) fn ProjectPage() -> Element {
-    let state = use_ui_state::<ProjectUiState>().state;
+    let state = UiState::<UiProject>::use_context().state;
     let snapshot = state();
     match snapshot.view {
         ProjectView::Detail(detail) => rsx! { ProjectDashboard { detail } },
@@ -666,7 +666,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
 
 #[component]
 fn ProjectSessionsPanel() -> Element {
-    let sessions = use_ui_state::<SessionScopeUiState>();
+    let sessions = UiState::<UiSessionScope>::use_context();
     let projection = sessions.use_selector(|state| {
         let now = vmux_ecs::UnixMillis::now().0;
         ProjectSessionList {
@@ -734,7 +734,7 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
 
 #[component]
 fn ProjectGitPanel(root: String) -> Element {
-    let git = use_ui_state::<GitUiState>();
+    let git = UiState::<UiGit>::use_context();
     let reactive_root = root.clone();
     let selected_root = use_memo(use_reactive!(|(reactive_root,)| reactive_root.clone()));
     let projection = git.use_selector(move |state| ProjectGitProjection {

@@ -77,7 +77,7 @@ fn announce_slow_shell_boot(
         }
         loading.announced = true;
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_ecs::event::TerminalUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_ecs::event::UiTerminal>::from_event(
                 entity,
                 &TermLoadingEvent {
                     loading: true,
@@ -122,7 +122,7 @@ fn clear_shell(
             continue;
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_ecs::event::TerminalUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_ecs::event::UiTerminal>::from_event(
                 entity,
                 &TermLoadingEvent {
                     loading: false,

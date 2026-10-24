@@ -6,7 +6,7 @@ use crate::state::{
     ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
     ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest,
     ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, ToolsRefreshRequest,
-    ToolsSnapshot, ToolsUiState, ToolsView,
+    ToolsSnapshot, ToolsView, UiTools,
 };
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -30,7 +30,7 @@ impl Plugin for ToolHostPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             crate::McpConnectionPlugin,
-            UiStatePlugin::<ToolsUiState>::default(),
+            UiStatePlugin::<UiTools>::default(),
         ))
         .add_plugins((
             UiEventPlugin::<(
@@ -213,13 +213,13 @@ impl Default for ToolRegistry {
 }
 
 #[derive(Component, Default)]
-#[require(UiState<ToolsUiState>)]
+#[require(UiState<UiTools>)]
 struct ToolSubscriber {
     snapshot_revision: u64,
     revision: u64,
     emitted_revision: u64,
     pending: BTreeMap<u64, ToolOperationKey>,
-    state: ToolsUiState,
+    state: UiTools,
 }
 
 impl ToolSubscriber {
@@ -871,7 +871,7 @@ fn emit_tools_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        commands.trigger(UiStateWrite::<ToolsUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiTools>::from_event(
             entity,
             &subscriber.state,
         ));

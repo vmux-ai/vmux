@@ -4,7 +4,7 @@ use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::extension::{
     ExtFilterRequest, ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest,
-    ExtToggleRequest, ExtUninstallRequest, ExtensionsUiState,
+    ExtToggleRequest, ExtUninstallRequest, UiExtensions,
 };
 use vmux_ecs::PageMetadata;
 use vmux_ecs::UiStateWrite;
@@ -46,12 +46,12 @@ pub struct OpenManagerRequest;
 
 #[derive(Component, Default)]
 pub(crate) struct ExtensionCatalog {
-    snapshot: ExtensionsUiState,
+    snapshot: UiExtensions,
     revision: u64,
 }
 
 impl ExtensionCatalog {
-    pub(crate) fn replace(&mut self, mut snapshot: ExtensionsUiState) {
+    pub(crate) fn replace(&mut self, mut snapshot: UiExtensions) {
         snapshot.loaded = true;
         snapshot.installing = std::mem::take(&mut self.snapshot.installing);
         self.snapshot = snapshot;
@@ -85,7 +85,7 @@ struct ExtensionSubscriber {
     catalog_revision: u64,
     revision: u64,
     emitted_revision: u64,
-    state: ExtensionsUiState,
+    state: UiExtensions,
 }
 
 impl ExtensionSubscriber {
@@ -132,7 +132,7 @@ impl ExtensionSubscriber {
 }
 
 #[derive(Component)]
-struct ExtensionCatalogTask(Task<Result<Option<ExtensionsUiState>, String>>);
+struct ExtensionCatalogTask(Task<Result<Option<UiExtensions>, String>>);
 
 #[derive(Component)]
 struct ExtensionCatalogKey(String);
@@ -304,7 +304,7 @@ fn finish(
                         message: error,
                     });
                 } else if initial {
-                    catalog.replace(ExtensionsUiState {
+                    catalog.replace(UiExtensions {
                         loaded: true,
                         ..default()
                     });
@@ -358,17 +358,15 @@ fn publish(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        commands.trigger(UiStateWrite::<ExtensionsUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiExtensions>::from_event(
             entity,
             &subscriber.state,
         ));
         if layout_ui.contains(entity) {
-            commands.trigger(
-                UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
-                    entity,
-                    &catalog.snapshot,
-                ),
-            );
+            commands.trigger(UiStateWrite::<vmux_layout::state::UiLayout>::from_event(
+                entity,
+                &catalog.snapshot,
+            ));
         }
         subscriber.emitted_revision = subscriber.revision;
     }

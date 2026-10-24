@@ -411,15 +411,15 @@ fn finish_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(
-            read.webview,
-            &vmux_api::command_bar::StartProjectBranches {
-                project: read.project.clone(),
-                branches,
-            },
-        ));
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(
+                read.webview,
+                &vmux_api::command_bar::StartProjectBranches {
+                    project: read.project.clone(),
+                    branches,
+                },
+            ),
+        );
     }
 }
 
@@ -621,9 +621,9 @@ fn sync_pages(
         &locale,
     );
     for (e, focus_requested) in targets {
-        commands.trigger(vmux_ecs::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(e, &payload));
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(e, &payload),
+        );
         if focus_requested {
             commands.trigger(CommandBarFocusRequested { webview: e });
         }
@@ -646,9 +646,9 @@ fn focus_command_bar(
             effect
         }
     };
-    commands.trigger(vmux_ecs::UiStateWrite::<
-        vmux_api::command_bar::CommandBarUiState,
-    >::from_event(webview, &effect));
+    commands.trigger(
+        vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(webview, &effect),
+    );
 }
 
 fn mark_launcher(
@@ -689,9 +689,9 @@ fn begin_inline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::command_bar::CommandBarUiState;
+    use vmux_api::command_bar::UiCommandBar;
     #[cfg(ui)]
-    use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+    use vmux_api::input::{KeyContextRequest, UiKeyClaims};
     #[cfg(ui)]
     use vmux_api::{BinEvent, UiEventPermissions};
     use vmux_ecs::UiStateWrite;
@@ -700,10 +700,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct EmittedIds(Vec<(&'static str, u64)>);
 
-    fn capture_state(
-        trigger: On<UiStateWrite<CommandBarUiState>>,
-        mut emitted: ResMut<EmittedIds>,
-    ) {
+    fn capture_state(trigger: On<UiStateWrite<UiCommandBar>>, mut emitted: ResMut<EmittedIds>) {
         let patch = trigger.event().update();
         let entry = if patch.snapshot.is_some() {
             ("snapshot", 0)
@@ -754,7 +751,7 @@ mod tests {
         assert!(UiEventPermissions::allows_page(
             permissions.iter(app.world()),
             StartPlugin::URL,
-            KeyClaimsUiState::PERMISSION,
+            UiKeyClaims::PERMISSION,
         ));
     }
 

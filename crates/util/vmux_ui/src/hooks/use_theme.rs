@@ -1,11 +1,11 @@
-use super::use_ui_state;
+use super::UiState;
 use crate::i18n::Locale;
-use crate::theme::ThemeUiState;
+use crate::theme::UiTheme;
 use crate::transport::Host;
 use dioxus::prelude::*;
 
 pub fn use_theme() -> Signal<String> {
-    let state = use_ui_state::<ThemeUiState>().state;
+    let state = UiState::<UiTheme>::use_context().state;
     let mut locale = use_signal(|| Locale::preferred().into_string());
     apply_locale(&Locale::from(locale().as_str()));
     use_effect(move || {

@@ -16,7 +16,13 @@ mod format;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ChatUiState", "SessionCatalogUiState", "SessionDetailUiState", "KeyClaimsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        crate::state::UiChat,
+        crate::state::UiSessionCatalog,
+        crate::state::UiSessionDetail,
+        vmux_api::input::UiKeyClaims,
+    ],
     subtree,
     preserve_title,
     no_favicon,
@@ -44,7 +50,7 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
-    let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
+    let detail = vmux_ui::hooks::UiState::<crate::state::UiSessionDetail>::use_context();
     let header_catalog =
         detail.use_selector(|state| ChatHeaderCatalog::from_navigation(&state.navigation));
     let keys = use_chat_keys(chat);

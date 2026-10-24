@@ -148,7 +148,7 @@ pub struct ToolOperationNotice {
 }
 
 #[vmux_api::ui_state(Default, Eq, version = 9)]
-pub struct ToolsUiState {
+pub struct UiTools {
     pub snapshot: ToolsSnapshot,
     pub view: ToolsView,
     pub pending: Vec<ToolOperationKey>,

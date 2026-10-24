@@ -90,13 +90,13 @@ struct FeatureManifestFile {
     pages: Vec<PageManifestFile>,
 }
 
-struct PageStates(Vec<LitStr>);
+struct PageStates(Vec<Path>);
 
 impl Parse for PageStates {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let content;
         bracketed!(content in input);
-        let states = Punctuated::<LitStr, Token![,]>::parse_terminated(&content)?;
+        let states = Punctuated::<Path, Token![,]>::parse_terminated(&content)?;
         Ok(Self(states.into_iter().collect()))
     }
 }
@@ -104,17 +104,27 @@ impl Parse for PageStates {
 impl PageStates {
     fn validate(&self, permissions: &[LitStr]) -> syn::Result<()> {
         for state in &self.0 {
+            let name = state
+                .segments
+                .last()
+                .map(|segment| segment.ident.to_string())
+                .ok_or_else(|| syn::Error::new_spanned(state, "UI state path cannot be empty"))?;
             if permissions
                 .iter()
-                .any(|permission| permission.value() == state.value())
+                .any(|permission| permission.value() == name)
             {
                 continue;
             }
             return Err(syn::Error::new(
-                state.span(),
+                state
+                    .segments
+                    .last()
+                    .expect("state path checked above")
+                    .ident
+                    .span(),
                 format!(
                     "page manifest permissions must include subscribed UI state {}",
-                    state.value()
+                    name
                 ),
             ));
         }
@@ -402,6 +412,7 @@ struct Args {
     icon: Option<Expr>,
     command_bar: bool,
     permissions: Vec<LitStr>,
+    states: Vec<Path>,
 }
 
 #[derive(Clone, Copy)]
@@ -647,6 +658,7 @@ impl Parse for Args {
             icon,
             command_bar,
             permissions,
+            states: states.0,
         })
     }
 }
@@ -716,6 +728,7 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
     let url = args.url;
     let title = args.title;
     let component = args.component;
+    let states = args.states;
     let document_url = match args.document_url {
         Some(url) => quote! { ::core::option::Option::Some(#url) },
         None => quote! { ::core::option::Option::None },
@@ -795,13 +808,18 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
         impl #ident {
             pub const URL: &'static str = #url;
 
+            fn render() -> ::dioxus::prelude::Element {
+                #(let _ = ::vmux_ui::hooks::use_ui_state::<#states>();)*
+                #component()
+            }
+
             pub const PAGE: ::vmux_page::Page = ::vmux_page::Page {
                 url: Self::URL,
                 document_url: #document_url,
                 title: #title,
                 reports_title: #reports_title,
                 favicon: #favicon,
-                component: #component,
+                component: Self::render,
                 dom_group: #dom_group,
                 root_id: #root_id,
                 root_class: #root_class,
@@ -838,7 +856,7 @@ mod tests {
                 icon: "Hammer",
                 command_bar: true,
                 manifest: true,
-                permissions: ["ToolsUiState", "ToolsRefreshRequest"],
+                permissions: ["UiTools", "ToolsRefreshRequest"],
             )"#,
         )
         .unwrap();
@@ -850,10 +868,7 @@ mod tests {
         assert_eq!(manifest.icon, "Hammer");
         assert!(manifest.command_bar);
         assert!(manifest.manifest);
-        assert_eq!(
-            manifest.permissions,
-            ["ToolsUiState", "ToolsRefreshRequest"]
-        );
+        assert_eq!(manifest.permissions, ["UiTools", "ToolsRefreshRequest"]);
     }
 
     #[test]
@@ -872,10 +887,12 @@ mod tests {
 
     #[test]
     fn page_states_require_matching_manifest_permissions() {
-        let states = syn::parse2::<PageStates>(quote!(["ThemeUiState", "FileUiState"])).unwrap();
+        let states =
+            syn::parse2::<PageStates>(quote!([vmux_ui::theme::UiTheme, vmux_ecs::event::UiFile,]))
+                .unwrap();
         let permissions = [
-            LitStr::new("ThemeUiState", proc_macro2::Span::call_site()),
-            LitStr::new("FileUiState", proc_macro2::Span::call_site()),
+            LitStr::new("UiTheme", proc_macro2::Span::call_site()),
+            LitStr::new("UiFile", proc_macro2::Span::call_site()),
         ];
 
         assert!(states.validate(&permissions).is_ok());

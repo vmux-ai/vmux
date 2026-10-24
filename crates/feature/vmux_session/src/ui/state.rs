@@ -9,14 +9,14 @@ use crate::event::{
     QueuedPromptSnapshot, SelectMode, SlashCommandEntry,
 };
 use crate::event::{ChatDismissSelectorRequest, ChatResumeState};
-use crate::state::ChatUiState;
+use crate::state::UiChat;
 use crate::tab::Accent;
 use dioxus::core::Task;
 use dioxus::prelude::*;
-use vmux_api::mcp::McpServersUiState;
+use vmux_api::mcp::UiMcpServers;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
-use vmux_ui::hooks::{send, try_send, use_selector, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, try_send, use_selector, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::scroll::PrependScrollAnchor;
 
@@ -36,7 +36,7 @@ impl<T> Copy for ChatValue<T> {}
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Chat {
-    root: Signal<ChatUiState>,
+    root: Signal<UiChat>,
     pub transcript: Transcript,
     pub run: RunState,
     pub identity: AgentIdentity,
@@ -45,7 +45,7 @@ pub struct Chat {
     pub composer: ComposerDraft,
     pub queue: PromptQueue,
     pub media: MediaPicker,
-    pub mcp: ChatValue<McpServersUiState>,
+    pub mcp: ChatValue<UiMcpServers>,
     pub models: ModelPicker,
     pub effort: EffortPicker,
     pub permissions: PermissionPicker,
@@ -59,7 +59,7 @@ pub struct Chat {
 
 pub fn use_chat() -> Chat {
     use_theme();
-    let root = use_ui_state::<ChatUiState>().state;
+    let root = UiState::<UiChat>::use_context().state;
     let always_ready = use_memo(|| true);
     let snapshot = ChatValue {
         value: use_memo(move || root.read().snapshot.clone()),
@@ -131,11 +131,12 @@ pub fn use_chat() -> Chat {
     };
     chat.listen(root);
     chat.watch();
+    use_context_provider(|| chat);
     chat
 }
 
 impl Chat {
-    fn listen(&self, root: Signal<ChatUiState>) {
+    fn listen(&self, root: Signal<UiChat>) {
         let chat = *self;
         use_effect(move || {
             chat.apply_composer_effect(&root.read().composer_effect);
@@ -649,7 +650,7 @@ impl Chat {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Transcript {
-    root: Signal<ChatUiState>,
+    root: Signal<UiChat>,
     pub at_bottom: Signal<bool>,
     pub initial_follow: Signal<bool>,
     last_top: Signal<i32>,
@@ -661,7 +662,7 @@ pub struct Transcript {
     handled_prepend: Signal<u64>,
 }
 
-pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
+pub fn use_transcript(root: Signal<UiChat>) -> Transcript {
     Transcript {
         root,
         at_bottom: use_signal(|| true),

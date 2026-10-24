@@ -4,7 +4,7 @@ use crate::event::{
     HistoryClearAllRequest, HistoryClearConfirmRequest, HistoryDeleteRequest, HistoryEntry,
     HistoryLoadMoreRequest, HistoryOpenRequest, HistoryQueryRequest,
 };
-use crate::state::HistoryUiState;
+use crate::state::UiHistory;
 use dioxus::prelude::*;
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
@@ -16,21 +16,24 @@ use vmux_ui::components::manager::{
 use vmux_ui::components::page::{PageContent, PageShell};
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::platform::Platform;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "HistoryUiState"]
+    states = [
+        vmux_ui::theme::UiTheme,
+        crate::state::UiHistory,
+    ]
 )]
 pub(crate) struct HistoryPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<HistoryUiState>().state;
+    let state = UiState::<UiHistory>::use_context().state;
     let confirm_open = use_memo(move || Some(state().clear_confirm_open));
     let snapshot = state();
     let has_more = snapshot.has_more;

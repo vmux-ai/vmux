@@ -2,7 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::session::RemoteModelState;
 
-use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishUiChat};
 #[cfg(host)]
 use crate::event::SlashCommand;
 use crate::event::{ModeState, ModelOptionEntry, ModelState, SlashCommandEntry, SlashCommands};
@@ -132,7 +132,7 @@ fn project_picker(mut runtimes: ChangedModelPicker) {
 }
 
 fn emit_picker(
-    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut refreshes: MessageReader<RepublishUiChat>,
     mut runtimes: Query<(Ref<Picker>, &mut ChatUiStateProjection), With<ChatRuntime>>,
 ) {
     let refresh = refreshes.read().next().is_some();
@@ -150,12 +150,10 @@ fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
     commands
         .entity(event.webview)
         .insert(ModelPickerProjection(event.state.clone()));
-    commands.trigger(
-        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-            event.webview,
-            &event.state,
-        ),
-    );
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        event.webview,
+        &event.state,
+    ));
     let mut commands_list = vec![
         SlashCommandEntry {
             command: SlashCommand::Upload,
@@ -193,12 +191,10 @@ fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands)
     commands
         .entity(event.webview)
         .insert(ModeProjection(event.state.clone()));
-    commands.trigger(
-        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-            event.webview,
-            &event.state,
-        ),
-    );
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        event.webview,
+        &event.state,
+    ));
 }
 
 #[cfg(test)]
@@ -207,13 +203,10 @@ mod tests {
     use vmux_ecs::UiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Published(Vec<crate::state::ChatUiStatePatch>);
+    struct Published(Vec<crate::state::UiChatPatch>);
 
     impl Published {
-        fn record(
-            trigger: On<UiStateWrite<crate::state::ChatUiState>>,
-            mut published: ResMut<Self>,
-        ) {
+        fn record(trigger: On<UiStateWrite<crate::state::UiChat>>, mut published: ResMut<Self>) {
             published.0.push(trigger.event().update().clone());
         }
     }

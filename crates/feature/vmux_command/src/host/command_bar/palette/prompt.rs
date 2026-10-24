@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
-use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
+use vmux_api::command_bar::{UiCommandBar, UiCommandBarPatch};
 use vmux_ecs::UiStateWrite;
 
 use super::prompt_driver::PromptContext;
@@ -65,10 +65,10 @@ fn update(
 }
 
 fn receive_history(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
+    trigger: On<UiStateWrite<UiCommandBar>>,
     mut palettes: Query<(&mut PalettePrompt, &mut PaletteSnapshot)>,
 ) {
-    let Some(response) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<PromptHistory>>::payload(
+    let Some(response) = <UiCommandBarPatch as vmux_api::UiStatePatch<PromptHistory>>::payload(
         trigger.event().update(),
     ) else {
         return;

@@ -37,7 +37,7 @@ impl From<&ExtRow> for Approval {
 }
 
 #[component]
-pub(crate) fn ExtensionManager(state: ExtensionsUiState) -> Element {
+pub(crate) fn ExtensionManager(state: UiExtensions) -> Element {
     let installing = &state.installing;
 
     rsx! {

@@ -1,11 +1,9 @@
-use vmux_api::team::{
-    ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, TeamUiState,
-};
+use vmux_api::team::{ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, UiTeam};
 
 pub(crate) struct TeamStateProjection;
 
 impl TeamStateProjection {
-    pub(crate) fn build(members: Vec<TeamMemberRow>, profiles: Vec<ProfileRow>) -> TeamUiState {
+    pub(crate) fn build(members: Vec<TeamMemberRow>, profiles: Vec<ProfileRow>) -> UiTeam {
         let active_profile = profiles.iter().find(|profile| profile.is_active).cloned();
         let mut agents = Vec::new();
         for member in &members {
@@ -28,7 +26,7 @@ impl TeamStateProjection {
                 subtitle,
             });
         }
-        TeamUiState {
+        UiTeam {
             members,
             profiles,
             active_profile,

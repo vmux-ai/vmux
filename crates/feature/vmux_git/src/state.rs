@@ -569,7 +569,7 @@ pub struct GitDiffAppend {
 }
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct GitUiStatePatch {
+pub struct UiGitPatch {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
     pub workspace: Option<GitWorkspaceChanged>,
@@ -582,8 +582,8 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 10)]
-pub struct GitUiState {
+#[vmux_api::ui_state(Default, patch = UiGitPatch, version = 10)]
+pub struct UiGit {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
     pub workspace: Option<GitWorkspaceChanged>,
@@ -597,8 +597,8 @@ pub struct GitUiState {
     pub diff_update_revision: u64,
 }
 
-impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
-    fn apply(&mut self, patch: GitUiStatePatch) {
+impl vmux_api::UiStateProjection<UiGitPatch> for UiGit {
+    fn apply(&mut self, patch: UiGitPatch) {
         if let Some(context) = patch.context {
             self.context = Some(context);
         }
@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn snapshot_round_trips_through_ui_state() {
-        let event = <GitUiState as vmux_api::UiState>::from_updates(
+        let event = <UiGit as vmux_api::UiState>::from_updates(
             None,
             vec![
                 GitPageContext {
@@ -745,7 +745,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiGit, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(
             decoded
@@ -801,7 +801,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let event = <GitUiState as vmux_api::UiState>::from_updates(
+        let event = <UiGit as vmux_api::UiState>::from_updates(
             None,
             vec![
                 first.into(),
@@ -822,7 +822,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiGit, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert!(decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);
@@ -846,7 +846,7 @@ mod tests {
             diff_rows: vec![GitDiffRow::Line(0)],
             ..Default::default()
         };
-        let event = <GitUiState as vmux_api::UiState>::from_updates(
+        let event = <UiGit as vmux_api::UiState>::from_updates(
             None,
             vec![
                 first.into(),
@@ -881,7 +881,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiGit, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert!(decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);

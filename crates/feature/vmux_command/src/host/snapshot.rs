@@ -7,16 +7,14 @@ use vmux_ecs::launcher::RendersLauncherPanel;
 use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::page::PageManifest;
 
-pub type CommandBarState = vmux_ecs::UiState<vmux_api::command_bar::CommandBarUiState>;
+pub type CommandBarState = vmux_ecs::UiState<vmux_api::command_bar::UiCommandBar>;
 
 pub(super) struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn, ApplyDeferred, update, contribute).chain())
-            .add_plugins(vmux_ecs::UiStatePlugin::<
-                vmux_api::command_bar::CommandBarUiState,
-            >::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<vmux_api::command_bar::UiCommandBar>::default())
             .add_systems(PreUpdate, attach);
     }
 }

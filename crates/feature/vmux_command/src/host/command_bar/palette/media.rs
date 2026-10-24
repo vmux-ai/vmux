@@ -3,10 +3,10 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
-    CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
-    CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
-    CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
-    CommandPaletteRemoveAttachmentRequest,
+    CommandPaletteDraftRequest, CommandPaletteMediaActivateRequest,
+    CommandPaletteMediaDismissRequest, CommandPaletteMediaHighlightRequest,
+    CommandPaletteMediaMoveRequest, CommandPaletteRemoveAttachmentRequest, UiCommandBar,
+    UiCommandBarPatch,
 };
 use vmux_api::prompt_media::{
     ChatAttachPaths, ChatAttachments, ChatMediaEntries, ChatMediaListRequest, InlineMediaQuery,
@@ -309,14 +309,12 @@ fn remove_attachment(
 }
 
 fn receive_attachments(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
+    trigger: On<UiStateWrite<UiCommandBar>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
 ) {
-    let Some(response) =
-        <CommandBarUiStatePatch as vmux_api::UiStatePatch<ChatAttachments>>::payload(
-            trigger.event().update(),
-        )
-    else {
+    let Some(response) = <UiCommandBarPatch as vmux_api::UiStatePatch<ChatAttachments>>::payload(
+        trigger.event().update(),
+    ) else {
         return;
     };
     let Ok((media, mut snapshot)) = palettes.get_mut(trigger.event().webview()) else {
@@ -331,16 +329,14 @@ fn receive_attachments(
 }
 
 fn receive_entries(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
+    trigger: On<UiStateWrite<UiCommandBar>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
     pending: Query<(Entity, &MediaResponsePending)>,
     mut commands: Commands,
 ) {
-    let Some(response) =
-        <CommandBarUiStatePatch as vmux_api::UiStatePatch<ChatMediaEntries>>::payload(
-            trigger.event().update(),
-        )
-    else {
+    let Some(response) = <UiCommandBarPatch as vmux_api::UiStatePatch<ChatMediaEntries>>::payload(
+        trigger.event().update(),
+    ) else {
         return;
     };
     let target = trigger.event().webview();
@@ -483,7 +479,7 @@ fn project(mut snapshots: Query<&mut PaletteSnapshot, Changed<PaletteSnapshot>>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::command_bar::{CommandPaletteUiState, OpenId};
+    use vmux_api::command_bar::{OpenId, UiCommandPalette};
     use vmux_api::prompt_media::ChatMediaEntry;
 
     #[test]
@@ -515,7 +511,7 @@ mod tests {
                     query: "show @pic".to_string(),
                     ..Default::default()
                 },
-                PaletteSnapshot(CommandPaletteUiState {
+                PaletteSnapshot(UiCommandPalette {
                     open_id,
                     media_query: Some("pic".to_string()),
                     media_entries: vec![

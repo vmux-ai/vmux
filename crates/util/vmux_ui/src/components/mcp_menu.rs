@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
-use vmux_api::mcp::{McpServerEntry, McpServerStatus, McpServersUiState};
+use vmux_api::mcp::{McpServerEntry, McpServerStatus, UiMcpServers};
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
 
 #[component]
 pub fn McpMenu(
-    state: McpServersUiState,
+    state: UiMcpServers,
     entries: Vec<McpServerEntry>,
     selected: usize,
     #[props(default)] placement: PromptPopupPlacement,

@@ -2,7 +2,7 @@ use crate::{
     ShortcutBinding, ShortcutCatalog, ShortcutCloseRequest, ShortcutCollectionViewRequest,
     ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest, ShortcutProbePress,
     ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView, ShortcutStroke,
-    ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
+    UiShortcuts, UiShortcutsUpdates, ShortcutUrl,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -39,7 +39,7 @@ impl Plugin for ShortcutPlugin {
                 ShortcutCloseRequest,
                 ShortcutCollectionViewRequest,
             )>::default(),
-            vmux_ecs::UiStatePlugin::<ShortcutUiState>::default(),
+            vmux_ecs::UiStatePlugin::<UiShortcuts>::default(),
         ))
         .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
@@ -61,7 +61,7 @@ impl Plugin for ShortcutPlugin {
 }
 
 #[derive(Component, Default)]
-#[require(ShortcutUiStateUpdates, ShortcutCapture)]
+#[require(UiShortcutsUpdates, ShortcutCapture)]
 struct Shortcuts {
     catalog: ShortcutCatalog,
     probe: ShortcutProbe,
@@ -115,7 +115,7 @@ impl ShortcutCaptureFocus<'_, '_> {
 }
 
 impl Shortcuts {
-    fn project(&self) -> ShortcutUiState {
+    fn project(&self) -> UiShortcuts {
         let active = !self.probe.sequence.is_empty();
         let mut groups = Vec::new();
         for group in &self.catalog.groups {
@@ -148,7 +148,7 @@ impl Shortcuts {
             .flat_map(|group| &group.entries)
             .map(|entry| entry.shortcuts.len() as u32)
             .sum();
-        ShortcutUiState {
+        UiShortcuts {
             groups,
             probe: ShortcutProbeView {
                 sequence: self.probe.sequence.clone(),
@@ -482,7 +482,7 @@ fn expire_probe(mut views: Query<&mut Shortcuts>) {
 
 fn publish_state(views: Query<(Entity, &Shortcuts), Changed<Shortcuts>>, mut commands: Commands) {
     for (entity, view) in &views {
-        commands.trigger(vmux_ecs::UiStateWrite::<ShortcutUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiShortcuts>::from_event(
             entity,
             &view.project(),
         ));

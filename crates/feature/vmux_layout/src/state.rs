@@ -1,28 +1,27 @@
 use crate::event::{
-    ActiveSession, ActiveSessionState, BookmarkUiState, HeaderState, LayoutGeometry,
-    LayoutOverlayDismissEffect, PaneTreeState, ReloadEffect, RemoteUiState, SideSheetState,
-    StackNavigationState, TabBoundaryState, TabListState, TabStripState, UpdateCleared,
-    UpdateProgress, UpdateReady,
+    ActiveSession, ActiveSessionState, HeaderState, LayoutGeometry, LayoutOverlayDismissEffect,
+    PaneTreeState, ReloadEffect, SideSheetState, StackNavigationState, TabBoundaryState,
+    TabListState, TabStripState, UiBookmark, UiRemote, UpdateCleared, UpdateProgress, UpdateReady,
 };
 use vmux_api::bookmark::{BookmarkEditState, BookmarkMenuEffect, BookmarkStateEvent};
-use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsUiState};
+use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, UiExtensions};
 use vmux_ecs::event::space::{SpaceFormState, SpacesListEvent};
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct LayoutUiStatePatch {
+pub struct UiLayoutPatch {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
     pub tabs: Option<TabListState>,
     pub tab_strip: Option<TabStripState>,
     pub bookmarks: Option<BookmarkStateEvent>,
-    pub bookmark_ui: Option<BookmarkUiState>,
+    pub bookmark_ui: Option<UiBookmark>,
     pub pane_tree: Option<PaneTreeState>,
     pub side_sheet: Option<SideSheetState>,
     pub spaces: Option<SpacesListEvent>,
     pub space_form: Option<SpaceFormState>,
     pub projects: Option<TabBoundaryState>,
-    pub remote: Option<RemoteUiState>,
-    pub extensions: Option<ExtensionsUiState>,
+    pub remote: Option<UiRemote>,
+    pub extensions: Option<UiExtensions>,
     pub extension_popup: Option<ExtensionPopupEvent>,
     pub extension_popup_size: Option<ExtensionPopupSizeEvent>,
     pub update_progress: Option<UpdateProgress>,
@@ -51,18 +50,18 @@ pub enum UpdateStatus {
     },
 }
 
-#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 4)]
-pub struct LayoutUiState {
+#[vmux_api::ui_state(Default, patch = UiLayoutPatch, version = 4)]
+pub struct UiLayout {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
     pub tab_strip: Option<TabStripState>,
-    pub bookmarks: BookmarkUiState,
+    pub bookmarks: UiBookmark,
     pub side_sheet: Option<SideSheetState>,
     pub projects: TabBoundaryState,
     pub active_session: Option<ActiveSession>,
     pub header: HeaderState,
-    pub remote: RemoteUiState,
-    pub extensions: ExtensionsUiState,
+    pub remote: UiRemote,
+    pub extensions: UiExtensions,
     pub extension_popup: ExtensionPopupEvent,
     pub extension_popup_size: ExtensionPopupSizeEvent,
     pub update: Option<UpdateStatus>,
@@ -74,8 +73,8 @@ pub struct LayoutUiState {
     pub overlay_dismiss_revision: u64,
 }
 
-impl vmux_api::UiStateProjection<LayoutUiStatePatch> for LayoutUiState {
-    fn apply(&mut self, patch: LayoutUiStatePatch) {
+impl vmux_api::UiStateProjection<UiLayoutPatch> for UiLayout {
+    fn apply(&mut self, patch: UiLayoutPatch) {
         if let Some(event) = patch.layout {
             self.layout = Some(event);
         }
@@ -154,7 +153,7 @@ impl vmux_api::UiStateProjection<LayoutUiStatePatch> for LayoutUiState {
     }
 }
 
-impl LayoutUiState {
+impl UiLayout {
     pub fn overlay_ready(&self, error: &Option<String>) -> bool {
         let received = |ready| ready || error.is_some();
         let layout_ready = received(self.layout.is_some());
@@ -173,8 +172,8 @@ impl LayoutUiState {
 mod tests {
     use super::*;
 
-    fn state(header_open: bool, side_sheet_open: bool) -> LayoutUiState {
-        LayoutUiState {
+    fn state(header_open: bool, side_sheet_open: bool) -> UiLayout {
+        UiLayout {
             layout: Some(LayoutGeometry {
                 header_open,
                 side_sheet_open,
@@ -186,7 +185,7 @@ mod tests {
 
     #[test]
     fn patches_build_a_retained_tree() {
-        let mut state = LayoutUiState::default();
+        let mut state = UiLayout::default();
 
         vmux_api::UiStateProjection::apply(
             &mut state,
@@ -208,7 +207,7 @@ mod tests {
 
     #[test]
     fn overlay_waits_for_layout_state() {
-        assert!(!LayoutUiState::default().overlay_ready(&None));
+        assert!(!UiLayout::default().overlay_ready(&None));
     }
 
     #[test]

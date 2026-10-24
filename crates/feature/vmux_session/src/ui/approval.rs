@@ -10,7 +10,8 @@ pub(super) const APPROVAL_DECISIONS: [ApprovalDecision; 3] = [
 ];
 
 #[component]
-pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
+pub(super) fn ChatApprovalDock() -> Element {
+    let chat = use_context::<Chat>();
     if chat.installing() {
         return rsx! {};
     }
@@ -115,7 +116,8 @@ mod tests {
 }
 
 #[component]
-pub(super) fn ChoiceList(chat: Chat) -> Element {
+pub(super) fn ChoiceList() -> Element {
+    let chat = use_context::<Chat>();
     let options = chat.run.choice_options();
     if options.is_empty() {
         return rsx! {};

@@ -26,7 +26,11 @@ const MEASURE_ROWS: usize = 8;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "TerminalUiState", "KeyClaimsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_ecs::event::UiTerminal,
+        vmux_api::input::UiKeyClaims,
+    ],
     claims = crate::Terminal
 )]
 pub(crate) struct TerminalPage;

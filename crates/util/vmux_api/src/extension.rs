@@ -32,7 +32,7 @@ pub struct ExtRow {
 }
 
 #[vmux_api::ui_state(Eq, Default, version = 3)]
-pub struct ExtensionsUiState {
+pub struct UiExtensions {
     pub loaded: bool,
     pub extensions: Vec<ExtRow>,
     pub visible: Vec<ExtRow>,

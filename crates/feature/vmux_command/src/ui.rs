@@ -5,13 +5,14 @@ use crate::ui::input_driver::{
 };
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
-    CommandBarControl, CommandBarUiState, CommandPaletteActivateRequest,
-    CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
+    CommandBarControl, CommandPaletteActivateRequest, CommandPaletteDraftRequest,
+    CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
     CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
     CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest,
-    CommandPaletteSubmitRequest, CommandPaletteUiState, InvokeRequest, PaletteGlyph, PaletteMode,
+    CommandPaletteSubmitRequest, InvokeRequest, PaletteGlyph, PaletteMode, UiCommandBar,
+    UiCommandPalette,
 };
 use vmux_api::input::KeyContextRequest;
 use vmux_api::prompt_media::{ChatPasteMedia, ChatPickFiles};
@@ -23,7 +24,7 @@ use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlaceme
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::dom::DomSelection;
 use vmux_ui::hooks::Unclaimed;
-use vmux_ui::hooks::{send, use_key_claim, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_key_claim};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::BuiltinIconView;
 use vmux_ui::ime::use_ime_guard;
@@ -42,8 +43,8 @@ mod panel;
 mod readline_driver;
 mod row;
 
-pub fn use_command_bar_ui() -> Signal<CommandBarUiState> {
-    let ui = use_ui_state::<CommandBarUiState>();
+pub fn use_command_bar_ui() -> Signal<UiCommandBar> {
+    let ui = UiState::<UiCommandBar>::use_context();
     let state = ui.state;
     let mut handled_focus_revision = use_signal(|| 0);
     use_effect(move || {
@@ -157,7 +158,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let palette_data = if host_snapshot.open_id == state_val.open_id {
         host_snapshot
     } else {
-        CommandPaletteUiState::default()
+        UiCommandPalette::default()
     };
     let projection = std::rc::Rc::new(palette_data.projection.clone());
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
@@ -687,7 +688,7 @@ fn CommandBarControlButton(control: CommandBarControl) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PaletteProps {
-    pub state: ReadSignal<CommandBarUiState>,
+    pub state: ReadSignal<UiCommandBar>,
     pub surface: CommandPaletteSurface,
     pub on_close: EventHandler<()>,
     pub on_activity: EventHandler<()>,

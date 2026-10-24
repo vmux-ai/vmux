@@ -8,14 +8,14 @@ use vmux_ui::i18n::translate;
 
 use crate::event::{
     LayoutOverlayEvent, RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest,
-    RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
+    RemotePhase, RemoteRequest, RemoteRevokeRequest, UiRemote,
 };
 
 use qrcode::QrCode;
 use qrcode::render::svg;
 
 #[component]
-pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
+pub(crate) fn RemoteControl(remote: UiRemote) -> Element {
     let mut open = use_signal(|| false);
     use_effect(move || {
         send(&LayoutOverlayEvent {
@@ -87,7 +87,7 @@ pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
 }
 
 #[component]
-fn RemotePanel(remote: RemoteUiState) -> Element {
+fn RemotePanel(remote: UiRemote) -> Element {
     let mut copied = use_signal(|| false);
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;

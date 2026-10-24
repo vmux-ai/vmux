@@ -5,7 +5,7 @@ use crate::event::{
     SimulatorClipboardPasteRequest, SimulatorClipboardSelectAllRequest,
     SimulatorInputHardwareButtonRequest, SimulatorInputKeyRequest,
     SimulatorInputModifiedKeyRequest, SimulatorInputTextRequest, SimulatorKeyModifiers,
-    SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase, SimulatorUiState,
+    SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase, UiSimulator,
 };
 use crate::url::SimulatorRoute;
 use dioxus::html::geometry::ClientPoint;
@@ -14,14 +14,17 @@ use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::Platform;
 use vmux_ui::script::PageScript;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "SimulatorUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        crate::event::UiSimulator,
+    ],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]
@@ -30,7 +33,7 @@ pub(crate) struct SimulatorPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let ready = use_ui_state::<SimulatorUiState>().state;
+    let ready = UiState::<UiSimulator>::use_context().state;
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).ok());
 

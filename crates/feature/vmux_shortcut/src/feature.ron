@@ -47,9 +47,9 @@
             bookmark: Some(120),
             permissions: [
                 "PageReady",
-                "ThemeUiState",
+                "UiTheme",
                 "OpenRequest",
-                "ShortcutUiState",
+                "UiShortcuts",
                 "ShortcutProbePressRequest",
                 "ShortcutProbeClearRequest",
                 "ShortcutCloseRequest",

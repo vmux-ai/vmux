@@ -106,7 +106,7 @@ pub enum ShortcutProbeStatus {
 }
 
 #[vmux_api::ui_state(Default)]
-pub struct ShortcutUiState {
+pub struct UiShortcuts {
     pub groups: Vec<ShortcutGroup>,
     pub probe: ShortcutProbeView,
     pub shortcut_count: u32,
@@ -114,7 +114,7 @@ pub struct ShortcutUiState {
 }
 
 #[cfg(host)]
-pub type ShortcutUiStateUpdates = vmux_ecs::UiState<ShortcutUiState>;
+pub type ShortcutUiStateUpdates = vmux_ecs::UiState<UiShortcuts>;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ShortcutGroup {
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn ui_state_round_trips_projected_shortcuts() {
-        let state = ShortcutUiState {
+        let state = UiShortcuts {
             probe: ShortcutProbeView {
                 sequence: vec![ShortcutStroke {
                     code: "KeyK".to_string(),
@@ -231,7 +231,7 @@ mod tests {
         };
 
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
-        let decoded = rkyv::from_bytes::<ShortcutUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiShortcuts, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.shortcut_count, 3);
         assert_eq!(decoded.probe.sequence[0].code, "KeyK");

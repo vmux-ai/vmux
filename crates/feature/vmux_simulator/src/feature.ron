@@ -11,9 +11,9 @@
             command_bar: true,
             permissions: [
                 "PageReady",
-                "ThemeUiState",
+                "UiTheme",
                 "OpenRequest",
-                "SimulatorUiState",
+                "UiSimulator",
                 "SimulatorReady",
                 "SimulatorTouch",
                 "SimulatorSoftwareKeyboard",

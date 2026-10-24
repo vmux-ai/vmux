@@ -7,8 +7,7 @@ use crate::event::{
 };
 use crate::state::{
     SettingsBindingRow, SettingsRenderField, SettingsRenderFieldId, SettingsRenderFieldKind,
-    SettingsRenderItem, SettingsRenderItemId, SettingsSection, SettingsSelectOption,
-    SettingsUiState,
+    SettingsRenderItem, SettingsRenderItemId, SettingsSection, SettingsSelectOption, UiSettings,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
@@ -20,7 +19,7 @@ use vmux_ui::components::manager::{
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::translate;
 
 const SETTINGS_SCROLL_SPY: &str = r#"
@@ -68,7 +67,10 @@ if (viewport && sections.length) {
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "SettingsUiState"]
+    states = [
+        vmux_ui::theme::UiTheme,
+        crate::state::UiSettings,
+    ]
 )]
 pub(crate) struct SettingsPage;
 
@@ -91,8 +93,8 @@ impl SettingsRenderCatalog {
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<SettingsUiState>().state;
-    let SettingsUiState {
+    let state = UiState::<UiSettings>::use_context().state;
+    let UiSettings {
         query,
         sections,
         fields,

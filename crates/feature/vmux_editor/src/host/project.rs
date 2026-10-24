@@ -19,14 +19,14 @@ use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 use crate::project::{
     ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCollectionViewRequest,
     ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectId,
-    ProjectImportRequest, ProjectRoute, ProjectUiState, ProjectView,
+    ProjectImportRequest, ProjectRoute, ProjectView, UiProject,
 };
 
 pub(super) struct ProjectPagePlugin;
 
 impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<ProjectUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiProject>::default())
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
                 ProjectImportRequest,
@@ -72,7 +72,7 @@ fn prewarm(mut commands: Commands) {
 #[derive(Component)]
 struct ProjectCatalogTask {
     revision: u64,
-    task: Task<ProjectUiState>,
+    task: Task<UiProject>,
 }
 
 impl ProjectCatalogTask {
@@ -140,7 +140,7 @@ struct ProjectPageQueries<'w, 's> {
         (Entity, &'static mut vmux_ecs::PageMetadata),
         Changed<vmux_ecs::PageMetadata>,
     >,
-    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<UiProject>>,
     revisions: Query<'w, 's, &'static mut ProjectPageRevision>,
     collection_views: ProjectCollectionViews<'w, 's>,
 }
@@ -163,7 +163,7 @@ struct ProjectOperationPages<'w, 's> {
         ),
     >,
     pending: Query<'w, 's, &'static PendingProjectOperation>,
-    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<UiProject>>,
 }
 
 impl ProjectOperationPages<'_, '_> {
@@ -188,7 +188,7 @@ impl ProjectOperationPages<'_, '_> {
         })
     }
 
-    fn pending_state(&self, webview: Entity) -> ProjectUiState {
+    fn pending_state(&self, webview: Entity) -> UiProject {
         self.states
             .get(webview)
             .ok()
@@ -433,9 +433,9 @@ fn create(
     {
         Ok(operation) => operation,
         Err(error) => {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 webview,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Error(error),
                     ..Default::default()
                 },
@@ -444,7 +444,7 @@ fn create(
         }
     };
     let state = pages.pending_state(webview);
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let requester = commands.spawn(pending).id();
@@ -469,7 +469,7 @@ fn import(
         return;
     };
     let state = pages.pending_state(webview);
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
@@ -503,9 +503,9 @@ fn clone(
     {
         Ok(operation) => operation,
         Err(error) => {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 webview,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Error(error),
                     ..Default::default()
                 },
@@ -514,7 +514,7 @@ fn clone(
         }
     };
     let state = pages.pending_state(webview);
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let requester = commands.spawn(pending).id();
@@ -530,7 +530,7 @@ fn archive(
     states: Query<(
         Entity,
         &vmux_ecs::PageMetadata,
-        &vmux_ecs::UiState<ProjectUiState>,
+        &vmux_ecs::UiState<UiProject>,
     )>,
     mut commands: Commands,
 ) {
@@ -544,9 +544,9 @@ fn archive(
     let mut archive = ProjectArchive::load(root);
     archive.set(&request.url, request.archived);
     if let Err(error) = archive.save(root) {
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
             trigger.event().webview,
-            &ProjectUiState {
+            &UiProject {
                 view: ProjectView::Error(error),
                 ..Default::default()
             },
@@ -571,7 +571,7 @@ fn archive(
             continue;
         };
         entry.archived = request.archived;
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
             entity, &current,
         ));
     }
@@ -594,9 +594,9 @@ fn delete(
     let deletion = match ProjectDeletion::resolve(root, &trigger.event().payload.url) {
         Ok(deletion) => deletion,
         Err(error) => {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 webview,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Error(error),
                     ..Default::default()
                 },
@@ -610,7 +610,7 @@ fn delete(
             .entries
             .retain(|entry| entry.url != trigger.event().payload.url);
     }
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
@@ -628,7 +628,7 @@ fn collection_view(
     trigger: On<UiInput<ProjectCollectionViewRequest>>,
     hierarchy: vmux_layout::space::SpaceHierarchy,
     mut spaces: Query<&mut vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
-    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<&vmux_ecs::UiState<UiProject>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -646,7 +646,7 @@ fn collection_view(
         .cloned()
         .unwrap_or_default();
     state.collection_view = view;
-    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
         webview, &state,
     ));
 }
@@ -698,9 +698,9 @@ fn queue(
         let root = match projects.path() {
             Ok(root) => root.to_path_buf(),
             Err(error) => {
-                commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                     entity,
-                    &ProjectUiState {
+                    &UiProject {
                         view: ProjectView::Error(error),
                         collection_view,
                     },
@@ -718,7 +718,7 @@ fn queue(
                     page.title.clone_from(&name);
                     let id = ProjectId(url.clone());
                     (
-                        ProjectUiState {
+                        UiProject {
                             view: ProjectView::Detail(ProjectDetailView {
                                 id: id.clone(),
                                 name,
@@ -730,7 +730,7 @@ fn queue(
                     )
                 }
                 Some(Err(error)) => (
-                    ProjectUiState {
+                    UiProject {
                         view: ProjectView::Error(error),
                         collection_view,
                     },
@@ -751,7 +751,7 @@ fn queue(
                 webview: entity,
                 cwd,
             });
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 entity, &state,
             ));
             continue;
@@ -768,9 +768,9 @@ fn queue(
                 .is_some_and(|state| matches!(state.view, ProjectView::Catalog(_)))
         });
         if !has_catalog {
-            commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                 entity,
-                &ProjectUiState {
+                &UiProject {
                     view: ProjectView::Loading,
                     collection_view,
                 },
@@ -830,9 +830,9 @@ fn finish_deletes(
                         ));
                 }
                 Err(error) => {
-                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                         operation.webview,
-                        &ProjectUiState {
+                        &UiProject {
                             view: ProjectView::Error(error),
                             ..Default::default()
                         },
@@ -852,7 +852,7 @@ fn finish_catalogs(
         &ProjectPageRevision,
     )>,
     catalog: Res<CatalogSnapshot>,
-    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
+    states: Query<&vmux_ecs::UiState<UiProject>>,
     mut commands: Commands,
 ) {
     for (entity, mut task, page, revision) in &mut tasks {
@@ -869,7 +869,7 @@ fn finish_catalogs(
         {
             state.collection_view = current.collection_view;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
             entity, &state,
         ));
     }
@@ -880,7 +880,7 @@ fn sync_session_counts(
     pages: Query<(
         Entity,
         &vmux_ecs::PageMetadata,
-        &vmux_ecs::UiState<ProjectUiState>,
+        &vmux_ecs::UiState<UiProject>,
     )>,
     mut commands: Commands,
 ) {
@@ -898,7 +898,7 @@ fn sync_session_counts(
         if next == *current {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
             entity, &next,
         ));
     }
@@ -930,9 +930,9 @@ fn finish_imports(
                         ));
                 }
                 Err(error) => {
-                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                         operation.webview,
-                        &ProjectUiState {
+                        &UiProject {
                             view: ProjectView::Error(error),
                             ..Default::default()
                         },
@@ -971,9 +971,9 @@ fn finish_repository_operations(
                         ));
                 }
                 Err(error) => {
-                    commands.trigger(vmux_ecs::UiStateWrite::<ProjectUiState>::from_event(
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
                         operation.webview,
-                        &ProjectUiState {
+                        &UiProject {
                             view: ProjectView::Error(error.clone()),
                             ..Default::default()
                         },
@@ -990,7 +990,7 @@ struct ProjectCatalog;
 impl ProjectCatalog {
     const MAX_DEPTH: usize = 6;
 
-    fn read(root: &Path, archive: &ProjectArchive) -> ProjectUiState {
+    fn read(root: &Path, archive: &ProjectArchive) -> UiProject {
         let mut entries = Vec::new();
         Self::walk(root, root, 0, archive, &mut entries);
         entries.sort_by(|left, right| {
@@ -999,7 +999,7 @@ impl ProjectCatalog {
                 .cmp(&right.name.to_lowercase())
                 .then_with(|| left.path.cmp(&right.path))
         });
-        ProjectUiState {
+        UiProject {
             view: ProjectView::Catalog(ProjectCatalogView {
                 entries,
                 operation_pending: false,
@@ -1008,7 +1008,7 @@ impl ProjectCatalog {
         }
     }
 
-    fn with_session_counts(mut state: ProjectUiState, catalog: &CatalogSnapshot) -> ProjectUiState {
+    fn with_session_counts(mut state: UiProject, catalog: &CatalogSnapshot) -> UiProject {
         let ProjectView::Catalog(view) = &mut state.view else {
             return state;
         };
@@ -1181,7 +1181,7 @@ mod tests {
         let project = root.path().join("github.com/vmux-ai/vmux");
         std::fs::create_dir_all(&project).unwrap();
         let now = vmux_ecs::UnixMillis::now().0;
-        let state = ProjectUiState {
+        let state = UiProject {
             view: ProjectView::Catalog(ProjectCatalogView {
                 entries: vec![ProjectEntry {
                     path: project.display().to_string(),

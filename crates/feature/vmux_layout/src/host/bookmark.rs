@@ -169,7 +169,7 @@ fn open_folder_edit(trigger: On<UiInput<BookmarkFolderEditOpenRequest>>, mut com
             parent: state.parent.clone(),
             draft: state.draft.clone(),
         });
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         event.webview,
         &BookmarkEditState {
             create: state,
@@ -194,7 +194,7 @@ fn open_rename_edit(trigger: On<UiInput<BookmarkRenameEditOpenRequest>>, mut com
             folder: state.folder,
             draft: state.draft.clone(),
         });
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         event.webview,
         &BookmarkEditState {
             rename: state,
@@ -233,7 +233,7 @@ fn edit_draft(
             draft: rename.draft.clone(),
         };
     }
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         event.webview,
         &state,
     ));
@@ -280,7 +280,7 @@ fn submit_edit(
         .entity(webview)
         .remove::<BookmarkFolderEditor>()
         .remove::<BookmarkRenameEditor>();
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         webview,
         &BookmarkEditState::default(),
     ));
@@ -292,14 +292,14 @@ fn close_edit(trigger: On<UiInput<BookmarkEditCloseRequest>>, mut commands: Comm
         .entity(webview)
         .remove::<BookmarkFolderEditor>()
         .remove::<BookmarkRenameEditor>();
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         webview,
         &BookmarkEditState::default(),
     ));
 }
 
 fn menu_edit(
-    trigger: On<UiStateWrite<crate::state::LayoutUiState>>,
+    trigger: On<UiStateWrite<crate::state::UiLayout>>,
     handled: Query<&BookmarkMenuRevisions>,
     entries: Query<(&Uuid, &Name, Has<Folder>)>,
     mut commands: Commands,

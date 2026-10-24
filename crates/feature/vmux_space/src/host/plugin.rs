@@ -23,25 +23,25 @@ use vmux_layout::space::{
     SpaceOfPane,
 };
 use vmux_layout::stack::{FocusedStack, Stack};
-use vmux_layout::state::LayoutUiState;
+use vmux_layout::state::UiLayout;
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, Main, WindowHierarchy};
 use vmux_layout::{
-    LayoutCef, LayoutContractPlugin, LayoutStartupSet, LayoutUiStateUpdates, TabLayoutSpawnContent,
+    LayoutCef, LayoutContractPlugin, LayoutStartupSet, UiLayoutUpdates, TabLayoutSpawnContent,
     TabLayoutSpawnRequest,
 };
 #[cfg(test)]
 use vmux_setting::{AgentSettings, SpaceOverrides, SpaceProject, TerminalSettings};
 use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 
-use super::SpacesUiStateUpdates;
+use super::UiSpacesUpdates;
 use super::agent::SpaceAgentPlugin;
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
     ProjectActivateRequest, ProjectForgetRequest, ProjectPickerRequest, SpaceAttachRequest,
     SpaceCreateRequest, SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest,
     SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState, SpaceOpenPageRequest,
-    SpaceRenameRequest, SpaceRow, SpacesListEvent, SpacesUiState,
+    SpaceRenameRequest, SpaceRow, SpacesListEvent, UiSpaces,
 };
 use crate::model::SpaceRecord;
 use vmux_api::command_bar::{CommandBarPicker, OpenRequest as CommandBarOpenUrlRequest};
@@ -66,7 +66,7 @@ impl Plugin for SpacePlugin {
         ))
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(LayoutContractPlugin)
-        .add_plugins(vmux_ecs::UiStatePlugin::<SpacesUiState>::default())
+        .add_plugins(vmux_ecs::UiStatePlugin::<UiSpaces>::default())
         .add_message::<CommandBarOpenRequest>()
         .add_message::<SpaceAttachRequest>()
         .add_message::<SpaceCreateRequest>()
@@ -440,11 +440,11 @@ fn open_form(
     commands
         .entity(trigger.event().webview)
         .insert(SpaceForm(form.clone()));
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(
         trigger.event().webview,
         &form,
     ));
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(
         trigger.event().webview,
         &form,
     ));
@@ -459,11 +459,11 @@ fn edit_form(
         return;
     };
     form.0.draft.clone_from(&trigger.event().payload.draft);
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(
         trigger.event().webview,
         &form.0,
     ));
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(
         trigger.event().webview,
         &form.0,
     ));
@@ -487,11 +487,11 @@ fn regenerate_form(
     let suggestion = SpaceRecord::suggested_planet_name(&existing);
     form.0.draft.clone_from(&suggestion);
     form.0.suggestion = suggestion;
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(
         trigger.event().webview,
         &form.0,
     ));
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(
         trigger.event().webview,
         &form.0,
     ));
@@ -501,11 +501,11 @@ fn close_form(trigger: On<UiInput<SpaceFormCloseRequest>>, mut commands: Command
     commands
         .entity(trigger.event().webview)
         .remove::<SpaceForm>();
-    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiSpaces>::from_event(
         trigger.event().webview,
         &SpaceFormState::default(),
     ));
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(
         trigger.event().webview,
         &SpaceFormState::default(),
     ));
@@ -603,8 +603,8 @@ fn broadcast_spaces_to_views(
     >,
     browsers: NonSend<Browsers>,
     space_window: SpaceWindow,
-    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
-    spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
+    layout_ui: Query<(), With<UiLayoutUpdates>>,
+    spaces_ui: Query<(), With<UiSpacesUpdates>>,
     mut commands: Commands,
 ) {
     for (entity, selection, snapshot, sent) in &mut views {
@@ -640,10 +640,10 @@ fn broadcast_spaces_to_views(
             commands
                 .entity(entity)
                 .insert(SpacesProjection(payload.clone()));
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(entity, &payload));
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(entity, &payload));
         }
         if spaces_ui.contains(entity) {
-            commands.trigger(UiStateWrite::<SpacesUiState>::from_event(entity, &payload));
+            commands.trigger(UiStateWrite::<UiSpaces>::from_event(entity, &payload));
         }
         commands
             .entity(entity)

@@ -29,7 +29,7 @@ use vmux_layout::{
     side_sheet::{SideSheet, SideSheetPosition, SideSheetSections, SideSheetSectionsExpanded},
     space::{CurrentSpace, Space, SpaceId},
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
-    state::LayoutUiState,
+    state::UiLayout,
     tab::Tab,
     toggle::LayoutHidden,
     window::{FocusedWindow, VmuxWindow, WindowHierarchy},
@@ -590,7 +590,7 @@ fn push_layout_emit(
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 struct AddressRoots<'a> {
@@ -715,7 +715,7 @@ fn push_stacks_host_emit(
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_pane_tree_emit(
@@ -833,7 +833,7 @@ fn push_pane_tree_emit(
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_projects_host_emit(
@@ -935,7 +935,7 @@ fn push_projects_host_emit(
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_bookmarks_host_emit(
@@ -1032,7 +1032,7 @@ fn push_bookmarks_host_emit(
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_tabs_host_emit(mut projection: LayoutProjection, tabs: TabProjectionData) {
@@ -1048,7 +1048,7 @@ fn push_tabs_host_emit(mut projection: LayoutProjection, tabs: TabProjectionData
     }
     projection
         .commands
-        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        .trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
 }
 
 fn push_update_notice_emit(
@@ -1070,17 +1070,14 @@ fn push_update_notice_emit(
     }
     match &*state {
         UpdateState::Idle => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
-                cef_e,
-                &UpdateCleared,
-            ));
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &UpdateCleared));
         }
         UpdateState::Downloading {
             version,
             downloaded,
             total,
         } => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 cef_e,
                 &UpdateProgress {
                     version: version.clone(),
@@ -1091,7 +1088,7 @@ fn push_update_notice_emit(
             ));
         }
         UpdateState::Installing { version } => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 cef_e,
                 &UpdateProgress {
                     version: version.clone(),
@@ -1102,7 +1099,7 @@ fn push_update_notice_emit(
             ));
         }
         UpdateState::Ready { version } => {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 cef_e,
                 &UpdateReady {
                     version: version.clone(),

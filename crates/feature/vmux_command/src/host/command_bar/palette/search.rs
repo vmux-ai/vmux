@@ -4,9 +4,8 @@ use super::super::driver::CompletionQuery;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{
-    CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
-    HistorySuggestionsRequest, HistorySuggestionsResponse, PathCompleteRequest,
-    PathCompleteResponse,
+    CommandPaletteDraftRequest, HistorySuggestionsRequest, HistorySuggestionsResponse,
+    PathCompleteRequest, PathCompleteResponse, UiCommandBar, UiCommandBarPatch,
 };
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::search::{Cancel, Ready, Request, SearchPlugin, State};
@@ -89,11 +88,11 @@ fn update(
 }
 
 fn receive_files(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
+    trigger: On<UiStateWrite<UiCommandBar>>,
     mut palettes: Query<(&State<CompletionSearch>, &mut PaletteSnapshot)>,
 ) {
     let Some(response) =
-        <CommandBarUiStatePatch as vmux_api::UiStatePatch<PathCompleteResponse>>::payload(
+        <UiCommandBarPatch as vmux_api::UiStatePatch<PathCompleteResponse>>::payload(
             trigger.event().update(),
         )
     else {
@@ -111,10 +110,10 @@ fn receive_files(
 }
 
 fn receive_history(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
+    trigger: On<UiStateWrite<UiCommandBar>>,
     mut palettes: Query<(&State<HistorySearch>, &mut PaletteSnapshot)>,
 ) {
-    let Some(response) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
+    let Some(response) = <UiCommandBarPatch as vmux_api::UiStatePatch<
         HistorySuggestionsResponse,
     >>::payload(trigger.event().update()) else {
         return;

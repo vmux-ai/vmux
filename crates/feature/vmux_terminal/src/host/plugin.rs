@@ -22,7 +22,7 @@ use vmux_command::{KeyCombo, Keymap, Modifiers};
 #[cfg(test)]
 use vmux_ecs::PageOpenId;
 use vmux_ecs::UiStateWrite;
-use vmux_ecs::event::TerminalUiState;
+use vmux_ecs::event::UiTerminal;
 use vmux_ecs::page::{BindsEditingChords, HostsPage};
 use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
@@ -101,7 +101,7 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::CopyModeRequest>()
         .add_message::<PendingProcessPresentation>()
         .add_plugins((
-            vmux_ecs::UiStatePlugin::<TerminalUiState>::default(),
+            vmux_ecs::UiStatePlugin::<UiTerminal>::default(),
             super::agent::AgentTerminalPlugin,
             crate::TerminalToolPlugin,
         ))
@@ -905,7 +905,7 @@ impl TerminalServiceStatus<'_, '_> {
         let event = ServiceUnavailableEvent { message };
         for entity in &self.terminals {
             self.commands
-                .trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &event));
+                .trigger(UiStateWrite::<UiTerminal>::from_event(entity, &event));
         }
     }
 }
@@ -1080,7 +1080,7 @@ fn apply_viewport_updates(
         for (_, line) in patch.changed_lines.iter_mut() {
             super::link::LinkDetector::new(None).annotate(line);
         }
-        commands.trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &patch));
+        commands.trigger(UiStateWrite::<UiTerminal>::from_event(entity, &patch));
     }
 }
 
@@ -2007,7 +2007,7 @@ fn apply_osc_title(
             .as_ref()
             .is_some_and(|browsers| browsers.can_emit_to(&entity))
         {
-            commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiTerminal>::from_event(
                 entity,
                 &TermTitleEvent {
                     title: ev.title.clone(),
