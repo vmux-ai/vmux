@@ -132,6 +132,19 @@ impl ProjectCollectionViews<'_, '_> {
     }
 }
 
+#[derive(SystemParam)]
+struct ProjectPageQueries<'w, 's> {
+    pages: Query<
+        'w,
+        's,
+        (Entity, &'static mut vmux_ecs::PageMetadata),
+        Changed<vmux_ecs::PageMetadata>,
+    >,
+    states: Query<'w, 's, &'static vmux_ecs::UiState<ProjectUiState>>,
+    revisions: Query<'w, 's, &'static mut ProjectPageRevision>,
+    collection_views: ProjectCollectionViews<'w, 's>,
+}
+
 #[derive(Component)]
 struct PendingProjectOperation {
     webview: Entity,
@@ -639,15 +652,18 @@ fn collection_view(
 }
 
 fn queue(
-    mut pages: Query<(Entity, &mut vmux_ecs::PageMetadata), Changed<vmux_ecs::PageMetadata>>,
-    states: Query<&vmux_ecs::UiState<ProjectUiState>>,
-    mut revisions: Query<&mut ProjectPageRevision>,
+    queries: ProjectPageQueries,
     settings: Res<vmux_setting::AppSettings>,
     projects: vmux_ecs::profile::Projects,
-    collection_views: ProjectCollectionViews,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let ProjectPageQueries {
+        mut pages,
+        states,
+        mut revisions,
+        collection_views,
+    } = queries;
     for (entity, mut page) in &mut pages {
         let url = page.url.clone();
         let collection_view = collection_views.get(entity);

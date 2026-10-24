@@ -1527,7 +1527,6 @@ mod tests {
                 archived_at: 10,
                 ..Default::default()
             }],
-            ..Default::default()
         };
 
         let leaving = ManagerPresentation::new(
