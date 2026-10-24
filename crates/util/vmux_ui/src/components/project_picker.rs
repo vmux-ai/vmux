@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
+use crate::components::avatar::Identicon;
 use crate::components::dropdown::DropdownPopup;
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
@@ -15,6 +16,7 @@ pub fn ProjectSelectTrigger(
     label: String,
     title: String,
     open: bool,
+    #[props(default)] seed: String,
     #[props(default)] class: String,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
@@ -28,9 +30,17 @@ pub fn ProjectSelectTrigger(
             title,
             aria_expanded: open,
             onclick: move |event| onclick.call(event),
-            BuiltinIconView {
-                icon: vmux_api::BuiltinIcon::Project,
-                class: "size-4 shrink-0 text-muted-foreground".to_string(),
+            if seed.is_empty() {
+                BuiltinIconView {
+                    icon: vmux_api::BuiltinIcon::Project,
+                    class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                }
+            } else {
+                Identicon {
+                    seed,
+                    alt: label.clone(),
+                    class: "size-4 shrink-0 rounded-md".to_string(),
+                }
             }
             span { class: "min-w-0 flex-1 truncate", "{label}" }
             LineIconView {
@@ -68,6 +78,11 @@ pub fn ProjectSelectPopup(
                             },
                             title: "{project.display_path}",
                             onclick: move |_| on_pick.call(row.clone()),
+                            Identicon {
+                                seed: project.path.clone(),
+                                alt: project.label.clone(),
+                                class: "size-5 shrink-0 rounded-md".to_string(),
+                            }
                             div { class: "min-w-0 flex-1",
                                 div { class: "truncate font-medium", "{project.label}" }
                                 div { class: "truncate font-mono text-[10px] text-muted-foreground", "{project.display_path}" }

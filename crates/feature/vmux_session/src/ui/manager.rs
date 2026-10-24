@@ -609,25 +609,27 @@ fn SessionGroup(
     };
     rsx! {
         section { class: "group/session-section {section_class}",
-            header { class: "glass sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md px-2 text-left backdrop-blur-xl transition-colors hover:bg-glass-hover",
-                SheetHeaderChevron {
-                    expanded: !collapsed(),
-                    label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
-                    onclick: move |event: MouseEvent| {
-                        event.stop_propagation();
-                        collapsed.set(!collapsed());
-                    },
-                }
-                button {
-                    r#type: "button",
-                    class: "flex min-w-0 flex-1 items-center gap-2 text-left",
-                    aria_expanded: !collapsed(),
-                    onclick: move |_| collapsed.set(!collapsed()),
-                    span { class: "flex size-4 shrink-0 items-center justify-center",
-                        span { class: "size-2 rounded-full {group.dot}" }
+            header { class: "sticky top-0 z-10 flex h-8 w-full items-center gap-2 px-1 text-left backdrop-blur-xl",
+                div { class: "flex h-7 w-fit max-w-full min-w-0 items-center gap-1 rounded-md px-1 transition-colors hover:bg-foreground/[0.045]",
+                    SheetHeaderChevron {
+                        expanded: !collapsed(),
+                        label: if collapsed() { translate("common-expand") } else { translate("common-collapse") },
+                        onclick: move |event: MouseEvent| {
+                            event.stop_propagation();
+                            collapsed.set(!collapsed());
+                        },
                     }
-                    h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
-                    span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
+                    button {
+                        r#type: "button",
+                        class: "flex min-w-0 items-center gap-2 pr-1 text-left",
+                        aria_expanded: !collapsed(),
+                        onclick: move |_| collapsed.set(!collapsed()),
+                        span { class: "flex size-4 shrink-0 items-center justify-center",
+                            span { class: "size-2 rounded-full {group.dot}" }
+                        }
+                        h2 { class: "truncate text-[11px] font-medium text-foreground/85", {translate_humanized(&stage.name)} }
+                        span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
+                    }
                 }
                 if stage.id == "stale" && !group.archivable.is_empty() {
                     div { class: "ml-auto opacity-0 transition-opacity group-hover/session-section:opacity-100 focus-within:opacity-100",
@@ -878,8 +880,6 @@ fn SessionProperties(
     let SessionPresentation {
         context,
         stage_target,
-        runtime,
-        agent,
         compact_id,
         updated,
         ..
@@ -898,26 +898,6 @@ fn SessionProperties(
                         span { class: "size-1.5 shrink-0 rounded-full {StageVisual::for_id(&session.stage).dot}" }
                         span { class: "truncate", {translate_humanized(&session.stage)} }
                     }
-                }
-            }
-            if !agent.name.is_empty() {
-                SessionDetailField { label: translate("resume-column-agent"),
-                    div { class: "flex min-w-0 items-center gap-1.5",
-                        AgentThumbnail {
-                            src: agent.icon.clone(),
-                            seed: agent.id.clone(),
-                            background: agent.color.clone(),
-                            alt: agent.name.clone(),
-                            class: "size-4 shrink-0 text-[5px]".to_string(),
-                        }
-                        span { class: "truncate text-[10px] text-foreground/75", "{agent.name}" }
-                    }
-                }
-            }
-            SessionDetailField { label: translate("common-status"),
-                div { class: "flex min-w-0 items-center gap-2 text-[10px] text-foreground/75",
-                    span { class: "size-1.5 shrink-0 rounded-full {runtime.dot}" }
-                    span { class: "truncate", {runtime_label(&session.runtime)} }
                 }
             }
             if !context.project.is_empty() {

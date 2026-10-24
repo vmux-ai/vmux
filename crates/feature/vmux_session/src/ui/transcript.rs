@@ -87,9 +87,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.transcript.note_scroll_input();
                 }
             },
-            onpointerdown: move |_| chat.transcript.begin_pointer_scroll(),
-            onpointerup: move |_| chat.transcript.end_pointer_scroll(),
-            onpointercancel: move |_| chat.transcript.end_pointer_scroll(),
             onscroll: move |e: Event<ScrollData>| {
                 let top = e.scroll_top() as i32;
                 let dist = e.scroll_height() - top - e.client_height();

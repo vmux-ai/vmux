@@ -939,6 +939,16 @@ fn EditorWorkspace() -> Element {
                 {measure_wide_text}
             }
 
+            EditorBreadcrumbs {
+                display_path: path(),
+                abs_path: breadcrumb_path,
+                repo_root: git_repo_root(),
+                branch: git_state().branch,
+                leaf_is_dir: mode() == Mode::Dir,
+                outline: breadcrumb_outline,
+                caret_line: breadcrumb_caret_line,
+            }
+
             EditorHeader {
                 pane: explorer,
                 mode,
@@ -954,14 +964,6 @@ fn EditorWorkspace() -> Element {
                 git_has_diff: git_has_diff(),
                 view_mode: file_view_mode(),
                 tidy: tidy(),
-            }
-
-            EditorBreadcrumbs {
-                display_path: path(),
-                abs_path: breadcrumb_path,
-                leaf_is_dir: mode() == Mode::Dir,
-                outline: breadcrumb_outline,
-                caret_line: breadcrumb_caret_line,
             }
 
             {

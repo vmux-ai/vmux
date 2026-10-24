@@ -1,13 +1,17 @@
 use crate::cn::cn;
+use crate::components::avatar::Identicon;
 use crate::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use crate::i18n::translate;
-use crate::icon::{LineIcon, LineIconView};
+use crate::icon::{BuiltinIconView, LineIcon, LineIconView};
 use dioxus::prelude::*;
+use vmux_api::BuiltinIcon;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct BreadcrumbOption {
     pub label: String,
     pub value: String,
+    pub identity_seed: String,
+    pub icon: Option<BuiltinIcon>,
 }
 
 #[component]
@@ -82,11 +86,11 @@ pub fn BreadcrumbSelector(
     #[props(default = rsx! {})] leading: Element,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let root_class = cn(["min-w-0", class.as_str()]);
+    let root_class = cn(["min-w-0 max-w-full", class.as_str()]);
     let button_class = if active {
-        "flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.05]"
+        "flex h-7 w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.05]"
     } else {
-        "flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+        "flex h-7 w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
     };
     rsx! {
         Dropdown {
@@ -111,17 +115,29 @@ pub fn BreadcrumbSelector(
                 }
             }
             if open() {
-                DropdownPopup { align: DropdownAlign::Start, class: "w-40 p-1",
+                DropdownPopup { align: DropdownAlign::Start, class: "min-w-56 max-w-[min(24rem,calc(100vw-2rem))] p-1",
                     for option in options {
                         button {
                             key: "{option.value}",
                             r#type: "button",
                             "data-vmux-dropdown-option": "",
-                            class: "flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground data-[vmux-dropdown-active=true]:bg-foreground/[0.07] data-[vmux-dropdown-active=true]:text-foreground",
+                            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground data-[vmux-dropdown-active=true]:bg-foreground/[0.07] data-[vmux-dropdown-active=true]:text-foreground",
                             onclick: move |_| {
                                 open.set(false);
                                 onselect.call(option.value.clone());
                             },
+                            if !option.identity_seed.is_empty() {
+                                Identicon {
+                                    seed: option.identity_seed.clone(),
+                                    alt: option.label.clone(),
+                                    class: "size-4 shrink-0 rounded-md".to_string(),
+                                }
+                            } else if let Some(icon) = option.icon {
+                                BuiltinIconView {
+                                    icon,
+                                    class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                                }
+                            }
                             span { class: "truncate", "{option.label}" }
                         }
                     }

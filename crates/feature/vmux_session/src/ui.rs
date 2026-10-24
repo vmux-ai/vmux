@@ -69,7 +69,9 @@ fn SessionDetail(session_id: String) -> Element {
     let header_repository = details
         .as_ref()
         .and_then(|(_, repository, _)| repository.clone());
-    let header_navigation = header_catalog.read().navigation(header_repository.as_ref());
+    let header_navigation = header_catalog
+        .read()
+        .navigation(header_repository.as_ref(), header_session.as_ref());
     let mut details_open = use_signal(|| false);
 
     rsx! {

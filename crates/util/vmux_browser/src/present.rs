@@ -54,25 +54,7 @@ impl Plugin for PresentPlugin {
             )
                 .chain()
                 .after(LayoutSystems::Layout),
-        )
-        .add_systems(Last, log_windowed_view_state);
-    }
-}
-
-fn log_windowed_view_state(
-    browsers: NonSend<Browsers>,
-    pages: Query<Entity, (With<Browser>, With<WebviewWindowed>, Without<WindowOverlay>)>,
-    mut previous: Local<std::collections::HashMap<Entity, String>>,
-) {
-    for entity in &pages {
-        let Some(state) = browsers.windowed_view_state(&entity) else {
-            continue;
-        };
-        if previous.get(&entity) == Some(&state) {
-            continue;
-        }
-        bevy::log::warn!(?entity, "cef_diagnostic: {state}");
-        previous.insert(entity, state);
+        );
     }
 }
 
@@ -540,6 +522,7 @@ fn sync_windowed_frames(
         let browser_ready = browsers.windowed_view_ready(&entity);
         let was_raised = memory.raised_frame.contains_key(&entity);
         let first_native_frame = browser_ready && !was_raised;
+        let reveal = windowed_page_needs_reveal(became_visible, browser_ready, was_raised);
         browsers.set_windowed_frame(
             &entity,
             frame.left,
@@ -548,7 +531,7 @@ fn sync_windowed_frames(
             frame.height,
             scale,
         );
-        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
+        if reveal {
             browsers.set_windowed_hidden(&entity, false);
         }
         browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
@@ -598,6 +581,9 @@ fn sync_windowed_frames(
             let changed = memory.raised_frame.insert(entity, key) != Some(key);
             if force_raise || changed || became_visible || first_native_frame {
                 browsers.raise_windowed_to_front(&entity);
+            }
+            if reveal {
+                browsers.nudge_windowed_repaint(&entity);
             }
         }
     }

@@ -947,12 +947,9 @@ const CHAT_MD_CLASS: &str = "chat-md px-0.5 text-sm text-foreground/95 leading-[
     [&_a]:decoration-[color-mix(in_srgb,var(--agent-accent)_45%,transparent)] \
     [&_a]:underline-offset-[0.16em] \
     [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.88em] \
-    [&_:not(pre)>code]:bg-[color-mix(in_srgb,var(--agent-accent)_10%,transparent)] \
-    [&_:not(pre)>code]:border \
-    [&_:not(pre)>code]:border-[color-mix(in_srgb,var(--agent-accent)_11%,transparent)] \
+    [&_:not(pre)>code]:bg-foreground/[0.055] \
     [&_:not(pre)>code]:[padding:0.1em_0.35em] [&_:not(pre)>code]:rounded-[0.4em] \
-    [&_pre]:bg-[linear-gradient(135deg,color-mix(in_srgb,var(--agent-accent)_7%,transparent),color-mix(in_srgb,var(--agent-accent)_3%,transparent))] \
-    [&_pre]:border [&_pre]:border-[color-mix(in_srgb,var(--agent-accent)_11%,transparent)] \
+    [&_pre]:bg-foreground/[0.045] \
     [&_pre]:[padding:0.7em_0.9em] [&_pre]:rounded-[0.7em] [&_pre]:overflow-x-auto \
     [&_pre]:my-[0.6em] [&_pre]:font-mono [&_pre_code]:text-[0.85em] \
     [&_blockquote]:border-l-2 \
@@ -1101,7 +1098,7 @@ pub const MD_CSS: &str = r#"
 .agent-themed-activity{color:var(--agent-accent);background:color-mix(in srgb,var(--agent-accent) 11%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 18%,transparent)}
 .agent-working-label{color:color-mix(in srgb,var(--agent-accent) 82%,currentColor)}
 .agent-row-hover:hover{background:color-mix(in srgb,var(--agent-accent) 4%,transparent)}
-.agent-code-panel,.user-context-content{background:rgba(127,127,127,0.07);box-shadow:inset 0 0 0 1px rgba(127,127,127,0.14)}
+.agent-code-panel,.user-context-content{background:rgba(127,127,127,0.07)}
 .agent-context-tree{border-color:color-mix(in srgb,var(--agent-accent) 22%,transparent)}
 .agent-turn-meta{color:color-mix(in srgb,var(--agent-accent) 72%,currentColor);border-color:color-mix(in srgb,var(--agent-accent) 13%,transparent);background:color-mix(in srgb,var(--agent-accent) 7%,transparent)}
 .agent-turn-meta-dot{background:var(--agent-accent)}

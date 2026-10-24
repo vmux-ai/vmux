@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use dioxus::prelude::*;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar, Identicon};
 use vmux_ui::components::breadcrumb::{
-    BreadcrumbItem, BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator, Breadcrumbs,
+    BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator, Breadcrumbs,
 };
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::composer_bar::StatusDot;
@@ -43,6 +43,8 @@ impl ChatHeaderCatalog {
             projects.push(BreadcrumbOption {
                 label: repository.project.clone(),
                 value: repository.project_url.clone(),
+                identity_seed: repository.project_url.clone(),
+                icon: None,
             });
         }
         projects.sort_by(|left, right| left.label.cmp(&right.label));
@@ -65,6 +67,8 @@ impl ChatHeaderCatalog {
                 option: BreadcrumbOption {
                     label: presentation.title,
                     value: Route::Session(SessionId(session.id.clone())).url(),
+                    identity_seed: session.id.clone(),
+                    icon: None,
                 },
             });
         }
@@ -74,6 +78,7 @@ impl ChatHeaderCatalog {
     pub(super) fn navigation(
         &self,
         repository: Option<&SessionRepository>,
+        session: Option<&SessionSummary>,
     ) -> ChatHeaderNavigation {
         let current_project = repository.map(|repository| repository.project_url.as_str());
         let sessions = self
@@ -82,9 +87,39 @@ impl ChatHeaderCatalog {
             .filter(|session| current_project.is_none_or(|project| session.project_url == project))
             .map(|session| session.option.clone())
             .collect();
+        let mut views = Vec::new();
+        if let Some(session) = session {
+            views.push(BreadcrumbOption {
+                label: translate("sessions-title"),
+                value: Route::Session(SessionId(session.id.clone())).url(),
+                identity_seed: String::new(),
+                icon: Some(vmux_api::BuiltinIcon::MessagesRound),
+            });
+            if let Some(repository) = repository {
+                if !repository.url.is_empty() {
+                    views.push(BreadcrumbOption {
+                        label: translate("git-title"),
+                        value: repository.url.clone(),
+                        identity_seed: String::new(),
+                        icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                    });
+                }
+            }
+            if !session.cwd.is_empty()
+                && let Ok(url) = url::Url::from_directory_path(&session.cwd)
+            {
+                views.push(BreadcrumbOption {
+                    label: translate("editor-editor"),
+                    value: url.to_string(),
+                    identity_seed: String::new(),
+                    icon: Some(vmux_api::BuiltinIcon::Files),
+                });
+            }
+        }
         ChatHeaderNavigation {
             projects: self.projects.clone(),
             sessions,
+            views,
         }
     }
 }
@@ -93,6 +128,7 @@ impl ChatHeaderCatalog {
 pub(super) struct ChatHeaderNavigation {
     projects: Vec<BreadcrumbOption>,
     sessions: Vec<BreadcrumbOption>,
+    views: Vec<BreadcrumbOption>,
 }
 
 #[component]
@@ -142,9 +178,10 @@ pub(super) fn ChatHeader(
                     onselect: move |url| PageNavigation::replace(url),
                 }
                 BreadcrumbSeparator {}
-                BreadcrumbItem {
+                BreadcrumbSelector {
                     label: translate("sessions-title"),
-                    onclick: move |_| PageNavigation::replace("vmux://sessions/"),
+                    options: navigation.views,
+                    onselect: move |url| PageNavigation::replace(url),
                 }
                 BreadcrumbSeparator {}
                 BreadcrumbSelector {
@@ -163,15 +200,12 @@ pub(super) fn ChatHeader(
                 }
             }
             StatusDot { status: chat.status(), size_class: "h-2 w-2" }
-            div { class: "relative h-7 w-10 shrink-0",
-                Avatar {
-                    src: None,
-                    seed: user_name.clone(),
-                    background: user_color,
-                    alt: user_name.clone(),
-                    class: "absolute left-0 top-0 size-7 border-2 border-background text-[9px]".to_string(),
-                }
-                AgentAvatar { chat, size_class: "absolute left-4 top-0 size-7 border-2 border-background text-[9px]" }
+            Avatar {
+                src: None,
+                seed: user_name.clone(),
+                background: user_color,
+                alt: user_name.clone(),
+                class: "size-5 shrink-0 text-[7px]".to_string(),
             }
             if details_available {
                 Button {

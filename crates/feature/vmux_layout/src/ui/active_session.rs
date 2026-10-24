@@ -179,6 +179,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         label: root.label.clone(),
                         title: root.display_path.clone(),
                         open: choosing(),
+                        seed: root.path.clone(),
                         class: "w-full @max-[12rem]:gap-1.5 @max-[12rem]:px-1".to_string(),
                         onclick: move |_| choosing.set(!choosing()),
                     }
@@ -209,7 +210,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                 }
                 if !current_branch.is_empty() || !branch_choices.is_empty() {
                     if branch_choices.is_empty() {
-                        div { class: "flex h-8 min-w-0 items-center gap-2 rounded px-2",
+                        div { class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 transition-colors hover:bg-foreground/[0.04]",
                             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                             span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch}" }
                         }
@@ -245,14 +246,42 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            div { class: "flex h-8 min-w-0 items-center gap-2 px-3 @max-[12rem]:gap-1.5 @max-[12rem]:px-1.5",
+            div {
+                role: "button",
+                tabindex: "0",
+                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-3 text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5 @max-[12rem]:px-1.5",
+                aria_expanded: expanded,
+                onclick: move |_| {
+                    let _ = send(&SideSheetSectionRequest::new(
+                        pane_id,
+                        "projects",
+                        !expanded,
+                    ));
+                },
+                onkeydown: move |event: KeyboardEvent| {
+                    let activates = match event.key() {
+                        Key::Enter => true,
+                        Key::Character(value) => value == " ",
+                        _ => false,
+                    };
+                    if !activates {
+                        return;
+                    }
+                    event.prevent_default();
+                    let _ = send(&SideSheetSectionRequest::new(
+                        pane_id,
+                        "projects",
+                        !expanded,
+                    ));
+                },
                 LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                 span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85", {translate("git-files")} }
                 div { class: "shrink-0",
                     SheetHeaderChevron {
                         expanded,
                         label: toggle_label,
-                        onclick: move |_| {
+                        onclick: move |event: MouseEvent| {
+                            event.stop_propagation();
                             let _ = send(&SideSheetSectionRequest::new(
                                 pane_id,
                                 "projects",

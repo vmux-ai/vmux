@@ -647,7 +647,6 @@ pub struct Transcript {
     pub at_bottom: Signal<bool>,
     pub initial_follow: Signal<bool>,
     last_top: Signal<i32>,
-    pointer_scrolling: Signal<bool>,
     input_pending: Signal<bool>,
     input_clear_task: Signal<Option<Task>>,
     pub scroll_container: scroll::Container,
@@ -661,7 +660,6 @@ pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
         at_bottom: use_signal(|| true),
         initial_follow: use_signal(|| true),
         last_top: use_signal(|| 0),
-        pointer_scrolling: use_signal(|| false),
         input_pending: use_signal(|| false),
         input_clear_task: use_signal(|| None),
         scroll_container: use_signal(|| None),
@@ -692,16 +690,6 @@ impl Transcript {
         })));
     }
 
-    pub(super) fn begin_pointer_scroll(self) {
-        let mut pointer_scrolling = self.pointer_scrolling;
-        pointer_scrolling.set(true);
-    }
-
-    pub(super) fn end_pointer_scroll(self) {
-        let mut pointer_scrolling = self.pointer_scrolling;
-        pointer_scrolling.set(false);
-    }
-
     pub(super) fn observe_scroll(self, top: i32, distance: i32) {
         let mut last_top = self.last_top;
         let previous = *last_top.peek();
@@ -709,11 +697,10 @@ impl Transcript {
         if *self.initial_follow.peek() {
             return;
         }
-        let user_scrolling = *self.pointer_scrolling.peek() || *self.input_pending.peek();
         if distance <= 48 {
             let mut at_bottom = self.at_bottom;
             at_bottom.set(true);
-        } else if user_scrolling && top < previous - 4 {
+        } else if *self.input_pending.peek() && top < previous - 4 {
             let mut at_bottom = self.at_bottom;
             at_bottom.set(false);
         }
@@ -735,10 +722,8 @@ impl Transcript {
             let mut last_top = self.last_top;
             last_top.set(0);
         }
-        if *self.initial_follow.peek() {
+        if *self.initial_follow.peek() || *self.at_bottom.peek() {
             scroll::settle_bottom(self.scroll_container, self.initial_follow, self.follow_task);
-        } else if *self.at_bottom.peek() {
-            scroll::to_bottom(self.scroll_container);
         }
     }
 }

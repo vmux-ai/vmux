@@ -25,6 +25,8 @@ impl Plugin for InputPlugin {
             PreUpdate,
             (
                 publish_layout_pointer_inside,
+                #[cfg(target_os = "macos")]
+                dismiss_layout_overlay_from_native_pointer,
                 forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
                 forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
             )
@@ -33,6 +35,53 @@ impl Plugin for InputPlugin {
         )
         .add_systems(PreUpdate, log_command_bar_keyboard)
         .add_systems(Update, track_interaction);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn dismiss_layout_overlay_from_native_pointer(
+    windows: Query<&Window>,
+    mut layouts: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    active_overlays: Query<(), With<LayoutOverlayActive>>,
+    cef_regions: CefPointerRegions,
+    mut previous_sequence: Local<u64>,
+    mut previous_pressed: Local<bool>,
+    mut commands: Commands,
+) {
+    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
+        return;
+    };
+    if pointer.sequence == *previous_sequence {
+        return;
+    }
+    *previous_sequence = pointer.sequence;
+    let pressed = pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle;
+    let began = pressed && !*previous_pressed;
+    *previous_pressed = pressed;
+    if !began {
+        return;
+    }
+    for (layout, host, mut revision) in &mut layouts {
+        if !active_overlays.contains(layout) {
+            continue;
+        }
+        let Ok(window) = windows.get(host.0) else {
+            continue;
+        };
+        let scale = window.resolution.scale_factor();
+        if !scale.is_finite() || scale <= 0.0 {
+            continue;
+        }
+        let position = pointer.position_px / scale;
+        if cef_regions.contains(position) {
+            continue;
+        }
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                layout,
+                &revision.next_effect(),
+            ),
+        );
     }
 }
 

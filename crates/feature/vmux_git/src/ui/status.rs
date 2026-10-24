@@ -122,6 +122,7 @@ pub(super) fn RepositoryHeader(
                         label: repository.repo_name.clone(),
                         title: repository.repo_root.clone(),
                         open: repository_open,
+                        seed: repository.repo_root.clone(),
                         onclick: move |_| {
                             let open = if repository_open {
                                 HeaderDropdown::Closed
