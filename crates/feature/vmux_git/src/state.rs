@@ -756,7 +756,7 @@ pub struct GitBranchFilesPatch {
 }
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct GitUiStatePatch {
+pub struct UiGitPatch {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
     pub workspace: Option<GitWorkspaceChanged>,
@@ -772,8 +772,8 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 15)]
-pub struct GitUiState {
+#[vmux_api::ui_state(Default, patch = UiGitPatch, version = 15)]
+pub struct UiGit {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,
     pub workspace: Option<GitWorkspaceChanged>,
@@ -785,8 +785,8 @@ pub struct GitUiState {
     pub diff_updates: Vec<GitDiffAppend>,
 }
 
-impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
-    fn apply(&mut self, patch: GitUiStatePatch) {
+impl vmux_api::UiStateProjection<UiGitPatch> for UiGit {
+    fn apply(&mut self, patch: UiGitPatch) {
         if let Some(context) = patch.context {
             self.context = Some(context);
         }
@@ -865,7 +865,7 @@ mod tests {
 
     #[test]
     fn repository_selection_replaces_stale_content_immediately() {
-        let mut state = GitUiState::default();
+        let mut state = UiGit::default();
         state.snapshot.repository = Some(repository_with_branches());
         state.snapshot.branch_files = vec![GitBranchFileEntry {
             path: "old.rs".into(),
@@ -910,7 +910,7 @@ mod tests {
 
     #[test]
     fn repository_projection_discards_stale_diff_updates() {
-        let mut state = GitUiState::default();
+        let mut state = UiGit::default();
         state.snapshot.workspace = "/tmp/old".into();
         state.snapshot.repository_request_id = 4;
         state.diff_updates.push(GitDiffAppend {
@@ -939,7 +939,7 @@ mod tests {
 
         vmux_api::UiStateProjection::apply(
             &mut state,
-            GitUiStatePatch {
+            UiGitPatch {
                 snapshot: Some(Box::new(snapshot)),
                 ..Default::default()
             },
@@ -951,14 +951,14 @@ mod tests {
 
     #[test]
     fn catalog_patch_appends_without_replacing_the_snapshot() {
-        let mut state = GitUiState::default();
+        let mut state = UiGit::default();
         state.snapshot.repository = Some(repository_with_branches());
         state.snapshot.diff_loading = true;
         let mut branch = state.snapshot.repository.as_ref().unwrap().branches[1].clone();
         branch.name = "release".to_string();
         vmux_api::UiStateProjection::apply(
             &mut state,
-            GitUiStatePatch {
+            UiGitPatch {
                 catalog: Some(Box::new(GitCatalogPatch {
                     catalog: GitCatalog::LocalBranches,
                     offset: 2,
@@ -991,7 +991,7 @@ mod tests {
 
     #[test]
     fn branch_file_patch_replaces_then_appends_pages() {
-        let mut state = GitUiState::default();
+        let mut state = UiGit::default();
         let file = |path: &str| GitBranchFileEntry {
             path: path.to_string(),
             path_bytes: path.as_bytes().to_vec(),
@@ -1031,7 +1031,7 @@ mod tests {
         ] {
             vmux_api::UiStateProjection::apply(
                 &mut state,
-                GitUiStatePatch {
+                UiGitPatch {
                     branch_files: Some(Box::new(patch)),
                     ..Default::default()
                 },
@@ -1136,7 +1136,7 @@ mod tests {
 
     #[test]
     fn snapshot_round_trips_through_ui_state() {
-        let event = <GitUiState as vmux_api::UiState>::from_updates(
+        let event = <UiGit as vmux_api::UiState>::from_updates(
             None,
             vec![
                 GitPageContext {
@@ -1160,7 +1160,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiGit, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(
             decoded
@@ -1267,7 +1267,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let event = <GitUiState as vmux_api::UiState>::from_updates(
+        let event = <UiGit as vmux_api::UiState>::from_updates(
             None,
             vec![
                 first.into(),
@@ -1289,7 +1289,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiGit, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert!(decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);
@@ -1316,7 +1316,7 @@ mod tests {
             diff_rows: vec![GitDiffRow::Line(0)],
             ..Default::default()
         };
-        let event = <GitUiState as vmux_api::UiState>::from_updates(
+        let event = <UiGit as vmux_api::UiState>::from_updates(
             None,
             vec![
                 first.into(),
@@ -1353,7 +1353,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiGit, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert!(decoded.snapshot.diff_loading);
         assert_eq!(decoded.snapshot.diff_viewport.unwrap().lines.len(), 2);

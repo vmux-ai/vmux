@@ -24,7 +24,7 @@ use crate::event::{
     GitRepositorySnapshot,
 };
 use crate::state::{
-    GitBranchFilesPagePatch, GitBranchFilesPatch, GitCatalogEntries, GitCatalogPatch, GitUiState,
+    GitBranchFilesPagePatch, GitBranchFilesPatch, GitCatalogEntries, GitCatalogPatch, UiGit,
 };
 use vmux_path::PathIdentity;
 
@@ -700,7 +700,7 @@ fn deliver_repository_outputs(
                 if let Some(patch) =
                     states.set_repository(webview, snapshot, request.refresh_catalogs)
                 {
-                    commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                    commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                         webview, &patch,
                     ));
                 }
@@ -719,7 +719,7 @@ fn deliver_catalog_outputs(
         &mut super::state::GitState,
         &mut super::state::GitCatalogRevision,
     )>,
-    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
+    mut ui_state: Option<vmux_ecs::UiStateWriter<UiGit>>,
     mut commands: Commands,
 ) {
     for (entity, job, mut output) in &mut outputs {
@@ -838,7 +838,7 @@ fn deliver_diff_outputs(
     )>,
     mut files: super::status::FileGitStates,
     mut diffs: Query<&mut super::diff::GitDiffQuery>,
-    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
+    mut ui_state: Option<vmux_ecs::UiStateWriter<UiGit>>,
     mut commands: Commands,
 ) {
     for (entity, job, mut output) in &mut outputs {
@@ -917,7 +917,7 @@ fn deliver_branch_files_outputs(
         &crate::state::GitPageControllerState,
         &mut super::state::GitCatalogRevision,
     )>,
-    mut ui_state: Option<vmux_ecs::UiStateWriter<GitUiState>>,
+    mut ui_state: Option<vmux_ecs::UiStateWriter<UiGit>>,
     mut commands: Commands,
 ) {
     for (entity, job, mut output) in &mut outputs {
@@ -1760,7 +1760,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.init_resource::<CapturedOutputs>()
-            .add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
+            .add_plugins(vmux_ecs::UiStatePlugin::<UiGit>::default())
             .add_plugins(JobPlugin)
             .add_systems(
                 Update,

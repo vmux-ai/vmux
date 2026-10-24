@@ -15,7 +15,7 @@ use crate::event::{
 use crate::state::GitCatalogProgress;
 use crate::state::{
     CheckedOutBranch, GitCommandLogEntry, GitDiffRowsPatch, GitPageControllerState,
-    GitPageSnapshot, GitRepositoryPatch, GitUiState, RepositoryName, RepositoryPath,
+    GitPageSnapshot, GitRepositoryPatch, UiGit, RepositoryName, RepositoryPath,
 };
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
@@ -24,13 +24,13 @@ use super::job::RepositoryJob;
 use super::job_runner::{GitJob, RepositoryLoads};
 use super::watch::{GitWatch, GitWatchSubscription};
 
-type GitUiStateUpdates = vmux_ecs::UiState<GitUiState>;
+type UiGitUpdates = vmux_ecs::UiState<UiGit>;
 
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiGit>::default())
             .add_plugins(UiEventPlugin::<(GitRepositoryRequest,)>::default())
             .init_resource::<GitPageCache>()
             .add_observer(page_ready)
@@ -52,7 +52,7 @@ impl Plugin for StatePlugin {
 
 #[derive(Component, Default)]
 #[require(
-    GitUiStateUpdates,
+    UiGitUpdates,
     GitPageControllerState,
     GitDirectoryNavigation,
     PendingBranchCheckout,
@@ -829,7 +829,7 @@ fn project_diff(
         Ref<GitDiffRevealRanges>,
         &mut GitDiffProjectionState,
     )>,
-    mut ui_state: vmux_ecs::UiStateWriter<GitUiState>,
+    mut ui_state: vmux_ecs::UiStateWriter<UiGit>,
 ) {
     for (entity, mut state, revealed, mut projection) in &mut pages {
         if !state.is_changed() && !revealed.is_changed() {
@@ -872,7 +872,7 @@ fn page_ready(
         return;
     }
     if let Ok(state) = states.get(entity) {
-        commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+        commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
             entity,
             &state.snapshot,
         ));
@@ -1057,19 +1057,19 @@ type GitStateQuery<'w, 's> = Query<
 fn publish(views: GitStateQuery, mut commands: Commands) {
     for (entity, view, controller, directory) in &views {
         if view.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 entity,
                 &view.snapshot,
             ));
         }
         if controller.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 entity,
                 &*controller,
             ));
         }
         if directory.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                 entity,
                 &directory.state(),
             ));
@@ -1499,7 +1499,7 @@ mod tests {
             .collect::<Vec<_>>();
         lines[changed].kind = DiffKind::Add;
         let mut app = App::new();
-        app.add_plugins(vmux_ecs::UiStatePlugin::<GitUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiGit>::default())
             .add_systems(Update, project_diff);
         let entity = app
             .world_mut()

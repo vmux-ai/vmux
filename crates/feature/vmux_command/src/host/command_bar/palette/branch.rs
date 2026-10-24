@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{
-    CommandBarUiState, CommandBarUiStatePatch, StartBranchesRequest, StartProjectBranches,
+    StartBranchesRequest, StartProjectBranches, UiCommandBar, UiCommandBarPatch,
 };
 use vmux_ecs::UiStateWrite;
 
@@ -66,11 +66,11 @@ fn update(
 }
 
 fn receive_branches(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
+    trigger: On<UiStateWrite<UiCommandBar>>,
     mut palettes: Query<(&mut PaletteBranch, &mut PaletteSnapshot)>,
 ) {
     let Some(response) =
-        <CommandBarUiStatePatch as vmux_api::UiStatePatch<StartProjectBranches>>::payload(
+        <UiCommandBarPatch as vmux_api::UiStatePatch<StartProjectBranches>>::payload(
             trigger.event().update(),
         )
     else {

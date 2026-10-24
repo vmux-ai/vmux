@@ -132,8 +132,8 @@ impl HistoryEntries {
         Self(entries)
     }
 
-    fn state(self, limit: usize) -> crate::state::HistoryUiState {
-        crate::state::HistoryUiState {
+    fn state(self, limit: usize) -> crate::state::UiHistory {
+        crate::state::UiHistory {
             has_more: self.0.len() > limit,
             entries: self.0.into_iter().take(limit).collect(),
             query: String::new(),
@@ -238,7 +238,7 @@ fn publish_pages(
         snapshot.clear_confirm_open = state.clear_confirm_open;
         state.bypass_change_detection().has_more = snapshot.has_more;
         commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::HistoryUiState>::from_event(entity, &snapshot),
+            vmux_ecs::UiStateWrite::<crate::state::UiHistory>::from_event(entity, &snapshot),
         );
     }
 }
@@ -258,15 +258,15 @@ fn suggestions_request(
         .state(req.limit as usize)
         .entries;
 
-    commands.trigger(vmux_ecs::UiStateWrite::<
-        vmux_api::command_bar::CommandBarUiState,
-    >::from_event(
-        trigger.event().webview,
-        &HistorySuggestionsResponse {
-            request_id: req.request_id,
-            entries,
-        },
-    ));
+    commands.trigger(
+        vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(
+            trigger.event().webview,
+            &HistorySuggestionsResponse {
+                request_id: req.request_id,
+                entries,
+            },
+        ),
+    );
 }
 
 #[cfg(test)]

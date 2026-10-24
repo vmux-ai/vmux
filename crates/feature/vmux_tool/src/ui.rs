@@ -1,3 +1,4 @@
+use vmux_ui::hooks::UiState;
 #![allow(non_snake_case)]
 
 use std::collections::BTreeSet;
@@ -7,10 +8,10 @@ use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
     ToolOperationNotice, ToolProvider, ToolProviderMetadata, ToolStatus, ToolUninstallRequest,
-    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, ToolsUiState,
+    ToolUnlinkRequest, ToolUpdateRequest, ToolsFilterRequest, ToolsNavigateRequest, UiTools,
 };
 use dioxus::prelude::*;
-use vmux_api::extension::ExtensionsUiState;
+use vmux_api::extension::UiExtensions;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::breadcrumb::{
     BreadcrumbOption, BreadcrumbOptionIcon, BreadcrumbSelector, BreadcrumbSeparator,
@@ -22,7 +23,7 @@ use vmux_ui::components::manager::{
     WorkspacePage,
 };
 use vmux_ui::components::page_address::PageAddress;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{send, use_theme, };
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
@@ -30,7 +31,11 @@ use crate::route::ToolRoute;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "ToolsUiState", "ExtensionsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        crate::state::UiTools,
+        vmux_api::extension::UiExtensions,
+    ],
     subtree
 )]
 pub struct ToolsPage;
@@ -39,8 +44,8 @@ pub struct ToolsPage;
 pub fn Page() -> Element {
     use_theme();
     let mut manager_view = use_signal(ManagerView::default);
-    let tools = use_ui_state::<ToolsUiState>().state;
-    let extensions = use_ui_state::<ExtensionsUiState>().state;
+    let tools = UiState::<UiTools>::use_context().state;
+    let extensions = UiState::<UiExtensions>::use_context().state;
     let state = tools();
     let extension_state = extensions();
     let route = state.view.route.clone();
@@ -301,7 +306,7 @@ fn ToolThumbnail(item: ToolItem, provider: ToolProviderMetadata, class: String) 
 }
 
 #[component]
-fn ToolManager(state: ToolsUiState, manager_view: Signal<ManagerView>) -> Element {
+fn ToolManager(state: UiTools, manager_view: Signal<ManagerView>) -> Element {
     let mut selected = use_signal(|| None::<ToolSelection>);
     let current = state;
     let pending = current.pending.into_iter().collect::<BTreeSet<_>>();

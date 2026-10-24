@@ -14,15 +14,16 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 #[component]
-pub(super) fn ChatDock(chat: Chat) -> Element {
+pub(super) fn ChatDock() -> Element {
+    let chat = use_context::<Chat>();
     rsx! {
         div { class: "relative z-20 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2",
             div { class: "session-chat-prompt-shell relative mx-auto flex max-w-3xl flex-col gap-2",
                 if chat.media_menu_open() {
-                    MediaMenu { chat }
+                    MediaMenu {}
                 }
                 if chat.command_menu_open() {
-                    CommandMenu { chat }
+                    CommandMenu {}
                 }
                 if chat.mcp_menu_open() {
                     McpMenu {
@@ -35,22 +36,23 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                     }
                 }
                 if chat.resume_menu_open() {
-                    ResumeMenu { chat }
+                    ResumeMenu {}
                 }
                 if chat.model_menu_open() {
-                    ChatModelMenu { chat }
+                    ChatModelMenu {}
                 }
-                ChatComposerMenus { chat }
-                ChoiceList { chat }
-                QueuedPrompts { chat }
-                ChatComposer { chat }
+                ChatComposerMenus {}
+                ChoiceList {}
+                QueuedPrompts {}
+                ChatComposer {}
             }
         }
     }
 }
 
 #[component]
-fn ChatComposer(chat: Chat) -> Element {
+fn ChatComposer() -> Element {
+    let chat = use_context::<Chat>();
     let accent = AgentAccent::for_agent(&chat.agent());
     let keys = use_context::<ChatKeys>();
     let drafted = chat.draft();
@@ -65,7 +67,7 @@ fn ChatComposer(chat: Chat) -> Element {
             accent_color: chat.accent().css,
             accent_gradient: accent.grad.to_string(),
             footer: Some(rsx! {
-                ComposerFooter { chat }
+                ComposerFooter {}
             }),
             mode: chat.prompt_mode(),
             action_title: chat.prompt_action_title(),
@@ -93,7 +95,8 @@ fn ChatComposer(chat: Chat) -> Element {
 }
 
 #[component]
-fn ComposerFooter(chat: Chat) -> Element {
+fn ComposerFooter() -> Element {
+    let chat = use_context::<Chat>();
     let context = chat.slash.context();
     let transcript = chat.transcript.current();
     let queued = chat.queue.queued();

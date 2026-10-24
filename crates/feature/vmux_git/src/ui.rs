@@ -17,7 +17,7 @@ mod status;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "GitUiState", "KeyClaimsUiState", "PageLocationUiState"],
+    states = [vmux_ui::theme::UiTheme, vmux_git::state::UiGit, vmux_api::input::UiKeyClaims, vmux_api::page_location::PageLocationUiState],
     subtree
 )]
 pub(crate) struct GitPage;

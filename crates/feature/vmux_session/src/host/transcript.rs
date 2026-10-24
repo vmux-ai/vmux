@@ -269,15 +269,13 @@ fn push_to_page(
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
         commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
+            vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(webview, &snapshot.0),
         );
         if transcript_changed {
-            commands.trigger(
-                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                    webview,
-                    &transcript.state,
-                ),
-            );
+            commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+                webview,
+                &transcript.state,
+            ));
         }
         let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
         if !paths.is_empty() {
@@ -479,21 +477,18 @@ fn sync_ready_views(
         attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &snapshot.0),
-        );
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &transcript.state,
-            ),
-        );
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &attachments.state(),
-            ),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &snapshot.0,
+        ));
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &transcript.state,
+        ));
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &attachments.state(),
+        ));
         let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
         if !paths.is_empty() {
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
@@ -539,9 +534,10 @@ fn request_more(
         return;
     };
     commands.spawn(query);
-    commands.trigger(
-        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &transcript.state),
-    );
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        webview,
+        &transcript.state,
+    ));
 }
 
 fn resolve_queries(
@@ -611,12 +607,10 @@ fn apply_results(
         changed |= attachments.hydrate_transcript(&mut transcript.state);
         commands.entity(entity).despawn();
         if changed {
-            commands.trigger(
-                vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                    result.webview,
-                    &transcript.state,
-                ),
-            );
+            commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+                result.webview,
+                &transcript.state,
+            ));
         }
         let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
         if !paths.is_empty() {

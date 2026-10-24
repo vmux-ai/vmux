@@ -61,7 +61,7 @@ struct ExplorerNoticeTimer(Timer);
 
 fn show_edit_failure(trigger: On<EditFailure>, mut commands: Commands) {
     let event = trigger.event();
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         trigger.event_target(),
         &FileEditNotice {
             reason: Some(event.reason.clone()),
@@ -73,7 +73,7 @@ fn show_edit_failure(trigger: On<EditFailure>, mut commands: Commands) {
 }
 
 fn clear_edit_failure(trigger: On<ClearEditFailure>, mut commands: Commands) {
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         trigger.event_target(),
         &FileEditNotice::default(),
     ));
@@ -92,7 +92,7 @@ fn expire_edit_failure(
         if !timer.0.just_finished() {
             continue;
         }
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(
             entity,
             &FileEditNotice::default(),
         ));
@@ -102,7 +102,7 @@ fn expire_edit_failure(
 
 fn show_explorer_notice(trigger: On<ExplorerFeedback>, mut commands: Commands) {
     let event = trigger.event();
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         trigger.event_target(),
         &ExplorerNotice {
             ok: event.ok,
@@ -118,7 +118,7 @@ fn show_explorer_notice(trigger: On<ExplorerFeedback>, mut commands: Commands) {
 }
 
 fn clear_explorer_notice(trigger: On<ClearExplorerNotice>, mut commands: Commands) {
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         trigger.event_target(),
         &ExplorerNotice::default(),
     ));

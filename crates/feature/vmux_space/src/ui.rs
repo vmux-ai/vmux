@@ -3,7 +3,7 @@
 use crate::event::{
     SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceFormCloseRequest,
     SpaceFormInputRequest, SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState,
-    SpaceRenameRequest, SpaceRow, SpacesUiState,
+    SpaceRenameRequest, SpaceRow, UiSpaces,
 };
 use dioxus::prelude::*;
 use vmux_api::input::KeyContextRequest;
@@ -12,20 +12,24 @@ use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::input::ActionInput;
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
 use vmux_ui::hooks::Unclaimed;
-use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_key_claim, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "SpacesUiState", "KeyClaimsUiState"]
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_api::space::UiSpaces,
+        vmux_api::input::UiKeyClaims,
+    ]
 )]
 pub(crate) struct SpacesPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<SpacesUiState>().state;
+    let state = UiState::<UiSpaces>::use_context().state;
     let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
     use_drop(move || {
         send(&KeyContextRequest { keys: Vec::new() });
@@ -325,7 +329,7 @@ fn SpaceFormView(form: SpaceFormState) -> Element {
                 }
             },
             onaction: move |_| {
-                let _ = send(&SpaceFormRegenerateRequest);
+                send(&SpaceFormRegenerateRequest);
             },
             LineIconView { icon: LineIcon::RefreshCw, class: "size-3.5".to_string() }
         }

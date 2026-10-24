@@ -450,6 +450,12 @@ reports transport failures centrally; optimistic behavior that must roll back im
 `try_send`. Page components do not repeat transport error handling or wrap requests in a second
 UI action type.
 
+`#[vmux_page::page(states = [...])]` installs each typed state listener and Dioxus context once.
+Projection payloads use the `Ui*` prefix, such as `UiTheme` and `UiGit`. Feature roots compose
+`UiState<T>` into one reusable selector bundle where multiple descendants share derived state.
+Descendants read that context; props carry leaf display values and local callbacks, not the page
+store.
+
 `#[vmux_api::ui_state]` is the state-specific host-to-UI contract. It includes the contract,
 `HostEvent`, and `UiState` implementations, while `#[vmux_api::ui_state_patch]` supplies the
 serializable typed patch mapping. `#[vmux_api::host_event]` remains for one-shot notifications and

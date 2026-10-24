@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::event::FileTidyState;
-use vmux_ecs::{FileUiStateWrite, LastActivatedAt};
+use vmux_ecs::{LastActivatedAt, UiFileWrite};
 use vmux_layout::CloseStackRequest;
 use vmux_setting::AppSettings;
 
@@ -79,7 +79,7 @@ impl TidyFiles<'_, '_> {
             })
             .map(|(_, page, _)| *page);
         if let Some(page) = active_page {
-            self.commands.trigger(FileUiStateWrite::from_event(
+            self.commands.trigger(UiFileWrite::from_event(
                 page,
                 &FileTidyState { count: Some(count) },
             ));

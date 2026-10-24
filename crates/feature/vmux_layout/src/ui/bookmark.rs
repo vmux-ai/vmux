@@ -27,18 +27,17 @@ use vmux_ui::icon::{LineIcon, LineIconView, PageIconView};
 use vmux_ui::platform::Platform;
 
 use crate::event::{
-    BookmarkEntryState, BookmarkFolderState, BookmarkTreeState, BookmarkUiState,
-    SideSheetSectionRequest,
+    BookmarkEntryState, BookmarkFolderState, BookmarkTreeState, SideSheetSectionRequest, UiBookmark,
 };
 
 #[component]
 pub(super) fn BookmarksSection(
-    bookmarks: BookmarkUiState,
+    bookmarks: UiBookmark,
     edit: BookmarkEditState,
     pane_id: u64,
     expanded: bool,
 ) -> Element {
-    let BookmarkUiState {
+    let UiBookmark {
         pins,
         rows,
         folders: _,

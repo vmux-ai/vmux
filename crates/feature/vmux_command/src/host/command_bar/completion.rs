@@ -13,7 +13,7 @@ use crate::host::snapshot::{
     CommandBarProjectRoots, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
     WriteCommandBarSnapshots,
 };
-use vmux_api::command_bar::{CommandBarUiState, PathCompleteRequest};
+use vmux_api::command_bar::{PathCompleteRequest, UiCommandBar};
 
 use super::completion_driver::{PathQuery, ProjectQuery};
 
@@ -129,7 +129,7 @@ fn request(
         .entity(asking)
         .remove::<PathCompletionRequest>()
         .remove::<PathCompletionOperation>();
-    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
         asking,
         &completions.response(request_id),
     ));
@@ -201,7 +201,7 @@ fn answer_index(
             .entity(webview)
             .remove::<PathCompletionRequest>()
             .remove::<PathCompletionOperation>();
-        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
             webview,
             &completions.response(request.request_id),
         ));
@@ -240,7 +240,7 @@ fn answer_paths(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
                 webview,
                 &completions.response(pending.request_id),
             ));

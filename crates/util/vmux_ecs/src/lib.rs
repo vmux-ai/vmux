@@ -10,8 +10,6 @@ pub use component::{
     Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
 };
 #[cfg(all(host, feature = "host"))]
-pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
-#[cfg(all(host, feature = "host"))]
 pub use launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged,
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
@@ -50,8 +48,6 @@ pub mod cli;
 mod component;
 pub mod event;
 #[cfg(all(host, feature = "host"))]
-mod file_ui_state;
-#[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
@@ -85,6 +81,8 @@ pub mod service;
 pub mod team;
 #[cfg(all(host, feature = "host"))]
 pub mod terminal;
+#[cfg(all(host, feature = "host"))]
+mod ui_file;
 #[cfg(all(host, feature = "host"))]
 mod ui_state;
 #[cfg(all(host, feature = "host"))]

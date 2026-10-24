@@ -7,7 +7,7 @@ use bevy_cef::prelude::*;
 use vmux_api::{BinEvent, UiEventPermissions};
 #[cfg(ui)]
 use vmux_ecs::event::*;
-use vmux_ecs::event::{ExplorerReveal, FileUiState};
+use vmux_ecs::event::{ExplorerReveal, UiFile};
 
 use super::*;
 use crate::host::editor::FileView;
@@ -608,14 +608,14 @@ fn opening_a_file_leaves_a_hidden_explorer_collapsed() {
 struct SentReveals {
     revision: u64,
     reveals: Vec<ExplorerReveal>,
-    state: Option<FileUiState>,
+    state: Option<UiFile>,
 }
 
 impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.add_plugins(vmux_ecs::UiStatePlugin::<FileUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<UiFile>::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);
@@ -631,24 +631,24 @@ impl SentReveals {
         app.world_mut().spawn(UiEventPermissions {
             url: "file:///repo",
             owns_subtree: false,
-            permissions: &["FileUiState"],
+            permissions: &["UiFile"],
         });
     }
 
     fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
-        if emit.id() != FileUiState::id() {
+        if emit.id() != UiFile::id() {
             return;
         }
         emit.mark_delivered();
         let frame = rkyv::from_bytes::<
-            vmux_api::UiStateFrame<FileUiState, <FileUiState as vmux_api::UiState>::Update>,
+            vmux_api::UiStateFrame<UiFile, <UiFile as vmux_api::UiState>::Update>,
             rkyv::rancor::Error,
         >(emit.payload())
         .unwrap();
         let event = match frame {
             vmux_api::UiStateFrame::Snapshot(state) => state,
             vmux_api::UiStateFrame::Updates(updates) => {
-                <FileUiState as vmux_api::UiState>::from_updates(sent.state.take(), updates)
+                <UiFile as vmux_api::UiState>::from_updates(sent.state.take(), updates)
             }
         };
         sent.state = Some(event.clone());

@@ -10,7 +10,8 @@ use vmux_ui::components::project_picker::ProjectPick;
 use vmux_ui::hooks::send;
 
 #[component]
-pub(super) fn ChatComposerMenus(chat: Chat) -> Element {
+pub(super) fn ChatComposerMenus() -> Element {
+    let chat = use_context::<Chat>();
     let menus = ChatMenuSet::from(chat);
     let menu = chat.menu;
     rsx! {
@@ -98,7 +99,8 @@ impl ChatMenuSet {
 }
 
 #[component]
-pub(super) fn ChatModelMenu(chat: Chat) -> Element {
+pub(super) fn ChatModelMenu() -> Element {
+    let chat = use_context::<Chat>();
     rsx! {
         ModelMenu {
             models: chat.filtered_models(),

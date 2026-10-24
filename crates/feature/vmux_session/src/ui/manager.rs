@@ -27,8 +27,7 @@ use vmux_ui::components::page_address::{PageAddress, PageAddressContext};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{
-    CollectionController, send, use_collection_controller, use_optimistic_map, use_theme,
-    use_ui_state,
+    CollectionController, UiState, send, use_collection_controller, use_optimistic_map, use_theme,
 };
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView};
@@ -37,7 +36,7 @@ use vmux_ui::navigation::PageNavigation;
 use crate::event::{
     SessionRepositories, SessionRepository, SessionsDescriptionUpdate, SessionsStageChange,
 };
-use crate::state::SessionCatalogUiState;
+use crate::state::UiSessionCatalog;
 
 use super::manager_controller::*;
 use super::manager_model::*;
@@ -45,7 +44,7 @@ use super::manager_model::*;
 #[component]
 pub fn SessionsManager() -> Element {
     use_theme();
-    let ui = use_ui_state::<SessionCatalogUiState>();
+    let ui = UiState::<UiSessionCatalog>::use_context();
     let controls = use_collection_controller::<SessionFilter>(ManagerView::List);
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .map(|metadata| metadata.url)

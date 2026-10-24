@@ -29,8 +29,8 @@ use crate::event::{
     SessionsRename, SessionsRestoreDeleted, SessionsStageChange,
 };
 use crate::state::{
-    ChatUiState, Navigation, NavigationProject, NavigationSession, SessionCatalogUiState,
-    SessionDetailUiState, SessionScopeUiState,
+    Navigation, NavigationProject, NavigationSession, UiChat, UiSessionCatalog, UiSessionDetail,
+    UiSessionScope,
 };
 
 pub(super) struct CatalogPlugin;
@@ -41,9 +41,9 @@ impl Plugin for CatalogPlugin {
             .init_resource::<DirectoryRevision>()
             .init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
-            .add_plugins(UiStatePlugin::<SessionCatalogUiState>::default())
-            .add_plugins(UiStatePlugin::<SessionDetailUiState>::default())
-            .add_plugins(UiStatePlugin::<SessionScopeUiState>::default())
+            .add_plugins(UiStatePlugin::<UiSessionCatalog>::default())
+            .add_plugins(UiStatePlugin::<UiSessionDetail>::default())
+            .add_plugins(UiStatePlugin::<UiSessionScope>::default())
             .add_plugins(UiEventPlugin::<(
                 SessionsCreate,
                 SessionsChooseDirectory,
@@ -86,7 +86,7 @@ impl Plugin for CatalogPlugin {
 }
 
 #[derive(Component)]
-#[require(SessionCatalogView, SessionCatalogUiStateComponent)]
+#[require(SessionCatalogView, UiSessionCatalogComponent)]
 pub struct SessionManagerView;
 
 #[derive(Component, Clone)]
@@ -107,19 +107,23 @@ impl SessionManagerFallback {
     }
 }
 
-type SessionCatalogUiStateComponent = UiState<SessionCatalogUiState>;
-type SessionDetailUiStateComponent = UiState<SessionDetailUiState>;
-type SessionScopeUiStateComponent = UiState<SessionScopeUiState>;
+type UiSessionCatalogComponent = UiState<UiSessionCatalog>;
+type UiSessionDetailComponent = UiState<UiSessionDetail>;
+type UiSessionScopeComponent = UiState<UiSessionScope>;
 
 #[derive(Component, Default)]
 pub struct SessionCatalogView;
 
 #[derive(Component, Default)]
-#[require(SessionCatalogView, SessionDetailUiStateComponent)]
+#[require(
+    SessionCatalogView,
+    UiSessionCatalogComponent,
+    UiSessionDetailComponent
+)]
 struct SessionDetailView;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-#[require(SessionCatalogView, SessionScopeUiStateComponent)]
+#[require(SessionCatalogView, UiSessionScopeComponent)]
 struct SessionScopeView(PathBuf);
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -190,7 +194,7 @@ fn sync_manager_views(
                 commands.entity(entity).remove::<(
                     SessionManagerView,
                     SessionCatalogView,
-                    SessionCatalogUiStateComponent,
+                    UiSessionCatalogComponent,
                 )>();
             }
             continue;
@@ -494,7 +498,7 @@ fn finish_directory_pickers(
         if let Some(path) = selected.and_then(|path| path.canonicalize().ok())
             && path.is_dir()
         {
-            commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiChat>::from_event(
                 picker.webview,
                 &SessionDirectorySelection {
                     revision: revision.next(),
@@ -746,7 +750,7 @@ fn restore_deleted(
     }
 }
 
-impl SessionScopeUiState {
+impl UiSessionScope {
     fn project(root: &Path, catalog: &CatalogSnapshot) -> Self {
         let sessions = catalog
             .sessions
@@ -761,7 +765,7 @@ impl SessionScopeUiState {
     }
 }
 
-impl SessionDetailUiState {
+impl UiSessionDetail {
     fn project(
         page: &PageMetadata,
         catalog: &CatalogSnapshot,
@@ -833,7 +837,7 @@ fn publish(
     targets: Query<
         Entity,
         (
-            With<SessionCatalogUiStateComponent>,
+            With<UiSessionCatalogComponent>,
             With<PageReady>,
             With<KeyboardOwner>,
         ),
@@ -841,10 +845,10 @@ fn publish(
     claimed: Query<
         (),
         (
-            With<SessionCatalogUiStateComponent>,
+            With<UiSessionCatalogComponent>,
             With<PageReady>,
             With<KeyboardOwner>,
-            Or<(Added<SessionCatalogUiStateComponent>, Added<KeyboardOwner>)>,
+            Or<(Added<UiSessionCatalogComponent>, Added<KeyboardOwner>)>,
         ),
     >,
     mut commands: Commands,
@@ -853,10 +857,10 @@ fn publish(
         return;
     }
     for target in &targets {
-        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiSessionCatalog>::from_event(
             target, &*catalog,
         ));
-        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiSessionCatalog>::from_event(
             target,
             &*repositories,
         ));
@@ -881,10 +885,8 @@ fn publish_scope(
         return;
     }
     for (target, scope) in &targets {
-        let state = SessionScopeUiState::project(&scope.0, &catalog);
-        commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
-            target, &state,
-        ));
+        let state = UiSessionScope::project(&scope.0, &catalog);
+        commands.trigger(UiStateWrite::<UiSessionScope>::from_event(target, &state));
     }
 }
 
@@ -918,10 +920,8 @@ fn publish_detail(
         return;
     }
     for (target, page) in &targets {
-        let state = SessionDetailUiState::project(page, &catalog, &repositories);
-        commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
-            target, &state,
-        ));
+        let state = UiSessionDetail::project(page, &catalog, &repositories);
+        commands.trigger(UiStateWrite::<UiSessionDetail>::from_event(target, &state));
     }
 }
 
@@ -940,7 +940,7 @@ fn sync_repositories(
         (),
         (
             With<KeyboardOwner>,
-            Or<(Added<SessionCatalogUiStateComponent>, Added<KeyboardOwner>)>,
+            Or<(Added<UiSessionCatalogComponent>, Added<KeyboardOwner>)>,
             Or<(With<SessionCatalogView>, With<SessionDetailView>)>,
         ),
     >,
@@ -1027,11 +1027,11 @@ fn ready(
     }
     if views.manager_contains(target) {
         commands.entity(target).insert(SessionCatalogView);
-        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiSessionCatalog>::from_event(
             target,
             &*content.catalog,
         ));
-        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiSessionCatalog>::from_event(
             target,
             &*content.repositories,
         ));
@@ -1040,14 +1040,20 @@ fn ready(
         && let Ok(page) = pages.get(target)
     {
         commands.entity(target).insert(SessionDetailView);
-        let state = SessionDetailUiState::project(page, &content.catalog, &content.repositories);
-        commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
+        let state = UiSessionDetail::project(page, &content.catalog, &content.repositories);
+        commands.trigger(UiStateWrite::<UiSessionDetail>::from_event(
             target, &state,
         ));
+        commands.trigger(UiStateWrite::<UiSessionCatalog>::from_event(
+            target,
+            &*repositories,
+        ));
+        let state = UiSessionDetail::project(page, &catalog, &repositories);
+        commands.trigger(UiStateWrite::<UiSessionDetail>::from_event(target, &state));
     }
     if let Ok(scope) = scopes.get(target) {
-        let state = SessionScopeUiState::project(&scope.0, &content.catalog);
-        commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
+        let state = UiSessionScope::project(&scope.0, &content.catalog);
+        commands.trigger(UiStateWrite::<UiSessionScope>::from_event(
             target, &state,
         ));
     }
@@ -1063,7 +1069,7 @@ fn scope_projection(
     let Some(cwd) = &trigger.event().cwd else {
         commands
             .entity(target)
-            .remove::<(SessionScopeView, SessionScopeUiStateComponent)>();
+            .remove::<(SessionScopeView, UiSessionScopeComponent)>();
         if owners
             .get(target)
             .is_ok_and(|(manager, chat)| !manager && !chat)
@@ -1075,10 +1081,8 @@ fn scope_projection(
     commands
         .entity(target)
         .insert(SessionScopeView(cwd.clone()));
-    let state = SessionScopeUiState::project(cwd, &catalog);
-    commands.trigger(UiStateWrite::<SessionScopeUiState>::from_event(
-        target, &state,
-    ));
+    let state = UiSessionScope::project(cwd, &catalog);
+    commands.trigger(UiStateWrite::<UiSessionScope>::from_event(target, &state));
 }
 
 fn cleanup_inactive_views(
@@ -1098,12 +1102,12 @@ fn cleanup_inactive_views(
         if detail && !chat {
             commands
                 .entity(entity)
-                .remove::<(SessionDetailView, SessionDetailUiStateComponent)>();
+                .remove::<(SessionDetailView, UiSessionDetailComponent)>();
         }
         if !manager && !chat && !scope {
             commands
                 .entity(entity)
-                .remove::<(SessionCatalogView, SessionCatalogUiStateComponent)>();
+                .remove::<(SessionCatalogView, UiSessionCatalogComponent)>();
         }
     }
 }
@@ -1120,24 +1124,21 @@ mod tests {
     }
 
     impl Published {
-        fn record(
-            trigger: On<UiStateWrite<SessionCatalogUiState>>,
-            mut published: ResMut<Published>,
-        ) {
+        fn record(trigger: On<UiStateWrite<UiSessionCatalog>>, mut published: ResMut<Published>) {
             if trigger.event().update().catalog.is_some() {
                 published.catalogs.push(trigger.event().webview());
             }
         }
 
         fn record_detail(
-            trigger: On<UiStateWrite<SessionDetailUiState>>,
+            trigger: On<UiStateWrite<UiSessionDetail>>,
             mut published: ResMut<Published>,
         ) {
             published.details.push(trigger.event().webview());
         }
 
         fn record_scope(
-            trigger: On<UiStateWrite<SessionScopeUiState>>,
+            trigger: On<UiStateWrite<UiSessionScope>>,
             mut published: ResMut<Published>,
         ) {
             published.scopes.push((
@@ -1461,7 +1462,7 @@ mod tests {
         let entity = app.world().entity(webview);
         assert!(!entity.contains::<SessionManagerView>());
         assert!(!entity.contains::<SessionCatalogView>());
-        assert!(!entity.contains::<SessionCatalogUiStateComponent>());
+        assert!(!entity.contains::<UiSessionCatalogComponent>());
     }
 
     #[test]
@@ -1521,7 +1522,7 @@ mod tests {
         let entity = app.world().entity(webview);
         assert!(!entity.contains::<SessionManagerView>());
         assert!(!entity.contains::<SessionCatalogView>());
-        assert!(!entity.contains::<SessionCatalogUiStateComponent>());
+        assert!(!entity.contains::<UiSessionCatalogComponent>());
     }
 
     #[test]
@@ -1552,7 +1553,7 @@ mod tests {
 
         let entity = app.world().entity(webview);
         assert!(!entity.contains::<SessionDetailView>());
-        assert!(!entity.contains::<SessionDetailUiStateComponent>());
+        assert!(!entity.contains::<UiSessionDetailComponent>());
         assert!(!entity.contains::<SessionCatalogView>());
     }
 

@@ -21,7 +21,7 @@ use crate::event::{
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
-    GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState,
+    GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, UiGit,
     GitWorkspaceChanged,
 };
 
@@ -499,7 +499,7 @@ fn dispatch_git_key(
 ) {
     if let Some(direction) = SelectionDirection::from_key(request) {
         if let Some(effect) = controller.move_selection(direction, state, revision) {
-            commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
+            commands.trigger(UiStateWrite::<UiGit>::from_event(webview, &effect));
         }
         return;
     }
@@ -976,7 +976,7 @@ impl SelectionDirection {
 }
 
 fn ui_state_write(
-    trigger: On<UiStateWrite<GitUiState>>,
+    trigger: On<UiStateWrite<UiGit>>,
     mut pages: Query<(
         &mut GitPageControllerState,
         &mut GitDirectoryNavigation,
@@ -1718,14 +1718,13 @@ mod tests {
         app.add_plugins((MinimalPlugins, ControllerPlugin));
         let webview = app.world_mut().spawn_empty().id();
 
-        app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitPageContext {
-                    working_directory: "/tmp/repository".to_string(),
-                    page_url: String::new(),
-                },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiGit>::from_event(
+            webview,
+            &GitPageContext {
+                working_directory: "/tmp/repository".to_string(),
+                page_url: String::new(),
+            },
+        ));
         app.update();
 
         let state = app.world().get::<GitState>(webview).unwrap();
@@ -1746,7 +1745,7 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
+            .trigger(UiStateWrite::<UiGit>::from_event(
                 webview,
                 &GitPageContext {
                     working_directory: path.clone(),
@@ -1774,7 +1773,7 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
+            .trigger(UiStateWrite::<UiGit>::from_event(
                 webview,
                 &GitPageContext {
                     working_directory: path.clone(),
@@ -1806,7 +1805,7 @@ mod tests {
             .id();
 
         app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
+            .trigger(UiStateWrite::<UiGit>::from_event(
                 webview,
                 &GitWorkspaceChanged {
                     path: "/tmp/repository/./project".into(),
@@ -1840,7 +1839,7 @@ mod tests {
             .id();
 
         app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
+            .trigger(UiStateWrite::<UiGit>::from_event(
                 webview,
                 &GitWorkspaceChanged {
                     path: "/tmp/other".into(),
@@ -1890,9 +1889,9 @@ mod tests {
         let target = app.world_mut().spawn(GitState::default()).id();
 
         app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
+            .trigger(UiStateWrite::<UiGit>::from_event(
                 target,
-                &crate::state::GitUiStatePatch {
+                &crate::state::UiGitPatch {
                     context: Some(GitPageContext {
                         working_directory: "/tmp/cached".to_string(),
                         page_url: String::new(),
@@ -1964,9 +1963,9 @@ mod tests {
             .id();
 
         app.world_mut()
-            .trigger(UiStateWrite::<GitUiState>::from_event(
+            .trigger(UiStateWrite::<UiGit>::from_event(
                 target,
-                &crate::state::GitUiStatePatch {
+                &crate::state::UiGitPatch {
                     context: Some(GitPageContext {
                         working_directory: path.clone(),
                         page_url: String::new(),

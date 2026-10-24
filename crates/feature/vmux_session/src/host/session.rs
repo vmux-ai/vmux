@@ -13,7 +13,7 @@ use crate::event::{
     ChatBranchesState, ChatItem, ChatMediaState, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
-use crate::state::ChatUiState;
+use crate::state::UiChat;
 use vmux_api::avatar::IdenticonSpec;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
@@ -34,7 +34,7 @@ use vmux_session::{
     AgentConversationTitle, AgentId, CreateRequest, Created, PromptQueue, Route, Session, SessionId,
 };
 
-type ChatUiStateUpdates = UiState<ChatUiState>;
+type UiChatUpdates = UiState<UiChat>;
 
 #[derive(SystemParam)]
 pub struct SessionViews<'w, 's> {
@@ -497,7 +497,7 @@ fn report_tab_identity(
 
 #[derive(Component)]
 #[require(
-    ChatUiStateUpdates,
+    UiChatUpdates,
     ChatAttachmentProjection,
     ChatSnapshotProjection,
     ChatTranscriptProjection,

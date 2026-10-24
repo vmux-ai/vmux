@@ -86,7 +86,7 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 HostedPagePlugin,
                 BookmarkPlugin,
-                vmux_ecs::UiStatePlugin::<crate::state::LayoutUiState>::with_post_update_flush(),
+                vmux_ecs::UiStatePlugin::<crate::state::UiLayout>::with_post_update_flush(),
                 crate::workspace_snapshot_publish::SnapshotPlugin,
                 PresentationPlugin,
             ));

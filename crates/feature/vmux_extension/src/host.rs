@@ -61,7 +61,7 @@ impl Plugin for ExtensionPlugin {
         app.add_agent_request::<AgentBrowserInstallExtension>()
             .add_plugins((
                 crate::catalog::ExtensionCatalogPlugin,
-                vmux_ecs::UiStatePlugin::<vmux_api::extension::ExtensionsUiState>::default(),
+                vmux_ecs::UiStatePlugin::<vmux_api::extension::UiExtensions>::default(),
                 bridge::ExtensionBridgePlugin::new(profile, registrations),
                 bridge_page::ExtensionBridgePagePlugin,
                 broker::ExtensionBrokerPlugin,

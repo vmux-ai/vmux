@@ -11,7 +11,7 @@ use crate::host::viewport::FileViewport;
 
 #[derive(Component, Clone, Debug)]
 #[require(
-    vmux_ecs::FileUiStateUpdates,
+    vmux_ecs::UiFileUpdates,
     super::address::AddressSource,
     FileDocumentRevision,
     crate::host::panel::FilePanel,
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct RenderedDocuments(Vec<vmux_ecs::event::FileUiState>);
+    struct RenderedDocuments(Vec<vmux_ecs::event::UiFile>);
 
     impl Session {
         fn open(first: &str) -> Self {
@@ -443,10 +443,10 @@ mod tests {
                 .init_resource::<RenderedDocuments>()
                 .add_plugins(crate::host::status::StatusPlugin)
                 .add_observer(
-                    |request: On<vmux_ecs::FileUiStateWrite>,
+                    |request: On<vmux_ecs::UiFileWrite>,
                      mut rendered: ResMut<RenderedDocuments>| {
                         let state =
-                            <vmux_ecs::event::FileUiState as vmux_api::UiState>::from_updates(
+                            <vmux_ecs::event::UiFile as vmux_api::UiState>::from_updates(
                                 None,
                                 vec![request.update().clone()],
                             );

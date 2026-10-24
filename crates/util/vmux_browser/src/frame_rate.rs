@@ -11,11 +11,11 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::MessageLoopWakePolicy;
 use std::sync::atomic::Ordering;
 use vmux_api::BinEvent;
-use vmux_api::command_bar::CommandBarUiState;
+use vmux_api::command_bar::UiCommandBar;
 use vmux_ecs::overlay::Overlay;
 use vmux_ecs::overlay::WindowOverlay;
 use vmux_layout::Browser;
-use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
+use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::UiLayout};
 
 use crate::NativeLayout;
 #[cfg(not(target_os = "macos"))]
@@ -248,7 +248,7 @@ fn request_layout_frame_burst(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     wake_policy: Option<Res<MessageLoopWakePolicy>>,
 ) {
-    if trigger.id() != LayoutUiState::id() && trigger.id() != CommandBarUiState::id() {
+    if trigger.id() != UiLayout::id() && trigger.id() != UiCommandBar::id() {
         return;
     }
     let Ok((mut cap, state)) = layouts.get_mut(trigger.webview()) else {
@@ -400,10 +400,8 @@ mod tests {
             .world_mut()
             .spawn((LayoutCef, WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE)))
             .id();
-        app.world_mut().trigger(BinHostEmitEvent::from_event(
-            layout,
-            &LayoutUiState::default(),
-        ));
+        app.world_mut()
+            .trigger(BinHostEmitEvent::from_event(layout, &UiLayout::default()));
         app.update();
         assert!(
             app.world()
@@ -425,7 +423,7 @@ mod tests {
             .insert(WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE));
         app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
-            &CommandBarUiState {
+            &UiCommandBar {
                 snapshot: CommandBarOpenEvent::default(),
                 ..Default::default()
             },

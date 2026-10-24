@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
     CommandPaletteComposer, CommandPaletteMenuDismissRequest, CommandPaletteMenuHighlightRequest,
-    CommandPaletteMenus, CommandPaletteUiState, OpenId,
+    CommandPaletteMenus, OpenId, UiCommandPalette,
 };
 use vmux_ui::components::agent_menu::AgentMenu;
 use vmux_ui::components::model_menu::ModelMenu;
@@ -15,7 +15,7 @@ use super::composer_driver::MenuSelection;
 #[component]
 pub fn CommandComposerMenus(
     composer: CommandPaletteComposer,
-    palette: CommandPaletteUiState,
+    palette: UiCommandPalette,
     open_id: OpenId,
     menus: CommandPaletteMenus,
     cursor: usize,

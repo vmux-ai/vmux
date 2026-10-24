@@ -5,14 +5,14 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_api::avatar::AvatarSpec;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
-use vmux_api::space::SpacesUiState;
+use vmux_api::space::UiSpaces;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_ecs::event::team::{
     ProfileRow, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest, TeamProfileCreateRequest,
     TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
-    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
+    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, UiTeam,
 };
 use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::PageReady;
@@ -68,7 +68,7 @@ struct ProjectionPlugin;
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_agent_request::<AgentListTeam>()
-            .add_plugins(UiStatePlugin::<TeamUiState>::default())
+            .add_plugins(UiStatePlugin::<UiTeam>::default())
             .add_observer(replay)
             .add_systems(Update, (sync_user_profile_name, project, publish).chain())
             .add_systems(Update, list.after(AgentRequestRouteSet));
@@ -134,7 +134,7 @@ struct ProfileRenameTask(Task<Result<ProfileRecord, String>>);
 struct Team;
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-struct TeamPresentation(TeamUiState);
+struct TeamPresentation(UiTeam);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct ProfileFormState(TeamProfileForm);
@@ -358,13 +358,10 @@ fn publish(
 ) {
     for (entity, presentation) in &presentations {
         if team_views.contains(entity) {
-            commands.trigger(UiStateWrite::<TeamUiState>::from_event(
-                entity,
-                &presentation.0,
-            ));
+            commands.trigger(UiStateWrite::<UiTeam>::from_event(entity, &presentation.0));
         }
         if spaces_views.contains(entity) {
-            commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiSpaces>::from_event(
                 entity,
                 &presentation.0,
             ));
@@ -390,13 +387,10 @@ fn replay(
         return;
     };
     if team_views.contains(entity) {
-        commands.trigger(UiStateWrite::<TeamUiState>::from_event(
-            entity,
-            &presentation.0,
-        ));
+        commands.trigger(UiStateWrite::<UiTeam>::from_event(entity, &presentation.0));
     }
     if spaces_views.contains(entity) {
-        commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiSpaces>::from_event(
             entity,
             &presentation.0,
         ));

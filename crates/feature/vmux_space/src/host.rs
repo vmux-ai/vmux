@@ -27,4 +27,4 @@ mod spaces;
 mod tool;
 mod workspace;
 
-type SpacesUiStateUpdates = vmux_ecs::UiState<vmux_api::space::SpacesUiState>;
+type SpacesUiStateUpdates = vmux_ecs::UiState<vmux_api::space::UiSpaces>;

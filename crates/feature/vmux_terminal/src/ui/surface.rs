@@ -27,7 +27,7 @@ const MEASURE_ROWS: usize = 8;
 #[vmux_page::page(
     component = Page,
     subtree,
-    states = ["ThemeUiState", "TerminalUiState", "KeyClaimsUiState"],
+    states = [vmux_ui::theme::UiTheme, vmux_ecs::event::UiTerminal, vmux_api::input::UiKeyClaims],
     claims = crate::Terminal
 )]
 pub(crate) struct TerminalPage;
@@ -760,7 +760,7 @@ mod tests {
     #[test]
     fn process_specific_terminal_pages_can_exchange_their_state_and_input() {
         let permissions = TerminalPage::PAGE.page_permissions();
-        for permission in ["TerminalUiState", "TermResizeEvent", "KeyClaimsUiState"] {
+        for permission in ["UiTerminal", "TermResizeEvent", "UiKeyClaims"] {
             assert!(permissions.allows("vmux://terminal/29876", permission));
         }
     }

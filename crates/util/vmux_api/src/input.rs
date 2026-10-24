@@ -4,11 +4,11 @@ pub struct KeyContextRequest {
 }
 
 #[vmux_api::ui_state(Default, Eq)]
-pub struct KeyClaimsUiState {
+pub struct UiKeyClaims {
     pub keys: Vec<ClaimedKey>,
 }
 
-impl KeyClaimsUiState {
+impl UiKeyClaims {
     pub fn contains(&self, stroke: &KeyStroke) -> bool {
         self.command(stroke).is_some()
     }

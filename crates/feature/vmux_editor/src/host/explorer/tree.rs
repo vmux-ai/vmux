@@ -99,7 +99,7 @@ impl ExplorerTreeActions<'_, '_> {
         }
         let effect = state.focus_effect(current, reveal);
         self.commands
-            .trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &effect));
+            .trigger(vmux_ecs::UiFileWrite::from_event(entity, &effect));
     }
 }
 
@@ -324,18 +324,16 @@ fn emit(
         } else {
             None
         };
-        actions
-            .commands
-            .trigger(vmux_ecs::FileUiStateWrite::from_event(
-                entity,
-                &ExplorerTreeEvent {
-                    root_name: ExplorerRoot::name(&tree.root),
-                    root_path: tree.root.to_string_lossy().into_owned(),
-                    current_path: view.path.to_string_lossy().into_owned(),
-                    loading: tree.is_loading(&tree.root),
-                    rows,
-                },
-            ));
+        actions.commands.trigger(vmux_ecs::UiFileWrite::from_event(
+            entity,
+            &ExplorerTreeEvent {
+                root_name: ExplorerRoot::name(&tree.root),
+                root_path: tree.root.to_string_lossy().into_owned(),
+                current_path: view.path.to_string_lossy().into_owned(),
+                loading: tree.is_loading(&tree.root),
+                rows,
+            },
+        ));
         if let Some(focus_path) = focus_path {
             actions.focus(entity, &focus_path, ExplorerReveal::Followed, &mut state);
         }

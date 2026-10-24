@@ -56,7 +56,7 @@ pub struct ProjectDetailView {
 }
 
 #[vmux_api::ui_state(Default, Eq, version = 3)]
-pub struct ProjectUiState {
+pub struct UiProject {
     pub view: ProjectView,
     pub collection_view: vmux_ecs::CollectionView,
 }
@@ -70,7 +70,7 @@ pub struct ProjectFilesUiState {
 }
 
 #[cfg(host)]
-impl ProjectUiState {
+impl UiProject {
     pub(crate) fn pending(mut self) -> Self {
         if let ProjectView::Catalog(catalog) = &mut self.view {
             catalog.operation_pending = true;

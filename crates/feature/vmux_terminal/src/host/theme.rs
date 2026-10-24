@@ -126,9 +126,7 @@ fn sync(
     for entity in targets {
         if browsers.can_emit_to(&entity) {
             commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_ecs::event::TerminalUiState>::from_event(
-                    entity, &event,
-                ),
+                vmux_ecs::UiStateWrite::<vmux_ecs::event::UiTerminal>::from_event(entity, &event),
             );
         }
     }

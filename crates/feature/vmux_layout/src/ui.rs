@@ -28,11 +28,11 @@ mod window_drag;
 #[vmux_page::page(
     component = Page,
     states = [
-        "ThemeUiState",
-        "LayoutUiState",
-        "ExtensionsUiState",
-        "CommandBarUiState",
-        "KeyClaimsUiState",
+        vmux_ui::theme::UiTheme,
+        crate::state::UiLayout,
+        vmux_api::extension::UiExtensions,
+        vmux_api::command_bar::UiCommandBar,
+        vmux_api::input::UiKeyClaims,
     ],
     placement = layout,
     transparent,

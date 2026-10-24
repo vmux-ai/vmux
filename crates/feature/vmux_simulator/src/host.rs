@@ -1,5 +1,5 @@
 use crate::SimulatorPlugin;
-use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorUiState};
+use crate::event::{HardwareButton, SimulatorClipboardOperation, UiSimulator};
 use crate::url::SimulatorRoute;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -76,7 +76,7 @@ impl Plugin for SimulatorPlugin {
                 .plugin()
                 .hosted(HostedPage::subtree(Self::URL, Self::MANIFEST.title)),
         )
-        .add_plugins(UiStatePlugin::<SimulatorUiState>::default())
+        .add_plugins(UiStatePlugin::<UiSimulator>::default())
         .add_plugins(SimulatorToolPlugin)
         .configure_sets(
             Update,
@@ -373,7 +373,7 @@ type SimulatorViews<'w, 's> = Query<
         Entity,
         &'static PageMetadata,
         Option<&'static ChildOf>,
-        Option<&'static UiState<SimulatorUiState>>,
+        Option<&'static UiState<UiSimulator>>,
         Option<&'static DeviceAttachment>,
         Option<&'static AttachmentFailed>,
     ),
@@ -523,7 +523,7 @@ fn start_device_attachments(
             DevicePoints,
             DevicePixels,
             StreamServer,
-            UiState<SimulatorUiState>,
+            UiState<UiSimulator>,
             input::DeviceTouchSession,
         )>();
         let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
@@ -644,7 +644,7 @@ fn announce(
             continue;
         }
         let payload = match attachments.get(entity) {
-            Ok((server, device)) => SimulatorUiState {
+            Ok((server, device)) => UiSimulator {
                 port: server.port(),
                 status: "ready".to_string(),
                 error: String::new(),
@@ -659,7 +659,7 @@ fn announce(
                 frame_height: server.frame_height(),
                 frame_stride: server.frame_stride(),
             },
-            Err(_) => SimulatorUiState {
+            Err(_) => UiSimulator {
                 status: if failed.is_some() {
                     "errored".to_string()
                 } else if let Some(starting) = starting {
@@ -685,9 +685,7 @@ fn announce(
         if announced.is_some_and(|announced| announced.current() == Some(&payload)) {
             continue;
         }
-        commands.trigger(UiStateWrite::<SimulatorUiState>::from_event(
-            entity, &payload,
-        ));
+        commands.trigger(UiStateWrite::<UiSimulator>::from_event(entity, &payload));
     }
 }
 

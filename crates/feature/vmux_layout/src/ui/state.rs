@@ -1,17 +1,17 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::use_ui_state;
+use vmux_ui::hooks::UiState;
 
-use crate::state::LayoutUiState;
+use crate::state::UiLayout;
 
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutUi {
-    state: Signal<LayoutUiState>,
+    state: Signal<UiLayout>,
     error: Signal<Option<String>>,
 }
 
 impl LayoutUi {
     pub(crate) fn use_state() -> Self {
-        let root = use_ui_state::<LayoutUiState>();
+        let root = UiState::<UiLayout>::use_context();
         Self {
             state: root.state,
             error: root.error,
@@ -26,7 +26,7 @@ impl LayoutUi {
         use_context::<Self>()
     }
 
-    pub(crate) fn use_selector<S>(self, select: impl Fn(&LayoutUiState) -> S + 'static) -> Memo<S>
+    pub(crate) fn use_selector<S>(self, select: impl Fn(&UiLayout) -> S + 'static) -> Memo<S>
     where
         S: Clone + PartialEq + 'static,
     {

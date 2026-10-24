@@ -46,7 +46,7 @@ use vmux_layout::{
     side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded},
     space::{Space, SpaceHierarchy},
     stack::{CloseStackRequest, FocusedStack, LayoutFocus, Stack},
-    state::LayoutUiState,
+    state::UiLayout,
     tab::Tab,
     window::{WindowHierarchy, WindowScope},
 };
@@ -730,7 +730,7 @@ fn reload_notify_header(
         return;
     };
     let effect = revision.next_effect();
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &effect));
 }
 
 fn hard_reload_notify_header(
@@ -750,7 +750,7 @@ fn hard_reload_notify_header(
         return;
     };
     let effect = revision.next_effect();
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
+    commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &effect));
 }
 
 fn side_sheet_resize(

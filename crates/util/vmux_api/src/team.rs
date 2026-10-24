@@ -1,5 +1,5 @@
 #[vmux_api::ui_state(Default, Eq, version = 2)]
-pub struct TeamUiState {
+pub struct UiTeam {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
     pub profiles: Vec<ProfileRow>,
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn team_event_rkyv_roundtrip() {
-        let original = TeamUiState {
+        let original = UiTeam {
             members: vec![TeamMemberRow {
                 id: "9".to_string(),
                 name: "You".to_string(),
@@ -153,7 +153,7 @@ mod tests {
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =
-            rkyv::from_bytes::<TeamUiState, rkyv::rancor::Error>(&bytes).expect("deserialize");
+            rkyv::from_bytes::<UiTeam, rkyv::rancor::Error>(&bytes).expect("deserialize");
         assert_eq!(original, recovered);
     }
 

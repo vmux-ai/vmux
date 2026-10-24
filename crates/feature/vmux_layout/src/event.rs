@@ -541,7 +541,7 @@ pub struct SideSheetState {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct BookmarkUiState {
+pub struct UiBookmark {
     pub pins: Vec<BookmarkPinState>,
     pub rows: Vec<BookmarkTreeState>,
     pub folders: Vec<BookmarkFolderChoice>,
@@ -676,7 +676,7 @@ pub enum RemotePhase {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct RemoteUiState {
+pub struct UiRemote {
     pub enabled: bool,
     pub phase: RemotePhase,
     pub pairing_url: String,
