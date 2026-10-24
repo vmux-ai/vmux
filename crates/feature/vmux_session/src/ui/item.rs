@@ -171,6 +171,7 @@ pub fn ChatItemRow(
     agent_color: String,
     user_name: String,
     user_color: String,
+    on_media_load: EventHandler<()>,
 ) -> Element {
     let key = absolute_index;
     let item = &item;
@@ -214,6 +215,7 @@ pub fn ChatItemRow(
                         for attachment in attachments {
                             UserAttachment {
                                 attachment: attachment.clone(),
+                                onload: on_media_load,
                             }
                         }
                     }
@@ -233,7 +235,7 @@ pub fn ChatItemRow(
 }
 
 #[component]
-fn UserAttachment(attachment: ChatAttachment) -> Element {
+fn UserAttachment(attachment: ChatAttachment, onload: EventHandler<()>) -> Element {
     let preview_data_url = &attachment.preview_data_url;
     if attachment.mime_type.starts_with("image/") && !preview_data_url.is_empty() {
         return rsx! {
@@ -247,6 +249,7 @@ fn UserAttachment(attachment: ChatAttachment) -> Element {
                     loading: "lazy",
                     decoding: "async",
                     class: "max-h-80 w-full object-cover",
+                    onload: move |_| onload.call(()),
                 }
             }
         };

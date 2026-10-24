@@ -59,6 +59,13 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;
+    let bottom_key = format!(
+        "chat-bottom-{}-{}-{}-{}",
+        transcript.generation,
+        transcript.request_id,
+        loaded_start,
+        items.len()
+    );
     let handoff_source = chat.handoff.source();
     let handoff_truncated = chat.handoff.truncated();
     let agent = chat.agent();
@@ -75,7 +82,12 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     rsx! {
         div {
             id: "chat-scroll",
-            onmounted: move |e| scroll_container.set(Some(e.data())),
+            onmounted: move |e| {
+                scroll_container.set(Some(e.data()));
+                if *at_bottom.peek() {
+                    super::scroll::to_bottom(scroll_container);
+                }
+            },
             class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-8 pt-3 sm:px-4 md:px-6",
             onscroll: move |e: Event<ScrollData>| {
                 let top = e.scroll_top() as i32;
@@ -118,11 +130,26 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                             agent_color: agent_color.clone(),
                             user_name: user_name.clone(),
                             user_color: user_color.clone(),
+                            on_media_load: move |_| {
+                                if *at_bottom.peek() {
+                                    super::scroll::to_bottom(scroll_container);
+                                }
+                            },
                         }
                         if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start as usize + i) {
                             HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
                         }
                     }
+                }
+                div {
+                    key: "{bottom_key}",
+                    id: "chat-bottom",
+                    class: "h-px shrink-0",
+                    onmounted: move |_| {
+                        if *at_bottom.peek() {
+                            super::scroll::to_bottom(scroll_container);
+                        }
+                    },
                 }
                 if chat.status() == "errored" {
                     ChatErrorCard { message: chat.run.error() }

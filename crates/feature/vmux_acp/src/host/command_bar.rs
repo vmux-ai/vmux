@@ -2,11 +2,7 @@ use std::cmp::Reverse;
 
 use bevy::prelude::*;
 use vmux_api::command_bar::CommandBarPage;
-#[cfg(test)]
-use vmux_command::ClaimedUrls;
-use vmux_command::{
-    ClaimedUrl, CommandBarWorkDirectory, ContributedPage, WriteCommandBarSnapshots,
-};
+use vmux_command::{CommandBarWorkDirectory, ContributedPage, WriteCommandBarSnapshots};
 use vmux_ecs::{Cwd, EntityTarget, LastActivatedAt};
 #[cfg(test)]
 use vmux_session::SessionId;
@@ -17,30 +13,21 @@ use super::acp::registry::RegistryAgent;
 use vmux_session::Route as SessionRoute;
 
 pub(super) fn add(app: &mut App) {
-    app.add_message::<AcpPackageChanged>()
-        .add_systems(Startup, claim)
-        .add_systems(
-            Update,
-            (
-                sync_work_directories,
-                sync_installed,
-                ApplyDeferred,
-                publish,
-            )
-                .chain()
-                .in_set(WriteCommandBarSnapshots),
-        );
+    app.add_message::<AcpPackageChanged>().add_systems(
+        Update,
+        (
+            sync_work_directories,
+            sync_installed,
+            ApplyDeferred,
+            publish,
+        )
+            .chain()
+            .in_set(WriteCommandBarSnapshots),
+    );
 }
 
 #[derive(Component)]
 struct InstalledAgent;
-
-fn claim(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Agent command-bar contribution"),
-        ClaimedUrl(vmux_api::VmuxRoute::SESSIONS_ROOT.to_string()),
-    ));
-}
 
 fn sync_work_directories(
     sessions: Query<Ref<Cwd>, With<Session>>,
@@ -167,7 +154,6 @@ fn publish(
 
 #[cfg(test)]
 mod tests {
-    use bevy::ecs::system::RunSystemOnce;
     use vmux_command::ContributedPage;
     use vmux_ecs::ProcessId;
 
@@ -210,31 +196,5 @@ mod tests {
             vmux_api::PageIcon::Favicon(ref icon)
                 if icon == "https://cdn.example/claude-acp.svg"
         ));
-    }
-
-    #[test]
-    fn only_bare_agent_urls_are_claimed() {
-        let mut world = World::new();
-        world.spawn(ClaimedUrl(vmux_api::VmuxRoute::SESSIONS_ROOT.to_string()));
-
-        let claimed = world
-            .run_system_once(|claimed: ClaimedUrls| {
-                [
-                    claimed.contains("vmux://sessions/"),
-                    claimed.contains("vmux://sessions"),
-                    claimed.contains("vmux://agent/"),
-                    claimed.contains("vmux://agent"),
-                    claimed.contains("vmux://sessions/codex"),
-                    claimed.contains("vmux://sessions/codex/cli"),
-                    claimed.contains("vmux://agent/codex"),
-                    claimed.contains("vmux://agent/codex/cli"),
-                ]
-            })
-            .expect("claims_url system runs");
-
-        assert_eq!(
-            claimed,
-            [true, true, false, false, false, false, false, false]
-        );
     }
 }

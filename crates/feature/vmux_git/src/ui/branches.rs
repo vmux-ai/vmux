@@ -129,7 +129,7 @@ pub(super) fn BranchesCard(
                 class: "flex-1 px-2 pb-2".to_string(),
                 onscroll: move |event: Event<ScrollData>| {
                     let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                    let preload_distance = event.client_height().saturating_mul(2).max(480);
+                    let preload_distance = event.client_height().saturating_mul(4).max(960);
                     if remaining <= preload_distance && files_has_more && !files_loading {
                         let _ = send(&GitBranchFilesNextRequest);
                     }

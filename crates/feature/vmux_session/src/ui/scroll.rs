@@ -16,15 +16,17 @@ mod imp {
             return;
         };
         spawn(async move {
-            let Ok(size) = element.get_scroll_size().await else {
-                return;
-            };
-            let _ = element
-                .scroll(
-                    PixelsVector2D::new(0.0, size.height),
-                    ScrollBehavior::Instant,
-                )
-                .await;
+            for _ in 0..2 {
+                let Ok(size) = element.get_scroll_size().await else {
+                    return;
+                };
+                let _ = element
+                    .scroll(
+                        PixelsVector2D::new(0.0, size.height),
+                        ScrollBehavior::Instant,
+                    )
+                    .await;
+            }
         });
     }
 }

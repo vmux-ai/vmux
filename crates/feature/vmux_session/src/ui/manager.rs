@@ -184,7 +184,7 @@ fn SessionsManagerContent(
                 }
             },
             if !presentation.snapshot.sessions.is_empty() {
-                div { class: "shrink-0 px-2 pt-2",
+                div { class: "shrink-0 px-2 pb-2 pt-2",
                     ManagerControls {
                         ManagerViewToggle {
                             view: controls.view(),

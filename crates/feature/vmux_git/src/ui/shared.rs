@@ -376,7 +376,7 @@ pub fn DiffView(
                     }
                 }
                 let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                let preload_distance = event.client_height().saturating_mul(10).max(2400);
+                let preload_distance = event.client_height().saturating_mul(16).max(4800);
                 if remaining <= preload_distance && has_more && !loading {
                     let _ = send(&GitDiffNextRequest);
                 }

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use chrono::{Datelike, Duration, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
-use vmux_api::session::{AssistantBlock, Message};
+use vmux_api::session::{AgentAttachment, AssistantBlock, Message};
 use vmux_session::{ArchiveState, ProviderSession};
 
 use super::{
@@ -663,26 +663,10 @@ impl CodexConversationLine {
         if self.kind != "response_item" || self.payload.kind != "message" {
             return None;
         }
-        let expected = match self.payload.role.as_str() {
-            "user" => "input_text",
-            "assistant" => "output_text",
-            _ => return None,
-        };
-        let mut parts = Vec::new();
-        for content in self.payload.content {
-            if content.kind == expected && !content.text.trim().is_empty() {
-                parts.push(content.text);
-            }
-        }
-        if parts.is_empty() {
-            return None;
-        }
-        let text = parts.join("\n");
-        match self.payload.role.as_str() {
-            "user" => Some(Message::user(text)),
-            "assistant" => Some(Message::Assistant {
-                blocks: vec![AssistantBlock::Text(text)],
-            }),
+        let role = self.payload.role.clone();
+        match role.as_str() {
+            "user" => self.payload.user_message(),
+            "assistant" => self.payload.assistant_message(),
             _ => None,
         }
     }
@@ -696,6 +680,65 @@ struct CodexConversationPayload {
     role: String,
     #[serde(default)]
     content: Vec<CodexConversationContent>,
+    #[serde(default)]
+    internal_chat_message_metadata_passthrough: Option<CodexMessageMetadata>,
+}
+
+impl CodexConversationPayload {
+    fn user_message(self) -> Option<Message> {
+        if self
+            .internal_chat_message_metadata_passthrough
+            .as_ref()
+            .is_some_and(CodexMessageMetadata::internal)
+        {
+            return None;
+        }
+        let mut parts = Vec::new();
+        let mut attachments = Vec::new();
+        let mut image = None;
+        for content in self.content {
+            match content.kind.as_str() {
+                "input_text" => {
+                    if let Some(tag) = CodexImageTag::parse(&content.text) {
+                        image = Some(tag);
+                    } else if content.text.trim() != "</image>" && !content.text.trim().is_empty() {
+                        parts.push(content.text);
+                    }
+                }
+                "input_image" => {
+                    if let Some(tag) = image.take() {
+                        attachments.push(tag.attachment());
+                    }
+                }
+                _ => {}
+            }
+        }
+        let text = parts.join("\n");
+        if Self::internal_text(&text) || text.trim().is_empty() && attachments.is_empty() {
+            return None;
+        }
+        Some(Message::user_with_attachments(text, attachments))
+    }
+
+    fn assistant_message(self) -> Option<Message> {
+        let parts = self
+            .content
+            .into_iter()
+            .filter(|content| content.kind == "output_text" && !content.text.trim().is_empty())
+            .map(|content| content.text)
+            .collect::<Vec<_>>();
+        if parts.is_empty() {
+            return None;
+        }
+        Some(Message::Assistant {
+            blocks: vec![AssistantBlock::Text(parts.join("\n"))],
+        })
+    }
+
+    fn internal_text(text: &str) -> bool {
+        let text = text.trim_start();
+        text.starts_with("<codex_internal_context") || text.starts_with("<subagent_notification>")
+    }
 }
 
 #[derive(Deserialize)]
@@ -704,6 +747,73 @@ struct CodexConversationContent {
     kind: String,
     #[serde(default)]
     text: String,
+}
+
+#[derive(Default, Deserialize)]
+struct CodexMessageMetadata {
+    #[serde(default)]
+    content_item_kinds: Vec<String>,
+}
+
+impl CodexMessageMetadata {
+    fn internal(&self) -> bool {
+        !self.content_item_kinds.is_empty()
+            && !self
+                .content_item_kinds
+                .iter()
+                .any(|kind| kind.starts_with("user."))
+    }
+}
+
+struct CodexImageTag(PathBuf);
+
+impl CodexImageTag {
+    fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        if !text.starts_with("<image ") || !text.ends_with('>') {
+            return None;
+        }
+        let (_, path) = text.split_once("path=\"")?;
+        let (path, _) = path.split_once('"')?;
+        if path.is_empty() {
+            return None;
+        }
+        Some(Self(PathBuf::from(path)))
+    }
+
+    fn attachment(self) -> AgentAttachment {
+        let name = self
+            .0
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("image")
+            .to_string();
+        let mime_type = match self
+            .0
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png") => "image/png",
+            Some("jpg" | "jpeg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            Some("tif" | "tiff") => "image/tiff",
+            Some("heic") => "image/heic",
+            _ => "application/octet-stream",
+        }
+        .to_string();
+        let size = std::fs::metadata(&self.0)
+            .map(|metadata| metadata.len())
+            .unwrap_or_default();
+        AgentAttachment {
+            path: self.0.to_string_lossy().into_owned(),
+            name,
+            mime_type,
+            size,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -856,6 +966,54 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn codex_reader_ignores_internal_user_envelopes() {
+        let lines = [
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<subagent_notification>hidden</subagent_notification>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["multi_agent.subagent_notification"]}}}"#,
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context source=\"goal\">hidden</codex_internal_context>"}]}}"#,
+        ];
+
+        for line in lines {
+            let line = serde_json::from_str::<CodexConversationLine>(line).unwrap();
+            assert!(line.message().is_none());
+        }
+    }
+
+    #[test]
+    fn codex_reader_restores_image_attachments() {
+        let fixture = Fixture::new();
+        let image = fixture.path().join("screenshot.png");
+        std::fs::write(&image, [1, 2, 3]).unwrap();
+        let line = serde_json::json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": format!("<image name=[Image #1] path=\"{}\">", image.display())},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AQID"},
+                    {"type": "input_text", "text": "</image>"},
+                    {"type": "input_text", "text": "Review this [Image #1]"}
+                ],
+                "internal_chat_message_metadata_passthrough": {
+                    "content_item_kinds": ["user.text", "user.image", "user.text", "user.text"]
+                }
+            }
+        });
+        let line = serde_json::from_value::<CodexConversationLine>(line).unwrap();
+
+        let Some(Message::User { text, attachments }) = line.message() else {
+            panic!()
+        };
+
+        assert_eq!(text, "Review this [Image #1]");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].path, image.to_string_lossy());
+        assert_eq!(attachments[0].name, "screenshot.png");
+        assert_eq!(attachments[0].mime_type, "image/png");
+        assert_eq!(attachments[0].size, 3);
     }
 
     #[test]
