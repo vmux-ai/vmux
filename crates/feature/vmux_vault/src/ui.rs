@@ -19,6 +19,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "VaultUiState"],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]
@@ -44,7 +45,7 @@ pub fn Page() -> Element {
     let current = state();
     rsx! {
         ManagerPage {
-            header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
+            header { class: "shrink-0 bg-foreground/[0.018] px-5 py-3",
                 div { class: "flex items-center gap-3",
                     h1 { class: "text-base font-semibold tracking-tight", {translate("vault-title")} }
                     div { class: "flex-1" }
@@ -66,9 +67,9 @@ pub fn Page() -> Element {
                     if let Some(notice) = current.workflow.notice.as_ref() {
                         div {
                             class: if notice.success {
-                                "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
+                                "rounded-lg bg-success/10 px-4 py-3 text-xs text-success"
                             } else {
-                                "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
+                                "rounded-lg bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1"
                             },
                             {if notice.message_id.is_empty() {
                                 notice.message.clone()
@@ -132,11 +133,9 @@ fn VaultPanel(
         VaultSyncStatus::Clean => translate("vault-clean"),
     };
     rsx! {
-        div { class: "relative overflow-hidden rounded-[28px] bg-foreground/[0.03] p-6 shadow-2xl shadow-black/[0.06] ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl",
-            div { class: "pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-primary/[0.08] blur-3xl motion-safe:animate-pulse [animation-duration:7s]" }
-            div { class: "pointer-events-none absolute -bottom-36 -left-24 h-72 w-72 rounded-full bg-primary/[0.05] blur-3xl motion-safe:animate-pulse [animation-delay:-2.5s] [animation-duration:7s]" }
+        div { class: "relative overflow-hidden rounded-lg bg-foreground/[0.03] p-5",
             div { class: "relative flex items-start gap-4",
-                div { class: "grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary shadow-lg shadow-primary/10 ring-1 ring-inset ring-primary/20",
+                div { class: "grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary",
                     svg { class: "h-5.5 w-5.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                         path { d: "M12 3 4.5 6v5.5c0 4.7 3.2 8.1 7.5 9.5 4.3-1.4 7.5-4.8 7.5-9.5V6Z" }
                         path { d: "m9 12 2 2 4-4" }
@@ -187,14 +186,14 @@ fn VaultPanel(
                 }
             }
             if !workflow.connected {
-                div { class: "relative mt-6 overflow-hidden rounded-[24px] bg-background/35 p-4 shadow-inner ring-1 ring-inset ring-foreground/[0.08]",
-                    div { class: "mx-auto flex w-fit flex-wrap items-center justify-center gap-1.5 rounded-2xl bg-foreground/[0.035] p-1.5 ring-1 ring-inset ring-foreground/[0.07]",
+                div { class: "relative mt-6 overflow-hidden rounded-lg bg-foreground/[0.025] p-4",
+                    div { class: "mx-auto flex w-fit flex-wrap items-center justify-center gap-1.5 rounded-lg bg-foreground/[0.04] p-1",
                         for option in VaultConnectionProvider::ALL {
                             button {
                                 class: if provider == Some(option) {
-                                    "grid h-12 w-12 scale-105 place-items-center rounded-xl bg-background text-foreground shadow-lg shadow-black/10 ring-1 ring-inset ring-primary/40 transition-all duration-300 ease-out"
+                                    "grid h-12 w-12 place-items-center rounded-md bg-foreground/[0.09] text-foreground transition-colors"
                                 } else {
-                                    "grid h-12 w-12 place-items-center rounded-xl text-muted-foreground transition-all duration-300 ease-out hover:-translate-y-0.5 hover:scale-105 hover:bg-foreground/[0.06] hover:text-foreground active:scale-95"
+                                    "grid h-12 w-12 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.065] hover:text-foreground"
                                 },
                                 title: option.name(),
                                 aria_label: option.name(),
@@ -211,8 +210,7 @@ fn VaultPanel(
                                 key: "connect-{provider.name()}",
                                 class: "flex min-h-52 flex-col items-center justify-center px-5 py-8 text-center transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
                                 div { class: "relative grid h-20 w-20 place-items-center",
-                                    div { class: "absolute inset-0 rounded-[26px] bg-primary/15 blur-xl motion-safe:animate-pulse [animation-duration:2.4s]" }
-                                    div { class: "relative grid h-16 w-16 place-items-center rounded-[22px] bg-background/80 text-foreground shadow-xl shadow-black/10 ring-1 ring-inset ring-foreground/10",
+                                    div { class: "relative grid h-16 w-16 place-items-center rounded-lg bg-foreground/[0.055] text-foreground",
                                         ProviderIcon { provider, large: true }
                                     }
                                 }
@@ -226,7 +224,7 @@ fn VaultPanel(
                                 if provider.is_github() && !workflow.github_device_code.is_empty() {
                                     button {
                                         r#type: "button",
-                                        class: "group mt-4 rounded-xl bg-foreground/[0.06] px-4 py-2.5 text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-[opacity,transform,background-color] duration-200 ease-out hover:bg-foreground/[0.09] active:scale-[0.98] starting:scale-90 starting:opacity-0",
+                                        class: "group mt-4 rounded-lg bg-foreground/[0.06] px-4 py-2.5 text-foreground transition-colors hover:bg-foreground/[0.09]",
                                         title: translate("common-copy"),
                                         aria_label: translate("common-copy"),
                                         onclick: move |_| copy_recovery_key(
@@ -261,7 +259,7 @@ fn VaultPanel(
                                 key: "destination-{provider.name()}",
                                 class: "pt-5 transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
                                 div { class: "flex items-center justify-center gap-2 text-xs text-success",
-                                    span { class: "grid h-5 w-5 place-items-center rounded-full bg-success/15 ring-1 ring-inset ring-success/25",
+                                    span { class: "grid h-5 w-5 place-items-center rounded-full bg-success/15",
                                         svg { class: "h-3 w-3", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
                                             path { d: "m5 12 4 4L19 6" }
                                         }
@@ -287,10 +285,10 @@ fn VaultPanel(
                                         }
                                     }
                                 }
-                                div { class: "mx-auto mt-4 grid max-w-md grid-cols-2 gap-1 rounded-xl bg-foreground/[0.04] p-1 ring-1 ring-inset ring-foreground/[0.07]",
+                                div { class: "mx-auto mt-4 grid max-w-md grid-cols-2 gap-1 rounded-lg bg-foreground/[0.04] p-1",
                                     button {
                                         class: if workflow.destination == VaultDestination::Create {
-                                            "rounded-lg bg-background px-4 py-2 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08] transition-all duration-200"
+                                            "rounded-md bg-foreground/[0.08] px-4 py-2 text-xs font-medium text-foreground transition-colors"
                                         } else {
                                             "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
                                         },
@@ -303,7 +301,7 @@ fn VaultPanel(
                                     }
                                     button {
                                         class: if workflow.destination == VaultDestination::Existing {
-                                            "rounded-lg bg-background px-4 py-2 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08] transition-all duration-200"
+                                            "rounded-md bg-foreground/[0.08] px-4 py-2 text-xs font-medium text-foreground transition-colors"
                                         } else {
                                             "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
                                         },
@@ -321,10 +319,10 @@ fn VaultPanel(
                                 }
                                 div { class: "mx-auto max-w-md py-4",
                                     if workflow.destination == VaultDestination::Create {
-                                        div { class: "rounded-2xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07] transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
+                                        div { class: "rounded-lg bg-foreground/[0.025] p-3",
                                             div { class: "flex gap-2",
                                                 if provider == VaultConnectionProvider::Github {
-                                                    div { class: "flex min-w-0 flex-1 items-center rounded-xl bg-background/60 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/40",
+                                                    div { class: "flex min-w-0 flex-1 items-center rounded-md bg-foreground/[0.055] focus-within:bg-foreground/[0.08]",
                                                         span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{workflow.selected_owner}/" }
                                                         input {
                                                             class: "min-w-0 flex-1 bg-transparent py-2.5 pl-0.5 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/50",
@@ -339,7 +337,7 @@ fn VaultPanel(
                                                     }
                                                 } else {
                                                     input {
-                                                        class: "min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-primary/40",
+                                                        class: "min-w-0 flex-1 rounded-md bg-foreground/[0.055] px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/50 focus:bg-foreground/[0.08]",
                                                         value: "{workflow.repository_name}",
                                                         placeholder: translate("vault-repository-name"),
                                                         oninput: move |event| {
@@ -375,7 +373,7 @@ fn VaultPanel(
                                             }
                                         }
                                     } else {
-                                        div { class: "rounded-2xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07] transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
+                                        div { class: "rounded-lg bg-foreground/[0.025] p-3",
                                             if provider == VaultConnectionProvider::Github {
                                                 div { class: "flex gap-2",
                                                     div { class: "min-w-0 flex-1",
@@ -399,7 +397,7 @@ fn VaultPanel(
                                                 }
                                             } else {
                                                 button {
-                                                    class: "flex w-full items-center justify-center gap-2 rounded-xl bg-background/60 px-4 py-3 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-foreground/[0.07] active:translate-y-0",
+                                                    class: "flex w-full items-center justify-center gap-2 rounded-md bg-foreground/[0.055] px-4 py-3 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.085]",
                                                     disabled: workflow.pending.is_some(),
                                                     onclick: move |_| {
                                                         let _ = send(&VaultWorkflowConnectRequest);
@@ -483,7 +481,7 @@ fn RecoveryCard(
     let generated = generated_recovery_key.clone();
     let copy_value = generated_recovery_key.clone();
     rsx! {
-        div { class: "mt-4 rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10",
+        div { class: "mt-4 rounded-lg bg-foreground/[0.025] p-4",
             div { class: "flex items-start gap-3",
                 svg { class: "mt-0.5 h-5 w-5 shrink-0 text-foreground/70", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                     path { d: "M21 2 13.6 9.4" }

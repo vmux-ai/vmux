@@ -24,6 +24,7 @@ vmux_knowledge = { path = "../vmux_knowledge" }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 vmux_setting = { path = "../vmux_setting" }
+vmux_session = { path = "../vmux_session" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 arboard = "3"
@@ -43,6 +44,7 @@ notify = { workspace = true }
 percent-encoding = "2"
 pulldown-cmark = { version = "0.12", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rfd.workspace = true
 ron = { workspace = true }
 ropey = "1"
 serde_json = { workspace = true }
@@ -61,6 +63,7 @@ vmux_mcp = { path = "../../util/vmux_mcp" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_transport = { path = "../../util/vmux_transport" }
 vmux_path = { path = "../../util/vmux_path" }
+vmux_syntax = { path = "../../util/vmux_syntax" }
 vmux_space = { path = "../vmux_space" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 

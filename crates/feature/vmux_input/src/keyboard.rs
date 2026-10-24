@@ -28,6 +28,7 @@ impl Plugin for KeyboardPlugin {
         app.add_message::<NativeKeyInput>()
             .add_message::<ExitFullscreenShortcut>()
             .add_message::<HideWindowsShortcut>()
+            .init_resource::<HideWindowsGesture>()
             .add_systems(Startup, (spawn_bridge, spawn_application_key_bindings))
             .add_systems(Update, install_monitor)
             .add_systems(
@@ -60,6 +61,42 @@ struct ExitFullscreenKey;
 
 #[derive(Component)]
 struct HideWindowsKey;
+
+#[derive(Resource, Default)]
+struct HideWindowsGesture {
+    started_at_ms: Option<i64>,
+    triggered: bool,
+}
+
+impl HideWindowsGesture {
+    const DOUBLE_TAP_MS: i64 = 450;
+    const HOLD_MS: i64 = 900;
+
+    fn register(&mut self, input: &NativeKeyInput) -> bool {
+        if input.repeat {
+            let Some(started_at_ms) = self.started_at_ms else {
+                return false;
+            };
+            if self.triggered || input.pressed_at_ms - started_at_ms < Self::HOLD_MS {
+                return false;
+            }
+            self.triggered = true;
+            return true;
+        }
+
+        let double_tap = !self.triggered
+            && self.started_at_ms.is_some_and(|started_at_ms| {
+                input.pressed_at_ms - started_at_ms <= Self::DOUBLE_TAP_MS
+            });
+        if double_tap {
+            self.triggered = true;
+            return true;
+        }
+        self.started_at_ms = Some(input.pressed_at_ms);
+        self.triggered = false;
+        false
+    }
+}
 
 #[derive(Component, Clone)]
 struct KeyboardBridge {
@@ -537,6 +574,7 @@ fn sync_application_key_bindings(
 fn publish_shortcuts(
     mut inputs: MessageReader<NativeKeyInput>,
     bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<Active>>,
+    mut hide_windows_gesture: ResMut<HideWindowsGesture>,
     mut exit_fullscreen: MessageWriter<ExitFullscreenShortcut>,
     mut hide_windows: MessageWriter<HideWindowsShortcut>,
 ) {
@@ -548,7 +586,7 @@ fn publish_shortcuts(
         if exits_fullscreen {
             exit_fullscreen.write(ExitFullscreenShortcut);
         }
-        if hides_windows {
+        if hides_windows && hide_windows_gesture.register(input) {
             hide_windows.write(HideWindowsShortcut);
         }
     }
@@ -630,6 +668,29 @@ mod tests {
             claim: None,
             pressed_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn hide_windows_requires_a_hold_or_double_tap() {
+        let mut gesture = HideWindowsGesture::default();
+        let mut first = input(KeyCode::KeyQ);
+        first.pressed_at_ms = 1_000;
+        assert!(!gesture.register(&first));
+
+        let mut held = first.clone();
+        held.repeat = true;
+        held.pressed_at_ms = 1_899;
+        assert!(!gesture.register(&held));
+        held.pressed_at_ms = 1_900;
+        assert!(gesture.register(&held));
+        held.pressed_at_ms = 2_000;
+        assert!(!gesture.register(&held));
+
+        let mut gesture = HideWindowsGesture::default();
+        assert!(!gesture.register(&first));
+        let mut second = first.clone();
+        second.pressed_at_ms = 1_450;
+        assert!(gesture.register(&second));
     }
 
     #[test]
@@ -753,6 +814,7 @@ mod tests {
             .add_message::<NativeKeyInput>()
             .add_message::<ExitFullscreenShortcut>()
             .add_message::<HideWindowsShortcut>()
+            .init_resource::<HideWindowsGesture>()
             .add_systems(Startup, spawn_application_key_bindings)
             .add_systems(
                 Update,

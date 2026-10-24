@@ -14,11 +14,10 @@ use vmux_ecs::PageMetadata;
 use vmux_ui::components::context_menu::ContextMenuTrigger;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::tree_row::{
-    SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN,
-    SIDEBAR_TREE_SCROLLER, SidebarTreeRow, SidebarTreeRowGroup,
+    FILE_TREE_COLUMN, FILE_TREE_SCROLLER, FileTreeRow, FileTreeRowGroup,
 };
-use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
@@ -59,7 +58,7 @@ pub(super) fn BookmarksSection(
     rsx! {
         div {
             "data-bookmark-drop": "root",
-            class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            class: "@container group relative z-30 {SHEET_SECTION}",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
                 let _ = send(&BookmarkMenuRootRequest);
@@ -69,12 +68,12 @@ pub(super) fn BookmarksSection(
                 onpointerenter: move |_| set_bookmark_drop_target(drag_state, BookmarkDragTarget::Root),
                 onpointerleave: move |_| clear_bookmark_drop_target(drag_state, &BookmarkDragTarget::Root),
                 class: if root_targeted {
-                    "flex items-center bg-foreground/10 ring-1 ring-inset ring-ring"
+                    "flex items-center rounded-md bg-foreground/10 ring-1 ring-inset ring-ring"
                 } else {
-                    "flex items-center transition-colors hover:bg-glass-hover"
+                    "flex items-center rounded-md"
                 },
-                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
-                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 @max-[12rem]:gap-1 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground @max-[12rem]:h-6 @max-[12rem]:w-6",
                         Icon { class: "h-3.5 w-3.5",
                             path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
                         }
@@ -82,37 +81,31 @@ pub(super) fn BookmarksSection(
                     if let Some(label) = root_drop_label {
                         span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
                     } else {
-                        span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{bookmarks_title}" }
-                        button {
-                            r#type: "button",
-                            aria_label: "{new_folder_title}",
-                            title: "{new_folder_title}",
-                            class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                            onclick: move |event| {
-                                event.prevent_default();
-                                event.stop_propagation();
-                                let _ = send(&BookmarkFolderEditOpenRequest {
-                                    parent: None,
-                                    draft: translate("layout-new-folder"),
-                                });
-                            },
-                            Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                                path { d: "M12 10v6" }
-                                path { d: "M9 13h6" }
+                        span { class: "min-w-0 flex-1 truncate whitespace-nowrap text-ui font-semibold text-foreground @max-[12rem]:sr-only", "{bookmarks_title}" }
+                        div { class: "shrink-0",
+                            SheetHeaderAction {
+                                label: new_folder_title,
+                                onclick: move |event: MouseEvent| {
+                                    event.prevent_default();
+                                    event.stop_propagation();
+                                    let _ = send(&BookmarkFolderEditOpenRequest {
+                                        parent: None,
+                                        draft: translate("layout-new-folder"),
+                                    });
+                                },
+                                Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                    path { d: "M12 10v6" }
+                                    path { d: "M9 13h6" }
+                                }
                             }
                         }
                     }
                 }
-                button {
-                    r#type: "button",
-                    aria_label: "{bookmarks_title}",
-                    title: "{bookmarks_title}",
-                    class: if expanded {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
-                    } else {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
-                    },
+                div { class: "mr-2",
+                    SheetHeaderChevron {
+                    expanded,
+                    label: bookmarks_title,
                     onclick: move |_| {
                         let _ = send(&SideSheetSectionRequest::new(
                             pane_id,
@@ -120,9 +113,6 @@ pub(super) fn BookmarksSection(
                             !expanded,
                         ));
                     },
-                    Icon {
-                        class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
-                        path { d: "m9 18 6-6-6-6" }
                     }
                 }
             }
@@ -132,11 +122,11 @@ pub(super) fn BookmarksSection(
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "overflow-hidden",
-                    div { class: "border-t border-foreground/10 p-1.5",
+                    div { class: "px-1.5 pb-0 pt-0.5",
                         if !pins.is_empty() {
                             div {
                                 "data-bookmark-drop": "",
-                                class: "mb-1 grid grid-cols-4 gap-1.5 p-1",
+                                class: "mb-1 grid gap-1.5 p-1 [grid-template-columns:repeat(auto-fill,minmax(2rem,1fr))]",
                                 for (index, pin) in pins.iter().enumerate() {
                                     PinTile {
                                         key: "{pin.row.uuid}",
@@ -163,8 +153,8 @@ pub(super) fn BookmarksSection(
                         if pins.is_empty() && rows.is_empty() && !creating_folder {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-pins-bookmarks")} }
                         } else {
-                            div { class: SIDEBAR_TREE_SCROLLER,
-                            div { class: "{SIDEBAR_TREE_COLUMN} gap-1",
+                            div { class: FILE_TREE_SCROLLER,
+                            div { class: "{FILE_TREE_COLUMN} gap-1",
                                 for node in rows.iter() {
                                     match node {
                                         BookmarkTreeState::Folder(folder) => rsx! {
@@ -404,7 +394,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
     };
     rsx! {
         div {
-            class: "relative aspect-square",
+            class: "relative aspect-square w-full max-w-10 justify-self-center",
             onpointerenter: move |_| set_bookmark_drop_target(drag_state, drop_target.clone()),
             onpointerleave: move |_| clear_bookmark_drop_target(drag_state, &leave_target),
             if targeted {
@@ -426,11 +416,11 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                         },
                         style: "{visual.style()}",
                         class: if visual.dragging {
-                            "absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-white/5"
+                            "absolute inset-0 flex cursor-grabbing select-none items-center justify-center rounded-md bg-foreground/[0.10]"
                         } else if active {
-                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-primary/15 text-primary ring-1 ring-inset ring-primary/30 transition-colors hover:bg-primary/20"
+                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-foreground/[0.09] text-foreground transition-colors"
                         } else {
-                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md bg-white/5 transition-colors hover:bg-white/10"
+                            "absolute inset-0 flex cursor-pointer select-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground"
                         },
                         onclick: {
                             let u = url_open.clone();
@@ -444,20 +434,11 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                             }
                         },
                         title: "{row.metadata.title}",
-                        if vmux_api::VmuxRoute::parse(&row.metadata.url).is_some() {
-                            Favicon {
-                                favicon_url: row.metadata.icon.favicon_url().to_string(),
-                                url: row.metadata.url.clone(),
-                                class: "pointer-events-none h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
-                                globe_class: "pointer-events-none h-5 w-5 shrink-0 text-muted-foreground".to_string(),
-                            }
-                        } else {
-                            PageIconView {
-                                icon: row.metadata.icon.clone(),
-                                url: row.metadata.url.clone(),
-                                img_class: "pointer-events-none h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
-                                icon_class: "pointer-events-none h-5 w-5 shrink-0 text-muted-foreground".to_string(),
-                            }
+                        PageIconView {
+                            icon: row.metadata.icon.clone(),
+                            url: row.metadata.url.clone(),
+                            img_class: "pointer-events-none h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
+                            icon_class: "pointer-events-none h-5 w-5 shrink-0 text-muted-foreground".to_string(),
                         }
                     }
                 },
@@ -745,8 +726,8 @@ fn BookmarkFolder(
                                 let item = drag_item.clone();
                                 move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                             },
-                            SidebarTreeRowGroup {
-                                SidebarTreeRow {
+                            FileTreeRowGroup {
+                                FileTreeRow {
                                     path: uuid.clone(),
                                     label: folder.name.clone(),
                                     is_dir: true,
@@ -970,8 +951,8 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                             let item = drag_item.clone();
                             move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                         },
-                        SidebarTreeRowGroup {
-                            SidebarTreeRow {
+                        FileTreeRowGroup {
+                            FileTreeRow {
                                 path: row.metadata.url.clone(),
                                 label: title.clone(),
                                 is_dir: false,

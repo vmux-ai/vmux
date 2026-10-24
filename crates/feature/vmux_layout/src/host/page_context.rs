@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::PageMetadata;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ecs::page::PageReady;
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
@@ -16,9 +19,12 @@ pub struct PageContextPlugin;
 
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
+        app.init_resource::<vmux_git::GitRuntime>()
+            .init_resource::<ProjectActivationRevisions>()
+            .add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
             .add_observer(git_page_ready)
-            .add_observer(project_activate);
+            .add_observer(project_activate)
+            .add_systems(Update, poll_project_activations);
     }
 }
 
@@ -28,95 +34,102 @@ struct TabWorkspaceSelection {
     worktree: Option<(TabWorktree, TabWorktreeReady)>,
 }
 
-impl TabWorkspaceSelection {
-    fn resolve(
-        path: &str,
-        branch: &str,
-        checkout: &str,
-        managed_root: &std::path::Path,
-    ) -> Result<Self, String> {
-        let project_dir = std::path::Path::new(path.trim())
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        if !project_dir.is_dir() {
-            return Err("project path is not a directory".to_string());
-        }
-        if !checkout.trim().is_empty() {
-            return Self::from_checkout(&project_dir, std::path::Path::new(checkout));
-        }
-        if !branch.trim().is_empty() {
-            let activation = crate::worktree::TabWorktreeActivation::checkout_branch(
-                &project_dir,
-                branch.trim(),
-                managed_root,
-            )?;
-            return Ok(Self {
-                startup_dir: activation.execution_dir.to_string_lossy().into_owned(),
-                project_dir: project_dir.to_string_lossy().into_owned(),
-                worktree: Some((activation.metadata, activation.ready)),
-            });
-        }
-        Self::from_checkout(&project_dir, &project_dir)
+#[derive(Component)]
+struct ProjectActivationTask {
+    webview: Entity,
+    tab: Entity,
+    branch: String,
+    revision: u64,
+    task: vmux_git::GitTask<Result<TabWorkspaceSelection, String>>,
+}
+
+#[derive(Resource, Default)]
+struct ProjectActivationRevisions(HashMap<Entity, u64>);
+
+impl ProjectActivationRevisions {
+    fn next(&mut self, tab: Entity) -> u64 {
+        let revision = self.0.entry(tab).or_default();
+        *revision = revision.wrapping_add(1).max(1);
+        *revision
     }
 
-    fn from_checkout(
-        project_dir: &std::path::Path,
-        checkout_dir: &std::path::Path,
-    ) -> Result<Self, String> {
-        let project_dir = project_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout_dir = checkout_dir
-            .canonicalize()
-            .map_err(|error| format!("invalid checkout directory: {error}"))?;
-        let Some(info) = vmux_git::worktree::RepoInfo::read(&checkout_dir) else {
-            return Ok(Self {
-                startup_dir: checkout_dir.to_string_lossy().into_owned(),
-                project_dir: checkout_dir.to_string_lossy().into_owned(),
-                worktree: None,
-            });
-        };
-        if !info.is_worktree {
-            return Ok(Self {
-                startup_dir: checkout_dir.to_string_lossy().into_owned(),
-                project_dir: checkout_dir.to_string_lossy().into_owned(),
-                worktree: None,
-            });
+    fn accepts(&self, tab: Entity, revision: u64) -> bool {
+        self.0.get(&tab) == Some(&revision)
+    }
+
+    fn finish(&mut self, tab: Entity, revision: u64) {
+        if self.accepts(tab, revision) {
+            self.0.remove(&tab);
         }
-        let source = vmux_git::worktree::CheckoutInfo::try_from(project_dir.as_path())
-            .map_err(|error| error.0)?;
-        let project_dir = info
-            .project_root()
-            .canonicalize()
-            .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout = vmux_git::worktree::CheckoutInfo::try_from(checkout_dir.as_path())
-            .map_err(|error| error.0)?;
-        if source.common_dir != checkout.common_dir {
-            return Err("worktree belongs to a different repository".to_string());
+    }
+}
+
+struct ProjectActivationOutcome {
+    path: String,
+    branch: String,
+    error: String,
+}
+
+impl ProjectActivationOutcome {
+    fn from_result(branch: String, result: Result<String, String>) -> Self {
+        match result {
+            Ok(path) => Self {
+                path,
+                branch,
+                error: String::new(),
+            },
+            Err(error) => Self {
+                path: String::new(),
+                branch,
+                error,
+            },
         }
-        let metadata = TabWorktree {
-            repo_root: source.root.to_string_lossy().into_owned(),
-            checkout_dir: checkout.root.to_string_lossy().into_owned(),
-            branch: info.branch,
-            base_ref: info.base_ref,
-        };
-        let project_dir_text = project_dir.to_string_lossy().into_owned();
-        let ready = TabWorktreeReady::new(&checkout_dir, &project_dir_text, &metadata, &checkout)?;
-        Ok(Self {
-            startup_dir: checkout_dir.to_string_lossy().into_owned(),
-            project_dir: project_dir_text,
-            worktree: Some((metadata, ready)),
-        })
     }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct WorkspaceWriter<'w, 's> {
+struct ProjectActivationContext<'w, 's> {
     tabs: Query<'w, 's, &'static mut Tab>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    pages: Query<'w, 's, (Entity, &'static PageMetadata)>,
     commands: Commands<'w, 's>,
 }
 
-impl WorkspaceWriter<'_, '_> {
+impl ProjectActivationContext<'_, '_> {
+    fn publish(&mut self, outcome: ProjectActivationOutcome, webview: Entity, tab: Option<Entity>) {
+        let event = GitWorkspaceChanged {
+            path: outcome.path,
+            branch: outcome.branch,
+            error: outcome.error,
+        };
+        let Some(tab) = tab else {
+            self.commands.trigger(
+                vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
+            );
+            return;
+        };
+        for (page, metadata) in &self.pages {
+            if !vmux_git::GitUrl::is_page(&metadata.url) {
+                continue;
+            }
+            let mut current = page;
+            loop {
+                if current == tab {
+                    self.commands.trigger(
+                        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+                            page, &event,
+                        ),
+                    );
+                    break;
+                }
+                let Ok(parent) = self.child_of.get(current) else {
+                    break;
+                };
+                current = parent.parent();
+            }
+        }
+    }
+
     fn apply(
         &mut self,
         selection: TabWorkspaceSelection,
@@ -156,10 +169,123 @@ impl WorkspaceWriter<'_, '_> {
     }
 }
 
+impl TabWorkspaceSelection {
+    fn resolve(
+        path: &str,
+        branch: &str,
+        checkout: &str,
+        managed_root: &std::path::Path,
+    ) -> Result<Self, String> {
+        let project_dir = std::path::Path::new(path.trim())
+            .canonicalize()
+            .map_err(|error| format!("invalid project directory: {error}"))?;
+        if !project_dir.is_dir() {
+            return Err("project path is not a directory".to_string());
+        }
+        if !checkout.trim().is_empty() {
+            let checkout = std::path::Path::new(checkout);
+            if checkout.is_dir() {
+                return Self::from_checkout(
+                    &project_dir,
+                    checkout,
+                    (!branch.trim().is_empty()).then_some(branch.trim()),
+                );
+            }
+        }
+        if !branch.trim().is_empty() {
+            let activation = crate::worktree::TabWorktreeActivation::checkout_branch(
+                &project_dir,
+                branch.trim(),
+                managed_root,
+            )?;
+            return Ok(Self {
+                startup_dir: activation.execution_dir.to_string_lossy().into_owned(),
+                project_dir: project_dir.to_string_lossy().into_owned(),
+                worktree: Some((activation.metadata, activation.ready)),
+            });
+        }
+        Self::from_checkout(&project_dir, &project_dir, None)
+    }
+
+    fn from_checkout(
+        project_dir: &std::path::Path,
+        checkout_dir: &std::path::Path,
+        expected_branch: Option<&str>,
+    ) -> Result<Self, String> {
+        let project_dir = project_dir
+            .canonicalize()
+            .map_err(|error| format!("invalid project directory: {error}"))?;
+        let checkout_dir = checkout_dir
+            .canonicalize()
+            .map_err(|error| format!("invalid checkout directory: {error}"))?;
+        let Some(info) = vmux_git::worktree::RepoInfo::read(&checkout_dir) else {
+            if expected_branch.is_some() {
+                return Err("branch checkout is no longer available".to_string());
+            }
+            return Ok(Self {
+                startup_dir: checkout_dir.to_string_lossy().into_owned(),
+                project_dir: checkout_dir.to_string_lossy().into_owned(),
+                worktree: None,
+            });
+        };
+        if let Some(expected_branch) = expected_branch
+            && info.branch != expected_branch
+        {
+            return Err(format!(
+                "branch {expected_branch} is no longer checked out at {}",
+                checkout_dir.display()
+            ));
+        }
+        let source = vmux_git::worktree::CheckoutInfo::try_from(project_dir.as_path())
+            .map_err(|error| error.0)?;
+        let relative_dir = project_dir
+            .strip_prefix(&source.root)
+            .map_err(|_| "project directory is outside its checkout".to_string())?;
+        let project_dir = info
+            .project_root()
+            .join(relative_dir)
+            .canonicalize()
+            .map_err(|error| format!("invalid project directory: {error}"))?;
+        let checkout = vmux_git::worktree::CheckoutInfo::try_from(checkout_dir.as_path())
+            .map_err(|error| error.0)?;
+        if source.common_dir != checkout.common_dir {
+            return Err("worktree belongs to a different repository".to_string());
+        }
+        let execution_dir = checkout
+            .root
+            .join(relative_dir)
+            .canonicalize()
+            .map_err(|error| format!("project directory is missing from checkout: {error}"))?;
+        if !execution_dir.is_dir() || !execution_dir.starts_with(&checkout.root) {
+            return Err("project directory escapes checkout".to_string());
+        }
+        let project_dir_text = project_dir.to_string_lossy().into_owned();
+        if !info.is_worktree {
+            return Ok(Self {
+                startup_dir: execution_dir.to_string_lossy().into_owned(),
+                project_dir: project_dir_text,
+                worktree: None,
+            });
+        }
+        let metadata = TabWorktree {
+            repo_root: info.project_root().to_string_lossy().into_owned(),
+            checkout_dir: checkout.root.to_string_lossy().into_owned(),
+            branch: info.branch,
+            base_ref: info.base_ref,
+        };
+        let ready = TabWorktreeReady::new(&execution_dir, &project_dir_text, &metadata, &checkout)?;
+        Ok(Self {
+            startup_dir: execution_dir.to_string_lossy().into_owned(),
+            project_dir: project_dir_text,
+            worktree: Some((metadata, ready)),
+        })
+    }
+}
+
 fn git_page_ready(
     trigger: On<UiInput<PageReady>>,
     tabs: TabHierarchy,
-    pages: Query<&vmux_ecs::PageMetadata>,
+    pages: Query<&PageMetadata>,
     focused_space: FocusedSpace,
     mut commands: Commands,
 ) {
@@ -192,12 +318,13 @@ fn git_page_ready(
 
 fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
-    child_of: Query<&ChildOf>,
-    tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
-    pages: Query<Entity, With<vmux_ecs::PageMetadata>>,
     managed_root: Res<ManagedWorktreeRoot>,
-    mut writer: WorkspaceWriter,
+    runtime: Res<vmux_git::GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    running: Query<(Entity, &ProjectActivationTask)>,
+    mut revisions: ResMut<ProjectActivationRevisions>,
+    mut context: ProjectActivationContext,
 ) {
     let webview = trigger.event().webview;
     let ProjectActivateRequest {
@@ -214,48 +341,89 @@ fn project_activate(
         })
         .unwrap_or(webview);
     let tab_entity = loop {
-        if tab_entities.contains(current) {
+        if context.tabs.contains(current) {
             break Some(current);
         }
-        let Ok(parent) = child_of.get(current) else {
+        let Ok(parent) = context.child_of.get(current) else {
             break None;
         };
         current = parent.parent();
     };
-    let result = match tab_entity {
-        Some(tab_entity) => TabWorkspaceSelection::resolve(path, branch, checkout, &managed_root.0)
-            .and_then(|selection| writer.apply(selection, tab_entity)),
-        None => Err("tab workspace is unavailable".to_string()),
-    };
-    let (path, error) = match result {
-        Ok(path) => (path, String::new()),
-        Err(error) => (String::new(), error),
-    };
-    let event = GitWorkspaceChanged {
-        path,
-        branch: branch.clone(),
-        error,
-    };
     let Some(tab_entity) = tab_entity else {
-        writer.commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
+        context.publish(
+            ProjectActivationOutcome::from_result(
+                branch.clone(),
+                Err("tab workspace is unavailable".to_string()),
+            ),
+            webview,
+            None,
         );
         return;
     };
-    for page in &pages {
-        let mut current = page;
-        loop {
-            if current == tab_entity {
-                writer.commands.trigger(
-                    vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(page, &event),
-                );
-                break;
-            }
-            let Ok(parent) = child_of.get(current) else {
-                break;
-            };
-            current = parent.parent();
+    let revision = revisions.next(tab_entity);
+    for (entity, task) in &running {
+        if task.tab == tab_entity {
+            context.commands.entity(entity).despawn();
         }
+    }
+    let path = path.clone();
+    let branch = branch.clone();
+    let checkout = checkout.clone();
+    let managed_root = managed_root.0.clone();
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    let task_branch = branch.clone();
+    let Some(task) = runtime.spawn_operation(wake, move || {
+        TabWorkspaceSelection::resolve(&path, &task_branch, &checkout, &managed_root)
+    }) else {
+        revisions.finish(tab_entity, revision);
+        context.publish(
+            ProjectActivationOutcome::from_result(
+                branch,
+                Err("Git operation queue is busy".to_string()),
+            ),
+            webview,
+            Some(tab_entity),
+        );
+        return;
+    };
+    context.commands.spawn(ProjectActivationTask {
+        webview,
+        tab: tab_entity,
+        branch,
+        revision,
+        task,
+    });
+}
+
+fn poll_project_activations(
+    mut tasks: Query<(Entity, &mut ProjectActivationTask)>,
+    mut revisions: ResMut<ProjectActivationRevisions>,
+    mut context: ProjectActivationContext,
+) {
+    for (entity, mut activation) in &mut tasks {
+        if !revisions.accepts(activation.tab, activation.revision) {
+            context.commands.entity(entity).despawn();
+            continue;
+        }
+        if !context.tabs.contains(activation.tab) {
+            revisions.finish(activation.tab, activation.revision);
+            context.commands.entity(entity).despawn();
+            continue;
+        }
+        let Some(output) = activation.task.poll() else {
+            continue;
+        };
+        let result = match output {
+            Ok(result) => result.and_then(|selection| context.apply(selection, activation.tab)),
+            Err(_) => Err("Git workspace worker panicked".to_string()),
+        };
+        context.publish(
+            ProjectActivationOutcome::from_result(activation.branch.clone(), result),
+            activation.webview,
+            Some(activation.tab),
+        );
+        revisions.finish(activation.tab, activation.revision);
+        context.commands.entity(entity).despawn();
     }
 }
 
@@ -266,12 +434,24 @@ mod tests {
     #[derive(Resource, Default)]
     struct ContextWrites(Vec<GitPageContext>);
 
+    #[derive(Resource, Default)]
+    struct WorkspaceWrites(Vec<Entity>);
+
     fn capture_context(
         trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
         mut writes: ResMut<ContextWrites>,
     ) {
         if let Some(context) = &trigger.event().update().context {
             writes.0.push(context.clone());
+        }
+    }
+
+    fn capture_workspace(
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        mut writes: ResMut<WorkspaceWrites>,
+    ) {
+        if trigger.event().update().workspace.is_some() {
+            writes.0.push(trigger.event().webview());
         }
     }
 
@@ -283,7 +463,7 @@ mod tests {
             .add_observer(capture_context);
         let webview = app
             .world_mut()
-            .spawn(vmux_ecs::PageMetadata {
+            .spawn(PageMetadata {
                 url: "git://tmp/repo".to_string(),
                 ..Default::default()
             })
@@ -306,8 +486,11 @@ mod tests {
         let managed_root = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_git::GitRuntime>()
+            .init_resource::<ProjectActivationRevisions>()
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
-            .add_observer(project_activate);
+            .add_observer(project_activate)
+            .add_systems(Update, poll_project_activations);
         let tab = app.world_mut().spawn(Tab::default()).id();
         let webview = app.world_mut().spawn(ChildOf(tab)).id();
 
@@ -320,7 +503,12 @@ mod tests {
                 pane_id: None,
             },
         });
-        app.update();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.world().get::<TabWorkspace>(tab).is_none() {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
 
         let expected = project.path().canonicalize().unwrap();
         let tab_state = app.world().get::<Tab>(tab).unwrap();
@@ -334,5 +522,126 @@ mod tests {
             expected.to_string_lossy().into_owned()
         );
         assert!(app.world().get::<TabDirDecided>(tab).is_some());
+    }
+
+    #[test]
+    fn project_activation_notifies_only_git_pages_in_the_tab() {
+        let project = tempfile::tempdir().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_git::GitRuntime>()
+            .init_resource::<ProjectActivationRevisions>()
+            .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
+            .init_resource::<WorkspaceWrites>()
+            .add_observer(project_activate)
+            .add_observer(capture_workspace)
+            .add_systems(Update, poll_project_activations);
+        let tab = app.world_mut().spawn(Tab::default()).id();
+        let requester = app
+            .world_mut()
+            .spawn((
+                ChildOf(tab),
+                PageMetadata {
+                    url: "vmux://projects/".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        let git = app
+            .world_mut()
+            .spawn((
+                ChildOf(tab),
+                PageMetadata {
+                    url: "git://tmp/repo".to_string(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            ChildOf(tab),
+            PageMetadata {
+                url: "vmux://sessions/".to_string(),
+                ..Default::default()
+            },
+        ));
+
+        app.world_mut().trigger(UiInput {
+            webview: requester,
+            payload: ProjectActivateRequest {
+                path: project.path().to_string_lossy().into_owned(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.world().resource::<WorkspaceWrites>().0.is_empty() {
+            app.update();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+
+        assert_eq!(app.world().resource::<WorkspaceWrites>().0, vec![git]);
+    }
+
+    #[test]
+    fn branch_checkout_preserves_nested_project_directory() {
+        let repository = tempfile::tempdir().unwrap();
+        let nested = repository.path().join("crates/app");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("main.rs"), "fn main() {}\n").unwrap();
+        let source = vmux_git::worktree::CheckoutInfo::initialize(repository.path()).unwrap();
+        source.ensure_initial_snapshot("Initialize").unwrap();
+        let worktrees = tempfile::tempdir().unwrap();
+        let checkout = worktrees.path().join("feature");
+        source.add_worktree(&checkout, "feature", "HEAD").unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let selection = TabWorkspaceSelection::resolve(
+            nested.to_string_lossy().as_ref(),
+            "feature",
+            checkout.join("crates/app").to_string_lossy().as_ref(),
+            managed_root.path(),
+        )
+        .unwrap();
+
+        let expected_project = nested.canonicalize().unwrap();
+        let expected_checkout = checkout.join("crates/app").canonicalize().unwrap();
+        let (metadata, _) = selection.worktree.unwrap();
+        assert_eq!(selection.project_dir, expected_project.to_string_lossy());
+        assert_eq!(selection.startup_dir, expected_checkout.to_string_lossy());
+        assert_eq!(
+            metadata.repo_root,
+            repository.path().canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            metadata.checkout_dir,
+            checkout.canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(metadata.branch, "feature");
+    }
+
+    #[test]
+    fn branch_checkout_rejects_stale_checkout_ownership() {
+        let repository = tempfile::tempdir().unwrap();
+        std::fs::write(repository.path().join("README.md"), "vmux\n").unwrap();
+        let source = vmux_git::worktree::CheckoutInfo::initialize(repository.path()).unwrap();
+        source.ensure_initial_snapshot("Initialize").unwrap();
+        let worktrees = tempfile::tempdir().unwrap();
+        let checkout = worktrees.path().join("feature");
+        source.add_worktree(&checkout, "feature", "HEAD").unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let error = TabWorkspaceSelection::resolve(
+            repository.path().to_string_lossy().as_ref(),
+            "other",
+            checkout.to_string_lossy().as_ref(),
+            managed_root.path(),
+        )
+        .err()
+        .unwrap();
+
+        assert!(error.contains("no longer checked out"));
     }
 }

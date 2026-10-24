@@ -31,7 +31,6 @@ rfd = { workspace = true }
 ron = { workspace = true }
 serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
-vmux_chat = { path = "../vmux_chat" }
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../vmux_history" }

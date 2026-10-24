@@ -57,7 +57,15 @@ impl Route {
         {
             return Self::Document;
         }
-        Self::from(url)
+        let route = Self::from(url);
+        if page.owns_subtree
+            && Self::belongs_to(url, page.url)
+            && !matches!(route, Self::Events | Self::Edits)
+            && !Self::path_of(url).starts_with("assets/")
+        {
+            return Self::Document;
+        }
+        route
     }
 
     fn is_served_by(self, request: &str, page: &Page) -> bool {
@@ -129,6 +137,20 @@ mod tests {
         ));
         assert!(matches!(
             Route::for_page("vmux://tools/lsp/asset.svg", &page),
+            Route::Asset
+        ));
+    }
+
+    #[test]
+    fn a_subtree_url_asks_for_the_owning_page_document() {
+        let page = Page::pane("vmux://projects/", || unreachable!()).owning_subtree();
+
+        assert!(matches!(
+            Route::for_page("vmux://projects/github.com/mistralai/dashboard", &page),
+            Route::Document
+        ));
+        assert!(matches!(
+            Route::for_page("vmux://projects/assets/index.css", &page),
             Route::Asset
         ));
     }

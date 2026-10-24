@@ -13,6 +13,7 @@ use std::sync::atomic::Ordering;
 use vmux_ecs::overlay::Overlay;
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
+use vmux_layout::overlay::{LayoutOverlayActive, LayoutOverlayDismissRevision};
 
 use crate::host::{CefPointerRegions, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE};
 
@@ -144,10 +145,12 @@ fn forward_layout_cef_mouse_button(
     windows: Query<&Window>,
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
-    layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
+    mut layout_q: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    active_overlays: Query<(), With<LayoutOverlayActive>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegions,
     mut captured: Local<Option<Entity>>,
+    mut commands: Commands,
 ) {
     if suppress.0 {
         for _ in events.read() {}
@@ -161,9 +164,10 @@ fn forward_layout_cef_mouse_button(
         let Ok(window) = windows.get(event.window) else {
             continue;
         };
-        let Some(layout) = layout_q
-            .iter()
-            .find_map(|(entity, host)| (host.0 == event.window).then_some(entity))
+        let Some((layout, mut dismiss_revision)) =
+            layout_q.iter_mut().find_map(|(entity, host, revision)| {
+                (host.0 == event.window).then_some((entity, revision))
+            })
         else {
             continue;
         };
@@ -178,7 +182,16 @@ fn forward_layout_cef_mouse_button(
         let Some(position) = position else {
             continue;
         };
-        let inside = pointer_capture_q.contains(layout) || cef_regions.contains(position);
+        let in_region = cef_regions.contains(position);
+        if event.state == ButtonState::Pressed && active_overlays.contains(layout) && !in_region {
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                    layout,
+                    &dismiss_revision.next_effect(),
+                ),
+            );
+        }
+        let inside = pointer_capture_q.contains(layout) || in_region;
         if event.state == ButtonState::Pressed && inside {
             *captured = Some(layout);
         }

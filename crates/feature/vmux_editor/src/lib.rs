@@ -2,7 +2,7 @@
 pub use host::{
     ContractPlugin, EditorPlugin, FileToolPlugin, FileView, FileViewModeRequest,
     GlobalSearchRequest, LspPlugin, StackExplorerVisibility, contract, edit, encoding, fold,
-    fold_store, keymap, lsp, markdown, palette, shape, tool,
+    fold_store, keymap, lsp, markdown, shape, tool,
 };
 
 #[cfg(host)]
@@ -15,6 +15,7 @@ impl vmux_ecs::manifest::FeatureManifestSource for Feature {
 
 pub(crate) mod event;
 mod picker;
+pub(crate) mod project;
 mod text;
 
 #[cfg(ui)]

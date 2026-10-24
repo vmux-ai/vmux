@@ -1,4 +1,7 @@
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::{
+    ecs::{relationship::Relationship, system::SystemParam},
+    prelude::*,
+};
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 #[cfg(test)]
@@ -167,7 +170,7 @@ fn sync_tab_metadata(
 fn go_back(
     mut reader: MessageReader<vmux_layout::BrowserGoBackRequest>,
     targets: BrowserTarget,
-    host_histories: Query<(), With<HostHistory>>,
+    histories: NavigationHistory,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
@@ -175,9 +178,9 @@ fn go_back(
         let Some(webview) = targets.resolve_pane(request.pane.as_deref()) else {
             continue;
         };
-        if host_histories.contains(webview) {
+        if let Some(owner) = histories.owner_for(webview, HostHistoryDelta::Back) {
             host_history_steps.write(HostHistoryStep {
-                webview,
+                webview: owner,
                 delta: HostHistoryDelta::Back,
             });
             continue;
@@ -189,7 +192,7 @@ fn go_back(
 fn go_forward(
     mut reader: MessageReader<vmux_layout::BrowserGoForwardRequest>,
     targets: BrowserTarget,
-    host_histories: Query<(), With<HostHistory>>,
+    histories: NavigationHistory,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
@@ -197,14 +200,52 @@ fn go_forward(
         let Some(webview) = targets.resolve_pane(request.pane.as_deref()) else {
             continue;
         };
-        if host_histories.contains(webview) {
+        if let Some(owner) = histories.owner_for(webview, HostHistoryDelta::Forward) {
             host_history_steps.write(HostHistoryStep {
-                webview,
+                webview: owner,
                 delta: HostHistoryDelta::Forward,
             });
             continue;
         }
         commands.trigger(bevy_cef::prelude::RequestGoForward { webview });
+    }
+}
+
+#[derive(SystemParam)]
+pub(crate) struct NavigationHistory<'w, 's> {
+    histories: Query<'w, 's, &'static HostHistory>,
+    metadata: Query<'w, 's, &'static PageMetadata, With<Stack>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+}
+
+impl NavigationHistory<'_, '_> {
+    pub(crate) fn owner_for(&self, webview: Entity, delta: HostHistoryDelta) -> Option<Entity> {
+        let stack = self.child_of.get(webview).ok().map(Relationship::get)?;
+        self.owner(stack, webview, delta)
+    }
+
+    pub(crate) fn owner(
+        &self,
+        stack: Entity,
+        webview: Entity,
+        delta: HostHistoryDelta,
+    ) -> Option<Entity> {
+        let stack_is_vmux = self
+            .metadata
+            .get(stack)
+            .is_ok_and(|metadata| VmuxRoute::parse(&metadata.url).is_some());
+        if stack_is_vmux
+            && self
+                .histories
+                .get(stack)
+                .is_ok_and(|history| history.can_step(delta))
+        {
+            return Some(stack);
+        }
+        self.histories
+            .get(webview)
+            .is_ok_and(|history| history.can_step(delta))
+            .then_some(webview)
     }
 }
 

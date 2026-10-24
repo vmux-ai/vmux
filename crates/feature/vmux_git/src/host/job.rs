@@ -1,25 +1,61 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bevy::prelude::Component;
 
+use crate::event::GitCatalog;
+
+#[derive(Component, Default)]
+pub(super) struct GitReadJob;
+
 #[derive(Clone, Component)]
+#[require(GitReadJob)]
 pub(super) struct RepositoryJob {
     pub(super) path: PathBuf,
+    pub(super) refresh_catalogs: bool,
+    pub(super) revision: u32,
 }
 
 #[derive(Clone, Component)]
-pub(super) struct BranchLogJob {
-    pub(super) branch: String,
+#[require(GitReadJob)]
+pub(super) struct CatalogJob {
+    pub(super) catalog: GitCatalog,
+    pub(super) current_branch: String,
+    pub(super) offset: usize,
+    pub(super) limit: usize,
+    pub(super) revision: u32,
 }
 
 #[derive(Clone, Component)]
+#[require(GitReadJob)]
 pub(super) struct DiffJob {
     pub(super) path: PathBuf,
-    pub(super) reference: String,
+    pub(super) scope: DiffScope,
+    pub(super) branch_paths: Vec<Vec<u8>>,
+    pub(super) branch_lines: Option<Arc<Vec<crate::event::DiffLine>>>,
+    pub(super) branch_source: PathBuf,
+    pub(super) branch_merge_base: String,
+    pub(super) branch_top_line: u32,
+    pub(super) branch_has_more: bool,
     pub(super) generation: u64,
     pub(super) top_line: u32,
     pub(super) rows: u32,
     pub(super) content: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum DiffScope {
+    File,
+    Branch(String),
+    Commit(String),
+    Stash(String),
+}
+
+#[derive(Clone, Component)]
+#[require(GitReadJob)]
+pub(super) struct BranchFilesJob {
+    pub(super) reference: String,
+    pub(super) generation: u64,
 }
 
 #[derive(Clone, Component)]

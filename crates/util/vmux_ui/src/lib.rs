@@ -29,6 +29,9 @@ pub mod i18n;
 pub mod ime;
 pub mod matrix_rain;
 
+#[cfg(ui)]
+pub mod navigation;
+
 pub mod prompt_ghost;
 pub mod prompt_recall;
 

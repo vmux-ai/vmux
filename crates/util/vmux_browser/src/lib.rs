@@ -81,6 +81,7 @@ pub struct BrowserOverlaySet;
 pub struct HostedPageLifecycle {
     pub mount_revision: u64,
     pub remount_revision: u64,
+    pub frames_applied: u64,
     pub frame_pending: bool,
     pub ui_events: u64,
     pub host_events: u64,

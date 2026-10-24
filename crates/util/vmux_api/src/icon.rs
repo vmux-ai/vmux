@@ -10,6 +10,7 @@ pub enum BuiltinIcon {
     Settings,
     Clock,
     Layers,
+    Planet,
     Users,
     Sparkles,
     Activity,
@@ -18,11 +19,17 @@ pub enum BuiltinIcon {
     Bash,
     Zsh,
     Hammer,
+    Toolbox,
     Vault,
     Smartphone,
     Keyboard,
     GitBranch,
     Bookmark,
+    CheckCircle,
+    MessagesRound,
+    ListTodo,
+    Search,
+    Globe,
 }
 
 impl BuiltinIcon {

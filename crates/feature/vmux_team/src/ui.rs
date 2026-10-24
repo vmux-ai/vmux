@@ -6,7 +6,7 @@ use vmux_api::team::{
     TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
     TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
 };
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::select::{
     Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger,
@@ -17,7 +17,8 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "TeamUiState"]
 )]
 pub(crate) struct TeamPage;
 
@@ -37,7 +38,7 @@ pub fn Page() -> Element {
     rsx! {
         div {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            header { class: "flex items-center justify-between border-b border-border px-5 py-4",
+            header { class: "flex items-center justify-between bg-foreground/[0.018] px-5 py-4",
                 div { class: "min-w-0",
                     h1 { class: "text-lg font-semibold tracking-tight", {translate("team-title")} }
                 }
@@ -83,7 +84,7 @@ fn ProfileSection(
             }
             div { class: "flex max-w-xl flex-col gap-2",
                 if let Some(form) = form.as_ref().filter(|form| form.profile_id.is_some()) {
-                    div { class: "glass flex min-h-16 items-center rounded-xl border border-primary/20 p-2",
+                    div { class: "flex min-h-16 items-center rounded-lg bg-primary/[0.055] p-2",
                         ProfileFormView { form: form.clone() }
                     }
                 } else if let Some(active) = active.clone() {
@@ -103,7 +104,7 @@ fn ProfileSection(
                                 attributes: vec![],
                                 SelectTrigger {
                                     attributes: attributes!(button {
-                                        class: "w-full rounded-xl bg-primary/[0.06] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_25%,transparent)] dark:bg-primary/[0.06]"
+                                        class: "w-full rounded-lg bg-primary/[0.06] dark:bg-primary/[0.06]"
                                     }),
                                     Avatar {
                                         src: None,
@@ -147,7 +148,7 @@ fn ProfileSection(
                         button {
                             id: "edit-active-profile",
                             r#type: "button",
-                            class: "glass flex w-11 shrink-0 items-center justify-center rounded-xl border border-border/70 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
+                            class: "flex w-11 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.04] text-muted-foreground transition-colors hover:bg-foreground/[0.075] hover:text-foreground",
                             title: translate("team-edit-profile"),
                             onclick: move |_| {
                                 let _ = send(&TeamProfileFormOpenRequest {
@@ -163,14 +164,14 @@ fn ProfileSection(
                     }
                 }
                 if let Some(form) = form.as_ref().filter(|form| form.profile_id.is_none()) {
-                    div { key: "create-{profile_count}", class: "glass flex min-h-24 items-center rounded-xl border border-border/70 p-2",
+                    div { key: "create-{profile_count}", class: "flex min-h-16 items-center rounded-lg bg-foreground/[0.04] p-2",
                         ProfileFormView { form: form.clone() }
                     }
                 } else {
                     button {
                         id: "new-profile",
                         r#type: "button",
-                        class: "flex h-10 items-center justify-center gap-2 rounded-xl border border-dashed border-border text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:bg-foreground/[0.035] hover:text-foreground",
+                        class: "flex h-10 items-center justify-center gap-2 rounded-lg bg-foreground/[0.03] text-sm font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.065] hover:text-foreground",
                         onclick: move |_| {
                             let _ = send(&TeamProfileFormOpenRequest {
                                 profile_id: None,
@@ -197,7 +198,7 @@ fn ProfileFormView(form: TeamProfileForm) -> Element {
     rsx! {
         input {
             r#type: "text",
-            class: "m-1 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50",
+            class: "m-1 min-w-0 flex-1 rounded-md bg-foreground/[0.055] px-3 py-2 text-sm text-foreground outline-none focus:bg-foreground/[0.08]",
             placeholder: translate("team-profile-name"),
             aria_label: translate("team-profile-name"),
             value: form.draft,
@@ -299,7 +300,7 @@ fn AgentAvatar(member: TeamMemberRow) -> Element {
 
     rsx! {
         div { class: "relative shrink-0",
-            Avatar {
+            AgentThumbnail {
                 src,
                 seed: member.name.clone(),
                 background: member.color.clone(),

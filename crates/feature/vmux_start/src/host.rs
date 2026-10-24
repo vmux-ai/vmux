@@ -39,7 +39,10 @@ impl Plugin for StartPlugin {
                 .hosted(vmux_ecs::page::HostedPage::page(Self::URL, "Start")),
         )
         .add_message::<InlineTransitionRequested>()
-        .add_systems(Update, (mark_launcher, begin_inline));
+        .add_systems(
+            Update,
+            (mark_launcher, begin_inline, ApplyDeferred, sync_pages).chain(),
+        );
         app.add_plugins(UiEventPlugin::<(
             StartSelectWorkspace,
             vmux_api::command_bar::StartBranchesRequest,
@@ -52,12 +55,7 @@ impl Plugin for StartPlugin {
             .add_observer(focus_command_bar)
             .add_systems(
                 Update,
-                (
-                    sync_pages,
-                    finish_workspace_pickers,
-                    read_branches,
-                    finish_branch_reads,
-                ),
+                (finish_workspace_pickers, read_branches, finish_branch_reads),
             );
     }
 }
@@ -102,7 +100,6 @@ struct StartPromptContext<'w, 's> {
     pages: Single<'w, 's, Ref<'static, CommandBarPagesSnapshot>>,
     projects: Single<'w, 's, Ref<'static, CommandBarProjectRoots>>,
     work: Single<'w, 's, Ref<'static, CommandBarWorkSnapshot>>,
-    warmed_branches_for: Local<'s, String>,
 }
 
 impl StartPromptContext<'_, '_> {
@@ -180,6 +177,7 @@ impl StartPromptContext<'_, '_> {
             return Self::unrooted();
         }
         let path = Path::new(&cwd);
+        let is_git_repo = info.is_some() || worktree.is_some() || path.join(".git").exists();
         let named = match info {
             Some(info) => info.project_name(),
             None => path
@@ -191,7 +189,7 @@ impl StartPromptContext<'_, '_> {
         CommandBarPromptContext {
             workspace_name: named,
             cwd,
-            is_git_repo: info.is_some(),
+            is_git_repo,
             is_worktree: info.is_some_and(|info| info.is_worktree),
             branch: info.map(|info| info.branch.clone()).unwrap_or_default(),
             base_ref: worktree
@@ -516,7 +514,7 @@ fn apply_chosen_project(
 
 fn sync_pages(
     tab_gather: TabGather,
-    mut prompt_context: StartPromptContext,
+    prompt_context: StartPromptContext,
     contributions: (
         Query<
             (),
@@ -543,10 +541,12 @@ fn sync_pages(
             Has<StartWorkSynced>,
             Has<KeyboardOwner>,
         ),
-        Without<crate::StartInlineTransitionView>,
+        (
+            With<HostsLauncher>,
+            Without<crate::StartInlineTransitionView>,
+        ),
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
-    browsers: NonSend<Browsers>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
@@ -562,13 +562,19 @@ fn sync_pages(
         mut removed_modes,
     ) = contributions;
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
-    let git_info = (!cwd.is_empty())
-        .then(|| {
-            repo_info
-                .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().lookup(Path::new(&cwd)))
+    let observer = starts.iter().find_map(|(entity, metadata, _, active)| {
+        (active && metadata.url.starts_with(StartPlugin::URL)).then_some(entity)
+    });
+    let git_info = observer.and_then(|observer| {
+        repo_info.as_mut().and_then(|cache| {
+            let cache = cache.bypass_change_detection();
+            if cwd.is_empty() {
+                cache.release(observer);
+                return None;
+            }
+            cache.observe_active(observer, Path::new(&cwd))
         })
-        .flatten();
+    });
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
     let focus_changed = focused.is_changed();
     let contributions_changed = !contribution_changes.is_empty()
@@ -592,9 +598,6 @@ fn sync_pages(
             if !meta.url.starts_with(StartPlugin::URL) {
                 return None;
             }
-            if !browsers.can_emit_to(&e) {
-                return None;
-            }
             let focus_requested =
                 keyboard_target && (!synced || added_keyboard_targets.contains(e) || focus_changed);
             (changed || !synced || focus_requested).then_some((e, focus_requested))
@@ -614,24 +617,7 @@ fn sync_pages(
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
         &locale,
     );
-    let project = payload
-        .prompt_context
-        .projects
-        .iter()
-        .find(|project| project.is_active)
-        .map(|project| project.path.clone())
-        .unwrap_or_else(|| payload.prompt_context.cwd.clone());
-    let warm_branches = !project.is_empty() && *prompt_context.warmed_branches_for != project;
-    if warm_branches {
-        *prompt_context.warmed_branches_for = project.clone();
-    }
     for (e, focus_requested) in targets {
-        if warm_branches {
-            commands.spawn(StartBranchQuery {
-                webview: e,
-                project: project.clone(),
-            });
-        }
         commands.trigger(vmux_ecs::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(e, &payload));
@@ -653,7 +639,7 @@ fn focus_command_bar(
         Err(_) => {
             let mut revision = CommandBarFocusRevision::default();
             let effect = revision.next();
-            commands.entity(webview).insert(revision);
+            commands.entity(webview).try_insert(revision);
             effect
         }
     };
@@ -701,6 +687,10 @@ fn begin_inline(
 mod tests {
     use super::*;
     use vmux_api::command_bar::CommandBarUiState;
+    #[cfg(ui)]
+    use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+    #[cfg(ui)]
+    use vmux_api::{BinEvent, UiEventPermissions};
     use vmux_ecs::UiStateWrite;
     use vmux_ecs::page::PageManifest;
 
@@ -743,6 +733,26 @@ mod tests {
         app.world_mut().run_schedule(PreStartup);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
+    }
+
+    #[test]
+    #[cfg(ui)]
+    fn start_page_allows_keyboard_routing() {
+        let mut app = App::new();
+        app.add_plugins(StartPlugin);
+        app.world_mut().run_schedule(PreStartup);
+        let mut permissions = app.world_mut().query::<&UiEventPermissions>();
+
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyContextRequest::PERMISSION,
+        ));
+        assert!(UiEventPermissions::allows_page(
+            permissions.iter(app.world()),
+            StartPlugin::URL,
+            KeyClaimsUiState::PERMISSION,
+        ));
     }
 
     #[test]

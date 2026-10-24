@@ -197,7 +197,10 @@ fn sync_winit_power_mode(
     }
 }
 
-const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(16_666_666);
+#[cfg(target_os = "macos")]
+const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_millis(250);
+#[cfg(not(target_os = "macos"))]
+const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(33_333_333);
 
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -447,10 +450,10 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn startup_installs_the_mouse_wake_monitor_and_activates_the_window() {
+    fn startup_installs_the_input_wake_monitor_and_activates_the_window() {
         let startup = platform_systems(Startup);
         assert!(
-            startup.contains(&"install_mouse_wake_monitor".to_string()),
+            startup.contains(&"install_input_wake_monitor".to_string()),
             "startup systems: {startup:?}"
         );
         assert!(
@@ -484,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn cef_wake_policy_follows_display_refresh_but_not_past_60hz() {
+    fn cef_wake_policy_uses_the_platform_foreground_cap() {
         assert_eq!(
             WakePolicy::foreground_cef([Some(60_000)]),
             MIN_FOREGROUND_CEF_WAKE_INTERVAL
@@ -494,10 +497,17 @@ mod tests {
             MIN_FOREGROUND_CEF_WAKE_INTERVAL,
             "a faster panel must not make the app wake faster"
         );
-        assert!(
-            WakePolicy::foreground_cef([Some(30_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL,
-            "a slower panel still wakes less often"
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            WakePolicy::foreground_cef([Some(20_000)]),
+            MIN_FOREGROUND_CEF_WAKE_INTERVAL
         );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(
+            WakePolicy::foreground_cef([Some(20_000)]),
+            Duration::from_millis(50)
+        );
+        assert!(WakePolicy::foreground_cef([Some(2_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL);
         assert_eq!(
             WakePolicy::cef(false, true, true, Duration::from_millis(7)),
             Duration::from_millis(7)

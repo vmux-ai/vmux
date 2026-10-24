@@ -1,69 +1,118 @@
-@custom-variant dark (@media (prefers-color-scheme: dark));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.88 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(0.95 0 0);
+  --surface-hue: 255;
+  --surface-chroma: 0;
+  --background: oklch(0.955 var(--surface-chroma) var(--surface-hue));
+  --foreground: oklch(0.19 var(--surface-chroma) var(--surface-hue));
+  --card: oklch(0.985 var(--surface-chroma) var(--surface-hue));
+  --popover: oklch(1 var(--surface-chroma) var(--surface-hue));
   --primary: oklch(0.646 0.222 41.116);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.925 var(--surface-chroma) var(--surface-hue));
+  --secondary-foreground: oklch(0.22 var(--surface-chroma) var(--surface-hue));
+  --muted: oklch(0.925 var(--surface-chroma) var(--surface-hue));
+  --muted-foreground: oklch(0.52 var(--surface-chroma) var(--surface-hue));
+  --accent: oklch(0.91 var(--surface-chroma) var(--surface-hue));
+  --accent-foreground: oklch(0.22 var(--surface-chroma) var(--surface-hue));
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   /* Paired with the background of its own scheme, not carried across from the other one. */
   --success: oklch(0.52 0.13 156);
   --success-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --git-selection-accent: #0969da;
+  --git-reference: #0969da;
+  --git-ahead: #0969da;
+  --git-behind: #8250df;
+  --git-tag: #8250df;
+  --git-worktree: #9a6700;
+  --git-added: #dafbe1;
+  --git-added-hover: #ccffd8;
+  --git-added-gutter: #ccffd8;
+  --git-added-foreground: #1a7f37;
+  --git-removed: #ffebe9;
+  --git-removed-hover: #ffd7d5;
+  --git-removed-gutter: #ffd7d5;
+  --git-removed-foreground: #cf222e;
+  --git-staged: #fff8c5;
+  --git-staged-hover: #fae17d;
+  --git-staged-gutter: #fae17d;
+  --git-staged-foreground: #9a6700;
+  --git-hunk: #ddf4ff;
+  --git-hunk-gutter: #b6e3ff;
+  --git-hunk-foreground: #0969da;
+  --primary-action-foreground: #6366f1;
+  --primary-action-start: #6366f1;
+  --primary-action-middle: #a855f7;
+  --primary-action-end: #ec4899;
+  --border: oklch(0.86 var(--surface-chroma) var(--surface-hue));
+  --input: oklch(0.86 var(--surface-chroma) var(--surface-hue));
+  --ring: oklch(0.62 var(--surface-chroma) var(--surface-hue));
   --scrim: oklch(0.145 0 0 / 0.35);
   --scrim-strong: oklch(0.145 0 0 / 0.55);
-  --glass: oklch(1 0 0 / 0.55);
-  --glass-hover: oklch(1 0 0 / 0.7);
-  --glass-active: oklch(1 0 0 / 0.85);
-  --glass-border: oklch(0 0 0 / 0.08);
-  --cef-surface: oklch(0.98 0 0 / 0.86);
-  --cef-surface-hover: oklch(0.94 0 0 / 0.78);
-  --cef-surface-active: oklch(0.9 0 0 / 0.82);
-  --cef-surface-border: oklch(0 0 0 / 0.1);
+  --glass: oklch(0.985 var(--surface-chroma) var(--surface-hue) / 0.62);
+  --glass-hover: oklch(0.94 var(--surface-chroma) var(--surface-hue) / 0.78);
+  --glass-active: oklch(0.9 var(--surface-chroma) var(--surface-hue) / 0.85);
+  --glass-border: oklch(0.32 var(--surface-chroma) var(--surface-hue) / 0.1);
+  --cef-surface: oklch(0.97 var(--surface-chroma) var(--surface-hue) / 0.9);
+  --cef-surface-hover: oklch(0.92 var(--surface-chroma) var(--surface-hue) / 0.82);
+  --cef-surface-active: oklch(0.88 var(--surface-chroma) var(--surface-hue) / 0.86);
+  --cef-surface-border: oklch(0.32 var(--surface-chroma) var(--surface-hue) / 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+:root[data-theme="dark"] {
+  --background: oklch(0.19 var(--surface-chroma) var(--surface-hue));
+  --foreground: oklch(0.94 var(--surface-chroma) var(--surface-hue));
+  --card: oklch(0.235 var(--surface-chroma) var(--surface-hue));
+  --popover: oklch(0.285 var(--surface-chroma) var(--surface-hue));
   --primary: oklch(0.75 0.183 55.934);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.27 var(--surface-chroma) var(--surface-hue));
+  --secondary-foreground: oklch(0.94 var(--surface-chroma) var(--surface-hue));
+  --muted: oklch(0.265 var(--surface-chroma) var(--surface-hue));
+  --muted-foreground: oklch(0.72 var(--surface-chroma) var(--surface-hue));
+  --accent: oklch(0.29 var(--surface-chroma) var(--surface-hue));
+  --accent-foreground: oklch(0.95 var(--surface-chroma) var(--surface-hue));
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.205 0 0);
   --success: oklch(0.76 0.15 158);
   --success-foreground: oklch(0.205 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --git-selection-accent: #58a6ff;
+  --git-reference: #58a6ff;
+  --git-ahead: #58a6ff;
+  --git-behind: #a371f7;
+  --git-tag: #a371f7;
+  --git-worktree: #d29922;
+  --git-added: #12261e;
+  --git-added-hover: #193324;
+  --git-added-gutter: #1b4721;
+  --git-added-foreground: #3fb950;
+  --git-removed: #2d1717;
+  --git-removed-hover: #3b1c1c;
+  --git-removed-gutter: #5c2020;
+  --git-removed-foreground: #f85149;
+  --git-staged: #4b3600;
+  --git-staged-hover: #633c01;
+  --git-staged-gutter: #633c01;
+  --git-staged-foreground: #d29922;
+  --git-hunk: #10253f;
+  --git-hunk-gutter: #1f3b4d;
+  --git-hunk-foreground: #58a6ff;
+  --primary-action-foreground: #818cf8;
+  --border: oklch(0.78 var(--surface-chroma) var(--surface-hue) / 0.13);
+  --input: oklch(0.78 var(--surface-chroma) var(--surface-hue) / 0.17);
+  --ring: oklch(0.64 var(--surface-chroma) var(--surface-hue));
   --scrim: oklch(0.08 0 0 / 0.72);
   --scrim-strong: oklch(0.05 0 0 / 0.82);
-  --glass: oklch(1 0 0 / 0.25);
-  --glass-hover: oklch(1 0 0 / 0.35);
-  --glass-active: oklch(1 0 0 / 0.45);
-  --glass-border: oklch(1 0 0 / 0.30);
-  --cef-surface: oklch(0.48 0 0 / 0.86);
-  --cef-surface-hover: oklch(0.58 0 0 / 0.72);
-  --cef-surface-active: oklch(0.64 0 0 / 0.78);
-  --cef-surface-border: oklch(1 0 0 / 0.22);
-  }
+  --glass: oklch(0.27 var(--surface-chroma) var(--surface-hue) / 0.78);
+  --glass-hover: oklch(0.33 var(--surface-chroma) var(--surface-hue) / 0.82);
+  --glass-active: oklch(0.38 var(--surface-chroma) var(--surface-hue) / 0.86);
+  --glass-border: oklch(0.82 var(--surface-chroma) var(--surface-hue) / 0.16);
+  --cef-surface: oklch(0.26 var(--surface-chroma) var(--surface-hue) / 0.9);
+  --cef-surface-hover: oklch(0.32 var(--surface-chroma) var(--surface-hue) / 0.84);
+  --cef-surface-active: oklch(0.37 var(--surface-chroma) var(--surface-hue) / 0.88);
+  --cef-surface-border: oklch(0.82 var(--surface-chroma) var(--surface-hue) / 0.18);
 }
 
 @theme inline {
@@ -95,7 +144,30 @@
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
 
+  --color-git-selection-accent: var(--git-selection-accent);
+  --color-git-reference: var(--git-reference);
+  --color-git-ahead: var(--git-ahead);
+  --color-git-behind: var(--git-behind);
+  --color-git-tag: var(--git-tag);
+  --color-git-worktree: var(--git-worktree);
+  --color-git-added: var(--git-added);
+  --color-git-added-hover: var(--git-added-hover);
+  --color-git-added-gutter: var(--git-added-gutter);
+  --color-git-added-foreground: var(--git-added-foreground);
+  --color-git-removed: var(--git-removed);
+  --color-git-removed-hover: var(--git-removed-hover);
+  --color-git-removed-gutter: var(--git-removed-gutter);
+  --color-git-removed-foreground: var(--git-removed-foreground);
+  --color-git-staged: var(--git-staged);
+  --color-git-staged-hover: var(--git-staged-hover);
+  --color-git-staged-gutter: var(--git-staged-gutter);
+  --color-git-staged-foreground: var(--git-staged-foreground);
+  --color-git-hunk: var(--git-hunk);
+  --color-git-hunk-gutter: var(--git-hunk-gutter);
+  --color-git-hunk-foreground: var(--git-hunk-foreground);
+
   --color-card: var(--card);
+  --color-popover: var(--popover);
 
   --color-scrim: var(--scrim);
   --color-scrim-strong: var(--scrim-strong);
@@ -240,29 +312,9 @@
 
 .glass {
   background-color: var(--glass);
-  border: 1px solid var(--glass-border);
+  border: 0;
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   backdrop-filter: blur(20px) saturate(1.4);
-}
-
-body {
-  --foreground: oklch(0.13 0 0);
-  --muted-foreground: oklch(0.42 0 0);
-  --glass: oklch(1 0 0 / 0.55);
-  --glass-hover: oklch(0 0 0 / 0.04);
-  --glass-active: oklch(0 0 0 / 0.07);
-  --glass-border: oklch(0 0 0 / 0.1);
-}
-
-@media (prefers-color-scheme: dark) {
-  body {
-    --foreground: oklch(1 0 0);
-    --muted-foreground: oklch(0.82 0 0);
-    --glass: oklch(0.18 0 0 / 0.82);
-    --glass-hover: oklch(1 0 0 / 0.08);
-    --glass-active: oklch(1 0 0 / 0.14);
-    --glass-border: oklch(1 0 0 / 0.2);
-  }
 }
 
 .truncate-start {
@@ -277,21 +329,48 @@ body {
   content: "\200E";
 }
 
-/* Ghost button with a gradient outline: transparent fill, gradient painted only on the border,
-   following the element's border-radius (the padding-box/border-box shorthand can't do a
-   transparent center, so mask out the interior). */
-.vmux-gradient-outline {
-  position: relative;
-  background: transparent;
+.syntax-token {
+  color: var(--syntax-light);
 }
 
-.vmux-gradient-outline::before {
+:root[data-theme="dark"] .syntax-token {
+  color: var(--syntax-dark);
+}
+
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+.vmux-primary-action {
+  position: relative;
+  background: transparent;
+  color: var(--primary-action-foreground);
+}
+
+.vmux-primary-action:hover {
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.vmux-primary-action:active {
+  transform: scale(0.98);
+}
+
+.vmux-primary-action::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1.5px;
-  background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
+  background: linear-gradient(
+    135deg,
+    var(--primary-action-start),
+    var(--primary-action-middle),
+    var(--primary-action-end)
+  );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -303,6 +382,6 @@ body {
   pointer-events: none;
 }
 
-.vmux-gradient-outline > * {
+.vmux-primary-action > * {
   position: relative;
 }

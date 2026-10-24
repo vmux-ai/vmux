@@ -16,6 +16,8 @@ mod markdown;
 mod menu;
 mod note;
 mod note_text;
+mod project;
+mod project_manager;
 mod sidebar;
 mod state;
 mod status;
@@ -26,6 +28,7 @@ mod workspace;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
     dom_group = "editor",
     subtree
 )]
@@ -34,14 +37,17 @@ pub(crate) struct FilePage;
 #[vmux_page::page(
     page = "projects",
     component = Page,
+    states = ["ThemeUiState", "FileUiState", "ProjectUiState", "SessionScopeUiState", "GitUiState", "KeyClaimsUiState"],
     dom_group = "editor",
-    subtree
+    subtree,
+    takes = vmux_ecs::PageMetadata
 )]
 pub(crate) struct ProjectsPage;
 
 #[vmux_page::page(
     file = "../vmux_knowledge/src/feature.ron",
     component = Page,
+    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
     dom_group = "editor",
     subtree
 )]

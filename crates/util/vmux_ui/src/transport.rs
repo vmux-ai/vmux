@@ -14,6 +14,8 @@ pub trait PageHost {
 
     fn scroll_element_into_view(&self, _element_id: &str) {}
 
+    fn scroll_element_into_view_vertical(&self, _element_id: &str) {}
+
     fn reveal_first_rendered(&self, _element_ids: &[&str], _centered: bool) {}
 
     fn scroll_element_to(&self, _element_id: &str, _top: f64) {}
@@ -134,6 +136,7 @@ impl Host {
     pub(crate) fn scroll_element_to(element_id: &str, top: f64) {
         let _ = Self::with_installed(|host| host.scroll_element_to(element_id, top));
     }
+
     pub(crate) fn reveal_first_rendered(element_ids: &[&str], centered: bool) {
         let _ = Self::with_installed(|host| host.reveal_first_rendered(element_ids, centered));
     }

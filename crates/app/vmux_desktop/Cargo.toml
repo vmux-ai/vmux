@@ -88,7 +88,7 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tray-icon = { version = "0.24", optional = true }
 url = { workspace = true }
-vmux_agent = { path = "../../feature/vmux_agent" }
+vmux_acp = { path = "../../feature/vmux_acp" }
 vmux_app = { path = "../../util/vmux_app", features = ["desktop"] }
 vmux_browser = { path = "../../util/vmux_browser" }
 vmux_command = { path = "../../feature/vmux_command" }

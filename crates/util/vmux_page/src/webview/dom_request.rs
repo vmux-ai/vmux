@@ -19,6 +19,9 @@ pub(crate) enum DomRequest {
     ScrollIntoView {
         element: String,
     },
+    ScrollIntoViewVertical {
+        element: String,
+    },
     ScrollTo {
         element: String,
         top: f64,
@@ -174,6 +177,9 @@ mod tests {
                 element: "e".into(),
             },
             DomRequest::ScrollIntoView {
+                element: "e".into(),
+            },
+            DomRequest::ScrollIntoViewVertical {
                 element: "e".into(),
             },
             DomRequest::ScrollTo {

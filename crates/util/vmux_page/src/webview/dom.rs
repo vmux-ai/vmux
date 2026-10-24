@@ -130,6 +130,7 @@ impl Dom {
     ) {
         if Self::acknowledges_last_frame(request) {
             self.page_flushed();
+            self.lifecycle.update(LifecycleUpdate::FrameApplied);
         }
         if let Some(stale) = self.parked.borrow_mut().take() {
             self.respond(stale, PageFrame::new(Vec::new(), Vec::new()));
@@ -298,6 +299,12 @@ impl PageHost for SurfaceHost {
 
     fn scroll_element_into_view(&self, element_id: &str) {
         self.request(DomRequest::ScrollIntoView {
+            element: element_id.to_string(),
+        });
+    }
+
+    fn scroll_element_into_view_vertical(&self, element_id: &str) {
+        self.request(DomRequest::ScrollIntoViewVertical {
             element: element_id.to_string(),
         });
     }

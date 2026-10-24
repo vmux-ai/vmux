@@ -1,7 +1,8 @@
 use crate::event::{
-    ActiveSession, ActiveSessionState, BookmarkUiState, HeaderState, LayoutGeometry, PaneTreeState,
-    ReloadEffect, RemoteUiState, SideSheetState, StackNavigationState, TabBoundaryState,
-    TabListState, TabStripState, UpdateCleared, UpdateProgress, UpdateReady,
+    ActiveSession, ActiveSessionState, BookmarkUiState, HeaderState, LayoutGeometry,
+    LayoutOverlayDismissEffect, PaneTreeState, ReloadEffect, RemoteUiState, SideSheetState,
+    StackNavigationState, TabBoundaryState, TabListState, TabStripState, UpdateCleared,
+    UpdateProgress, UpdateReady,
 };
 use vmux_api::bookmark::{BookmarkEditState, BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsUiState};
@@ -30,6 +31,7 @@ pub struct LayoutUiStatePatch {
     pub bookmark_menu: Option<BookmarkMenuEffect>,
     pub bookmark_edit: Option<BookmarkEditState>,
     pub reload: Option<ReloadEffect>,
+    pub overlay_dismiss: Option<LayoutOverlayDismissEffect>,
     pub active_session: Option<Box<ActiveSessionState>>,
     pub header: Option<HeaderState>,
 }
@@ -49,7 +51,7 @@ pub enum UpdateStatus {
     },
 }
 
-#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 2)]
+#[vmux_api::ui_state(Default, patch = LayoutUiStatePatch, version = 4)]
 pub struct LayoutUiState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
@@ -66,8 +68,10 @@ pub struct LayoutUiState {
     pub update: Option<UpdateStatus>,
     pub bookmark_menu: BookmarkMenuEffect,
     pub bookmark_edit: BookmarkEditState,
+    pub spaces: SpacesListEvent,
     pub space_form: SpaceFormState,
     pub reload_revision: u64,
+    pub overlay_dismiss_revision: u64,
 }
 
 impl vmux_api::UiStateProjection<LayoutUiStatePatch> for LayoutUiState {
@@ -135,11 +139,17 @@ impl vmux_api::UiStateProjection<LayoutUiStatePatch> for LayoutUiState {
         if let Some(event) = patch.bookmark_edit {
             self.bookmark_edit = event;
         }
+        if let Some(event) = patch.spaces {
+            self.spaces = event;
+        }
         if let Some(event) = patch.space_form {
             self.space_form = event;
         }
         if let Some(effect) = patch.reload {
             self.reload_revision = self.reload_revision.max(effect.revision);
+        }
+        if let Some(effect) = patch.overlay_dismiss {
+            self.overlay_dismiss_revision = self.overlay_dismiss_revision.max(effect.revision);
         }
     }
 }

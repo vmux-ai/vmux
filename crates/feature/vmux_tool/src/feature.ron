@@ -10,7 +10,7 @@
         (
             url: "vmux://tools/",
             title: "Tools",
-            bookmark: Some(50),
+            bookmark: Some(70),
             title_message_id: "tools-title",
             keywords: [
                 "packages",
@@ -21,17 +21,27 @@
                 "mcp",
                 "import",
             ],
-            icon: "Hammer",
+            icon: "Toolbox",
             command_bar: true,
             manifest: true,
+            placement: Some((
+                group: "tools",
+                reuse: Group,
+            )),
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "AgentToast",
                 "AgentInstallRunRequest",
                 "AgentSetupPrereqRequest",
                 "AgentSetupUiState",
                 "ToolsUiState",
+                "ExtensionsUiState",
+                "ExtToggleRequest",
+                "ExtUninstallRequest",
+                "ExtBrowseStoreRequest",
+                "ExtFilterRequest",
+                "RelaunchRequest",
                 "ToolsRefreshRequest",
                 "ToolsFilterRequest",
                 "ToolOpenRequest",
@@ -78,13 +88,6 @@
                                 ],
                             ),
                             (
-                                id: "tool.import.mcp",
-                                name: "mcp",
-                                arguments: [
-                                    (id: "path", index: Some(1), value_name: Some("CONFIG")),
-                                ],
-                            ),
-                            (
                                 id: "tool.import.dotfiles",
                                 name: "dotfiles",
                                 arguments: [
@@ -112,12 +115,4 @@
             ),
         ],
     )),
-    mcp_servers: [
-        (
-            id: "linear",
-            name: "Linear",
-            url: "https://mcp.linear.app/mcp",
-            scopes: ["read", "write"],
-        ),
-    ],
 )

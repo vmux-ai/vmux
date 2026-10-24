@@ -1,10 +1,57 @@
-pub use wasm::{BuiltinIconView, GitIconView, LineIconView, PageIconView};
+pub use wasm::{BuiltinIconView, GitIconView, GitSymbolView, LineIconView, PageIconView};
 
 pub const GIT_ICON_URL: &str = "vmux://git/assets/favicons/git.svg";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GitSymbol {
+    Repository,
+    Branch,
+    Commit,
+    Fork,
+    Merge,
+    PullRequest,
+}
+
+impl GitSymbol {
+    fn for_line(icon: LineIcon) -> Option<Self> {
+        match icon {
+            LineIcon::GitBranch => Some(Self::Branch),
+            LineIcon::GitCommit => Some(Self::Commit),
+            LineIcon::GitFork => Some(Self::Fork),
+            LineIcon::GitMerge => Some(Self::Merge),
+            LineIcon::GitPullRequest => Some(Self::PullRequest),
+            _ => None,
+        }
+    }
+
+    fn paths(self) -> &'static [&'static str] {
+        match self {
+            Self::Repository => &[
+                "M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z",
+            ],
+            Self::Branch => &[
+                "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z",
+            ],
+            Self::Commit => &[
+                "M11.93 8.5a4.002 4.002 0 0 1-7.86 0H.75a.75.75 0 0 1 0-1.5h3.32a4.002 4.002 0 0 1 7.86 0h3.32a.75.75 0 0 1 0 1.5Zm-1.43-.75a2.5 2.5 0 1 0-5 0 2.5 2.5 0 0 0 5 0Z",
+            ],
+            Self::Fork => &[
+                "M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 0 1.5Z",
+            ],
+            Self::Merge => &[
+                "M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 3.25a.75.75 0 1 0 0 .005V3.25Z",
+            ],
+            Self::PullRequest => &[
+                "M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z",
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineIcon {
     AlertCircle,
+    Archive,
     ArrowDown,
     ArrowUp,
     BookOpen,
@@ -15,6 +62,7 @@ pub enum LineIcon {
     ChevronsUpDown,
     Clock,
     Copy,
+    Ellipsis,
     ExternalLink,
     File,
     FileOutput,
@@ -25,11 +73,16 @@ pub enum LineIcon {
     GitMerge,
     GitPullRequest,
     Globe,
+    Grid2X2,
     Image,
+    Inbox,
     Layout,
+    List,
+    MessagesRound,
     Minus,
     Notebook,
     Package,
+    Planet,
     Pencil,
     Plus,
     RefreshCw,
@@ -44,6 +97,8 @@ pub enum LineIcon {
     Users,
     Wifi,
     Wrench,
+    X,
+    Columns3,
 }
 
 impl LineIcon {
@@ -54,6 +109,7 @@ impl LineIcon {
                 "M12 8v4",
                 "M12 16h.01",
             ],
+            Self::Archive => &["M21 8v13H3V8", "M1 3h22v5H1Z", "M10 12h4"],
             Self::ArrowDown => &["M12 5v14", "m19 12-7 7-7-7"],
             Self::ArrowUp => &["m5 12 7-7 7 7", "M12 19V5"],
             Self::BookOpen => &[
@@ -83,6 +139,7 @@ impl LineIcon {
                 "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z",
                 "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
             ],
+            Self::Ellipsis => &["M6 12h.01", "M12 12h.01", "M18 12h.01"],
             Self::ExternalLink => &[
                 "M14 3h7v7",
                 "m21 3-9 9",
@@ -130,12 +187,33 @@ impl LineIcon {
                 "M2 12h20",
                 "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z",
             ],
+            Self::Grid2X2 => &[
+                "M4 4h6v6H4Z",
+                "M14 4h6v6h-6Z",
+                "M4 14h6v6H4Z",
+                "M14 14h6v6h-6Z",
+            ],
             Self::Image => &[
                 "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
                 "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
                 "m21 15-5-5L5 21",
             ],
-            Self::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
+            Self::Inbox => &[
+                "M4 4h16l2 10v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4Z",
+                "M2 14h5l2 3h6l2-3h5",
+            ],
+            Self::Layout => &[
+                "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+                "M16 4v16",
+            ],
+            Self::List => &["M4 6h16", "M4 12h16", "M4 18h16"],
+            Self::MessagesRound => &[
+                "M12 4H7a5 5 0 0 0-5 5v.5A4.5 4.5 0 0 0 6.5 14H8l-1 3 4-3h1a5 5 0 0 0 0-10Z",
+                "M17 8h.5a4.5 4.5 0 0 1 0 9H17l1 3-4-3h-2",
+                "M6.5 9h.01",
+                "M9.5 9h.01",
+                "M12.5 9h.01",
+            ],
             Self::Minus => &["M5 12h14"],
             Self::Notebook => &[
                 "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
@@ -146,6 +224,10 @@ impl LineIcon {
                 "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
                 "M3.3 7 12 12l8.7-5",
                 "M12 22V12",
+            ],
+            Self::Planet => &[
+                "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z",
+                "M2.5 15.5c2.8 2.3 8.8.9 13.8-2.5s7.7-7.7 5.2-10.2",
             ],
             Self::Pencil => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
             Self::Plus => &["M12 5v14", "M5 12h14"],
@@ -190,12 +272,19 @@ impl LineIcon {
             Self::Wrench => &[
                 "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
             ],
+            Self::X => &["M18 6 6 18", "m6 6 12 12"],
+            Self::Columns3 => &[
+                "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+                "M9 4v16",
+                "M15 4v16",
+            ],
         }
     }
 }
 
 mod wasm {
-    use super::{GIT_ICON_URL, LineIcon};
+    use super::{GIT_ICON_URL, GitSymbol, LineIcon};
+    use crate::components::avatar::AgentThumbnail;
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
     use crate::file_icon::TypeIcon;
@@ -204,9 +293,27 @@ mod wasm {
 
     #[component]
     pub fn LineIconView(icon: LineIcon, class: String) -> Element {
+        if let Some(symbol) = GitSymbol::for_line(icon) {
+            return rsx! { GitSymbolView { symbol, class } };
+        }
         rsx! {
             Icon { class: "{class}", stroke_width: 1.8,
                 for d in icon.paths() {
+                    path { d: "{d}" }
+                }
+            }
+        }
+    }
+
+    #[component]
+    pub fn GitSymbolView(symbol: GitSymbol, class: String) -> Element {
+        rsx! {
+            svg {
+                class: "{class}",
+                view_box: "0 0 16 16",
+                fill: "currentColor",
+                "aria-hidden": "true",
+                for d in symbol.paths() {
                     path { d: "{d}" }
                 }
             }
@@ -270,6 +377,10 @@ mod wasm {
                 path { d: "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" }
                 path { d: "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" }
             } },
+            BuiltinIcon::Planet => rsx! { LineIconView {
+                icon: LineIcon::Planet,
+                class: class.clone(),
+            } },
             BuiltinIcon::Users => rsx! { Icon { class: "{class}",
                 path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
                 circle { cx: "9", cy: "7", r: "4" }
@@ -277,7 +388,8 @@ mod wasm {
                 path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
             } },
             BuiltinIcon::Sparkles => rsx! { Icon { class: "{class}",
-                path { d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" }
+                path { fill: "currentColor", stroke: "none", d: "M11.95 2.5c.7 4.42 3.13 6.85 7.55 7.55-4.42.7-6.85 3.13-7.55 7.55-.7-4.42-3.13-6.85-7.55-7.55 4.42-.7 6.85-3.13 7.55-7.55Z" }
+                path { fill: "currentColor", stroke: "none", d: "M18.7 2.9c.18 1.15.81 1.78 1.96 1.96-1.15.18-1.78.81-1.96 1.96-.18-1.15-.81-1.78-1.96-1.96 1.15-.18 1.78-.81 1.96-1.96Z" }
             } },
             BuiltinIcon::Activity => rsx! { Icon { class: "{class}",
                 path { d: "M22 12h-4l-3 9L9 3l-3 9H2" }
@@ -288,9 +400,15 @@ mod wasm {
             BuiltinIcon::Hammer => rsx! { Icon { class: "{class}",
                 path { d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94Z" }
             } },
-            BuiltinIcon::Vault => rsx! { Icon { class: "{class}",
-                path { d: "M12 3 4.5 6v5.5c0 4.7 3.2 8.1 7.5 9.5 4.3-1.4 7.5-4.8 7.5-9.5V6Z" }
-                path { d: "m9 12 2 2 4-4" }
+            BuiltinIcon::Toolbox => rsx! { Icon { class: "{class}",
+                path { d: "M8 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }
+                path { d: "M4 8h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" }
+                path { d: "M2 13h20" }
+                path { d: "M9 13v3h6v-3" }
+            } },
+            BuiltinIcon::Vault => rsx! { LineIconView {
+                icon: LineIcon::RefreshCw,
+                class: class.clone(),
             } },
             BuiltinIcon::Smartphone => rsx! { Icon { class: "{class}",
                 rect { x: "6", y: "2", width: "12", height: "20", rx: "3" }
@@ -302,6 +420,29 @@ mod wasm {
             }
             BuiltinIcon::Bookmark => rsx! { Icon { class: "{class}",
                 path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
+            } },
+            BuiltinIcon::CheckCircle => rsx! { Icon { class: "{class}",
+                circle { cx: "12", cy: "12", r: "9" }
+                path { d: "m8 12 2.5 2.5L16 9" }
+            } },
+            BuiltinIcon::MessagesRound => rsx! { LineIconView {
+                icon: LineIcon::MessagesRound,
+                class: class.clone(),
+            } },
+            BuiltinIcon::ListTodo => rsx! { Icon { class: "{class}",
+                path { d: "M13 5h8" }
+                path { d: "M13 12h8" }
+                path { d: "M13 19h8" }
+                path { d: "m3 7 2 2 4-4" }
+                rect { x: "3", y: "15", width: "6", height: "6", rx: "1" }
+            } },
+            BuiltinIcon::Search => rsx! { LineIconView {
+                icon: LineIcon::Search,
+                class: class.clone(),
+            } },
+            BuiltinIcon::Globe => rsx! { LineIconView {
+                icon: LineIcon::Globe,
+                class: class.clone(),
             } },
             BuiltinIcon::Nushell => {
                 rsx! { BrandGlyph { class: class.clone(), d: "M0 16.338h1.25v-5.7c.417-.624 1.205-1.309 2.127-1.309 1.176 0 1.34.64 1.34 2.247v4.762h1.25v-5.685c0-1.458-.67-2.32-2.202-2.32-.923 0-1.964.46-2.59 1.264l-.103-1.1H0Zm10.177-7.842h-1.25v5.698c0 1.46.745 2.307 2.263 2.307.921 0 1.889-.431 2.514-1.22l.104 1.057h1.072V8.496h-1.25v5.773c-.432.67-1.265 1.25-2.129 1.25-.907 0-1.324-.446-1.324-1.458zm8.11-.997-.61.952 5.251 3.229-5.251 3.244.669.922L24 12.32v-1.28z" } }
@@ -343,6 +484,23 @@ mod wasm {
             return rsx! { BuiltinIconView { icon: *builtin, class: icon_class } };
         }
         let favicon_url = icon.favicon_url().to_string();
+        let session_detail = url
+            .strip_prefix("vmux://sessions/")
+            .and_then(|path| path.split(['?', '#']).next())
+            .is_some_and(|path| !path.trim_matches('/').is_empty());
+        if session_detail && !favicon_url.is_empty() {
+            return rsx! {
+                span { class: "inline-flex {img_class}",
+                    AgentThumbnail {
+                        src: Some(favicon_url.clone()),
+                        seed: favicon_url,
+                        background: String::new(),
+                        alt: String::new(),
+                        class: "size-full text-[6px]".to_string(),
+                    }
+                }
+            };
+        }
         rsx! {
             Favicon {
                 favicon_url,

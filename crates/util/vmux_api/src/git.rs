@@ -1,7 +1,8 @@
 #[vmux_api::contract(Eq)]
 pub struct StyledSpan {
     pub text: String,
-    pub fg: [u8; 3],
+    pub light_fg: [u8; 3],
+    pub dark_fg: [u8; 3],
     pub bold: bool,
     pub italic: bool,
 }
@@ -13,6 +14,16 @@ pub struct DiffLine {
     pub new_no: Option<u32>,
     pub hunk: Option<u32>,
     pub spans: Vec<StyledSpan>,
+}
+
+impl DiffLine {
+    pub fn file_path(&self) -> Option<&str> {
+        if self.kind != DiffKind::Hunk || self.hunk.is_some() {
+            return None;
+        }
+        let text = self.spans.first()?.text.as_str();
+        (!text.starts_with("@@")).then_some(text)
+    }
 }
 
 #[vmux_api::contract(Copy, Eq, Default)]
@@ -68,6 +79,7 @@ pub struct GitDiffViewport {
     pub generation: u64,
     pub first_line: u32,
     pub total_lines: u32,
+    pub has_more: bool,
     pub lines: Vec<DiffLine>,
     pub markers: Vec<GitLineMarker>,
     pub error: String,
@@ -82,6 +94,22 @@ pub enum GitDiffRow {
         reveal_start: u32,
         reveal_end: u32,
     },
+}
+
+impl GitDiffRow {
+    pub fn start(self) -> u32 {
+        match self {
+            Self::Line(index) => index,
+            Self::Gap { start, .. } => start,
+        }
+    }
+
+    pub fn end(self) -> u32 {
+        match self {
+            Self::Line(index) => index.saturating_add(1),
+            Self::Gap { end, .. } => end,
+        }
+    }
 }
 
 #[vmux_api::contract(Eq)]
@@ -129,7 +157,8 @@ mod tests {
             hunk: Some(2),
             spans: vec![StyledSpan {
                 text: "x".into(),
-                fg: [1, 2, 3],
+                light_fg: [1, 2, 3],
+                dark_fg: [4, 5, 6],
                 bold: false,
                 italic: false,
             }],

@@ -709,7 +709,7 @@ mod projection_tests {
 
     const MANIFESTS: [&str; 9] = [
         include_str!("../feature.ron"),
-        include_str!("../../../vmux_agent/src/feature.ron"),
+        include_str!("../../../vmux_acp/src/feature.ron"),
         include_str!("../../../vmux_editor/src/feature.ron"),
         include_str!("../../../vmux_input/src/feature.ron"),
         include_str!("../../../vmux_layout/src/feature.ron"),

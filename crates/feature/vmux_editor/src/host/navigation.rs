@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::PageMetadata;
-use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
+use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen, RecordVisitRequest};
 
 use super::media::FileMedia;
 use crate::edit::Selection;
@@ -22,6 +22,7 @@ pub(crate) struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::lsp::manager::LspGoto>()
+            .add_message::<RecordVisitRequest>()
             .add_observer(file_open)
             .add_observer(knowledge_link_open)
             .add_observer(apply_file)
@@ -113,10 +114,36 @@ impl GotoActions<'_, '_> {
     }
 }
 
-fn file_open(trigger: On<UiInput<FileOpenEvent>>, mut commands: Commands) {
+fn file_open(
+    trigger: On<UiInput<FileOpenEvent>>,
+    mut visits: FileVisitRecorder,
+    mut commands: Commands,
+) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
+    visits.record(&path);
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct FileVisitRecorder<'w> {
+    visits: MessageWriter<'w, RecordVisitRequest>,
+}
+
+impl FileVisitRecorder<'_> {
+    fn record(&mut self, path: &Path) {
+        if !path.is_file() {
+            return;
+        }
+        let title = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        self.visits.write(RecordVisitRequest {
+            url: vmux_path::FileUrl::from_path(path, None, None, None),
+            title,
+        });
+    }
 }
 
 fn apply_file(
@@ -193,6 +220,7 @@ fn apply_file(
 fn knowledge_link_open(
     trigger: On<UiInput<KnowledgeLinkOpen>>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
+    mut visits: FileVisitRecorder,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -263,6 +291,7 @@ fn knowledge_link_open(
     if let Some(line) = request.line {
         commands.entity(entity).insert(NoteRevealLine(line));
     }
+    visits.record(&path);
     goto.write(crate::lsp::manager::LspGoto {
         entity,
         path,

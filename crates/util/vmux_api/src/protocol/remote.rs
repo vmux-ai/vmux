@@ -1,6 +1,6 @@
 use super::{
     AgentCommandResult, AgentQueryResult, AgentRequest, AgentRequestId, CommandLifecycleKind,
-    CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo, SharedEvent, SharedMessage,
+    CopyModeKey, JsonValue, ProcessInfo, SharedEvent, SharedMessage,
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
@@ -124,7 +124,18 @@ pub enum ClientMessage {
         mcp_command: Option<String>,
         mcp_args: Vec<String>,
         resume_acp_session_id: Option<String>,
-        managed_mcp_servers: Vec<ManagedMcpServer>,
+    },
+    ListAcpSessions {
+        request_id: u64,
+        agent_id: String,
+        agent_name: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        cwd: String,
+    },
+    CancelAcpSessionCatalog {
+        request_id: u64,
     },
     Status,
     RebindAcpWorkspace {
@@ -257,6 +268,22 @@ pub enum ServiceMessage {
         value: String,
         succeeded: bool,
     },
+    AcpSessionCatalog {
+        request_id: u64,
+        agent_id: String,
+        agent_name: String,
+        supported: bool,
+        sessions: Vec<AcpProviderSession>,
+        error: Option<String>,
+    },
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpProviderSession {
+    pub id: String,
+    pub cwd: String,
+    pub title: String,
+    pub updated_at: String,
 }
 
 #[vmux_api::contract(Eq)]

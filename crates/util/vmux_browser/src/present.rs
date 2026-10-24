@@ -25,7 +25,7 @@ use vmux_layout::{
     },
 };
 
-use vmux_ecs::KeyboardOwner;
+use vmux_ecs::{KeyboardOwner, PagePresented};
 use vmux_setting::AppSettings;
 
 use crate::host::{CommandBarRoute, LayoutPointerCapture, NATIVE_COMMAND_BAR_ROUTE};
@@ -207,11 +207,13 @@ fn sync_children_to_ui(
             Has<PendingCommandBarReveal>,
             Has<LayoutCef>,
             Has<WebviewWindowed>,
+            Has<PagePresented>,
         ),
         With<Browser>,
     >,
     queries: WindowFrameQueries,
     roots: Query<(Entity, &HostWindow, &ComputedNode), With<VmuxWindow>>,
+    mut commands: Commands,
 ) {
     for (
         browser,
@@ -228,14 +230,21 @@ fn sync_children_to_ui(
         pending_command_bar_reveal,
         is_layout_cef,
         is_windowed,
+        presented,
     ) in browser_q.iter_mut()
     {
         let Some(host_window) = queries.hierarchy.get(browser) else {
+            if presented {
+                commands.entity(browser).remove::<PagePresented>();
+            }
             continue;
         };
         let Some((glass_entity, _, glass_node)) =
             roots.iter().find(|(_, host, _)| host.0 == host_window)
         else {
+            if presented {
+                commands.entity(browser).remove::<PagePresented>();
+            }
             continue;
         };
         let glass_rect = *glass_node;
@@ -252,6 +261,9 @@ fn sync_children_to_ui(
         };
 
         if glass_size_px.x <= 0.0 || glass_size_px.y <= 0.0 {
+            if presented {
+                commands.entity(browser).remove::<PagePresented>();
+            }
             continue;
         }
 
@@ -274,12 +286,18 @@ fn sync_children_to_ui(
             HiddenWebviewSizing::Render => {}
             HiddenWebviewSizing::HideKeepSize => {
                 tf.scale = Vec3::splat(1.0e-6);
+                if presented {
+                    commands.entity(browser).remove::<PagePresented>();
+                }
                 continue;
             }
             HiddenWebviewSizing::Collapse => {
                 tf.scale = Vec3::splat(1.0e-6);
                 if webview_size.0 != Vec2::ONE {
                     webview_size.0 = Vec2::ONE;
+                }
+                if presented {
+                    commands.entity(browser).remove::<PagePresented>();
                 }
                 continue;
             }
@@ -294,6 +312,13 @@ fn sync_children_to_ui(
         let is_inactive_stack = parent != glass_entity && !is_cef_ui && !is_active_stack;
 
         let is_inactive_tab = under_inactive_tab;
+
+        let should_present = !is_inactive_stack && !is_inactive_tab;
+        if should_present && !presented {
+            commands.entity(browser).insert(PagePresented);
+        } else if !should_present && presented {
+            commands.entity(browser).remove::<PagePresented>();
+        }
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -515,9 +540,6 @@ fn sync_windowed_frames(
         let browser_ready = browsers.windowed_view_ready(&entity);
         let was_raised = memory.raised_frame.contains_key(&entity);
         let first_native_frame = browser_ready && !was_raised;
-        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
-            browsers.set_windowed_hidden(&entity, false);
-        }
         browsers.set_windowed_frame(
             &entity,
             frame.left,
@@ -526,6 +548,9 @@ fn sync_windowed_frames(
             frame.height,
             scale,
         );
+        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
+            browsers.set_windowed_hidden(&entity, false);
+        }
         browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
         let all_corners = windowed_page_all_corners(layout_is_hidden, visible_pane_count);
         browsers.set_windowed_corner_radius(

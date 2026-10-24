@@ -10,13 +10,13 @@ pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 #[derive(Clone, Copy, PartialEq)]
 pub struct PaletteInput {
     pub last_focus_open_id: Signal<OpenId>,
-    pub last_input_revision: Signal<u64>,
+    pub last_host_input: Signal<(OpenId, u64)>,
 }
 
 pub fn use_palette_input() -> PaletteInput {
     PaletteInput {
         last_focus_open_id: use_signal(|| OpenId(u64::MAX)),
-        last_input_revision: use_signal(|| 0),
+        last_host_input: use_signal(|| (OpenId(u64::MAX), 0)),
     }
 }
 
@@ -29,11 +29,19 @@ impl PaletteInput {
         true
     }
 
-    pub fn apply_host_input(&mut self, revision: u64, input_id: &'static str) {
-        if revision == 0 || revision <= (self.last_input_revision)() {
+    pub fn apply_host_input(&mut self, open_id: OpenId, revision: u64, input_id: &'static str) {
+        if revision == 0 {
             return;
         }
-        self.last_input_revision.set(revision);
+        let (last_open_id, last_revision) = (self.last_host_input)();
+        if last_open_id != open_id {
+            self.last_host_input.set((open_id, revision));
+            return;
+        }
+        if revision <= last_revision {
+            return;
+        }
+        self.last_host_input.set((open_id, revision));
         DomCaret::in_field(input_id).to_end();
     }
 }

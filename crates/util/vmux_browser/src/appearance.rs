@@ -5,9 +5,9 @@ use vmux_ecs::page::PageReady;
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
 use vmux_layout::LayoutCef;
 
-use vmux_setting::AppSettings;
+use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
 use vmux_ui::i18n::Locale;
-use vmux_ui::theme::ThemeUiState;
+use vmux_ui::theme::{ThemeScheme, ThemeUiState};
 
 pub(crate) struct BrowserLocale(String);
 
@@ -56,12 +56,18 @@ impl BrowserAppearance<'_> {
         }
     }
 
-    fn theme(&self) -> ThemeUiState {
+    fn theme(&self, resolved: Option<ResolvedScheme>) -> ThemeUiState {
         let locale = BrowserLocale::requested(&self.0.appearance.locale);
+        let resolved =
+            resolved.unwrap_or_else(|| ResolvedScheme::resolve(self.0.appearance.mode, None));
         ThemeUiState {
             radius: self.0.layout.radius,
             catalog: locale.catalog(),
             locale: locale.0,
+            scheme: match resolved {
+                ResolvedScheme::Light => ThemeScheme::Light,
+                ResolvedScheme::Dark => ThemeScheme::Dark,
+            },
         }
     }
 }
@@ -72,12 +78,7 @@ impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<ThemeUiState>::default())
             .add_observer(webview_ready_send_theme)
-            .add_systems(
-                Update,
-                sync_to_cef
-                    .before(CefSystems::CreateAndResize)
-                    .run_if(resource_changed::<AppSettings>),
-            )
+            .add_systems(Update, sync_to_cef.before(CefSystems::CreateAndResize))
             .add_systems(Update, reassert_color_scheme);
     }
 }
@@ -101,6 +102,7 @@ fn webview_ready_send_theme(
     trigger: On<UiInput<PageReady>>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
+    resolved: Option<Single<&ResolvedColorScheme>>,
     cef_q: Query<(), With<LayoutCef>>,
     modal_q: Query<(), With<WindowOverlay>>,
     mut zoom_q: Query<&mut bevy_cef::prelude::ZoomLevel>,
@@ -109,7 +111,7 @@ fn webview_ready_send_theme(
     let entity = trigger.event().webview;
     commands.trigger(UiStateWrite::<ThemeUiState>::from_event(
         entity,
-        &BrowserAppearance(&settings).theme(),
+        &BrowserAppearance(&settings).theme(resolved.as_ref().map(|resolved| resolved.0)),
     ));
     if cef_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
         if let Ok(mut zoom) = zoom_q.get_mut(entity) {
@@ -121,12 +123,19 @@ fn webview_ready_send_theme(
 
 fn sync_to_cef(
     settings: Res<AppSettings>,
+    resolved: Option<Single<Ref<ResolvedColorScheme>>>,
     mut scheme: ResMut<bevy_cef::prelude::CefColorScheme>,
     mut accept_language_list: Option<ResMut<bevy_cef::prelude::CefAcceptLanguageList>>,
     mut browsers: Option<NonSendMut<Browsers>>,
     ready: Query<Entity, With<PageReady>>,
     mut commands: Commands,
 ) {
+    let resolved_changed = resolved
+        .as_ref()
+        .is_some_and(|resolved| resolved.is_changed());
+    if !settings.is_changed() && !resolved_changed {
+        return;
+    }
     let appearance = BrowserAppearance(&settings);
     let mode = appearance.color_mode();
     if scheme.0 != mode {
@@ -145,7 +154,7 @@ fn sync_to_cef(
             browsers.set_accept_language_list(&next_accept_language_list);
         }
     }
-    let payload = appearance.theme();
+    let payload = appearance.theme(resolved.as_ref().map(|resolved| resolved.0));
     for entity in &ready {
         commands.trigger(UiStateWrite::<ThemeUiState>::from_event(entity, &payload));
     }
@@ -155,7 +164,8 @@ fn sync_to_cef(
 mod appearance_bridge_tests {
     use super::{BrowserAppearance, BrowserLocale};
     use bevy_cef::prelude::CefColorMode;
-    use vmux_setting::{AppSettings, ColorScheme};
+    use vmux_setting::{AppSettings, ColorScheme, ResolvedScheme};
+    use vmux_ui::theme::ThemeScheme;
 
     #[test]
     fn maps_color_scheme_to_cef_mode() {
@@ -190,6 +200,23 @@ mod appearance_bridge_tests {
         assert_eq!(
             BrowserLocale("en-US".to_string()).accept_language_list(),
             "en-US,en;q=0.9"
+        );
+    }
+
+    #[test]
+    fn resolved_scheme_is_sent_to_pages() {
+        let settings = AppSettings::default();
+        assert_eq!(
+            BrowserAppearance(&settings)
+                .theme(Some(ResolvedScheme::Light))
+                .scheme,
+            ThemeScheme::Light
+        );
+        assert_eq!(
+            BrowserAppearance(&settings)
+                .theme(Some(ResolvedScheme::Dark))
+                .scheme,
+            ThemeScheme::Dark
         );
     }
 }

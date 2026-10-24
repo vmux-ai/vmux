@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use vmux_api::protocol::{
     ClientMessage, ServiceMessage, SharedEvent, SharedMessage, SharedResponse,
 };
-use vmux_api::room::ClientOpId;
+use vmux_api::session::ClientOpId;
 use vmux_profile::ServicePaths;
 
 use crate::framing::LengthPrefixed;

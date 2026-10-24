@@ -115,17 +115,16 @@ pub(super) fn ExplorerSidebar(
                 keys.offer(&event);
             },
             div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible: pane.visible, caret_line, view } }
-        }
-        div {
-            class: if open {
-                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-primary/40"
-            } else {
-                "pointer-events-none h-full w-0 shrink-0 opacity-0"
-            },
-            onmousedown: move |e: Event<MouseData>| {
-                e.prevent_default();
-                pane.start_resize();
-            },
+            if open {
+                div {
+                    class: "group absolute inset-y-0 -right-1 z-[3] w-2 cursor-col-resize",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.prevent_default();
+                        pane.start_resize();
+                    },
+                    span { class: "pointer-events-none absolute left-1/2 top-1/2 h-9 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/20 opacity-0 transition-opacity group-hover:opacity-100" }
+                }
+            }
         }
     }
 }

@@ -11,6 +11,30 @@ use wry::WebViewExtMacOS;
 
 use super::{Appearance, SiblingOrder, WebView};
 
+struct SurfaceBackground;
+
+impl SurfaceBackground {
+    fn apply(webview: &wry::WebView, appearance: Appearance, transparent: bool) {
+        let wk = webview.webview();
+        let (red, green, blue, alpha) = appearance.surface_rgba(transparent);
+        let color = NSColor::colorWithSRGBRed_green_blue_alpha(
+            red as f64 / 255.0,
+            green as f64 / 255.0,
+            blue as f64 / 255.0,
+            alpha as f64 / 255.0,
+        );
+        unsafe {
+            wk.setUnderPageBackgroundColor(Some(&color));
+        }
+        let view: &NSView = &wk;
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            layer.setOpaque(!transparent);
+            layer.setBackgroundColor(Some(&color.CGColor()));
+        }
+    }
+}
+
 impl WebView {
     pub fn order_among_siblings(&self, order: SiblingOrder) {
         let wk = self.webview.webview();
@@ -96,6 +120,7 @@ impl WebView {
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setAppearance(named.as_deref());
+        SurfaceBackground::apply(&self.webview, appearance, self.page.get().transparent);
     }
 
     pub fn take_first_responder(&self) {

@@ -62,7 +62,7 @@ fn collect<S: UiStateContract>(
         Err(_) => {
             let mut updates = UiState::<S>::default();
             updates.updates.push(trigger.event().update.clone());
-            commands.entity(trigger.event().webview).insert(updates);
+            commands.entity(trigger.event().webview).try_insert(updates);
         }
     }
 }
@@ -269,6 +269,23 @@ mod tests {
         let emitted = &app.world().resource::<SnapshotEmitted>().0;
         assert_eq!(emitted.len(), 2);
         assert!(emitted.iter().all(|state| state.value == 7));
+    }
+
+    #[test]
+    fn writes_to_closed_pages_are_ignored() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()));
+        let entity = app.world_mut().spawn_empty().id();
+        app.world_mut().despawn(entity);
+
+        app.world_mut()
+            .trigger(UiStateWrite::<SnapshotState>::from_event(
+                entity,
+                &SnapshotState { value: 7 },
+            ));
+        app.update();
+
+        assert!(app.world().get_entity(entity).is_err());
     }
 
     #[test]

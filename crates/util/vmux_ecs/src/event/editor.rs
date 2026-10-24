@@ -1,6 +1,8 @@
 use super::CommandBarPicker;
 
-pub use vmux_api::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
+pub use vmux_api::space::{
+    ProjectBranch, ProjectPickerRequest, ProjectRow, ProjectRowKind, ProjectTreeToggle,
+};
 
 #[vmux_api::contract]
 pub struct StyledSpan {

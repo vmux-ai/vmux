@@ -4,126 +4,7 @@ use dioxus::prelude::*;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-use crate::event::{
-    GitConfigEditRequest, GitRepositoryPickerRequest, GitShortcutHelpRequest, GitUpdateCheckRequest,
-};
-use crate::state::{GitBranchCollection, GitPanel};
-
-#[component]
-pub(super) fn GitShortcutBar(
-    repo_root: String,
-    focused_panel: GitPanel,
-    branch_collection: GitBranchCollection,
-) -> Element {
-    let panel_shortcuts = match focused_panel {
-        GitPanel::Status => Vec::new(),
-        GitPanel::Files => vec![
-            ("space", translate("git-toggle-stage")),
-            ("a", translate("git-stage-all")),
-            ("s", translate("git-stash")),
-            ("A", translate("git-amend")),
-            ("x", translate("git-discard")),
-        ],
-        GitPanel::Branches if branch_collection == GitBranchCollection::Local => vec![
-            ("space", translate("git-checkout")),
-            ("n", translate("git-new-branch")),
-            ("d", translate("git-delete-branch")),
-            ("r", translate("git-rebase")),
-            ("M", translate("git-merge")),
-            ("f", translate("git-fast-forward")),
-        ],
-        GitPanel::Branches => Vec::new(),
-        GitPanel::Commits => vec![
-            ("space", translate("git-checkout-commit")),
-            ("C", translate("git-cherry-pick")),
-            ("t", translate("git-revert-commit")),
-        ],
-        GitPanel::Stash => vec![
-            ("g", translate("git-stash-pop")),
-            ("d", translate("git-stash-drop")),
-        ],
-    };
-
-    rsx! {
-        footer { class: "flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-t border-foreground/[0.08] bg-card/92 px-2 text-[10px] text-muted-foreground backdrop-blur-xl",
-            if focused_panel == GitPanel::Status {
-                ShortcutButton {
-                    keycap: "e",
-                    label: translate("git-edit-config"),
-                    onclick: {
-                        let repo_root = repo_root.clone();
-                        move |_| {
-                            let _ = send(&GitConfigEditRequest {
-                                repo_root: repo_root.clone(),
-                            });
-                        }
-                    },
-                }
-                ShortcutButton {
-                    keycap: "u",
-                    label: translate("settings-check-updates"),
-                    onclick: {
-                        move |_| {
-                            let _ = send(&GitUpdateCheckRequest);
-                        }
-                    },
-                }
-                ShortcutButton {
-                    keycap: "enter",
-                    label: translate("git-switch-recent-repository"),
-                    onclick: {
-                        let repo_root = repo_root.clone();
-                        move |_| {
-                            let _ = send(&GitRepositoryPickerRequest { path: repo_root.clone() });
-                        }
-                    },
-                }
-            } else {
-                for (keycap, label) in panel_shortcuts {
-                    ShortcutHint { keycap, label }
-                }
-                ShortcutHint { keycap: "↑↓", label: translate("git-shortcut-navigate") }
-                ShortcutHint { keycap: "1–5", label: translate("git-shortcut-panels") }
-            }
-            button {
-                r#type: "button",
-                class: "ml-auto flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
-                onclick: move |_| {
-                    let _ = send(&GitShortcutHelpRequest { visible: true });
-                },
-                kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "?" }
-                span { {translate("git-keybindings")} }
-            }
-        }
-    }
-}
-
-#[component]
-fn ShortcutButton(
-    keycap: &'static str,
-    label: String,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            class: "flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
-            onclick: move |event| onclick.call(event),
-            kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "{keycap}" }
-            span { "{label}" }
-        }
-    }
-}
-
-#[component]
-fn ShortcutHint(keycap: &'static str, label: String) -> Element {
-    rsx! {
-        span { class: "flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5",
-            kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "{keycap}" }
-            span { "{label}" }
-        }
-    }
-}
+use crate::event::GitShortcutHelpRequest;
 
 #[component]
 pub(super) fn GitShortcutHelp() -> Element {
@@ -154,7 +35,7 @@ pub(super) fn GitShortcutHelp() -> Element {
                     ShortcutGroup {
                         title: translate("git-shortcut-universal"),
                         shortcuts: vec![
-                            ("1–5".to_string(), translate("git-shortcut-panels")),
+                            ("1–4".to_string(), translate("git-shortcut-panels")),
                             ("tab".to_string(), translate("git-shortcut-next-panel")),
                             ("↑/k".to_string(), translate("git-shortcut-previous")),
                             ("↓/j".to_string(), translate("git-shortcut-next")),

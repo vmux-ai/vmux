@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 use vmux_ecs::event::FileDirEntry;
 
 use crate::cn::cn;
+use crate::components::tree_row::{FILE_TREE_ROW_BASE, TreeRowAccent};
 use crate::file_icon::TypeIcon;
 use crate::focus::FocusClaim;
 use crate::platform::Platform;
@@ -94,7 +95,7 @@ pub fn DirectoryNavigator(
                         rsx! {
                             div {
                                 key: "{entry.path}",
-                                class: if entry.name == current_name { DIRECTORY_PARENT_CURRENT_CLASS } else { DIRECTORY_PARENT_CLASS },
+                                class: DirectoryRowStyle::parent(entry.name == current_name),
                                 title: "{entry.path}",
                                 onclick: move |event: Event<MouseData>| {
                                     event.stop_propagation();
@@ -165,20 +166,24 @@ pub fn DirectoryNavigator(
 
 pub const DIRECTORY_PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-primary/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
 const DIRECTORY_NAVIGATOR_ID: &str = "directory-navigator";
-const DIRECTORY_PARENT_CLASS: &str = "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 cursor-default transition-colors hover:bg-foreground/[0.04]";
-const DIRECTORY_PARENT_CURRENT_CLASS: &str = "flex items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-foreground cursor-default shadow-[inset_2px_0_0_0_color-mix(in_oklab,var(--primary)_60%,transparent)]";
-
 struct DirectoryRowStyle;
 
 impl DirectoryRowStyle {
     fn class(selected: bool) -> String {
-        let base = "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
-        let state = if selected {
-            "bg-primary/12 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
+        cn([
+            FILE_TREE_ROW_BASE,
+            "h-7 gap-2 rounded-md px-2",
+            TreeRowAccent::resolve(selected, false).classes(),
+        ])
+    }
+
+    fn parent(selected: bool) -> String {
+        let tone = if selected {
+            TreeRowAccent::resolve(true, false).classes()
         } else {
-            "text-foreground/75 hover:bg-foreground/[0.05]"
+            "text-foreground/45 hover:bg-foreground/[0.04]"
         };
-        cn([base, state])
+        cn([FILE_TREE_ROW_BASE, "h-7 gap-2 rounded-md px-2", tone])
     }
 }
 

@@ -1,6 +1,7 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_ecs::PageMetadata;
+use vmux_ecs::page::PageManifest;
 use vmux_history::LastActivatedAt;
 use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -91,15 +92,25 @@ fn spawn_popup_stacks(
     }
 }
 
-fn apply_fallback_page_icons(mut metas: Query<&mut PageMetadata, Changed<PageMetadata>>) {
+fn apply_fallback_page_icons(
+    mut metas: Query<&mut PageMetadata, Changed<PageMetadata>>,
+    manifests: Query<&PageManifest>,
+) {
     for mut meta in &mut metas {
-        if !meta.icon.is_none() {
-            continue;
-        }
-        if meta.url.starts_with("file:") {
+        if meta.icon.is_none() && meta.url.starts_with("file:") {
             meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Files);
-        } else if meta.url.starts_with("chrome-extension://") {
+        } else if meta.icon.is_none() && meta.url.starts_with("chrome-extension://") {
             meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Puzzle);
+        } else if let Some(icon) = manifests
+            .iter()
+            .find(|manifest| manifest.answers_for(&meta.url))
+            .and_then(|manifest| manifest.icon)
+            && matches!(
+                meta.icon,
+                vmux_api::PageIcon::None | vmux_api::PageIcon::Builtin(_)
+            )
+        {
+            meta.icon = vmux_api::PageIcon::Builtin(icon);
         }
     }
 }
@@ -110,10 +121,27 @@ mod apply_fallback_page_icons_tests {
     use vmux_api::{BuiltinIcon, PageIcon};
     use vmux_ecs::PageMetadata;
 
-    fn resolve(url: &str, seed: PageIcon) -> PageIcon {
+    fn resolve(url: &str, seed: PageIcon, manifest_icon: Option<BuiltinIcon>) -> PageIcon {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, apply_fallback_page_icons);
+        if let Some(icon) = manifest_icon {
+            app.world_mut().spawn(PageManifest {
+                route: "vmux://sessions/",
+                url: "vmux://sessions/",
+                asset_host: "sessions",
+                owns_subtree: true,
+                title: "Sessions",
+                title_message_id: None,
+                replaces_command: None,
+                keywords: &[],
+                icon: Some(icon),
+                command_bar: true,
+                startup: false,
+                reports_title: true,
+                placement: vmux_ecs::page::PagePlacement::DEFAULT,
+            });
+        }
         let entity = app
             .world_mut()
             .spawn(PageMetadata {
@@ -134,21 +162,44 @@ mod apply_fallback_page_icons_tests {
     #[test]
     fn file_url_gets_files_icon() {
         assert_eq!(
-            resolve("file:///a/b.rs", PageIcon::None),
+            resolve("file:///a/b.rs", PageIcon::None, None),
             PageIcon::Builtin(BuiltinIcon::Files)
         );
     }
 
     #[test]
-    fn vmux_page_waits_for_its_favicon() {
-        assert_eq!(resolve("vmux://team/", PageIcon::None), PageIcon::None);
+    fn vmux_page_uses_its_manifest_icon() {
+        assert_eq!(
+            resolve(
+                "vmux://sessions/",
+                PageIcon::None,
+                Some(BuiltinIcon::MessagesRound),
+            ),
+            PageIcon::Builtin(BuiltinIcon::MessagesRound)
+        );
     }
 
     #[test]
     fn existing_favicon_is_not_overwritten() {
         assert_eq!(
-            resolve("vmux://team/", PageIcon::Favicon("x".into())),
+            resolve(
+                "vmux://sessions/",
+                PageIcon::Favicon("x".into()),
+                Some(BuiltinIcon::MessagesRound),
+            ),
             PageIcon::Favicon("x".into())
+        );
+    }
+
+    #[test]
+    fn legacy_builtin_icon_is_updated_from_manifest() {
+        assert_eq!(
+            resolve(
+                "vmux://sessions/",
+                PageIcon::Builtin(BuiltinIcon::ListTodo),
+                Some(BuiltinIcon::MessagesRound),
+            ),
+            PageIcon::Builtin(BuiltinIcon::MessagesRound)
         );
     }
 }

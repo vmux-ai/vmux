@@ -285,6 +285,7 @@ fn load_on_startup(
         return;
     }
     let path = &path.0;
+    normalize_workspace_resources_if_needed(path);
     let removed_stale = remove_rejected_store_if_needed(path, &validators);
     let removed_incompatible = {
         let registry = registry.read();
@@ -315,6 +316,69 @@ fn load_on_startup(
         commands.trigger_load(load);
     } else {
         restore.complete = true;
+    }
+}
+
+fn normalize_workspace_resources_if_needed(path: &Path) {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Some(normalized) = WorkspaceStoreSource(&body).without_resources() else {
+        return;
+    };
+    if let Err(error) = std::fs::write(path, normalized) {
+        warn!(
+            "Failed to remove legacy workspace resources from {:?}: {error}",
+            path
+        );
+    } else {
+        info!("Removed legacy workspace resources from {:?}", path);
+    }
+}
+
+struct WorkspaceStoreSource<'a>(&'a str);
+
+impl WorkspaceStoreSource<'_> {
+    fn without_resources(&self) -> Option<String> {
+        let marker = self.0.find("resources:")? + "resources:".len();
+        let open = marker + self.0[marker..].find('{')?;
+        let close = self.matching_brace(open)?;
+        if self.0[open + 1..close].trim().is_empty() {
+            return None;
+        }
+        let mut normalized = self.0.to_string();
+        normalized.replace_range(open + 1..close, "");
+        Some(normalized)
+    }
+
+    fn matching_brace(&self, open: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        let mut quoted = false;
+        let mut escaped = false;
+        for (offset, character) in self.0[open..].char_indices() {
+            if quoted {
+                if escaped {
+                    escaped = false;
+                } else if character == '\\' {
+                    escaped = true;
+                } else if character == '"' {
+                    quoted = false;
+                }
+                continue;
+            }
+            match character {
+                '"' => quoted = true,
+                '{' => depth += 1,
+                '}' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(open + offset);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 }
 
@@ -743,7 +807,7 @@ mod tests {
             Save,
             PageMetadata {
                 title: "Git".into(),
-                url: "vmux://git/".into(),
+                url: "git://".into(),
                 icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Project),
                 bg_color: None,
             },
@@ -1065,6 +1129,42 @@ mod tests {
         let key = <vmux_ecs::PageMetadata as bevy::reflect::TypePath>::type_path();
         let body = store_body_with_key(key);
         assert!(!space_has_unregistered_types(&body, &registry));
+    }
+
+    #[test]
+    fn legacy_workspace_resources_are_removed_without_touching_entities() {
+        let body = r#"(
+  resources: {
+    "vmux_bookmark::OfferedBookmarkDefaults": (
+      urls: ["vmux://sessions/{active}"],
+    ),
+  },
+  entities: {
+    1: (
+      components: {
+        "vmux_ecs::PageMetadata": (),
+      },
+    ),
+  },
+)
+"#;
+
+        let normalized = WorkspaceStoreSource(body)
+            .without_resources()
+            .expect("legacy resources");
+
+        assert!(normalized.contains("resources: {}"));
+        assert!(normalized.contains("vmux_ecs::PageMetadata"));
+        assert!(!normalized.contains("OfferedBookmarkDefaults"));
+    }
+
+    #[test]
+    fn empty_workspace_resources_need_no_migration() {
+        assert!(
+            WorkspaceStoreSource("(resources: {}, entities: {})")
+                .without_resources()
+                .is_none()
+        );
     }
 
     #[test]

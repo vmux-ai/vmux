@@ -47,7 +47,7 @@
             bookmark: Some(120),
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "ShortcutUiState",
                 "ShortcutProbePressRequest",
                 "ShortcutProbeClearRequest",

@@ -5,12 +5,14 @@ use crate::{
     ShortcutUiState,
 };
 use dioxus::prelude::*;
+use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::BuiltinIconView;
+use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "ShortcutUiState"]
 )]
 pub(crate) struct ShortcutPage;
 
@@ -30,8 +32,7 @@ pub fn Page() -> Element {
         )],
     );
     rsx! {
-        main {
-            class: "relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground outline-none",
+        PageShell {
             tabindex: "-1",
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {
@@ -53,56 +54,52 @@ pub fn Page() -> Element {
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
-            div { class: "pointer-events-none absolute inset-0 opacity-70 [background:radial-gradient(circle_at_14%_8%,color-mix(in_oklab,var(--primary)_12%,transparent),transparent_34%),radial-gradient(circle_at_88%_18%,color-mix(in_oklab,var(--primary)_10%,transparent),transparent_30%)]" }
-            header { class: "relative z-10 shrink-0 border-b border-border/70 bg-background/75 px-5 py-4 backdrop-blur-xl",
-                div { class: "mx-auto flex w-full max-w-6xl items-center gap-4",
-                    div { class: "min-w-0",
-                        h1 { class: "text-xl font-semibold tracking-tight", {translate("shortcuts-title")} }
-                        p { class: "mt-0.5 text-xs text-muted-foreground", "{subtitle}" }
-                    }
+            PageHeader {
+                div { class: "min-w-0",
+                    h1 { class: "text-base font-semibold tracking-tight", {translate("shortcuts-title")} }
+                    p { class: "mt-0.5 text-xs text-muted-foreground", "{subtitle}" }
                 }
             }
-            div { class: "relative z-10 min-h-0 flex-1 overflow-y-auto px-5 py-5 [scrollbar-gutter:stable]",
-                div { class: "mx-auto w-full max-w-6xl",
+            PageContent {
                     div {
-                        class: "group relative mb-5 flex min-h-40 w-full items-center justify-center overflow-hidden rounded-2xl border border-primary/20 bg-[linear-gradient(135deg,color-mix(in_oklab,var(--glass)_88%,var(--primary)_12%),color-mix(in_oklab,var(--glass)_94%,transparent))] px-20 py-8 text-center shadow-[0_18px_60px_-36px_color-mix(in_oklab,var(--primary)_75%,transparent)] backdrop-blur-2xl",
+                        class: "mb-3 flex min-h-12 w-full items-center gap-3 rounded-lg bg-foreground/[0.035] px-3 py-2",
                         aria_label: translate("shortcuts-try-title"),
-                        span { class: "absolute left-5 top-4 flex items-center gap-2 text-xs font-semibold text-foreground/80",
-                            span { class: "flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20",
+                        span { class: "flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground",
+                            span { class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground/[0.055] text-muted-foreground",
                                 BuiltinIconView {
                                     icon: vmux_api::BuiltinIcon::Keyboard,
                                     class: "h-4 w-4".to_string(),
                                 }
                             }
-                            {translate("shortcuts-try-title")}
+                            span { class: "hidden sm:inline", {translate("shortcuts-try-title")} }
+                        }
+                        div { class: "flex min-w-0 flex-1 items-center justify-center gap-3",
+                            if probe.sequence.is_empty() {
+                                span { class: "truncate text-sm text-foreground/70", {translate("shortcuts-try-hint")} }
+                            } else {
+                                ShortcutSequence { strokes: probe.sequence.clone() }
+                            }
+                            if !probe.sequence.is_empty() {
+                                span { class: "min-w-0 truncate text-xs font-medium {status_tone}", "{status_label}" }
+                            }
                         }
                         if !probe.sequence.is_empty() {
                             button {
                                 r#type: "button",
                                 tabindex: "-1",
-                                class: "absolute right-5 top-4 inline-flex items-center gap-2 rounded-lg px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
+                                class: "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground/[0.045] px-2 text-[10px] font-medium text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground",
                                 onpointerdown: move |event| event.prevent_default(),
                                 onclick: move |event| {
                                     event.stop_propagation();
                                     let _ = send(&ShortcutProbeClearRequest);
                                 },
-                                kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[10px]", "Esc" }
+                                LineIconView { icon: LineIcon::RotateCcw, class: "size-3".to_string() }
                                 {translate("shortcuts-clear")}
-                            }
-                        }
-                        div { class: "flex min-w-0 flex-col items-center gap-4",
-                            if probe.sequence.is_empty() {
-                                span { class: "text-lg font-medium tracking-tight text-foreground/80", {translate("shortcuts-try-hint")} }
-                            } else {
-                                ShortcutSequence { strokes: probe.sequence.clone() }
-                            }
-                            if !probe.sequence.is_empty() {
-                                span { class: "text-sm font-medium {status_tone}", "{status_label}" }
                             }
                         }
                     }
                     if groups.is_empty() {
-                        div { class: "flex min-h-72 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-foreground/[0.015] text-sm text-muted-foreground",
+                        div { class: "flex min-h-40 items-center justify-center rounded-lg bg-foreground/[0.025] text-sm text-muted-foreground",
                             if matches!(probe.status, ShortcutProbeStatus::Miss) {
                                 {translate("shortcuts-no-match")}
                             } else {
@@ -110,7 +107,7 @@ pub fn Page() -> Element {
                             }
                         }
                     } else {
-                        div { class: "columns-1 gap-3 md:columns-2 xl:columns-3",
+                        div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
                             for group in groups {
                                 ShortcutGroupView {
                                     key: "{group.name}",
@@ -119,7 +116,6 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                }
             }
         }
     }
@@ -170,12 +166,11 @@ impl ShortcutStroke {
 #[component]
 fn ShortcutGroupView(group: crate::ShortcutGroup) -> Element {
     rsx! {
-        section { class: "mb-3 inline-block w-full break-inside-avoid overflow-hidden rounded-2xl border border-border/70 bg-[color-mix(in_oklab,var(--glass)_88%,transparent)] shadow-sm",
-            h2 { class: "flex items-center gap-2 border-b border-primary/15 bg-primary/[0.075] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-primary",
-                span { class: "h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--primary)]" }
+        section { class: "w-full border-b border-foreground/[0.055] last:border-b-0",
+            h2 { class: "flex h-8 items-center px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground",
                 "{group.name}"
             }
-            div { class: "divide-y divide-border/45",
+            div {
                 for entry in group.entries {
                     ShortcutEntryView {
                         key: "{entry.id}",
@@ -191,14 +186,14 @@ fn ShortcutGroupView(group: crate::ShortcutGroup) -> Element {
 fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
     let selected = entry.shortcuts.iter().any(|shortcut| shortcut.emphasized);
     let class = if selected {
-        "flex min-h-12 items-center gap-3 bg-primary/[0.09] px-4 py-2.5 ring-1 ring-inset ring-primary/15"
+        "flex min-h-10 items-center gap-3 bg-foreground/[0.07] px-3 py-2"
     } else {
-        "flex min-h-12 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-foreground/[0.025]"
+        "flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-foreground/[0.035]"
     };
     rsx! {
         div { class: "{class}",
-            span { class: "min-w-0 flex-1 text-[13px] leading-snug text-foreground", "{entry.name}" }
-            div { class: "flex shrink-0 flex-col items-end gap-1.5",
+            span { class: "min-w-0 flex-1 text-xs leading-snug text-foreground", "{entry.name}" }
+            div { class: "flex max-w-[55%] shrink-0 flex-col items-end gap-1",
                 for (shortcut_index, shortcut) in entry.shortcuts.iter().enumerate() {
                     {
                         rsx! {
@@ -230,7 +225,7 @@ fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
 fn probe_presentation(status: &ShortcutProbeStatus) -> (String, &'static str) {
     match status {
         ShortcutProbeStatus::Idle => (translate("shortcuts-try-hint"), "text-muted-foreground"),
-        ShortcutProbeStatus::Pending => (translate("shortcuts-waiting"), "text-amber-500"),
+        ShortcutProbeStatus::Pending => (translate("shortcuts-waiting"), "text-muted-foreground"),
         ShortcutProbeStatus::Match(names) => {
             let commands = names.join(", ");
             (
@@ -238,24 +233,24 @@ fn probe_presentation(status: &ShortcutProbeStatus) -> (String, &'static str) {
                     "shortcuts-triggered",
                     &[("action", TranslationValue::String(&commands))],
                 ),
-                "text-primary",
+                "text-foreground",
             )
         }
-        ShortcutProbeStatus::Contextual(labels) => (labels.join(", "), "text-sky-500"),
-        ShortcutProbeStatus::Miss => (translate("shortcuts-no-match"), "text-rose-500"),
+        ShortcutProbeStatus::Contextual(labels) => (labels.join(", "), "text-foreground/80"),
+        ShortcutProbeStatus::Miss => (translate("shortcuts-no-match"), "text-ansi-1"),
     }
 }
 
 #[component]
 fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
     rsx! {
-        span { class: "inline-flex items-center gap-2",
+        span { class: "inline-flex items-center gap-1.5",
             for (stroke_index, stroke) in strokes.into_iter().enumerate() {
                 if stroke_index > 0 {
-                    span { class: "px-1 text-lg text-muted-foreground/55", "›" }
+                    span { class: "text-xs text-muted-foreground/55", "›" }
                 }
                 for keycap in stroke.keycaps() {
-                    kbd { class: "inline-flex min-w-11 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 px-3 py-2.5 font-mono text-lg font-semibold leading-none text-primary shadow-[inset_0_-2px_0_color-mix(in_oklab,var(--primary)_24%,transparent)]", "{keycap}" }
+                    kbd { class: "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.09] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground", "{keycap}" }
                 }
             }
         }
@@ -264,8 +259,8 @@ fn ShortcutSequence(strokes: Vec<ShortcutStroke>) -> Element {
 
 fn shortcut_key_class(emphasized: bool) -> &'static str {
     if emphasized {
-        "inline-flex min-w-6 items-center justify-center rounded-md border border-primary/25 bg-primary/10 px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-primary shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--primary)_24%,transparent)]"
+        "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.09] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground"
     } else {
-        "inline-flex min-w-6 items-center justify-center rounded-md border border-foreground/10 bg-foreground/[0.055] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground shadow-[inset_0_-1px_0_color-mix(in_oklab,var(--foreground)_10%,transparent)]"
+        "inline-flex min-w-6 items-center justify-center rounded-md bg-foreground/[0.06] px-1.5 py-1 font-mono text-[11px] font-semibold leading-none text-foreground"
     }
 }

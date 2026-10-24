@@ -6,7 +6,7 @@ use vmux_api::bookmark::{
 };
 use vmux_ecs::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
 use vmux_ui::cn::cn;
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::FaviconSource;
@@ -41,10 +41,15 @@ pub(crate) fn HeaderView() -> Element {
         state.header_height,
         state.tab_row_pad_left(),
     );
+    let motion = if state.zen {
+        "-translate-y-2 opacity-0"
+    } else {
+        "translate-y-0 opacity-100"
+    };
 
     rsx! {
         div {
-            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] {motion} transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
             style: "{header_vars}",
             HeaderContent {}
         }
@@ -224,7 +229,7 @@ fn HeaderContent() -> Element {
 fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
     (
         String::new(),
-        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] bg-card px-2 text-foreground".to_string(),
     )
 }
 
@@ -262,17 +267,17 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
     let inactive_hover_classes = if visual.active() {
         ""
     } else {
-        "hover:bg-glass-hover hover:text-foreground"
+        "hover:bg-card hover:text-foreground"
     };
 
     let trunc = StackTitle::truncate_class(&display_title);
     let (surface_style, surface_class, title_class, close_class) = if is_active {
         (
-            "--tab-bg:var(--glass);background-color:var(--glass);border-bottom-width:0;"
+            "--tab-bg:var(--card);background-color:var(--card);border-bottom-width:0;"
                 .to_string(),
             cn([
                 skirt_classes,
-                "glass mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
             ]),
             cn([
                 "min-w-0 flex-1",
@@ -283,9 +288,9 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         )
     } else {
         (
-            "background-color:color-mix(in oklab,var(--glass) 58%,transparent);".to_string(),
+            String::new(),
             cn([
-                "my-1 flex h-8 w-full items-center gap-2 rounded-lg border border-glass-border/65 px-3.5 text-muted-foreground shadow-sm transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "my-1 flex h-8 w-full items-center gap-2 rounded-lg px-3.5 text-muted-foreground transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
                 inactive_hover_classes,
             ]),
             cn([
@@ -414,11 +419,11 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground shadow-none outline-none transition-colors hover:bg-card hover:text-foreground active:bg-secondary focus-visible:bg-card focus-visible:text-foreground",
                 onclick: move |_| {
                     let _ = send(&TabCreateRequest);
                 },
-                Icon { class: "h-3.5 w-3.5",
+                Icon { class: "h-4 w-4",
                     path { d: "M12 5v14" }
                     path { d: "M5 12h14" }
                 }
@@ -530,7 +535,7 @@ fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Elem
                                             member_id: id.clone(),
                                         });
                                     },
-                                    Avatar {
+                                    AgentThumbnail {
                                         src,
                                         seed: m.name.clone(),
                                         background: m.color.clone(),

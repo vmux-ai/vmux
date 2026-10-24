@@ -1,0 +1,15 @@
+[package]
+name = "vmux_syntax"
+description = "Shared source-code syntax themes"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+syntect = { workspace = true }
+
+[lints]
+workspace = true

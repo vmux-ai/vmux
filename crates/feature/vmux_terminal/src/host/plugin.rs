@@ -27,19 +27,24 @@ use vmux_ecs::page::{BindsEditingChords, HostsPage};
 use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
 use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
-use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
+use vmux_ecs::{
+    CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged, EntityTarget,
+    ProcessPresentationRequest,
+};
 use vmux_ecs::{
     KeyboardOwner, PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet,
     PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
+use vmux_layout::pane::PanePlacement;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack};
 #[cfg(test)]
 use vmux_layout::tab::Tab;
 use vmux_layout::tab::TabHierarchy;
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
+use vmux_session::Session;
 #[cfg(test)]
 use vmux_setting::SpaceOverrides;
 use vmux_setting::{AppSettings, TerminalTheme};
@@ -94,6 +99,7 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::TerminalPrevRequest>()
         .add_message::<super::command::TerminalClearRequest>()
         .add_message::<super::command::CopyModeRequest>()
+        .add_message::<PendingProcessPresentation>()
         .add_plugins((
             vmux_ecs::UiStatePlugin::<TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
@@ -103,8 +109,10 @@ impl Plugin for TerminalPlugin {
         .add_observer(open)
         .add_observer(contribute)
         .add_observer(activate)
+        .add_observer(queue_presentation)
         .register_persisted::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
+        .add_systems(PostUpdate, present)
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
         .add_plugins((
@@ -116,6 +124,52 @@ impl Plugin for TerminalPlugin {
             super::loading::LoadingPlugin,
             crate::snapshot::Plugin,
             crate::theme::TerminalThemePlugin,
+        ));
+    }
+}
+
+#[derive(Message, Clone, Copy)]
+struct PendingProcessPresentation(ProcessPresentationRequest);
+
+fn queue_presentation(
+    trigger: On<ProcessPresentationRequest>,
+    mut pending: MessageWriter<PendingProcessPresentation>,
+) {
+    pending.write(PendingProcessPresentation(*trigger.event()));
+}
+
+fn present(
+    mut requests: MessageReader<PendingProcessPresentation>,
+    stacks: Query<(Entity, &EntityTarget<Session>)>,
+    mut placement: PanePlacement,
+    mut commands: Commands,
+) {
+    let mut split_batch = std::collections::HashSet::new();
+    for pending in requests.read() {
+        let request = &pending.0;
+        let Some(stack) = stacks
+            .iter()
+            .find(|(_, target)| target.entity() == request.owner)
+            .map(|(stack, _)| stack)
+        else {
+            continue;
+        };
+        let Ok(agent_pane) = placement
+            .child_of_q
+            .get(stack)
+            .map(|child_of| child_of.parent())
+        else {
+            continue;
+        };
+        let target_pane =
+            placement.resolve_spiral(agent_pane, TerminalPlugin::URL, false, &mut split_batch);
+        let tab = commands
+            .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
+            .id();
+        commands.spawn((
+            ReattachedTerminalBundle::new(request.process_id),
+            RetainOnProcessExit,
+            ChildOf(tab),
         ));
     }
 }
@@ -280,7 +334,7 @@ impl Plugin for TerminalInputPlugin {
 }
 
 fn prewarm(settings: Res<AppSettings>) {
-    super::LoginShellEnvironment::prewarm(TerminalBundle::default_shell(&settings));
+    vmux_process::LoginShellEnvironment::prewarm(TerminalBundle::default_shell(&settings));
 }
 
 fn initialize_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
@@ -920,7 +974,7 @@ fn send_service_requests(
     for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         let mut env = launch.env.clone();
         if agent_run {
-            super::LoginShellEnvironment::merge(
+            vmux_process::LoginShellEnvironment::merge(
                 &mut env,
                 &TerminalBundle::default_shell(&settings),
             );
@@ -1773,7 +1827,10 @@ fn restart_pty(
         }
     };
     if agent_run {
-        super::LoginShellEnvironment::merge(&mut env, &TerminalBundle::default_shell(&settings));
+        vmux_process::LoginShellEnvironment::merge(
+            &mut env,
+            &TerminalBundle::default_shell(&settings),
+        );
     }
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
@@ -2003,6 +2060,109 @@ mod tests {
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    #[test]
+    fn process_presentation_does_not_take_focus_from_owner() {
+        let mut app = App::new();
+        app.add_message::<PendingProcessPresentation>()
+            .add_observer(queue_presentation)
+            .add_systems(Update, present);
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
+        let pane = app
+            .world_mut()
+            .spawn((vmux_layout::pane::Pane::bundle(), ChildOf(tab)))
+            .id();
+        let session = app.world_mut().spawn(Session).id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt(10),
+                ChildOf(pane),
+                EntityTarget::<Session>::new(session),
+            ))
+            .id();
+
+        app.world_mut().trigger(ProcessPresentationRequest {
+            owner: session,
+            process_id: ProcessId::new(),
+        });
+        app.update();
+
+        let stack_times = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<(Entity, &LastActivatedAt), With<Stack>>();
+            query
+                .iter(world)
+                .map(|(entity, activated)| (entity, activated.0))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity == owner)
+                .map(|(_, activated)| *activated),
+            Some(10)
+        );
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity != owner)
+                .map(|(_, activated)| *activated),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn process_presentation_batches_splits_for_one_session() {
+        let mut app = App::new();
+        app.add_message::<PendingProcessPresentation>()
+            .add_observer(queue_presentation)
+            .add_systems(Update, present);
+        app.world_mut().spawn(TerminalPlugin::MANIFEST);
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
+        let pane = app
+            .world_mut()
+            .spawn((vmux_layout::pane::Pane::bundle(), ChildOf(tab)))
+            .id();
+        let session = app.world_mut().spawn(Session).id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt(10),
+                ChildOf(pane),
+                EntityTarget::<Session>::new(session),
+            ))
+            .id();
+        app.world_mut().entity_mut(owner).insert(PageMetadata {
+            url: "https://github.com/vmux-ai/vmux".into(),
+            ..default()
+        });
+
+        app.world_mut().trigger(ProcessPresentationRequest {
+            owner: session,
+            process_id: process_id(1),
+        });
+        app.world_mut().trigger(ProcessPresentationRequest {
+            owner: session,
+            process_id: process_id(2),
+        });
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<vmux_layout::pane::PaneSplit>(pane)
+                .is_some()
+        );
+        let children = app.world().get::<Children>(pane).unwrap();
+        assert_eq!(children.len(), 3);
+        assert!(
+            children
+                .iter()
+                .all(|child| app.world().get::<vmux_layout::pane::Pane>(child).is_some())
+        );
     }
 
     #[test]

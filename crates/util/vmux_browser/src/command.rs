@@ -27,7 +27,7 @@ use vmux_ecs::page::HostHistoryObserve;
 use vmux_ecs::page::HostedPage;
 use vmux_ecs::{
     PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
-    page::{HostHistory, HostHistoryDelta, HostHistoryStep, PageReady},
+    page::{HostHistoryDelta, HostHistoryStep, PageReady},
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -419,7 +419,7 @@ fn handle_navigation_requests(
     focus: FocusedStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
-    host_histories: Query<(), With<HostHistory>>,
+    histories: crate::navigation::NavigationHistory,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
@@ -440,9 +440,9 @@ fn handle_navigation_requests(
                 if is_terminal {
                     continue;
                 }
-                if host_histories.contains(webview) {
+                if let Some(owner) = histories.owner(active, webview, HostHistoryDelta::Back) {
                     host_history_steps.write(HostHistoryStep {
-                        webview,
+                        webview: owner,
                         delta: HostHistoryDelta::Back,
                     });
                 } else {
@@ -453,9 +453,9 @@ fn handle_navigation_requests(
                 if is_terminal {
                     continue;
                 }
-                if host_histories.contains(webview) {
+                if let Some(owner) = histories.owner(active, webview, HostHistoryDelta::Forward) {
                     host_history_steps.write(HostHistoryStep {
-                        webview,
+                        webview: owner,
                         delta: HostHistoryDelta::Forward,
                     });
                 } else {
@@ -820,7 +820,10 @@ fn side_sheet_stack_create(
         return;
     };
     commands.entity(target_pane).insert(LastActivatedAt::now());
-    requests.write(vmux_layout::stack::OpenRequest { url: None });
+    requests.write(vmux_layout::stack::OpenRequest {
+        url: None,
+        focus_existing: false,
+    });
 }
 
 fn side_sheet_project_open(
@@ -1276,13 +1279,15 @@ mod tests {
     }
 
     #[test]
-    fn an_expanded_card_stays_expanded_on_another_tab_of_the_same_space() {
+    fn files_start_closed_and_stay_expanded_across_pages() {
         let mut spaces = SideSheetSpaces::start();
-        spaces.expand("bookmarks");
+        let first_pane = spaces.pane_in_first_tab;
+        assert!(!spaces.sections_under(first_pane).projects);
+        spaces.expand("projects");
 
         let second_tab = spaces.second_tab;
         assert!(
-            spaces.sections_under(second_tab).bookmarks,
+            spaces.sections_under(second_tab).projects,
             "a card is expanded for the whole space, so switching tab must not fold it"
         );
     }

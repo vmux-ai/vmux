@@ -201,7 +201,8 @@ const _: () = {
 #[derive(Asset, TypePath)]
 pub struct WindowMaterial;
 
-pub const WINDOW_BACKGROUND_SRGB: [f32; 3] = [0.13, 0.13, 0.14];
+pub const WINDOW_BACKGROUND_DARK_SRGB: [f32; 3] = [0.16, 0.16, 0.16];
+pub const WINDOW_BACKGROUND_LIGHT_SRGB: [f32; 3] = [0.9, 0.9, 0.9];
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct WindowBackground(pub Color);
@@ -381,7 +382,7 @@ fn spawn_window_shell(
                 right: Val::Px(settings.window.pad_right()),
                 bottom: Val::Px(settings.window.pad_bottom()),
             },
-            column_gap: Val::Px(crate::event::PANE_GAP_PX),
+            column_gap: Val::Px(crate::event::SIDE_SHEET_GAP_PX),
             ..default()
         },
     });
@@ -715,7 +716,7 @@ fn persist(
     let pad_right = settings.window.pad_right();
     let pad_bottom = settings.window.pad_bottom();
     let pad_left = settings.window.pad_left();
-    let gap = crate::event::PANE_GAP_PX;
+    let gap = crate::event::SIDE_SHEET_GAP_PX;
     let configured_width =
         crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     for (host, mut node) in &mut window_q {
@@ -1002,7 +1003,7 @@ mod tests {
             .expect("window root");
         let node = app.world().get::<Node>(root).expect("window node");
 
-        assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
+        assert_eq!(node.column_gap, Val::Px(crate::event::SIDE_SHEET_GAP_PX));
     }
 
     #[test]

@@ -33,7 +33,7 @@ pub fn EditorBreadcrumbs(
 
     rsx! {
         div {
-            class: "relative z-20 flex h-7 shrink-0 items-center overflow-hidden border-b border-foreground/[0.07] bg-background/40 px-4 font-sans text-ui text-muted-foreground",
+            class: "relative z-20 flex h-7 shrink-0 items-center overflow-hidden bg-foreground/[0.018] px-3 font-sans text-ui text-muted-foreground",
             "aria-label": translate("editor-breadcrumb"),
 
             div { class: "flex min-w-0 shrink items-center overflow-hidden",

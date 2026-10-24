@@ -33,6 +33,18 @@ pub enum Appearance {
     System,
 }
 
+impl Appearance {
+    fn surface_rgba(self, transparent: bool) -> (u8, u8, u8, u8) {
+        if transparent {
+            return (0, 0, 0, 0);
+        }
+        match self {
+            Self::Light => (240, 240, 240, 255),
+            Self::Dark | Self::System => (20, 20, 20, 255),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SiblingOrder {
     Front,
@@ -53,6 +65,7 @@ impl WebView {
         bounds: wry::Rect,
         embed: Embedding,
         instance: crate::Instance,
+        appearance: Appearance,
     ) -> Result<Self, wry::Error> {
         let dom = Dom::mount(page.component, instance, &embed);
         let current_page = Rc::new(Cell::new(page));
@@ -74,6 +87,8 @@ impl WebView {
         };
         let webview = builder
             .with_transparent(page.transparent)
+            .with_background_color(appearance.surface_rgba(page.transparent))
+            .with_visible(false)
             .with_initialization_script(WRY_HOST_SHIM)
             .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
                 routes.serve(request, responder);
@@ -89,12 +104,14 @@ impl WebView {
             .build_as_child(window)?;
         #[cfg(target_os = "macos")]
         macos::LinkPreviewPolicy::forbid(&webview);
-        Ok(Self {
+        let surface = Self {
             webview,
             dom,
             page: current_page,
             outbox,
-        })
+        };
+        surface.set_appearance(appearance);
+        Ok(surface)
     }
 
     pub fn navigate(&self, page: &'static Page, instance: crate::Instance) -> bool {

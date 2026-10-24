@@ -58,8 +58,9 @@ impl Plugin for VmuxPlugin {
             DefaultPlugins
                 .set(Self::window())
                 .set(bevy::log::LogPlugin {
-                    filter: "bevy_camera_controller=warn".into(),
+                    filter: "bevy_camera_controller=warn,dioxus_document=off".into(),
                     custom_layer: crate::log_forward::file_log_layer,
+                    fmt_layer: crate::log_forward::stderr_log_layer,
                     ..default()
                 }),
             vmux_app::VmuxPlugin::builder().desktop().build(),

@@ -1,7 +1,13 @@
 use bevy::app::App;
-use bevy::log::BoxedLayer;
+use bevy::log::{BoxedFmtLayer, BoxedLayer};
 use tracing_subscriber::Layer;
 use vmux_profile::ServicePaths;
+
+pub fn stderr_log_layer(_app: &mut App) -> Option<BoxedFmtLayer> {
+    let (writer, guard) = tracing_appender::non_blocking(std::io::stderr());
+    Box::leak(Box::new(guard));
+    Some(tracing_subscriber::fmt::layer().with_writer(writer).boxed())
+}
 
 pub fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
     let dir = ServicePaths::log_dir();

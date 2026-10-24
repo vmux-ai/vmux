@@ -3,13 +3,12 @@ pub use shared::{DiffView, GitFooter};
 
 mod branches;
 mod changes;
-mod command_log;
 mod dashboard;
 mod diff;
 mod empty;
 mod history;
 mod model;
-mod panel;
+mod operation;
 mod root;
 mod shared;
 mod shortcuts;
@@ -18,12 +17,7 @@ mod status;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "GitUiState", "KeyClaimsUiState"],
     subtree
 )]
 pub(crate) struct GitPage;
-
-#[vmux_page::page(
-    page = "document",
-    component = Page
-)]
-pub(crate) struct LegacyGitPage;

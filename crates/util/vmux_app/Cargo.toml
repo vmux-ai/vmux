@@ -11,7 +11,7 @@ repository.workspace = true
 default = []
 conformance = ["extension", "vmux_extension/conformance"]
 cli = [
-    "agent",
+    "acp",
     "bookmark",
     "browser",
     "capture",
@@ -29,11 +29,10 @@ cli = [
     "dep:vmux_mcp",
 ]
 desktop = [
-    "agent",
+    "acp",
     "bookmark",
     "browser",
     "capture",
-    "chat",
     "command",
     "editor",
     "extension",
@@ -54,17 +53,17 @@ desktop = [
     "terminal",
     "vault",
 ]
-mobile = ["chat", "dep:vmux_start", "dep:vmux_team"]
+mobile = ["session", "dep:vmux_start", "dep:vmux_team"]
 service-daemon = [
     "service",
     "dep:tokio",
     "dep:tracing",
     "dep:tracing-appender",
     "dep:tracing-subscriber",
-    "dep:vmux_agent",
+    "dep:vmux_acp",
     "dep:vmux_profile",
     "dep:vmux_transport",
-    "vmux_agent/service",
+    "vmux_acp/service",
 ]
 tool = ["dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
@@ -73,7 +72,6 @@ ecs = [
     "dep:vmux_ecs",
     "dep:vmux_flex",
 ]
-chat = ["dep:vmux_chat"]
 command = ["ecs", "dep:vmux_command"]
 setting = ["ecs", "dep:vmux_setting"]
 session = ["dep:vmux_session"]
@@ -83,8 +81,7 @@ extension = ["browser", "dep:vmux_extension"]
 terminal = ["layout", "service", "dep:vmux_terminal"]
 editor = ["layout", "dep:vmux_editor"]
 git = ["layout", "dep:vmux_git"]
-agent = [
-    "chat",
+acp = [
     "command",
     "editor",
     "history",
@@ -93,8 +90,8 @@ agent = [
     "session",
     "space",
     "terminal",
-    "dep:vmux_agent",
-    "vmux_agent/app",
+    "dep:vmux_acp",
+    "vmux_acp/app",
 ]
 knowledge = ["ecs", "dep:vmux_knowledge"]
 history = ["ecs", "dep:vmux_history"]
@@ -110,10 +107,9 @@ vault = ["layout", "dep:vmux_vault"]
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
-vmux_agent = { path = "../../feature/vmux_agent", default-features = false, optional = true }
+vmux_acp = { path = "../../feature/vmux_acp", default-features = false, optional = true }
 vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
-vmux_chat = { path = "../../feature/vmux_chat", optional = true }
 vmux_command = { path = "../../feature/vmux_command", optional = true }
 vmux_ecs = { path = "../vmux_ecs", optional = true }
 vmux_editor = { path = "../../feature/vmux_editor", optional = true }

@@ -6,11 +6,16 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerTone,
 };
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-#[vmux_page::page(page = "process_monitor", component = Page)]
+#[vmux_page::page(
+    page = "process_monitor",
+    component = Page,
+    states = ["ThemeUiState", "ProcessesUiState"]
+)]
 pub struct ProcessMonitorPage;
 
 #[component]
@@ -35,6 +40,7 @@ pub fn Page() -> Element {
             ManagerHeader {
                 title: translate("services-title"),
                 count: process_count,
+                content_class: "mx-auto w-full max-w-7xl".to_string(),
                 search_value: snapshot.query.clone(),
                 search_placeholder: translate("services-filter"),
                 onsearch: move |event: FormEvent| {
@@ -112,12 +118,22 @@ fn UsageChart(
             div { class: "flex h-9 items-center justify-between border-b border-foreground/[0.07] px-3",
                 div { class: "flex items-baseline gap-2",
                     h2 { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground", "{usage.label}" }
-                    span { class: "font-mono text-xs font-semibold {line_class}", "{usage.value}" }
+                    if usage.value.is_empty() {
+                        Skeleton { class: "h-3 w-12 bg-foreground/[0.05]" }
+                    } else {
+                        span { class: "font-mono text-xs font-semibold {line_class}", "{usage.value}" }
+                    }
                 }
-                span { class: "font-mono text-[9px] text-muted-foreground", "{usage.peak}" }
+                if usage.peak.is_empty() {
+                    Skeleton { class: "h-2.5 w-14 bg-foreground/[0.04]" }
+                } else {
+                    span { class: "font-mono text-[9px] text-muted-foreground", "{usage.peak}" }
+                }
             }
             div { class: "relative h-36 bg-background/30 px-2 py-2",
-                svg {
+                if usage.line.is_empty() {
+                    Skeleton { class: "h-full w-full bg-foreground/[0.025]" }
+                } else { svg {
                     class: "h-full w-full overflow-visible {line_class}",
                     view_box: "0 0 100 40",
                     preserve_aspect_ratio: "none",
@@ -125,9 +141,9 @@ fn UsageChart(
                     for y in [10, 20, 30] {
                         line { x1: "0", x2: "100", y1: "{y}", y2: "{y}", stroke: "currentColor", stroke_opacity: "0.08", stroke_width: "0.5" }
                     }
-                    polygon { points: "{usage.area}", fill }
-                    polyline { points: "{usage.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", vector_effect: "non-scaling-stroke" }
-                }
+                    path { d: "{usage.area}", fill }
+                    path { d: "{usage.line}", fill: "none", stroke: "currentColor", stroke_width: "1.35", stroke_linecap: "round", stroke_linejoin: "round", vector_effect: "non-scaling-stroke" }
+                } }
             }
         }
     }
@@ -228,7 +244,13 @@ fn ProcessRow(process: ProcessEntry) -> Element {
                     div { class: "truncate font-mono text-[8px] text-muted-foreground/65", title: "{cwd}", "{cwd}" }
                 }
             }
-            span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_label}" }
+            if process.cpu_label.is_empty() {
+                span { class: "flex justify-end",
+                    Skeleton { class: "h-2.5 w-8 bg-foreground/[0.04]" }
+                }
+            } else {
+                span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_label}" }
+            }
             span { class: "text-right font-mono text-[9px] tabular-nums text-foreground", "{process.memory_label}" }
             span { class: "hidden text-right font-mono text-[9px] tabular-nums text-muted-foreground sm:block", "{process.uptime_label}" }
             if managed {

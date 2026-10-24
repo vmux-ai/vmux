@@ -423,7 +423,7 @@
                 hint: Some("schema-mode-detail"),
                 widget: Some(Select),
                 options: [
-                    (value: "device", label: "schema-device"),
+                    (value: "device", label: "schema-system"),
                     (value: "light", label: "schema-light"),
                     (value: "dark", label: "schema-dark"),
                 ],
@@ -445,10 +445,10 @@
             keywords: ["preferences", "config"],
             icon: "Settings",
             command_bar: true,
-            bookmark: Some(130),
+            bookmark: Some(150),
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
                 "SettingsUiState",
                 "CheckForUpdatesEvent",
                 "SettingsRequest",
