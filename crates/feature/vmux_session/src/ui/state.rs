@@ -18,6 +18,7 @@ use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptF
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
 use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::platform::Platform;
 
 #[derive(PartialEq)]
 pub struct ChatValue<T: 'static> {
@@ -645,6 +646,10 @@ pub struct Transcript {
     root: Signal<ChatUiState>,
     pub at_bottom: Signal<bool>,
     pub initial_follow: Signal<bool>,
+    last_top: Signal<i32>,
+    pointer_scrolling: Signal<bool>,
+    input_pending: Signal<bool>,
+    input_clear_task: Signal<Option<Task>>,
     pub scroll_container: scroll::Container,
     generation: Signal<u64>,
     follow_task: Signal<Option<Task>>,
@@ -655,6 +660,10 @@ pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
         root,
         at_bottom: use_signal(|| true),
         initial_follow: use_signal(|| true),
+        last_top: use_signal(|| 0),
+        pointer_scrolling: use_signal(|| false),
+        input_pending: use_signal(|| false),
+        input_clear_task: use_signal(|| None),
         scroll_container: use_signal(|| None),
         generation: use_signal(|| 0),
         follow_task: use_signal(|| None),
@@ -670,6 +679,50 @@ impl Transcript {
         self.root.read().transcript_revision > 0
     }
 
+    pub(super) fn note_scroll_input(self) {
+        let mut task = self.input_clear_task;
+        if let Some(task) = task.write().take() {
+            task.cancel();
+        }
+        let mut pending = self.input_pending;
+        pending.set(true);
+        task.set(Some(spawn(async move {
+            Platform::sleep(120).await;
+            pending.set(false);
+        })));
+    }
+
+    pub(super) fn begin_pointer_scroll(self) {
+        let mut pointer_scrolling = self.pointer_scrolling;
+        pointer_scrolling.set(true);
+    }
+
+    pub(super) fn end_pointer_scroll(self) {
+        let mut pointer_scrolling = self.pointer_scrolling;
+        pointer_scrolling.set(false);
+    }
+
+    pub(super) fn observe_scroll(self, top: i32, distance: i32) {
+        let mut last_top = self.last_top;
+        let previous = *last_top.peek();
+        last_top.set(top);
+        if *self.initial_follow.peek() {
+            return;
+        }
+        let user_scrolling = *self.pointer_scrolling.peek() || *self.input_pending.peek();
+        if distance <= 48 {
+            let mut at_bottom = self.at_bottom;
+            at_bottom.set(true);
+        } else if user_scrolling && top < previous - 4 {
+            let mut at_bottom = self.at_bottom;
+            at_bottom.set(false);
+        }
+        if *self.input_pending.peek() {
+            let mut pending = self.input_pending;
+            pending.set(false);
+        }
+    }
+
     pub(super) fn follow(self) {
         let generation = self.root.read().transcript.generation;
         if generation != *self.generation.peek() {
@@ -679,6 +732,8 @@ impl Transcript {
             initial_follow.set(true);
             let mut at_bottom = self.at_bottom;
             at_bottom.set(true);
+            let mut last_top = self.last_top;
+            last_top.set(0);
         }
         if *self.initial_follow.peek() {
             scroll::settle_bottom(self.scroll_container, self.initial_follow, self.follow_task);

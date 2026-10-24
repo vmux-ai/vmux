@@ -52,7 +52,7 @@ fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
 #[component]
 pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
-    let mut at_bottom = chat.transcript.at_bottom;
+    let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
     let transcript_loading = chat.transcript_loading() || !chat.transcript.ready();
     let loaded_start = transcript.loaded_start;
@@ -83,19 +83,17 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     WheelDelta::Lines(delta) => delta.y,
                     WheelDelta::Pages(delta) => delta.y,
                 };
-                if delta < 0.0 {
-                    at_bottom.set(false);
+                if delta != 0.0 {
+                    chat.transcript.note_scroll_input();
                 }
             },
+            onpointerdown: move |_| chat.transcript.begin_pointer_scroll(),
+            onpointerup: move |_| chat.transcript.end_pointer_scroll(),
+            onpointercancel: move |_| chat.transcript.end_pointer_scroll(),
             onscroll: move |e: Event<ScrollData>| {
                 let top = e.scroll_top() as i32;
                 let dist = e.scroll_height() - top - e.client_height();
-                if *chat.transcript.initial_follow.peek() {
-                    return;
-                }
-                if dist <= 48 {
-                    at_bottom.set(true);
-                }
+                chat.transcript.observe_scroll(top, dist);
                 if top <= 160 {
                     chat.request_history();
                 }

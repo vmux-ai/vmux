@@ -77,19 +77,29 @@ pub fn BreadcrumbSelector(
     label: String,
     options: Vec<BreadcrumbOption>,
     onselect: EventHandler<String>,
+    #[props(default)] class: String,
+    #[props(default)] active: bool,
+    #[props(default = rsx! {})] leading: Element,
 ) -> Element {
     let mut open = use_signal(|| false);
+    let root_class = cn(["min-w-0", class.as_str()]);
+    let button_class = if active {
+        "flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.05]"
+    } else {
+        "flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+    };
     rsx! {
         Dropdown {
             open: open(),
             keyboard_navigation: true,
-            class: "min-w-0 shrink-0".to_string(),
+            class: root_class,
             on_dismiss: move |_| open.set(false),
             button {
                 r#type: "button",
-                class: "flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
+                class: button_class,
                 aria_expanded: open(),
                 onclick: move |_| open.set(!open()),
+                {leading}
                 span { class: "truncate", "{label}" }
                 LineIconView {
                     icon: LineIcon::ChevronDown,

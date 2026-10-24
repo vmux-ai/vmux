@@ -110,9 +110,7 @@ const entries = globalThis.__vmuxDropdownPopupEntries ??= new Map();
 entries.get(id)?.cleanup();
 const popup = document.getElementById(id);
 const root = popup?.closest('[data-vmux-dropdown-root]');
-if (!popup || !root) {
-  dioxus.send(false);
-} else {
+if (popup && root) {
   let active = true;
   let frame = 0;
   const align = '__VMUX_DROPDOWN_ALIGN__';
@@ -194,10 +192,9 @@ if (!popup || !root) {
       try { popup.hidePopover(); } catch (error) {}
     }
     if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
-    dioxus.send(true);
   };
   entries.set(id, { cleanup });
-  schedule();
+  place();
 }
 "#;
 
@@ -284,8 +281,26 @@ impl DropdownPopupOwner {
         )
     }
 
-    fn raise(self) {
+    fn mount(
+        self,
+        align: DropdownAlign,
+        placement: DropdownPlacement,
+        match_width: bool,
+        horizontal_inset: f64,
+        gap: f64,
+    ) {
         crate::transport::Host::show_element_popover(&self.id());
+        crate::transport::Host::run_script(self.install_script(
+            align,
+            placement,
+            match_width,
+            horizontal_inset,
+            gap,
+        ));
+    }
+
+    fn cleanup(self) {
+        crate::transport::Host::run_script(self.cleanup_script());
     }
 }
 
@@ -348,9 +363,18 @@ pub fn DropdownPopup(
         "data-vmux-dropdown-popup": "",
     });
     let merged = merge_attributes(vec![base, attributes]);
+    use_drop(move || owner.cleanup());
     rsx! {
         div {
-            onmounted: move |_| owner.raise(),
+            onmounted: move |_| {
+                owner.mount(
+                    align,
+                    placement,
+                    match_width,
+                    horizontal_inset,
+                    gap,
+                );
+            },
             onclick: move |event| {
                 if let Some(handler) = onclick {
                     handler.call(event);
@@ -358,36 +382,8 @@ pub fn DropdownPopup(
             },
             ..merged,
             {children}
-            DropdownPopupMount {
-                owner,
-                align,
-                placement,
-                match_width,
-                horizontal_inset,
-                gap,
-            }
         }
     }
-}
-
-#[component]
-fn DropdownPopupMount(
-    owner: DropdownPopupOwner,
-    align: DropdownAlign,
-    placement: DropdownPlacement,
-    match_width: bool,
-    horizontal_inset: f64,
-    gap: f64,
-) -> Element {
-    use_future(move || async move {
-        let script = owner.install_script(align, placement, match_width, horizontal_inset, gap);
-        let mut eval = document::eval(&script);
-        let _ = eval.recv::<bool>().await;
-    });
-    use_drop(move || {
-        let _ = document::eval(&owner.cleanup_script());
-    });
-    rsx! {}
 }
 
 #[component]

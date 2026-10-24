@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use self::agent::ChatHeader;
+use self::agent::{ChatHeader, ChatHeaderCatalog};
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
 use self::item::MD_CSS;
@@ -44,6 +44,8 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
+    let catalog = vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
+    let header_catalog = catalog.use_selector(ChatHeaderCatalog::from_catalog);
     let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
@@ -67,6 +69,7 @@ fn SessionDetail(session_id: String) -> Element {
     let header_repository = details
         .as_ref()
         .and_then(|(_, repository, _)| repository.clone());
+    let header_navigation = header_catalog.read().navigation(header_repository.as_ref());
     let mut details_open = use_signal(|| false);
 
     rsx! {
@@ -74,7 +77,12 @@ fn SessionDetail(session_id: String) -> Element {
             class: "session-chat-page relative isolate flex h-dvh flex-col overflow-hidden bg-background text-foreground outline-none",
             style: "--agent-accent:{accent.css};",
             tabindex: "-1",
-            onkeydown: move |event| keys.on_root_keydown(event),
+            onkeydown: move |event| {
+                if matches!(event.key(), Key::ArrowUp | Key::PageUp | Key::Home) {
+                    chat.transcript.note_scroll_input();
+                }
+                keys.on_root_keydown(event);
+            },
             style { dangerous_inner_html: MD_CSS }
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 section { class: "flex min-w-0 flex-1 flex-col",
@@ -82,6 +90,7 @@ fn SessionDetail(session_id: String) -> Element {
                         chat,
                         session: header_session,
                         repository: header_repository,
+                        navigation: header_navigation,
                         details_available,
                         details_open: details_open(),
                         on_details_toggle: move |_| details_open.set(!details_open()),

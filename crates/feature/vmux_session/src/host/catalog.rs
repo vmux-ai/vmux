@@ -63,7 +63,7 @@ impl Plugin for CatalogPlugin {
                 PostUpdate,
                 (
                     sync_repositories.run_if(Activity::<SessionCatalogView>::active),
-                    publish_manager,
+                    publish_catalog,
                     publish_scope,
                     publish_detail,
                 )
@@ -84,7 +84,11 @@ type SessionScopeUiStateComponent = UiState<SessionScopeUiState>;
 pub struct SessionCatalogView;
 
 #[derive(Component, Default)]
-#[require(SessionCatalogView, SessionDetailUiStateComponent)]
+#[require(
+    SessionCatalogView,
+    SessionCatalogUiStateComponent,
+    SessionDetailUiStateComponent
+)]
 struct SessionDetailView;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -515,13 +519,13 @@ impl SessionDetailUiState {
     }
 }
 
-fn publish_manager(
+fn publish_catalog(
     catalog: Res<CatalogSnapshot>,
     repositories: Res<SessionRepositories>,
     targets: Query<
         Entity,
         (
-            With<SessionManagerView>,
+            With<SessionCatalogUiStateComponent>,
             With<PageReady>,
             With<KeyboardOwner>,
         ),
@@ -529,7 +533,7 @@ fn publish_manager(
     claimed: Query<
         (),
         (
-            With<SessionManagerView>,
+            With<SessionCatalogUiStateComponent>,
             With<PageReady>,
             Added<KeyboardOwner>,
         ),
@@ -716,6 +720,13 @@ fn ready(
         && let Ok(page) = pages.get(target)
     {
         commands.entity(target).insert(SessionDetailView);
+        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+            target, &*catalog,
+        ));
+        commands.trigger(UiStateWrite::<SessionCatalogUiState>::from_event(
+            target,
+            &*repositories,
+        ));
         let state = SessionDetailUiState::project(page, &catalog, &repositories);
         commands.trigger(UiStateWrite::<SessionDetailUiState>::from_event(
             target, &state,
@@ -777,7 +788,9 @@ fn cleanup_inactive_views(
                 .remove::<(SessionDetailView, SessionDetailUiStateComponent)>();
         }
         if !manager && !chat && !scope {
-            commands.entity(entity).remove::<SessionCatalogView>();
+            commands
+                .entity(entity)
+                .remove::<(SessionCatalogView, SessionCatalogUiStateComponent)>();
         }
     }
 }

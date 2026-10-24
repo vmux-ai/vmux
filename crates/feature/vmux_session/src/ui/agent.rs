@@ -1,4 +1,6 @@
 use super::state::Chat;
+use std::collections::HashSet;
+
 use dioxus::prelude::*;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar, Identicon};
 use vmux_ui::components::breadcrumb::{
@@ -12,13 +14,93 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::navigation::PageNavigation;
 
 use crate::event::SessionRepository;
+use crate::state::SessionCatalogUiState;
 use crate::{Route, SessionId, SessionSummary};
+
+#[derive(Clone, Default, PartialEq)]
+pub(super) struct ChatHeaderCatalog {
+    projects: Vec<BreadcrumbOption>,
+    sessions: Vec<ChatHeaderSession>,
+}
+
+#[derive(Clone, PartialEq)]
+struct ChatHeaderSession {
+    project_url: String,
+    option: BreadcrumbOption,
+}
+
+impl ChatHeaderCatalog {
+    pub(super) fn from_catalog(catalog: &SessionCatalogUiState) -> Self {
+        let mut project_urls = HashSet::new();
+        let mut projects = Vec::new();
+        for repository in &catalog.repositories.sessions {
+            if repository.project.is_empty()
+                || repository.project_url.is_empty()
+                || !project_urls.insert(repository.project_url.clone())
+            {
+                continue;
+            }
+            projects.push(BreadcrumbOption {
+                label: repository.project.clone(),
+                value: repository.project_url.clone(),
+            });
+        }
+        projects.sort_by(|left, right| left.label.cmp(&right.label));
+
+        let now = vmux_ecs::UnixMillis::now().0;
+        let mut sessions = Vec::new();
+        for session in &catalog.catalog.sessions {
+            if session.archived_at > 0 {
+                continue;
+            }
+            let presentation =
+                vmux_session::SessionSummaryProjection::new(session, &catalog.catalog.stages, now);
+            let project_url = catalog
+                .repositories
+                .get(&session.id)
+                .map(|repository| repository.project_url)
+                .unwrap_or_default();
+            sessions.push(ChatHeaderSession {
+                project_url,
+                option: BreadcrumbOption {
+                    label: presentation.title,
+                    value: Route::Session(SessionId(session.id.clone())).url(),
+                },
+            });
+        }
+        Self { projects, sessions }
+    }
+
+    pub(super) fn navigation(
+        &self,
+        repository: Option<&SessionRepository>,
+    ) -> ChatHeaderNavigation {
+        let current_project = repository.map(|repository| repository.project_url.as_str());
+        let sessions = self
+            .sessions
+            .iter()
+            .filter(|session| current_project.is_none_or(|project| session.project_url == project))
+            .map(|session| session.option.clone())
+            .collect();
+        ChatHeaderNavigation {
+            projects: self.projects.clone(),
+            sessions,
+        }
+    }
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub(super) struct ChatHeaderNavigation {
+    projects: Vec<BreadcrumbOption>,
+    sessions: Vec<BreadcrumbOption>,
+}
 
 #[component]
 pub(super) fn ChatHeader(
     chat: Chat,
     session: Option<SessionSummary>,
     repository: Option<SessionRepository>,
+    navigation: ChatHeaderNavigation,
     details_available: bool,
     details_open: bool,
     on_details_toggle: EventHandler<MouseEvent>,
@@ -31,73 +113,53 @@ pub(super) fn ChatHeader(
         .map(|repository| repository.project.clone())
         .filter(|project| !project.is_empty())
         .unwrap_or_else(|| translate("layout-projects"));
-    let project_url = repository
-        .as_ref()
-        .map(|repository| repository.project_url.clone())
-        .filter(|url| !url.is_empty())
-        .unwrap_or_else(|| "vmux://projects/".to_string());
     let project_seed = repository
         .as_ref()
         .map(|repository| repository.project_url.clone())
         .filter(|seed| !seed.is_empty())
         .or_else(|| session.as_ref().map(|session| session.cwd.clone()))
         .unwrap_or_else(|| project_name.clone());
-    let session_url = session
+    let session_seed = session
         .as_ref()
-        .map(|session| Route::Session(SessionId(session.id.clone())).url())
-        .unwrap_or_else(|| "vmux://sessions/".to_string());
-    let mut routes = vec![
-        BreadcrumbOption {
-            label: translate("resume-column-project"),
-            value: project_url.clone(),
-        },
-        BreadcrumbOption {
-            label: translate("sessions-title"),
-            value: session_url,
-        },
-    ];
-    if let Some(repository) = &repository
-        && !repository.url.is_empty()
-    {
-        routes.push(BreadcrumbOption {
-            label: translate("git-title"),
-            value: repository.url.clone(),
-        });
-    }
-    if let Some(session) = &session
-        && let Ok(url) = url::Url::from_file_path(std::path::Path::new(&session.cwd))
-    {
-        routes.push(BreadcrumbOption {
-            label: translate("schema-editor"),
-            value: url.into(),
-        });
-    }
+        .map(|session| session.id.clone())
+        .unwrap_or_else(|| title.clone());
     rsx! {
         PageHeader {
             class: "session-chat-header relative z-10 shrink-0 bg-transparent px-5 pb-2 pt-[calc(0.75rem+env(safe-area-inset-top))]".to_string(),
-            content_class: "mx-auto flex min-h-10 w-full max-w-3xl items-center gap-2".to_string(),
-            Identicon {
-                seed: project_seed,
-                alt: project_name.clone(),
-                class: "size-7 shrink-0 rounded-lg".to_string(),
-            }
+            content_class: "flex min-h-10 w-full items-center gap-2".to_string(),
             Breadcrumbs { class: "min-w-0 flex-1".to_string(),
-                BreadcrumbItem {
-                    label: project_name,
-                    title: project_url.clone(),
-                    onclick: move |_| PageNavigation::replace(project_url.clone()),
-                }
-                BreadcrumbSeparator {}
                 BreadcrumbSelector {
-                    label: translate("sessions-title"),
-                    options: routes,
+                    label: project_name.clone(),
+                    class: "max-w-[min(16rem,30vw)] shrink-0".to_string(),
+                    options: navigation.projects,
+                    leading: rsx! {
+                        Identicon {
+                            seed: project_seed,
+                            alt: project_name.clone(),
+                            class: "size-5 shrink-0 rounded-md".to_string(),
+                        }
+                    },
                     onselect: move |url| PageNavigation::replace(url),
                 }
                 BreadcrumbSeparator {}
                 BreadcrumbItem {
+                    label: translate("sessions-title"),
+                    onclick: move |_| PageNavigation::replace("vmux://sessions/"),
+                }
+                BreadcrumbSeparator {}
+                BreadcrumbSelector {
                     label: title.clone(),
-                    title: title.clone(),
+                    class: "min-w-0 flex-1".to_string(),
                     active: true,
+                    options: navigation.sessions,
+                    leading: rsx! {
+                        Identicon {
+                            seed: session_seed,
+                            alt: title.clone(),
+                            class: "size-5 shrink-0 rounded-md".to_string(),
+                        }
+                    },
+                    onselect: move |url| PageNavigation::replace(url),
                 }
             }
             StatusDot { status: chat.status(), size_class: "h-2 w-2" }
