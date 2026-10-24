@@ -666,22 +666,26 @@ fn broadcast_to_monitors(
             managed_count,
             cpu: ProcessUsageUiState {
                 label: "CPU".to_string(),
-                value: runtime
-                    .cpu_ready
-                    .then(|| format!("{total_cpu_percent:.1}%"))
-                    .unwrap_or_default(),
-                peak: runtime
-                    .cpu_ready
-                    .then(|| format!("↑ {peak_cpu_percent:.1}%"))
-                    .unwrap_or_default(),
-                line: runtime
-                    .cpu_ready
-                    .then_some(cpu_graph.line)
-                    .unwrap_or_default(),
-                area: runtime
-                    .cpu_ready
-                    .then_some(cpu_graph.area)
-                    .unwrap_or_default(),
+                value: if runtime.cpu_ready {
+                    format!("{total_cpu_percent:.1}%")
+                } else {
+                    String::new()
+                },
+                peak: if runtime.cpu_ready {
+                    format!("↑ {peak_cpu_percent:.1}%")
+                } else {
+                    String::new()
+                },
+                line: if runtime.cpu_ready {
+                    cpu_graph.line
+                } else {
+                    String::new()
+                },
+                area: if runtime.cpu_ready {
+                    cpu_graph.area
+                } else {
+                    String::new()
+                },
             },
             memory: ProcessUsageUiState {
                 label: locale.translate("services-memory"),

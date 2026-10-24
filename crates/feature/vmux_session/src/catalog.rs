@@ -263,6 +263,67 @@ type SessionCatalog<'w, 's> = Query<
 >;
 
 #[cfg(host)]
+type LinkedSessions<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static ProviderKind, &'static ProviderSessionId),
+    (With<Session>, Without<SessionDuplicate>),
+>;
+
+#[cfg(host)]
+type StageCatalog<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static StageId,
+        &'static Name,
+        &'static Order,
+        Has<Terminal>,
+    ),
+    With<StageDefinition>,
+>;
+
+#[cfg(host)]
+type ProviderStages<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static ProviderKind,
+        &'static ProviderSessionId,
+        &'static Stage,
+        &'static StageChangedAt,
+        &'static SourceUpdatedAt,
+    ),
+    With<ProviderStage>,
+>;
+
+#[cfg(host)]
+type ProviderArchives<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static ProviderKind,
+        &'static ProviderSessionId,
+        &'static SourceUpdatedAt,
+        Option<&'static ArchivedAt>,
+    ),
+    With<ProviderArchive>,
+>;
+
+#[cfg(host)]
+#[derive(SystemParam)]
+struct CatalogSources<'w, 's> {
+    sessions: SessionCatalog<'w, 's>,
+    linked_sessions: LinkedSessions<'w, 's>,
+    stages: StageCatalog<'w, 's>,
+    providers: Res<'w, ProviderCatalog>,
+    operations: Res<'w, ProviderArchiveOperations>,
+    provider_stages: ProviderStages<'w, 's>,
+    provider_archives: ProviderArchives<'w, 's>,
+    transcripts: Transcripts<'w, 's>,
+}
+
+#[cfg(host)]
 type ChangedSessions<'w, 's> = Query<
     'w,
     's,
@@ -418,37 +479,20 @@ impl CatalogChanges<'_, '_> {
 
 #[cfg(host)]
 fn project(
-    sessions: SessionCatalog,
-    linked_sessions: Query<
-        (Entity, &ProviderKind, &ProviderSessionId),
-        (With<Session>, Without<SessionDuplicate>),
-    >,
-    stages: Query<(&StageId, &Name, &Order, Has<Terminal>), With<StageDefinition>>,
-    providers: Res<ProviderCatalog>,
-    operations: Res<ProviderArchiveOperations>,
-    provider_stages: Query<
-        (
-            &ProviderKind,
-            &ProviderSessionId,
-            &Stage,
-            &StageChangedAt,
-            &SourceUpdatedAt,
-        ),
-        With<ProviderStage>,
-    >,
-    provider_archives: Query<
-        (
-            &ProviderKind,
-            &ProviderSessionId,
-            &SourceUpdatedAt,
-            Option<&ArchivedAt>,
-        ),
-        With<ProviderArchive>,
-    >,
-    transcripts: Transcripts,
+    sources: CatalogSources,
     mut changes: CatalogChanges,
     mut catalog: ResMut<CatalogSnapshot>,
 ) {
+    let CatalogSources {
+        sessions,
+        linked_sessions,
+        stages,
+        providers,
+        operations,
+        provider_stages,
+        provider_archives,
+        transcripts,
+    } = sources;
     if !catalog.is_added() && !providers.is_changed() && !operations.is_changed() && !changes.any()
     {
         return;

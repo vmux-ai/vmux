@@ -402,9 +402,7 @@ impl ProviderArchiveOperations {
         result: &ProviderArchiveCompleted,
     ) -> Option<ProviderArchiveWriteRequest> {
         let key = (result.kind.0.clone(), result.id.0.clone());
-        let Some(operation) = self.pending.get_mut(&key) else {
-            return None;
-        };
+        let operation = self.pending.get_mut(&key)?;
         if operation.in_flight != Some(result.revision) {
             return None;
         }
