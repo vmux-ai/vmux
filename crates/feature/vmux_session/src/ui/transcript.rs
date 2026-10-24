@@ -59,13 +59,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
     let items = transcript.items;
-    let bottom_key = format!(
-        "chat-bottom-{}-{}-{}-{}",
-        transcript.generation,
-        transcript.request_id,
-        loaded_start,
-        items.len()
-    );
     let handoff_source = chat.handoff.source();
     let handoff_truncated = chat.handoff.truncated();
     let agent = chat.agent();
@@ -142,7 +135,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     }
                 }
                 div {
-                    key: "{bottom_key}",
                     id: "chat-bottom",
                     class: "h-px shrink-0",
                     onmounted: move |_| {
