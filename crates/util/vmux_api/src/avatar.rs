@@ -183,13 +183,13 @@ impl IdenticonHash {
     }
 
     fn boolean(self, place: u32) -> bool {
-        self.digit(place) % 2 == 0
+        self.digit(place).is_multiple_of(2)
     }
 
     fn unit(self, range: i32, sign_digit: Option<u32>) -> i32 {
         let value = (self.0 % range as u64) as i32;
         match sign_digit {
-            Some(place) if self.digit(place) % 2 == 0 => -value,
+            Some(place) if self.digit(place).is_multiple_of(2) => -value,
             _ => value,
         }
     }
