@@ -26,6 +26,7 @@ pub mod bin_event;
 pub mod bookmark;
 pub mod chat;
 pub mod command_bar;
+pub mod dropdown;
 pub mod editor;
 pub mod error;
 pub mod extension;

@@ -24,6 +24,7 @@ pub mod cef;
 mod command;
 pub mod contract;
 mod deadline;
+mod dropdown;
 pub mod hosted_page;
 pub mod overlay;
 pub mod page_context;

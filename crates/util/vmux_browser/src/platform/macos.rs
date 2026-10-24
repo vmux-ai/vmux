@@ -27,7 +27,7 @@ use vmux_layout::overlay::{LayoutOverlayDismissRevision, LayoutOverlayOpened};
 use vmux_layout::window::FocusedWindow;
 use vmux_page::{
     Appearance, AssetReply, Assets as RendererAssets, Embedding, LifecycleSink, LifecycleUpdate,
-    Outbox as RendererOutbox, Page, PageClaimDirty, PagePlacement, PageRegistration, SiblingOrder,
+    ModalFrame, Outbox as RendererOutbox, Page, PageClaimDirty, PagePlacement, PageRegistration, SiblingOrder,
     Wake as RendererWake, WebView,
 };
 use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
@@ -1632,6 +1632,9 @@ fn open(
                     surface.ipc_epoch()
                 };
                 let navigation_revision = surface.navigation_revision();
+                if placement == PagePlacement::Modal && !surface.host_as_modal() {
+                    error!("browser_platform: modal host failed for {}", page.url);
+                }
                 if placement.paints_in_front() {
                     surface.raise_above_layers();
                 }
@@ -1728,6 +1731,7 @@ fn place(
     >,
     ready_spares: Query<(), (With<vmux_layout::warm_page::WarmPageSpare>, With<PageReady>)>,
     frames: Query<&PaneFrame>,
+    modal_frames: Query<&ModalFrame>,
     rings: Query<&FocusRing>,
     corners: Query<&AllCorners>,
     windows: Query<&Window>,
@@ -1787,7 +1791,7 @@ fn place(
             SurfacePresentation::Hidden
         } else {
             let window = windows.get(page.window).ok();
-            let Some(frame) = page.placement.frame(entity, window, &frames) else {
+            let Some(frame) = page.placement.frame(entity, window, &frames, &modal_frames) else {
                 if presentation_ready || transition_ready {
                     commands.entity(entity).try_remove::<(
                         vmux_layout::hosted_page::SurfacePresentationReady,
@@ -1813,7 +1817,8 @@ fn place(
                 }
                 continue;
             };
-            let all_corners = corners.get(entity).is_ok_and(|corners| corners.0);
+            let all_corners = page.placement == PagePlacement::Modal
+                || corners.get(entity).is_ok_and(|corners| corners.0);
             let ring = rings.get(entity).copied().unwrap_or_default();
             let window_is_capturing = capturing.iter().any(|host| host.0 == page.window);
             let awaiting_first_paint = handoff.is_some_and(|handoff| {
@@ -2118,6 +2123,7 @@ trait PagePlacementExt {
         entity: Entity,
         window: Option<&Window>,
         frames: &Query<&PaneFrame>,
+        modal_frames: &Query<&ModalFrame>,
     ) -> Option<PaneFrame>;
 }
 
@@ -2155,6 +2161,7 @@ impl PagePlacementExt for PagePlacement {
         entity: Entity,
         window: Option<&Window>,
         frames: &Query<&PaneFrame>,
+        modal_frames: &Query<&ModalFrame>,
     ) -> Option<PaneFrame> {
         match self {
             PagePlacement::Layout => {
@@ -2166,7 +2173,16 @@ impl PagePlacementExt for PagePlacement {
                     height: window.height(),
                 })
             }
-            PagePlacement::Pane | PagePlacement::Modal => frames.get(entity).ok().copied(),
+            PagePlacement::Pane => frames.get(entity).ok().copied(),
+            PagePlacement::Modal => {
+                let frame = modal_frames.get(entity).ok()?;
+                Some(PaneFrame {
+                    left: frame.left,
+                    top: frame.top,
+                    width: frame.width,
+                    height: frame.height,
+                })
+            }
         }
     }
 }

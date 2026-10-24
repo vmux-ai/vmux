@@ -82,6 +82,8 @@
                 "RemotePairingShowRequest",
                 "RemotePairingDismissRequest",
                 "LayoutOverlayEvent",
+                "ProjectDropdownOpenRequest",
+                "ProjectDropdownCloseRequest",
                 "RemoteCopyEvent",
                 "RemoteRevokeRequest",
                 "BookmarkToggleRequest",
@@ -182,8 +184,21 @@
                 "KeyStroke",
                 "UiKeyClaims",
             ],
-        )
-        ,
+        ),
+        (
+            name: "project_dropdown",
+            url: "vmux://layout/project-dropdown/",
+            title: "Project",
+            permissions: [
+                "PageReady",
+                "UiTheme",
+                "ProjectDropdownSizeRequest",
+                "ProjectDropdownPickRequest",
+                "ProjectDropdownAddRequest",
+                "ProjectDropdownOpenSelectedRequest",
+                "ProjectDropdownCloseRequest",
+            ],
+        ),
         (
             name: "error",
             url: "vmux://error/",
