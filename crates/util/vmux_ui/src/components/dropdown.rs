@@ -70,40 +70,6 @@ document.addEventListener('keydown', keydown, true);
 document.addEventListener('input', input, true);
 "#;
 
-const DROPDOWN_DISMISS_SCRIPT: &str = r#"
-const owner = __VMUX_DROPDOWN_OWNER__;
-const entries = globalThis.__vmuxDropdownDismissEntries ??= new Map();
-for (const [other, entry] of [...entries]) {
-  if (other !== owner) entry.dismiss();
-}
-entries.get(owner)?.cleanup();
-let active = true;
-const cleanup = () => {
-  if (!active) return;
-  active = false;
-  document.removeEventListener('pointerdown', outside, true);
-  window.removeEventListener('pointerdown', outside, true);
-  window.removeEventListener('blur', dismiss, true);
-  if (entries.get(owner)?.cleanup === cleanup) {
-    entries.delete(owner);
-  }
-};
-const dismiss = () => {
-  if (!active) return;
-  cleanup();
-  dioxus.send(true);
-};
-const outside = event => {
-  const root = document.querySelector(`[data-vmux-dropdown-owner="${owner}"]`);
-  if (root && event.composedPath().includes(root)) return;
-  dismiss();
-};
-entries.set(owner, { cleanup, dismiss });
-document.addEventListener('pointerdown', outside, true);
-window.addEventListener('pointerdown', outside, true);
-window.addEventListener('blur', dismiss, true);
-"#;
-
 const DROPDOWN_POPUP_SCRIPT: &str = r#"
 const id = '__VMUX_DROPDOWN_POPUP__';
 const entries = globalThis.__vmuxDropdownPopupEntries ??= new Map();
@@ -198,22 +164,6 @@ if (popup && root) {
 }
 "#;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct DropdownOutsideOwner(usize);
-
-impl DropdownOutsideOwner {
-    fn install_script(self) -> String {
-        DROPDOWN_DISMISS_SCRIPT.replace("__VMUX_DROPDOWN_OWNER__", &self.0.to_string())
-    }
-
-    fn cleanup_script(self) -> String {
-        format!(
-            "globalThis.__vmuxDropdownDismissEntries?.get({})?.cleanup();",
-            self.0
-        )
-    }
-}
-
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum DropdownAlign {
     #[default]
@@ -236,6 +186,9 @@ pub enum DropdownPlacement {
     Bottom,
     Top,
 }
+
+#[derive(Clone, Copy)]
+struct DropdownContext(EventHandler<()>);
 
 impl DropdownPlacement {
     fn as_str(self) -> &'static str {
@@ -281,6 +234,46 @@ impl DropdownPopupOwner {
         )
     }
 
+    fn dismiss_script(self) -> String {
+        format!(
+            r#"
+const id = '{}';
+const popup = document.getElementById(id);
+if (popup) {{
+  const entries = globalThis.__vmuxDropdownToggleEntries ??= new Map();
+  entries.get(id)?.cleanup();
+  let active = true;
+  const cleanup = () => {{
+    if (!active) return;
+    active = false;
+    popup.removeEventListener('toggle', toggle);
+    window.removeEventListener('blur', dismiss, true);
+    if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
+  }};
+  const dismiss = () => {{
+    if (!active) return;
+    cleanup();
+    dioxus.send(true);
+  }};
+  const toggle = () => {{
+    if (!popup.matches(':popover-open')) dismiss();
+  }};
+  entries.set(id, {{ cleanup }});
+  popup.addEventListener('toggle', toggle);
+  window.addEventListener('blur', dismiss, true);
+}}
+"#,
+            self.id()
+        )
+    }
+
+    fn dismiss_cleanup_script(self) -> String {
+        format!(
+            "globalThis.__vmuxDropdownToggleEntries?.get('{}')?.cleanup();",
+            self.id()
+        )
+    }
+
     fn mount(
         self,
         align: DropdownAlign,
@@ -312,7 +305,7 @@ pub fn Dropdown(
     on_dismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
-    let outside_owner = DropdownOutsideOwner(current_scope_id().0);
+    use_context_provider(|| DropdownContext(on_dismiss));
     let layer = if open { "z-[100]" } else { "z-auto" };
     let root_class = cn([
         "relative [&_button]:transition-[background-color,color,opacity,transform] [&_button]:duration-150 [&_button]:ease-out [&_svg]:transition-transform [&_svg]:duration-150 motion-reduce:[&_button]:transition-none motion-reduce:[&_svg]:transition-none",
@@ -324,7 +317,6 @@ pub fn Dropdown(
             class: root_class,
             "data-vmux-dropdown-root": "",
             "data-vmux-dropdown-open": if open { "true" } else { "false" },
-            "data-vmux-dropdown-owner": outside_owner.0,
             "data-vmux-dropdown-keyboard": if keyboard_navigation { "true" } else { "false" },
             onkeydown: move |event: KeyboardEvent| {
                 if open && event.key() == Key::Escape {
@@ -334,7 +326,6 @@ pub fn Dropdown(
                 }
             },
             if open {
-                DropdownDismiss { owner: outside_owner, on_dismiss }
                 if keyboard_navigation {
                     DropdownKeyboardNavigation {}
                 }
@@ -356,14 +347,18 @@ pub fn DropdownPopup(
     children: Element,
 ) -> Element {
     let owner = DropdownPopupOwner(current_scope_id().0);
+    let dismiss = use_context::<DropdownContext>().0;
     let base = attributes!(div {
         id: owner.id(),
-        popover: "manual",
+        popover: "auto",
         class: "invisible fixed left-0 top-0 z-[1000] m-0 origin-top rounded-lg bg-popover shadow-[0_16px_48px_rgba(0,0,0,0.32)] animate-[dx-fade-zoom-in_120ms_ease-out_forwards] will-change-[transform,opacity] motion-reduce:animate-none",
         "data-vmux-dropdown-popup": "",
     });
     let merged = merge_attributes(vec![base, attributes]);
-    use_drop(move || owner.cleanup());
+    use_drop(move || {
+        crate::transport::Host::run_script(owner.dismiss_cleanup_script());
+        owner.cleanup();
+    });
     rsx! {
         div {
             onmounted: move |_| {
@@ -374,6 +369,12 @@ pub fn DropdownPopup(
                     horizontal_inset,
                     gap,
                 );
+                let mut eval = document::eval(&owner.dismiss_script());
+                spawn(async move {
+                    if eval.recv::<bool>().await.is_ok_and(|dismiss| dismiss) {
+                        dismiss.call(());
+                    }
+                });
             },
             onclick: move |event| {
                 if let Some(handler) = onclick {
@@ -384,21 +385,6 @@ pub fn DropdownPopup(
             {children}
         }
     }
-}
-
-#[component]
-fn DropdownDismiss(owner: DropdownOutsideOwner, on_dismiss: EventHandler<()>) -> Element {
-    use_future(move || async move {
-        let script = owner.install_script();
-        let mut eval = document::eval(&script);
-        if eval.recv::<bool>().await.is_ok_and(|dismiss| dismiss) {
-            on_dismiss.call(());
-        }
-    });
-    use_drop(move || {
-        let _ = document::eval(&owner.cleanup_script());
-    });
-    rsx! {}
 }
 
 #[component]
