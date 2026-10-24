@@ -58,7 +58,7 @@ fn dismiss_layout_overlay_from_native_pointer(
     let pressed = pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle;
     let began = pressed && !*previous_pressed;
     *previous_pressed = pressed;
-    if !began {
+    if !began || !vmux_input::NativePointer::in_main_window() {
         return;
     }
     for (layout, host, mut revision) in &mut layouts {
@@ -77,7 +77,7 @@ fn dismiss_layout_overlay_from_native_pointer(
             continue;
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_layout::state::UiLayout>::from_event(
                 layout,
                 &revision.next_effect(),
             ),
@@ -234,7 +234,7 @@ fn forward_layout_cef_mouse_button(
         let in_region = cef_regions.contains(position);
         if event.state == ButtonState::Pressed && active_overlays.contains(layout) && !in_region {
             commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                vmux_ecs::UiStateWrite::<vmux_layout::state::UiLayout>::from_event(
                     layout,
                     &dismiss_revision.next_effect(),
                 ),

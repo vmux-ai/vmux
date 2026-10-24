@@ -4,6 +4,7 @@ use vmux_flex::prelude::*;
 
 use super::agent::LayoutAgentPlugin;
 use super::command::LayoutRequestPlugin;
+use super::dropdown::ProjectDropdownPlugin;
 use super::persistence::LayoutPersistencePlugin;
 use super::projection::LayoutUiProjectionPlugin;
 use crate::active_pane::ActivePanePlugin;
@@ -35,6 +36,7 @@ impl Plugin for LayoutPlugin {
             app.add_plugins((
                 crate::ui::LayoutPage::plugin(),
                 crate::ui::ErrorPage::plugin(),
+                crate::ui::ProjectDropdownPage::plugin(),
             ));
         }
         app.add_systems(Startup, spawn_update_state)
@@ -64,6 +66,7 @@ impl Plugin for LayoutPlugin {
                 crate::tool::LayoutToolPlugin,
                 LayoutUiProjectionPlugin,
                 LayoutOverlayPlugin,
+                ProjectDropdownPlugin,
                 SpaceLayoutPlugin,
                 WindowLayoutPlugin,
                 TabPlugin,
@@ -118,3 +121,6 @@ fn sync_header_visibility(
 
 #[vmux_page::page(page = "error")]
 pub struct ErrorPage;
+
+#[vmux_page::page(page = "project_dropdown")]
+pub(super) struct ProjectDropdownPage;

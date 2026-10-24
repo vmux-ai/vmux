@@ -23,6 +23,7 @@ pub mod bookmark;
 pub mod cef;
 mod command;
 pub mod contract;
+mod dropdown;
 pub mod hosted_page;
 pub mod overlay;
 pub mod page_context;

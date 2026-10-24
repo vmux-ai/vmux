@@ -25,7 +25,7 @@ use vmux_layout::overlay::LayoutOverlayDismissRevision;
 use vmux_layout::window::FocusedWindow;
 use vmux_page::{
     Appearance, AssetReply, Assets as RendererAssets, Embedding, LifecycleSink, LifecycleUpdate,
-    Outbox as RendererOutbox, Page, PagePlacement, PageRegistration, SiblingOrder,
+    ModalFrame, Outbox as RendererOutbox, Page, PagePlacement, PageRegistration, SiblingOrder,
     Wake as RendererWake, WebView,
 };
 use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
@@ -387,6 +387,9 @@ fn open(
                 return;
             }
             Some(Ok(surface)) => {
+                if placement == PagePlacement::Modal && !surface.host_as_modal() {
+                    error!("browser_platform: modal host failed for {}", page.url);
+                }
                 if placement.paints_in_front() {
                     surface.raise_above_layers();
                 }
@@ -437,6 +440,7 @@ fn place(
     renderer: Option<NonSendMut<PageRenderer>>,
     hosted: Query<(Entity, &HostedSurface, &crate::HostedPageLifecycle), With<HostsPage>>,
     frames: Query<&PaneFrame>,
+    modal_frames: Query<&ModalFrame>,
     rings: Query<&FocusRing>,
     corners: Query<&AllCorners>,
     windows: Query<&Window>,
@@ -463,12 +467,16 @@ fn place(
             continue;
         }
         let window = windows.get(page.window).ok();
-        let Some(bounds) = page.placement.bounds(entity, window, &frames) else {
+        let Some(bounds) = page
+            .placement
+            .bounds(entity, window, &frames, &modal_frames)
+        else {
             surface.set_visible(false);
             continue;
         };
         surface.set_bounds(bounds);
-        let all_corners = corners.get(entity).is_ok_and(|corners| corners.0);
+        let all_corners = page.placement == PagePlacement::Modal
+            || corners.get(entity).is_ok_and(|corners| corners.0);
         surface.set_corner_radius(settings.layout.radius as f64, all_corners);
         let ring = rings.get(entity).copied().unwrap_or_default();
         surface.set_focus_ring(ring.width as f64, ring.rgb);
@@ -611,6 +619,7 @@ trait PagePlacementExt {
         entity: Entity,
         window: Option<&Window>,
         frames: &Query<&PaneFrame>,
+        modal_frames: &Query<&ModalFrame>,
     ) -> Option<wry::Rect>;
 }
 
@@ -632,6 +641,7 @@ impl PagePlacementExt for PagePlacement {
         entity: Entity,
         window: Option<&Window>,
         frames: &Query<&PaneFrame>,
+        modal_frames: &Query<&ModalFrame>,
     ) -> Option<wry::Rect> {
         match self {
             PagePlacement::Layout => {
@@ -641,8 +651,15 @@ impl PagePlacementExt for PagePlacement {
                     size: wry::dpi::LogicalSize::new(window.width(), window.height()).into(),
                 })
             }
-            PagePlacement::Pane | PagePlacement::Modal => {
+            PagePlacement::Pane => {
                 let frame = frames.get(entity).ok()?;
+                Some(wry::Rect {
+                    position: wry::dpi::LogicalPosition::new(frame.left, frame.top).into(),
+                    size: wry::dpi::LogicalSize::new(frame.width, frame.height).into(),
+                })
+            }
+            PagePlacement::Modal => {
+                let frame = modal_frames.get(entity).ok()?;
                 Some(wry::Rect {
                     position: wry::dpi::LogicalPosition::new(frame.left, frame.top).into(),
                     size: wry::dpi::LogicalSize::new(frame.width, frame.height).into(),
