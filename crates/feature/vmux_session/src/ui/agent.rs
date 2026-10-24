@@ -2,11 +2,13 @@ use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::back::BackButton;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
+use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator, Breadcrumbs};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 #[component]
 pub(super) fn ChatHeader(
@@ -37,10 +39,17 @@ pub(super) fn ChatHeader(
                 AgentAvatar { chat, size_class: "absolute left-5 top-0 h-8 w-8 border-2 border-zinc-100 text-[10px] dark:border-zinc-900" }
             }
             div { class: "min-w-0 flex-1",
-                div {
-                    class: "truncate text-sm font-semibold text-foreground",
-                    title: "{title}",
-                    "{title}"
+                Breadcrumbs {
+                    BreadcrumbItem {
+                        label: translate("sessions-title"),
+                        onclick: move |_| PageNavigation::replace("vmux://sessions/"),
+                    }
+                    BreadcrumbSeparator {}
+                    BreadcrumbItem {
+                        label: title.clone(),
+                        title: title.clone(),
+                        active: true,
+                    }
                 }
                 div { class: "flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground",
                     StatusDot { status: chat.status(), size_class: "h-2 w-2" }

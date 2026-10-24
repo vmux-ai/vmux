@@ -435,6 +435,16 @@ mod tests {
                 sid: "s".into(),
                 cwd: "/tmp/worktree".into(),
             },
+            ClientMessage::ListAcpSessions {
+                request_id: 9,
+                agent_id: "codex-acp".into(),
+                agent_name: "Codex".into(),
+                command: "codex-acp".into(),
+                args: vec!["--acp".into()],
+                env: vec![("K".into(), "V".into())],
+                cwd: "/tmp".into(),
+            },
+            ClientMessage::CancelAcpSessionCatalog { request_id: 9 },
         ];
         for msg in messages {
             let expects_allow_always = matches!(
@@ -572,6 +582,19 @@ mod tests {
                 config_id: Some("model".into()),
                 value: "opus".into(),
                 succeeded: false,
+            },
+            ServiceMessage::AcpSessionCatalog {
+                request_id: 9,
+                agent_id: "codex-acp".into(),
+                agent_name: "Codex".into(),
+                supported: true,
+                sessions: vec![AcpProviderSession {
+                    id: "provider-session".into(),
+                    cwd: "/tmp".into(),
+                    title: "Review changes".into(),
+                    updated_at: "2026-10-24T00:00:00Z".into(),
+                }],
+                error: None,
             },
         ];
         for msg in services {

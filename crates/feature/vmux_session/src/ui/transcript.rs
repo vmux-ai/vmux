@@ -85,6 +85,10 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
             onscroll: move |e: Event<ScrollData>| {
                 let top = e.scroll_top() as i32;
                 let dist = e.scroll_height() - top - e.client_height();
+                if *chat.transcript.initial_follow.peek() {
+                    last_top.set(top);
+                    return;
+                }
                 if dist <= 48 {
                     at_bottom.set(true);
                 } else if top < *last_top.peek() - 4 {
@@ -95,7 +99,15 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     chat.request_history();
                 }
             },
-            div { class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
+            div {
+                class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
+                onresize: move |_| {
+                    if *chat.transcript.initial_follow.peek() {
+                        chat.transcript.follow();
+                    } else if *at_bottom.peek() {
+                        super::scroll::to_bottom(scroll_container);
+                    }
+                },
                 if transcript_loading {
                     TranscriptSkeleton {}
                 } else if loaded_start > 0 {

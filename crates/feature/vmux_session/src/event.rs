@@ -482,11 +482,6 @@ pub struct SetAgentEffort {
     pub level: String,
 }
 
-#[vmux_api::ui_event(Default)]
-pub struct ChatOpenPage {
-    pub url: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

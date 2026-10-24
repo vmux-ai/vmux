@@ -1,8 +1,7 @@
-use crate::event::ChatOpenPage;
 use dioxus::prelude::*;
 use vmux_ui::clipboard::Clipboard;
-use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
+use vmux_ui::navigation::PageNavigation;
 
 #[component]
 pub(super) fn ChatErrorCard(message: String) -> Element {
@@ -78,7 +77,7 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
                         button {
                             class: "vmux-primary-action inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg",
                             onclick: move |_| {
-                                let _ = send(&ChatOpenPage { url: url.clone() });
+                                PageNavigation::replace(url.clone());
                             },
                             svg {
                                 class: "h-4 w-4 text-indigo-500",

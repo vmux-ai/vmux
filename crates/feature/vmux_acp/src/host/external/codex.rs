@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, Duration, Utc};
@@ -10,8 +11,8 @@ use vmux_api::session::{AgentAttachment, AssistantBlock, Message};
 use vmux_session::{ArchiveState, ProviderSession};
 
 use super::{
-    BoundedLines, PROVIDER_LINE_LIMIT, PROVIDER_READ_LIMIT, PromptText, Reader as ProviderReader,
-    Timestamp,
+    BoundedLines, PromptText, Reader as ProviderReader, Timestamp,
+    conversation::{Decoder as ConversationDecoder, FileConversation, JsonText, ReadResult},
 };
 
 pub(super) struct Reader {
@@ -21,19 +22,10 @@ pub(super) struct Reader {
     previous: HashMap<String, ProviderSession>,
 }
 
-pub(super) struct ConversationRead {
-    pub(super) messages: Vec<Message>,
-    pub(super) cursor: u64,
-    pub(super) tail: bool,
-}
-
 impl Reader {
     const MAX_SESSION_DEPTH: usize = 8;
     const MAX_SESSION_ENTRIES: usize = 100_000;
     const MAX_SESSION_FILES: usize = 50_000;
-    const CONVERSATION_TAIL_BYTES: u64 = 16 * 1024 * 1024;
-    const CONVERSATION_TAIL_MESSAGES: usize = 512;
-
     pub(super) fn at(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
@@ -55,85 +47,24 @@ impl Reader {
         sid: &str,
         created_at: i64,
         cursor: Option<u64>,
-    ) -> Result<ConversationRead, String> {
+    ) -> Result<ReadResult, String> {
         let Some(path) = self.rollout(sid, created_at)? else {
-            return Ok(ConversationRead {
+            return Ok(ReadResult {
                 messages: Vec::new(),
                 cursor: cursor.unwrap_or_default(),
                 tail: cursor.is_none(),
+                complete: true,
             });
         };
-        Self::conversation_file(&path, cursor, Self::CONVERSATION_TAIL_BYTES)
+        Self::conversation_file(&path, cursor, FileConversation::TAIL_BYTES)
     }
 
     fn conversation_file(
         path: &Path,
         cursor: Option<u64>,
         tail_bytes: u64,
-    ) -> Result<ConversationRead, String> {
-        let mut file = File::open(path).map_err(|error| error.to_string())?;
-        let physical_length = file.metadata().map_err(|error| error.to_string())?.len();
-        let length = Self::complete_length(&mut file, physical_length)?;
-        let incremental = cursor.filter(|cursor| {
-            *cursor <= length && length.saturating_sub(*cursor) <= PROVIDER_READ_LIMIT as u64
-        });
-        let tail = incremental.is_none();
-        let start = incremental.unwrap_or_else(|| length.saturating_sub(tail_bytes));
-        file.seek(SeekFrom::Start(start))
-            .map_err(|error| error.to_string())?;
-        let remaining = length.saturating_sub(start);
-        let mut reader = BufReader::new(file.take(remaining));
-        if tail && start > 0 {
-            reader
-                .skip_until(b'\n')
-                .map_err(|error| error.to_string())?;
-        }
-        let mut messages = VecDeque::new();
-        for line in BoundedLines::new(reader) {
-            let Ok(line) = serde_json::from_str::<CodexConversationLine>(&line) else {
-                continue;
-            };
-            let Some(message) = line.message() else {
-                continue;
-            };
-            if messages.len() == Self::CONVERSATION_TAIL_MESSAGES {
-                messages.pop_front();
-            }
-            messages.push_back(message);
-        }
-        Ok(ConversationRead {
-            messages: messages.into_iter().collect(),
-            cursor: length,
-            tail,
-        })
-    }
-
-    fn complete_length(file: &mut File, length: u64) -> Result<u64, String> {
-        if length == 0 {
-            return Ok(0);
-        }
-        file.seek(SeekFrom::Start(length - 1))
-            .map_err(|error| error.to_string())?;
-        let mut last = [0];
-        file.read_exact(&mut last)
-            .map_err(|error| error.to_string())?;
-        if last[0] == b'\n' {
-            return Ok(length);
-        }
-        let search_start = length.saturating_sub(PROVIDER_LINE_LIMIT as u64 + 1);
-        file.seek(SeekFrom::Start(search_start))
-            .map_err(|error| error.to_string())?;
-        let mut trailing = Vec::new();
-        file.take(length - search_start)
-            .read_to_end(&mut trailing)
-            .map_err(|error| error.to_string())?;
-        if let Some(offset) = trailing.iter().rposition(|byte| *byte == b'\n') {
-            return Ok(search_start + offset as u64 + 1);
-        }
-        if search_start == 0 {
-            return Ok(0);
-        }
-        Ok(length)
+    ) -> Result<ReadResult, String> {
+        FileConversation::read(path, cursor, tail_bytes, CodexConversationDecoder)
     }
 
     fn archives(&self) -> Result<Option<HashMap<String, ArchiveState>>, String> {
@@ -658,15 +589,42 @@ struct CodexConversationLine {
     payload: CodexConversationPayload,
 }
 
+struct CodexConversationDecoder;
+
+impl ConversationDecoder for CodexConversationDecoder {
+    fn messages(&mut self, line: &str) -> Vec<Message> {
+        let Ok(decoded) = serde_json::from_str::<CodexConversationLine>(line) else {
+            return Vec::new();
+        };
+        decoded
+            .message(ConversationIdentity::of(line))
+            .into_iter()
+            .collect()
+    }
+}
+
+struct ConversationIdentity;
+
+impl ConversationIdentity {
+    fn of(line: &str) -> String {
+        let mut hasher = DefaultHasher::new();
+        line.hash(&mut hasher);
+        format!("codex-history-{:016x}", hasher.finish())
+    }
+}
+
 impl CodexConversationLine {
-    fn message(self) -> Option<Message> {
-        if self.kind != "response_item" || self.payload.kind != "message" {
+    fn message(self, fallback_id: String) -> Option<Message> {
+        if self.kind != "response_item" {
             return None;
         }
-        let role = self.payload.role.clone();
-        match role.as_str() {
-            "user" => self.payload.user_message(),
-            "assistant" => self.payload.assistant_message(),
+        match self.payload.kind.as_str() {
+            "message" => self.payload.visible_message(),
+            "custom_tool_call" => self.payload.tool_use(&self.payload.input),
+            "function_call" => self.payload.tool_use(&self.payload.arguments),
+            "custom_tool_call_output" | "function_call_output" => self.payload.tool_result(),
+            "web_search_call" => self.payload.web_search(fallback_id),
+            "reasoning" => self.payload.reasoning_message(),
             _ => None,
         }
     }
@@ -677,15 +635,43 @@ struct CodexConversationPayload {
     #[serde(rename = "type")]
     kind: String,
     #[serde(default)]
+    id: String,
+    #[serde(default)]
     role: String,
     #[serde(default)]
     content: Vec<CodexConversationContent>,
+    #[serde(default)]
+    summary: Vec<CodexConversationContent>,
+    #[serde(default)]
+    call_id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    arguments: String,
+    #[serde(default)]
+    input: String,
+    #[serde(default)]
+    output: serde_json::Value,
+    #[serde(default)]
+    action: serde_json::Value,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    is_error: bool,
     #[serde(default)]
     internal_chat_message_metadata_passthrough: Option<CodexMessageMetadata>,
 }
 
 impl CodexConversationPayload {
-    fn user_message(self) -> Option<Message> {
+    fn visible_message(&self) -> Option<Message> {
+        match self.role.as_str() {
+            "user" => self.user_message(),
+            "assistant" => self.assistant_message(),
+            _ => None,
+        }
+    }
+
+    fn user_message(&self) -> Option<Message> {
         if self
             .internal_chat_message_metadata_passthrough
             .as_ref()
@@ -696,13 +682,13 @@ impl CodexConversationPayload {
         let mut parts = Vec::new();
         let mut attachments = Vec::new();
         let mut image = None;
-        for content in self.content {
+        for content in &self.content {
             match content.kind.as_str() {
                 "input_text" => {
                     if let Some(tag) = CodexImageTag::parse(&content.text) {
                         image = Some(tag);
                     } else if content.text.trim() != "</image>" && !content.text.trim().is_empty() {
-                        parts.push(content.text);
+                        parts.push(content.text.clone());
                     }
                 }
                 "input_image" => {
@@ -720,12 +706,12 @@ impl CodexConversationPayload {
         Some(Message::user_with_attachments(text, attachments))
     }
 
-    fn assistant_message(self) -> Option<Message> {
+    fn assistant_message(&self) -> Option<Message> {
         let parts = self
             .content
-            .into_iter()
+            .iter()
             .filter(|content| content.kind == "output_text" && !content.text.trim().is_empty())
-            .map(|content| content.text)
+            .map(|content| content.text.clone())
             .collect::<Vec<_>>();
         if parts.is_empty() {
             return None;
@@ -733,6 +719,73 @@ impl CodexConversationPayload {
         Some(Message::Assistant {
             blocks: vec![AssistantBlock::Text(parts.join("\n"))],
         })
+    }
+
+    fn tool_use(&self, args: &str) -> Option<Message> {
+        let call_id = self.call_identity()?;
+        if self.name.trim().is_empty() {
+            return None;
+        }
+        Some(Message::Assistant {
+            blocks: vec![AssistantBlock::ToolUse {
+                call_id,
+                name: self.name.clone(),
+                args: args.to_string(),
+                parent_call_id: None,
+            }],
+        })
+    }
+
+    fn tool_result(&self) -> Option<Message> {
+        let call_id = self.call_identity()?;
+        Some(Message::ToolResult {
+            call_id,
+            content: JsonText::new(&self.output).text(),
+            is_error: self.is_error || self.status == "failed",
+        })
+    }
+
+    fn web_search(&self, fallback_id: String) -> Option<Message> {
+        let call_id = self.call_identity().unwrap_or(fallback_id);
+        let args = if self.action.is_null() {
+            String::new()
+        } else {
+            serde_json::to_string(&self.action).ok()?
+        };
+        Some(Message::Assistant {
+            blocks: vec![AssistantBlock::ToolUse {
+                call_id,
+                name: "web_search".to_string(),
+                args,
+                parent_call_id: None,
+            }],
+        })
+    }
+
+    fn reasoning_message(&self) -> Option<Message> {
+        let text = self
+            .summary
+            .iter()
+            .filter(|content| content.kind == "summary_text" && !content.text.trim().is_empty())
+            .map(|content| content.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.is_empty() {
+            return None;
+        }
+        Some(Message::Assistant {
+            blocks: vec![AssistantBlock::Thinking(text)],
+        })
+    }
+
+    fn call_identity(&self) -> Option<String> {
+        if !self.call_id.trim().is_empty() {
+            return Some(self.call_id.clone());
+        }
+        if !self.id.trim().is_empty() {
+            return Some(self.id.clone());
+        }
+        None
     }
 
     fn internal_text(text: &str) -> bool {
@@ -969,6 +1022,94 @@ mod tests {
     }
 
     #[test]
+    fn codex_reader_restores_native_tool_activity() {
+        let lines = [
+            r#"{"type":"response_item","payload":{"type":"custom_tool_call","id":"ctc_1","call_id":"call_exec","name":"exec","input":"const result = await tools.exec_command({\"cmd\":\"git status\"});"}}"#,
+            r#"{"type":"response_item","payload":{"type":"custom_tool_call_output","id":"ctco_1","call_id":"call_exec","output":[{"type":"input_text","text":"Script completed\n"},{"type":"input_text","text":"clean"}]}}"#,
+            r#"{"type":"response_item","payload":{"type":"function_call","id":"fc_1","call_id":"call_wait","name":"wait","arguments":"{\"cell_id\":\"98\"}"}}"#,
+            r#"{"type":"response_item","payload":{"type":"function_call_output","id":"fco_1","call_id":"call_wait","output":"finished"}}"#,
+            r#"{"type":"response_item","payload":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"vmux"}}}"#,
+            r#"{"type":"response_item","payload":{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Inspecting the workspace"}]}}"#,
+        ];
+        let messages = lines
+            .into_iter()
+            .filter_map(|line| {
+                serde_json::from_str::<CodexConversationLine>(line)
+                    .unwrap()
+                    .message()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::ToolUse {
+                        call_id: "call_exec".into(),
+                        name: "exec".into(),
+                        args: r#"const result = await tools.exec_command({"cmd":"git status"});"#
+                            .into(),
+                        parent_call_id: None,
+                    }],
+                },
+                Message::ToolResult {
+                    call_id: "call_exec".into(),
+                    content: "Script completed\n\nclean".into(),
+                    is_error: false,
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::ToolUse {
+                        call_id: "call_wait".into(),
+                        name: "wait".into(),
+                        args: r#"{"cell_id":"98"}"#.into(),
+                        parent_call_id: None,
+                    }],
+                },
+                Message::ToolResult {
+                    call_id: "call_wait".into(),
+                    content: "finished".into(),
+                    is_error: false,
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::ToolUse {
+                        call_id: "ws_1".into(),
+                        name: "web_search".into(),
+                        args: r#"{"query":"vmux","type":"search"}"#.into(),
+                        parent_call_id: None,
+                    }],
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Thinking("Inspecting the workspace".into())],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_reader_restores_web_search_without_a_provider_id() {
+        let mut decoder = CodexConversationDecoder;
+        let messages = decoder.messages(
+            r#"{"type":"response_item","payload":{"type":"web_search_call","status":"completed","action":{"type":"search","query":"vmux"}}}"#,
+        );
+
+        let Message::Assistant { blocks } = &messages[0] else {
+            panic!()
+        };
+        let AssistantBlock::ToolUse {
+            call_id,
+            name,
+            args,
+            ..
+        } = &blocks[0]
+        else {
+            panic!()
+        };
+        assert!(call_id.starts_with("codex-history-"));
+        assert_eq!(name, "web_search");
+        assert!(args.contains("vmux"));
+    }
+
+    #[test]
     fn codex_reader_ignores_internal_user_envelopes() {
         let lines = [
             r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<subagent_notification>hidden</subagent_notification>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["multi_agent.subagent_notification"]}}}"#,
@@ -1066,6 +1207,32 @@ mod tests {
             }]
         );
         assert_eq!(appended.cursor, std::fs::metadata(path).unwrap().len());
+    }
+
+    #[test]
+    fn codex_conversation_batches_incremental_records_without_skipping_them() {
+        let fixture = Fixture::new();
+        let path = fixture.path().join("sessions/rollout.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let initial = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"initial"}]}}"#;
+        std::fs::write(&path, format!("{initial}\n")).unwrap();
+        let initial = Reader::conversation_file(&path, None, 1024).unwrap();
+        let mut content = std::fs::read_to_string(&path).unwrap();
+        for index in 0..513 {
+            content.push_str(&format!(
+                "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"{index}\"}}]}}}}\n"
+            ));
+        }
+        std::fs::write(&path, content).unwrap();
+
+        let first = Reader::conversation_file(&path, Some(initial.cursor), 1024).unwrap();
+        let second = Reader::conversation_file(&path, Some(first.cursor), 1024).unwrap();
+
+        assert_eq!(first.messages.len(), FileConversation::TAIL_MESSAGES);
+        assert!(!first.complete);
+        assert_eq!(second.messages, vec![Message::user("512")]);
+        assert!(second.complete);
+        assert_eq!(second.cursor, std::fs::metadata(path).unwrap().len());
     }
 
     #[test]

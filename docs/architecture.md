@@ -263,7 +263,7 @@ carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control conne
 the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
 Remote agent operations are flat `SharedMessage` variants rather than a nested request enum.
-The QUIC application protocol is `vmux/8`; changing the positional rkyv wire contract requires
+The QUIC application protocol is `vmux/11`; changing the positional rkyv wire contract requires
 another ALPN version.
 
 Agent commands and queries use the same routed `AgentRequest` envelope. Each operation is a
@@ -1066,12 +1066,14 @@ their bound Session state. The service carries serialized agent protocol message
 persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
 wire messages enter ECS.
 
-Provider session stores remain authoritative for conversations created outside Vmux. Provider
-readers in `vmux_acp` project metadata from Codex, Claude, and Vibe storage into the
-provider-neutral Session catalog. Browsing an external entry does not copy it into durable Vmux
-state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets the
-provider load the conversation through its normal ACP implementation. Provider-store watches
-debounce into one wake, rescan only the changed provider, and bound untrusted history traversal.
+ACP `session/list` is the primary provider catalog. The Sessions page starts each installed ACP only
+long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
+sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family
+or the ACP explicitly omits `session/list`. Browsing an external entry does not copy it into durable
+Vmux state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets
+the provider replay the conversation through `session/load`. Compatibility watches exist only while
+the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
+the changed provider, and bound untrusted history traversal.
 The Session manager publishes only to its active page and leases Git metadata for every displayed
 repository while that page remains active.
 

@@ -18,9 +18,10 @@ use vmux_ecs::{
 };
 
 use crate::{
-    ExternalToolOperation, ToolApplier, ToolOperationFailed, ToolOperationFinished,
-    ToolOperationRequest, ToolOperationSucceeded, ToolOperator, ToolProviderBinding,
-    ToolProviderId, ToolProviderTarget, ToolScanner, ToolStore, ToolStoreTarget, ToolsManifest,
+    ExternalToolOperation, ToolApplier, ToolInventoryChanged, ToolOperationFailed,
+    ToolOperationFinished, ToolOperationRequest, ToolOperationSucceeded, ToolOperator,
+    ToolProviderBinding, ToolProviderId, ToolProviderTarget, ToolScanner, ToolStore,
+    ToolStoreTarget, ToolsManifest,
 };
 
 pub(crate) struct ToolHostPlugin;
@@ -814,6 +815,7 @@ fn drain_succeeded_operations(
     >,
     mut registry: Query<&mut ToolRegistry>,
     mut subscribers: Query<&mut ToolSubscriber>,
+    mut changed: MessageWriter<ToolInventoryChanged>,
     mut commands: Commands,
 ) {
     let Ok(mut state) = registry.single_mut() else {
@@ -830,6 +832,7 @@ fn drain_succeeded_operations(
         }
         state.dirty = true;
         state.generation = state.generation.wrapping_add(1);
+        changed.write(ToolInventoryChanged(operation.operation.provider.clone()));
         commands.entity(entity).despawn();
     }
 }

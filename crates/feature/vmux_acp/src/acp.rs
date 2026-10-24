@@ -2,6 +2,7 @@ use bevy::prelude::{
     App, ApplyDeferred, Bundle, Commands, Component, Entity, IntoScheduleConfigs, Name, Query,
     Single, Update,
 };
+pub(crate) use catalog_driver::{CatalogDriver, CatalogRequest};
 pub use driver::AcpInput;
 use driver::{
     AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpShared,
@@ -21,6 +22,7 @@ use vmux_session::SessionId;
 
 use agent_client_protocol::schema::v1::McpServer;
 
+mod catalog_driver;
 mod driver;
 mod projection;
 mod projection_driver;

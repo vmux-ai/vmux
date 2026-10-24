@@ -11,6 +11,7 @@ use crate::event::{
 use crate::event::{ChatDismissSelectorRequest, ChatResumeState};
 use crate::state::ChatUiState;
 use crate::tab::Accent;
+use dioxus::core::Task;
 use dioxus::prelude::*;
 use vmux_api::mcp::McpServersUiState;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
@@ -169,10 +170,7 @@ impl Chat {
         use_effect(move || {
             let _ = chat.transcript.current().items.len();
             let _ = chat.run.status();
-            if !*chat.transcript.at_bottom.peek() {
-                return;
-            }
-            scroll::to_bottom(chat.transcript.scroll_container);
+            chat.transcript.follow();
         });
         use_selector(
             move || chat.list_selection(),
@@ -646,16 +644,22 @@ impl Chat {
 pub struct Transcript {
     root: Signal<ChatUiState>,
     pub at_bottom: Signal<bool>,
+    pub initial_follow: Signal<bool>,
     pub last_top: Signal<i32>,
     pub scroll_container: scroll::Container,
+    generation: Signal<u64>,
+    follow_task: Signal<Option<Task>>,
 }
 
 pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
     Transcript {
         root,
         at_bottom: use_signal(|| true),
+        initial_follow: use_signal(|| true),
         last_top: use_signal(|| 0),
         scroll_container: use_signal(|| None),
+        generation: use_signal(|| 0),
+        follow_task: use_signal(|| None),
     }
 }
 
@@ -666,6 +670,25 @@ impl Transcript {
 
     pub fn ready(self) -> bool {
         self.root.read().transcript_revision > 0
+    }
+
+    pub(super) fn follow(self) {
+        let generation = self.root.read().transcript.generation;
+        if generation != *self.generation.peek() {
+            let mut current = self.generation;
+            current.set(generation);
+            let mut initial_follow = self.initial_follow;
+            initial_follow.set(true);
+            let mut at_bottom = self.at_bottom;
+            at_bottom.set(true);
+            let mut last_top = self.last_top;
+            last_top.set(0);
+        }
+        if *self.initial_follow.peek() {
+            scroll::settle_bottom(self.scroll_container, self.initial_follow, self.follow_task);
+        } else if *self.at_bottom.peek() {
+            scroll::to_bottom(self.scroll_container);
+        }
     }
 }
 

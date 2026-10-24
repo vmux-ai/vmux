@@ -13,6 +13,19 @@ impl AcpEnvironment {
         environment
     }
 
+    pub(super) fn catalog(
+        base: Vec<(String, String)>,
+        login_env: &[(String, String)],
+        path_prepend: Option<String>,
+    ) -> Self {
+        let login_env = login_env
+            .iter()
+            .filter(|(key, _)| CatalogVariable::allowed(key))
+            .cloned()
+            .collect::<Vec<_>>();
+        Self::build(base, &login_env, path_prepend)
+    }
+
     pub(super) fn into_inner(self) -> Vec<(String, String)> {
         self.0
     }
@@ -46,6 +59,27 @@ impl AcpEnvironment {
         }
         environment.reverse();
         self.0 = environment;
+    }
+}
+
+struct CatalogVariable;
+
+impl CatalogVariable {
+    fn allowed(key: &str) -> bool {
+        matches!(
+            key,
+            "HOME"
+                | "PATH"
+                | "TMPDIR"
+                | "LANG"
+                | "USER"
+                | "LOGNAME"
+                | "SHELL"
+                | "XDG_CONFIG_HOME"
+                | "XDG_CACHE_HOME"
+                | "XDG_DATA_HOME"
+                | "XDG_STATE_HOME"
+        ) || key.starts_with("LC_")
     }
 }
 
@@ -91,5 +125,27 @@ mod tests {
         .into_inner();
 
         assert!(environment.contains(&env("PATH", "/managed:/from/login")));
+    }
+
+    #[test]
+    fn catalog_environment_keeps_explicit_values_and_drops_login_credentials() {
+        let base = vec![env("MISTRAL_API_KEY", "configured")];
+        let login = vec![
+            env("MISTRAL_API_KEY", "inherited"),
+            env("AWS_SECRET_ACCESS_KEY", "secret"),
+            env("HOME", "/home/test"),
+            env("PATH", "/login/bin"),
+        ];
+        let environment = AcpEnvironment::catalog(base, &login, None).into_inner();
+
+        assert!(environment.contains(&env("MISTRAL_API_KEY", "configured")));
+        assert!(environment.contains(&env("HOME", "/home/test")));
+        assert!(environment.contains(&env("PATH", "/login/bin")));
+        assert!(
+            !environment
+                .iter()
+                .any(|(key, _)| key == "AWS_SECRET_ACCESS_KEY")
+        );
+        assert!(!environment.contains(&env("MISTRAL_API_KEY", "inherited")));
     }
 }

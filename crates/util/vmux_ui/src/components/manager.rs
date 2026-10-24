@@ -107,7 +107,7 @@ impl ManagerArea {
 }
 
 #[component]
-pub fn ManagerWorkspace(
+pub fn WorkspaceLayout(
     active: Option<ManagerArea>,
     onnavigate: EventHandler<ManagerArea>,
     #[props(default = rsx! {})] sidebar_actions: Element,

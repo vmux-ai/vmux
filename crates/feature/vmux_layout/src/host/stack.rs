@@ -609,7 +609,7 @@ fn open(
                 .or_else(|| target.pending_reusable(&pending, &url))
         {
             focus.focus_stack(stack, &mut commands);
-            if target.url(stack) != Some(url.as_str()) {
+            if target.navigates(stack, &url) {
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
                     url: url.clone(),
@@ -647,6 +647,16 @@ struct StackOpenTarget<'w, 's> {
 
 impl StackOpenTarget<'_, '_> {
     fn reusable(&self, focus: &LayoutFocus, tab: Entity, url: &str) -> Option<Entity> {
+        self.find(focus, tab, |existing| Self::same_url(url, existing))
+            .or_else(|| self.find(focus, tab, |existing| self.placements.reuses(url, existing)))
+    }
+
+    fn find(
+        &self,
+        focus: &LayoutFocus,
+        tab: Entity,
+        matches: impl Fn(&str) -> bool,
+    ) -> Option<Entity> {
         for pane in focus.leaves(tab) {
             let Ok(children) = focus.pane_children.get(pane) else {
                 continue;
@@ -655,7 +665,7 @@ impl StackOpenTarget<'_, '_> {
                 let Ok(metadata) = self.metadata.get(stack) else {
                     continue;
                 };
-                if self.placements.reuses(url, &metadata.url) {
+                if matches(&metadata.url) {
                     return Some(stack);
                 }
             }
@@ -666,8 +676,31 @@ impl StackOpenTarget<'_, '_> {
     fn pending_reusable(&self, pending: &[(String, Entity)], url: &str) -> Option<Entity> {
         pending
             .iter()
-            .find(|(pending_url, _)| self.placements.reuses(url, pending_url))
+            .find(|(pending_url, _)| Self::same_url(url, pending_url))
+            .or_else(|| {
+                pending
+                    .iter()
+                    .find(|(pending_url, _)| self.placements.reuses(url, pending_url))
+            })
             .map(|(_, stack)| *stack)
+    }
+
+    fn navigates(&self, stack: Entity, url: &str) -> bool {
+        let Some(existing) = self.url(stack) else {
+            return true;
+        };
+        !Self::same_url(url, existing)
+            && !(self.placements.group_entrypoint(url) && self.placements.same_group(url, existing))
+    }
+
+    fn same_url(left: &str, right: &str) -> bool {
+        match (
+            vmux_api::VmuxRoute::canonical(left),
+            vmux_api::VmuxRoute::canonical(right),
+        ) {
+            (Some(left), Some(right)) => left == right,
+            _ => left.trim_end_matches('/') == right.trim_end_matches('/'),
+        }
     }
 
     fn url(&self, stack: Entity) -> Option<&str> {
@@ -1831,6 +1864,122 @@ mod tests {
         assert!(
             app.world().get::<LastActivatedAt>(existing).unwrap().0
                 > app.world().get::<LastActivatedAt>(active).unwrap().0
+        );
+    }
+
+    #[test]
+    fn group_entrypoint_focuses_existing_page_without_navigation() {
+        let mut app = build_app_with_collector();
+        app.world_mut().spawn(vmux_ecs::page::PageManifest {
+            route: "git://",
+            url: "git://",
+            asset_host: "git",
+            owns_subtree: true,
+            title: "Git",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement {
+                group: "git",
+                reuse: vmux_ecs::page::PageReuse::Group,
+                ..vmux_ecs::page::PagePlacement::DEFAULT
+            },
+        });
+        let (_tab, pane, existing) = build_hierarchy(&mut app, "");
+        app.world_mut().entity_mut(existing).insert((
+            LastActivatedAt(1),
+            PageMetadata {
+                url: "git://repo-a?branch=feature".into(),
+                ..Default::default()
+            },
+        ));
+        let active = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                PageMetadata {
+                    url: "vmux://projects/".into(),
+                    ..Default::default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("git://".into()),
+                focus_existing: true,
+            });
+        app.update();
+
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert!(
+            app.world().get::<LastActivatedAt>(existing).unwrap().0
+                > app.world().get::<LastActivatedAt>(active).unwrap().0
+        );
+    }
+
+    #[test]
+    fn exact_group_page_is_preferred_over_another_group_member() {
+        let mut app = build_app_with_collector();
+        app.world_mut().spawn(vmux_ecs::page::PageManifest {
+            route: "git://",
+            url: "git://",
+            asset_host: "git",
+            owns_subtree: true,
+            title: "Git",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement {
+                group: "git",
+                reuse: vmux_ecs::page::PageReuse::Group,
+                ..vmux_ecs::page::PagePlacement::DEFAULT
+            },
+        });
+        let (_tab, pane, first) = build_hierarchy(&mut app, "");
+        app.world_mut().entity_mut(first).insert((
+            LastActivatedAt(1),
+            PageMetadata {
+                url: "git://repo-a".into(),
+                ..Default::default()
+            },
+        ));
+        let exact = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                PageMetadata {
+                    url: "git://repo-b".into(),
+                    ..Default::default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("git://repo-b".into()),
+                focus_existing: true,
+            });
+        app.update();
+
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert!(
+            app.world().get::<LastActivatedAt>(exact).unwrap().0
+                > app.world().get::<LastActivatedAt>(first).unwrap().0
         );
     }
 

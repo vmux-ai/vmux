@@ -65,12 +65,10 @@ impl AgentBrand {
 
     fn icon_url(&self) -> &'static str {
         match self {
-            Self::Claude => "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg",
-            Self::Codex => "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg",
+            Self::Claude => "assets/agent-logos/claude.png",
+            Self::Codex => "assets/agent-logos/codex.png",
             Self::Gemini => "https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg",
-            Self::Mistral => {
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
-            }
+            Self::Mistral => "assets/agent-logos/vibe.png",
         }
     }
 }
@@ -221,10 +219,7 @@ mod tests {
     fn agent_maps_vibe() {
         assert_eq!(
             FaviconSource::agent("mistral-vibe"),
-            Some(
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg"
-                    .to_string()
-            )
+            Some("assets/agent-logos/vibe.png".to_string())
         );
     }
 
@@ -232,15 +227,11 @@ mod tests {
     fn agent_maps_claude_and_codex() {
         assert_eq!(
             FaviconSource::agent("claude-acp"),
-            Some(
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg".to_string()
-            )
+            Some("assets/agent-logos/claude.png".to_string())
         );
         assert_eq!(
             FaviconSource::agent("codex-acp"),
-            Some(
-                "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg".to_string()
-            )
+            Some("assets/agent-logos/codex.png".to_string())
         );
     }
 

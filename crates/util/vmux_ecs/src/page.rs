@@ -159,6 +159,12 @@ impl PagePlacementCatalog<'_, '_> {
         self.resolve(left).group == self.resolve(right).group
     }
 
+    pub fn group_entrypoint(&self, url: &str) -> bool {
+        self.pages
+            .iter()
+            .any(|page| page.url == url && page.placement.reuse == PageReuse::Group)
+    }
+
     pub fn reports_title(&self, url: &str) -> bool {
         self.pages
             .iter()

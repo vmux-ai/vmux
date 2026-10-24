@@ -17,7 +17,7 @@ use vmux_transport::service::{
     ServiceProtocolDriver,
 };
 
-use crate::acp::{AcpInput, AcpSessions};
+use crate::acp::{AcpInput, AcpSessions, CatalogDriver, CatalogRequest};
 use crate::broker_driver::AgentBroker;
 use crate::remote_driver::AgentRemoteDriver;
 
@@ -60,6 +60,7 @@ impl AcpService {
             outbound,
             command_subscription: None,
             session_forwarders: HashMap::new(),
+            catalog_tasks: HashMap::new(),
         }
     }
 
@@ -143,10 +144,12 @@ struct AcpServiceConnection {
     outbound: mpsc::UnboundedSender<ServiceMessage>,
     command_subscription: Option<JoinHandle<()>>,
     session_forwarders: HashMap<String, JoinHandle<()>>,
+    catalog_tasks: HashMap<u64, JoinHandle<()>>,
 }
 
 impl AcpServiceConnection {
     async fn dispatch(&mut self, message: ClientMessage) -> Result<(), ClientMessage> {
+        self.catalog_tasks.retain(|_, task| !task.is_finished());
         match message {
             ClientMessage::SubscribeAgentCommands => {
                 if let Some(task) = self.command_subscription.take() {
@@ -359,6 +362,47 @@ impl AcpServiceConnection {
                 }
                 self.attach(sid, false).await;
             }
+            ClientMessage::ListAcpSessions {
+                request_id,
+                agent_id,
+                agent_name,
+                command,
+                args,
+                env,
+                cwd,
+            } => {
+                if let Some(task) = self.catalog_tasks.remove(&request_id) {
+                    task.abort();
+                }
+                let outbound = self.outbound.clone();
+                let task = tokio::spawn(async move {
+                    let result = CatalogDriver::list(CatalogRequest {
+                        command,
+                        args,
+                        env,
+                        cwd: PathBuf::from(cwd),
+                    })
+                    .await;
+                    let (supported, sessions, error) = match result {
+                        Ok(result) => (result.supported, result.sessions, None),
+                        Err(error) => (false, Vec::new(), Some(error)),
+                    };
+                    let _ = outbound.send(ServiceMessage::AcpSessionCatalog {
+                        request_id,
+                        agent_id,
+                        agent_name,
+                        supported,
+                        sessions,
+                        error,
+                    });
+                });
+                self.catalog_tasks.insert(request_id, task);
+            }
+            ClientMessage::CancelAcpSessionCatalog { request_id } => {
+                if let Some(task) = self.catalog_tasks.remove(&request_id) {
+                    task.abort();
+                }
+            }
             other => return Err(other),
         }
         Ok(())
@@ -420,6 +464,9 @@ impl Drop for AcpServiceConnection {
             task.abort();
         }
         for (_, task) in self.session_forwarders.drain() {
+            task.abort();
+        }
+        for (_, task) in self.catalog_tasks.drain() {
             task.abort();
         }
     }

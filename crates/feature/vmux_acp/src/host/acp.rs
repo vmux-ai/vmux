@@ -21,6 +21,7 @@ use vmux_tool::{
     ToolScanner, ToolStore, ToolsManifest,
 };
 
+use self::environment_driver::AcpEnvironment;
 use self::installer_driver::{AgentInstaller, start_acp_install_job};
 use self::registry::Registry;
 pub(super) use config::add as add_config;
@@ -219,10 +220,70 @@ struct AcpInstallOutcome {
 }
 
 #[derive(Clone)]
-struct AcpLaunch {
+pub(super) struct AcpLaunch {
     command: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
+}
+
+struct CatalogCommand<'a>(&'a str);
+
+impl CatalogCommand<'_> {
+    fn allowed(&self) -> bool {
+        let command = std::path::Path::new(self.0)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(self.0);
+        !matches!(
+            command,
+            "npx" | "npm" | "pnpm" | "yarn" | "bunx" | "uvx" | "pipx"
+        )
+    }
+}
+
+impl AcpLaunch {
+    pub(super) fn installed_catalog(
+        agent: &registry::RegistryAgent,
+        shell: &str,
+    ) -> Result<Self, String> {
+        installer_driver::resolve_installed_catalog_launch(agent, shell)
+    }
+
+    pub(super) fn configured_catalog(config: &AcpAgentConfig, shell: &str) -> Result<Self, String> {
+        if config.command.trim().is_empty() {
+            return Err(format!("ACP command is unavailable: {}", config.id));
+        }
+        if !CatalogCommand(&config.command).allowed() {
+            return Err(format!(
+                "ACP catalog does not automatically run package manager commands: {}",
+                config.id
+            ));
+        }
+        let login_env = vmux_process::LoginShellEnvironment::get(shell);
+        Ok(Self {
+            command: config.command.clone(),
+            args: config.args.clone(),
+            env: AcpEnvironment::catalog(config.env.clone(), login_env, None).into_inner(),
+        })
+    }
+
+    pub(super) fn catalog_message(
+        &self,
+        request_id: u64,
+        agent_id: &str,
+        agent_name: &str,
+        cwd: &std::path::Path,
+    ) -> vmux_api::protocol::ClientMessage {
+        vmux_api::protocol::ClientMessage::ListAcpSessions {
+            request_id,
+            agent_id: agent_id.to_string(),
+            agent_name: agent_name.to_string(),
+            command: self.command.clone(),
+            args: self.args.clone(),
+            env: self.env.clone(),
+            cwd: cwd.to_string_lossy().into_owned(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -235,6 +296,13 @@ struct AcpInstallProgressSink {
 mod tests {
     use super::*;
     use vmux_ecs::profile::{ActiveProfile, Profile, ProfileDirectories, ProfilePaths};
+
+    #[test]
+    fn catalog_command_rejects_package_runners() {
+        assert!(!CatalogCommand("npx").allowed());
+        assert!(!CatalogCommand("/usr/local/bin/uvx").allowed());
+        assert!(CatalogCommand("/usr/local/bin/custom-acp").allowed());
+    }
 
     fn install_test_app() -> App {
         let mut app = App::new();

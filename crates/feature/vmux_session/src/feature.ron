@@ -44,7 +44,7 @@
                 "ChatGoToBranch",
                 "SelectModel",
                 "SetAgentEffort",
-                "ChatOpenPage",
+                "OpenRequest",
                 "SessionsCreate",
                 "SessionsChooseDirectory",
                 "SessionsRename",

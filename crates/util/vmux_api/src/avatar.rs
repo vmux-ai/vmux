@@ -77,105 +77,121 @@ impl AvatarSpec {
 }
 const USER_COLOR: &str = "#3b82f6";
 
-const IDENTICON_PALETTES: [(&str, &str, &str); 6] = [
-    ("#fff1f2", "#e11d48", "#fb7185"),
-    ("#fff7ed", "#ea580c", "#fb923c"),
-    ("#fefce8", "#ca8a04", "#facc15"),
-    ("#f0fdf4", "#16a34a", "#4ade80"),
-    ("#ecfeff", "#0891b2", "#22d3ee"),
-    ("#f5f3ff", "#7c3aed", "#a78bfa"),
+const IDENTICON_PALETTES: [[&str; 5]; 6] = [
+    ["#fff1f2", "#e11d48", "#fb7185", "#be123c", "#fecdd3"],
+    ["#fff7ed", "#ea580c", "#fb923c", "#c2410c", "#fed7aa"],
+    ["#fefce8", "#ca8a04", "#facc15", "#a16207", "#fef08a"],
+    ["#f0fdf4", "#16a34a", "#4ade80", "#15803d", "#bbf7d0"],
+    ["#ecfeff", "#0891b2", "#22d3ee", "#0e7490", "#a5f3fc"],
+    ["#f5f3ff", "#7c3aed", "#a78bfa", "#6d28d9", "#ddd6fe"],
 ];
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdenticonSpec {
     pub background: &'static str,
-    pub foreground: &'static str,
-    pub accent: &'static str,
-    pub tiles: [bool; 9],
+    pub bar: IdenticonShape,
+    pub circle: IdenticonShape,
+    pub line: IdenticonShape,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IdenticonShape {
+    pub color: &'static str,
+    pub translate_x: i32,
+    pub translate_y: i32,
+    pub rotate: u32,
+    pub square: bool,
+}
+
 impl IdenticonSpec {
     pub fn from_seed(seed: &str) -> Self {
-        let mut random = IdenticonRandom::from(seed);
-        let (background, foreground, accent) =
-            IDENTICON_PALETTES[random.below(IDENTICON_PALETTES.len())];
-        let mut tiles = [false; 9];
-        for row in 0..3 {
-            for column in 0..2 {
-                let visible = random.yes();
-                tiles[row * 3 + column] = visible;
-                tiles[row * 3 + (2 - column)] = visible;
-            }
-        }
-        tiles[4] = true;
+        let hash = IdenticonHash::of(seed);
+        let colors = IDENTICON_PALETTES[hash.modulus(IDENTICON_PALETTES.len() as u32) as usize];
+        let shape = |index: u32| IdenticonShape {
+            color: colors[hash.offset(index).modulus(colors.len() as u32) as usize],
+            translate_x: hash.scaled(index + 1).unit(23 - index as i32, Some(1)),
+            translate_y: hash.scaled(index + 1).unit(23 - index as i32, Some(2)),
+            rotate: hash.scaled(index + 1).modulus(360),
+            square: hash.boolean(2),
+        };
         Self {
-            background,
-            foreground,
-            accent,
-            tiles,
+            background: shape(0).color,
+            bar: shape(1),
+            circle: shape(2),
+            line: shape(3),
         }
     }
 
     pub fn favicon(seed: &str) -> String {
-        let identicon = Self::from_seed(seed);
-        let mut shapes = String::new();
-        for (index, visible) in identicon.tiles.iter().copied().enumerate() {
-            if !visible {
-                continue;
-            }
-            let color = if index % 2 == 0 {
-                identicon.foreground
-            } else {
-                identicon.accent
-            };
-            shapes.push_str(&format!(
-                r#"<rect x="{}" y="{}" width="8" height="8" rx="2.25" fill="{}"/>"#,
-                Self::coordinate(index % 3),
-                Self::coordinate(index / 3),
-                color
-            ));
-        }
-        let svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36"><rect width="36" height="36" rx="8" fill="{}"/>{shapes}</svg>"#,
-            identicon.background
-        );
+        let svg = Self::from_seed(seed).svg();
         format!(
             "data:image/svg+xml;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(svg)
         )
     }
 
-    pub fn coordinate(index: usize) -> usize {
-        5 + index * 9
+    fn svg(&self) -> String {
+        let bar_height = if self.bar.square { 80 } else { 10 };
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><clipPath id="avatar"><rect width="80" height="80" rx="18"/></clipPath></defs><g clip-path="url(#avatar)"><rect width="80" height="80" fill="{}"/><rect x="10" y="30" width="80" height="{}" fill="{}" transform="translate({} {}) rotate({} 40 40)"/><circle cx="40" cy="40" r="16" fill="{}" transform="translate({} {})"/><line x1="0" y1="40" x2="80" y2="40" stroke-width="2" stroke="{}" transform="translate({} {}) rotate({} 40 40)"/></g></svg>"#,
+            self.background,
+            bar_height,
+            self.bar.color,
+            self.bar.translate_x,
+            self.bar.translate_y,
+            self.bar.rotate,
+            self.circle.color,
+            self.circle.translate_x,
+            self.circle.translate_y,
+            self.line.color,
+            self.line.translate_x,
+            self.line.translate_y,
+            self.line.rotate,
+        )
     }
 }
 
-struct IdenticonRandom(u64);
+#[derive(Clone, Copy)]
+struct IdenticonHash(u64);
 
-impl From<&str> for IdenticonRandom {
-    fn from(seed: &str) -> Self {
-        let mut hash = 0xcbf29ce484222325u64;
-        for byte in seed.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
+impl IdenticonHash {
+    fn of(seed: &str) -> Self {
+        let mut hash = 0i32;
+        for character in seed.encode_utf16() {
+            hash = hash
+                .wrapping_shl(5)
+                .wrapping_sub(hash)
+                .wrapping_add(i32::from(character));
         }
-        Self(hash)
-    }
-}
-
-impl IdenticonRandom {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
+        Self(u64::from(hash.unsigned_abs()))
     }
 
-    fn below(&mut self, ceiling: usize) -> usize {
-        self.next() as usize % ceiling
+    fn offset(self, value: u32) -> Self {
+        Self(self.0 + u64::from(value))
     }
 
-    fn yes(&mut self) -> bool {
-        self.below(2) == 0
+    fn scaled(self, value: u32) -> Self {
+        Self(self.0 * u64::from(value))
+    }
+
+    fn modulus(self, range: u32) -> u32 {
+        (self.0 % u64::from(range)) as u32
+    }
+
+    fn digit(self, place: u32) -> u32 {
+        (self.0 / 10u64.pow(place) % 10) as u32
+    }
+
+    fn boolean(self, place: u32) -> bool {
+        self.digit(place) % 2 == 0
+    }
+
+    fn unit(self, range: i32, sign_digit: Option<u32>) -> i32 {
+        let value = (self.0 % range as u64) as i32;
+        match sign_digit {
+            Some(place) if self.digit(place) % 2 == 0 => -value,
+            _ => value,
+        }
     }
 }
 

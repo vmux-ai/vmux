@@ -2,8 +2,10 @@
 
 use dioxus::prelude::*;
 use vmux_api::input::KeyModifiers;
+use vmux_ui::components::manager::{ManagerArea, WorkspaceLayout};
 use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::translate;
+use vmux_ui::navigation::PageNavigation;
 
 use super::branches::BranchPromptDialog;
 use super::dashboard::GitDashboard;
@@ -52,10 +54,14 @@ pub fn Page() -> Element {
                     event.stop_propagation();
                 }
             },
-            if repository_loaded() {
-                GitDashboard {}
-            } else {
-                EmptyRepository {}
+            WorkspaceLayout {
+                active: None,
+                onnavigate: move |area: ManagerArea| PageNavigation::replace(area.url()),
+                if repository_loaded() {
+                    GitDashboard {}
+                } else {
+                    EmptyRepository {}
+                }
             }
             if branch_prompt_visible() {
                 BranchPromptDialog {}

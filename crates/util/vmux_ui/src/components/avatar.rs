@@ -5,6 +5,7 @@ use vmux_api::avatar::IdenticonSpec;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
 const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
+const AGENT_THUMBNAIL_FILLED: &str = "[&_img]:size-full [&_img]:object-cover";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -92,7 +93,15 @@ pub fn AgentThumbnail(
 ) -> Element {
     let src = src.or_else(|| FaviconSource::agent(&seed));
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
-    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
+    let image_class = if src
+        .as_deref()
+        .is_some_and(AgentThumbnailBackground::image_is_filled)
+    {
+        AGENT_THUMBNAIL_FILLED
+    } else {
+        AGENT_THUMBNAIL
+    };
+    let class = cn([image_class, class.as_str()]);
     rsx! {
         Avatar { src, seed, background, alt, class }
     }
@@ -100,26 +109,12 @@ pub fn AgentThumbnail(
 
 #[component]
 pub fn Identicon(seed: String, #[props(default)] alt: String, class: String) -> Element {
-    let identicon = IdenticonSpec::from_seed(&seed);
+    let src = IdenticonSpec::favicon(&seed);
     rsx! {
-        svg {
+        img {
             class,
-            view_box: "0 0 36 36",
-            role: "img",
-            title { "{alt}" }
-            rect { width: "36", height: "36", rx: "8", fill: identicon.background }
-            for (index, visible) in identicon.tiles.iter().copied().enumerate() {
-                if visible {
-                    rect {
-                        x: "{IdenticonSpec::coordinate(index % 3)}",
-                        y: "{IdenticonSpec::coordinate(index / 3)}",
-                        width: "8",
-                        height: "8",
-                        rx: "2.25",
-                        fill: if index % 2 == 0 { identicon.foreground } else { identicon.accent },
-                    }
-                }
-            }
+            src,
+            alt,
         }
     }
 }
@@ -135,6 +130,10 @@ impl AgentThumbnailBackground {
             return color.to_string();
         }
         vmux_api::avatar::AvatarSpec::agent_color(seed)
+    }
+
+    fn image_is_filled(src: &str) -> bool {
+        src.ends_with("/claude.png") || src.ends_with("/vibe.png")
     }
 }
 

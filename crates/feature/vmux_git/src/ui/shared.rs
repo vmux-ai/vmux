@@ -7,8 +7,6 @@ use std::path::Path;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use vmux_api::command_bar::OpenRequest;
-use vmux_api::open_target::OpenTarget;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::checkbox::{Checkbox, CheckboxTone};
 use vmux_ui::components::error_state::ErrorState;
@@ -19,6 +17,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::GitDiffRow;
@@ -449,10 +448,7 @@ pub fn DiffView(
                                         class: "min-w-0 flex-1 truncate text-left font-mono transition-colors hover:text-primary hover:underline",
                                         title: file_path.clone(),
                                         onclick: move |_| {
-                                            let _ = send(&OpenRequest {
-                                                value: file_url.clone(),
-                                                open: Some(OpenTarget::InNewStack),
-                                            });
+                                            PageNavigation::stack(file_url.clone());
                                         },
                                         "{file_path}"
                                     }

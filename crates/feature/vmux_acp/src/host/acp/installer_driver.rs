@@ -72,9 +72,26 @@ impl AgentInstaller {
         self.store.remove(&name).map_err(|error| error.to_string())
     }
 
+    fn resolve_installed(&self, agent: &RegistryAgent) -> Result<ResolvedAgent, String> {
+        agent.resolve_installed(&self.store)
+    }
+
     fn is_installed(&self, agent: &RegistryAgent) -> bool {
         agent.is_installed_at(&self.store)
     }
+}
+
+pub(super) fn resolve_installed_catalog_launch(
+    agent: &RegistryAgent,
+    shell: &str,
+) -> Result<AcpLaunch, String> {
+    let resolved = AgentInstaller::current().resolve_installed(agent)?;
+    let login_env = vmux_process::LoginShellEnvironment::get(shell);
+    Ok(AcpLaunch {
+        command: resolved.command,
+        args: resolved.args,
+        env: AcpEnvironment::catalog(resolved.env, login_env, resolved.path_prepend).into_inner(),
+    })
 }
 
 impl AcpInstallJob {
@@ -290,6 +307,29 @@ impl BinaryTarget {
             ArchiveKind::Gz | ArchiveKind::Raw => Ok(package_dir.join(self.command_basename())),
         }
     }
+
+    fn launch(
+        &self,
+        package_dir: &Path,
+        archive: &str,
+        package_added: bool,
+    ) -> Result<ResolvedAgent, String> {
+        let command = self.command_path(package_dir, archive)?;
+        if !command.is_file() {
+            return Err(format!("ACP binary is unavailable: {}", command.display()));
+        }
+        Ok(ResolvedAgent {
+            command: command.to_string_lossy().into_owned(),
+            args: self.args.clone(),
+            env: self
+                .env
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            path_prepend: None,
+            package_added,
+        })
+    }
 }
 
 impl RegistryAgent {
@@ -325,17 +365,7 @@ impl RegistryAgent {
             target.install(self, store, &name, &archive, &mut emit)?;
         }
 
-        Ok(ResolvedAgent {
-            command: command.to_string_lossy().into_owned(),
-            args: target.args.clone(),
-            env: target
-                .env
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect(),
-            path_prepend: None,
-            package_added,
-        })
+        target.launch(&package_dir, &archive, package_added)
     }
 }
 
@@ -395,6 +425,50 @@ impl NodeRuntime {
         )
         .map_err(|error| error.to_string())?;
         Ok(path)
+    }
+
+    fn launch(
+        &self,
+        distribution: &PackageDist,
+        version: Option<&str>,
+        package_added: bool,
+    ) -> Result<ResolvedAgent, String> {
+        let bin_dir = self
+            .bin_dir()
+            .filter(|directory| directory.join("node").is_file())
+            .ok_or("managed Node runtime is unavailable")?;
+        let npx = self
+            .cli("npx-cli.js")
+            .filter(|path| path.is_file())
+            .ok_or("managed npx is unavailable")?;
+        let npm_config = self.npm_config()?;
+        let mut args = vec![
+            npx.to_string_lossy().into_owned(),
+            format!("--userconfig={}", npm_config.to_string_lossy()),
+            format!("--registry={NPM_REGISTRY}"),
+            "--ignore-scripts=false".to_string(),
+            "-y".to_string(),
+            distribution.spec(version),
+        ];
+        args.extend(distribution.args.iter().cloned());
+        let mut env = distribution
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        env.push((
+            "NPM_CONFIG_USERCONFIG".to_string(),
+            npm_config.to_string_lossy().into_owned(),
+        ));
+        env.push(("NPM_CONFIG_REGISTRY".to_string(), NPM_REGISTRY.to_string()));
+        env.push(("NPM_CONFIG_IGNORE_SCRIPTS".to_string(), "false".to_string()));
+        Ok(ResolvedAgent {
+            command: bin_dir.join("node").to_string_lossy().into_owned(),
+            args,
+            env,
+            path_prepend: Some(bin_dir.to_string_lossy().into_owned()),
+            package_added,
+        })
     }
 
     fn ensure(
@@ -482,42 +556,10 @@ impl RegistryAgent {
             .ok_or_else(|| format!("no npx distribution: {}", self.id))?;
         let package_added = !self.is_installed_at(store);
         let runtime = NodeRuntime::new(store);
-        let bin_dir = runtime.ensure(&mut emit)?;
-        let npx = runtime
-            .cli("npx-cli.js")
-            .filter(|path| path.is_file())
-            .ok_or("managed npx missing after extract")?;
-        let npm_config = runtime.npm_config()?;
+        runtime.ensure(&mut emit)?;
         self.write_receipt(store, version)?;
         emit(InstallPhase::Done, Some(100), "ready");
-
-        let mut args = vec![
-            npx.to_string_lossy().into_owned(),
-            format!("--userconfig={}", npm_config.to_string_lossy()),
-            format!("--registry={NPM_REGISTRY}"),
-            "--ignore-scripts=false".to_string(),
-            "-y".to_string(),
-            distribution.spec(version),
-        ];
-        args.extend(distribution.args.iter().cloned());
-        let mut env: Vec<_> = distribution
-            .env
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        env.push((
-            "NPM_CONFIG_USERCONFIG".to_string(),
-            npm_config.to_string_lossy().into_owned(),
-        ));
-        env.push(("NPM_CONFIG_REGISTRY".to_string(), NPM_REGISTRY.to_string()));
-        env.push(("NPM_CONFIG_IGNORE_SCRIPTS".to_string(), "false".to_string()));
-        Ok(ResolvedAgent {
-            command: bin_dir.join("node").to_string_lossy().into_owned(),
-            args,
-            env,
-            path_prepend: Some(bin_dir.to_string_lossy().into_owned()),
-            package_added,
-        })
+        runtime.launch(distribution, version, package_added)
     }
 }
 
@@ -555,6 +597,31 @@ impl UvRuntime {
     fn is_ready(&self) -> bool {
         self.bin_dir()
             .is_some_and(|directory| directory.join("uvx").exists())
+    }
+
+    fn launch(
+        &self,
+        distribution: &PackageDist,
+        version: Option<&str>,
+        package_added: bool,
+    ) -> Result<ResolvedAgent, String> {
+        let bin_dir = self
+            .bin_dir()
+            .filter(|directory| directory.join("uvx").is_file())
+            .ok_or("managed uv runtime is unavailable")?;
+        let mut args = vec![distribution.spec(version)];
+        args.extend(distribution.args.iter().cloned());
+        Ok(ResolvedAgent {
+            command: bin_dir.join("uvx").to_string_lossy().into_owned(),
+            args,
+            env: distribution
+                .env
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            path_prepend: Some(bin_dir.to_string_lossy().into_owned()),
+            package_added,
+        })
     }
 
     fn ensure(
@@ -640,23 +707,11 @@ impl RegistryAgent {
             .as_ref()
             .ok_or_else(|| format!("no uvx distribution: {}", self.id))?;
         let package_added = !self.is_installed_at(store);
-        let bin_dir = UvRuntime::new(store).ensure(&mut emit)?;
+        let runtime = UvRuntime::new(store);
+        runtime.ensure(&mut emit)?;
         self.write_receipt(store, version)?;
         emit(InstallPhase::Done, Some(100), "ready");
-
-        let mut args = vec![distribution.spec(version)];
-        args.extend(distribution.args.iter().cloned());
-        Ok(ResolvedAgent {
-            command: bin_dir.join("uvx").to_string_lossy().into_owned(),
-            args,
-            env: distribution
-                .env
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect(),
-            path_prepend: Some(bin_dir.to_string_lossy().into_owned()),
-            package_added,
-        })
+        runtime.launch(distribution, version, package_added)
     }
 }
 
@@ -704,6 +759,41 @@ impl RegistryAgent {
             Runtime::None => self.ensure_binary(store, emit),
             Runtime::Node => self.ensure_npx(store, version, emit),
             Runtime::Uv => self.ensure_uvx(store, version, emit),
+        }
+    }
+
+    fn resolve_installed(&self, store: &PackageStore) -> Result<ResolvedAgent, String> {
+        if !self.is_installed_at(store) {
+            return Err(format!("ACP agent is not installed: {}", self.id));
+        }
+        let name = PackageName::parse(&self.id)?;
+        let receipt = store
+            .read_receipt(&name)
+            .ok_or_else(|| format!("ACP install receipt is unavailable: {}", self.id))?;
+        match self.preferred_runtime() {
+            Runtime::None => {
+                let target = self.binary_for_host().ok_or_else(|| {
+                    format!("no binary distribution for this platform: {}", self.id)
+                })?;
+                let archive = target.archive_filename();
+                target.launch(&store.package_dir(&name), archive, false)
+            }
+            Runtime::Node => {
+                let distribution = self
+                    .distribution
+                    .npx
+                    .as_ref()
+                    .ok_or_else(|| format!("no npx distribution: {}", self.id))?;
+                NodeRuntime::new(store).launch(distribution, receipt.version.as_deref(), false)
+            }
+            Runtime::Uv => {
+                let distribution = self
+                    .distribution
+                    .uvx
+                    .as_ref()
+                    .ok_or_else(|| format!("no uvx distribution: {}", self.id))?;
+                UvRuntime::new(store).launch(distribution, receipt.version.as_deref(), false)
+            }
         }
     }
 }

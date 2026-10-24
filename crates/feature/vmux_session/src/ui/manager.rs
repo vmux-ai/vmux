@@ -11,7 +11,7 @@ use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
     ManagerArea, ManagerControls, ManagerEmpty, ManagerIconButton, ManagerPage, ManagerSearch,
     ManagerSearchPopover, ManagerSidebarItem, ManagerSidebarSection, ManagerView,
-    ManagerViewToggle, ManagerWorkspace,
+    ManagerViewToggle, WorkspaceLayout,
 };
 use vmux_ui::components::motion::Collapse;
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
@@ -22,10 +22,10 @@ use vmux_ui::hooks::{
 };
 use vmux_ui::i18n::{translate, translate_humanized};
 use vmux_ui::icon::{GitIconView, LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 use crate::event::{
-    ChatOpenPage, SessionRepositories, SessionRepository, SessionsDescriptionUpdate,
-    SessionsStageChange,
+    SessionRepositories, SessionRepository, SessionsDescriptionUpdate, SessionsStageChange,
 };
 use crate::state::SessionCatalogUiState;
 
@@ -153,7 +153,7 @@ fn SessionsManagerContent(
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
     rsx! {
-        ManagerWorkspace {
+        WorkspaceLayout {
             active: presentation.selected_stage.is_none().then_some(ManagerArea::Inbox),
             onnavigate: move |area: ManagerArea| {
                 if area == ManagerArea::Inbox {
@@ -161,9 +161,7 @@ fn SessionsManagerContent(
                     controls.set_query(String::new());
                     return;
                 }
-                let _ = send(&ChatOpenPage {
-                    url: area.url().to_string(),
-                });
+                PageNavigation::replace(area.url());
             },
             sidebar_actions: rsx! {
                 SessionsManagerActions {
@@ -227,9 +225,7 @@ struct StartPage;
 
 impl StartPage {
     fn open() {
-        let _ = send(&ChatOpenPage {
-            url: "vmux://start/".to_string(),
-        });
+        PageNavigation::replace("vmux://start/");
     }
 }
 
@@ -983,7 +979,7 @@ fn SessionActions(
                     visibility: visibility.to_string(),
                     onclick: move |event: MouseEvent| {
                         event.stop_propagation();
-                        let _ = send(&ChatOpenPage { url: git_url.clone() });
+                        PageNavigation::replace(git_url.clone());
                     },
                     GitIconView { class: "size-3.5".to_string() }
                 }

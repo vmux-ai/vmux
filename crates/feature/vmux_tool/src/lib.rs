@@ -2,7 +2,7 @@
 
 use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
-    ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
+    ToolLinkRequest, ToolProvider, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
 };
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -108,47 +108,48 @@ impl Plugin for ToolRuntimePlugin {
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
-        app.configure_sets(
-            Update,
-            (ToolOperationRouteSet, ToolOperationRouteFlush).chain(),
-        )
-        .add_systems(
-            Update,
-            bevy_ecs::schedule::ApplyDeferred.in_set(ToolOperationRouteFlush),
-        )
-        .add_systems(
-            Update,
-            (
-                route_external_operation::<ToolInstallRequest>,
-                route_external_operation::<ToolUpdateRequest>,
-                route_external_operation::<ToolUninstallRequest>,
-                route_external_operation::<ToolForgetRequest>,
-                route_external_operation::<ToolAdoptRequest>,
-                route_external_operation::<ToolLinkRequest>,
-                route_external_operation::<ToolUnlinkRequest>,
-                route_external_operation::<ToolApplyRequest>,
-                route_external_operation::<ToolImportRequest>,
+        app.add_message::<ToolInventoryChanged>()
+            .configure_sets(
+                Update,
+                (ToolOperationRouteSet, ToolOperationRouteFlush).chain(),
             )
-                .after(ToolOperationRouteFlush),
-        )
-        .add_systems(
-            Update,
-            (
-                finish_operation::<mcp::ForgottenMcpServer>,
-                finish_operation::<dotfiles::DiscoveredDotfilePackages>,
-                finish_operation::<dotfiles::DotfilePlan>,
-                finish_operation::<dotfiles::ImportedDotfiles>,
-                finish_operation::<dotfiles::ImportedAvailableDotfiles>,
-                finish_operation::<dotfiles::LinkedDotfilePackage>,
-                finish_operation::<dotfiles::DisabledDotfilePackage>,
-                finish_operation::<dotfiles::UnlinkedDotfilePackage>,
-                finish_operation::<dotfiles::AppliedEnabledDotfiles>,
-                finish_operation::<dotfiles::AdoptedDotfile>,
-                finish_operation::<homebrew::ImportedBrewfile>,
-                finish_operation::<npm::ImportedNpmManifest>,
+            .add_systems(
+                Update,
+                bevy_ecs::schedule::ApplyDeferred.in_set(ToolOperationRouteFlush),
             )
-                .after(ToolOperationRouteFlush),
-        );
+            .add_systems(
+                Update,
+                (
+                    route_external_operation::<ToolInstallRequest>,
+                    route_external_operation::<ToolUpdateRequest>,
+                    route_external_operation::<ToolUninstallRequest>,
+                    route_external_operation::<ToolForgetRequest>,
+                    route_external_operation::<ToolAdoptRequest>,
+                    route_external_operation::<ToolLinkRequest>,
+                    route_external_operation::<ToolUnlinkRequest>,
+                    route_external_operation::<ToolApplyRequest>,
+                    route_external_operation::<ToolImportRequest>,
+                )
+                    .after(ToolOperationRouteFlush),
+            )
+            .add_systems(
+                Update,
+                (
+                    finish_operation::<mcp::ForgottenMcpServer>,
+                    finish_operation::<dotfiles::DiscoveredDotfilePackages>,
+                    finish_operation::<dotfiles::DotfilePlan>,
+                    finish_operation::<dotfiles::ImportedDotfiles>,
+                    finish_operation::<dotfiles::ImportedAvailableDotfiles>,
+                    finish_operation::<dotfiles::LinkedDotfilePackage>,
+                    finish_operation::<dotfiles::DisabledDotfilePackage>,
+                    finish_operation::<dotfiles::UnlinkedDotfilePackage>,
+                    finish_operation::<dotfiles::AppliedEnabledDotfiles>,
+                    finish_operation::<dotfiles::AdoptedDotfile>,
+                    finish_operation::<homebrew::ImportedBrewfile>,
+                    finish_operation::<npm::ImportedNpmManifest>,
+                )
+                    .after(ToolOperationRouteFlush),
+            );
     }
 }
 
@@ -172,6 +173,9 @@ pub struct ToolOperationFinished;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationSucceeded(pub String);
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct ToolInventoryChanged(pub ToolProvider);
 
 pub type ToolStoreTarget = vmux_ecs::EntityTarget<ToolStore>;
 pub type ToolProviderTarget = vmux_ecs::EntityTarget<ToolProviderId>;

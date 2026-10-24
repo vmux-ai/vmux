@@ -11,7 +11,13 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
+use vmux_api::protocol::AcpProviderSession;
+use vmux_ecs::page::Activity;
+use vmux_ecs::service::{
+    ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
+};
 use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget};
+use vmux_session::host::SessionManagerView;
 use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchiveCompleted,
@@ -19,26 +25,34 @@ use vmux_session::{
     Route, Session, SessionDuplicate, SessionId, SnapshotReceived, TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
+use vmux_tool::ToolInventoryChanged;
 
-use super::acp::registry::RegistryAgent;
+use super::acp::{AcpLaunch, AcpPackageChanged, registry::RegistryAgent};
 use crate::AcpSessionId;
 
 mod claude;
 mod codex;
+mod conversation;
 mod vibe;
 
 pub(super) fn add(app: &mut App) {
     app.init_resource::<SourceSnapshot>()
+        .init_resource::<AcpSnapshot>()
+        .init_resource::<CatalogRequests>()
         .init_resource::<PendingImports>()
         .init_resource::<ProviderCatalog>()
         .init_resource::<ArchiveQueue>()
         .init_resource::<ArchiveOverlay>()
+        .add_message::<ToolInventoryChanged>()
+        .add_service_message::<AcpCatalogReceived>()
         .add_observer(open)
         .add_observer(attach)
-        .add_systems(Startup, start)
         .add_systems(
             Update,
             (
+                request_catalogs,
+                receive_catalogs.after(ServiceMessageSet),
+                activate,
                 archive,
                 finish_archives,
                 watch,
@@ -57,8 +71,371 @@ pub(super) fn add(app: &mut App) {
 
 const SCAN_DEBOUNCE: Duration = Duration::from_millis(350);
 const SCAN_MAX_LATENCY: Duration = Duration::from_secs(2);
+const CATALOG_CONCURRENCY: usize = 2;
+const CATALOG_REQUEST_TIMEOUT: Duration = Duration::from_secs(32);
 const PROVIDER_READ_LIMIT: usize = 256 * 1024 * 1024;
 const PROVIDER_LINE_LIMIT: usize = 2 * 1024 * 1024;
+
+#[vmux_api::service_message(AcpSessionCatalog)]
+struct AcpCatalogReceived {
+    request_id: u64,
+    agent_id: String,
+    agent_name: String,
+    supported: bool,
+    sessions: Vec<AcpProviderSession>,
+    error: Option<String>,
+}
+
+#[derive(Resource, Default)]
+struct AcpSnapshot(HashMap<String, AcpSource>);
+
+struct AcpSource {
+    state: AcpSourceState,
+    sessions: Vec<ProviderSession>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AcpSourceState {
+    Unprobed,
+    Pending,
+    Supported,
+    Unsupported,
+    Failed,
+}
+
+impl AcpSnapshot {
+    fn allows_fallback(&self, family: &AgentFamily) -> bool {
+        for (agent, source) in &self.0 {
+            if AgentFamily::of(agent) != *family {
+                continue;
+            }
+            if source.state != AcpSourceState::Unsupported {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn sessions(&self) -> impl Iterator<Item = &ProviderSession> {
+        self.0.values().flat_map(|source| source.sessions.iter())
+    }
+}
+
+#[derive(Resource, Default)]
+struct CatalogRequests {
+    active: bool,
+    refresh: bool,
+    generation: u64,
+    next_request_id: u64,
+    pending: HashMap<u64, CatalogRequest>,
+    queued: VecDeque<CatalogQueued>,
+}
+
+struct CatalogRequest {
+    generation: u64,
+    agent_id: String,
+    started_at: Option<Instant>,
+}
+
+struct CatalogQueued {
+    request_id: u64,
+    request: CatalogRequest,
+    message: vmux_api::protocol::ClientMessage,
+}
+
+struct CatalogLaunch {
+    agent_id: String,
+    message: vmux_api::protocol::ClientMessage,
+}
+
+impl CatalogRequests {
+    fn request_id(&mut self) -> u64 {
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
+        self.next_request_id
+    }
+
+    fn launch(&mut self) -> Vec<CatalogLaunch> {
+        let available = CATALOG_CONCURRENCY.saturating_sub(self.pending.len());
+        let mut launched = Vec::with_capacity(available);
+        for _ in 0..available {
+            let Some(queued) = self.queued.pop_front() else {
+                break;
+            };
+            let agent_id = queued.request.agent_id.clone();
+            let mut request = queued.request;
+            request.started_at = Some(Instant::now());
+            self.pending.insert(queued.request_id, request);
+            launched.push(CatalogLaunch {
+                agent_id,
+                message: queued.message,
+            });
+        }
+        launched
+    }
+
+    fn cancel(&mut self) -> (Vec<u64>, HashSet<String>) {
+        let mut request_ids = Vec::with_capacity(self.pending.len());
+        let mut agents = HashSet::new();
+        for (request_id, request) in self.pending.drain() {
+            request_ids.push(request_id);
+            agents.insert(request.agent_id);
+        }
+        self.queued.clear();
+        (request_ids, agents)
+    }
+}
+
+struct CatalogCwd;
+
+impl CatalogCwd {
+    fn current() -> Option<PathBuf> {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
+    }
+}
+
+fn request_catalogs(
+    activity: Activity<SessionManagerView>,
+    connected: Query<(), With<ServiceConnected>>,
+    agents: Query<Ref<RegistryAgent>>,
+    settings: Option<Res<AppSettings>>,
+    mut package_changes: MessageReader<AcpPackageChanged>,
+    mut tool_changes: MessageReader<ToolInventoryChanged>,
+    mut snapshot: ResMut<AcpSnapshot>,
+    mut state: ResMut<CatalogRequests>,
+    mut requests: MessageWriter<ServiceRequest>,
+) {
+    let package_changed = package_changes.read().next().is_some();
+    let tool_changed = tool_changes.read().any(|changed| changed.0.is("acp"));
+    let registry_changed = agents.iter().any(|agent| agent.is_changed());
+    if !Activity::present(activity) {
+        let (request_ids, launched) = state.cancel();
+        for request_id in request_ids {
+            requests.write(ServiceRequest(
+                vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog { request_id },
+            ));
+        }
+        for agent in launched {
+            if let Some(source) = snapshot.0.get_mut(&agent) {
+                source.state = AcpSourceState::Failed;
+            }
+        }
+        state.active = false;
+        state.refresh = true;
+        return;
+    }
+    if !state.active {
+        state.active = true;
+        state.refresh = true;
+    }
+    if package_changed || tool_changed || registry_changed {
+        state.refresh = true;
+    }
+    if connected.is_empty() {
+        if !state.pending.is_empty() || !state.queued.is_empty() {
+            let (_, agents) = state.cancel();
+            state.refresh = true;
+            for agent in agents {
+                if let Some(source) = snapshot.0.get_mut(&agent) {
+                    source.state = AcpSourceState::Failed;
+                }
+            }
+        }
+        return;
+    }
+    let timed_out = state
+        .pending
+        .iter()
+        .filter_map(|(request_id, request)| {
+            request
+                .started_at
+                .is_some_and(|started| started.elapsed() >= CATALOG_REQUEST_TIMEOUT)
+                .then_some(*request_id)
+        })
+        .collect::<Vec<_>>();
+    for request_id in timed_out {
+        if let Some(request) = state.pending.remove(&request_id) {
+            requests.write(ServiceRequest(
+                vmux_api::protocol::ClientMessage::CancelAcpSessionCatalog { request_id },
+            ));
+            if let Some(source) = snapshot.0.get_mut(&request.agent_id) {
+                source.state = AcpSourceState::Failed;
+            }
+        }
+    }
+    if state.refresh && state.pending.is_empty() && state.queued.is_empty() {
+        let Some(settings) = settings else {
+            return;
+        };
+        let Some(cwd) = CatalogCwd::current() else {
+            return;
+        };
+        state.refresh = false;
+        state.generation = state.generation.wrapping_add(1).max(1);
+        let generation = state.generation;
+        let shell = settings.shell();
+        let mut installed = HashSet::new();
+        let mut installed_families = HashSet::new();
+        for agent in &agents {
+            if !agent.is_installed() {
+                continue;
+            }
+            installed.insert(agent.id.clone());
+            installed_families.insert(AgentFamily::of(&agent.id));
+            let source = snapshot.0.entry(agent.id.clone()).or_insert(AcpSource {
+                state: AcpSourceState::Unprobed,
+                sessions: Vec::new(),
+            });
+            let launch = match AcpLaunch::installed_catalog(&agent, &shell) {
+                Ok(launch) => launch,
+                Err(error) => {
+                    source.state = AcpSourceState::Failed;
+                    bevy::log::warn!("failed to resolve installed ACP {}: {error}", agent.id);
+                    continue;
+                }
+            };
+            let request_id = state.request_id();
+            state.queued.push_back(CatalogQueued {
+                request_id,
+                request: CatalogRequest {
+                    generation,
+                    agent_id: agent.id.clone(),
+                    started_at: None,
+                },
+                message: launch.catalog_message(request_id, &agent.id, &agent.name, &cwd),
+            });
+        }
+        for config in &settings.agent.acp {
+            if config.command.trim().is_empty()
+                || installed.contains(&config.id)
+                || installed_families.contains(&AgentFamily::of(&config.id))
+            {
+                continue;
+            }
+            let launch = match AcpLaunch::configured_catalog(config, &shell) {
+                Ok(launch) => launch,
+                Err(error) => {
+                    bevy::log::debug!("configured ACP catalog skipped for {}: {error}", config.id);
+                    continue;
+                }
+            };
+            installed.insert(config.id.clone());
+            snapshot.0.entry(config.id.clone()).or_insert(AcpSource {
+                state: AcpSourceState::Unprobed,
+                sessions: Vec::new(),
+            });
+            let request_id = state.request_id();
+            let configured_cwd = config
+                .cwd
+                .as_deref()
+                .filter(|path| path.is_dir())
+                .unwrap_or(&cwd);
+            state.queued.push_back(CatalogQueued {
+                request_id,
+                request: CatalogRequest {
+                    generation,
+                    agent_id: config.id.clone(),
+                    started_at: None,
+                },
+                message: launch.catalog_message(
+                    request_id,
+                    &config.id,
+                    &config.name,
+                    configured_cwd,
+                ),
+            });
+        }
+        snapshot.0.retain(|agent, _| installed.contains(agent));
+    }
+    for launch in state.launch() {
+        if let Some(source) = snapshot.0.get_mut(&launch.agent_id) {
+            source.state = AcpSourceState::Pending;
+        }
+        requests.write(ServiceRequest(launch.message));
+    }
+}
+
+fn receive_catalogs(
+    mut received: MessageReader<AcpCatalogReceived>,
+    mut snapshot: ResMut<AcpSnapshot>,
+    mut compatibility: ResMut<SourceSnapshot>,
+    mut state: ResMut<CatalogRequests>,
+) {
+    for received in received.read() {
+        let Some(request) = state.pending.remove(&received.request_id) else {
+            continue;
+        };
+        if request.generation != state.generation || request.agent_id != received.agent_id {
+            continue;
+        }
+        let source = snapshot
+            .0
+            .entry(received.agent_id.clone())
+            .or_insert(AcpSource {
+                state: AcpSourceState::Unprobed,
+                sessions: Vec::new(),
+            });
+        if let Some(error) = &received.error {
+            source.state = AcpSourceState::Failed;
+            bevy::log::warn!(
+                "ACP session catalog failed for {}: {error}",
+                received.agent_id
+            );
+            continue;
+        }
+        if !received.supported {
+            source.state = AcpSourceState::Unsupported;
+            source.sessions.clear();
+        } else {
+            source.state = AcpSourceState::Supported;
+            source.sessions = AcpCatalog::sessions(received);
+        }
+        let family = AgentFamily::of(&received.agent_id);
+        if source.state == AcpSourceState::Supported {
+            compatibility
+                .0
+                .retain(|source, _| source.family() != family);
+        }
+    }
+}
+
+struct AcpCatalog;
+
+impl AcpCatalog {
+    fn sessions(received: &AcpCatalogReceived) -> Vec<ProviderSession> {
+        let mut sessions = received
+            .sessions
+            .iter()
+            .filter(|session| !session.id.trim().is_empty())
+            .map(|session| {
+                let updated_at = Timestamp::parse(&session.updated_at);
+                let name = if session.title.trim().is_empty() {
+                    session.id.clone()
+                } else {
+                    session.title.clone()
+                };
+                ProviderSession {
+                    kind: format!("acp:{}", received.agent_id),
+                    sid: session.id.clone(),
+                    agent: received.agent_id.clone(),
+                    agent_name: received.agent_name.clone(),
+                    name: name.clone(),
+                    description: String::new(),
+                    cwd: session.cwd.clone(),
+                    created_at: updated_at,
+                    updated_at,
+                    conversation_title: name,
+                    last_prompt: String::new(),
+                    archive: None,
+                }
+            })
+            .collect::<Vec<_>>();
+        sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
+        sessions
+    }
+}
 
 #[derive(Resource, Default)]
 struct SourceSnapshot(HashMap<SourceKind, Vec<ProviderSession>>);
@@ -151,6 +528,7 @@ struct Runtime {
     changes: Mutex<mpsc::Receiver<SourceChanges>>,
     watcher: Option<RecommendedWatcher>,
     watched: HashMap<PathBuf, bool>,
+    sources: HashSet<SourceKind>,
 }
 
 impl Runtime {
@@ -158,17 +536,18 @@ impl Runtime {
         let Some(watcher) = self.watcher.as_mut() else {
             return;
         };
+        let desired = paths.watches(&self.sources);
         let stale = self
             .watched
             .keys()
-            .filter(|path| !path.exists())
+            .filter(|path| !path.exists() || !desired.iter().any(|(desired, _)| desired == *path))
             .cloned()
             .collect::<Vec<_>>();
         for path in stale {
             self.watched.remove(&path);
             let _ = watcher.unwatch(&path);
         }
-        for (target, recursive) in paths.watches() {
+        for (target, recursive) in desired {
             let mut path = target.clone();
             while !path.exists() && path.pop() {}
             if !path.exists() {
@@ -307,6 +686,7 @@ struct ConversationRead {
     messages: Vec<vmux_api::session::Message>,
     cursor: u64,
     snapshot: bool,
+    complete: bool,
 }
 
 struct ConversationSource {
@@ -347,12 +727,14 @@ impl ConversationSource {
                     messages,
                     cursor: read.cursor,
                     snapshot,
+                    complete: read.complete,
                 })
             }
             _ => Ok(ConversationRead {
                 messages: Vec::new(),
                 cursor: cursor.unwrap_or_default(),
                 snapshot: false,
+                complete: true,
             }),
         }
     }
@@ -389,8 +771,18 @@ enum SourceKind {
 impl SourceKind {
     const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Vibe];
 
-    fn all() -> HashSet<Self> {
-        Self::ALL.into_iter().collect()
+    fn family(self) -> AgentFamily {
+        match self {
+            Self::Codex => AgentFamily::of("codex"),
+            Self::Claude => AgentFamily::of("claude"),
+            Self::Vibe => AgentFamily::of("vibe"),
+        }
+    }
+
+    fn for_family(family: &AgentFamily) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|source| source.family() == *family)
     }
 }
 
@@ -441,13 +833,19 @@ impl SourcePaths {
         Readers(readers)
     }
 
-    fn watches(&self) -> Vec<(PathBuf, bool)> {
-        vec![
-            (self.codex.clone(), false),
-            (self.codex.join("sessions"), true),
-            (self.claude.clone(), false),
-            (self.vibe.join("logs/session"), true),
-        ]
+    fn watches(&self, sources: &HashSet<SourceKind>) -> Vec<(PathBuf, bool)> {
+        let mut watches = Vec::new();
+        if sources.contains(&SourceKind::Codex) {
+            watches.push((self.codex.clone(), false));
+            watches.push((self.codex.join("sessions"), true));
+        }
+        if sources.contains(&SourceKind::Claude) {
+            watches.push((self.claude.clone(), false));
+        }
+        if sources.contains(&SourceKind::Vibe) {
+            watches.push((self.vibe.join("logs/session"), true));
+        }
+        watches
     }
 
     fn sources(&self, paths: &[PathBuf]) -> HashSet<SourceKind> {
@@ -531,6 +929,7 @@ impl SourceRead {
 struct BoundedLines<R> {
     reader: R,
     remaining: usize,
+    consumed: usize,
 }
 
 impl<R: BufRead> BoundedLines<R> {
@@ -538,7 +937,12 @@ impl<R: BufRead> BoundedLines<R> {
         Self {
             reader,
             remaining: PROVIDER_READ_LIMIT,
+            consumed: 0,
         }
+    }
+
+    fn consumed(&self) -> usize {
+        self.consumed
     }
 }
 
@@ -557,9 +961,11 @@ impl<R: BufRead> Iterator for BoundedLines<R> {
                 return None;
             }
             self.remaining = self.remaining.saturating_sub(read);
+            self.consumed = self.consumed.saturating_add(read);
             if bytes.len() > PROVIDER_LINE_LIMIT {
                 let skipped = self.reader.skip_until(b'\n').ok()?;
                 self.remaining = self.remaining.saturating_sub(skipped);
+                self.consumed = self.consumed.saturating_add(skipped);
                 continue;
             }
             while matches!(bytes.last(), Some(b'\n' | b'\r')) {
@@ -655,7 +1061,58 @@ impl SourceChanges {
     }
 }
 
-fn start(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
+fn activate(
+    activity: Activity<SessionManagerView>,
+    acp: Res<AcpSnapshot>,
+    sessions: Query<&ProviderKind, With<Session>>,
+    mut runtime: Query<(Entity, &mut Runtime, &SourcePaths)>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let manager = Activity::present(activity);
+    let available = SourceKind::ALL
+        .into_iter()
+        .filter(|source| acp.allows_fallback(&source.family()))
+        .collect::<HashSet<_>>();
+    let mut sources = if manager {
+        available.clone()
+    } else {
+        HashSet::new()
+    };
+    if !manager {
+        for kind in &sessions {
+            let Some(agent) = kind.0.strip_prefix("acp:") else {
+                continue;
+            };
+            let family = AgentFamily::of(agent);
+            let Some(source) = SourceKind::for_family(&family) else {
+                continue;
+            };
+            if available.contains(&source) {
+                sources.insert(source);
+            }
+        }
+    }
+    if sources.is_empty() {
+        for (entity, _, _) in &mut runtime {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    if let Ok((entity, mut runtime, paths)) = runtime.single_mut() {
+        if runtime.sources != sources {
+            let requested = sources
+                .difference(&runtime.sources)
+                .copied()
+                .collect::<HashSet<_>>();
+            runtime.sources = sources;
+            runtime.ensure_watches(paths);
+            if !requested.is_empty() {
+                commands.entity(entity).insert(ScanRequested(requested));
+            }
+        }
+        return;
+    }
     let Some(paths) = SourcePaths::current() else {
         return;
     };
@@ -691,13 +1148,14 @@ fn start(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
         changes: Mutex::new(events.receiver),
         watcher: watcher.ok(),
         watched: HashMap::new(),
+        sources: sources.clone(),
     };
     runtime.ensure_watches(&paths);
     commands.spawn((
         Name::new("ACP provider session catalog"),
         runtime,
         paths,
-        ScanRequested(SourceKind::all()),
+        ScanRequested(sources),
     ));
 }
 
@@ -719,6 +1177,12 @@ fn watch(
     }
     if changes.is_empty() {
         return;
+    }
+    changes
+        .scans
+        .retain(|source| runtime.sources.contains(source));
+    if !runtime.sources.contains(&SourceKind::Codex) {
+        changes.codex_activity.clear();
     }
     runtime.ensure_watches(paths);
     for path in changes.codex_activity {
@@ -826,13 +1290,25 @@ fn finish_archives(
 }
 
 fn scan(
-    runtime: Single<(Entity, &SourcePaths, &ScanRequested), (With<Runtime>, Without<ScanTask>)>,
+    runtime: Single<
+        (Entity, &Runtime, &SourcePaths, &ScanRequested),
+        (With<Runtime>, Without<ScanTask>),
+    >,
     snapshot: Res<SourceSnapshot>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let (entity, paths, requested) = *runtime;
-    let readers = paths.readers(&requested.0, &snapshot);
+    let (entity, runtime, paths, requested) = *runtime;
+    let requested = requested
+        .0
+        .intersection(&runtime.sources)
+        .copied()
+        .collect::<HashSet<_>>();
+    if requested.is_empty() {
+        commands.entity(entity).remove::<ScanRequested>();
+        return;
+    }
+    let readers = paths.readers(&requested, &snapshot);
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let started_at = Instant::now();
     let task = IoTaskPool::get().spawn(async move {
@@ -878,6 +1354,7 @@ fn finish(
 
 fn project(
     snapshot: Res<SourceSnapshot>,
+    acp: Res<AcpSnapshot>,
     imported: Query<
         (
             &AgentId,
@@ -905,7 +1382,12 @@ fn project(
     mut catalog: ResMut<ProviderCatalog>,
 ) {
     let removed = removed.read().next().is_some() || removed_duplicates.read().next().is_some();
-    if !snapshot.is_changed() && changed.is_empty() && !removed && !catalog.is_added() {
+    if !snapshot.is_changed()
+        && !acp.is_changed()
+        && changed.is_empty()
+        && !removed
+        && !catalog.is_added()
+    {
         return;
     }
     let imported = imported
@@ -921,18 +1403,37 @@ fn project(
             Some((family, sid))
         })
         .collect::<HashSet<_>>();
-    let mut sessions = Vec::new();
+    let mut indexed = HashMap::<(AgentFamily, String), ProviderSession>::new();
+    for session in acp.sessions() {
+        let key = (AgentFamily::of(&session.agent), session.sid.clone());
+        match indexed.get(&key) {
+            Some(current) if current.updated_at > session.updated_at => {}
+            _ => {
+                indexed.insert(key, session.clone());
+            }
+        }
+    }
     for source in SourceKind::ALL {
+        if !acp.allows_fallback(&source.family()) {
+            continue;
+        }
         let Some(source_sessions) = snapshot.0.get(&source) else {
             continue;
         };
         for session in source_sessions {
             let key = (AgentFamily::of(&session.agent), session.sid.clone());
-            if !imported.contains(&key) {
-                sessions.push(session.clone());
+            match indexed.get(&key) {
+                Some(current) if current.updated_at > session.updated_at => {}
+                _ => {
+                    indexed.insert(key, session.clone());
+                }
             }
         }
     }
+    let mut sessions = indexed
+        .into_iter()
+        .filter_map(|(key, session)| (!imported.contains(&key)).then_some(session))
+        .collect::<Vec<_>>();
     sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
     if catalog.sessions != sessions {
         catalog.sessions = sessions;
@@ -1070,6 +1571,10 @@ fn queue_initial_conversations(
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         }
+        if snapshot.get(&kind.0, &provider_sid.0).is_none() {
+            commands.entity(session).remove::<TranscriptLoading>();
+            continue;
+        }
         let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
@@ -1188,6 +1693,11 @@ fn finish_conversations(
                 commands
                     .entity(task.session)
                     .insert(ConversationCursor(read.cursor));
+                if !read.complete {
+                    commands
+                        .entity(task.session)
+                        .insert(ConversationRefreshRequested(task.revision));
+                }
             }
             Err(error) => {
                 bevy::log::warn!("failed to read provider conversation: {error}");
@@ -1321,12 +1831,19 @@ struct AgentCatalog<'w, 's> {
 impl AgentCatalog<'_, '_> {
     fn resolve(&self, source: &str) -> AgentId {
         let family = AgentFamily::of(source);
+        if let Some(agent) = self
+            .registry
+            .iter()
+            .find(|agent| agent.id == source && agent.is_installed())
+        {
+            return AgentId(agent.id.clone());
+        }
         if let Some(config) = self
             .settings
             .agent
             .acp
             .iter()
-            .find(|config| AgentFamily::of(&config.id) == family)
+            .find(|config| config.id == source)
         {
             return AgentId(config.id.clone());
         }
@@ -1336,6 +1853,15 @@ impl AgentCatalog<'_, '_> {
             .find(|agent| AgentFamily::of(&agent.id) == family && agent.is_installed())
         {
             return AgentId(agent.id.clone());
+        }
+        if let Some(config) = self
+            .settings
+            .agent
+            .acp
+            .iter()
+            .find(|config| AgentFamily::of(&config.id) == family)
+        {
+            return AgentId(config.id.clone());
         }
         if let Some(agent) = self
             .registry
@@ -1377,6 +1903,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_store_fallback_requires_an_explicitly_unsupported_catalog() {
+        let family = AgentFamily::of("codex");
+        let mut snapshot = AcpSnapshot::default();
+        assert!(snapshot.allows_fallback(&family));
+
+        snapshot.0.insert(
+            "codex-acp".into(),
+            AcpSource {
+                state: AcpSourceState::Pending,
+                sessions: Vec::new(),
+            },
+        );
+        assert!(!snapshot.allows_fallback(&family));
+
+        snapshot.0.get_mut("codex-acp").unwrap().state = AcpSourceState::Failed;
+        assert!(!snapshot.allows_fallback(&family));
+
+        snapshot.0.get_mut("codex-acp").unwrap().state = AcpSourceState::Unsupported;
+        assert!(snapshot.allows_fallback(&family));
+    }
+
+    #[test]
+    fn acp_catalog_normalizes_provider_sessions() {
+        let received = AcpCatalogReceived {
+            request_id: 1,
+            agent_id: "example-acp".into(),
+            agent_name: "Example".into(),
+            supported: true,
+            sessions: vec![AcpProviderSession {
+                id: "provider-session".into(),
+                cwd: "/work/example".into(),
+                title: "Review changes".into(),
+                updated_at: "1970-01-01T00:00:01Z".into(),
+            }],
+            error: None,
+        };
+
+        assert_eq!(
+            AcpCatalog::sessions(&received),
+            vec![ProviderSession {
+                kind: "acp:example-acp".into(),
+                sid: "provider-session".into(),
+                agent: "example-acp".into(),
+                agent_name: "Example".into(),
+                name: "Review changes".into(),
+                cwd: "/work/example".into(),
+                created_at: 1_000,
+                updated_at: 1_000,
+                conversation_title: "Review changes".into(),
+                ..Default::default()
+            }]
+        );
+    }
+
+    #[test]
     fn missing_provider_directory_upgrades_from_parent_watch() {
         let home = tempfile::tempdir().unwrap();
         let paths = SourcePaths {
@@ -1389,6 +1970,7 @@ mod tests {
             changes: Mutex::new(receiver),
             watcher: notify::recommended_watcher(|_| {}).ok(),
             watched: HashMap::new(),
+            sources: SourceKind::all(),
         };
 
         runtime.ensure_watches(&paths);
@@ -1413,6 +1995,7 @@ mod tests {
             changes: Mutex::new(receiver),
             watcher: notify::recommended_watcher(|_| {}).ok(),
             watched: HashMap::new(),
+            sources: SourceKind::all(),
         };
 
         runtime.ensure_watches(&paths);

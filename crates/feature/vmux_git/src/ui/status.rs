@@ -1,8 +1,6 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_api::command_bar::OpenRequest;
-use vmux_api::open_target::OpenTarget;
 use vmux_api::space::ProjectRow;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
@@ -545,31 +543,6 @@ fn ViewPicker(
                         count: stashes,
                         onselect: move |_| {
                             let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
-                        },
-                    }
-                    div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
-                    ViewPickerItem {
-                        active: false,
-                        icon: LineIcon::MessagesRound,
-                        label: translate("sessions-title"),
-                        count: 0,
-                        onselect: move |_| {
-                            let _ = send(&OpenRequest {
-                                value: "vmux://sessions/".to_string(),
-                                open: Some(OpenTarget::InPlace),
-                            });
-                        },
-                    }
-                    ViewPickerItem {
-                        active: false,
-                        icon: LineIcon::Notebook,
-                        label: translate("layout-projects"),
-                        count: 0,
-                        onselect: move |_| {
-                            let _ = send(&OpenRequest {
-                                value: "vmux://projects/".to_string(),
-                                open: Some(OpenTarget::InPlace),
-                            });
                         },
                     }
                 }

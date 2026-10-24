@@ -12,7 +12,7 @@ use super::projection::ChatTurnProjection;
 use crate::activity::ActivityIcon;
 use crate::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_SIZE, ChatAttachment, ChatBranch,
-    ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatSnapshot,
+    ChatBranchesState, ChatItem, ChatMediaState, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
 use crate::state::ChatUiState;
@@ -82,7 +82,7 @@ impl Plugin for ChatHostPlugin {
                 super::composer::ChatComposerPlugin,
                 super::prompt::ChatPromptInputPlugin,
             ))
-            .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
+            .add_plugins(UiEventPlugin::<(PromptRequest,)>::default())
             .add_observer(open_started)
             .add_observer(submit_from_command_bar)
             .add_systems(

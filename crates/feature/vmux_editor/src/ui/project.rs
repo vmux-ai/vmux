@@ -1,8 +1,6 @@
 use std::path::Path;
 
 use dioxus::prelude::*;
-use vmux_api::command_bar::OpenRequest;
-use vmux_api::open_target::OpenTarget;
 use vmux_ecs::event::{FileDirEntry, FileDirectoryOpenRequest, OpenEditorItem};
 use vmux_git::event::GitRepositoryRequest;
 use vmux_git::state::GitUiState;
@@ -14,6 +12,7 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, Identicon};
+use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator, Breadcrumbs};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
@@ -22,7 +21,7 @@ use vmux_ui::components::manager::{
     ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty,
     ManagerGridSize, ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
     ManagerSearchPopover, ManagerSidebarItem, ManagerSkeleton, ManagerTone, ManagerView,
-    ManagerViewToggle, ManagerWorkspace,
+    ManagerViewToggle, WorkspaceLayout,
 };
 use vmux_ui::components::page::{PageContent, PageHeader};
 use vmux_ui::components::sheet::SheetHeaderChevron;
@@ -32,6 +31,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{CollectionController, send, use_collection_controller, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
+use vmux_ui::navigation::PageNavigation;
 
 use super::project_manager::{
     ProjectFilter, ProjectFilterMenu, ProjectPresentation, ViewPreference,
@@ -79,17 +79,14 @@ pub(super) fn ProjectList(
     let presentation = ProjectPresentation::new(&entries, &controls.query(), &filters);
     rsx! {
         ManagerPage {
-            ManagerWorkspace {
+            WorkspaceLayout {
                 active: ProjectFilter::selected(&filters).is_none().then_some(ManagerArea::Projects),
                 onnavigate: move |area: ManagerArea| {
                     if area == ManagerArea::Projects {
                         controls.replace_filters(Vec::new());
                         return;
                     }
-                    let _ = send(&OpenRequest {
-                        value: area.url().to_string(),
-                        open: Some(OpenTarget::InPlace),
-                    });
+                    PageNavigation::replace(area.url());
                 },
                 sidebar_actions: rsx! {
                     ProjectManagerActions {
@@ -452,10 +449,7 @@ fn ProjectActionMenuItem(
 
 impl ProjectEntry {
     fn open(url: String) {
-        let _ = send(&OpenRequest {
-            value: url,
-            open: Some(OpenTarget::InPlace),
-        });
+        PageNavigation::replace(url);
     }
 }
 
@@ -636,41 +630,40 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
 
     rsx! {
         ManagerPage {
-            PageHeader {
-                div { class: "flex min-h-10 items-center gap-3",
-                Identicon {
-                    seed: project_identity,
-                    alt: project_name.clone(),
-                    class: "size-9 shrink-0 rounded-xl".to_string(),
-                }
-                div { class: "min-w-0 flex-1",
-                    Tooltip { label: header_root,
-                        h1 { class: "max-w-full truncate text-sm font-semibold tracking-[-0.015em]", "{project_name}" }
-                    }
-                }
-                Button {
-                    variant: ButtonVariant::Primary,
-                    size: ButtonSize::Sm,
-                    class: "h-8 gap-1.5 text-xs".to_string(),
-                    onclick: move |_| {
-                        let _ = send(&OpenRequest {
-                            value: start_url.clone(),
-                            open: Some(OpenTarget::InPlace),
-                        });
-                    },
-                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
-                    span { {translate("sessions-start")} }
-                }
-                }
-            }
-            ManagerWorkspace {
+            WorkspaceLayout {
                 active: Some(ManagerArea::Projects),
                 onnavigate: move |area: ManagerArea| {
-                    let _ = send(&OpenRequest {
-                        value: area.url().to_string(),
-                        open: Some(OpenTarget::InPlace),
-                    });
+                    PageNavigation::replace(area.url());
                 },
+                PageHeader {
+                    div { class: "flex min-h-10 items-center gap-2",
+                        Identicon {
+                            seed: project_identity,
+                            alt: project_name.clone(),
+                            class: "size-7 shrink-0 rounded-lg".to_string(),
+                        }
+                        Breadcrumbs { class: "min-w-0 flex-1".to_string(),
+                            BreadcrumbItem {
+                                label: translate("layout-projects"),
+                                onclick: move |_| PageNavigation::replace("vmux://projects/"),
+                            }
+                            BreadcrumbSeparator {}
+                            BreadcrumbItem {
+                                label: project_name.clone(),
+                                title: header_root,
+                                active: true,
+                            }
+                        }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Sm,
+                            class: "h-8 gap-1.5 text-xs".to_string(),
+                            onclick: move |_| PageNavigation::replace(start_url.clone()),
+                            LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                            span { {translate("sessions-start")} }
+                        }
+                    }
+                }
                 PageContent { content_class: "mx-auto flex w-full max-w-5xl flex-col gap-5".to_string(),
                     ProjectSessionsPanel {}
                     ProjectGitPanel { root: root.clone() }
@@ -832,10 +825,7 @@ impl ProjectSessionTarget {
     fn open(&self) {
         if self.managed {
             let url = vmux_session::Route::Session(vmux_session::SessionId(self.id.clone())).url();
-            let _ = send(&OpenRequest {
-                value: url,
-                open: Some(OpenTarget::InPlace),
-            });
+            PageNavigation::replace(url);
             return;
         }
         let _ = send(&ResumeSession {
@@ -891,10 +881,7 @@ fn ProjectGit(
                     class: "group flex w-full min-w-0 items-center gap-3 rounded-md px-3 py-3 text-left hover:bg-foreground/[0.035]",
                     onclick: move |_| {
                         if let Some(url) = git_url.clone() {
-                            let _ = send(&OpenRequest {
-                                value: url,
-                                open: Some(OpenTarget::InPlace),
-                            });
+                            PageNavigation::replace(url);
                         }
                     },
                     GitSymbolView { symbol: GitSymbol::Repository, class: "size-4 shrink-0 text-muted-foreground".to_string() }
