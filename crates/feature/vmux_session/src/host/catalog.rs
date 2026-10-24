@@ -63,7 +63,7 @@ impl Plugin for CatalogPlugin {
                 PostUpdate,
                 (
                     sync_repositories.run_if(Activity::<SessionCatalogView>::active),
-                    publish_catalog,
+                    publish,
                     publish_scope,
                     publish_detail,
                 )
@@ -519,7 +519,7 @@ impl SessionDetailUiState {
     }
 }
 
-fn publish_catalog(
+fn publish(
     catalog: Res<CatalogSnapshot>,
     repositories: Res<SessionRepositories>,
     targets: Query<
