@@ -44,7 +44,14 @@ impl Plugin for ProjectPagePlugin {
             .add_systems(PreStartup, prewarm)
             .add_systems(
                 Update,
-                (queue, finish_catalogs, finish_imports, finish_deletes).chain(),
+                (
+                    queue,
+                    sync_icons,
+                    finish_catalogs,
+                    finish_imports,
+                    finish_deletes,
+                )
+                    .chain(),
             )
             .add_systems(
                 PostUpdate,
@@ -635,6 +642,7 @@ fn queue(
     mut pages: Query<(Entity, &mut vmux_ecs::PageMetadata), Changed<vmux_ecs::PageMetadata>>,
     states: Query<&vmux_ecs::UiState<ProjectUiState>>,
     mut revisions: Query<&mut ProjectPageRevision>,
+    settings: Res<vmux_setting::AppSettings>,
     projects: vmux_ecs::profile::Projects,
     collection_views: ProjectCollectionViews,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -718,7 +726,10 @@ fn queue(
                 ProjectView::Detail(detail) => detail.id.0.as_str(),
                 _ => &url,
             };
-            page.icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon(seed));
+            page.icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon_with_variant(
+                seed,
+                settings.appearance.project_icon,
+            ));
             commands.entity(entity).remove::<ProjectCatalogTask>();
             commands.trigger(ScopeProjectionRequest {
                 webview: entity,
@@ -753,6 +764,27 @@ fn queue(
         commands
             .entity(entity)
             .insert(ProjectCatalogTask::spawn(root, revision, wake));
+    }
+}
+
+fn sync_icons(
+    settings: Res<vmux_setting::AppSettings>,
+    mut pages: Query<&mut vmux_ecs::PageMetadata>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for mut page in &mut pages {
+        if !ProjectRoute::is_page(&page.url) || ProjectRoute::is_root(&page.url) {
+            continue;
+        }
+        let icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon_with_variant(
+            &page.url,
+            settings.appearance.project_icon,
+        ));
+        if page.icon != icon {
+            page.icon = icon;
+        }
     }
 }
 

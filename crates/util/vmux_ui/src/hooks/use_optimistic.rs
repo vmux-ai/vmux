@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use dioxus::prelude::*;
@@ -40,31 +40,44 @@ where
             .unwrap_or_else(|| observed.clone())
     }
 
-    pub fn set(mut self, key: K, baseline: V, expected: V) {
-        if baseline == expected {
-            self.pending.write().remove(&key);
+    pub fn set(self, key: K, baseline: V, expected: V) {
+        self.set_many([(key, baseline, expected)]);
+    }
+
+    pub fn set_many(mut self, values: impl IntoIterator<Item = (K, V, V)>) {
+        let values = values.into_iter().collect::<Vec<_>>();
+        if values.is_empty() {
             return;
         }
         let generation = (self.generation)().wrapping_add(1).max(1);
         self.generation.set(generation);
-        self.pending.write().insert(
-            key.clone(),
-            Pending {
-                baseline,
-                expected,
-                generation,
-            },
-        );
+        let mut keys = HashSet::with_capacity(values.len());
+        {
+            let mut pending = self.pending.write();
+            for (key, baseline, expected) in values {
+                if baseline == expected {
+                    pending.remove(&key);
+                    continue;
+                }
+                keys.insert(key.clone());
+                pending.insert(
+                    key,
+                    Pending {
+                        baseline,
+                        expected,
+                        generation,
+                    },
+                );
+            }
+        }
+        if keys.is_empty() {
+            return;
+        }
         spawn(async move {
             Platform::sleep(OPTIMISTIC_TIMEOUT_MS).await;
-            let expired = self
-                .pending
-                .peek()
-                .get(&key)
-                .is_some_and(|pending| pending.generation == generation);
-            if expired {
-                self.pending.write().remove(&key);
-            }
+            self.pending
+                .write()
+                .retain(|key, pending| !keys.contains(key) || pending.generation != generation);
         });
     }
 

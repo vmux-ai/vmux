@@ -68,6 +68,7 @@ impl BrowserAppearance<'_> {
                 ResolvedScheme::Light => ThemeScheme::Light,
                 ResolvedScheme::Dark => ThemeScheme::Dark,
             },
+            project_icon: self.0.appearance.project_icon,
         }
     }
 }

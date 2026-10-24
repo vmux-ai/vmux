@@ -4,18 +4,17 @@ use dioxus::prelude::*;
 use vmux_ecs::event::{FileDirEntry, FileDirectoryOpenRequest, OpenEditorItem};
 use vmux_git::event::GitRepositoryRequest;
 use vmux_git::state::GitUiState;
-use vmux_session::event::ResumeSession;
 use vmux_session::state::SessionScopeUiState;
-use vmux_session::{SessionAge, SessionSummary, SessionSummaryProjection, StageSummary};
+use vmux_session::{SessionSummary, SessionSummaryProjection, StageSummary};
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use vmux_ui::components::avatar::{AgentThumbnail, Identicon};
+use vmux_ui::components::avatar::Identicon;
 use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator, Breadcrumbs};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
-use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
+use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
     ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerControls, ManagerEmpty,
@@ -29,7 +28,7 @@ use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{CollectionController, send, use_collection_controller, use_ui_state};
-use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 use vmux_ui::navigation::PageNavigation;
 
@@ -352,7 +351,8 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
             }
             if open() {
                 DropdownPopup {
-                    class: "absolute right-0 top-8 z-30 w-40 p-1",
+                    align: DropdownAlign::End,
+                    class: "w-40 p-1",
                     onclick: move |event: MouseEvent| event.stop_propagation(),
                     ProjectActionMenuItem {
                         icon: LineIcon::MessagesRound,
@@ -490,7 +490,7 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
                 }
             }
             if open() {
-                DropdownPopup { class: "absolute right-0 top-9 z-50 w-72 p-1.5",
+                DropdownPopup { align: DropdownAlign::End, class: "w-72 p-1.5",
                     ProjectAddItem {
                         icon: LineIcon::Plus,
                         title: translate("project-new"),
@@ -701,15 +701,25 @@ struct ProjectSessionList {
     stages: Vec<StageSummary>,
 }
 
+impl ProjectSessionList {
+    fn visible_len(&self) -> usize {
+        self.sessions
+            .iter()
+            .filter(|session| session.archived_at == 0)
+            .count()
+    }
+}
+
 #[component]
 fn ProjectSessions(projection: ProjectSessionList) -> Element {
     let mut view = use_signal(ManagerView::default);
+    let visible = projection.visible_len();
     rsx! {
         ProjectSection {
             title: translate("sessions-title"),
-            count: projection.sessions.len(),
+            count: visible,
             actions: rsx! {
-                if !projection.sessions.is_empty() {
+                if visible > 0 {
                     ManagerViewToggle {
                         view: view(),
                         list_label: translate("tools-view-list"),
@@ -718,121 +728,18 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
                     }
                 }
             },
-            if projection.sessions.is_empty() {
+            if visible == 0 {
                 div { class: "flex min-h-20 items-center justify-center px-3 text-xs text-muted-foreground",
                     {translate("sessions-inbox-empty")}
                 }
             } else {
-                ManagerCollection { view: view(), grid_size: ManagerGridSize::Comfortable,
-                    for session in projection.sessions {
-                        ProjectSessionItem {
-                            key: "{session.id}",
-                            session,
-                            stages: projection.stages.clone(),
-                            view: view(),
-                        }
-                    }
+                vmux_session::ui::SessionCollection {
+                    sessions: projection.sessions,
+                    stages: projection.stages,
+                    view: view(),
                 }
             }
         }
-    }
-}
-
-#[component]
-fn ProjectSessionItem(
-    session: SessionSummary,
-    stages: Vec<StageSummary>,
-    view: ManagerView,
-) -> Element {
-    let projection =
-        SessionSummaryProjection::new(&session, &stages, vmux_ecs::UnixMillis::now().0);
-    let stage = if projection.stale {
-        translate_humanized("stale")
-    } else {
-        stages
-            .iter()
-            .find(|stage| stage.id == session.stage)
-            .map(|stage| translate_humanized(&stage.name))
-            .unwrap_or_else(|| translate_humanized(&session.stage))
-    };
-    let age = ProjectTime::label(projection.age);
-    let target = ProjectSessionTarget::from(&session);
-    let icon = rsx! {
-            AgentThumbnail {
-                src: (!session.agent_icon.is_empty()).then(|| session.agent_icon.clone()),
-                seed: session.agent.clone(),
-                background: session.agent_color.clone(),
-                alt: session.agent_name.clone(),
-                class: "size-6 text-[7px]".to_string(),
-            }
-    };
-    let meta = rsx! {
-        ManagerBadge { tone: ManagerTone::Neutral, uppercase: false,
-            span { "{stage}" }
-        }
-        ManagerBadge { tone: ManagerTone::Neutral, uppercase: false,
-            span { "{age}" }
-        }
-    };
-    if view == ManagerView::Grid {
-        return rsx! {
-            ManagerCard {
-                selected: false,
-                icon_surface: false,
-                onselect: move |_| target.open(),
-                icon,
-                title: projection.title,
-                subtitle: projection.preview,
-                meta,
-                actions: rsx! {},
-            }
-        };
-    }
-    rsx! {
-        ManagerRow {
-            selected: false,
-            icon_surface: false,
-            onselect: move |_| target.open(),
-            icon,
-            title: projection.title,
-            subtitle: projection.preview,
-            meta,
-            actions: rsx! {},
-        }
-    }
-}
-
-#[derive(Clone)]
-struct ProjectSessionTarget {
-    managed: bool,
-    id: String,
-    kind: String,
-    sid: String,
-    cwd: String,
-}
-
-impl ProjectSessionTarget {
-    fn from(session: &SessionSummary) -> Self {
-        Self {
-            managed: session.managed,
-            id: session.id.clone(),
-            kind: session.kind.clone(),
-            sid: session.sid.clone(),
-            cwd: session.cwd.clone(),
-        }
-    }
-
-    fn open(&self) {
-        if self.managed {
-            let url = vmux_session::Route::Session(vmux_session::SessionId(self.id.clone())).url();
-            PageNavigation::replace(url);
-            return;
-        }
-        let _ = send(&ResumeSession {
-            kind: self.kind.clone(),
-            sid: self.sid.clone(),
-            cwd: self.cwd.clone(),
-        });
     }
 }
 
@@ -1003,7 +910,7 @@ fn ProjectFiles(projection: ProjectFilesProjection) -> Element {
         .cloned()
         .collect::<Vec<_>>();
     rsx! {
-        section { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
+        section { class: "overflow-hidden rounded-lg",
             div { class: "flex h-10 items-center gap-2 px-3",
                 div { class: "flex min-w-0 flex-1 items-center gap-2",
                     LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
@@ -1080,7 +987,7 @@ fn ProjectSection(
     children: Element,
 ) -> Element {
     rsx! {
-        section { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
+        section { class: "overflow-hidden rounded-lg",
             header { class: "flex h-10 items-center gap-2 px-3",
                 h2 { class: "truncate text-xs font-semibold", "{title}" }
                 if count > 0 {
@@ -1115,25 +1022,5 @@ impl ProjectPath {
             || path
                 .strip_prefix(root)
                 .is_some_and(|relative| relative.starts_with('/'))
-    }
-}
-
-struct ProjectTime;
-
-impl ProjectTime {
-    fn label(age: SessionAge) -> String {
-        if age.0 < SessionAge::MINUTE {
-            return translate("resume-age-now");
-        }
-        if age.0 < SessionAge::HOUR {
-            return format!("{}m", age.0 / SessionAge::MINUTE);
-        }
-        if age.0 < SessionAge::DAY {
-            return format!("{}h", age.0 / SessionAge::HOUR);
-        }
-        if age.0 < SessionAge::WEEK {
-            return format!("{}d", age.0 / SessionAge::DAY);
-        }
-        format!("{}w", age.0 / SessionAge::WEEK)
     }
 }

@@ -1,3 +1,4 @@
+use crate::cn::cn;
 use crate::i18n::translate;
 use dioxus::prelude::*;
 
@@ -7,11 +8,7 @@ pub fn Breadcrumbs(
     #[props(default)] class: String,
     #[props(default)] label: String,
 ) -> Element {
-    let class = if class.is_empty() {
-        "flex min-w-0 items-center gap-1".to_string()
-    } else {
-        class
-    };
+    let class = cn(["flex min-w-0 items-center gap-1", class.as_str()]);
     let label = if label.is_empty() {
         translate("editor-breadcrumb")
     } else {

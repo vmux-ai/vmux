@@ -104,6 +104,103 @@ window.addEventListener('pointerdown', outside, true);
 window.addEventListener('blur', dismiss, true);
 "#;
 
+const DROPDOWN_POPUP_SCRIPT: &str = r#"
+const id = '__VMUX_DROPDOWN_POPUP__';
+const entries = globalThis.__vmuxDropdownPopupEntries ??= new Map();
+entries.get(id)?.cleanup();
+const popup = document.getElementById(id);
+const root = popup?.closest('[data-vmux-dropdown-root]');
+if (!popup || !root) {
+  dioxus.send(false);
+} else {
+  let active = true;
+  let frame = 0;
+  const align = '__VMUX_DROPDOWN_ALIGN__';
+  const placement = '__VMUX_DROPDOWN_PLACEMENT__';
+  const matchWidth = __VMUX_DROPDOWN_MATCH_WIDTH__;
+  const inset = __VMUX_DROPDOWN_INSET__;
+  const gap = __VMUX_DROPDOWN_GAP__;
+  const margin = 6;
+  const baseWidth = popup.style.width;
+  const baseMinWidth = popup.style.minWidth;
+  const baseMaxHeight = popup.style.maxHeight;
+  const baseOverflowY = popup.style.overflowY;
+  const place = () => {
+    frame = 0;
+    if (!active || !popup.isConnected || !root.isConnected) return;
+    if (!popup.matches(':popover-open')) {
+      try { popup.showPopover(); } catch (error) { return; }
+    }
+    const anchor = root.getBoundingClientRect();
+    popup.style.width = baseWidth;
+    popup.style.minWidth = baseMinWidth;
+    popup.style.maxHeight = baseMaxHeight;
+    popup.style.overflowY = baseOverflowY;
+    if (matchWidth) popup.style.width = `${Math.max(0, anchor.width - inset * 2)}px`;
+    const availableWidth = Math.max(0, window.innerWidth - margin * 2);
+    const availableHeight = Math.max(0, window.innerHeight - margin * 2);
+    popup.style.maxWidth = `${availableWidth}px`;
+    let bounds = popup.getBoundingClientRect();
+    if (bounds.width > availableWidth) {
+      popup.style.minWidth = '0px';
+      popup.style.width = `${availableWidth}px`;
+      bounds = popup.getBoundingClientRect();
+    }
+    if (bounds.height > availableHeight) {
+      popup.style.maxHeight = `${availableHeight}px`;
+      popup.style.overflowY = 'auto';
+      bounds = popup.getBoundingClientRect();
+    }
+    const width = bounds.width;
+    const height = bounds.height;
+    let x = align === 'end'
+      ? anchor.right - inset - width
+      : anchor.left + inset;
+    let y = placement === 'top'
+      ? anchor.top - gap - height
+      : anchor.bottom + gap;
+    const below = anchor.bottom + gap;
+    const above = anchor.top - gap - height;
+    if (placement === 'bottom' && y + height > window.innerHeight - margin && above >= margin) {
+      y = above;
+    } else if (placement === 'top' && y < margin && below + height <= window.innerHeight - margin) {
+      y = below;
+    }
+    x = Math.min(Math.max(margin, x), Math.max(margin, window.innerWidth - width - margin));
+    y = Math.min(Math.max(margin, y), Math.max(margin, window.innerHeight - height - margin));
+    popup.style.left = `${x}px`;
+    popup.style.top = `${y}px`;
+    popup.style.right = 'auto';
+    popup.style.bottom = 'auto';
+    popup.style.visibility = 'visible';
+  };
+  const schedule = () => {
+    if (!active || frame) return;
+    frame = requestAnimationFrame(place);
+  };
+  const observer = new ResizeObserver(schedule);
+  observer.observe(root);
+  observer.observe(popup);
+  window.addEventListener('resize', schedule, true);
+  window.addEventListener('scroll', schedule, true);
+  const cleanup = () => {
+    if (!active) return;
+    active = false;
+    if (frame) cancelAnimationFrame(frame);
+    observer.disconnect();
+    window.removeEventListener('resize', schedule, true);
+    window.removeEventListener('scroll', schedule, true);
+    if (popup.matches(':popover-open')) {
+      try { popup.hidePopover(); } catch (error) {}
+    }
+    if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
+    dioxus.send(true);
+  };
+  entries.set(id, { cleanup });
+  schedule();
+}
+"#;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct DropdownOutsideOwner(usize);
 
@@ -116,6 +213,74 @@ impl DropdownOutsideOwner {
         format!(
             "globalThis.__vmuxDropdownDismissEntries?.get({})?.cleanup();",
             self.0
+        )
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum DropdownAlign {
+    #[default]
+    Start,
+    End,
+}
+
+impl DropdownAlign {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::End => "end",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum DropdownPlacement {
+    #[default]
+    Bottom,
+    Top,
+}
+
+impl DropdownPlacement {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Bottom => "bottom",
+            Self::Top => "top",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct DropdownPopupOwner(usize);
+
+impl DropdownPopupOwner {
+    fn id(self) -> String {
+        format!("vmux-dropdown-popup-{}", self.0)
+    }
+
+    fn install_script(
+        self,
+        align: DropdownAlign,
+        placement: DropdownPlacement,
+        match_width: bool,
+        horizontal_inset: f64,
+        gap: f64,
+    ) -> String {
+        DROPDOWN_POPUP_SCRIPT
+            .replace("__VMUX_DROPDOWN_POPUP__", &self.id())
+            .replace("__VMUX_DROPDOWN_ALIGN__", align.as_str())
+            .replace("__VMUX_DROPDOWN_PLACEMENT__", placement.as_str())
+            .replace(
+                "__VMUX_DROPDOWN_MATCH_WIDTH__",
+                if match_width { "true" } else { "false" },
+            )
+            .replace("__VMUX_DROPDOWN_INSET__", &horizontal_inset.to_string())
+            .replace("__VMUX_DROPDOWN_GAP__", &gap.to_string())
+    }
+
+    fn cleanup_script(self) -> String {
+        format!(
+            "globalThis.__vmuxDropdownPopupEntries?.get('{}')?.cleanup();",
+            self.id()
         )
     }
 }
@@ -164,10 +329,18 @@ pub fn Dropdown(
 pub fn DropdownPopup(
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     #[props(default)] onclick: Option<EventHandler<MouseEvent>>,
+    #[props(default)] align: DropdownAlign,
+    #[props(default)] placement: DropdownPlacement,
+    #[props(default)] match_width: bool,
+    #[props(default)] horizontal_inset: f64,
+    #[props(default = 4.0)] gap: f64,
     children: Element,
 ) -> Element {
+    let owner = DropdownPopupOwner(current_scope_id().0);
     let base = attributes!(div {
-        class: "origin-top rounded-lg bg-popover shadow-[0_16px_48px_rgba(0,0,0,0.32)] animate-[dx-fade-zoom-in_120ms_ease-out_forwards] will-change-[transform,opacity] motion-reduce:animate-none",
+        id: owner.id(),
+        popover: "manual",
+        class: "invisible fixed left-0 top-0 z-[1000] m-0 origin-top rounded-lg bg-popover shadow-[0_16px_48px_rgba(0,0,0,0.32)] animate-[dx-fade-zoom-in_120ms_ease-out_forwards] will-change-[transform,opacity] motion-reduce:animate-none",
         "data-vmux-dropdown-popup": "",
     });
     let merged = merge_attributes(vec![base, attributes]);
@@ -180,8 +353,36 @@ pub fn DropdownPopup(
             },
             ..merged,
             {children}
+            DropdownPopupMount {
+                owner,
+                align,
+                placement,
+                match_width,
+                horizontal_inset,
+                gap,
+            }
         }
     }
+}
+
+#[component]
+fn DropdownPopupMount(
+    owner: DropdownPopupOwner,
+    align: DropdownAlign,
+    placement: DropdownPlacement,
+    match_width: bool,
+    horizontal_inset: f64,
+    gap: f64,
+) -> Element {
+    use_future(move || async move {
+        let script = owner.install_script(align, placement, match_width, horizontal_inset, gap);
+        let mut eval = document::eval(&script);
+        let _ = eval.recv::<bool>().await;
+    });
+    use_drop(move || {
+        let _ = document::eval(&owner.cleanup_script());
+    });
+    rsx! {}
 }
 
 #[component]

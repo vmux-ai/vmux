@@ -345,7 +345,7 @@ fn SideSheetSpaceRow(
                 }
             }
             if open() {
-                DropdownPopup { class: "absolute left-2 right-2 top-12 z-40 isolate p-1.5 outline-none",
+                DropdownPopup { match_width: true, horizontal_inset: 8.0, class: "isolate p-1.5 outline-none",
                     for choice in spaces.spaces {
                         SpaceChoice {
                             key: "{choice.id}",

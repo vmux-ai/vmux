@@ -86,6 +86,14 @@ const IDENTICON_PALETTES: [[&str; 5]; 6] = [
     ["#f5f3ff", "#7c3aed", "#a78bfa", "#6d28d9", "#ddd6fe"],
 ];
 
+#[vmux_api::contract(Copy, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IdenticonVariant {
+    #[default]
+    Marble,
+    Pixel,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IdenticonSpec {
     pub background: &'static str,
@@ -123,30 +131,64 @@ impl IdenticonSpec {
     }
 
     pub fn favicon(seed: &str) -> String {
-        let svg = Self::from_seed(seed).svg();
+        Self::favicon_with_variant(seed, IdenticonVariant::Marble)
+    }
+
+    pub fn favicon_with_variant(seed: &str, variant: IdenticonVariant) -> String {
+        let spec = Self::from_seed(seed);
+        let svg = match variant {
+            IdenticonVariant::Marble => spec.marble_svg(),
+            IdenticonVariant::Pixel => spec.pixel_svg(seed),
+        };
         format!(
             "data:image/svg+xml;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(svg)
         )
     }
 
-    fn svg(&self) -> String {
-        let bar_height = if self.bar.square { 80 } else { 10 };
+    fn marble_svg(&self) -> String {
         format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><clipPath id="avatar"><rect width="80" height="80" rx="18"/></clipPath></defs><g clip-path="url(#avatar)"><rect width="80" height="80" fill="{}"/><rect x="10" y="30" width="80" height="{}" fill="{}" transform="translate({} {}) rotate({} 40 40)"/><circle cx="40" cy="40" r="16" fill="{}" transform="translate({} {})"/><line x1="0" y1="40" x2="80" y2="40" stroke-width="2" stroke="{}" transform="translate({} {}) rotate({} 40 40)"/></g></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><clipPath id="avatar"><rect width="80" height="80" rx="18"/></clipPath><filter id="blur"><feGaussianBlur stdDeviation="10"/></filter></defs><g clip-path="url(#avatar)"><rect width="80" height="80" fill="{}"/><g filter="url(#blur)"><circle cx="18" cy="18" r="42" fill="{}" transform="translate({} {})"/><circle cx="66" cy="22" r="38" fill="{}" transform="translate({} {})"/><circle cx="40" cy="72" r="44" fill="{}" transform="translate({} {})"/></g></g></svg>"#,
             self.background,
-            bar_height,
             self.bar.color,
             self.bar.translate_x,
             self.bar.translate_y,
-            self.bar.rotate,
             self.circle.color,
             self.circle.translate_x,
             self.circle.translate_y,
             self.line.color,
             self.line.translate_x,
             self.line.translate_y,
-            self.line.rotate,
+        )
+    }
+
+    fn pixel_svg(&self, seed: &str) -> String {
+        let hash = IdenticonHash::of(seed);
+        let colors = [self.bar.color, self.circle.color, self.line.color];
+        let mut cells = String::new();
+        for row in 0..5u32 {
+            for column in 0..3u32 {
+                let index = row * 3 + column;
+                if !hash.bit(index) {
+                    continue;
+                }
+                let color = colors[((row + column) as usize) % colors.len()];
+                let x = column * 16;
+                let y = row * 16;
+                cells.push_str(&format!(
+                    r#"<rect x="{x}" y="{y}" width="16" height="16" fill="{color}"/>"#
+                ));
+                let mirror = 64 - x;
+                if mirror != x {
+                    cells.push_str(&format!(
+                        r#"<rect x="{mirror}" y="{y}" width="16" height="16" fill="{color}"/>"#
+                    ));
+                }
+            }
+        }
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><defs><clipPath id="avatar"><rect width="80" height="80" rx="18"/></clipPath></defs><g clip-path="url(#avatar)"><rect width="80" height="80" fill="{}"/>{cells}</g></svg>"#,
+            self.background,
         )
     }
 }
@@ -184,6 +226,10 @@ impl IdenticonHash {
 
     fn boolean(self, place: u32) -> bool {
         self.digit(place).is_multiple_of(2)
+    }
+
+    fn bit(self, index: u32) -> bool {
+        self.0.rotate_left((index * 7) % 64) & 1 == 1
     }
 
     fn unit(self, range: i32, sign_digit: Option<u32>) -> i32 {
@@ -235,6 +281,19 @@ mod tests {
         assert!(
             IdenticonSpec::favicon("vmux://projects/github.com/vmux-ai/vmux")
                 .starts_with("data:image/svg+xml;base64,")
+        );
+    }
+
+    #[test]
+    fn identicon_variants_are_distinct_and_stable() {
+        let seed = "vmux://projects/github.com/vmux-ai/vmux";
+        let marble = IdenticonSpec::favicon_with_variant(seed, IdenticonVariant::Marble);
+        let pixel = IdenticonSpec::favicon_with_variant(seed, IdenticonVariant::Pixel);
+
+        assert_ne!(marble, pixel);
+        assert_eq!(
+            pixel,
+            IdenticonSpec::favicon_with_variant(seed, IdenticonVariant::Pixel)
         );
     }
 }

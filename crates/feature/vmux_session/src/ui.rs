@@ -11,6 +11,8 @@ use dioxus::prelude::*;
 use vmux_ui::components::manager::{ManagerArea, WorkspaceLayout};
 use vmux_ui::navigation::PageNavigation;
 
+pub use manager::SessionCollection;
+
 mod activity;
 mod format;
 

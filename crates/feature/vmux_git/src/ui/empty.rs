@@ -54,7 +54,7 @@ pub(super) fn EmptyRepository() -> Element {
                         LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 shrink-0 text-muted-foreground" }
                     }
                     if open() {
-                        DropdownPopup { class: "absolute left-0 right-0 top-11 z-40 p-1.5 text-left outline-none",
+                        DropdownPopup { match_width: true, class: "p-1.5 text-left outline-none",
                             if rows.is_empty() {
                                 div { class: "px-2 py-2 text-ui text-muted-foreground", {translate("agent-project-none")} }
                             }

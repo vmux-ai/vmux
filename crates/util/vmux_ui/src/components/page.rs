@@ -27,7 +27,7 @@ pub fn PageHeader(
     #[props(default)] content_class: String,
 ) -> Element {
     let class = if class.is_empty() {
-        "shrink-0 bg-foreground/[0.018] px-5 py-3".to_string()
+        "shrink-0 px-5 py-3".to_string()
     } else {
         class
     };

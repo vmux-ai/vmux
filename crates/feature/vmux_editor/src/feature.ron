@@ -230,6 +230,8 @@
                 "ProjectCollectionViewRequest",
                 "OpenRequest",
                 "ResumeSession",
+                "SessionsArchive",
+                "SessionsCleanup",
                 "FileEditorGotoDeclarationRequest",
                 "FileEditorGotoTypeDefinitionRequest",
                 "FileEditorGotoImplementationRequest",

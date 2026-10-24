@@ -45,6 +45,7 @@ impl ManagerPresentation {
         filters: &[SessionFilter],
         mut stage_for: impl FnMut(&String, &String) -> String,
         mut archived_for: impl FnMut(&String, bool) -> bool,
+        mut retain_archived: impl FnMut(&String) -> bool,
     ) -> Self {
         for session in &mut snapshot.sessions {
             session.stage = stage_for(&session.id, &session.stage);
@@ -54,7 +55,9 @@ impl ManagerPresentation {
                 0
             };
         }
-        snapshot.sessions.retain(|session| session.archived_at == 0);
+        snapshot
+            .sessions
+            .retain(|session| session.archived_at == 0 || retain_archived(&session.id));
         let filter_requested = query.starts_with('#');
         let filter_needle = query
             .strip_prefix('#')

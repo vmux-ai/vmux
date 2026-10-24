@@ -424,9 +424,6 @@ fn archive(
                 native,
             });
         }
-        if native {
-            continue;
-        }
         requests.write(ArchiveRequest {
             id: SessionId(id.clone()),
             archived_at: request.archived.then_some(source_updated_at),

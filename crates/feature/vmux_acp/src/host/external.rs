@@ -20,9 +20,10 @@ use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget};
 use vmux_session::host::SessionManagerView;
 use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
-    ConversationAppendReceived, CreateRequest, Created, ProviderArchiveCompleted,
+    ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveWriteRequest, ProviderCatalog, ProviderKind, ProviderSession, ProviderSessionId,
-    Route, Session, SessionDuplicate, SessionId, SnapshotReceived, TranscriptLoading, Transcripts,
+    Route, Session, SessionDuplicate, SessionId, SnapshotReceived, SourceUpdatedAt,
+    TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
@@ -1492,6 +1493,15 @@ fn associate(
 
 fn request_conversation_refreshes(
     snapshot: Res<SourceSnapshot>,
+    archive_overrides: Query<
+        (
+            &ProviderKind,
+            &ProviderSessionId,
+            &SourceUpdatedAt,
+            Option<&ArchivedAt>,
+        ),
+        With<ProviderArchive>,
+    >,
     mut sessions: Query<
         (
             Entity,
@@ -1511,6 +1521,16 @@ fn request_conversation_refreshes(
     if !snapshot.is_changed() {
         return;
     }
+    let mut archive_overrides_by_session = HashMap::new();
+    for (kind, sid, source_updated_at, archived_at) in &archive_overrides {
+        archive_overrides_by_session.insert(
+            (kind.0.as_str(), sid.0.as_str()),
+            (
+                source_updated_at.0,
+                archived_at.map(|archived_at| archived_at.0),
+            ),
+        );
+    }
     for (
         session,
         session_id,
@@ -1525,16 +1545,31 @@ fn request_conversation_refreshes(
         let Some(source) = snapshot.get(&kind.0, &provider_sid.0) else {
             continue;
         };
-        match source.archive {
+        let archive_override =
+            archive_overrides_by_session.get(&(kind.0.as_str(), provider_sid.0.as_str()));
+        let archive = match archive_override {
+            Some((source_updated_at, override_archived_at))
+                if source
+                    .archive
+                    .is_none_or(|archive| *source_updated_at >= archive.updated_at()) =>
+            {
+                Some(match override_archived_at {
+                    Some(archived_at) => ArchiveState::Archived(*archived_at),
+                    None => ArchiveState::Active(*source_updated_at),
+                })
+            }
+            _ => source.archive,
+        };
+        match archive {
             Some(ArchiveState::Archived(at))
-                if archived_at.is_none_or(|current| current.0 != at.max(1)) =>
+                if archived_at.is_none_or(|current| at.max(1) > current.0) =>
             {
                 archive_requests.write(ArchiveRequest {
                     id: session_id.clone(),
                     archived_at: Some(at),
                 });
             }
-            Some(ArchiveState::Active(_)) if archived_at.is_some() => {
+            Some(ArchiveState::Active(at)) if archived_at.is_some_and(|current| at > current.0) => {
                 archive_requests.write(ArchiveRequest {
                     id: session_id.clone(),
                     archived_at: None,
@@ -2376,6 +2411,107 @@ mod tests {
                 .0,
             300
         );
+    }
+
+    #[test]
+    fn durable_archive_overrides_win_until_the_provider_has_newer_state() {
+        let mut app = App::new();
+        app.init_resource::<SourceSnapshot>()
+            .add_message::<ArchiveRequest>()
+            .add_systems(Update, request_conversation_refreshes);
+        app.world_mut()
+            .resource_mut::<SourceSnapshot>()
+            .0
+            .entry(SourceKind::Codex)
+            .or_default()
+            .extend([
+                ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: "locally-active".into(),
+                    archive: Some(ArchiveState::Archived(200)),
+                    ..Default::default()
+                },
+                ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: "locally-archived".into(),
+                    archive: Some(ArchiveState::Active(200)),
+                    ..Default::default()
+                },
+                ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: "provider-newer".into(),
+                    archive: Some(ArchiveState::Active(400)),
+                    ..Default::default()
+                },
+                ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: "session-newer".into(),
+                    archive: Some(ArchiveState::Archived(300)),
+                    ..Default::default()
+                },
+            ]);
+        app.world_mut().spawn((
+            ProviderArchive,
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("locally-active".into()),
+            SourceUpdatedAt(300),
+        ));
+        app.world_mut().spawn((
+            ProviderArchive,
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("locally-archived".into()),
+            SourceUpdatedAt(300),
+            ArchivedAt(300),
+        ));
+        app.world_mut().spawn((
+            ProviderArchive,
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-newer".into()),
+            SourceUpdatedAt(300),
+            ArchivedAt(300),
+        ));
+        app.world_mut().spawn((
+            Session,
+            SessionId::new("active-session"),
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("locally-active".into()),
+            vmux_ecs::LastActivatedAt(0),
+        ));
+        app.world_mut().spawn((
+            Session,
+            SessionId::new("provider-newer-session"),
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-newer".into()),
+            vmux_ecs::LastActivatedAt(0),
+            ArchivedAt(300),
+        ));
+        app.world_mut().spawn((
+            Session,
+            SessionId::new("archived-session"),
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("locally-archived".into()),
+            vmux_ecs::LastActivatedAt(0),
+        ));
+        app.world_mut().spawn((
+            Session,
+            SessionId::new("session-newer"),
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("session-newer".into()),
+            vmux_ecs::LastActivatedAt(0),
+            ArchivedAt(400),
+        ));
+
+        app.update();
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<ArchiveRequest>>()
+            .drain()
+            .map(|request| (request.id.0, request.archived_at))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.get("archived-session"), Some(&Some(300)));
+        assert_eq!(requests.get("provider-newer-session"), Some(&None));
     }
 
     #[test]

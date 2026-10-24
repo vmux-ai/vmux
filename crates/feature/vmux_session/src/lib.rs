@@ -22,8 +22,8 @@ pub use model::{
     AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CreateRequest, Created,
     DescriptionUpdateRequest, LocalTask, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderKind, ProviderSessionId,
-    ProviderStage, ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, Stage,
-    StageChangeRequest, StageChangedAt, StageDefinition, StageId,
+    ProviderStage, ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate,
+    SourceUpdatedAt, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};

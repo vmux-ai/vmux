@@ -206,7 +206,7 @@ pub struct ProviderArchive;
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub(crate) struct SourceUpdatedAt(pub i64);
+pub struct SourceUpdatedAt(pub i64);
 
 #[derive(
     Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
@@ -745,28 +745,27 @@ fn archive_provider(
         latest.insert((request.kind.0.clone(), request.id.0.clone()), request);
     }
     for request in latest.into_values() {
-        if request.native {
-            if let Some(write) = operations.request(&request) {
-                writes.write(write);
-            }
-            continue;
-        }
-        let now = vmux_ecs::UnixMillis::now().0;
+        let next_archived_at = request.source_updated_at.max(1);
         let mut found = false;
-        for (entity, kind, id, mut source_updated_at, archived_at) in &mut overrides {
+        for (entity, kind, id, mut source_updated_at, current_archived_at) in &mut overrides {
             if kind != &request.kind || id != &request.id {
                 continue;
             }
             source_updated_at.0 = request.source_updated_at;
-            if request.archived && archived_at.is_none() {
-                commands.entity(entity).insert(ArchivedAt(now));
-            } else if !request.archived && archived_at.is_some() {
+            if request.archived && current_archived_at.is_none() {
+                commands.entity(entity).insert(ArchivedAt(next_archived_at));
+            } else if !request.archived && current_archived_at.is_some() {
                 commands.entity(entity).remove::<ArchivedAt>();
             }
             found = true;
             break;
         }
         if found {
+            if request.native
+                && let Some(write) = operations.request(&request)
+            {
+                writes.write(write);
+            }
             continue;
         }
         let mut entity = commands.spawn((
@@ -776,7 +775,12 @@ fn archive_provider(
             SourceUpdatedAt(request.source_updated_at),
         ));
         if request.archived {
-            entity.insert(ArchivedAt(now));
+            entity.insert(ArchivedAt(next_archived_at));
+        }
+        if request.native
+            && let Some(write) = operations.request(&request)
+        {
+            writes.write(write);
         }
     }
 }
@@ -1296,6 +1300,37 @@ mod tests {
     }
 
     #[test]
+    fn native_provider_archive_persists_before_the_provider_write_finishes() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, StagePlugin));
+        app.world_mut()
+            .resource_mut::<Messages<ProviderArchiveRequest>>()
+            .write(ProviderArchiveRequest {
+                kind: ProviderKind("acp:codex".into()),
+                id: ProviderSessionId("provider-session".into()),
+                archived: true,
+                source_updated_at: 40,
+                native: true,
+            });
+
+        app.update();
+
+        let mut overrides = app
+            .world_mut()
+            .query_filtered::<(&SourceUpdatedAt, &ArchivedAt), With<ProviderArchive>>();
+        let (source_updated_at, archived_at) = overrides.single(app.world()).unwrap();
+        assert_eq!(source_updated_at.0, 40);
+        assert_eq!(archived_at.0, 40);
+        let writes = app
+            .world_mut()
+            .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].archived);
+    }
+
+    #[test]
     fn duplicate_creation_requests_create_one_session() {
         let mut app = App::new();
         app.add_plugins((EntityPlugin, StagePlugin));
@@ -1348,6 +1383,7 @@ mod tests {
         assert!(filter.is_allowed::<AgentId>());
         assert!(filter.is_allowed::<ProviderStage>());
         assert!(filter.is_allowed::<ProviderArchive>());
+        assert!(filter.is_allowed::<SourceUpdatedAt>());
         assert!(filter.is_allowed::<ProviderKind>());
         assert!(filter.is_allowed::<ProviderSessionId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());

@@ -314,6 +314,8 @@ pub enum ColorScheme {
 pub struct AppearanceSettings {
     #[serde(default)]
     pub mode: ColorScheme,
+    #[serde(default)]
+    pub project_icon: vmux_api::avatar::IdenticonVariant,
     #[serde(default = "default_locale_setting")]
     pub locale: String,
 }
@@ -322,6 +324,7 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             mode: ColorScheme::Device,
+            project_icon: vmux_api::avatar::IdenticonVariant::Marble,
             locale: default_locale_setting(),
         }
     }

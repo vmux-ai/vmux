@@ -125,6 +125,12 @@ pub enum ClientMessage {
         mcp_args: Vec<String>,
         resume_acp_session_id: Option<String>,
     },
+    Status,
+    RebindAcpWorkspace {
+        sid: String,
+        cwd: String,
+    },
+    Shared(SharedMessage),
     ListAcpSessions {
         request_id: u64,
         agent_id: String,
@@ -137,12 +143,6 @@ pub enum ClientMessage {
     CancelAcpSessionCatalog {
         request_id: u64,
     },
-    Status,
-    RebindAcpWorkspace {
-        sid: String,
-        cwd: String,
-    },
-    Shared(SharedMessage),
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

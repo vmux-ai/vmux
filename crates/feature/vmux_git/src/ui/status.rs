@@ -1,10 +1,12 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_api::command_bar::OpenRequest;
+use vmux_api::open_target::OpenTarget;
 use vmux_api::space::ProjectRow;
 use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::breadcrumb::BreadcrumbSeparator;
-use vmux_ui::components::button::{Button, ButtonVariant};
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
 use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::hooks::send;
@@ -109,7 +111,7 @@ pub(super) fn RepositoryHeader(
     }
     rsx! {
         header { class: "relative z-40 shrink-0 overflow-visible bg-transparent",
-            div { class: "flex h-14 min-w-0 items-center gap-1 px-4",
+            div { class: "flex h-14 min-w-0 items-center gap-1 px-2.5",
                 Dropdown {
                     open: repository_open,
                     class: "min-w-0".to_string(),
@@ -133,7 +135,7 @@ pub(super) fn RepositoryHeader(
                         ProjectSelectPopup {
                             projects: root_projects.clone(),
                             selected_path: repository.repo_root.clone(),
-                            class: "absolute left-0 top-9 z-40 max-h-72 min-w-64 overflow-y-auto".to_string(),
+                            class: "max-h-72 min-w-64 overflow-y-auto".to_string(),
                             on_pick: move |project: ProjectRow| {
                                 let _ = send(&HeaderDropdownRequest { open: HeaderDropdown::Closed });
                                 let _ = send(&GitRepositoryRequest { path: project.path });
@@ -175,7 +177,7 @@ pub(super) fn RepositoryHeader(
                     }
                     if branch_open {
                         DropdownPopup {
-                            class: "absolute left-0 top-9 z-40 flex max-h-96 min-w-80 flex-col overflow-hidden p-1.5",
+                            class: "flex max-h-96 min-w-80 flex-col overflow-hidden p-1.5",
                             if focused_panel == GitPanel::Branches {
                                 div { class: "flex shrink-0 items-center gap-2 px-1 pb-1.5",
                                     BranchCollectionTabs { branch_collection }
@@ -314,6 +316,7 @@ pub(super) fn RepositoryHeader(
                 ViewPicker {
                     open_dropdown,
                     focused_panel,
+                    repository_root: repository.repo_root.clone(),
                     changes: repository.files.len(),
                     commits: repository.commits.len(),
                     stashes: repository.stashes.len(),
@@ -347,7 +350,7 @@ pub(super) fn RepositoryHeader(
                             }
                             if commit_open {
                                 DropdownPopup {
-                                    class: "absolute left-0 top-9 z-40 min-w-80 overflow-hidden p-1.5",
+                                    class: "min-w-80 overflow-hidden p-1.5",
                                     div {
                                         class: "max-h-80 overflow-y-auto",
                                         onscroll: move |event: Event<ScrollData>| {
@@ -390,7 +393,7 @@ pub(super) fn RepositoryHeader(
                     }
                 }
                 if focused_panel == GitPanel::Branches && viewed_total > 0 {
-                    span { class: "ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground",
+                    span { class: "ml-auto mr-2 shrink-0 text-[11px] tabular-nums text-muted-foreground",
                         "{viewed_count} / {viewed_total} "
                         {translate("git-viewed")}
                     }
@@ -398,10 +401,11 @@ pub(super) fn RepositoryHeader(
                 if checkout_required {
                     Button {
                         variant: ButtonVariant::Primary,
+                        size: ButtonSize::Xs,
                         class: if viewed_total > 0 {
-                            "h-8 gap-2.5 px-3 text-[11px] font-medium"
+                            "h-8 gap-1.5 px-2.5 text-[11px] font-medium"
                         } else {
-                            "ml-auto h-8 gap-2.5 px-3 text-[11px] font-medium"
+                            "ml-auto h-8 gap-1.5 px-2.5 text-[11px] font-medium"
                         },
                         onclick: move |_| {
                             if checkout_start.is_empty() {
@@ -425,10 +429,11 @@ pub(super) fn RepositoryHeader(
                 } else {
                     Button {
                         variant: ButtonVariant::Primary,
+                        size: ButtonSize::Xs,
                         class: if focused_panel == GitPanel::Branches && viewed_total > 0 {
-                            "h-8 gap-2.5 px-3 text-[11px] font-medium"
+                            "h-8 gap-1.5 px-2.5 text-[11px] font-medium"
                         } else {
-                            "ml-auto h-8 gap-2.5 px-3 text-[11px] font-medium"
+                            "ml-auto h-8 gap-1.5 px-2.5 text-[11px] font-medium"
                         },
                         disabled: !can_push,
                         onclick: move |_| {
@@ -447,6 +452,7 @@ pub(super) fn RepositoryHeader(
 fn ViewPicker(
     open_dropdown: HeaderDropdown,
     focused_panel: GitPanel,
+    repository_root: String,
     changes: usize,
     commits: usize,
     stashes: usize,
@@ -501,7 +507,7 @@ fn ViewPicker(
                 }
             }
             if open {
-                DropdownPopup { class: "absolute left-0 top-9 z-40 min-w-48 p-1.5",
+                DropdownPopup { class: "min-w-48 p-1.5",
                     ViewPickerItem {
                         active: focused_panel == GitPanel::Files,
                         icon: LineIcon::File,
@@ -543,6 +549,48 @@ fn ViewPicker(
                         count: stashes,
                         onselect: move |_| {
                             let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
+                        },
+                    }
+                    div { class: "mx-1 my-1 h-px bg-foreground/[0.07]" }
+                    ViewPickerItem {
+                        active: false,
+                        icon: LineIcon::File,
+                        label: translate("editor-editor"),
+                        count: 0,
+                        onselect: move |_| {
+                            let _ = send(&OpenRequest {
+                                value: vmux_path::FileUrl::from_path(
+                                    std::path::Path::new(&repository_root),
+                                    None,
+                                    None,
+                                    None,
+                                ),
+                                open: Some(OpenTarget::InPlace),
+                            });
+                        },
+                    }
+                    ViewPickerItem {
+                        active: false,
+                        icon: LineIcon::Notebook,
+                        label: translate("layout-projects"),
+                        count: 0,
+                        onselect: move |_| {
+                            let _ = send(&OpenRequest {
+                                value: "vmux://projects/".to_string(),
+                                open: Some(OpenTarget::InPlace),
+                            });
+                        },
+                    }
+                    ViewPickerItem {
+                        active: false,
+                        icon: LineIcon::MessagesRound,
+                        label: translate("sessions-title"),
+                        count: 0,
+                        onselect: move |_| {
+                            let _ = send(&OpenRequest {
+                                value: "vmux://sessions/".to_string(),
+                                open: Some(OpenTarget::InPlace),
+                            });
                         },
                     }
                 }

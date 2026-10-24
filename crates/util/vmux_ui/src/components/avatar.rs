@@ -118,7 +118,10 @@ pub fn AgentThumbnail(
 
 #[component]
 pub fn Identicon(seed: String, #[props(default)] alt: String, class: String) -> Element {
-    let src = IdenticonSpec::favicon(&seed);
+    let variant = try_consume_context::<crate::hooks::UiStateBinding<crate::theme::ThemeUiState>>()
+        .map(|theme| (theme.state)().project_icon)
+        .unwrap_or_default();
+    let src = IdenticonSpec::favicon_with_variant(&seed, variant);
     rsx! {
         img {
             class,

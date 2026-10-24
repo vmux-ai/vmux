@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use vmux_session::SessionSummaryProjection;
 use vmux_session::{SessionSummary, StageSummary};
 use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
+use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
@@ -45,10 +45,10 @@ pub fn SessionsManager() -> Element {
     let optimistic_stages = use_optimistic_map(ManagerPresentation::stage_observations(&snapshot));
     let optimistic_archives =
         use_optimistic_map(ManagerPresentation::archive_observations(&snapshot));
-    let stages = use_memo(move || catalog.read().stages.clone());
+    let stage_catalog = use_memo(move || catalog.read().stages.clone());
     let mutations = SessionMutations::new(optimistic_stages, optimistic_archives);
     use_context_provider(|| mutations);
-    use_context_provider(|| stages);
+    use_context_provider(|| stage_catalog);
     let filters = controls.filters();
     let presentation = Rc::new(ManagerPresentation::new(
         snapshot,
@@ -57,11 +57,56 @@ pub fn SessionsManager() -> Element {
         &filters,
         |id, stage| optimistic_stages.value(id, stage),
         |id, archived| optimistic_archives.value(id, &archived),
+        |id| mutations.is_leaving(id),
     ));
     rsx! {
         ManagerPage {
             SessionsManagerContent { controls, filter_picker, presentation }
         }
+    }
+}
+
+#[component]
+pub fn SessionCollection(
+    sessions: Vec<SessionSummary>,
+    stages: Vec<StageSummary>,
+    view: ManagerView,
+) -> Element {
+    let reactive_stages = stages.clone();
+    let stage_catalog = use_memo(use_reactive!(|(reactive_stages,)| reactive_stages.clone()));
+    let optimistic_stages = use_optimistic_map(
+        sessions
+            .iter()
+            .map(|session| (session.id.clone(), session.stage.clone()))
+            .collect(),
+    );
+    let optimistic_archives = use_optimistic_map(
+        sessions
+            .iter()
+            .map(|session| (session.id.clone(), session.archived_at > 0))
+            .collect(),
+    );
+    let mutations = SessionMutations::new(optimistic_stages, optimistic_archives);
+    use_context_provider(|| mutations);
+    use_context_provider(|| stage_catalog);
+    let mut sessions = sessions;
+    for session in &mut sessions {
+        session.stage = optimistic_stages.value(&session.id, &session.stage);
+        session.archived_at = if optimistic_archives.value(&session.id, &(session.archived_at > 0))
+        {
+            session.archived_at.max(1)
+        } else {
+            0
+        };
+    }
+    sessions.retain(|session| session.archived_at == 0 || mutations.is_leaving(&session.id));
+    let groups = StageGroup::inbox(&StageGroup::from_catalog(&stages, &sessions, ""));
+    let repositories = SessionRepositories {
+        ready: true,
+        ..Default::default()
+    };
+    rsx! {
+        SessionGroups { groups, repositories, view }
     }
 }
 
@@ -532,6 +577,18 @@ fn SessionsBoard(groups: Vec<StageGroup>, repositories: SessionRepositories) -> 
 }
 
 #[component]
+fn SessionGroups(
+    groups: Vec<StageGroup>,
+    repositories: SessionRepositories,
+    view: ManagerView,
+) -> Element {
+    if view == ManagerView::List {
+        return rsx! { SessionsList { groups, repositories } };
+    }
+    rsx! { SessionsBoard { groups, repositories } }
+}
+
+#[component]
 fn SessionGroup(
     view: ManagerView,
     stage: StageSummary,
@@ -549,7 +606,7 @@ fn SessionGroup(
         "glass w-[18rem] shrink-0 overflow-hidden rounded-lg p-1 backdrop-blur-xl"
     };
     rsx! {
-        section { class: "{section_class}",
+        section { class: "group/session-section {section_class}",
             header { class: "glass sticky top-0 z-10 flex h-8 w-full items-center gap-2 rounded-md px-2 text-left backdrop-blur-xl transition-colors hover:bg-glass-hover",
                 SheetHeaderChevron {
                     expanded: !collapsed(),
@@ -571,8 +628,8 @@ fn SessionGroup(
                     span { class: "text-[10px] tabular-nums text-muted-foreground/75", "{sessions.len()}" }
                 }
                 if stage.id == "stale" && !group.archivable.is_empty() {
-                    div { class: "ml-auto",
-                        SessionArchiveAllButton { targets: group.archivable }
+                    div { class: "ml-auto opacity-0 transition-opacity group-hover/session-section:opacity-100 focus-within:opacity-100",
+                        SessionArchiveAllMenu { targets: group.archivable }
                     }
                 }
             }
@@ -642,7 +699,8 @@ fn SessionItem(
     repository_ready: bool,
     stage: String,
 ) -> Element {
-    let stages = use_context::<Memo<Vec<StageSummary>>>()();
+    let stage_catalog = use_context::<Memo<Vec<StageSummary>>>();
+    let stages = stage_catalog.read();
     let leaving = use_context::<SessionMutations>().is_leaving(&session.id);
     let presentation = SessionPresentation::new(&session, repository, &stages, &stage);
     let resume = ResumeTarget::from(&session);
@@ -995,7 +1053,8 @@ fn SessionActions(
             }
             if open() {
                 DropdownPopup {
-                    class: "absolute right-0 top-7 z-30 w-36 p-1",
+                    align: DropdownAlign::End,
+                    class: "w-36 p-1",
                     onclick: move |event: MouseEvent| event.stop_propagation(),
                     if !archived {
                         SessionArchiveButton {
@@ -1039,17 +1098,40 @@ fn SessionActionButton(
 }
 
 #[component]
-fn SessionArchiveAllButton(targets: Vec<ArchiveTarget>) -> Element {
-    let label = format!("{} {}", translate("common-archive"), targets.len());
+fn SessionArchiveAllMenu(targets: Vec<ArchiveTarget>) -> Element {
+    let mut open = use_signal(|| false);
+    let label = translate("sessions-actions");
     let mutations = use_context::<SessionMutations>();
     rsx! {
-        SheetHeaderAction {
-            label,
-            onclick: move |event: MouseEvent| {
-                event.stop_propagation();
-                mutations.archive(targets.clone());
-            },
-            LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
+        Dropdown {
+            open: open(),
+            class: "shrink-0".to_string(),
+            on_dismiss: move |_| open.set(false),
+            SheetHeaderAction {
+                label,
+                onclick: move |event: MouseEvent| {
+                    event.stop_propagation();
+                    open.set(!open());
+                },
+                LineIconView { icon: LineIcon::Ellipsis, class: "size-3.5 shrink-0".to_string() }
+            }
+            if open() {
+                DropdownPopup {
+                    align: DropdownAlign::End,
+                    class: "w-40 p-1",
+                    onclick: move |event: MouseEvent| event.stop_propagation(),
+                    button {
+                        r#type: "button",
+                        class: "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-foreground/75 transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
+                        onclick: move |_| {
+                            open.set(false);
+                            mutations.archive(targets.clone());
+                        },
+                        LineIconView { icon: LineIcon::Archive, class: "size-3.5 shrink-0".to_string() }
+                        span { {translate("sessions-archive-all")} }
+                    }
+                }
+            }
         }
     }
 }
@@ -1112,7 +1194,7 @@ fn StagePicker(target: StageTarget, selected: String, stages: Vec<StageSummary>)
                 }
             }
             if open() {
-                DropdownPopup { class: "absolute left-0 top-7 z-30 min-w-full p-1",
+                DropdownPopup { match_width: true, class: "min-w-full p-1",
                     for stage in stages {
                         StagePickerOption {
                             target: target.clone(),
@@ -1429,5 +1511,45 @@ mod tests {
         assert_eq!(inbox.len(), 1);
         assert_eq!(inbox[0].stage.id, active.stage.id);
         assert_eq!(inbox[0].sessions, active.sessions);
+    }
+
+    #[test]
+    fn archived_session_remains_during_its_leave_animation() {
+        let snapshot = vmux_session::CatalogSnapshot {
+            stages: vec![StageSummary {
+                id: "in_progress".into(),
+                terminal: false,
+                ..Default::default()
+            }],
+            sessions: vec![SessionSummary {
+                id: "leaving".into(),
+                stage: "in_progress".into(),
+                archived_at: 10,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let leaving = ManagerPresentation::new(
+            snapshot.clone(),
+            SessionRepositories::default(),
+            "",
+            &[],
+            |_, stage| stage.clone(),
+            |_, archived| archived,
+            |id| id == "leaving",
+        );
+        let settled = ManagerPresentation::new(
+            snapshot,
+            SessionRepositories::default(),
+            "",
+            &[],
+            |_, stage| stage.clone(),
+            |_, archived| archived,
+            |_| false,
+        );
+
+        assert!(leaving.visible_sessions);
+        assert!(!settled.visible_sessions);
     }
 }

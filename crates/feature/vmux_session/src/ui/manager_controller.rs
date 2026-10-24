@@ -3,8 +3,11 @@ use std::collections::HashSet;
 use dioxus::prelude::*;
 use vmux_session::SessionSummary;
 use vmux_ui::hooks::{CollectionController, OptimisticMap, send};
+use vmux_ui::navigation::PageNavigation;
 
+use crate::SessionId;
 use crate::event::{ResumeSession, SessionsArchive, SessionsCleanup, SessionsStageChange};
+use crate::route::Route;
 
 use super::manager_model::{ArchiveTarget, SessionFilter, SessionFilterStep, StageTarget};
 
@@ -117,9 +120,11 @@ impl SessionMutations {
         self.leaving
             .write()
             .extend(targets.iter().map(|target| target.id.clone()));
-        for target in &targets {
-            self.archives.set(target.id.clone(), target.archived, true);
-        }
+        self.archives.set_many(
+            targets
+                .iter()
+                .map(|target| (target.id.clone(), target.archived, true)),
+        );
         if send(&SessionsArchive {
             ids: targets.iter().map(|target| target.id.clone()).collect(),
             archived: true,
@@ -163,23 +168,31 @@ impl SessionMutations {
 
 #[derive(Clone, PartialEq)]
 pub(super) struct ResumeTarget {
+    id: String,
     kind: String,
     sid: String,
     cwd: String,
+    managed: bool,
 }
 
 impl From<&SessionSummary> for ResumeTarget {
     fn from(session: &SessionSummary) -> Self {
         Self {
+            id: session.id.clone(),
             kind: session.kind.clone(),
             sid: session.sid.clone(),
             cwd: session.cwd.clone(),
+            managed: session.managed,
         }
     }
 }
 
 impl ResumeTarget {
     pub fn open(&self) {
+        if self.managed {
+            PageNavigation::replace(Route::Session(SessionId(self.id.clone())).url());
+            return;
+        }
         let _ = send(&ResumeSession {
             kind: self.kind.clone(),
             sid: self.sid.clone(),

@@ -46,12 +46,13 @@ pub fn ProjectSelectPopup(
     projects: Vec<ProjectRow>,
     selected_path: String,
     #[props(default)] class: String,
+    #[props(default)] match_width: bool,
     on_pick: EventHandler<ProjectRow>,
     on_add: EventHandler<()>,
 ) -> Element {
     let has_projects = !projects.is_empty();
     rsx! {
-        DropdownPopup { class: cn([class.as_str(), "p-1.5"]),
+        DropdownPopup { match_width, class: cn([class.as_str(), "p-1.5"]),
             for project in projects {
                 {
                     let selected = project.path == selected_path;

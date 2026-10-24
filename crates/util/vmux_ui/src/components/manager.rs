@@ -1,6 +1,6 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
-use crate::components::dropdown::{Dropdown, DropdownPopup};
+use crate::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
 use crate::components::tooltip::Tooltip;
@@ -115,8 +115,8 @@ pub fn WorkspaceLayout(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 overflow-hidden bg-background/45",
-            aside { class: "hidden w-44 shrink-0 flex-col bg-foreground/[0.018] p-2 sm:flex",
+        div { class: "flex min-h-0 flex-1 overflow-hidden",
+            aside { class: "hidden w-44 shrink-0 flex-col p-2 sm:flex",
                 div { class: "flex h-7 shrink-0 items-center justify-end gap-1 px-1",
                     {sidebar_actions}
                 }
@@ -426,7 +426,11 @@ pub fn ManagerSearchPopover(
     ondismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
-    let position = if align_left { "left-0" } else { "right-0" };
+    let align = if align_left {
+        DropdownAlign::Start
+    } else {
+        DropdownAlign::End
+    };
     rsx! {
         Dropdown {
             open,
@@ -441,7 +445,8 @@ pub fn ManagerSearchPopover(
             }
             if open {
                 DropdownPopup {
-                    class: "absolute {position} top-8 z-50 w-[min(28rem,calc(100vw-2rem))]",
+                    align,
+                    class: "w-[min(28rem,calc(100vw-2rem))]",
                     {children}
                 }
             }

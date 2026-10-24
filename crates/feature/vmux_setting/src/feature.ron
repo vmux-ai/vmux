@@ -375,6 +375,7 @@
             update_channel: Some(stable),
             appearance: Some((
                 mode: device,
+                project_icon: marble,
                 locale: "system",
             )),
         ),
@@ -415,7 +416,7 @@
             ),
             (
                 path: "appearance",
-                order: ["mode", "locale"],
+                order: ["mode", "project_icon", "locale"],
             ),
             (
                 path: "appearance.mode",
@@ -426,6 +427,16 @@
                     (value: "device", label: "schema-system"),
                     (value: "light", label: "schema-light"),
                     (value: "dark", label: "schema-dark"),
+                ],
+            ),
+            (
+                path: "appearance.project_icon",
+                label: Some("schema-project-icon"),
+                hint: Some("schema-project-icon-detail"),
+                widget: Some(Select),
+                options: [
+                    (value: "marble", label: "schema-project-icon-marble"),
+                    (value: "pixel", label: "schema-project-icon-pixel"),
                 ],
             ),
             (

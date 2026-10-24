@@ -186,7 +186,8 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         ProjectSelectPopup {
                             projects: project_choices.clone(),
                             selected_path: root.path.clone(),
-                            class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto".to_string(),
+                            match_width: true,
+                            class: "max-h-64 min-w-0 overflow-y-auto".to_string(),
                             on_pick: move |project: ProjectRow| {
                                 choosing.set(false);
                                 let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
@@ -228,7 +229,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                 LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                             }
                             if choosing_branch() {
-                                DropdownPopup { class: "absolute left-0 right-0 top-9 z-50 max-h-64 min-w-0 overflow-y-auto p-1",
+                                DropdownPopup { match_width: true, class: "max-h-64 min-w-0 overflow-y-auto p-1",
                                     for branch in branch_choices {
                                         ActiveWorkspaceBranchChoice {
                                             key: "{branch.branch}",

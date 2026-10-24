@@ -191,7 +191,7 @@ pub fn ToolsRouteSelector(active: String, providers: Vec<ToolProviderMetadata>) 
                     }
                 }
                 if open() {
-                    DropdownPopup { class: "absolute left-0 top-8 z-30 w-48 p-1",
+                    DropdownPopup { class: "w-48 p-1",
                         for option in options {
                             button {
                                 key: "{option.id}",

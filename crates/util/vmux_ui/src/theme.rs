@@ -20,6 +20,7 @@ pub struct ThemeUiState {
     pub locale: String,
     pub catalog: Option<String>,
     pub scheme: ThemeScheme,
+    pub project_icon: vmux_api::avatar::IdenticonVariant,
 }
 
 #[cfg(test)]
@@ -33,6 +34,7 @@ mod tests {
             locale: "ja".to_string(),
             catalog: None,
             scheme: ThemeScheme::Light,
+            project_icon: vmux_api::avatar::IdenticonVariant::Pixel,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =

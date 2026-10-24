@@ -8,7 +8,7 @@ use crate::event::{
 use dioxus::prelude::*;
 use vmux_api::input::KeyContextRequest;
 use vmux_ecs::event::team::TeamProfileSwitchRequest;
-use vmux_ui::components::dropdown::{Dropdown, DropdownPopup};
+use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
@@ -231,7 +231,8 @@ fn SpaceActions(space_id: String, name: String, deletable: bool) -> Element {
             }
             if open() {
                 DropdownPopup {
-                    class: "absolute right-0 top-7 z-30 w-36 p-1",
+                    align: DropdownAlign::End,
+                    class: "w-36 p-1",
                     onclick: move |event: MouseEvent| event.stop_propagation(),
                     button {
                         r#type: "button",
