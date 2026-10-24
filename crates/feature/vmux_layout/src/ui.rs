@@ -53,10 +53,12 @@ pub fn Page() -> Element {
         .main_cef_center_offset();
 
     rsx! {
-        div { class: "fixed inset-0 pointer-events-none text-foreground",
+        div {
+            class: "fixed inset-0 pointer-events-none text-foreground",
+            style: "--vmux-command-bar-center-offset:{center_offset}px;",
             SideSheetView {}
             HeaderView {}
-            CommandBarPanel { center_offset }
+            CommandBarPanel {}
             ExtensionPopup {}
         }
     }

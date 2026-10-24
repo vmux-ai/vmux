@@ -6,7 +6,7 @@ use vmux_ui::hooks::send;
 use crate::CommandPaletteSurface;
 
 #[component]
-pub fn CommandBarPanel(center_offset: f32) -> Element {
+pub fn CommandBarPanel() -> Element {
     let state = use_command_bar_ui();
     let close = EventHandler::new(move |()| {
         let _ = send(&DismissRequest);
@@ -19,7 +19,6 @@ pub fn CommandBarPanel(center_offset: f32) -> Element {
     rsx! {
         div {
             class: "pointer-events-auto fixed inset-0",
-            style: "--vmux-command-bar-center-offset:{center_offset}px;",
             onmousedown: move |event| {
                 event.prevent_default();
                 close.call(());
