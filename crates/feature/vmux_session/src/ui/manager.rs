@@ -540,27 +540,41 @@ fn SessionCategories(
     onselect: EventHandler<Option<String>>,
     onarchived: EventHandler<()>,
 ) -> Element {
+    let inbox_count = groups
+        .iter()
+        .filter(|group| !group.stage.terminal)
+        .map(|group| group.sessions.len())
+        .sum();
     rsx! {
-        ManagerSidebarSection { title: translate("common-status"),
-            for group in groups {
-                if !group.sessions.is_empty() {
-                    ManagerSidebarItem {
-                        key: "{group.stage.id}",
-                        label: translate_humanized(&group.stage.name),
-                        count: group.sessions.len(),
-                        selected: selected.as_ref() == Some(&group.stage.id),
-                        dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
-                        onclick: move |_| onselect.call(Some(group.stage.id.clone())),
+        div { class: "flex flex-col gap-3",
+            ManagerSidebarItem {
+                label: translate("sessions-inbox"),
+                count: inbox_count,
+                selected: selected.is_none() && !archived,
+                icon: LineIcon::MessagesRound,
+                onclick: move |_| onselect.call(None),
+            }
+            ManagerSidebarSection { title: translate("common-status"),
+                for group in groups {
+                    if !group.sessions.is_empty() {
+                        ManagerSidebarItem {
+                            key: "{group.stage.id}",
+                            label: translate_humanized(&group.stage.name),
+                            count: group.sessions.len(),
+                            selected: selected.as_ref() == Some(&group.stage.id),
+                            dot: StageVisual::for_id(&group.stage.id).dot.to_string(),
+                            onclick: move |_| onselect.call(Some(group.stage.id.clone())),
+                        }
                     }
                 }
-            }
-            if archived_count > 0 {
-                ManagerSidebarItem {
-                    label: translate("common-archived"),
-                    count: archived_count,
-                    selected: archived,
-                    icon: Some(LineIcon::Archive),
-                    onclick: move |_| onarchived.call(()),
+                if archived_count > 0 {
+                    ManagerSidebarItem {
+                        label: translate("common-archived"),
+                        count: archived_count,
+                        selected: archived,
+                        icon: Some(LineIcon::Archive),
+                        onclick: move |_| onarchived.call(()),
+                    }
                 }
             }
         }
