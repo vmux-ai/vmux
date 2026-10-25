@@ -18,12 +18,15 @@ pub use conversation::{
 };
 #[cfg(feature = "app")]
 pub use host::SessionPlugin;
+#[cfg(host)]
+pub use model::ProviderSessionTombstones;
 pub use model::{
-    AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CreateRequest, Created,
-    DescriptionUpdateRequest, LocalTask, ProviderArchive, ProviderArchiveCompleted,
+    AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CleanupTarget, CreateRequest,
+    Created, DescriptionUpdateRequest, LocalTask, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderKind, ProviderSessionId,
-    ProviderStage, ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate,
-    SourceUpdatedAt, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
+    ProviderSessionKey, ProviderSessionRestoreRequest, ProviderSessionTombstone, ProviderStage,
+    ProviderStageChangeRequest, RenameRequest, Session, SessionDuplicate, SourceUpdatedAt, Stage,
+    StageChangeRequest, StageChangedAt, StageDefinition, StageId,
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};

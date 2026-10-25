@@ -145,6 +145,7 @@ fn activate(
             kind: session.kind.clone(),
             sid: session.sid.clone(),
             cwd: session.cwd.clone(),
+            open: None,
         },
     });
 }

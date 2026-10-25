@@ -8,7 +8,7 @@ use vmux_ui::components::alert_dialog::{
 };
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerRow,
-    ManagerSearch, ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
+    ManagerSkeleton, ManagerThumbnail, ManagerTone, ManagerToolbar,
 };
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -39,27 +39,10 @@ impl From<&ExtRow> for Approval {
 #[component]
 pub(crate) fn ExtensionManager(state: ExtensionsUiState) -> Element {
     let installing = &state.installing;
-    let browse_query = state.query.clone();
 
     rsx! {
-        ManagerToolbar {
-            ManagerSearch {
-                value: state.query.clone(),
-                placeholder: translate("extensions-search"),
-                minimal: true,
-                onsearch: move |query: String| {
-                    let _ = send(&ExtFilterRequest { query });
-                },
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Enter {
-                        let query = browse_query.clone();
-                        if !query.trim().is_empty() {
-                            let _ = send(&ExtBrowseStoreRequest { query });
-                        }
-                    }
-                },
-            }
-            if state.pending {
+        if state.pending {
+            ManagerToolbar {
                 ManagerButton {
                     variant: ManagerButtonVariant::Primary,
                     onclick: move |_| {

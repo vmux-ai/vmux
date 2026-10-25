@@ -46,6 +46,26 @@ pub struct SessionDetailUiState {
     pub session: Option<SessionSummary>,
     pub repository: Option<SessionRepository>,
     pub stages: Vec<StageSummary>,
+    pub navigation: Navigation,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct Navigation {
+    pub projects: Vec<NavigationProject>,
+    pub sessions: Vec<NavigationSession>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct NavigationProject {
+    pub name: String,
+    pub url: String,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct NavigationSession {
+    pub id: String,
+    pub title: String,
+    pub project_url: String,
 }
 
 #[vmux_api::ui_state(Default, Eq)]

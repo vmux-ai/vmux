@@ -14,7 +14,9 @@ use vmux_api::session::{AssistantBlock, Message};
 use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
 
 #[cfg(host)]
-use crate::model::{ProviderArchiveOperations, SourceUpdatedAt};
+use crate::model::{
+    ProviderArchiveOperations, ProviderSessionKey, ProviderSessionTombstones, SourceUpdatedAt,
+};
 #[cfg(host)]
 use crate::{
     AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
@@ -98,6 +100,8 @@ pub struct SessionSummary {
     pub id: String,
     pub kind: String,
     pub sid: String,
+    pub provider_kind: String,
+    pub provider_sid: String,
     pub managed: bool,
     pub name: String,
     pub description: String,
@@ -320,6 +324,7 @@ struct CatalogSources<'w, 's> {
     operations: Res<'w, ProviderArchiveOperations>,
     provider_stages: ProviderStages<'w, 's>,
     provider_archives: ProviderArchives<'w, 's>,
+    provider_tombstones: Res<'w, ProviderSessionTombstones>,
     transcripts: Transcripts<'w, 's>,
 }
 
@@ -491,9 +496,14 @@ fn project(
         operations,
         provider_stages,
         provider_archives,
+        provider_tombstones,
         transcripts,
     } = sources;
-    if !catalog.is_added() && !providers.is_changed() && !operations.is_changed() && !changes.any()
+    if !catalog.is_added()
+        && !providers.is_changed()
+        && !operations.is_changed()
+        && !provider_tombstones.is_changed()
+        && !changes.any()
     {
         return;
     }
@@ -515,7 +525,7 @@ fn project(
         .unwrap_or_default();
     let linked_sessions = linked_sessions
         .iter()
-        .map(|(entity, kind, id)| (entity, (kind.0.clone(), id.0.clone())))
+        .map(|(entity, kind, id)| (entity, ProviderSessionKey::from_components(kind, id)))
         .collect::<HashMap<_, _>>();
     for (
         entity,
@@ -546,7 +556,7 @@ fn project(
             .unwrap_or_default();
         let archived_at = linked_sessions
             .get(&entity)
-            .and_then(|(kind, id)| operations.archived_at(kind, id))
+            .and_then(|key| operations.archived_at(key))
             .unwrap_or_else(|| {
                 archived_at
                     .map(|archived_at| archived_at.0)
@@ -556,6 +566,14 @@ fn project(
             id: id.0.clone(),
             kind: "session".to_string(),
             sid: id.0.clone(),
+            provider_kind: linked_sessions
+                .get(&entity)
+                .map(|key| key.kind.0.clone())
+                .unwrap_or_default(),
+            provider_sid: linked_sessions
+                .get(&entity)
+                .map(|key| key.id.0.clone())
+                .unwrap_or_default(),
             managed: true,
             name: name.as_str().to_string(),
             description: description.0.clone(),
@@ -587,7 +605,7 @@ fn project(
         .iter()
         .map(|(kind, id, stage, changed_at, source_updated_at)| {
             (
-                (kind.0.clone(), id.0.clone()),
+                ProviderSessionKey::from_components(kind, id),
                 (stage.0.0.clone(), changed_at.0, source_updated_at.0),
             )
         })
@@ -596,7 +614,7 @@ fn project(
         .iter()
         .map(|(kind, id, source_updated_at, archived_at)| {
             (
-                (kind.0.clone(), id.0.clone()),
+                ProviderSessionKey::from_components(kind, id),
                 (
                     source_updated_at.0,
                     archived_at.map(|archived_at| archived_at.0),
@@ -605,8 +623,13 @@ fn project(
         })
         .collect::<HashMap<_, _>>();
     for session in &providers.sessions {
-        let key = (session.kind.clone(), session.sid.clone());
-        if linked_sessions.contains(&key) {
+        let key = ProviderSessionKey::new(
+            ProviderKind(session.kind.clone()),
+            ProviderSessionId(session.sid.clone()),
+        );
+        if linked_sessions.contains(&key)
+            || provider_tombstones.contains(&session.kind, &session.sid)
+        {
             continue;
         }
         let provider_updated_at = session.source_updated_at();
@@ -637,8 +660,7 @@ fn project(
                             .map(ArchiveState::updated_at)
                             .unwrap_or_default()
             });
-        let archived_at = if let Some(pending) = operations.archived_at(&session.kind, &session.sid)
-        {
+        let archived_at = if let Some(pending) = operations.archived_at(&key) {
             pending
         } else if let Some((_, archived_at)) = archive_override {
             archived_at.unwrap_or_default()
@@ -653,6 +675,8 @@ fn project(
             id: session.catalog_id(),
             kind: session.kind.clone(),
             sid: session.sid.clone(),
+            provider_kind: session.kind.clone(),
+            provider_sid: session.sid.clone(),
             managed: false,
             name: session.name.clone(),
             description: session.description.clone(),
@@ -862,6 +886,56 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(imported, 0);
+    }
+
+    #[test]
+    fn provider_removal_hides_the_session_across_source_updates() {
+        let mut app = App::new();
+        app.add_plugins(DomainPlugin);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "External task".into(),
+                updated_at: 10,
+                ..Default::default()
+            });
+        app.update();
+        assert_eq!(app.world().resource::<CatalogSnapshot>().sessions.len(), 1);
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::CleanupRequest>>()
+            .write(crate::CleanupRequest {
+                targets: vec![crate::CleanupTarget::Provider(ProviderSessionKey::new(
+                    ProviderKind("acp:codex".into()),
+                    ProviderSessionId("provider-session".into()),
+                ))],
+            });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<CatalogSnapshot>()
+                .sessions
+                .is_empty()
+        );
+
+        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 20;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<CatalogSnapshot>()
+                .sessions
+                .is_empty()
+        );
+        let removals = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::ProviderSessionTombstone>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(removals, 1);
     }
 
     #[test]

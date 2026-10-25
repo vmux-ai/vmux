@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_api::space::ProjectRow;
 
@@ -21,6 +22,7 @@ pub(super) fn GitDashboard() -> Element {
     let repository_loaded = state.use_selector(|state| state.snapshot.repository.is_some());
     let active_branch_file = state.active_branch_file;
     let branch_reveal_path = use_signal(String::new);
+    let file_query = use_signal(String::new);
     let viewed_count = use_signal(|| 0usize);
     let mut list_width = use_signal(|| 336.0_f64);
     let mut resizing = use_signal(|| false);
@@ -32,16 +34,19 @@ pub(super) fn GitDashboard() -> Element {
     }
 
     rsx! {
-        GitHeader { viewed_count }
+        GitHeader { viewed_count, file_query }
         main { class: "flex min-h-0 flex-1 flex-col bg-transparent",
             div {
                 id: "git-dashboard-split",
                 class: "grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(12rem,0.7fr)_minmax(18rem,1.3fr)] sm:grid-cols-[minmax(18rem,var(--git-list-width))_0.75rem_minmax(0,1fr)] sm:grid-rows-1",
                 style: "{split_style}",
-                GitListPane { active_branch_file, branch_reveal_path }
+                GitListPane { active_branch_file, branch_reveal_path, file_query }
                 div {
                     class: "group relative z-30 hidden h-full w-full cursor-col-resize items-center justify-center sm:flex",
-                    onmousedown: move |event: Event<MouseData>| {
+                    onpointerdown: move |event: Event<PointerData>| {
+                        if event.trigger_button() != Some(MouseButton::Primary) {
+                            return;
+                        }
                         event.prevent_default();
                         resize_origin.set(Some((event.client_coordinates().x, list_width())));
                         resizing.set(true);
@@ -57,22 +62,29 @@ pub(super) fn GitDashboard() -> Element {
         }
         if resizing() {
             div {
-                class: "fixed inset-0 z-[900] cursor-col-resize",
-                onmousemove: move |event: Event<MouseData>| {
+                class: "fixed inset-0 z-[900] cursor-col-resize select-none touch-none",
+                onpointermove: move |event: Event<PointerData>| {
                     let Some((start, width)) = resize_origin() else {
                         return;
                     };
+                    if !event.held_buttons().contains(MouseButton::Primary) {
+                        resize_origin.set(None);
+                        resizing.set(false);
+                        return;
+                    }
                     let width = (width + event.client_coordinates().x - start).clamp(288.0, 640.0);
-                    let _ = document::eval(&format!(
-                        "document.getElementById('git-dashboard-split')?.style.setProperty('--git-list-width','{width}px')"
-                    ));
+                    list_width.set(width);
                 },
-                onmouseup: move |event: Event<MouseData>| {
+                onpointerup: move |event: Event<PointerData>| {
                     if let Some((start, width)) = resize_origin() {
                         list_width.set(
                             (width + event.client_coordinates().x - start).clamp(288.0, 640.0),
                         );
                     }
+                    resize_origin.set(None);
+                    resizing.set(false);
+                },
+                onpointercancel: move |_| {
                     resize_origin.set(None);
                     resizing.set(false);
                 },
@@ -101,7 +113,7 @@ struct HeaderState {
 }
 
 #[component]
-fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
+fn GitHeader(viewed_count: ReadSignal<usize>, file_query: Signal<String>) -> Element {
     let state = use_context::<GitPageState>();
     let header = state.use_selector(|state| {
         let snapshot = &state.snapshot;
@@ -144,6 +156,7 @@ fn GitHeader(viewed_count: ReadSignal<usize>) -> Element {
             commits_progress: header.commits_progress,
             viewed_count: viewed_count(),
             viewed_total: header.viewed_total,
+            file_query,
         }
     }
 }
@@ -162,6 +175,7 @@ struct ListState {
     commit_pending: String,
     operations: GitOperationEligibility,
     branch_files: Vec<GitBranchFileEntry>,
+    branch_diff_paths: Vec<String>,
     branch_files_reference: String,
     branch_files_total: u32,
     branch_files_loading: bool,
@@ -172,7 +186,11 @@ struct ListState {
 }
 
 #[component]
-fn GitListPane(active_branch_file: Signal<String>, branch_reveal_path: Signal<String>) -> Element {
+fn GitListPane(
+    active_branch_file: Signal<String>,
+    branch_reveal_path: Signal<String>,
+    file_query: Signal<String>,
+) -> Element {
     let state = use_context::<GitPageState>();
     let list = state.use_selector(|state| {
         let snapshot = &state.snapshot;
@@ -190,6 +208,7 @@ fn GitListPane(active_branch_file: Signal<String>, branch_reveal_path: Signal<St
             commit_pending: controller.commit_pending.clone(),
             operations: controller.operations.clone(),
             branch_files: snapshot.branch_files.clone(),
+            branch_diff_paths: snapshot.branch_diff_paths.clone(),
             branch_files_reference: snapshot.branch_files_reference.clone(),
             branch_files_total: snapshot.branch_files_total,
             branch_files_loading: snapshot.branch_files_loading,
@@ -225,6 +244,7 @@ fn GitListPane(active_branch_file: Signal<String>, branch_reveal_path: Signal<St
                         files_error: list.branch_files_error,
                         selected_path_bytes: list.selected_branch_path_bytes,
                         active_path: active_branch_file,
+                        file_query,
                         onfileselect: move |path: String| {
                             let mut active_branch_file = active_branch_file;
                             let mut branch_reveal_path = branch_reveal_path;
@@ -265,6 +285,7 @@ struct DiffState {
     selected_branch_base: String,
     selected_stash: String,
     branch_files: Vec<GitBranchFileEntry>,
+    branch_diff_paths: Vec<String>,
     branch_files_error: String,
 }
 
@@ -290,6 +311,7 @@ fn GitDiffPane(
             selected_branch_base: snapshot.branch_files_base_ref.clone(),
             selected_stash: controller.selected_stash.clone(),
             branch_files: snapshot.branch_files.clone(),
+            branch_diff_paths: snapshot.branch_diff_paths.clone(),
             branch_files_error: snapshot.branch_files_error.clone(),
         }
     });
@@ -320,6 +342,7 @@ fn GitDiffPane(
                 BranchDiffCard {
                     base_ref: selected_state.selected_branch_base,
                     files: selected_state.branch_files,
+                    expected_paths: selected_state.branch_diff_paths,
                     active_path: active_branch_file,
                     repo_root,
                     selected_branch,

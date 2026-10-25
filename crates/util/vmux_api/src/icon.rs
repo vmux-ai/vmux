@@ -4,6 +4,7 @@
 pub enum BuiltinIcon {
     Terminal,
     Files,
+    Code,
     Project,
     Brain,
     Server,

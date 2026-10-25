@@ -97,13 +97,14 @@
             url: "file://",
             title: "Files",
             manifest_url: "vmux://files/",
+            bookmark: Some(50),
             placement: Some((
                 group: "files",
                 refresh: true,
                 reuse: Fragmentless,
             )),
             keywords: ["file", "open"],
-            icon: "Files",
+            icon: "Code",
             command_bar: true,
             permissions: [
                 "PageReady",
@@ -154,6 +155,7 @@
                 "FileStatusPickerOpen",
                 "FileTidyRequest",
                 "FileFindRequest",
+                "OpenRequest",
                 "ExplorerTreeToggle",
                 "ExplorerTreePrefetch",
                 "ExplorerTreeRefresh",

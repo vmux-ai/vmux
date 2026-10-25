@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
-use crate::components::avatar::Identicon;
-use crate::components::dropdown::DropdownPopup;
+use crate::components::avatar::IdentityOrb;
+use crate::components::dropdown::{DropdownOption, DropdownPopup, DropdownTrigger};
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
 };
@@ -20,33 +20,26 @@ pub fn ProjectSelectTrigger(
     #[props(default)] class: String,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let leading = if seed.is_empty() {
+        rsx! { BuiltinIconView {
+            icon: vmux_api::BuiltinIcon::Project,
+            class: "size-4 shrink-0 text-muted-foreground".to_string(),
+        } }
+    } else {
+        rsx! { IdentityOrb {
+            seed,
+            alt: label.clone(),
+            class: "size-4".to_string(),
+        } }
+    };
     rsx! {
-        button {
-            r#type: "button",
-            class: cn([
-                "group flex h-8 min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs font-semibold tracking-[-0.015em] text-foreground hover:bg-foreground/[0.055]",
-                class.as_str(),
-            ]),
+        DropdownTrigger {
+            label,
             title,
-            aria_expanded: open,
-            onclick: move |event| onclick.call(event),
-            if seed.is_empty() {
-                BuiltinIconView {
-                    icon: vmux_api::BuiltinIcon::Project,
-                    class: "size-4 shrink-0 text-muted-foreground".to_string(),
-                }
-            } else {
-                Identicon {
-                    seed,
-                    alt: label.clone(),
-                    class: "size-4 shrink-0 rounded-md".to_string(),
-                }
-            }
-            span { class: "min-w-0 flex-1 truncate", "{label}" }
-            LineIconView {
-                icon: LineIcon::ChevronsUpDown,
-                class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string(),
-            }
+            open,
+            class: cn([class.as_str()]),
+            leading,
+            onclick,
         }
     }
 }
@@ -59,8 +52,13 @@ pub fn ProjectSelectPopup(
     #[props(default)] match_width: bool,
     on_pick: EventHandler<ProjectRow>,
     on_add: EventHandler<()>,
+    #[props(default)] on_open_selected: Option<EventHandler<ProjectRow>>,
 ) -> Element {
     let has_projects = !projects.is_empty();
+    let selected_project = projects
+        .iter()
+        .find(|project| project.path == selected_path)
+        .cloned();
     rsx! {
         DropdownPopup { match_width, class: cn([class.as_str(), "p-1.5"]),
             for project in projects {
@@ -68,28 +66,21 @@ pub fn ProjectSelectPopup(
                     let selected = project.path == selected_path;
                     let row = project.clone();
                     rsx! {
-                        button {
+                        DropdownOption {
                             key: "project-select-{project.path}",
-                            r#type: "button",
-                            class: if selected {
-                                "flex w-full min-w-0 items-center gap-2 rounded-md bg-foreground/[0.075] px-2 py-2 text-left text-xs text-foreground"
-                            } else {
-                                "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
-                            },
+                            label: project.label.clone(),
+                            secondary: project.display_path.clone(),
+                            selected,
                             title: "{project.display_path}",
                             onclick: move |_| on_pick.call(row.clone()),
-                            Identicon {
+                            leading: rsx! { IdentityOrb {
                                 seed: project.path.clone(),
                                 alt: project.label.clone(),
-                                class: "size-5 shrink-0 rounded-md".to_string(),
-                            }
-                            div { class: "min-w-0 flex-1",
-                                div { class: "truncate font-medium", "{project.label}" }
-                                div { class: "truncate font-mono text-[10px] text-muted-foreground", "{project.display_path}" }
-                            }
-                            if selected {
+                                class: "size-5".to_string(),
+                            } },
+                            trailing: rsx! { if selected {
                                 LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
-                            }
+                            } },
                         }
                     }
                 }
@@ -97,12 +88,27 @@ pub fn ProjectSelectPopup(
             if has_projects {
                 div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
             }
-            button {
-                r#type: "button",
-                class: "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground",
+            if let (Some(handler), Some(project)) = (on_open_selected, selected_project) {
+                {
+                    let row = project.clone();
+                    rsx! {
+                        DropdownOption {
+                            label: translate("project-open"),
+                            selected: false,
+                            onclick: move |_| handler.call(row.clone()),
+                            leading: rsx! { BuiltinIconView {
+                                icon: vmux_api::BuiltinIcon::Project,
+                                class: "size-4 shrink-0".to_string(),
+                            } },
+                        }
+                    }
+                }
+            }
+            DropdownOption {
+                label: translate("common-add"),
+                selected: false,
                 onclick: move |_| on_add.call(()),
-                LineIconView { icon: LineIcon::Plus, class: "size-4 shrink-0" }
-                span { {translate("common-add")} }
+                leading: rsx! { LineIconView { icon: LineIcon::Plus, class: "size-4 shrink-0" } },
             }
         }
     }

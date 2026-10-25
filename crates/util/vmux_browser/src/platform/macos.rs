@@ -21,6 +21,7 @@ use vmux_ecs::page::HostsPage;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageMetadata, PageOpenSet};
 use vmux_layout::LayoutCef;
+use vmux_layout::overlay::LayoutOverlayDismissRevision;
 use vmux_layout::window::FocusedWindow;
 use vmux_page::{
     Appearance, AssetReply, Assets as RendererAssets, Embedding, LifecycleSink, LifecycleUpdate,
@@ -144,6 +145,9 @@ fn apply_lifecycle(
     receiver: Single<&PageLifecycleReceiver>,
     renderer: Option<NonSend<PageRenderer>>,
     mut pages: Query<&mut crate::HostedPageLifecycle>,
+    source_hosts: Query<&HostWindow, Without<LayoutCef>>,
+    mut layouts: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    mut commands: Commands,
 ) {
     while let Ok(envelope) = receiver.0.try_recv() {
         let Ok(mut page) = pages.get_mut(envelope.webview) else {
@@ -182,6 +186,24 @@ fn apply_lifecycle(
                         );
                     }
                 }
+                if envelope.update != LifecycleUpdate::PageInteracted {
+                    continue;
+                }
+                let Ok(source_host) = source_hosts.get(envelope.webview) else {
+                    continue;
+                };
+                let Some((layout, _, mut revision)) = layouts
+                    .iter_mut()
+                    .find(|(_, host, _)| host.0 == source_host.0)
+                else {
+                    continue;
+                };
+                commands.trigger(
+                    vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                        layout,
+                        &revision.next_effect(),
+                    ),
+                );
             }
             LifecycleUpdate::MeasurementStarted => {
                 page.measurements = page.measurements.saturating_add(1);
@@ -390,7 +412,7 @@ fn registration_priority(entity: EntityRef<'_>, registration: PageRegistration) 
 
 fn place(
     renderer: Option<NonSendMut<PageRenderer>>,
-    hosted: Query<(Entity, &HostedSurface), With<HostsPage>>,
+    hosted: Query<(Entity, &HostedSurface, &crate::HostedPageLifecycle), With<HostsPage>>,
     frames: Query<&PaneFrame>,
     rings: Query<&FocusRing>,
     corners: Query<&AllCorners>,
@@ -409,10 +431,14 @@ fn place(
     {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
-    for (entity, page) in &hosted {
+    for (entity, page, lifecycle) in &hosted {
         let Some(surface) = renderer.0.get(&entity) else {
             continue;
         };
+        if lifecycle.frames_applied == 0 {
+            surface.set_visible(false);
+            continue;
+        }
         let window = windows.get(page.window).ok();
         let Some(bounds) = page.placement.bounds(entity, window, &frames) else {
             surface.set_visible(false);

@@ -129,6 +129,9 @@ pub struct SpaceFormInputRequest {
 }
 
 #[vmux_api::ui_event]
+pub struct SpaceFormRegenerateRequest;
+
+#[vmux_api::ui_event]
 pub struct SpaceFormCloseRequest;
 
 #[vmux_api::ui_event(Eq)]

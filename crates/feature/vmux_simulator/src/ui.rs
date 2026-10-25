@@ -12,6 +12,7 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
+use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -35,21 +36,27 @@ pub fn Page() -> Element {
 
     let announced = ready();
     rsx! {
-        div { class: "flex h-screen w-screen items-center justify-center overflow-hidden bg-background",
-            if announced.port == 0 {
-                Waiting {
-                    route,
-                    status: announced.status,
-                    error: announced.error,
-                }
-            } else {
-                Mirror {
-                    key: "{announced.port}-{announced.capability}",
-                    port: announced.port,
-                    capability: announced.capability.clone(),
-                    device_name: announced.device_name.clone(),
-                    frame_width: announced.frame_width,
-                    frame_height: announced.frame_height,
+        div { class: "flex h-screen w-screen flex-col overflow-hidden bg-background",
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Simulator.option(),
+                options: WorkspacePage::options(),
+            }
+            div { class: "flex min-h-0 flex-1 items-center justify-center overflow-hidden",
+                if announced.port == 0 {
+                    Waiting {
+                        route,
+                        status: announced.status,
+                        error: announced.error,
+                    }
+                } else {
+                    Mirror {
+                        key: "{announced.port}-{announced.capability}",
+                        port: announced.port,
+                        capability: announced.capability.clone(),
+                        device_name: announced.device_name.clone(),
+                        frame_width: announced.frame_width,
+                        frame_height: announced.frame_height,
+                    }
                 }
             }
         }
@@ -94,7 +101,7 @@ fn Mirror(
     });
     rsx! {
         div {
-            class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background bg-[radial-gradient(circle_at_50%_10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-8 outline-none",
+            class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background p-8 outline-none",
             tabindex: 0,
             onmounted: move |event: Event<MountedData>| {
                 let target = event.data();
@@ -268,6 +275,16 @@ const reveal = () => {{
   label?.classList.remove("opacity-0");
   label?.classList.add("opacity-100");
 }};
+const decodeFrame = bytes => new Promise((resolve, reject) => {{
+  const url = URL.createObjectURL(new Blob([bytes], {{ type: "image/jpeg" }}));
+  const image = new Image();
+  image.onload = () => resolve({{ image, url }});
+  image.onerror = () => {{
+    URL.revokeObjectURL(url);
+    reject(new Error("simulator frame could not be decoded"));
+  }};
+  image.src = url;
+}});
 (async () => {{
 try {{
   const canvas = document.getElementById(key);
@@ -283,14 +300,14 @@ try {{
     if (payload.length < 9) throw new Error("simulator frame was empty");
     const generationView = new DataView(payload.buffer, payload.byteOffset, 8);
     generation = generationView.getUint32(0, true) + generationView.getUint32(4, true) * 4294967296;
-    const bitmap = await createImageBitmap(new Blob([payload.subarray(8)], {{ type: "image/jpeg" }}));
+    const decoded = await decodeFrame(payload.subarray(8));
     if (!canvas.isConnected) {{
-      bitmap.close();
+      URL.revokeObjectURL(decoded.url);
       controller.abort();
       break;
     }}
-    context.drawImage(bitmap, 0, 0, {width}, {height});
-    bitmap.close();
+    context.drawImage(decoded.image, 0, 0, {width}, {height});
+    URL.revokeObjectURL(decoded.url);
     if (first) {{
       first = false;
       reveal();
@@ -569,7 +586,7 @@ fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Elem
         translate("composer-status-starting")
     };
     rsx! {
-        div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background bg-[radial-gradient(circle_at_50%_10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-8",
+        div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background p-8",
             div { class: "absolute left-5 top-5 z-20 flex max-w-[calc(100%-2.5rem)] items-center gap-2 rounded-full bg-foreground/[0.055] px-3 py-1.5 text-xs text-muted-foreground",
                 span { class: if failed { "size-2 shrink-0 rounded-full bg-destructive" } else { "size-2 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" } }
                 span { class: "truncate font-medium text-foreground", "{target}" }

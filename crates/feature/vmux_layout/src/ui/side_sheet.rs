@@ -1,13 +1,14 @@
-use crate::event::{ActiveSession, SideSheetPane, StackRevealTarget};
+use crate::event::{ActiveSession, LayoutOverlayEvent, SideSheetPane, StackRevealTarget};
 use dioxus::prelude::*;
 use vmux_ecs::event::space::{
     SpaceAttachRequest, SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest,
-    SpaceFormOpenRequest, SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
-    SpacesListEvent,
+    SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState, SpaceOpenPageRequest,
+    SpaceRenameRequest, SpaceRow, SpacesListEvent,
 };
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::dropdown::DropdownPopup;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::input::ActionInput;
 use vmux_ui::components::motion::Collapsible;
 use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::hooks::send;
@@ -128,11 +129,6 @@ fn SideSheetContent() -> Element {
         state.window_pad_bottom,
         crate::event::SPACES_ROW_HEIGHT_PX,
     );
-    let motion = if state.zen {
-        "-translate-x-3 opacity-0"
-    } else {
-        "translate-x-0 opacity-100"
-    };
     let active_pane = side_sheet.active_pane;
     let drag_state = use_signal(|| None::<BookmarkDragState>);
     use_context_provider(|| drag_state);
@@ -142,7 +138,7 @@ fn SideSheetContent() -> Element {
     rsx! {
         aside {
             id: "vmux-side-sheet",
-            class: "@container pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] {motion} transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
+            class: "@container pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)]",
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
@@ -433,15 +429,45 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
     let submission = SpaceRenameSubmission(form.clone());
     let enter = submission.clone();
     let blur = submission.clone();
+    let dismiss_revision = LayoutUi::current().value().overlay_dismiss_revision;
+    let mut observed_dismiss_revision = use_signal(|| dismiss_revision);
+    use_effect(move || {
+        if dismiss_revision <= *observed_dismiss_revision.peek() {
+            return;
+        }
+        observed_dismiss_revision.set(dismiss_revision);
+        if !finished() {
+            finished.set(true);
+            BookmarkInput::set_active(false);
+            let _ = send(&SpaceFormCloseRequest);
+        }
+    });
+    use_effect(move || {
+        let _ = send(&LayoutOverlayEvent {
+            id: "space-name-input".to_string(),
+            active: true,
+        });
+    });
+    use_drop(move || {
+        BookmarkInput::set_active(false);
+        let _ = send(&LayoutOverlayEvent {
+            id: "space-name-input".to_string(),
+            active: false,
+        });
+    });
     rsx! {
-        input {
-            r#type: "text",
-            class: "pointer-events-auto min-w-0 flex-1 rounded bg-background/70 px-1 py-0.5 text-ui font-medium text-foreground outline-none ring-1 ring-inset ring-primary/40",
+        ActionInput {
             value: form.draft,
+            placeholder: String::new(),
+            aria_label: translate("spaces-new-placeholder"),
+            action_label: translate("common-refresh"),
+            class: "pointer-events-auto h-7 flex-1 rounded bg-background/70 ring-1 ring-inset ring-primary/40".to_string(),
+            input_class: "px-1.5 text-ui font-medium text-foreground".to_string(),
             autofocus: true,
-            autocomplete: "off",
+            select_all: true,
+            selection_key: form.suggestion,
             onfocus: move |_| BookmarkInput::set_active(true),
-            onclick: move |event| event.stop_propagation(),
+            onclick: move |event: MouseEvent| event.stop_propagation(),
             oninput: move |event: FormEvent| {
                 let _ = send(&SpaceFormInputRequest { draft: event.value() });
             },
@@ -467,6 +493,10 @@ fn SpaceRenameInput(form: SpaceFormState) -> Element {
                     blur.submit();
                 }
             },
+            onaction: move |_| {
+                let _ = send(&SpaceFormRegenerateRequest);
+            },
+            LineIconView { icon: LineIcon::RefreshCw, class: "size-3.5".to_string() }
         }
     }
 }
@@ -512,14 +542,12 @@ fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
             div {
                 class: "flex h-9 items-center rounded-md",
                 div { class: "flex min-w-0 flex-1 items-center gap-2 px-2 @max-[12rem]:gap-1 @max-[12rem]:px-1",
-                    div { class: if pane.is_active {
-                            "grid h-7 w-7 shrink-0 place-items-center text-foreground"
+                    Icon { class: if pane.is_active {
+                            "h-4 w-4 shrink-0 text-foreground"
                         } else {
-                            "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground/55"
+                            "h-4 w-4 shrink-0 text-muted-foreground/55"
                         },
-                        Icon { class: "h-3.5 w-3.5",
-                            path { d: "M4 6h16M4 12h16M4 18h16" }
-                        }
+                        path { d: "M4 6h16M4 12h16M4 18h16" }
                     }
                     span {
                         class: if pane.is_active {

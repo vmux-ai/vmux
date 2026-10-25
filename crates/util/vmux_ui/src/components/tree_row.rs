@@ -143,7 +143,7 @@ pub fn FileTreeRow(
     #[props(default)] leading: Option<Element>,
     #[props(default = rsx! {})] label_suffix: Element,
     #[props(default = rsx! {})] trailing: Element,
-    on_activate: EventHandler<()>,
+    on_activate: EventHandler<MouseEvent>,
 ) -> Element {
     let indent = 8 + depth * 12;
     let hint = title.unwrap_or_else(|| path.clone());
@@ -157,7 +157,7 @@ pub fn FileTreeRow(
                 FILE_TREE_ROW
             },
             style: "padding-left:{indent}px;",
-            onclick: move |_| on_activate.call(()),
+            onclick: move |event| on_activate.call(event),
             if is_dir {
                 Icon {
                     class: if expanded { FILE_TREE_CHEVRON_OPEN } else { FILE_TREE_CHEVRON_CLOSED },

@@ -2,21 +2,18 @@
 
 use dioxus::prelude::*;
 use vmux_ecs::event::{ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
-use vmux_ui::components::avatar::AgentThumbnail;
-use vmux_ui::components::badge::Badge;
-use vmux_ui::components::composer_bar::StatusDot;
 use vmux_ui::components::dropdown::DropdownPopup;
 use vmux_ui::components::motion::Collapsible;
 use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
 use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::tree_row::{FileTreeRow, FileTreeRowGroup};
 use vmux_ui::hooks::send;
-use vmux_ui::i18n::{translate, translate_humanized};
+use vmux_ui::i18n::translate;
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconView};
 
 use crate::event::{
-    ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, SideSheetSectionRequest,
-    TabBoundary, WorkspaceBranch,
+    ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest,
+    SideSheetProjectPageOpenRequest, SideSheetSectionRequest, TabBoundary, WorkspaceBranch,
 };
 
 use super::LayoutDropdown;
@@ -26,10 +23,10 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
     let ActiveSession {
         page,
         task,
-        agent,
         project,
         boundary,
         pane_id,
+        ..
     } = session;
     let title = if task
         .as_ref()
@@ -42,9 +39,9 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
         page.title.clone()
     };
     rsx! {
-        div { class: "relative w-full max-w-full min-w-0 overflow-visible px-2 py-2 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
-            div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden @max-[12rem]:gap-1.5",
-                div { class: "flex size-8 shrink-0 items-center justify-center @max-[12rem]:size-6",
+        div { class: "relative w-full max-w-full min-w-0 overflow-visible py-2 @max-[12rem]:py-1.5",
+            div { class: "flex w-full min-w-0 items-center gap-2.5 overflow-hidden px-2 @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+                div { class: "flex size-4 shrink-0 items-center justify-center",
                     PageIconView {
                         icon: page.icon.clone(),
                         url: page.url.clone(),
@@ -66,32 +63,6 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
                 }
             }
             div { class: "mt-2 min-w-0 flex flex-col gap-1",
-                if let Some(task) = task {
-                    div { class: "flex items-center gap-1.5",
-                        Badge {
-                            class: "rounded-full bg-foreground/[0.05] px-2 py-1 text-[9px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                            {translate_humanized(&task.stage_name)}
-                        }
-                        if task.runtime != "inactive" {
-                            span { class: "flex items-center gap-1.5 text-[10px] text-muted-foreground",
-                                StatusDot { status: task.runtime.clone(), size_class: "size-1.5".to_string() }
-                                {session_runtime_label(&task.runtime)}
-                            }
-                        }
-                    }
-                }
-                if let Some(agent) = agent {
-                    div { class: "flex min-w-0 items-center gap-2 px-1 py-1.5",
-                        AgentThumbnail {
-                            src: agent.icon.clone(),
-                            seed: agent.name.clone(),
-                            background: agent.color.clone(),
-                            alt: agent.name.clone(),
-                            class: "size-4 text-[7px]",
-                        }
-                        span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground", "{agent.name}" }
-                    }
-                }
                 if let Some(project) = project {
                     ActiveWorkspaceProjectTree {
                         project,
@@ -107,17 +78,6 @@ pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
     }
 }
 
-fn session_runtime_label(runtime: &str) -> String {
-    let id = match runtime {
-        "idle" => "session-runtime-idle",
-        "streaming" => "session-runtime-streaming",
-        "awaiting" => "session-runtime-awaiting",
-        "errored" => "session-runtime-errored",
-        _ => "session-runtime-inactive",
-    };
-    translate(id)
-}
-
 #[component]
 fn ActiveSessionGit(boundary: TabBoundary) -> Element {
     let repository = if boundary.repository.is_empty() {
@@ -126,7 +86,7 @@ fn ActiveSessionGit(boundary: TabBoundary) -> Element {
         boundary.repository.clone()
     };
     rsx! {
-        div { class: "flex h-8 min-w-0 items-center gap-1 rounded-md bg-foreground/[0.035] px-2.5 text-[10px]",
+        div { class: "flex h-8 min-w-0 items-center gap-1 rounded-md bg-foreground/[0.035] px-2 text-[10px] @max-[12rem]:px-1",
             GitSymbolView {
                 symbol: GitSymbol::Repository,
                 class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
@@ -153,6 +113,20 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     let picker_root = root.path.clone();
     let mut choosing = use_signal(|| false);
     let mut choosing_branch = use_signal(|| false);
+    let mut optimistic_project = use_signal(|| None::<ProjectRow>);
+    let selected_project = optimistic_project().unwrap_or_else(|| root.clone());
+    let selected_path = selected_project.path.clone();
+    let selected_label = selected_project.label.clone();
+    let selected_display_path = selected_project.display_path.clone();
+    use_effect(move || {
+        if optimistic_project
+            .peek()
+            .as_ref()
+            .is_some_and(|project| project.path == root.path)
+        {
+            optimistic_project.set(None);
+        }
+    });
     let current_branch_label = if current_branch.is_empty() {
         "HEAD".to_string()
     } else {
@@ -170,28 +144,29 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     };
     rsx! {
         div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible",
-            div { class: "flex min-w-0 flex-col gap-0.5 p-1 @max-[12rem]:p-0.5",
+            div { class: "flex min-w-0 flex-col gap-0.5 py-1 @max-[12rem]:py-0.5",
                 LayoutDropdown {
                     id: format!("active-project-{pane_id}"),
                     open: choosing(),
                     class: "w-full min-w-0".to_string(),
                     on_dismiss: move |_| choosing.set(false),
                     ProjectSelectTrigger {
-                        label: root.label.clone(),
-                        title: root.display_path.clone(),
+                        label: selected_label.clone(),
+                        title: selected_display_path.clone(),
                         open: choosing(),
-                        seed: root.path.clone(),
+                        seed: selected_path.clone(),
                         class: "w-full @max-[12rem]:gap-1.5 @max-[12rem]:px-1".to_string(),
                         onclick: move |_| choosing.set(!choosing()),
                     }
                     if choosing() {
                         ProjectSelectPopup {
                             projects: project_choices.clone(),
-                            selected_path: root.path.clone(),
+                            selected_path: selected_path.clone(),
                             match_width: true,
                             class: "max-h-64 min-w-0 overflow-y-auto".to_string(),
                             on_pick: move |project: ProjectRow| {
                                 choosing.set(false);
+                                optimistic_project.set(Some(project.clone()));
                                 let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
                                     path: project.path,
                                     branch: String::new(),
@@ -206,12 +181,19 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                                     pane_id: Some(pane_id),
                                 });
                             },
+                            on_open_selected: move |project: ProjectRow| {
+                                choosing.set(false);
+                                let _ = send(&SideSheetProjectPageOpenRequest {
+                                    pane_id,
+                                    path: project.path,
+                                });
+                            },
                         }
                     }
                 }
                 if !current_branch.is_empty() || !branch_choices.is_empty() {
                     if branch_choices.is_empty() {
-                        div { class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 transition-colors hover:bg-foreground/[0.04]",
+                        div { class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 transition-colors hover:bg-foreground/[0.04] @max-[12rem]:px-1",
                             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
                             span { class: "min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch}" }
                         }
@@ -250,7 +232,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
             div {
                 role: "button",
                 tabindex: "0",
-                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5",
+                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
                 aria_expanded: expanded,
                 onclick: move |_| {
                     let _ = send(&SideSheetSectionRequest::new(
@@ -352,7 +334,7 @@ fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
                 expanded: project.expanded,
                 depth: project.depth,
                 title: project.display_path.clone(),
-                on_activate: move |()| {
+                on_activate: move |_| {
                     if opens_tree {
                         let _ = send(&ProjectTreeToggle {
                             path: path.clone(),

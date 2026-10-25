@@ -1,11 +1,18 @@
 use crate::cn::cn;
 use crate::components::badge::Badge;
-use crate::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
+use crate::components::breadcrumb::{
+    BreadcrumbOption, BreadcrumbOptionIcon, BreadcrumbSelector, Breadcrumbs,
+};
+use crate::components::dropdown::{
+    Dropdown, DropdownAlign, DropdownOption, DropdownPopup, DropdownSelector,
+};
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
 use crate::components::tooltip::Tooltip;
 use crate::i18n::translate;
-use crate::icon::{BuiltinIconView, LineIcon, LineIconView};
+use crate::icon::{LineIcon, LineIconView};
+use crate::navigation::NavigationGesture;
+use crate::navigation::PageNavigation;
 use crate::platform::Platform;
 use dioxus::core::Task;
 use dioxus::prelude::*;
@@ -77,39 +84,8 @@ pub fn ManagerPage(children: Element) -> Element {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ManagerArea {
-    Inbox,
-    Projects,
-}
-
-impl ManagerArea {
-    fn label(self) -> String {
-        translate(match self {
-            Self::Inbox => "sessions-inbox",
-            Self::Projects => "layout-projects",
-        })
-    }
-
-    pub fn url(self) -> &'static str {
-        match self {
-            Self::Inbox => "vmux://sessions/",
-            Self::Projects => "vmux://projects/",
-        }
-    }
-
-    fn icon(self) -> BuiltinIcon {
-        match self {
-            Self::Inbox => BuiltinIcon::MessagesRound,
-            Self::Projects => BuiltinIcon::Project,
-        }
-    }
-}
-
 #[component]
 pub fn WorkspaceLayout(
-    active: Option<ManagerArea>,
-    onnavigate: EventHandler<ManagerArea>,
     header: Element,
     #[props(default = rsx! {})] sidebar: Element,
     children: Element,
@@ -119,20 +95,7 @@ pub fn WorkspaceLayout(
             {header}
             div { class: "flex min-h-0 flex-1 overflow-hidden",
                 aside { class: "hidden w-44 shrink-0 flex-col px-2 pb-2 sm:flex",
-                    nav { class: "flex shrink-0 flex-col gap-0.5",
-                        ManagerAreaLink {
-                            area: ManagerArea::Inbox,
-                            selected: active == Some(ManagerArea::Inbox),
-                            onselect: move |area| onnavigate.call(area),
-                        }
-                        div { class: "h-1" }
-                        ManagerAreaLink {
-                            area: ManagerArea::Projects,
-                            selected: active == Some(ManagerArea::Projects),
-                            onselect: move |area| onnavigate.call(area),
-                        }
-                    }
-                    div { class: "mt-3 min-h-0 flex-1 overflow-y-auto", {sidebar} }
+                    div { class: "min-h-0 flex-1 overflow-y-auto", {sidebar} }
                 }
                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden", {children} }
             }
@@ -150,25 +113,195 @@ pub fn WorkspaceHeader(children: Element, #[props(default = rsx! {})] actions: E
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WorkspacePage {
+    Editor,
+    Git,
+    History,
+    Projects,
+    Services,
+    Sessions,
+    Settings,
+    Shortcuts,
+    Simulator,
+    Team,
+    Terminal,
+    Tools,
+    Vault,
+}
+
+impl WorkspacePage {
+    const ALL: [Self; 13] = [
+        Self::Editor,
+        Self::Git,
+        Self::History,
+        Self::Projects,
+        Self::Services,
+        Self::Sessions,
+        Self::Settings,
+        Self::Shortcuts,
+        Self::Simulator,
+        Self::Team,
+        Self::Terminal,
+        Self::Tools,
+        Self::Vault,
+    ];
+
+    pub fn option(self) -> BreadcrumbOption {
+        let (label, value, icon_url, icon) = match self {
+            Self::Editor => (
+                translate("editor-editor"),
+                "file://",
+                "assets/favicons/editor.svg",
+                BuiltinIcon::Code,
+            ),
+            Self::Git => (
+                translate("git-title"),
+                "git://",
+                "assets/favicons/git.svg",
+                BuiltinIcon::GitBranch,
+            ),
+            Self::History => (
+                translate("history-title"),
+                "vmux://history/",
+                "assets/favicons/history.svg",
+                BuiltinIcon::Clock,
+            ),
+            Self::Projects => (
+                translate("layout-projects"),
+                "vmux://projects/",
+                "assets/favicons/projects.svg",
+                BuiltinIcon::Project,
+            ),
+            Self::Services => (
+                translate("services-title"),
+                "vmux://services/",
+                "assets/favicons/services.svg",
+                BuiltinIcon::Activity,
+            ),
+            Self::Sessions => (
+                translate("sessions-title"),
+                "vmux://sessions/",
+                "assets/favicons/sessions.svg",
+                BuiltinIcon::MessagesRound,
+            ),
+            Self::Settings => (
+                translate("settings-title"),
+                "vmux://settings/",
+                "assets/favicons/settings.svg",
+                BuiltinIcon::Settings,
+            ),
+            Self::Shortcuts => (
+                translate("shortcuts-title"),
+                "vmux://shortcuts/",
+                "assets/favicons/shortcuts.svg",
+                BuiltinIcon::Keyboard,
+            ),
+            Self::Simulator => (
+                translate("simulator-title"),
+                "vmux://simulator/",
+                "assets/favicons/simulator.svg",
+                BuiltinIcon::Smartphone,
+            ),
+            Self::Team => (
+                translate("team-title"),
+                "vmux://team/",
+                "assets/favicons/team.svg",
+                BuiltinIcon::Users,
+            ),
+            Self::Terminal => (
+                translate("command-terminal"),
+                "vmux://terminal/",
+                "assets/favicons/terminal.svg",
+                BuiltinIcon::Terminal,
+            ),
+            Self::Tools => (
+                translate("tools-title"),
+                "vmux://tools/acp",
+                "assets/favicons/tools.svg",
+                BuiltinIcon::Toolbox,
+            ),
+            Self::Vault => (
+                translate("vault-title"),
+                "vmux://vault/",
+                "assets/favicons/vault.svg",
+                BuiltinIcon::Vault,
+            ),
+        };
+        BreadcrumbOption {
+            label,
+            value: value.to_string(),
+            identity_seed: String::new(),
+            icon_url: icon_url.to_string(),
+            icon: Some(icon),
+        }
+    }
+
+    pub fn options() -> Vec<BreadcrumbOption> {
+        let mut options = Self::ALL.into_iter().map(Self::option).collect::<Vec<_>>();
+        Self::sort(&mut options);
+        options
+    }
+
+    pub fn options_with(contextual: Vec<BreadcrumbOption>) -> Vec<BreadcrumbOption> {
+        let mut options = Self::options();
+        for option in contextual {
+            if let Some(page) = Self::ALL
+                .into_iter()
+                .find(|page| page.answers_for(&option.value))
+            {
+                options.retain(|existing| !page.answers_for(&existing.value));
+            }
+            options.push(option);
+        }
+        Self::sort(&mut options);
+        options
+    }
+
+    fn answers_for(self, url: &str) -> bool {
+        match self {
+            Self::Editor => url.starts_with("file:"),
+            Self::Git => url.starts_with("git:"),
+            Self::Terminal => url.starts_with("vmux://terminal"),
+            _ => self.option().value.trim_end_matches('/') == url.trim_end_matches('/'),
+        }
+    }
+
+    fn sort(options: &mut [BreadcrumbOption]) {
+        options.sort_by(|left, right| {
+            left.label
+                .to_ascii_lowercase()
+                .cmp(&right.label.to_ascii_lowercase())
+        });
+    }
+}
+
 #[component]
-fn ManagerAreaLink(
-    area: ManagerArea,
-    selected: bool,
-    onselect: EventHandler<ManagerArea>,
+pub fn WorkspaceBreadcrumbHeader(
+    current: BreadcrumbOption,
+    options: Vec<BreadcrumbOption>,
+    children: Element,
+    #[props(default = rsx! {})] actions: Element,
 ) -> Element {
-    let class = if selected {
-        "bg-foreground/[0.075] text-foreground"
-    } else {
-        "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
-    };
+    let label = current.label.clone();
+    let leading = current.clone();
     rsx! {
-        button {
-            r#type: "button",
-            aria_current: if selected { "page" } else { "false" },
-            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium transition-colors {class}",
-            onclick: move |_| onselect.call(area),
-            BuiltinIconView { icon: area.icon(), class: "size-3.5 shrink-0".to_string() }
-            span { class: "truncate", {area.label()} }
+        WorkspaceHeader { actions,
+            Breadcrumbs { class: "min-w-0 flex-1 overflow-hidden".to_string(),
+                BreadcrumbSelector {
+                    label,
+                    value: current.value.clone(),
+                    options,
+                    leading: rsx! {
+                        BreadcrumbOptionIcon {
+                            option: leading,
+                            class: "size-4 shrink-0".to_string(),
+                        }
+                    },
+                    onselect: move |url| PageNavigation::replace(url),
+                }
+                {children}
+            }
         }
     }
 }
@@ -433,6 +566,27 @@ pub fn ManagerIconButton(
 }
 
 #[component]
+pub fn ManagerAddButton(
+    label: String,
+    #[props(default)] active: bool,
+    #[props(default)] disabled: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "vmux-primary-action flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-opacity disabled:pointer-events-none disabled:opacity-40",
+            aria_label: label.clone(),
+            aria_pressed: active,
+            disabled,
+            onclick: move |event| onclick.call(event),
+            LineIconView { icon: LineIcon::Plus, class: "size-3.5" }
+            span { "{label}" }
+        }
+    }
+}
+
+#[component]
 pub fn ManagerSearchPopover(
     open: bool,
     active: bool,
@@ -465,6 +619,43 @@ pub fn ManagerSearchPopover(
                     class: "w-[min(28rem,calc(100vw-2rem))]",
                     {children}
                 }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ManagerSearchAction(
+    value: String,
+    placeholder: String,
+    onsearch: EventHandler<String>,
+    #[props(default)] label: String,
+    #[props(default)] active: bool,
+    #[props(default)] onkeydown: Option<EventHandler<KeyboardEvent>>,
+    #[props(default = rsx! {})] prefix: Element,
+    #[props(default = rsx! {})] suffix: Element,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let label = if label.is_empty() {
+        placeholder.clone()
+    } else {
+        label
+    };
+    rsx! {
+        ManagerSearchPopover {
+            open: open(),
+            active: active || !value.is_empty(),
+            label,
+            ontoggle: move |_| open.set(!open()),
+            ondismiss: move |_| open.set(false),
+            ManagerSearch {
+                value,
+                placeholder,
+                autofocus: true,
+                onsearch,
+                onkeydown,
+                prefix,
+                suffix,
             }
         }
     }
@@ -579,7 +770,7 @@ pub fn ManagerRow(
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
-    #[props(default)] onselect: Option<EventHandler<()>>,
+    #[props(default)] onselect: Option<EventHandler<NavigationGesture>>,
 ) -> Element {
     let interactive = onselect.is_some();
     let class = match (interactive, selected) {
@@ -599,9 +790,9 @@ pub fn ManagerRow(
             role: if interactive { "button" } else { "group" },
             tabindex: if interactive { "0" } else { "-1" },
             aria_selected: selected,
-            onclick: move |_| {
+            onclick: move |event| {
                 if let Some(handler) = &onselect {
-                    handler.call(());
+                    handler.call(NavigationGesture::from_mouse(&event));
                 }
             },
             onkeydown: move |event| {
@@ -612,7 +803,7 @@ pub fn ManagerRow(
                 }
                 event.prevent_default();
                 if let Some(handler) = &onselect {
-                    handler.call(());
+                    handler.call(NavigationGesture::default());
                 }
             },
             if show_icon {
@@ -648,7 +839,7 @@ pub fn ManagerCard(
     #[props(default = true)] show_icon: bool,
     #[props(default = true)] icon_surface: bool,
     #[props(default)] selected: bool,
-    onselect: EventHandler<()>,
+    onselect: EventHandler<NavigationGesture>,
 ) -> Element {
     let keyboard_select = onselect;
     rsx! {
@@ -661,7 +852,7 @@ pub fn ManagerCard(
             role: "button",
             tabindex: "0",
             aria_selected: selected,
-            onclick: move |_| onselect.call(()),
+            onclick: move |event| onselect.call(NavigationGesture::from_mouse(&event)),
             onkeydown: move |event| {
                 let activate = event.key() == Key::Enter
                     || matches!(event.key(), Key::Character(key) if key == " ");
@@ -669,7 +860,7 @@ pub fn ManagerCard(
                     return;
                 }
                 event.prevent_default();
-                keyboard_select.call(());
+                keyboard_select.call(NavigationGesture::default());
             },
             div { class: "flex min-w-0 items-start gap-3",
                 if show_icon {
@@ -798,25 +989,42 @@ pub fn ManagerSelect(
     #[props(default)] disabled: bool,
     onselect: EventHandler<String>,
 ) -> Element {
+    let mut open = use_signal(|| false);
     let selected = value.unwrap_or_default();
     let empty = items.is_empty();
+    let label = items
+        .iter()
+        .find(|item| item.value == selected)
+        .map(|item| item.label.clone())
+        .unwrap_or_else(|| placeholder.clone());
+    let disabled = disabled || empty;
 
     rsx! {
-        div { class: "relative min-w-0",
-            select {
-                class: "w-full min-w-0 appearance-none rounded-md bg-foreground/[0.055] py-2 pl-3 pr-9 text-xs text-foreground outline-none transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] disabled:pointer-events-none disabled:opacity-50",
-                disabled: disabled || empty,
-                value: selected.clone(),
-                onchange: move |event| onselect.call(event.value()),
-                if selected.is_empty() {
-                    option { value: "", disabled: true, "{placeholder}" }
+        DropdownSelector {
+            label,
+            open: open(),
+            active: !selected.is_empty(),
+            disabled,
+            class: "min-w-0".to_string(),
+            trigger_class: "w-full min-w-24 justify-between bg-foreground/[0.045] px-2.5 text-foreground hover:bg-foreground/[0.075]".to_string(),
+            popup_class: "max-h-80 min-w-40 overflow-y-auto p-1".to_string(),
+            ontoggle: move |_| open.set(!open()),
+            on_dismiss: move |_| open.set(false),
+            for item in items {
+                {
+                    let item_selected = item.value == selected;
+                    rsx! {
+                        DropdownOption {
+                            key: "{item.value}",
+                            label: item.label,
+                            selected: item_selected,
+                            onclick: move |_| {
+                                open.set(false);
+                                onselect.call(item.value.clone());
+                            },
+                        }
+                    }
                 }
-                for item in items {
-                    option { value: item.value, "{item.label}" }
-                }
-            }
-            svg { class: "pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                path { d: "m6 9 6 6 6-6" }
             }
         }
     }

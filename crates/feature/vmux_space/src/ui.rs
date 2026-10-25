@@ -2,13 +2,14 @@
 
 use crate::event::{
     SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceFormCloseRequest,
-    SpaceFormInputRequest, SpaceFormOpenRequest, SpaceFormState, SpaceRenameRequest, SpaceRow,
-    SpacesUiState,
+    SpaceFormInputRequest, SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState,
+    SpaceRenameRequest, SpaceRow, SpacesUiState,
 };
 use dioxus::prelude::*;
 use vmux_api::input::KeyContextRequest;
 use vmux_ecs::event::team::TeamProfileSwitchRequest;
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
+use vmux_ui::components::input::ActionInput;
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
@@ -290,15 +291,17 @@ fn SpaceFormView(form: SpaceFormState) -> Element {
         .display_name()
     };
     rsx! {
-        input {
-            r#type: "text",
-            class: "pointer-events-auto h-8 min-w-0 flex-1 rounded-md bg-background/70 px-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/[0.10] focus:ring-primary/35",
-            placeholder: "{placeholder}",
-            aria_label: translate("spaces-new-placeholder"),
+        ActionInput {
             value: form.draft,
+            placeholder,
+            aria_label: translate("spaces-new-placeholder"),
+            action_label: translate("common-refresh"),
+            class: "pointer-events-auto h-8 flex-1 rounded-md bg-background/70 ring-1 ring-inset ring-foreground/[0.10] focus-within:ring-primary/35".to_string(),
+            input_class: "px-2.5 text-sm text-foreground".to_string(),
             autofocus: true,
-            autocomplete: "off",
-            onclick: move |event| event.stop_propagation(),
+            select_all: true,
+            selection_key: form.suggestion,
+            onclick: move |event: MouseEvent| event.stop_propagation(),
             oninput: move |event: FormEvent| {
                 let _ = send(&SpaceFormInputRequest { draft: event.value() });
             },
@@ -321,6 +324,10 @@ fn SpaceFormView(form: SpaceFormState) -> Element {
                     let _ = send(&SpaceFormCloseRequest);
                 }
             },
+            onaction: move |_| {
+                let _ = send(&SpaceFormRegenerateRequest);
+            },
+            LineIconView { icon: LineIcon::RefreshCw, class: "size-3.5".to_string() }
         }
     }
 }

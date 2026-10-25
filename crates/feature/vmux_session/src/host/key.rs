@@ -773,6 +773,7 @@ fn choose(
                     kind: session.kind.clone(),
                     sid: session.sid.clone(),
                     cwd: session.cwd.clone(),
+                    open: None,
                 },
             });
             change_composer = Some(String::new());

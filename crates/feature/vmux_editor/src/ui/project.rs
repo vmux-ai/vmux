@@ -10,17 +10,17 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use vmux_ui::components::avatar::Identicon;
-use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator, Breadcrumbs};
+use vmux_ui::components::avatar::IdentityOrb;
+use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator};
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerArea, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
-    ManagerIconButton, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSearchPopover,
-    ManagerSidebarItem, ManagerSkeleton, ManagerTone, ManagerView, ManagerViewToggle,
-    WorkspaceHeader, WorkspaceLayout,
+    ManagerAddButton, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
+    ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSearchPopover, ManagerSidebarItem,
+    ManagerSkeleton, ManagerTone, ManagerView, ManagerViewToggle, WorkspaceBreadcrumbHeader,
+    WorkspaceLayout, WorkspacePage,
 };
 use vmux_ui::components::page::PageContent;
 use vmux_ui::components::sheet::SheetHeaderChevron;
@@ -30,7 +30,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{CollectionController, send, use_collection_controller, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
-use vmux_ui::navigation::PageNavigation;
+use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
 use super::project_manager::{
     ProjectFilter, ProjectFilterMenu, ProjectPresentation, ViewPreference,
@@ -79,16 +79,10 @@ pub(super) fn ProjectList(
     rsx! {
         ManagerPage {
             WorkspaceLayout {
-                active: ProjectFilter::selected(&filters).is_none().then_some(ManagerArea::Projects),
-                onnavigate: move |area: ManagerArea| {
-                    if area == ManagerArea::Projects {
-                        controls.replace_filters(Vec::new());
-                        return;
-                    }
-                    PageNavigation::replace(area.url());
-                },
                 header: rsx! {
-                    WorkspaceHeader {
+                    WorkspaceBreadcrumbHeader {
+                        current: WorkspacePage::Projects.option(),
+                        options: WorkspacePage::options(),
                         actions: rsx! {
                             ProjectManagerActions {
                                 entries: entries.clone(),
@@ -108,11 +102,6 @@ pub(super) fn ProjectList(
                                 }
                             }
                         },
-                        vmux_ui::icon::BuiltinIconView {
-                            icon: vmux_api::BuiltinIcon::Project,
-                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
-                        }
-                        span { class: "truncate text-xs font-medium text-foreground/90", {translate("layout-projects")} }
                     }
                 },
                 sidebar: rsx! { ProjectCategories { entries: entries.clone(), controls } },
@@ -219,7 +208,7 @@ fn ProjectManagerActions(
                     }
                 }
             }
-            ProjectAdd { pending, compact: true }
+            ProjectAdd { pending }
         }
     }
 }
@@ -251,12 +240,12 @@ fn ProjectCategories(
 #[component]
 fn ProjectItem(entry: ProjectEntry, view: ManagerView) -> Element {
     let url = entry.url.clone();
-    let select = move |_| ProjectEntry::open(url.clone());
+    let select = move |gesture| ProjectEntry::open(url.clone(), gesture);
     let icon = rsx! {
-        Identicon {
+        IdentityOrb {
             seed: entry.identity_seed().to_string(),
             alt: entry.name.clone(),
-            class: "size-6 shrink-0 rounded-lg".to_string(),
+            class: "size-6".to_string(),
         }
     };
     let meta = rsx! { ProjectMeta { entry: entry.clone() } };
@@ -364,7 +353,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         danger: false,
                         onclick: move |_| {
                             open.set(false);
-                            ProjectEntry::open(resume_url.clone());
+                            ProjectEntry::open(resume_url.clone(), NavigationGesture::default());
                         },
                     }
                     ProjectActionMenuItem {
@@ -452,8 +441,8 @@ fn ProjectActionMenuItem(
 }
 
 impl ProjectEntry {
-    fn open(url: String) {
-        PageNavigation::replace(url);
+    fn open(url: String, gesture: NavigationGesture) {
+        PageNavigation::gesture(url, gesture);
     }
 }
 
@@ -475,12 +464,11 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
             class: "shrink-0".to_string(),
             on_dismiss: move |_| open.set(false),
             if compact {
-                ManagerIconButton {
+                ManagerAddButton {
                     label: translate("common-add"),
                     disabled: pending,
                     active: open(),
                     onclick: move |_| open.set(!open()),
-                    LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
                 }
             } else {
                 Button {
@@ -564,7 +552,8 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
                         }
                         Button {
                             variant: ButtonVariant::Primary,
-                            size: ButtonSize::Xs,
+                            size: ButtonSize::Sm,
+                            class: "h-8 px-4 text-xs".to_string(),
                             disabled: !ready,
                             onclick: move |_| {
                                 ProjectPrompt::submit(kind, draft());
@@ -635,38 +624,32 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     rsx! {
         ManagerPage {
             WorkspaceLayout {
-                active: Some(ManagerArea::Projects),
-                onnavigate: move |area: ManagerArea| {
-                    PageNavigation::replace(area.url());
-                },
                 header: rsx! {
-                    WorkspaceHeader {
+                    WorkspaceBreadcrumbHeader {
+                        current: WorkspacePage::Projects.option(),
+                        options: WorkspacePage::options(),
                         actions: rsx! {
                             Button {
                                 variant: ButtonVariant::Primary,
                                 size: ButtonSize::Sm,
                                 class: "h-8 gap-1.5 text-xs".to_string(),
                                 onclick: move |_| PageNavigation::replace(start_url.clone()),
-                                LineIconView { icon: LineIcon::Plus, class: "size-3.5".to_string() }
+                                LineIconView { icon: LineIcon::MessagesRound, class: "size-3.5".to_string() }
                                 span { {translate("sessions-start")} }
                             }
                         },
-                        Identicon {
-                            seed: project_identity,
-                            alt: project_name.clone(),
-                            class: "size-5 shrink-0 rounded-md".to_string(),
-                        }
-                        Breadcrumbs { class: "min-w-0 flex-1".to_string(),
-                            BreadcrumbItem {
-                                label: translate("layout-projects"),
-                                onclick: move |_| PageNavigation::replace("vmux://projects/"),
-                            }
-                            BreadcrumbSeparator {}
-                            BreadcrumbItem {
-                                label: project_name.clone(),
-                                title: header_root,
-                                active: true,
-                            }
+                        BreadcrumbSeparator {}
+                        BreadcrumbItem {
+                            label: project_name.clone(),
+                            title: header_root,
+                            active: true,
+                            leading: rsx! {
+                                IdentityOrb {
+                                    seed: project_identity,
+                                    alt: project_name.clone(),
+                                    class: "size-5".to_string(),
+                                }
+                            },
                         }
                     }
                 },

@@ -12,6 +12,7 @@
             permissions: [
                 "PageReady",
                 "ThemeUiState",
+                "OpenRequest",
                 "SimulatorUiState",
                 "SimulatorReady",
                 "SimulatorTouch",

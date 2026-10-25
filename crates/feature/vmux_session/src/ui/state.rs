@@ -18,7 +18,7 @@ use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptF
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
 use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::platform::Platform;
+use vmux_ui::scroll::PrependScrollAnchor;
 
 #[derive(PartialEq)]
 pub struct ChatValue<T: 'static> {
@@ -188,10 +188,6 @@ impl Chat {
                 }
             },
         );
-    }
-
-    pub fn request_history(&self) {
-        let _ = send(&ChatHistoryMoreRequest);
     }
 
     pub fn list_selection(&self) -> usize {
@@ -647,11 +643,12 @@ pub struct Transcript {
     pub at_bottom: Signal<bool>,
     pub initial_follow: Signal<bool>,
     last_top: Signal<i32>,
-    input_pending: Signal<bool>,
-    input_clear_task: Signal<Option<Task>>,
     pub scroll_container: scroll::Container,
     generation: Signal<u64>,
     follow_task: Signal<Option<Task>>,
+    prepend_anchor: Signal<Option<PrependScrollAnchor>>,
+    prepend_task: Signal<Option<Task>>,
+    handled_prepend: Signal<u64>,
 }
 
 pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
@@ -660,11 +657,12 @@ pub fn use_transcript(root: Signal<ChatUiState>) -> Transcript {
         at_bottom: use_signal(|| true),
         initial_follow: use_signal(|| true),
         last_top: use_signal(|| 0),
-        input_pending: use_signal(|| false),
-        input_clear_task: use_signal(|| None),
         scroll_container: use_signal(|| None),
         generation: use_signal(|| 0),
         follow_task: use_signal(|| None),
+        prepend_anchor: use_signal(|| None),
+        prepend_task: use_signal(|| None),
+        handled_prepend: use_signal(|| 0),
     }
 }
 
@@ -682,35 +680,44 @@ impl Transcript {
     }
 
     pub(super) fn note_scroll_input(self) {
-        let mut task = self.input_clear_task;
-        if let Some(task) = task.write().take() {
+        self.stop_following();
+    }
+
+    fn stop_following(self) {
+        let mut follow_task = self.follow_task;
+        if let Some(task) = follow_task.write().take() {
             task.cancel();
         }
-        let mut pending = self.input_pending;
-        pending.set(true);
-        task.set(Some(spawn(async move {
-            Platform::sleep(120).await;
-            pending.set(false);
-        })));
+        let mut prepend_task = self.prepend_task;
+        if let Some(task) = prepend_task.write().take() {
+            task.cancel();
+        }
+        if *self.initial_follow.peek() {
+            let mut initial_follow = self.initial_follow;
+            initial_follow.set(false);
+        }
+        if *self.at_bottom.peek() {
+            let mut at_bottom = self.at_bottom;
+            at_bottom.set(false);
+        }
     }
 
     pub(super) fn observe_scroll(self, top: i32, distance: i32) {
         let mut last_top = self.last_top;
         let previous = *last_top.peek();
         last_top.set(top);
+        if top < previous {
+            self.stop_following();
+            return;
+        }
         if *self.initial_follow.peek() {
             return;
         }
         if distance <= 48 {
-            let mut at_bottom = self.at_bottom;
-            at_bottom.set(true);
-        } else if *self.input_pending.peek() && top < previous - 4 {
-            let mut at_bottom = self.at_bottom;
-            at_bottom.set(false);
-        }
-        if *self.input_pending.peek() {
-            let mut pending = self.input_pending;
-            pending.set(false);
+            if !*self.at_bottom.peek() {
+                let mut at_bottom = self.at_bottom;
+                at_bottom.set(true);
+            }
         }
     }
 
@@ -729,6 +736,36 @@ impl Transcript {
         if *self.initial_follow.peek() || *self.at_bottom.peek() {
             scroll::settle_bottom(self.scroll_container, self.initial_follow, self.follow_task);
         }
+    }
+
+    pub(super) fn request_history(self, anchor: PrependScrollAnchor) {
+        let transcript = self.current();
+        if transcript.loading || transcript.loaded_start == 0 {
+            return;
+        }
+        let mut pending = self.prepend_anchor;
+        pending.set(Some(anchor));
+        let _ = send(&ChatHistoryMoreRequest);
+    }
+
+    pub(super) fn restore_prepend(self, revision: u64) {
+        if revision == 0 || revision <= *self.handled_prepend.peek() {
+            return;
+        }
+        let mut handled = self.handled_prepend;
+        handled.set(revision);
+        let mut anchor = self.prepend_anchor;
+        let Some(anchor) = anchor.write().take() else {
+            return;
+        };
+        let Some(element) = self.scroll_container.peek().clone() else {
+            return;
+        };
+        let mut task = self.prepend_task;
+        if let Some(current) = task.write().take() {
+            current.cancel();
+        }
+        task.set(Some(anchor.restore(element)));
     }
 }
 

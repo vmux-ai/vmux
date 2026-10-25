@@ -18,7 +18,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::navigation::PageNavigation;
-use vmux_ui::scroll::ScrollIntoView;
+use vmux_ui::scroll::{ScrollIntoView, ScrollPreload};
 
 use crate::event::GitDiffRow;
 use crate::event::*;
@@ -42,8 +42,7 @@ impl ListPager {
         if current >= total {
             return;
         }
-        let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-        if remaining > 96 {
+        if !ScrollPreload::LIST.reached(&event) {
             return;
         }
         let mut visible = self.0;
@@ -192,6 +191,7 @@ pub fn DiffView(
     #[props(default)] reveal_path: Option<ReadSignal<String>>,
     #[props(default)] onactivefile: Option<EventHandler<String>>,
     #[props(default)] onviewedchange: Option<EventHandler<usize>>,
+    #[props(default)] expected_paths: Vec<String>,
     viewport: ReadSignal<Option<GitDiffViewport>>,
     display_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
@@ -203,6 +203,8 @@ pub fn DiffView(
     let mut render_window = use_signal(DiffRenderWindow::default);
     let mut revealed_file = use_signal(String::new);
     let mut active_file = use_signal(String::new);
+    let expected_path_count = expected_paths.len();
+    let layout_expected_paths = expected_paths.clone();
     let layout = use_memo(move || {
         let viewport = viewport.read();
         let lines = viewport
@@ -210,7 +212,7 @@ pub fn DiffView(
             .map(|viewport| viewport.lines.as_slice())
             .unwrap_or_default();
         let rows = display_rows.read();
-        DiffLayout::group(lines, &rows)
+        DiffLayout::group(lines, &rows, &layout_expected_paths)
     });
     let geometry_identity = identity.clone();
     let geometry = use_memo(move || {
@@ -374,14 +376,12 @@ pub fn DiffView(
                         handler.call(path);
                     }
                 }
-                let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                let preload_distance = event.client_height().saturating_mul(16).max(4800);
-                if remaining <= preload_distance && has_more && !loading {
+                if ScrollPreload::DOCUMENT.reached(&event) && has_more && !loading {
                     let _ = send(&GitDiffNextRequest);
                 }
             },
 
-            if loading && rows.is_empty() {
+            if loading && rows.is_empty() && expected_path_count == 0 {
                 div { class: "flex flex-col gap-2 p-3",
                     for width in ["w-10/12", "w-full", "w-8/12", "w-11/12", "w-7/12"] {
                         Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
@@ -395,7 +395,7 @@ pub fn DiffView(
                         let _ = send(&GitDiffRetryRequest);
                     },
                 }
-            } else if rows.is_empty() {
+            } else if rows.is_empty() && expected_path_count == 0 {
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
             }
 
@@ -405,6 +405,7 @@ pub fn DiffView(
             for section in sections {
                 {
                     let file_path = section.file_path.clone();
+                    let placeholder = section.placeholder;
                     let collapse_key = file_path
                         .as_ref()
                         .map(|file_path| format!("{identity}\0{file_path}"));
@@ -452,50 +453,58 @@ pub fn DiffView(
                                         },
                                         "{file_path}"
                                     }
-                                    label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
-                                        Checkbox {
-                                            checked: viewed,
-                                            tone: CheckboxTone::Neutral,
-                                            aria_label: translate("git-viewed"),
-                                            on_checked_change: move |checked| {
-                                                let Some(key) = viewed_key.as_ref() else {
+                                    if !placeholder {
+                                        label { class: "flex shrink-0 cursor-pointer items-center gap-1.5 font-sans font-normal text-muted-foreground",
+                                            Checkbox {
+                                                checked: viewed,
+                                                tone: CheckboxTone::Neutral,
+                                                aria_label: translate("git-viewed"),
+                                                on_checked_change: move |checked| {
+                                                    let Some(key) = viewed_key.as_ref() else {
+                                                        return;
+                                                    };
+                                                    let mut viewed = viewed_files.write();
+                                                    let mut collapsed = collapsed_files.write();
+                                                    if checked {
+                                                        viewed.insert(key.clone(), viewed_fingerprint);
+                                                        collapsed.insert(key.clone());
+                                                    } else {
+                                                        viewed.remove(key);
+                                                        collapsed.remove(key);
+                                                    }
+                                                    if let Some(handler) = onviewedchange {
+                                                        handler.call(viewed.count(
+                                                            &viewed_count_identity,
+                                                            viewed_count_layout.read().file_paths(),
+                                                        ));
+                                                    }
+                                                },
+                                            }
+                                            {translate("git-viewed")}
+                                        }
+                                        SheetHeaderChevron {
+                                            expanded: !collapsed,
+                                            label: translate(if collapsed { "common-expand" } else { "common-collapse" }),
+                                            onclick: move |_| {
+                                                let Some(key) = collapse_key.as_ref() else {
                                                     return;
                                                 };
-                                                let mut viewed = viewed_files.write();
-                                                let mut collapsed = collapsed_files.write();
-                                                if checked {
-                                                    viewed.insert(key.clone(), viewed_fingerprint);
-                                                    collapsed.insert(key.clone());
-                                                } else {
-                                                    viewed.remove(key);
-                                                    collapsed.remove(key);
-                                                }
-                                                if let Some(handler) = onviewedchange {
-                                                    handler.call(viewed.count(
-                                                        &viewed_count_identity,
-                                                        viewed_count_layout.read().file_paths(),
-                                                    ));
+                                                let mut files = collapsed_files.write();
+                                                if !files.remove(key) {
+                                                    files.insert(key.clone());
                                                 }
                                             },
                                         }
-                                        {translate("git-viewed")}
-                                    }
-                                    SheetHeaderChevron {
-                                        expanded: !collapsed,
-                                        label: translate(if collapsed { "common-expand" } else { "common-collapse" }),
-                                        onclick: move |_| {
-                                            let Some(key) = collapse_key.as_ref() else {
-                                                return;
-                                            };
-                                            let mut files = collapsed_files.write();
-                                            if !files.remove(key) {
-                                                files.insert(key.clone());
-                                            }
-                                        },
                                     }
                                 }
                             }
-                            if !collapsed {
+                            if placeholder {
+                                div { class: "flex h-36 flex-col gap-2 px-3 py-3",
+                                    for width in ["w-11/12", "w-9/12", "w-10/12", "w-7/12"] {
+                                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                                    }
+                                }
+                            } else if !collapsed {
                                 if section.top_spacer > 0.0 {
                                     div { style: "height:{section.top_spacer}px;" }
                                 }
@@ -589,16 +598,6 @@ pub fn DiffView(
             if bottom_spacer > 0.0 {
                 div { style: "height:{bottom_spacer}px;" }
             }
-            if (loading || has_more) && !rows.is_empty() && error.is_empty() {
-                div {
-                    key: "diff-next-{rows.len()}",
-                    class: "flex min-h-[200vh] flex-col gap-2 p-3",
-                    div { class: "h-8 rounded-md bg-card/70" }
-                    for width in ["w-11/12", "w-9/12", "w-10/12", "w-7/12"] {
-                        Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
-                    }
-                }
-            }
         }
     }
 }
@@ -607,6 +606,7 @@ const DIFF_LINE_HEIGHT: f64 = 20.0;
 const DIFF_GAP_HEIGHT: f64 = 34.0;
 const DIFF_FILE_HEADER_HEIGHT: f64 = 36.0;
 const DIFF_SECTION_GAP: f64 = 12.0;
+const DIFF_PLACEHOLDER_HEIGHT: f64 = 180.0;
 const DIFF_RENDER_OVERSCAN: f64 = 1600.0;
 const DIFF_RENDER_STEP: f64 = 640.0;
 
@@ -642,7 +642,7 @@ struct DiffLayout {
 }
 
 impl DiffLayout {
-    fn group(lines: &[DiffLine], rows: &[GitDiffRow]) -> Self {
+    fn group(lines: &[DiffLine], rows: &[GitDiffRow], expected_paths: &[String]) -> Self {
         let fingerprints = DiffFingerprints::of(lines);
         let mut sections: Vec<DiffSection> = Vec::new();
         for row in rows {
@@ -665,12 +665,42 @@ impl DiffLayout {
                 section.push(*row);
             }
         }
+        if expected_paths.is_empty() {
+            return Self { sections };
+        }
+        let mut loaded = HashMap::new();
+        let mut loaded_order = Vec::new();
+        let mut loose = Vec::new();
+        for section in sections {
+            match section.file_path.as_ref() {
+                Some(path) => {
+                    loaded_order.push(path.clone());
+                    loaded.insert(path.clone(), section);
+                }
+                None => loose.push(section),
+            }
+        }
+        let mut sections = Vec::with_capacity(expected_paths.len() + loose.len() + loaded.len());
+        sections.extend(loose);
+        for path in expected_paths {
+            sections.push(
+                loaded
+                    .remove(path)
+                    .unwrap_or_else(|| DiffSection::placeholder(path.clone())),
+            );
+        }
+        for path in loaded_order {
+            if let Some(section) = loaded.remove(&path) {
+                sections.push(section);
+            }
+        }
         Self { sections }
     }
 
     fn file_paths(&self) -> impl Iterator<Item = &str> {
         self.sections
             .iter()
+            .filter(|section| !section.placeholder)
             .filter_map(|section| section.file_path.as_deref())
     }
 
@@ -775,6 +805,7 @@ impl DiffGeometry {
 struct DiffSection {
     file_path: Option<String>,
     fingerprint: Option<DiffFingerprint>,
+    placeholder: bool,
     rows: Vec<GitDiffRow>,
     row_offsets: Vec<f64>,
 }
@@ -784,6 +815,17 @@ impl DiffSection {
         Self {
             file_path,
             fingerprint,
+            placeholder: false,
+            rows: Vec::new(),
+            row_offsets: vec![0.0],
+        }
+    }
+
+    fn placeholder(file_path: String) -> Self {
+        Self {
+            file_path: Some(file_path),
+            fingerprint: None,
+            placeholder: true,
             rows: Vec::new(),
             row_offsets: vec![0.0],
         }
@@ -810,6 +852,9 @@ impl DiffSection {
     }
 
     fn height(&self, index: usize, identity: &str, collapsed: &HashSet<String>) -> f64 {
+        if self.placeholder {
+            return self.margin(index) + DIFF_PLACEHOLDER_HEIGHT;
+        }
         let header = self
             .file_path
             .as_ref()
@@ -859,6 +904,7 @@ impl DiffSection {
             index,
             file_path: self.file_path.clone(),
             fingerprint: self.fingerprint,
+            placeholder: self.placeholder,
             rows: self.rows[first..end].to_vec(),
             top_spacer,
             bottom_spacer,
@@ -986,6 +1032,7 @@ struct VisibleDiffSection {
     index: usize,
     file_path: Option<String>,
     fingerprint: Option<DiffFingerprint>,
+    placeholder: bool,
     rows: Vec<GitDiffRow>,
     top_spacer: f64,
     bottom_spacer: f64,
@@ -1255,7 +1302,7 @@ mod tests {
                 },
             ];
             Self {
-                layout: DiffLayout::group(&lines, &[GitDiffRow::Line(0), GitDiffRow::Line(1)]),
+                layout: DiffLayout::group(&lines, &[GitDiffRow::Line(0), GitDiffRow::Line(1)], &[]),
             }
         }
 

@@ -6,6 +6,7 @@ use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::ScrollPreload;
 
 use crate::event::*;
 use crate::state::{GitCatalogProgress, GitOperationEligibility};
@@ -20,6 +21,7 @@ pub(super) fn HistoryCard(
     progress: GitCatalogProgress,
 ) -> Element {
     let commits_empty = repository.commits.is_empty();
+    let commit_count = repository.commits.len();
     let selected = repository
         .commits
         .iter()
@@ -76,8 +78,7 @@ pub(super) fn HistoryCard(
             div {
                 class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                 onscroll: move |event: Event<ScrollData>| {
-                    let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                    if remaining <= 192 && progress.has_more && !progress.loading {
+                    if ScrollPreload::LIST.reached(&event) && progress.has_more && !progress.loading {
                         let _ = send(&GitCatalogNextRequest {
                             catalog: GitCatalog::Commits,
                         });
@@ -117,8 +118,17 @@ pub(super) fn HistoryCard(
                         span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
                     }
                 }
-                if progress.loading && !commits_empty {
-                    div { class: "flex flex-col gap-2 px-2.5 py-2",
+                if (progress.loading || progress.has_more) && !commits_empty {
+                    div {
+                        key: "commit-next-{commit_count}",
+                        class: "flex flex-col gap-2 px-2.5 py-2",
+                        onvisible: move |_| {
+                            if progress.has_more && !progress.loading {
+                                let _ = send(&GitCatalogNextRequest {
+                                    catalog: GitCatalog::Commits,
+                                });
+                            }
+                        },
                         for width in ["w-10/12", "w-8/12"] {
                             Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
                         }
@@ -142,6 +152,7 @@ pub(super) fn StashCard(
         .find(|entry| entry.reference == selected_stash)
         .cloned();
     let stashes = repository.stashes.clone();
+    let stash_count = stashes.len();
     let stash_operations = selected.clone().map(|stash| {
         rsx! {
             div { class: "flex shrink-0 items-center gap-0.5",
@@ -182,8 +193,7 @@ pub(super) fn StashCard(
                 div {
                     class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
                     onscroll: move |event: Event<ScrollData>| {
-                        let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                        if remaining <= 192 && progress.has_more && !progress.loading {
+                        if ScrollPreload::LIST.reached(&event) && progress.has_more && !progress.loading {
                             let _ = send(&GitCatalogNextRequest {
                                 catalog: GitCatalog::Stashes,
                             });
@@ -213,8 +223,17 @@ pub(super) fn StashCard(
                             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{stash.reference}" }
                         }
                     }
-                    if progress.loading {
-                        div { class: "flex flex-col gap-2 px-2.5 py-2",
+                    if progress.loading || progress.has_more {
+                        div {
+                            key: "stash-next-{stash_count}",
+                            class: "flex flex-col gap-2 px-2.5 py-2",
+                            onvisible: move |_| {
+                                if progress.has_more && !progress.loading {
+                                    let _ = send(&GitCatalogNextRequest {
+                                        catalog: GitCatalog::Stashes,
+                                    });
+                                }
+                            },
                             for width in ["w-10/12", "w-8/12"] {
                                 Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
                             }

@@ -451,4 +451,5 @@ pub struct ResumeSession {
     pub kind: String,
     pub sid: String,
     pub cwd: String,
+    pub open: Option<crate::open_target::OpenTarget>,
 }

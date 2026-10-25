@@ -32,8 +32,9 @@ use vmux_ecs::{
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::event::{
-    SideSheetProjectOpenRequest, SideSheetResizeEvent, SideSheetSectionRequest,
-    SideSheetStackActivateRequest, SideSheetStackCloseRequest, SideSheetStackCreateRequest,
+    SideSheetProjectOpenRequest, SideSheetProjectPageOpenRequest, SideSheetResizeEvent,
+    SideSheetSectionRequest, SideSheetStackActivateRequest, SideSheetStackCloseRequest,
+    SideSheetStackCreateRequest,
 };
 use vmux_layout::{
     Header, LayoutCef, ReloadRevision,
@@ -76,6 +77,7 @@ impl Plugin for CommandPlugin {
             .add_observer(side_sheet_stack_close)
             .add_observer(side_sheet_stack_create)
             .add_observer(side_sheet_project_open)
+            .add_observer(side_sheet_project_page_open)
             .add_observer(side_sheet_section)
             .add_observer(side_sheet_resize)
             .add_observer(open_from_bar)
@@ -844,6 +846,33 @@ fn side_sheet_project_open(
     requests.write(PageOpenRequest {
         target: PageOpenTarget::ActiveStackInPane(target_pane),
         url: url.to_string(),
+        request_id: None,
+    });
+}
+
+fn side_sheet_project_page_open(
+    trigger: On<UiInput<SideSheetProjectPageOpenRequest>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    projects: vmux_ecs::profile::Projects,
+    mut requests: MessageWriter<PageOpenRequest>,
+) {
+    let request = &trigger.event().payload;
+    let Some(target_pane) = leaf_panes
+        .iter()
+        .find(|entity| entity.to_bits() == request.pane_id)
+    else {
+        return;
+    };
+    let Ok(root) = projects.path() else {
+        return;
+    };
+    let Some(url) = vmux_editor::ProjectRoute::from_path(root, std::path::Path::new(&request.path))
+    else {
+        return;
+    };
+    requests.write(PageOpenRequest {
+        target: PageOpenTarget::ActiveStackInPane(target_pane),
+        url,
         request_id: None,
     });
 }

@@ -1,7 +1,8 @@
 use crate::{
-    ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest,
-    ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView,
-    ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
+    ShortcutBinding, ShortcutCatalog, ShortcutCloseRequest, ShortcutCollectionViewRequest,
+    ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest, ShortcutProbePress,
+    ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView, ShortcutStroke,
+    ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -32,13 +33,20 @@ impl Plugin for ShortcutPlugin {
             crate::claim::ClaimPlugin,
             crate::input::InputPlugin,
             HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
-            UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
+            UiEventPlugin::<(
+                ShortcutProbePressRequest,
+                ShortcutProbeClearRequest,
+                ShortcutCloseRequest,
+                ShortcutCollectionViewRequest,
+            )>::default(),
             vmux_ecs::UiStatePlugin::<ShortcutUiState>::default(),
         ))
         .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
         .add_observer(probe_press_request)
         .add_observer(probe_clear_request)
+        .add_observer(close_request)
+        .add_observer(collection_view)
         .add_observer(probe_press)
         .add_systems(Update, normalize_alias.in_set(PageOpenSet::ResolveTarget))
         .add_systems(
@@ -57,6 +65,7 @@ impl Plugin for ShortcutPlugin {
 struct Shortcuts {
     catalog: ShortcutCatalog,
     probe: ShortcutProbe,
+    collection_view: vmux_ecs::CollectionView,
 }
 
 #[derive(Default)]
@@ -146,6 +155,7 @@ impl Shortcuts {
                 status: self.probe.status(&self.catalog),
             },
             shortcut_count,
+            collection_view: self.collection_view,
         }
     }
 }
@@ -321,6 +331,8 @@ impl ShortcutStroke {
 fn send_shortcuts(
     trigger: On<UiInput<PageReady>>,
     mut views: Query<(&mut Shortcuts, Option<&KeyContext>)>,
+    hierarchy: vmux_layout::space::SpaceHierarchy,
+    spaces: Query<&vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
     keymap: Single<&Keymap>,
     definitions: Query<&CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
@@ -336,6 +348,31 @@ fn send_shortcuts(
     let context = context.unwrap_or(KeyContext::NONE);
     let definitions = definitions.iter().cloned().collect::<Vec<_>>();
     view.catalog = ShortcutCatalog::build(&keymap, context, &locale, &definitions);
+    view.collection_view = hierarchy
+        .get(webview)
+        .and_then(|space| spaces.get(space).ok())
+        .copied()
+        .unwrap_or_default();
+}
+
+fn collection_view(
+    trigger: On<UiInput<ShortcutCollectionViewRequest>>,
+    hierarchy: vmux_layout::space::SpaceHierarchy,
+    mut spaces: Query<&mut vmux_ecs::CollectionView, With<vmux_layout::space::Space>>,
+    mut views: Query<&mut Shortcuts>,
+) {
+    let webview = trigger.event().webview;
+    let Ok(mut shortcuts) = views.get_mut(webview) else {
+        return;
+    };
+    let view = trigger.event().payload.view;
+    shortcuts.collection_view = view;
+    let Some(space) = hierarchy.get(webview) else {
+        return;
+    };
+    if let Ok(mut current) = spaces.get_mut(space) {
+        *current = view;
+    }
 }
 
 fn probe_press_request(
@@ -362,6 +399,19 @@ fn probe_clear_request(
         return;
     };
     view.probe.clear();
+}
+
+fn close_request(
+    trigger: On<UiInput<ShortcutCloseRequest>>,
+    parents: Query<&ChildOf, With<Shortcuts>>,
+    mut requests: MessageWriter<vmux_layout::stack::CloseStackRequest>,
+) {
+    let Ok(parent) = parents.get(trigger.event().webview) else {
+        return;
+    };
+    requests.write(vmux_layout::stack::CloseStackRequest::by_user(
+        parent.parent(),
+    ));
 }
 
 fn probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>) {

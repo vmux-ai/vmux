@@ -837,6 +837,14 @@ fn EditorWorkspace() -> Element {
                 leaf_is_dir: mode() == Mode::Dir,
                 outline: breadcrumb_outline,
                 caret_line: breadcrumb_caret_line,
+                search_active: sidebar_view() == SidebarView::Search,
+                onsearch: move |_| {
+                    let search = sidebar_view() != SidebarView::Search;
+                    if search && !explorer_visible() {
+                        let _ = send(&ExplorerPanelSetVisible { visible: true });
+                    }
+                    let _ = send(&ExplorerPanelViewSet { search });
+                },
             }
 
         div {
@@ -1713,8 +1721,7 @@ fn EditorWorkspace() -> Element {
 
             GitFooter {
                 git_state,
-                always_visible: mode() == Mode::Text
-                    && keymap() == KeymapKind::Vim,
+                always_visible: status_scope.shows_anything(),
                 leading: rsx! {
                     if mode() == Mode::Text && keymap() == KeymapKind::Vim {
                         VimStatus { label: ed_label() }
@@ -1753,7 +1760,7 @@ fn EditorWorkspace() -> Element {
                         }
                     })
                 }
-                if keymap() == KeymapKind::Vim && status_scope.shows_anything() {
+                if status_scope.shows_anything() {
                     FileStatusInfo {
                         scope: status_scope,
                         line: status_caret.line + 1,

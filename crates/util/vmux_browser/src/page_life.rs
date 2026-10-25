@@ -98,7 +98,7 @@ fn apply_fallback_page_icons(
 ) {
     for mut meta in &mut metas {
         if meta.icon.is_none() && meta.url.starts_with("file:") {
-            meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Files);
+            meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Code);
         } else if meta.icon.is_none() && meta.url.starts_with("chrome-extension://") {
             meta.icon = vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Puzzle);
         } else if let Some(icon) = manifests
@@ -163,7 +163,7 @@ mod apply_fallback_page_icons_tests {
     fn file_url_gets_files_icon() {
         assert_eq!(
             resolve("file:///a/b.rs", PageIcon::None, None),
-            PageIcon::Builtin(BuiltinIcon::Files)
+            PageIcon::Builtin(BuiltinIcon::Code)
         );
     }
 

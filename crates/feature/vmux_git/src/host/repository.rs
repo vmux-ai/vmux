@@ -121,6 +121,10 @@ impl BranchFilesCatalog {
             .collect()
     }
 
+    pub(crate) fn path_labels(&self) -> Vec<String> {
+        self.files.iter().map(|entry| entry.path.clone()).collect()
+    }
+
     pub(crate) fn source(&self) -> &Path {
         &self.source
     }

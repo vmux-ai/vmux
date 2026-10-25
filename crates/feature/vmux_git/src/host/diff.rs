@@ -17,8 +17,8 @@ use super::job_runner::{GitJob, QueuedGitJobs};
 use super::repository::{BranchFilesCatalog, BranchFilesPage, GitRepository};
 
 const DIFF_WINDOW_ROWS: u32 = 640;
-const PREFETCH_BATCHES: u8 = 4;
-const PREFETCH_ROWS: u32 = DIFF_WINDOW_ROWS * 4;
+const PREFETCH_BATCHES: u8 = 24;
+const PREFETCH_ROWS: u32 = DIFF_WINDOW_ROWS * PREFETCH_BATCHES as u32;
 
 pub(super) struct DiffPlugin;
 

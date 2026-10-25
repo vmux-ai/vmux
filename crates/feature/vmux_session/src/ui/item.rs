@@ -288,6 +288,14 @@ pub fn TurnView(
             })
         })
         .flatten();
+    let latest_finished_tools = if turn.running {
+        None
+    } else {
+        turn.rows.last().and_then(|row| match row {
+            ChatTurnRow::FinishedTools { index, .. } => Some(*index),
+            _ => None,
+        })
+    };
     let duration_label = turn.duration_secs.map(|duration| {
         if turn.step_count == 0 {
             let elapsed = Elapsed(duration).to_string();
@@ -331,6 +339,7 @@ pub fn TurnView(
                         TurnBlock {
                             key: "{row.index()}",
                             streaming: live_text_index == Some(row.index()),
+                            expanded: latest_finished_tools == Some(row.index()),
                             row,
                         }
                     }
@@ -510,10 +519,10 @@ fn ToolArguments(arguments: ChatToolArguments) -> Element {
 }
 
 #[component]
-fn FinishedToolCalls(calls: Vec<ChatToolCall>) -> Element {
+fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
     let count = calls.len() as i64;
     rsx! {
-        details { class: "disclosure",
+        details { class: "disclosure", open,
             summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-sm text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
                 span { class: "font-medium",
                     {translate_with("agent-tool-calls", &[("count", TranslationValue::Number(count))])}
@@ -639,7 +648,11 @@ fn SubagentRow(subagent: ChatSubagentState) -> Element {
 }
 
 #[component]
-pub fn TurnBlock(row: ChatTurnRow, #[props(default)] streaming: bool) -> Element {
+pub fn TurnBlock(
+    row: ChatTurnRow,
+    #[props(default)] streaming: bool,
+    #[props(default)] expanded: bool,
+) -> Element {
     let key = row.index();
     match row {
         ChatTurnRow::Text { text, .. } => {
@@ -660,7 +673,9 @@ pub fn TurnBlock(row: ChatTurnRow, #[props(default)] streaming: bool) -> Element
             }
         },
         ChatTurnRow::Tool(call) => rsx! { ToolCall { call } },
-        ChatTurnRow::FinishedTools { calls, .. } => rsx! { FinishedToolCalls { calls } },
+        ChatTurnRow::FinishedTools { calls, .. } => {
+            rsx! { FinishedToolCalls { calls, open: expanded } }
+        }
         ChatTurnRow::Subagent(subagent) => rsx! { SubagentRow { subagent } },
         ChatTurnRow::Plan { steps, .. } => {
             let n = steps.len();

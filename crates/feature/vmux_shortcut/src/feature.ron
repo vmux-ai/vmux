@@ -48,9 +48,12 @@
             permissions: [
                 "PageReady",
                 "ThemeUiState",
+                "OpenRequest",
                 "ShortcutUiState",
                 "ShortcutProbePressRequest",
                 "ShortcutProbeClearRequest",
+                "ShortcutCloseRequest",
+                "ShortcutCollectionViewRequest",
             ],
         ),
     ],

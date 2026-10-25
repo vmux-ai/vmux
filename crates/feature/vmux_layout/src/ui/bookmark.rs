@@ -13,15 +13,18 @@ use vmux_ecs::PageMetadata;
 #[cfg(not(target_os = "macos"))]
 use vmux_ui::components::context_menu::ContextMenuTrigger;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
+use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownOption, DropdownPopup};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::motion::Collapsible;
 use vmux_ui::components::sheet::{SHEET_SECTION, SheetHeaderAction, SheetHeaderChevron};
 use vmux_ui::components::tree_row::{
     FILE_TREE_COLUMN, FILE_TREE_SCROLLER, FileTreeRow, FileTreeRowGroup,
 };
+use vmux_ui::dom::DomCaret;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::PageIconView;
+use vmux_ui::icon::{LineIcon, LineIconView, PageIconView};
+use vmux_ui::navigation::PageNavigation;
 use vmux_ui::platform::Platform;
 
 use crate::event::{
@@ -55,6 +58,9 @@ pub(super) fn BookmarksSection(
         });
     let bookmarks_title = translate("layout-bookmarks");
     let new_folder_title = translate("layout-new-folder");
+    let mut add_open = use_signal(|| false);
+    let mut add_page = use_signal(|| None::<PageMetadata>);
+    let active_page_for_add = active_page.clone();
 
     rsx! {
         div {
@@ -73,31 +79,86 @@ pub(super) fn BookmarksSection(
                 } else {
                     "flex items-center rounded-md"
                 },
-                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 @max-[12rem]:gap-1 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
-                    div { class: "grid h-7 w-7 shrink-0 place-items-center text-muted-foreground @max-[12rem]:h-6 @max-[12rem]:w-6",
-                        Icon { class: "h-3.5 w-3.5",
-                            path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
-                        }
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2 py-2 @max-[12rem]:gap-1 @max-[12rem]:px-1 @max-[12rem]:py-1.5",
+                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                        path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
                     }
                     if let Some(label) = root_drop_label {
                         span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
                     } else {
                         span { class: "min-w-0 flex-1 truncate whitespace-nowrap text-ui font-semibold text-foreground @max-[12rem]:sr-only", "{bookmarks_title}" }
-                        div { class: "shrink-0",
+                        Dropdown {
+                            open: add_open(),
+                            class: "shrink-0".to_string(),
+                            on_dismiss: move |_| {
+                                add_open.set(false);
+                                add_page.set(None);
+                            },
                             SheetHeaderAction {
-                                label: new_folder_title,
+                                label: translate("common-add"),
+                                active: add_open(),
+                                subtle: true,
                                 onclick: move |event: MouseEvent| {
                                     event.prevent_default();
                                     event.stop_propagation();
-                                    let _ = send(&BookmarkFolderEditOpenRequest {
-                                        parent: None,
-                                        draft: translate("layout-new-folder"),
-                                    });
+                                    let next = !add_open();
+                                    add_open.set(next);
+                                    if !next {
+                                        add_page.set(None);
+                                    }
                                 },
-                                Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                                    path { d: "M12 10v6" }
-                                    path { d: "M9 13h6" }
+                                LineIconView { icon: LineIcon::Plus, class: "size-3.5 pointer-events-none".to_string() }
+                            }
+                            if add_open() {
+                                DropdownPopup {
+                                    align: DropdownAlign::End,
+                                    class: "w-72 p-1",
+                                    onclick: move |event: MouseEvent| event.stop_propagation(),
+                                    if let Some(metadata) = add_page() {
+                                        BookmarkPageForm {
+                                            metadata,
+                                            pane_id,
+                                            onsubmit: move |metadata| {
+                                                let _ = send(&BookmarkAddRequest {
+                                                    metadata,
+                                                    folder: None,
+                                                });
+                                                add_open.set(false);
+                                                add_page.set(None);
+                                            },
+                                            oncancel: move |_| {
+                                                add_open.set(false);
+                                                add_page.set(None);
+                                            },
+                                        }
+                                    } else {
+                                        if let Some(metadata) = active_page_for_add.clone() {
+                                            DropdownOption {
+                                                label: translate("layout-bookmark-page"),
+                                                selected: false,
+                                                leading: rsx! {
+                                                    LineIconView { icon: LineIcon::BookOpen, class: "size-3.5 shrink-0".to_string() }
+                                                },
+                                                onclick: move |_| add_page.set(Some(metadata.clone())),
+                                            }
+                                        }
+                                        DropdownOption {
+                                            label: new_folder_title.clone(),
+                                            selected: false,
+                                            leading: rsx! {
+                                                Icon { class: "size-3.5 shrink-0",
+                                                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                                }
+                                            },
+                                            onclick: move |_| {
+                                                add_open.set(false);
+                                                let _ = send(&BookmarkFolderEditOpenRequest {
+                                                    parent: None,
+                                                    draft: translate("layout-new-folder"),
+                                                });
+                                            },
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -122,7 +183,7 @@ pub(super) fn BookmarksSection(
                         if !pins.is_empty() {
                             div {
                                 "data-bookmark-drop": "",
-                                class: "mb-1 grid gap-1.5 p-1 [grid-template-columns:repeat(auto-fill,minmax(2rem,1fr))]",
+                                class: "mb-1 grid grid-cols-[repeat(auto-fill,2rem)] justify-start gap-1.5 p-1",
                                 for (index, pin) in pins.iter().enumerate() {
                                     PinTile {
                                         key: "{pin.row.uuid}",
@@ -173,6 +234,112 @@ pub(super) fn BookmarksSection(
                             }
                             }
                         }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct BookmarkPageDraft {
+    metadata: PageMetadata,
+    title: String,
+    url: String,
+}
+
+impl BookmarkPageDraft {
+    fn new(metadata: PageMetadata) -> Self {
+        Self {
+            title: metadata.title.clone(),
+            url: metadata.url.clone(),
+            metadata,
+        }
+    }
+
+    fn page(&self) -> Option<PageMetadata> {
+        let url = self.url.trim();
+        if url.is_empty() {
+            return None;
+        }
+        let title = self.title.trim();
+        Some(PageMetadata {
+            title: if title.is_empty() { url } else { title }.to_string(),
+            url: url.to_string(),
+            icon: self.metadata.icon.clone(),
+            bg_color: self.metadata.bg_color.clone(),
+        })
+    }
+}
+
+#[component]
+fn BookmarkPageForm(
+    metadata: PageMetadata,
+    pane_id: u64,
+    onsubmit: EventHandler<PageMetadata>,
+    oncancel: EventHandler<()>,
+) -> Element {
+    let mut draft = use_signal(|| BookmarkPageDraft::new(metadata));
+    let title_id = use_hook(|| format!("vmux-bookmark-title-{pane_id}"));
+    let mounted_id = title_id.clone();
+    rsx! {
+        form {
+            class: "flex min-w-0 flex-col gap-1",
+            onsubmit: move |event| {
+                event.prevent_default();
+                if let Some(page) = draft().page() {
+                    set_bookmark_text_input_active(false);
+                    onsubmit.call(page);
+                }
+            },
+            onkeydown: move |event: KeyboardEvent| {
+                if event.key() != Key::Escape {
+                    return;
+                }
+                event.prevent_default();
+                event.stop_propagation();
+                set_bookmark_text_input_active(false);
+                oncancel.call(());
+            },
+            div { class: "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 focus-within:bg-foreground/[0.055]",
+                PageIconView {
+                    icon: draft().metadata.icon.clone(),
+                    url: draft().metadata.url.clone(),
+                    img_class: "size-3.5 shrink-0 rounded-sm object-contain".to_string(),
+                    icon_class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
+                }
+                input {
+                    id: title_id,
+                    r#type: "text",
+                    class: "min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none",
+                    value: draft().title,
+                    placeholder: translate("layout-bookmark"),
+                    aria_label: translate("layout-bookmark"),
+                    autofocus: true,
+                    autocomplete: "off",
+                    onmounted: move |_| DomCaret::select_all_in_next_frame(&mounted_id),
+                    onfocus: move |_| set_bookmark_text_input_active(true),
+                    onblur: move |_| set_bookmark_text_input_active(false),
+                    oninput: move |event: FormEvent| draft.write().title = event.value(),
+                }
+            }
+            div { class: "flex h-8 min-w-0 items-center gap-2 rounded-md px-2 focus-within:bg-foreground/[0.055]",
+                LineIconView { icon: LineIcon::Globe, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
+                input {
+                    r#type: "text",
+                    class: "min-w-0 flex-1 bg-transparent font-mono text-[10px] text-foreground outline-none",
+                    value: draft().url,
+                    placeholder: "URL",
+                    aria_label: "URL",
+                    autocomplete: "off",
+                    onfocus: move |_| set_bookmark_text_input_active(true),
+                    onblur: move |_| set_bookmark_text_input_active(false),
+                    oninput: move |event: FormEvent| draft.write().url = event.value(),
+                }
+                button {
+                    r#type: "submit",
+                    class: "flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground/[0.08] text-foreground transition-colors hover:bg-foreground/[0.13]",
+                    aria_label: translate("layout-bookmark"),
+                    LineIconView { icon: LineIcon::ArrowUp, class: "size-3".to_string() }
                 }
             }
         }
@@ -425,7 +592,7 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                                     event.stop_propagation();
                                     return;
                                 }
-                                let _ = send(&BookmarkOpenRequest { url: u.clone() });
+                                PageNavigation::click(u.clone(), &event);
                             }
                         },
                         title: "{row.metadata.title}",
@@ -731,7 +898,7 @@ fn BookmarkFolder(
                                     title: folder.name.clone(),
                                     on_activate: {
                                         let id = uuid.clone();
-                                        move |()| {
+                                        move |_| {
                                             if bookmark_drag_blocks_click(drag_state) {
                                                 return;
                                             }
@@ -962,11 +1129,11 @@ fn BookmarkEntry(entry: BookmarkEntryState, edit: BookmarkEditState) -> Element 
                                 },
                                 on_activate: {
                                     let u = url_open.clone();
-                                    move |()| {
+                                    move |event| {
                                         if bookmark_drag_blocks_click(drag_state) {
                                             return;
                                         }
-                                        let _ = send(&BookmarkOpenRequest { url: u.clone() });
+                                        PageNavigation::click(u.clone(), &event);
                                     }
                                 },
                             }

@@ -121,7 +121,7 @@
             keywords: ["shell", "console"],
             icon: "Terminal",
             command_bar: true,
-            bookmark: Some(50),
+            bookmark: Some(60),
             permissions: [
                 "PageReady",
                 "ThemeUiState",
@@ -150,6 +150,7 @@
             permissions: [
                 "PageReady",
                 "ThemeUiState",
+                "OpenRequest",
                 "ProcessesUiState",
                 "ProcessNavigateEvent",
                 "ProcessKillEvent",

@@ -4,6 +4,8 @@ pub use host::{
     GlobalSearchRequest, LspPlugin, StackExplorerVisibility, contract, edit, encoding, fold,
     fold_store, keymap, lsp, markdown, shape, tool,
 };
+#[cfg(host)]
+pub use project::ProjectRoute;
 
 #[cfg(host)]
 pub(crate) struct Feature;

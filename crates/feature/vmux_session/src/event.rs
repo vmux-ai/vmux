@@ -58,7 +58,18 @@ pub struct SessionsArchive {
 
 #[vmux_api::ui_event(Default)]
 pub struct SessionsCleanup {
-    pub id: String,
+    pub ids: Vec<String>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ProviderSessionTarget {
+    pub kind: String,
+    pub sid: String,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct SessionsRestoreDeleted {
+    pub sessions: Vec<ProviderSessionTarget>,
 }
 
 #[vmux_api::contract(Default, Eq)]

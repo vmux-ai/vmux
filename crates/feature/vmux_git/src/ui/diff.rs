@@ -15,6 +15,7 @@ use crate::ui::DiffView;
 pub(super) fn BranchDiffCard(
     base_ref: String,
     files: Vec<GitBranchFileEntry>,
+    expected_paths: Vec<String>,
     active_path: Signal<String>,
     repo_root: ReadSignal<String>,
     selected_branch: ReadSignal<String>,
@@ -62,6 +63,7 @@ pub(super) fn BranchDiffCard(
                 active_path.set(path);
             })),
             onviewedchange,
+            expected_paths,
         }
     }
 }
@@ -161,6 +163,7 @@ fn RevisionDiffCard(
     reveal_path: Option<ReadSignal<String>>,
     #[props(default)] onactivefile: Option<EventHandler<String>>,
     #[props(default)] onviewedchange: Option<EventHandler<usize>>,
+    #[props(default)] expected_paths: Vec<String>,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let identity = title.clone();
@@ -202,6 +205,7 @@ fn RevisionDiffCard(
                     reveal_path,
                     onactivefile,
                     onviewedchange,
+                    expected_paths,
                     loading,
                     visible: true,
                 }

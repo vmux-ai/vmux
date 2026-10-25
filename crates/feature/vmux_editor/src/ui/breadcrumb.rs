@@ -3,15 +3,13 @@
 use dioxus::prelude::*;
 use std::path::Path;
 use vmux_ecs::event::*;
-use vmux_ui::components::avatar::Identicon;
-use vmux_ui::components::breadcrumb::{
-    BreadcrumbItem, BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator, Breadcrumbs,
-};
+use vmux_ui::components::avatar::IdentityOrb;
+use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbOption, BreadcrumbSeparator};
+use vmux_ui::components::manager::{ManagerIconButton, WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_ui::navigation::PageNavigation;
 
 use super::explorer::OutlineGlyph;
 use super::state::FileUi;
@@ -27,6 +25,8 @@ pub fn EditorBreadcrumbs(
     leaf_is_dir: bool,
     outline: Vec<OutlineRow>,
     caret_line: u32,
+    search_active: bool,
+    onsearch: EventHandler<()>,
 ) -> Element {
     let menus = CrumbMenus {
         open: use_signal(|| None::<CrumbMenu>),
@@ -45,75 +45,68 @@ pub fn EditorBreadcrumbs(
         .to_string();
     let git_url = vmux_git::GitUrl::from_path(Path::new(&repo_root));
     let editor_url = vmux_path::FileUrl::from_path(Path::new(&abs_path), None, None, None);
-    let mut page_options = vec![BreadcrumbOption {
+    let current_page = BreadcrumbOption {
         label: translate("editor-editor"),
-        value: editor_url,
+        value: editor_url.clone(),
         identity_seed: String::new(),
-        icon: Some(vmux_api::BuiltinIcon::Files),
-    }];
+        icon_url: "assets/favicons/editor.svg".to_string(),
+        icon: Some(vmux_api::BuiltinIcon::Code),
+    };
+    let mut contextual = vec![current_page.clone()];
     if let Some(git_url) = git_url.clone() {
-        page_options.push(BreadcrumbOption {
+        contextual.push(BreadcrumbOption {
             label: translate("git-title"),
             value: git_url,
             identity_seed: String::new(),
+            icon_url: "assets/favicons/git.svg".to_string(),
             icon: Some(vmux_api::BuiltinIcon::GitBranch),
         });
     }
-    page_options.extend([
-        BreadcrumbOption {
-            label: translate("layout-projects"),
-            value: "vmux://projects/".to_string(),
-            identity_seed: String::new(),
-            icon: Some(vmux_api::BuiltinIcon::Project),
-        },
-        BreadcrumbOption {
-            label: translate("sessions-title"),
-            value: "vmux://sessions/".to_string(),
-            identity_seed: String::new(),
-            icon: Some(vmux_api::BuiltinIcon::MessagesRound),
-        },
-    ]);
+    let page_options = WorkspacePage::options_with(contextual);
 
     rsx! {
-        div {
-            class: "relative z-40 flex h-14 shrink-0 items-center overflow-visible bg-transparent px-2.5 font-sans text-xs text-muted-foreground",
-            "aria-label": translate("editor-breadcrumb"),
-            Breadcrumbs { class: "min-w-0 flex-1 overflow-hidden".to_string(),
+        WorkspaceBreadcrumbHeader {
+            current: current_page,
+            options: page_options,
+            actions: rsx! {
+                ManagerIconButton {
+                    label: translate("editor-show-search"),
+                    active: search_active,
+                    onclick: move |_| onsearch.call(()),
+                    LineIconView { icon: LineIcon::Search, class: "size-3.5" }
+                }
+            },
             if !project_name.is_empty() {
+                BreadcrumbSeparator {}
                 BreadcrumbItem {
                     label: project_name.clone(),
                     title: repo_root.clone(),
                     leading: rsx! {
-                        Identicon {
+                        IdentityOrb {
                             seed: repo_root.clone(),
                             alt: project_name,
-                            class: "size-5 shrink-0 rounded-md".to_string(),
+                            class: "size-5".to_string(),
                         }
                     },
                 }
-                BreadcrumbSeparator {}
-            }
-            BreadcrumbSelector {
-                label: translate("editor-editor"),
-                options: page_options,
-                onselect: move |url| PageNavigation::replace(url),
             }
             BreadcrumbSeparator {}
             if !branch.is_empty() {
                 BreadcrumbItem {
-                    label: branch,
+                    label: branch.clone(),
                     title: repo_root.clone(),
                     leading: rsx! {
-                        vmux_ui::icon::LineIconView {
-                            icon: vmux_ui::icon::LineIcon::GitBranch,
-                            class: "size-3.5 shrink-0".to_string(),
+                        IdentityOrb {
+                            seed: branch.clone(),
+                            alt: branch,
+                            class: "size-5".to_string(),
                         }
                     },
                     onclick: git_url.map(|url| EventHandler::new(move |_| vmux_ui::navigation::PageNavigation::replace(url.clone()))),
                 }
                 BreadcrumbSeparator {}
             }
-            div { class: "flex min-w-0 shrink items-center overflow-hidden",
+            div { class: "flex min-w-0 shrink items-center overflow-hidden text-xs",
                 if !trail.hidden.is_empty() {
                     {
                         let hidden = trail.hidden.clone();
@@ -184,7 +177,7 @@ pub fn EditorBreadcrumbs(
                 }
             }
 
-            div { class: "flex min-w-0 shrink items-center overflow-hidden",
+            div { class: "flex min-w-0 shrink items-center overflow-hidden text-xs",
                 for (index, crumb) in symbols.crumbs.iter().enumerate() {
                     {
                         let last = index + 1 == symbols.crumbs.len();
@@ -243,7 +236,6 @@ pub fn EditorBreadcrumbs(
                     pending: menus.waiting(),
                     on_close: EventHandler::new(move |()| menus.hide()),
                 }
-            }
         }
     }
 }

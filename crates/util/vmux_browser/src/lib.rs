@@ -23,9 +23,9 @@ use vmux_layout::PendingWebviewReveal;
 use vmux_layout::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
     RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
-    RemoteRevokeRequest, SideSheetProjectOpenRequest, SideSheetResizeEvent,
-    SideSheetSectionRequest, SideSheetStackActivateRequest, SideSheetStackCloseRequest,
-    SideSheetStackCreateRequest, WindowDragRegionEvent,
+    RemoteRevokeRequest, SideSheetProjectOpenRequest, SideSheetProjectPageOpenRequest,
+    SideSheetResizeEvent, SideSheetSectionRequest, SideSheetStackActivateRequest,
+    SideSheetStackCloseRequest, SideSheetStackCreateRequest, WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
 pub use window_drag::WindowDragRegion;
@@ -153,6 +153,7 @@ impl Plugin for BrowserPlugin {
                     SideSheetStackCloseRequest,
                     SideSheetStackCreateRequest,
                     SideSheetProjectOpenRequest,
+                    SideSheetProjectPageOpenRequest,
                 )>::default(),
                 UiEventPlugin::<(
                     SideSheetSectionRequest,

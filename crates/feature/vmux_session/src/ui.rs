@@ -44,9 +44,9 @@ pub fn Page() -> Element {
 #[component]
 fn SessionDetail(session_id: String) -> Element {
     let chat = use_chat();
-    let catalog = vmux_ui::hooks::use_ui_state::<crate::state::SessionCatalogUiState>();
-    let header_catalog = catalog.use_selector(ChatHeaderCatalog::from_catalog);
     let detail = vmux_ui::hooks::use_ui_state::<crate::state::SessionDetailUiState>();
+    let header_catalog =
+        detail.use_selector(|state| ChatHeaderCatalog::from_navigation(&state.navigation));
     let keys = use_chat_keys(chat);
     use_context_provider(|| keys);
     let accent = chat.accent();

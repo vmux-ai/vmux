@@ -3,18 +3,19 @@
 use std::collections::{BTreeMap, HashSet};
 
 use dioxus::prelude::*;
+use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::error_state::ErrorState;
-use vmux_ui::components::manager::ManagerSearch;
 use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tree_row::{
-    FileTree, FileTreeChildren, FileTreeHeader, FileTreeRow, FileTreeRowGroup, FileTreeScroller,
+    FileTree, FileTreeChildren, FileTreeRow, FileTreeRowGroup, FileTreeScroller,
 };
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::{ScrollIntoView, ScrollPreload};
 
 use crate::event::*;
 use crate::state::{GitBranchCollection, GitBranchPrompt};
@@ -100,9 +101,9 @@ pub(super) fn BranchesCard(
     files_error: String,
     selected_path_bytes: Vec<u8>,
     active_path: Signal<String>,
+    file_query: Signal<String>,
     onfileselect: EventHandler<String>,
 ) -> Element {
-    let mut file_query = use_signal(String::new);
     let query = file_query().trim().to_lowercase();
     let files_empty = files.is_empty();
     let visible_files = files
@@ -113,24 +114,10 @@ pub(super) fn BranchesCard(
     let tree = BranchFileTree::from_files(visible_files);
     rsx! {
         FileTree {
-            div { class: "shrink-0 px-2 pb-1.5 pt-2",
-                ManagerSearch {
-                    value: file_query(),
-                    placeholder: translate("common-filter"),
-                    onsearch: move |query: String| file_query.set(query),
-                    onkeydown: None,
-                }
-            }
-            FileTreeHeader {
-                span { {translate("git-files")} }
-                span { class: "tabular-nums", "{files_total}" }
-            }
             FileTreeScroller {
                 class: "flex-1 px-2 pb-2".to_string(),
                 onscroll: move |event: Event<ScrollData>| {
-                    let remaining = event.scroll_height() - event.scroll_top() as i32 - event.client_height();
-                    let preload_distance = event.client_height().saturating_mul(4).max(960);
-                    if remaining <= preload_distance && files_has_more && !files_loading {
+                    if ScrollPreload::LIST.reached(&event) && files_has_more && !files_loading {
                         let _ = send(&GitBranchFilesNextRequest);
                     }
                 },
@@ -203,7 +190,35 @@ fn BranchFileTreeView(
     active_path: Signal<String>,
     onfileselect: EventHandler<String>,
 ) -> Element {
-    let collapsed = use_signal(HashSet::<String>::new);
+    let mut collapsed = use_signal(HashSet::<String>::new);
+    let follow_tree = tree.clone();
+    use_effect(move || {
+        let path = active_path();
+        if path.is_empty() {
+            return;
+        }
+        {
+            let mut collapsed = collapsed.write();
+            let mut parent = String::new();
+            for segment in path
+                .split('/')
+                .take(path.split('/').count().saturating_sub(1))
+            {
+                if !parent.is_empty() {
+                    parent.push('/');
+                }
+                parent.push_str(segment);
+                collapsed.remove(&parent);
+            }
+        }
+        let Some(row_id) = follow_tree.row_id(&path) else {
+            return;
+        };
+        spawn(async move {
+            vmux_ui::platform::Platform::sleep(0).await;
+            ScrollIntoView::nearest_vertical(&row_id);
+        });
+    });
     rsx! {
         div { class: "flex min-w-0 flex-col",
             BranchFileTreeNodes {
@@ -244,7 +259,7 @@ fn BranchFileTreeNodes(
                                     show_dir_icon: true,
                                     depth,
                                     title: directory.path.clone(),
-                                    on_activate: move |()| {
+                                    on_activate: move |_| {
                                         let mut collapsed = collapsed.write();
                                         if !collapsed.remove(&path) {
                                             collapsed.insert(path.clone());
@@ -311,7 +326,7 @@ fn BranchFileRow(
                     trailing: rsx! {
                         span { class: "w-4 shrink-0 text-center font-mono text-[10px] font-semibold {status_class}", "{status_code}" }
                     },
-                    on_activate: move |()| {
+                    on_activate: move |_| {
                         onfileselect.call(path.clone());
                         let _ = send(&GitBranchFileSelectRequest {
                             path_bytes: path_bytes.clone(),
@@ -342,12 +357,33 @@ impl BranchFileTree {
     fn is_empty(&self) -> bool {
         self.roots.is_empty()
     }
+
+    fn row_id(&self, path: &str) -> Option<String> {
+        BranchFileNode::row_id(&self.roots, path)
+    }
 }
 
 #[derive(Clone, PartialEq)]
 enum BranchFileNode {
     Directory(BranchDirectoryNode),
     File(GitBranchFileEntry),
+}
+
+impl BranchFileNode {
+    fn row_id(nodes: &[Self], path: &str) -> Option<String> {
+        for node in nodes {
+            match node {
+                Self::Directory(directory) => {
+                    if let Some(row_id) = Self::row_id(&directory.children, path) {
+                        return Some(row_id);
+                    }
+                }
+                Self::File(entry) if entry.path == path => return Some(entry.row_id()),
+                Self::File(_) => {}
+            }
+        }
+        None
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -456,11 +492,20 @@ pub(super) fn BranchRow(
     onselected: EventHandler<()>,
 ) -> Element {
     let name = branch.name.clone();
+    let title = if !branch.checkout.is_empty() {
+        branch.checkout.clone()
+    } else if !branch.upstream.is_empty() {
+        branch.upstream.clone()
+    } else if remote {
+        translate("git-remote")
+    } else {
+        translate("git-local")
+    };
     rsx! {
         button {
             id: "git-branch-row-{index}",
             r#type: "button",
-            title: if branch.checkout.is_empty() { branch.upstream.clone() } else { branch.checkout.clone() },
+            title,
             class: if selected_branch == branch.name {
                 "flex h-9 w-full items-center justify-start gap-2 rounded-md bg-primary/[0.10] px-2.5 text-left text-foreground"
             } else {
@@ -472,11 +517,10 @@ pub(super) fn BranchRow(
                 });
                 onselected.call(());
             },
-            BranchMarker {
-                current: branch.current,
-                upstream: branch.upstream.clone(),
-                worktree: !branch.checkout.is_empty(),
-                remote,
+            IdentityOrb {
+                seed: branch.name.clone(),
+                alt: branch.name.clone(),
+                class: "size-5".to_string(),
             }
             div { class: "flex min-w-0 flex-1 items-center gap-1.5",
                 span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{branch.name}" }
@@ -539,42 +583,6 @@ pub(super) fn TagRow(
             span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{tag.name}" }
             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{tag.short_sha}" }
             span { class: "shrink-0 text-[8px] text-muted-foreground", "{tag.date}" }
-        }
-    }
-}
-
-#[component]
-fn BranchMarker(current: bool, upstream: String, worktree: bool, remote: bool) -> Element {
-    let icon = if worktree {
-        LineIcon::GitFork
-    } else {
-        LineIcon::GitBranch
-    };
-    let tone = if current {
-        "text-success"
-    } else if worktree {
-        "text-git-worktree"
-    } else if remote || !upstream.is_empty() {
-        "text-git-reference"
-    } else {
-        "text-muted-foreground"
-    };
-    let title = if current {
-        translate("common-current")
-    } else if worktree {
-        translate("layout-worktree")
-    } else if remote {
-        translate("git-remote")
-    } else if !upstream.is_empty() {
-        upstream
-    } else {
-        translate("git-local")
-    };
-    rsx! {
-        span {
-            class: "flex size-4 shrink-0 items-center justify-center {tone}",
-            title,
-            LineIconView { icon, class: "size-3.5" }
         }
     }
 }

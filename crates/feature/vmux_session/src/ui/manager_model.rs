@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{Duration, Local, NaiveDate, TimeZone};
 use vmux_session::{
@@ -6,7 +6,7 @@ use vmux_session::{
 };
 use vmux_ui::i18n::{TranslationValue, translate, translate_humanized, translate_with};
 
-use crate::event::{SessionRepositories, SessionRepository};
+use crate::event::{ProviderSessionTarget, SessionRepositories, SessionRepository};
 
 #[derive(Clone, PartialEq)]
 pub(super) struct ManagerPresentation {
@@ -16,9 +16,12 @@ pub(super) struct ManagerPresentation {
     pub groups: Vec<StageGroup>,
     pub selected_filters: Vec<SessionFilterPresentation>,
     pub selected_stage: Option<String>,
+    pub selected_archived: bool,
+    pub archived_count: usize,
     pub filter_requested: bool,
     pub filter_needle: String,
     pub visible_sessions: bool,
+    pub visible_ids: HashSet<String>,
 }
 
 impl ManagerPresentation {
@@ -55,9 +58,7 @@ impl ManagerPresentation {
                 0
             };
         }
-        snapshot
-            .sessions
-            .retain(|session| session.archived_at == 0 || retain_archived(&session.id));
+        let selected_archived = SessionFilter::archived(filters);
         let filter_requested = query.starts_with('#');
         let filter_needle = query
             .strip_prefix('#')
@@ -69,15 +70,47 @@ impl ManagerPresentation {
         } else {
             query.trim().to_ascii_lowercase()
         };
-        let category_groups =
-            StageGroup::from_catalog(&snapshot.stages, &snapshot.sessions, &search);
-        let filtered_groups = StageGroup::filtered(&category_groups, filters, &repositories);
-        let groups = if SessionFilter::stage(filters).is_none() {
-            StageGroup::inbox(&filtered_groups)
+        let archived_count = snapshot
+            .sessions
+            .iter()
+            .filter(|session| session.archived_at > 0)
+            .count();
+        let active_sessions = snapshot
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.archived_at == 0 || (!selected_archived && retain_archived(&session.id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let archived_sessions = snapshot
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.archived_at > 0 || (selected_archived && retain_archived(&session.id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let category_groups = StageGroup::from_catalog(&snapshot.stages, &active_sessions, &search);
+        let groups = if selected_archived {
+            StageGroup::filtered(
+                &StageGroup::archived(&archived_sessions, &search),
+                filters,
+                &repositories,
+            )
         } else {
-            filtered_groups
+            let filtered_groups = StageGroup::filtered(&category_groups, filters, &repositories);
+            if SessionFilter::stage(filters).is_none() {
+                StageGroup::inbox(&filtered_groups)
+            } else {
+                filtered_groups
+            }
         };
-        let visible_sessions = groups.iter().any(|group| !group.sessions.is_empty());
+        let visible_ids = groups
+            .iter()
+            .flat_map(|group| group.sessions.iter().map(|session| session.id.clone()))
+            .collect::<HashSet<_>>();
+        let visible_sessions = !visible_ids.is_empty();
         let selected_filters = SessionFilter::presentations(filters, &snapshot.stages);
         let selected_stage = SessionFilter::stage(filters).map(str::to_string);
         Self {
@@ -87,9 +120,12 @@ impl ManagerPresentation {
             groups,
             selected_filters,
             selected_stage,
+            selected_archived,
+            archived_count,
             filter_requested,
             filter_needle,
             visible_sessions,
+            visible_ids,
         }
     }
 }
@@ -97,6 +133,7 @@ impl ManagerPresentation {
 #[derive(Clone, PartialEq)]
 pub(super) enum SessionFilter {
     Stage(String),
+    Archived,
     Agent(String),
     Project(String),
     Updated(UpdatedFilter),
@@ -116,12 +153,18 @@ impl SessionFilter {
     pub fn stage(filters: &[Self]) -> Option<&str> {
         filters.iter().find_map(|filter| match filter {
             Self::Stage(id) => Some(id.as_str()),
-            Self::Agent(_) | Self::Project(_) | Self::Updated(_) => None,
+            Self::Archived | Self::Agent(_) | Self::Project(_) | Self::Updated(_) => None,
         })
     }
 
+    pub fn archived(filters: &[Self]) -> bool {
+        filters
+            .iter()
+            .any(|filter| matches!(filter, Self::Archived))
+    }
+
     pub fn set_stage(filters: &mut Vec<Self>, stage: Option<String>) {
-        filters.retain(|filter| !matches!(filter, Self::Stage(_)));
+        filters.retain(|filter| !matches!(filter, Self::Stage(_) | Self::Archived));
         if let Some(stage) = stage {
             filters.insert(0, Self::Stage(stage));
         }
@@ -130,6 +173,10 @@ impl SessionFilter {
     pub fn upsert(filters: &mut Vec<Self>, selected: Self) {
         match selected {
             Self::Stage(stage) => Self::set_stage(filters, Some(stage)),
+            Self::Archived => {
+                Self::set_stage(filters, None);
+                filters.insert(0, Self::Archived);
+            }
             Self::Agent(agent) => {
                 filters.retain(|filter| !matches!(filter, Self::Agent(_)));
                 filters.push(Self::Agent(agent));
@@ -164,6 +211,14 @@ impl SessionFilter {
                     dot: StageVisual::for_id(id).dot.to_string(),
                 }
             }
+            Self::Archived => SessionFilterPresentation {
+                label: format!(
+                    "{} · {}",
+                    translate("common-status"),
+                    translate("sessions-archived")
+                ),
+                dot: String::new(),
+            },
             Self::Agent(agent) => SessionFilterPresentation {
                 label: format!("{} · {agent}", translate("resume-column-agent")),
                 dot: String::new(),
@@ -186,7 +241,7 @@ impl SessionFilter {
 
     fn matches(&self, session: &SessionSummary, repositories: &SessionRepositories) -> bool {
         match self {
-            Self::Stage(_) => true,
+            Self::Stage(_) | Self::Archived => true,
             Self::Agent(agent) => SessionFilterValue::agent(session) == *agent,
             Self::Project(project) => repositories
                 .get(&session.id)
@@ -367,7 +422,10 @@ impl StageGroup {
     ) -> Vec<Self> {
         let selected_stage = filters.iter().find_map(|filter| match filter {
             SessionFilter::Stage(id) => Some(id.as_str()),
-            SessionFilter::Agent(_) | SessionFilter::Project(_) | SessionFilter::Updated(_) => None,
+            SessionFilter::Archived
+            | SessionFilter::Agent(_)
+            | SessionFilter::Project(_)
+            | SessionFilter::Updated(_) => None,
         });
         let mut filtered = Vec::new();
         for group in groups {
@@ -449,6 +507,22 @@ impl StageGroup {
         }
         groups
     }
+
+    pub fn archived(sessions: &[SessionSummary], search: &str) -> Vec<Self> {
+        vec![Self {
+            stage: StageSummary {
+                id: "archived".into(),
+                name: "sessions-archived".into(),
+                order: u32::MAX,
+                terminal: true,
+            },
+            sessions: sessions
+                .iter()
+                .filter(|session| SessionSummaryProjection::matches(session, search))
+                .cloned()
+                .collect(),
+        }]
+    }
 }
 
 pub(super) struct StageGroupPresentation {
@@ -485,6 +559,26 @@ impl ArchiveTarget {
 }
 
 #[derive(Clone, PartialEq)]
+pub(super) struct DeleteTarget {
+    pub id: String,
+    pub provider: Option<ProviderSessionTarget>,
+}
+
+impl DeleteTarget {
+    pub fn from_session(session: &SessionSummary) -> Self {
+        let provider = (!session.provider_kind.is_empty() && !session.provider_sid.is_empty())
+            .then(|| ProviderSessionTarget {
+                kind: session.provider_kind.clone(),
+                sid: session.provider_sid.clone(),
+            });
+        Self {
+            id: session.id.clone(),
+            provider,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub(super) struct StageTarget {
     pub id: String,
     pub kind: String,
@@ -509,22 +603,28 @@ pub(super) struct SessionContext {
     pub project_url: String,
     pub branch: String,
     pub git_url: String,
+    pub editor_url: String,
 }
 
 impl SessionContext {
-    fn from(repository: Option<SessionRepository>) -> Self {
+    fn from(repository: Option<SessionRepository>, cwd: &str) -> Self {
+        let editor_url = url::Url::from_directory_path(cwd)
+            .map(Into::into)
+            .unwrap_or_default();
         match repository {
             Some(repository) => Self {
                 project: repository.project,
                 project_url: repository.project_url,
                 branch: repository.branch,
                 git_url: repository.url,
+                editor_url,
             },
             None => Self {
                 project: String::new(),
                 project_url: String::new(),
                 branch: String::new(),
                 git_url: String::new(),
+                editor_url,
             },
         }
     }
@@ -576,7 +676,7 @@ impl SessionPresentation {
     ) -> Self {
         let summary = SessionSummaryProjection::new(session, stages, vmux_ecs::UnixMillis::now().0);
         Self {
-            context: SessionContext::from(repository),
+            context: SessionContext::from(repository, &session.cwd),
             stage_target: StageTarget::from_session(session),
             archived: session.archived_at > 0,
             runtime: RuntimeVisual::for_id(&session.runtime),

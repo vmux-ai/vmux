@@ -405,7 +405,6 @@ fn windowed_ring_for(
 fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
-    hidden_windows: Query<(), With<vmux_layout::toggle::LayoutHidden>>,
     added_hidden_windows: Query<(), Added<vmux_layout::toggle::LayoutHidden>>,
     mut removed_hidden_windows: RemovedComponents<vmux_layout::toggle::LayoutHidden>,
     focus: vmux_layout::stack::FocusedStack,
@@ -485,7 +484,6 @@ fn sync_windowed_frames(
         }
         visible.push(entity);
         let host_window = queries.hierarchy.get(entity);
-        let layout_is_hidden = host_window.is_some_and(|window| hidden_windows.contains(window));
         let header_frame = host_window.and_then(|host_window| {
             queries.header_rect.iter().find_map(|(header, rect)| {
                 if queries.hierarchy.get(header) == Some(host_window) {
@@ -506,12 +504,7 @@ fn sync_windowed_frames(
             continue;
         };
         let scale = computed.scale();
-        let frame = windowed_page_frame_rect(
-            pane_frame,
-            header_frame,
-            layout_is_hidden,
-            visible_pane_count,
-        );
+        let frame = windowed_page_frame_rect(pane_frame, header_frame, visible_pane_count);
         let Some(logical) = PaneFrame::from_windowed(frame, scale) else {
             commands
                 .entity(entity)
@@ -535,7 +528,7 @@ fn sync_windowed_frames(
             browsers.set_windowed_hidden(&entity, false);
         }
         browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
-        let all_corners = windowed_page_all_corners(layout_is_hidden, visible_pane_count);
+        let all_corners = windowed_page_all_corners(header_frame.is_none(), visible_pane_count);
         browsers.set_windowed_corner_radius(
             &entity,
             settings.layout.radius * scale,
@@ -578,8 +571,8 @@ fn sync_windowed_frames(
                 frame.width.round() as i32,
                 frame.height.round() as i32,
             );
-            let changed = memory.raised_frame.insert(entity, key) != Some(key);
-            if force_raise || changed || became_visible || first_native_frame {
+            memory.raised_frame.insert(entity, key);
+            if force_raise || became_visible || first_native_frame {
                 browsers.raise_windowed_to_front(&entity);
             }
             if reveal {
@@ -704,15 +697,11 @@ impl WindowedFrameRect {
 fn windowed_page_frame_rect(
     pane: WindowedFrameRect,
     header: Option<WindowedFrameRect>,
-    layout_hidden: bool,
     visible_pane_count: usize,
 ) -> WindowedFrameRect {
     let Some(header) = header else {
         return pane;
     };
-    if layout_hidden {
-        return pane;
-    }
     let (left, right) = if visible_pane_count == 1 {
         (header.left.ceil(), header.right().floor())
     } else {
@@ -1741,7 +1730,7 @@ mod tests {
             height: 84.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 1);
+        let frame = windowed_page_frame_rect(pane, Some(header), 1);
 
         assert_eq!(
             frame,
@@ -1769,7 +1758,7 @@ mod tests {
             height: 72.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 2);
+        let frame = windowed_page_frame_rect(pane, Some(header), 2);
 
         assert_eq!(
             frame,

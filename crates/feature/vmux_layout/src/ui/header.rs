@@ -4,12 +4,11 @@ use dioxus::prelude::*;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
-use vmux_ecs::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
+use vmux_ecs::event::team::{TeamMemberRow, TeamOpenRequest};
 use vmux_ui::cn::cn;
-use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
+use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -41,15 +40,9 @@ pub(crate) fn HeaderView() -> Element {
         state.header_height,
         state.tab_row_pad_left(),
     );
-    let motion = if state.zen {
-        "-translate-y-2 opacity-0"
-    } else {
-        "translate-y-0 opacity-100"
-    };
-
     rsx! {
         div {
-            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] {motion} transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
+            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden",
             style: "{header_vars}",
             HeaderContent {}
         }
@@ -68,7 +61,7 @@ fn HeaderContent() -> Element {
         bookmarked: is_bookmarked,
         pinned_uuid,
         user,
-        agents,
+        agents: _,
     } = ui.header;
     let extensions = ui.extensions.extensions;
     let remote = ui.remote;
@@ -214,10 +207,7 @@ fn HeaderContent() -> Element {
                             }
                         }
                     }
-                    TeamFacepile {
-                        user,
-                        agents,
-                    }
+                    TeamFacepile { user }
                     ExtensionBar { extensions }
                     RemoteControl { remote }
                 }
@@ -419,7 +409,7 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground shadow-none outline-none transition-colors hover:bg-card hover:text-foreground active:bg-secondary focus-visible:bg-card focus-visible:text-foreground",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-foreground/[0.04] text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.09] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.09] focus-visible:text-foreground",
                 onclick: move |_| {
                     let _ = send(&TabCreateRequest);
                 },
@@ -493,15 +483,13 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
 }
 
 #[component]
-fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Element {
-    if user.is_none() && agents.is_empty() {
+fn TeamFacepile(user: Option<TeamMemberRow>) -> Element {
+    if user.is_none() {
         return rsx! {};
     }
-    let max = 5usize;
-    let overflow = agents.len().saturating_sub(max);
     rsx! {
         div {
-            class: "flex shrink-0 items-center gap-2 pl-3 pr-3",
+            class: "flex shrink-0 items-center pl-3 pr-3",
             if let Some(user) = user {
                 div {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
@@ -517,50 +505,6 @@ fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Elem
                         class: "size-5 text-[9px]",
                     }
                     span { class: "whitespace-nowrap text-xs font-medium text-foreground", "{user.name}" }
-                }
-            }
-            if !agents.is_empty() {
-                div { class: "flex items-center -space-x-1.5",
-                    for m in agents.iter().take(max) {
-                        {
-                            let src = FaviconSource::resolve(&m.icon, &m.url);
-                            let id = m.id.clone();
-                            rsx! {
-                                div {
-                                    key: "{m.id}",
-                                    title: "{m.name}",
-                                    class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
-                                    onclick: move |_| {
-                                        let _ = send(&TeamMemberFocusRequest {
-                                            member_id: id.clone(),
-                                        });
-                                    },
-                                    AgentThumbnail {
-                                        src,
-                                        seed: m.name.clone(),
-                                        background: m.color.clone(),
-                                        alt: m.name.clone(),
-                                        class: "size-5 text-[9px] ring-2 ring-background",
-                                    }
-                                    if m.is_running {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-2 ring-background" }
-                                    } else if m.is_done_unseen {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if overflow > 0 {
-                        div {
-                            class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
-                            title: translate("team-profiles"),
-                            onclick: move |_| {
-                                let _ = send(&TeamOpenRequest);
-                            },
-                            "+{overflow}"
-                        }
-                    }
                 }
             }
         }

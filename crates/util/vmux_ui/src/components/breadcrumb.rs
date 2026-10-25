@@ -1,8 +1,8 @@
 use crate::cn::cn;
-use crate::components::avatar::Identicon;
-use crate::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
+use crate::components::avatar::IdentityOrb;
+use crate::components::dropdown::{DropdownAlign, DropdownOption, DropdownSelector};
 use crate::i18n::translate;
-use crate::icon::{BuiltinIconView, LineIcon, LineIconView};
+use crate::icon::BuiltinIconView;
 use dioxus::prelude::*;
 use vmux_api::BuiltinIcon;
 
@@ -11,6 +11,7 @@ pub struct BreadcrumbOption {
     pub label: String,
     pub value: String,
     pub identity_seed: String,
+    pub icon_url: String,
     pub icon: Option<BuiltinIcon>,
 }
 
@@ -81,68 +82,84 @@ pub fn BreadcrumbSelector(
     label: String,
     options: Vec<BreadcrumbOption>,
     onselect: EventHandler<String>,
+    #[props(default)] value: String,
     #[props(default)] class: String,
     #[props(default)] active: bool,
     #[props(default = rsx! {})] leading: Element,
 ) -> Element {
     let mut open = use_signal(|| false);
     let root_class = cn(["min-w-0 max-w-full", class.as_str()]);
-    let button_class = if active {
-        "flex h-7 w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.05]"
-    } else {
-        "flex h-7 w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
-    };
+    let selected_value = value.clone();
+    let selected_label = label.clone();
     rsx! {
-        Dropdown {
+        DropdownSelector {
+            label,
             open: open(),
-            keyboard_navigation: true,
             class: root_class,
+            active,
+            leading,
+            align: DropdownAlign::Start,
+            popup_class: "max-h-80 min-w-56 max-w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-1".to_string(),
+            ontoggle: move |_| open.set(!open()),
             on_dismiss: move |_| open.set(false),
-            button {
-                r#type: "button",
-                class: button_class,
-                aria_expanded: open(),
-                onclick: move |_| open.set(!open()),
-                {leading}
-                span { class: "truncate", "{label}" }
-                LineIconView {
-                    icon: LineIcon::ChevronDown,
-                    class: if open() {
-                        "size-3 shrink-0 rotate-180 transition-transform".to_string()
+            for option in options {
+                {
+                    let selected = if selected_value.is_empty() {
+                        option.label == selected_label
                     } else {
-                        "size-3 shrink-0 transition-transform".to_string()
-                    },
-                }
-            }
-            if open() {
-                DropdownPopup { align: DropdownAlign::Start, class: "min-w-56 max-w-[min(24rem,calc(100vw-2rem))] p-1",
-                    for option in options {
-                        button {
+                        option.value == selected_value
+                    };
+                    let option_value = option.value.clone();
+                    rsx! {
+                        DropdownOption {
                             key: "{option.value}",
-                            r#type: "button",
-                            "data-vmux-dropdown-option": "",
-                            class: "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground data-[vmux-dropdown-active=true]:bg-foreground/[0.07] data-[vmux-dropdown-active=true]:text-foreground",
+                            label: option.label.clone(),
+                            selected,
                             onclick: move |_| {
                                 open.set(false);
-                                onselect.call(option.value.clone());
+                                onselect.call(option_value.clone());
                             },
-                            if !option.identity_seed.is_empty() {
-                                Identicon {
-                                    seed: option.identity_seed.clone(),
-                                    alt: option.label.clone(),
-                                    class: "size-4 shrink-0 rounded-md".to_string(),
+                            leading: rsx! {
+                                BreadcrumbOptionIcon {
+                                    option: option.clone(),
+                                    class: "size-4 shrink-0".to_string(),
                                 }
-                            } else if let Some(icon) = option.icon {
-                                BuiltinIconView {
-                                    icon,
-                                    class: "size-4 shrink-0 text-muted-foreground".to_string(),
-                                }
-                            }
-                            span { class: "truncate", "{option.label}" }
+                            },
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+pub fn BreadcrumbOptionIcon(option: BreadcrumbOption, class: String) -> Element {
+    if !option.identity_seed.is_empty() {
+        return rsx! {
+            IdentityOrb {
+                seed: option.identity_seed,
+                alt: option.label,
+                class,
+            }
+        };
+    }
+    if !option.icon_url.is_empty() {
+        return rsx! {
+            img {
+                src: option.icon_url,
+                alt: option.label,
+                class: cn([class.as_str(), "object-contain"]),
+            }
+        };
+    }
+    let Some(icon) = option.icon else {
+        return rsx! {};
+    };
+    rsx! {
+        BuiltinIconView {
+            icon,
+            class: cn([class.as_str(), "text-muted-foreground"]),
         }
     }
 }

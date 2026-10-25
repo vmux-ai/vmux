@@ -328,6 +328,7 @@ pub struct GitPageSnapshot {
     pub diff_rows: Vec<GitDiffRow>,
     pub diff_loading: bool,
     pub branch_files: Vec<crate::event::GitBranchFileEntry>,
+    pub branch_diff_paths: Vec<String>,
     pub branch_files_reference: String,
     pub branch_files_base_ref: String,
     pub branch_files_total: u32,
@@ -375,6 +376,7 @@ impl Default for GitPageSnapshot {
             diff_rows: Vec::new(),
             diff_loading: false,
             branch_files: Vec::new(),
+            branch_diff_paths: Vec::new(),
             branch_files_reference: String::new(),
             branch_files_base_ref: String::new(),
             branch_files_total: 0,
@@ -580,7 +582,7 @@ pub struct GitUiStatePatch {
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
-#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 9)]
+#[vmux_api::ui_state(Default, patch = GitUiStatePatch, version = 10)]
 pub struct GitUiState {
     pub context: Option<GitPageContext>,
     pub repository_picked: Option<GitRepositoryPicked>,

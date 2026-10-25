@@ -91,6 +91,15 @@ pub fn AgentThumbnail(
     #[props(default)] class: String,
 ) -> Element {
     let src = AgentThumbnailSource::resolve(src, &seed);
+    if let Some(src) = src.as_ref() {
+        return rsx! {
+            img {
+                class: cn(["shrink-0 object-contain", class.as_str()]),
+                src: src.clone(),
+                alt,
+            }
+        };
+    }
     let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
     let class = cn([AGENT_THUMBNAIL, class.as_str()]);
     rsx! {
@@ -121,12 +130,23 @@ pub fn Identicon(seed: String, #[props(default)] alt: String, class: String) -> 
     }
 }
 
+#[component]
+pub fn IdentityOrb(seed: String, #[props(default)] alt: String, class: String) -> Element {
+    rsx! {
+        Identicon {
+            seed,
+            alt,
+            class: cn([class.as_str(), "shrink-0 rounded-full"]),
+        }
+    }
+}
+
 struct AgentThumbnailBackground;
 
 impl AgentThumbnailBackground {
     fn resolve(background: &str, seed: &str, src: Option<&str>) -> String {
         if src.is_some() {
-            return "var(--muted)".to_string();
+            return "transparent".to_string();
         }
         if !background.trim().is_empty() {
             return background.to_string();
@@ -277,18 +297,18 @@ mod tests {
     }
 
     #[test]
-    fn agent_thumbnail_uses_a_neutral_surface_behind_logos() {
+    fn agent_thumbnail_does_not_add_a_surface_behind_logos() {
         assert_eq!(
             AgentThumbnailBackground::resolve(
                 "",
                 "hey",
                 Some("https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg")
             ),
-            "var(--muted)"
+            "transparent"
         );
         assert_eq!(
             AgentThumbnailBackground::resolve("#123456", "hey", Some("mistral-vibe.svg")),
-            "var(--muted)"
+            "transparent"
         );
     }
 

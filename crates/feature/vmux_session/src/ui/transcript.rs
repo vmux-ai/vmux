@@ -3,13 +3,13 @@ use super::error::ChatErrorCard;
 use super::item::ChatItemRow;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
-use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::scroll::{PrependScrollAnchor, ScrollPreload};
 
 #[component]
 fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
@@ -54,6 +54,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
     let at_bottom = chat.transcript.at_bottom;
     let transcript = chat.transcript.current();
+    let prepend_revision = transcript.prepend_revision;
     let transcript_loading = chat.transcript_loading() || !chat.transcript.ready();
     let loaded_start = transcript.loaded_start;
     let history_loading = transcript.loading;
@@ -67,53 +68,38 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let agent_color = chat.accent().css;
     let user_name = chat.user.name();
     let user_color = chat.user.color();
+    use_effect(move || chat.transcript.restore_prepend(prepend_revision));
     rsx! {
         div {
             id: "chat-scroll",
             onmounted: move |e| {
                 scroll_container.set(Some(e.data()));
                 if *at_bottom.peek() {
-                    super::scroll::to_bottom(scroll_container);
+                    chat.transcript.follow();
                 }
             },
             class: "relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 pb-8 pt-3 sm:px-4 md:px-6",
-            onwheel: move |event: Event<WheelData>| {
-                let delta = match event.data().delta() {
-                    WheelDelta::Pixels(delta) => delta.y,
-                    WheelDelta::Lines(delta) => delta.y,
-                    WheelDelta::Pages(delta) => delta.y,
-                };
-                if delta != 0.0 {
-                    chat.transcript.note_scroll_input();
-                }
-            },
+            tabindex: "0",
             onscroll: move |e: Event<ScrollData>| {
                 let top = e.scroll_top() as i32;
                 let dist = e.scroll_height() - top - e.client_height();
                 chat.transcript.observe_scroll(top, dist);
-                if top <= 160 {
-                    chat.request_history();
+                if ScrollPreload::HISTORY.reached_start(&e) {
+                    chat.transcript
+                        .request_history(PrependScrollAnchor::capture(&e));
                 }
             },
             div {
                 class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
                 onresize: move |_| {
-                    if *chat.transcript.initial_follow.peek() {
+                    if *chat.transcript.initial_follow.peek() || *at_bottom.peek() {
                         chat.transcript.follow();
-                    } else if *at_bottom.peek() {
-                        super::scroll::to_bottom(scroll_container);
                     }
                 },
                 if transcript_loading {
                     TranscriptSkeleton {}
                 } else if loaded_start > 0 {
-                    button {
-                        id: "chat-load-older",
-                        class: "mx-auto mb-3 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50",
-                        disabled: history_loading,
-                        onclick: move |_| chat.request_history(),
-                        {if history_loading { translate("agent-loading-older") } else { translate("agent-load-older") }}
-                    }
+                    HistorySentinel { loading: history_loading }
                 }
                 if !transcript_loading && chat.installing_splash() {
                     InstallIntro { chat, detail: chat.install_detail() }
@@ -134,7 +120,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                             user_color: user_color.clone(),
                             on_media_load: move |_| {
                                 if *at_bottom.peek() {
-                                    super::scroll::to_bottom(scroll_container);
+                                    chat.transcript.follow();
                                 }
                             },
                         }
@@ -148,7 +134,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                     class: "h-px shrink-0",
                     onmounted: move |_| {
                         if *at_bottom.peek() {
-                            super::scroll::to_bottom(scroll_container);
+                            chat.transcript.follow();
                         }
                     },
                 }
@@ -161,6 +147,20 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         span { class: "shrink-0", {translate("agent-interrupted")} }
                         span { class: "h-px flex-1 bg-foreground/10" }
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn HistorySentinel(loading: bool) -> Element {
+    rsx! {
+        div { class: "flex h-8 shrink-0 items-center justify-center",
+            if loading {
+                div { class: "flex w-28 flex-col gap-1.5",
+                    Skeleton { class: "h-1.5 w-full bg-foreground/[0.07]" }
+                    Skeleton { class: "h-1.5 w-3/4 bg-foreground/[0.05]" }
                 }
             }
         }

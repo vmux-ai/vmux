@@ -40,8 +40,8 @@ use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
     ProjectActivateRequest, ProjectForgetRequest, ProjectPickerRequest, SpaceAttachRequest,
     SpaceCreateRequest, SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest,
-    SpaceFormOpenRequest, SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
-    SpacesListEvent, SpacesUiState,
+    SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState, SpaceOpenPageRequest,
+    SpaceRenameRequest, SpaceRow, SpacesListEvent, SpacesUiState,
 };
 use crate::model::SpaceRecord;
 use vmux_api::command_bar::{CommandBarPicker, OpenRequest as CommandBarOpenUrlRequest};
@@ -116,7 +116,10 @@ impl Plugin for SpacePlugin {
                 SpaceRenameRequest,
                 SpaceFormOpenRequest,
                 SpaceFormInputRequest,
+                SpaceFormRegenerateRequest,
                 SpaceFormCloseRequest,
+            )>::default(),
+            UiEventPlugin::<(
                 ProjectActivateRequest,
                 ProjectForgetRequest,
                 ProjectPickerRequest,
@@ -130,6 +133,7 @@ impl Plugin for SpacePlugin {
         .add_observer(rename)
         .add_observer(open_form)
         .add_observer(edit_form)
+        .add_observer(regenerate_form)
         .add_observer(close_form)
         .add_observer(project_activate)
         .add_observer(project_forget)
@@ -422,10 +426,15 @@ fn open_form(
     } else {
         String::new()
     };
+    let draft = if trigger.event().payload.draft.trim().is_empty() {
+        suggestion.clone()
+    } else {
+        trigger.event().payload.draft.clone()
+    };
     let form = SpaceFormState {
         open: true,
         space_id: trigger.event().payload.space_id.clone(),
-        draft: trigger.event().payload.draft.clone(),
+        draft,
         suggestion,
     };
     commands
@@ -450,6 +459,34 @@ fn edit_form(
         return;
     };
     form.0.draft.clone_from(&trigger.event().payload.draft);
+    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        trigger.event().webview,
+        &form.0,
+    ));
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+        trigger.event().webview,
+        &form.0,
+    ));
+}
+
+fn regenerate_form(
+    trigger: On<UiInput<SpaceFormRegenerateRequest>>,
+    spaces: Query<&Name, With<Space>>,
+    mut forms: Query<&mut SpaceForm>,
+    mut commands: Commands,
+) {
+    let Ok(mut form) = forms.get_mut(trigger.event().webview) else {
+        return;
+    };
+    let mut existing = spaces
+        .iter()
+        .map(|name| name.as_str().to_string())
+        .collect::<std::collections::HashSet<_>>();
+    existing.insert(form.0.draft.clone());
+    existing.insert(form.0.suggestion.clone());
+    let suggestion = SpaceRecord::suggested_planet_name(&existing);
+    form.0.draft.clone_from(&suggestion);
+    form.0.suggestion = suggestion;
     commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
         trigger.event().webview,
         &form.0,

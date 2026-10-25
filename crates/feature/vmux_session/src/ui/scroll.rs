@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::platform::Platform;
 
-pub use imp::{settle_bottom, to_bottom};
+pub use imp::settle_bottom;
 
 pub type Container = Signal<Option<Rc<MountedData>>>;
 
@@ -13,25 +13,6 @@ mod imp {
     use dioxus::html::ScrollBehavior;
     use dioxus::html::geometry::PixelsVector2D;
     use dioxus::prelude::{ReadableExt, Signal, WritableExt, spawn};
-
-    pub fn to_bottom(container: Container) {
-        let Some(element) = container() else {
-            return;
-        };
-        spawn(async move {
-            for _ in 0..2 {
-                let Ok(size) = element.get_scroll_size().await else {
-                    return;
-                };
-                let _ = element
-                    .scroll(
-                        PixelsVector2D::new(0.0, size.height),
-                        ScrollBehavior::Instant,
-                    )
-                    .await;
-            }
-        });
-    }
 
     pub fn settle_bottom(
         container: Container,

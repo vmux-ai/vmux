@@ -665,12 +665,14 @@ fn deliver_branch_files_outputs(
         match &mut output.result {
             Ok(catalog) => {
                 let base_ref = catalog.base_ref().to_string();
+                let diff_paths = catalog.path_labels();
                 let page = query.replace(std::mem::take(catalog));
                 state
                     .snapshot
                     .branch_files_reference
                     .clone_from(&output.reference);
                 state.snapshot.branch_files_base_ref = base_ref;
+                state.snapshot.branch_diff_paths = diff_paths;
                 state.snapshot.branch_files = page.files;
                 state.snapshot.branch_files_total = page.total;
                 state.snapshot.branch_files_has_more = page.has_more;

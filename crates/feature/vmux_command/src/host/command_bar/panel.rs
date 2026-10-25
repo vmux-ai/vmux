@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::CommandBar;
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
 use vmux_ecs::UiStateWrite;
+use vmux_ecs::launcher::RendersLauncherPanel;
 use vmux_ecs::overlay::OverlayShownInline;
 
 pub(super) struct PanelPlugin;
@@ -17,7 +18,7 @@ impl Plugin for PanelPlugin {
 pub struct CommandBarPanelActive;
 
 fn sync_inline(
-    panel_active: Query<(), With<CommandBarPanelActive>>,
+    panel_active: Query<(), (With<CommandBarPanelActive>, With<RendersLauncherPanel>)>,
     bar_q: Query<(Entity, Has<OverlayShownInline>), With<CommandBar>>,
     mut commands: Commands,
 ) {
@@ -34,7 +35,11 @@ fn sync_inline(
     }
 }
 
-fn active(trigger: On<UiStateWrite<CommandBarUiState>>, mut commands: Commands) {
+fn active(
+    trigger: On<UiStateWrite<CommandBarUiState>>,
+    panels: Query<(), With<RendersLauncherPanel>>,
+    mut commands: Commands,
+) {
     let Some(opened) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
             trigger.event().update(),
@@ -42,6 +47,9 @@ fn active(trigger: On<UiStateWrite<CommandBarUiState>>, mut commands: Commands) 
     else {
         return;
     };
+    if !panels.contains(trigger.event().webview()) {
+        return;
+    }
     let Ok(mut webview) = commands.get_entity(trigger.event().webview()) else {
         return;
     };
@@ -67,7 +75,7 @@ mod tests {
     #[test]
     fn active_event_round_trips_the_marker() {
         let mut app = app();
-        let webview = app.world_mut().spawn_empty().id();
+        let webview = app.world_mut().spawn(RendersLauncherPanel).id();
 
         app.world_mut()
             .trigger(UiStateWrite::<CommandBarUiState>::from_event(
@@ -86,6 +94,24 @@ mod tests {
                 &CommandBarOpenEvent::default(),
             ));
         app.update();
+        assert!(app.world().get::<CommandBarPanelActive>(webview).is_none());
+    }
+
+    #[test]
+    fn inline_launcher_does_not_capture_the_layout() {
+        let mut app = app();
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<CommandBarUiState>::from_event(
+                webview,
+                &CommandBarOpenEvent {
+                    open_id: vmux_api::command_bar::OpenId(1),
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
         assert!(app.world().get::<CommandBarPanelActive>(webview).is_none());
     }
 }

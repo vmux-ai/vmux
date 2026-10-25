@@ -13,13 +13,13 @@ use dioxus::prelude::*;
 use vmux_api::extension::ExtensionsUiState;
 use vmux_ui::components::avatar::AgentThumbnail;
 use vmux_ui::components::breadcrumb::{
-    BreadcrumbItem, BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator, Breadcrumbs,
+    BreadcrumbOption, BreadcrumbOptionIcon, BreadcrumbSelector, BreadcrumbSeparator,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerCard, ManagerCollection, ManagerDetails,
-    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSection,
+    ManagerEmpty, ManagerList, ManagerPage, ManagerRow, ManagerSearchAction, ManagerSection,
     ManagerSpinner, ManagerThumbnail, ManagerToolbar, ManagerView, ManagerViewToggle,
-    WorkspaceHeader,
+    WorkspaceBreadcrumbHeader, WorkspacePage,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -38,31 +38,52 @@ pub struct ToolsPage;
 pub fn Page() -> Element {
     use_theme();
     let tools = use_ui_state::<ToolsUiState>().state;
+    let extensions = use_ui_state::<ExtensionsUiState>().state;
     let state = tools();
+    let extension_state = extensions();
     let route = state.view.route.clone();
     let title = ToolRouteOption::selected_label(&route, state.snapshot.providers.clone());
+    let tools_query = state.view.query.clone();
+    let extension_query = extension_state.query.clone();
+    let browse_query = extension_query.clone();
     rsx! {
         document::Title { "{title}" }
         ManagerPage {
             ToolsHeader {
                 active: route.clone(),
                 providers: state.snapshot.providers.clone(),
+                actions: rsx! {
+                    if route == "extensions" {
+                        ManagerSearchAction {
+                            value: extension_query,
+                            placeholder: translate("extensions-search"),
+                            onsearch: move |query| {
+                                let _ = send(&vmux_api::extension::ExtFilterRequest { query });
+                            },
+                            onkeydown: Some(EventHandler::new(move |event: KeyboardEvent| {
+                                if event.key() == Key::Enter && !browse_query.trim().is_empty() {
+                                    let _ = send(&vmux_api::extension::ExtBrowseStoreRequest {
+                                        query: browse_query.clone(),
+                                    });
+                                }
+                            })),
+                        }
+                    } else {
+                        ManagerSearchAction {
+                            value: tools_query,
+                            placeholder: translate("tools-search"),
+                            onsearch: move |query| {
+                                let _ = send(&ToolsFilterRequest { query });
+                            },
+                        }
+                    }
+                },
             }
             if route == "extensions" {
-                ExtensionsRoute {}
+                ExtensionManager { state: extension_state }
             } else {
                 ToolManager { state }
             }
-        }
-    }
-}
-
-#[component]
-fn ExtensionsRoute() -> Element {
-    let extensions = use_ui_state::<ExtensionsUiState>().state;
-    rsx! {
-        ExtensionManager {
-            state: extensions(),
         }
     }
 }
@@ -125,6 +146,7 @@ struct ToolRouteOption {
     id: String,
     label: String,
     url: String,
+    icon_url: String,
     icon: vmux_api::BuiltinIcon,
 }
 
@@ -134,12 +156,27 @@ impl From<ToolRouteOption> for BreadcrumbOption {
             label: option.label,
             value: option.url,
             identity_seed: String::new(),
+            icon_url: option.icon_url,
             icon: Some(option.icon),
         }
     }
 }
 
 impl ToolRouteOption {
+    fn icon_url(route: &str) -> String {
+        match route {
+            "acp" => "assets/tool-logos/acp.png",
+            "lsp" => "assets/favicons/lsp.svg",
+            "homebrew" => "assets/tool-logos/homebrew.svg",
+            "npm" => "assets/tool-logos/npm.svg",
+            "mcp" => "assets/tool-logos/mcp.png",
+            "dotfiles" => "assets/favicons/files.svg",
+            "extensions" => "assets/favicons/extensions.svg",
+            _ => "assets/favicons/tools.svg",
+        }
+        .to_string()
+    }
+
     fn icon(route: &str) -> vmux_api::BuiltinIcon {
         match route {
             "acp" => vmux_api::BuiltinIcon::Sparkles,
@@ -162,11 +199,13 @@ impl ToolRouteOption {
             }
             let route = ToolRoute::named(provider.route.clone());
             let label = provider.localized_route_title();
+            let icon_url = Self::icon_url(&provider.route);
             let icon = Self::icon(&provider.route);
             options.push(Self {
                 id: provider.route,
                 label,
                 url: route.url(),
+                icon_url,
                 icon,
             });
         }
@@ -174,7 +213,13 @@ impl ToolRouteOption {
             id: "extensions".to_string(),
             label: translate("extensions-title"),
             url: crate::EXTENSIONS_URL.to_string(),
+            icon_url: Self::icon_url("extensions"),
             icon: Self::icon("extensions"),
+        });
+        options.sort_by(|left, right| {
+            left.label
+                .to_ascii_lowercase()
+                .cmp(&right.label.to_ascii_lowercase())
         });
         options
     }
@@ -189,45 +234,44 @@ impl ToolRouteOption {
 }
 
 #[component]
-fn ToolsHeader(active: String, providers: Vec<ToolProviderMetadata>) -> Element {
+fn ToolsHeader(
+    active: String,
+    providers: Vec<ToolProviderMetadata>,
+    #[props(default = rsx! {})] actions: Element,
+) -> Element {
     let options = ToolRouteOption::all(providers);
-    let selected_label = options
+    let selected = options
         .iter()
         .find(|option| option.id == active)
-        .map(|option| option.label.clone())
-        .unwrap_or_else(|| translate("tools-title"));
-    let selected_icon = options
-        .iter()
-        .find(|option| option.id == active)
-        .map(|option| option.icon)
-        .unwrap_or(vmux_api::BuiltinIcon::Toolbox);
+        .cloned()
+        .unwrap_or_else(|| ToolRouteOption {
+            id: active.clone(),
+            label: translate("tools-title"),
+            url: ToolRoute::named(active).url(),
+            icon_url: ToolRouteOption::icon_url("tools"),
+            icon: vmux_api::BuiltinIcon::Toolbox,
+        });
+    let selected_label = selected.label.clone();
+    let selected_breadcrumb: BreadcrumbOption = selected.clone().into();
     rsx! {
-        WorkspaceHeader {
-            Breadcrumbs { class: "min-w-0 flex-1".to_string(),
-                BreadcrumbItem {
-                    label: translate("tools-title"),
-                    leading: rsx! {
-                        vmux_ui::icon::BuiltinIconView {
-                            icon: vmux_api::BuiltinIcon::Toolbox,
-                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
-                        }
-                    },
-                }
-                BreadcrumbSeparator {}
-                BreadcrumbSelector {
-                    label: selected_label,
-                    active: true,
-                    leading: rsx! {
-                        vmux_ui::icon::BuiltinIconView {
-                            icon: selected_icon,
-                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
-                        }
-                    },
-                    options: options.into_iter().map(Into::into).collect(),
-                    onselect: move |url| {
-                        let _ = send(&ToolsNavigateRequest { url });
-                    },
-                }
+        WorkspaceBreadcrumbHeader {
+            current: WorkspacePage::Tools.option(),
+            options: WorkspacePage::options(),
+            actions,
+            BreadcrumbSeparator {}
+            BreadcrumbSelector {
+                label: selected_label,
+                active: true,
+                leading: rsx! {
+                    BreadcrumbOptionIcon {
+                        option: selected_breadcrumb.clone(),
+                        class: "size-4 shrink-0".to_string(),
+                    }
+                },
+                options: options.into_iter().map(Into::into).collect(),
+                onselect: move |url| {
+                    let _ = send(&ToolsNavigateRequest { url });
+                },
             }
         }
     }
@@ -294,15 +338,6 @@ fn ToolManager(state: ToolsUiState) -> Element {
     });
     rsx! {
         ManagerToolbar {
-            ManagerSearch {
-                value: view.query.clone(),
-                placeholder: translate("tools-search"),
-                minimal: true,
-                onsearch: move |query: String| {
-                    let _ = send(&ToolsFilterRequest { query });
-                },
-                onkeydown: None,
-            }
             if let Some(provider) = apply_provider {
                 ManagerButton {
                     variant: ManagerButtonVariant::Secondary,

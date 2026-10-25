@@ -3,8 +3,8 @@
 use dioxus::prelude::*;
 use vmux_api::service::*;
 use vmux_ui::components::manager::{
-    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
-    ManagerPage, ManagerTone,
+    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerList, ManagerPage,
+    ManagerSearchAction, ManagerTone, WorkspaceBreadcrumbHeader, WorkspacePage,
 };
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
@@ -37,17 +37,18 @@ pub fn Page() -> Element {
 
     rsx! {
         ManagerPage {
-            ManagerHeader {
-                title: translate("services-title"),
-                count: process_count,
-                content_class: "mx-auto w-full max-w-7xl".to_string(),
-                search_value: snapshot.query.clone(),
-                search_placeholder: translate("services-filter"),
-                onsearch: move |event: FormEvent| {
-                    let _ = send(&ProcessSearchRequest { query: event.value() });
-                },
-                onkeydown: None,
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Services.option(),
+                options: WorkspacePage::options(),
                 actions: rsx! {
+                    ManagerSearchAction {
+                        value: snapshot.query.clone(),
+                        placeholder: translate("services-filter"),
+                        onsearch: move |query| {
+                            let _ = send(&ProcessSearchRequest { query });
+                        },
+                    }
+                    span { class: "text-[10px] tabular-nums text-muted-foreground", "{process_count}" }
                     StatusBadge { connected }
                     if has_managed_processes {
                         ManagerButton {

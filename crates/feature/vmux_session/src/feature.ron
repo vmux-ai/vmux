@@ -52,6 +52,7 @@
                 "SessionsStageChange",
                 "SessionsArchive",
                 "SessionsCleanup",
+                "SessionsRestoreDeleted",
                 "PromptHistoryRequest",
                 "ResumeListRequest",
                 "ResumeSession",

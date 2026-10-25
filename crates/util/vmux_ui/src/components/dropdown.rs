@@ -4,6 +4,7 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
 use crate::cn::cn;
+use crate::icon::{LineIcon, LineIconView};
 
 const DROPDOWN_KEYBOARD_SCRIPT: &str = r#"
 globalThis.__vmuxDropdownKeyboardCleanup?.();
@@ -77,6 +78,11 @@ entries.get(id)?.cleanup();
 const popup = document.getElementById(id);
 const root = popup?.closest('[data-vmux-dropdown-root]');
 if (popup && root) {
+  for (const other of document.querySelectorAll(
+    '[data-vmux-dropdown-popup]:popover-open'
+  )) {
+    if (other !== popup) other.hidePopover();
+  }
   let active = true;
   let frame = 0;
   const align = '__VMUX_DROPDOWN_ALIGN__';
@@ -187,6 +193,142 @@ pub enum DropdownPlacement {
     Top,
 }
 
+#[component]
+pub fn DropdownTrigger(
+    label: String,
+    open: bool,
+    onclick: EventHandler<MouseEvent>,
+    #[props(default)] title: String,
+    #[props(default)] active: bool,
+    #[props(default)] disabled: bool,
+    #[props(default)] class: String,
+    #[props(default = rsx! {})] leading: Element,
+    #[props(default = rsx! {})] trailing: Element,
+) -> Element {
+    let tone = if active {
+        "font-medium text-foreground"
+    } else {
+        "text-muted-foreground hover:text-foreground"
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            class: cn([
+                "group flex h-7 w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs transition-colors hover:bg-foreground/[0.05]",
+                tone,
+                class.as_str(),
+            ]),
+            title,
+            aria_expanded: open,
+            disabled,
+            onclick: move |event| onclick.call(event),
+            {leading}
+            span { class: "min-w-0 truncate", "{label}" }
+            {trailing}
+            LineIconView {
+                icon: LineIcon::ChevronDown,
+                class: if open {
+                    "size-3 shrink-0 rotate-180 text-muted-foreground opacity-100 transition-[opacity,transform]".to_string()
+                } else {
+                    "size-3 shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100".to_string()
+                },
+            }
+        }
+    }
+}
+
+#[component]
+pub fn DropdownOption(
+    label: String,
+    selected: bool,
+    onclick: EventHandler<MouseEvent>,
+    #[props(default)] title: String,
+    #[props(default)] secondary: String,
+    #[props(default)] class: String,
+    #[props(default = rsx! {})] leading: Element,
+    #[props(default = rsx! {})] trailing: Element,
+) -> Element {
+    let tone = if selected {
+        "bg-foreground/[0.075] text-foreground"
+    } else {
+        "text-muted-foreground hover:bg-foreground/[0.055] hover:text-foreground"
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            "data-vmux-dropdown-option": "",
+            class: cn([
+                "flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors data-[vmux-dropdown-active=true]:bg-foreground/[0.07] data-[vmux-dropdown-active=true]:text-foreground",
+                tone,
+                class.as_str(),
+            ]),
+            title,
+            onclick: move |event| onclick.call(event),
+            {leading}
+            div { class: "min-w-0 flex-1",
+                div { class: "truncate font-medium", "{label}" }
+                if !secondary.is_empty() {
+                    div { class: "truncate font-mono text-[10px] font-normal text-muted-foreground", "{secondary}" }
+                }
+            }
+            {trailing}
+        }
+    }
+}
+
+#[component]
+pub fn DropdownSelector(
+    label: String,
+    open: bool,
+    ontoggle: EventHandler<()>,
+    on_dismiss: EventHandler<()>,
+    children: Element,
+    #[props(default)] title: String,
+    #[props(default)] active: bool,
+    #[props(default)] disabled: bool,
+    #[props(default)] class: String,
+    #[props(default)] trigger_class: String,
+    #[props(default)] popup_class: String,
+    #[props(default)] align: DropdownAlign,
+    #[props(default)] placement: DropdownPlacement,
+    #[props(default)] match_width: bool,
+    #[props(default)] horizontal_inset: f64,
+    #[props(default = 4.0)] gap: f64,
+    #[props(default = rsx! {})] leading: Element,
+    #[props(default = rsx! {})] trailing: Element,
+) -> Element {
+    rsx! {
+        Dropdown {
+            open,
+            keyboard_navigation: true,
+            class,
+            on_dismiss: move |_| on_dismiss.call(()),
+            DropdownTrigger {
+                label,
+                title,
+                open,
+                active,
+                disabled,
+                class: trigger_class,
+                leading,
+                trailing,
+                onclick: move |_| ontoggle.call(()),
+            }
+            if open {
+                DropdownPopup {
+                    align,
+                    placement,
+                    match_width,
+                    horizontal_inset,
+                    gap,
+                    class: popup_class,
+                    {children}
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct DropdownContext(EventHandler<()>);
 
@@ -240,6 +382,7 @@ impl DropdownPopupOwner {
 const id = '{}';
 const popup = document.getElementById(id);
 if (popup) {{
+  const root = popup.closest('[data-vmux-dropdown-root]');
   const entries = globalThis.__vmuxDropdownToggleEntries ??= new Map();
   entries.get(id)?.cleanup();
   let active = true;

@@ -10,11 +10,15 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
-use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
+use vmux_ui::components::manager::{
+    ManagerIconButton, ManagerSearchAction, WorkspaceBreadcrumbHeader, WorkspacePage,
+};
+use vmux_ui::components::page::{PageContent, PageShell};
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::platform::Platform;
 
 #[vmux_page::page(
@@ -42,40 +46,33 @@ pub fn Page() -> Element {
         let _ = send(&HistoryLoadMoreRequest);
     };
 
-    let on_input = move |e: Event<FormData>| {
-        let query_value = e.value();
-        let _ = send(&HistoryQueryRequest { query: query_value });
-    };
-
     let groups = group_by_day(&snapshot.entries, Platform::now());
     let entry_count = snapshot.entries.len();
 
     rsx! {
         PageShell {
-            PageHeader {
-                h1 { class: "text-base font-semibold tracking-tight", {translate("history-title")} }
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::History.option(),
+                options: WorkspacePage::options(),
+                actions: rsx! {
+                    ManagerSearchAction {
+                        value: query,
+                        placeholder: translate("history-search"),
+                        onsearch: move |query| {
+                            let _ = send(&HistoryQueryRequest { query });
+                        },
+                    }
+                    ManagerIconButton {
+                        label: translate("history-clear-all"),
+                        disabled: entry_count == 0,
+                        onclick: move |_| {
+                            let _ = send(&HistoryClearConfirmRequest { open: true });
+                        },
+                        LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }
+                    }
+                },
             }
             PageContent {
-                    div { class: "mb-5 flex items-center gap-2 rounded-lg bg-foreground/[0.04] p-2",
-                        svg { class: "ml-1 size-4 shrink-0 text-muted-foreground", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
-                            circle { cx: "11", cy: "11", r: "7" }
-                            path { d: "m20 20-3.5-3.5" }
-                        }
-                        input {
-                            class: "min-w-0 flex-1 bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
-                            placeholder: translate("history-search"),
-                            value: "{query}",
-                            oninput: on_input,
-                        }
-                        button {
-                            class: "rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40",
-                            disabled: entry_count == 0,
-                            onclick: move |_| {
-                                let _ = send(&HistoryClearConfirmRequest { open: true });
-                            },
-                            {translate("history-clear-all")}
-                        }
-                    }
                     for (label, group) in groups {
                         section { class: "mb-6",
                             header { class: "mb-2 flex items-center gap-2 px-1",

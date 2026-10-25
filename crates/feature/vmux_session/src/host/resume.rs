@@ -13,8 +13,11 @@ use vmux_ecs::team::Profile;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
-    AgentFamily, AgentId, ProviderCatalog, Route, Session, SessionDuplicate, SessionId, Transcripts,
+    AgentFamily, AgentId, ProviderCatalog, ProviderSessionTombstones, Route, Session,
+    SessionDuplicate, SessionId, Transcripts,
 };
+#[cfg(test)]
+use vmux_session::{ProviderKind, ProviderSessionId, ProviderSessionKey};
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, SessionView};
@@ -25,6 +28,7 @@ pub(super) struct Plugin;
 impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProviderCatalog>()
+            .init_resource::<ProviderSessionTombstones>()
             .add_plugins(UiEventPlugin::<(
                 PromptHistoryRequest,
                 ResumeListRequest,
@@ -57,6 +61,7 @@ type Sessions<'w, 's> = Query<
 struct ResumeCatalog<'w, 's> {
     sessions: Sessions<'w, 's>,
     providers: Res<'w, ProviderCatalog>,
+    tombstones: Res<'w, ProviderSessionTombstones>,
     cache: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
 }
 
@@ -131,6 +136,9 @@ impl ResumeCatalog<'_, '_> {
             ));
         }
         for session in &self.providers.sessions {
+            if self.tombstones.contains(&session.kind, &session.sid) {
+                continue;
+            }
             let path = Path::new(&session.cwd);
             let subtitle = path
                 .file_name()
@@ -395,6 +403,7 @@ mod tests {
                 kind: "session".into(),
                 sid: "session-1".into(),
                 cwd: "/work/vmux".into(),
+                open: None,
             },
         });
         app.world_mut().flush();
@@ -418,6 +427,46 @@ mod tests {
             opened[0].target,
             PageOpenTarget::Stack(entity) if entity == stack
         ));
+    }
+
+    #[test]
+    fn dismissed_provider_sessions_stay_out_of_resume_results() {
+        let mut app = App::new();
+        app.init_resource::<Responses>()
+            .add_plugins(Plugin)
+            .add_observer(Responses::command_bar);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(vmux_session::ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "Removed session".into(),
+                cwd: "/work/vmux".into(),
+                updated_at: 2,
+                ..Default::default()
+            });
+        app.insert_resource(ProviderSessionTombstones::new([ProviderSessionKey::new(
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-session".into()),
+        )]));
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeListRequest {
+                request_id: 11,
+                query: String::new(),
+                offset: 0,
+            },
+        });
+        app.world_mut().flush();
+
+        let responses = app.world().resource::<Responses>();
+        assert_eq!(responses.resumes.len(), 1);
+        assert_eq!(responses.resumes[0].total, 0);
+        assert!(responses.resumes[0].sessions.is_empty());
     }
 
     #[test]

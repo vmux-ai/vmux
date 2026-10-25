@@ -11,19 +11,21 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
+use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_api::protocol::AcpProviderSession;
 use vmux_ecs::page::Activity;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
 use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget};
+use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use vmux_session::host::SessionManagerView;
 use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveWriteRequest, ProviderCatalog, ProviderKind, ProviderSession, ProviderSessionId,
-    Route, Session, SessionDuplicate, SessionId, SnapshotReceived, SourceUpdatedAt,
-    TranscriptLoading, Transcripts,
+    ProviderSessionKey, ProviderSessionTombstones, Route, Session, SessionDuplicate, SessionId,
+    SnapshotReceived, SourceUpdatedAt, TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
@@ -120,6 +122,24 @@ impl AcpSnapshot {
 
     fn sessions(&self) -> impl Iterator<Item = &ProviderSession> {
         self.0.values().flat_map(|source| source.sessions.iter())
+    }
+
+    fn supports(&self, family: &AgentFamily) -> bool {
+        self.0.iter().any(|(agent, source)| {
+            AgentFamily::of(agent) == *family && source.state == AcpSourceState::Supported
+        })
+    }
+
+    fn refresh_codex_activity(&mut self, activity: &codex::RolloutActivity) -> bool {
+        let family = SourceKind::Codex.family();
+        let mut refreshed = false;
+        for (agent, source) in &mut self.0 {
+            if AgentFamily::of(agent) != family || source.state != AcpSourceState::Supported {
+                continue;
+            }
+            refreshed |= activity.refresh(&mut source.sessions);
+        }
+        refreshed
     }
 }
 
@@ -501,7 +521,7 @@ impl PendingImports {
         if let Some(existing) = self.by_source.get(&key)
             && let Some(pending) = self.by_id.get_mut(existing)
         {
-            pending.stack = import.stack;
+            pending.destination = import.destination;
             return false;
         }
         self.by_source.insert(key, id.clone());
@@ -520,9 +540,71 @@ impl PendingImports {
 }
 
 struct PendingImport {
-    stack: Entity,
+    destination: ResumeDestination,
     source: ProviderSession,
     agent: AgentId,
+}
+
+#[derive(Clone, Copy)]
+struct ResumeDestination {
+    stack: Entity,
+    pane: Option<Entity>,
+    space: Option<Entity>,
+    window: Option<Entity>,
+    open: OpenTarget,
+}
+
+#[derive(SystemParam)]
+struct ResumeOpener<'w> {
+    opens: MessageWriter<'w, PageOpenRequest>,
+    tabs: MessageWriter<'w, TabLayoutSpawnRequest>,
+}
+
+impl ResumeOpener<'_> {
+    fn open(&mut self, destination: ResumeDestination, url: String) {
+        if destination.open == OpenTarget::InNewTab
+            && let (Some(space), Some(window)) = (destination.space, destination.window)
+        {
+            self.tabs.write(TabLayoutSpawnRequest {
+                space,
+                primary_window: window,
+                name: None,
+                startup_dir: None,
+                content: TabLayoutSpawnContent::Url {
+                    url,
+                    pending_prompt: None,
+                },
+                clear_pending_stack: true,
+                focus: true,
+            });
+            return;
+        }
+        let target = match destination.open {
+            OpenTarget::InNewStack => destination
+                .pane
+                .map(PageOpenTarget::NewStackInPane)
+                .unwrap_or(PageOpenTarget::NewStack),
+            OpenTarget::InPane {
+                mode: PaneOpenMode::NewStack,
+                ..
+            } => destination
+                .pane
+                .map(PageOpenTarget::NewStackInPane)
+                .unwrap_or(PageOpenTarget::NewStack),
+            OpenTarget::InPlace
+            | OpenTarget::InPane {
+                mode: PaneOpenMode::InPlace,
+                ..
+            }
+            | OpenTarget::InNewTab
+            | OpenTarget::InNewSpace => PageOpenTarget::Stack(destination.stack),
+        };
+        self.opens.write(PageOpenRequest {
+            target,
+            url,
+            request_id: None,
+        });
+    }
 }
 
 #[derive(Component)]
@@ -531,6 +613,7 @@ struct Runtime {
     watcher: Option<RecommendedWatcher>,
     watched: HashMap<PathBuf, bool>,
     sources: HashSet<SourceKind>,
+    watch_codex_activity: bool,
 }
 
 impl Runtime {
@@ -538,7 +621,7 @@ impl Runtime {
         let Some(watcher) = self.watcher.as_mut() else {
             return;
         };
-        let desired = paths.watches(&self.sources);
+        let desired = paths.watches(&self.sources, self.watch_codex_activity);
         let stale = self
             .watched
             .keys()
@@ -835,9 +918,13 @@ impl SourcePaths {
         Readers(readers)
     }
 
-    fn watches(&self, sources: &HashSet<SourceKind>) -> Vec<(PathBuf, bool)> {
+    fn watches(
+        &self,
+        sources: &HashSet<SourceKind>,
+        watch_codex_activity: bool,
+    ) -> Vec<(PathBuf, bool)> {
         let mut watches = Vec::new();
-        if sources.contains(&SourceKind::Codex) {
+        if sources.contains(&SourceKind::Codex) || watch_codex_activity {
             watches.push((self.codex.clone(), false));
             watches.push((self.codex.join("sessions"), true));
         }
@@ -909,12 +996,15 @@ impl SourceRead {
     }
 
     fn deduplicated(sessions: Vec<ProviderSession>) -> Vec<ProviderSession> {
-        let mut indexed = HashMap::<(String, String), ProviderSession>::new();
+        let mut indexed = HashMap::<ProviderSessionKey, ProviderSession>::new();
         for session in sessions {
             if session.kind.trim().is_empty() || session.sid.trim().is_empty() {
                 continue;
             }
-            let key = (session.kind.clone(), session.sid.clone());
+            let key = ProviderSessionKey::new(
+                ProviderKind(session.kind.clone()),
+                ProviderSessionId(session.sid.clone()),
+            );
             match indexed.get(&key) {
                 Some(current) if current.updated_at > session.updated_at => {}
                 _ => {
@@ -1093,6 +1183,7 @@ fn activate(
         .into_iter()
         .filter(|source| acp.allows_fallback(&source.family()))
         .collect::<HashSet<_>>();
+    let watch_codex_activity = manager && acp.supports(&SourceKind::Codex.family());
     let mut sources = if manager {
         available.clone()
     } else {
@@ -1112,19 +1203,20 @@ fn activate(
             }
         }
     }
-    if sources.is_empty() {
+    if sources.is_empty() && !watch_codex_activity {
         for (entity, _, _) in &mut runtime {
             commands.entity(entity).despawn();
         }
         return;
     }
     if let Ok((entity, mut runtime, paths)) = runtime.single_mut() {
-        if runtime.sources != sources {
+        if runtime.sources != sources || runtime.watch_codex_activity != watch_codex_activity {
             let requested = sources
                 .difference(&runtime.sources)
                 .copied()
                 .collect::<HashSet<_>>();
             runtime.sources = sources;
+            runtime.watch_codex_activity = watch_codex_activity;
             runtime.ensure_watches(paths);
             if !requested.is_empty() {
                 commands.entity(entity).insert(ScanRequested(requested));
@@ -1168,20 +1260,21 @@ fn activate(
         watcher: watcher.ok(),
         watched: HashMap::new(),
         sources: sources.clone(),
+        watch_codex_activity,
     };
     runtime.ensure_watches(&paths);
-    commands.spawn((
-        Name::new("ACP provider session catalog"),
-        runtime,
-        paths,
-        ScanRequested(sources),
-    ));
+    let mut entity = commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
+    if !sources.is_empty() {
+        entity.insert(ScanRequested(sources));
+    }
 }
 
 fn watch(
     runtime: Single<(Entity, &mut Runtime, &SourcePaths)>,
     mut requested: Query<&mut ScanRequested>,
     mut snapshot: ResMut<SourceSnapshot>,
+    mut acp: ResMut<AcpSnapshot>,
+    mut catalogs: ResMut<CatalogRequests>,
     mut commands: Commands,
 ) {
     let (entity, mut runtime, paths) = runtime.into_inner();
@@ -1200,7 +1293,7 @@ fn watch(
     changes
         .scans
         .retain(|source| runtime.sources.contains(source));
-    if !runtime.sources.contains(&SourceKind::Codex) {
+    if !runtime.sources.contains(&SourceKind::Codex) && !runtime.watch_codex_activity {
         changes.codex_activity.clear();
     }
     runtime.ensure_watches(paths);
@@ -1208,6 +1301,12 @@ fn watch(
         let Some(activity) = codex::RolloutActivity::read(&path) else {
             continue;
         };
+        if runtime.watch_codex_activity {
+            if !acp.refresh_codex_activity(&activity) {
+                catalogs.refresh = true;
+            }
+            continue;
+        }
         let Some(sessions) = snapshot.0.get_mut(&SourceKind::Codex) else {
             changes.scans.insert(SourceKind::Codex);
             continue;
@@ -1767,6 +1866,9 @@ fn finish_conversations(
 fn open(
     trigger: On<UiInput<ResumeSession>>,
     parents: Query<&ChildOf>,
+    panes: Query<(), With<vmux_layout::pane::Pane>>,
+    spaces: vmux_layout::space::SpaceHierarchy,
+    windows: vmux_layout::window::WindowHierarchy,
     catalog: Res<ProviderCatalog>,
     agents: AgentCatalog,
     existing: Query<
@@ -1780,12 +1882,16 @@ fn open(
         ),
         (With<Session>, Without<SessionDuplicate>),
     >,
+    tombstones: Res<ProviderSessionTombstones>,
     mut pending: ResMut<PendingImports>,
     mut creates: MessageWriter<CreateRequest>,
-    mut opens: MessageWriter<PageOpenRequest>,
+    mut opener: ResumeOpener,
 ) {
     let request = &trigger.event().payload;
     if !request.kind.starts_with("acp:") {
+        return;
+    }
+    if tombstones.contains(&request.kind, &request.sid) {
         return;
     }
     let Some(mut source) = catalog.get(&request.kind, &request.sid).cloned() else {
@@ -1795,6 +1901,17 @@ fn open(
         return;
     };
     let stack = parent.parent();
+    let destination = ResumeDestination {
+        stack,
+        pane: parents
+            .get(stack)
+            .ok()
+            .map(ChildOf::parent)
+            .filter(|pane| panes.contains(*pane)),
+        space: spaces.get(trigger.event().webview),
+        window: windows.get(trigger.event().webview),
+        open: request.open.unwrap_or_default(),
+    };
     let family = AgentFamily::of(&source.agent);
     if let Some((_, id, _, _, _, _)) =
         existing
@@ -1805,11 +1922,7 @@ fn open(
                     || AgentFamily::of(&agent.0) == family && resume.0 == source.sid
             })
     {
-        opens.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url: Route::Session(id.clone()).url(),
-            request_id: None,
-        });
+        opener.open(destination, Route::Session(id.clone()).url());
         return;
     }
     let Ok(cwd) = PathBuf::from(&source.cwd).canonicalize() else {
@@ -1836,7 +1949,7 @@ fn open(
     if !pending.reserve(
         create.id().clone(),
         PendingImport {
-            stack,
+            destination,
             source,
             agent,
         },
@@ -1849,7 +1962,7 @@ fn open(
 fn attach(
     trigger: On<Created>,
     mut pending: ResMut<PendingImports>,
-    mut opens: MessageWriter<PageOpenRequest>,
+    mut opener: ResumeOpener,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -1868,11 +1981,7 @@ fn attach(
         ProviderSessionId(import.source.sid),
         AgentConversationTitle(title),
     ));
-    opens.write(PageOpenRequest {
-        target: PageOpenTarget::Stack(import.stack),
-        url: Route::Session(event.id.clone()).url(),
-        request_id: None,
-    });
+    opener.open(import.destination, Route::Session(event.id.clone()).url());
 }
 
 #[derive(SystemParam)]
@@ -2024,6 +2133,7 @@ mod tests {
             watcher: notify::recommended_watcher(|_| {}).ok(),
             watched: HashMap::new(),
             sources: SourceKind::ALL.into_iter().collect(),
+            watch_codex_activity: false,
         };
 
         runtime.ensure_watches(&paths);
@@ -2049,6 +2159,7 @@ mod tests {
             watcher: notify::recommended_watcher(|_| {}).ok(),
             watched: HashMap::new(),
             sources: SourceKind::ALL.into_iter().collect(),
+            watch_codex_activity: false,
         };
 
         runtime.ensure_watches(&paths);
@@ -2085,9 +2196,11 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
+            .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
             .add_observer(open)
             .add_observer(attach);
         app.world_mut()
@@ -2114,6 +2227,7 @@ mod tests {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 cwd: cwd.to_string_lossy().into_owned(),
+                open: None,
             },
         });
         app.world_mut().trigger(UiInput {
@@ -2122,6 +2236,7 @@ mod tests {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 cwd: cwd.to_string_lossy().into_owned(),
+                open: None,
             },
         });
 
@@ -2215,9 +2330,11 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
+            .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
             .add_observer(open);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
@@ -2247,6 +2364,7 @@ mod tests {
                 kind: "acp:codex".into(),
                 sid: "provider-session".into(),
                 cwd: cwd.to_string_lossy().into_owned(),
+                open: None,
             },
         });
 
@@ -2267,13 +2385,70 @@ mod tests {
     }
 
     #[test]
+    fn provider_resume_rejects_a_dismissed_session() {
+        let cwd = tempfile::tempdir().unwrap();
+        let cwd = cwd.path().canonicalize().unwrap();
+        let mut app = App::new();
+        app.init_resource::<ProviderCatalog>()
+            .init_resource::<PendingImports>()
+            .insert_resource(ProviderSessionTombstones::new([ProviderSessionKey::new(
+                ProviderKind("acp:codex".into()),
+                ProviderSessionId("provider-session".into()),
+            )]))
+            .init_resource::<AppSettings>()
+            .add_message::<CreateRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .add_observer(open);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+                ..Default::default()
+            });
+        let stack = app.world_mut().spawn_empty().id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+                open: None,
+            },
+        });
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<CreateRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
     fn provider_resume_rejects_a_missing_working_directory() {
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
+            .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
             .add_observer(open);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
@@ -2294,6 +2469,7 @@ mod tests {
                 kind: "acp:codex".into(),
                 sid: "missing".into(),
                 cwd: String::new(),
+                open: None,
             },
         });
 

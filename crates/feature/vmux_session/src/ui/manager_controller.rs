@@ -3,13 +3,18 @@ use std::collections::HashSet;
 use dioxus::prelude::*;
 use vmux_session::SessionSummary;
 use vmux_ui::hooks::{CollectionController, OptimisticMap, send};
-use vmux_ui::navigation::PageNavigation;
+use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
 use crate::SessionId;
-use crate::event::{ResumeSession, SessionsArchive, SessionsCleanup, SessionsStageChange};
+use crate::event::{
+    ProviderSessionTarget, ResumeSession, SessionsArchive, SessionsCleanup, SessionsRestoreDeleted,
+    SessionsStageChange,
+};
 use crate::route::Route;
 
-use super::manager_model::{ArchiveTarget, SessionFilter, SessionFilterStep, StageTarget};
+use super::manager_model::{
+    ArchiveTarget, DeleteTarget, SessionFilter, SessionFilterStep, StageTarget,
+};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct SessionFilterPicker {
@@ -74,6 +79,7 @@ pub(super) struct SessionMutations {
     stages: OptimisticMap<String, String>,
     archives: OptimisticMap<String, bool>,
     leaving: Signal<HashSet<String>>,
+    deleted_providers: Signal<Vec<ProviderSessionTarget>>,
 }
 
 impl SessionMutations {
@@ -85,6 +91,7 @@ impl SessionMutations {
             stages,
             archives,
             leaving: use_signal(HashSet::new),
+            deleted_providers: use_signal(Vec::new),
         }
     }
 
@@ -107,11 +114,11 @@ impl SessionMutations {
         }
     }
 
-    pub fn archive(mut self, targets: Vec<ArchiveTarget>) {
+    pub fn set_archived(mut self, targets: Vec<ArchiveTarget>, archived: bool) {
         let leaving = self.leaving.read();
         let targets = targets
             .into_iter()
-            .filter(|target| !target.archived && !leaving.contains(&target.id))
+            .filter(|target| target.archived != archived && !leaving.contains(&target.id))
             .collect::<Vec<_>>();
         drop(leaving);
         if targets.is_empty() {
@@ -123,11 +130,11 @@ impl SessionMutations {
         self.archives.set_many(
             targets
                 .iter()
-                .map(|target| (target.id.clone(), target.archived, true)),
+                .map(|target| (target.id.clone(), target.archived, archived)),
         );
         if send(&SessionsArchive {
             ids: targets.iter().map(|target| target.id.clone()).collect(),
-            archived: true,
+            archived,
         })
         .is_err()
         {
@@ -146,23 +153,75 @@ impl SessionMutations {
         });
     }
 
+    pub fn archive(self, targets: Vec<ArchiveTarget>) {
+        self.set_archived(targets, true);
+    }
+
+    pub fn restore(self, targets: Vec<ArchiveTarget>) {
+        self.set_archived(targets, false);
+    }
+
     pub fn is_leaving(self, id: &str) -> bool {
         self.leaving.read().contains(id)
     }
 
-    pub fn cleanup(mut self, id: String) {
-        if self.leaving.read().contains(&id) {
+    pub fn cleanup(self, target: DeleteTarget) {
+        self.cleanup_many(vec![target]);
+    }
+
+    pub fn cleanup_many(mut self, targets: Vec<DeleteTarget>) {
+        let leaving = self.leaving.read();
+        let mut targets = targets
+            .into_iter()
+            .filter(|target| !leaving.contains(&target.id))
+            .collect::<Vec<_>>();
+        drop(leaving);
+        targets.sort_by(|left, right| left.id.cmp(&right.id));
+        targets.dedup_by(|left, right| left.id == right.id);
+        if targets.is_empty() {
             return;
         }
-        self.leaving.write().insert(id.clone());
-        if send(&SessionsCleanup { id: id.clone() }).is_err() {
-            self.leaving.write().remove(&id);
+        let ids = targets
+            .iter()
+            .map(|target| target.id.clone())
+            .collect::<Vec<_>>();
+        let mut providers = targets
+            .iter()
+            .filter_map(|target| target.provider.clone())
+            .collect::<Vec<_>>();
+        providers.sort_by(|left, right| (&left.kind, &left.sid).cmp(&(&right.kind, &right.sid)));
+        providers.dedup();
+        self.leaving.write().extend(ids.iter().cloned());
+        if send(&SessionsCleanup { ids: ids.clone() }).is_err() {
+            let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
+            self.leaving.write().retain(|id| !ids.contains(id.as_str()));
             return;
+        }
+        if !providers.is_empty() {
+            let mut deleted = self.deleted_providers.write();
+            deleted.extend(providers);
+            deleted.sort_by(|left, right| (&left.kind, &left.sid).cmp(&(&right.kind, &right.sid)));
+            deleted.dedup();
         }
         spawn(async move {
             vmux_ui::platform::Platform::sleep(1_500).await;
-            self.leaving.write().remove(&id);
+            let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
+            self.leaving.write().retain(|id| !ids.contains(id.as_str()));
         });
+    }
+
+    pub fn deleted_provider_count(self) -> usize {
+        self.deleted_providers.read().len()
+    }
+
+    pub fn restore_deleted(mut self) {
+        let sessions = self.deleted_providers.peek().clone();
+        if sessions.is_empty() {
+            return;
+        }
+        if send(&SessionsRestoreDeleted { sessions }).is_ok() {
+            self.deleted_providers.set(Vec::new());
+        }
     }
 }
 
@@ -188,15 +247,17 @@ impl From<&SessionSummary> for ResumeTarget {
 }
 
 impl ResumeTarget {
-    pub fn open(&self) {
+    pub fn click(&self, event: &MouseEvent) {
+        let gesture = NavigationGesture::from_mouse(event);
         if self.managed {
-            PageNavigation::replace(Route::Session(SessionId(self.id.clone())).url());
+            PageNavigation::gesture(Route::Session(SessionId(self.id.clone())).url(), gesture);
             return;
         }
         let _ = send(&ResumeSession {
             kind: self.kind.clone(),
             sid: self.sid.clone(),
             cwd: self.cwd.clone(),
+            open: Some(gesture.open_target()),
         });
     }
 }

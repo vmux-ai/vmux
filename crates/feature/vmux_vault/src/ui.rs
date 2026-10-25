@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
-    ManagerSelectItem, ManagerSpinner,
+    ManagerSelectItem, ManagerSpinner, WorkspaceBreadcrumbHeader, WorkspacePage,
 };
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -45,10 +45,10 @@ pub fn Page() -> Element {
     let current = state();
     rsx! {
         ManagerPage {
-            header { class: "shrink-0 bg-foreground/[0.018] px-5 py-3",
-                div { class: "flex items-center gap-3",
-                    h1 { class: "text-base font-semibold tracking-tight", {translate("vault-title")} }
-                    div { class: "flex-1" }
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Vault.option(),
+                options: WorkspacePage::options(),
+                actions: rsx! {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
@@ -58,7 +58,7 @@ pub fn Page() -> Element {
                         },
                         {translate("common-refresh")}
                     }
-                }
+                },
             }
             ManagerList {
                 if current.vault.root.is_empty() {

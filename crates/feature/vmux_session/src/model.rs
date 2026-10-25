@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{borrow::Borrow, path::PathBuf};
 
 #[cfg(host)]
 use bevy_app::{App, Plugin, PostUpdate, Update};
@@ -31,6 +31,7 @@ impl Plugin for EntityPlugin {
             .register_persisted::<AgentId>()
             .register_persisted::<ProviderStage>()
             .register_persisted::<ProviderArchive>()
+            .register_persisted::<ProviderSessionTombstone>()
             .register_persisted::<SourceUpdatedAt>()
             .register_persisted::<ProviderKind>()
             .register_persisted::<ProviderSessionId>()
@@ -38,11 +39,13 @@ impl Plugin for EntityPlugin {
             .register_persisted::<TitlePending>()
             .register_persisted::<LocalTask>()
             .init_resource::<ProviderArchiveOperations>()
+            .init_resource::<ProviderSessionTombstones>()
             .add_message::<CreateRequest>()
             .add_message::<ArchiveRequest>()
             .add_message::<ProviderArchiveRequest>()
             .add_message::<ProviderArchiveWriteRequest>()
             .add_message::<ProviderArchiveCompleted>()
+            .add_message::<ProviderSessionRestoreRequest>()
             .add_message::<CleanupRequest>()
             .add_observer(activate)
             .add_systems(
@@ -52,6 +55,8 @@ impl Plugin for EntityPlugin {
                     archive,
                     archive_provider,
                     finish_provider_archives,
+                    sync_tombstones,
+                    restore_tombstones,
                     cleanup,
                 )
                     .chain()
@@ -206,6 +211,12 @@ pub struct ProviderArchive;
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
+pub struct ProviderSessionTombstone;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
 pub struct SourceUpdatedAt(pub i64);
 
 #[derive(
@@ -216,6 +227,12 @@ pub struct SourceUpdatedAt(pub i64);
 #[type_path = "vmux_session"]
 pub struct ProviderKind(pub String);
 
+impl Borrow<str> for ProviderKind {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(
     Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
 )]
@@ -223,6 +240,32 @@ pub struct ProviderKind(pub String);
 #[require(Save)]
 #[type_path = "vmux_session"]
 pub struct ProviderSessionId(pub String);
+
+impl Borrow<str> for ProviderSessionId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ProviderSessionKey {
+    pub kind: ProviderKind,
+    pub id: ProviderSessionId,
+}
+
+impl ProviderSessionKey {
+    pub fn new(kind: ProviderKind, id: ProviderSessionId) -> Self {
+        Self { kind, id }
+    }
+
+    pub fn from_components(kind: &ProviderKind, id: &ProviderSessionId) -> Self {
+        Self::new(kind.clone(), id.clone())
+    }
+
+    pub fn matches(&self, kind: &str, id: &str) -> bool {
+        self.kind.0 == kind && self.id.0 == id
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
@@ -343,6 +386,11 @@ pub struct ProviderArchiveCompleted {
 }
 
 #[derive(Message, Clone, Debug)]
+pub struct ProviderSessionRestoreRequest {
+    pub keys: Vec<ProviderSessionKey>,
+}
+
+#[derive(Message, Clone, Debug)]
 pub struct ProviderStageChangeRequest {
     pub kind: ProviderKind,
     pub id: ProviderSessionId,
@@ -352,14 +400,20 @@ pub struct ProviderStageChangeRequest {
 
 #[derive(Message, Clone, Debug)]
 pub struct CleanupRequest {
-    pub id: SessionId,
+    pub targets: Vec<CleanupTarget>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CleanupTarget {
+    Session(SessionId),
+    Provider(ProviderSessionKey),
 }
 
 #[cfg(host)]
 #[derive(Resource, Default)]
 pub(crate) struct ProviderArchiveOperations {
     next_revision: u64,
-    pending: HashMap<(String, String), ProviderArchiveOperation>,
+    pending: HashMap<ProviderSessionKey, ProviderArchiveOperation>,
 }
 
 #[cfg(host)]
@@ -375,7 +429,7 @@ impl ProviderArchiveOperations {
     fn request(&mut self, request: &ProviderArchiveRequest) -> Option<ProviderArchiveWriteRequest> {
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
         let revision = self.next_revision;
-        let key = (request.kind.0.clone(), request.id.0.clone());
+        let key = ProviderSessionKey::from_components(&request.kind, &request.id);
         let operation = self.pending.entry(key).or_insert(ProviderArchiveOperation {
             archived: request.archived,
             source_updated_at: request.source_updated_at,
@@ -401,7 +455,7 @@ impl ProviderArchiveOperations {
         &mut self,
         result: &ProviderArchiveCompleted,
     ) -> Option<ProviderArchiveWriteRequest> {
-        let key = (result.kind.0.clone(), result.id.0.clone());
+        let key = ProviderSessionKey::from_components(&result.kind, &result.id);
         let operation = self.pending.get_mut(&key)?;
         if operation.in_flight != Some(result.revision) {
             return None;
@@ -419,16 +473,103 @@ impl ProviderArchiveOperations {
         })
     }
 
-    pub(crate) fn archived_at(&self, kind: &str, id: &str) -> Option<i64> {
-        self.pending
-            .get(&(kind.to_string(), id.to_string()))
-            .map(|operation| {
-                if operation.archived {
-                    operation.source_updated_at.max(1)
-                } else {
-                    0
-                }
-            })
+    pub(crate) fn archived_at(&self, key: &ProviderSessionKey) -> Option<i64> {
+        self.pending.get(key).map(|operation| {
+            if operation.archived {
+                operation.source_updated_at.max(1)
+            } else {
+                0
+            }
+        })
+    }
+}
+
+#[cfg(host)]
+#[derive(Resource, Default)]
+pub struct ProviderSessionTombstones {
+    entries: HashMap<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>,
+}
+
+#[cfg(host)]
+impl ProviderSessionTombstones {
+    pub fn new(keys: impl IntoIterator<Item = ProviderSessionKey>) -> Self {
+        let mut tombstones = Self::default();
+        for key in keys {
+            tombstones
+                .entries
+                .entry(key.kind)
+                .or_default()
+                .insert(key.id, None);
+        }
+        tombstones
+    }
+
+    pub fn contains(&self, kind: &str, id: &str) -> bool {
+        self.entries
+            .get(kind)
+            .is_some_and(|entries| entries.contains_key(id))
+    }
+
+    fn insert(&mut self, key: ProviderSessionKey, entity: Entity) {
+        self.entries
+            .entry(key.kind)
+            .or_default()
+            .insert(key.id, Some(entity));
+    }
+
+    fn remove(&mut self, key: &ProviderSessionKey) -> Option<Entity> {
+        let entries = self.entries.get_mut(key.kind.0.as_str())?;
+        let entity = entries.remove(key.id.0.as_str()).flatten();
+        let remove_kind = entries.is_empty();
+        if remove_kind {
+            self.entries.remove(key.kind.0.as_str());
+        }
+        entity
+    }
+
+    fn replace(
+        &mut self,
+        entries: HashMap<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>,
+    ) {
+        if self.entries != entries {
+            self.entries = entries;
+        }
+    }
+}
+
+#[cfg(host)]
+#[derive(SystemParam)]
+struct TombstoneMutations<'w, 's> {
+    index: ResMut<'w, ProviderSessionTombstones>,
+    commands: Commands<'w, 's>,
+}
+
+#[cfg(host)]
+impl TombstoneMutations<'_, '_> {
+    fn cleanup(&mut self, entity: Entity) {
+        self.commands.trigger(Cleanup { entity });
+        self.commands.entity(entity).despawn();
+    }
+
+    fn dismiss(&mut self, keys: impl IntoIterator<Item = ProviderSessionKey>) {
+        for key in keys {
+            if self.index.contains(&key.kind.0, &key.id.0) {
+                continue;
+            }
+            let entity = self
+                .commands
+                .spawn((ProviderSessionTombstone, key.kind.clone(), key.id.clone()))
+                .id();
+            self.index.insert(key, entity);
+        }
+    }
+
+    fn restore(&mut self, keys: impl IntoIterator<Item = ProviderSessionKey>) {
+        for key in keys {
+            if let Some(entity) = self.index.remove(&key) {
+                self.commands.entity(entity).despawn();
+            }
+        }
     }
 }
 
@@ -740,9 +881,12 @@ fn archive_provider(
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
     mut commands: Commands,
 ) {
-    let mut latest = HashMap::<(String, String), ProviderArchiveRequest>::new();
+    let mut latest = HashMap::<ProviderSessionKey, ProviderArchiveRequest>::new();
     for request in requests.read().cloned() {
-        latest.insert((request.kind.0.clone(), request.id.0.clone()), request);
+        latest.insert(
+            ProviderSessionKey::from_components(&request.kind, &request.id),
+            request,
+        );
     }
     for request in latest.into_values() {
         let next_archived_at = request.source_updated_at.max(1);
@@ -799,6 +943,47 @@ fn finish_provider_archives(
 }
 
 #[cfg(host)]
+fn sync_tombstones(
+    tombstones: Query<(Entity, &ProviderKind, &ProviderSessionId), With<ProviderSessionTombstone>>,
+    changed: Query<
+        (),
+        (
+            With<ProviderSessionTombstone>,
+            Or<(
+                Added<ProviderSessionTombstone>,
+                Changed<ProviderKind>,
+                Changed<ProviderSessionId>,
+            )>,
+        ),
+    >,
+    mut removed_tombstones: RemovedComponents<ProviderSessionTombstone>,
+    mut index: ResMut<ProviderSessionTombstones>,
+) {
+    let removed = removed_tombstones.read().next().is_some();
+    if !index.is_added() && changed.is_empty() && !removed {
+        return;
+    }
+    let mut entries = HashMap::<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>::new();
+    for (entity, kind, id) in &tombstones {
+        entries
+            .entry(kind.clone())
+            .or_default()
+            .insert(id.clone(), Some(entity));
+    }
+    index.replace(entries);
+}
+
+#[cfg(host)]
+fn restore_tombstones(
+    mut requests: MessageReader<ProviderSessionRestoreRequest>,
+    mut tombstones: TombstoneMutations,
+) {
+    for request in requests.read() {
+        tombstones.restore(request.keys.iter().cloned());
+    }
+}
+
+#[cfg(host)]
 fn change_provider_stage(
     mut requests: MessageReader<ProviderStageChangeRequest>,
     definitions: Query<&StageId, With<StageDefinition>>,
@@ -848,17 +1033,60 @@ fn change_provider_stage(
 #[cfg(host)]
 fn cleanup(
     mut requests: MessageReader<CleanupRequest>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
-    mut commands: Commands,
+    sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            Option<&ProviderKind>,
+            Option<&ProviderSessionId>,
+        ),
+        With<Session>,
+    >,
+    mut tombstones: TombstoneMutations,
 ) {
+    let mut requested_sessions = HashSet::new();
+    let mut dismissed_providers = HashSet::new();
     for request in requests.read() {
-        for (entity, id) in &sessions {
-            if id == &request.id {
-                commands.trigger(Cleanup { entity });
-                commands.entity(entity).despawn();
+        for target in &request.targets {
+            match target {
+                CleanupTarget::Session(id) => {
+                    requested_sessions.insert(id.clone());
+                }
+                CleanupTarget::Provider(key) => {
+                    dismissed_providers.insert(key.clone());
+                }
             }
         }
     }
+    if requested_sessions.is_empty() && dismissed_providers.is_empty() {
+        return;
+    }
+    let sessions = sessions
+        .iter()
+        .map(|(entity, id, kind, provider_id)| {
+            (
+                entity,
+                id.clone(),
+                kind.zip(provider_id)
+                    .map(|(kind, id)| ProviderSessionKey::from_components(kind, id)),
+            )
+        })
+        .collect::<Vec<_>>();
+    for (_, id, provider) in &sessions {
+        if requested_sessions.contains(id)
+            && let Some(provider) = provider
+        {
+            dismissed_providers.insert(provider.clone());
+        }
+    }
+    for (entity, id, provider) in sessions {
+        if requested_sessions.contains(&id)
+            || provider.is_some_and(|provider| dismissed_providers.contains(&provider))
+        {
+            tombstones.cleanup(entity);
+        }
+    }
+    tombstones.dismiss(dismissed_providers);
 }
 
 #[cfg(host)]
@@ -960,7 +1188,7 @@ fn canonicalize_provider_sessions(
         .iter()
         .map(EntityTarget::entity)
         .collect::<HashSet<_>>();
-    let mut groups = HashMap::<(String, String), Vec<ProviderSessionCandidate>>::new();
+    let mut groups = HashMap::<ProviderSessionKey, Vec<ProviderSessionCandidate>>::new();
     for (entity, kind, id, activated_at, stage_changed_at, archived, runtime, duplicate) in
         &sessions
     {
@@ -968,7 +1196,7 @@ fn canonicalize_provider_sessions(
             continue;
         }
         groups
-            .entry((kind.0.clone(), id.0.clone()))
+            .entry(ProviderSessionKey::from_components(kind, id))
             .or_default()
             .push(ProviderSessionCandidate {
                 entity,
@@ -1362,13 +1590,69 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
-                id: SessionId("session-1".into()),
+                targets: vec![CleanupTarget::Session(SessionId("session-1".into()))],
             });
 
         app.update();
 
         assert_eq!(app.world().resource::<Cleaned>().0, vec![session]);
         assert!(app.world().get_entity(session).is_err());
+    }
+
+    #[test]
+    fn cleanup_removes_linked_provider_copies_and_can_restore_visibility() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, StagePlugin));
+        for id in ["canonical", "duplicate"] {
+            app.world_mut().spawn((
+                Session,
+                SessionId(id.into()),
+                ProviderKind("acp:codex".into()),
+                ProviderSessionId("provider-session".into()),
+            ));
+        }
+        let key = ProviderSessionKey::new(
+            ProviderKind("acp:codex".into()),
+            ProviderSessionId("provider-session".into()),
+        );
+        app.world_mut()
+            .resource_mut::<Messages<CleanupRequest>>()
+            .write(CleanupRequest {
+                targets: vec![CleanupTarget::Session(SessionId("canonical".into()))],
+            });
+
+        app.update();
+
+        let count = app
+            .world_mut()
+            .query_filtered::<Entity, With<Session>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(count, 0);
+        assert!(
+            app.world()
+                .resource::<ProviderSessionTombstones>()
+                .contains(&key.kind.0, &key.id.0)
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<ProviderSessionRestoreRequest>>()
+            .write(ProviderSessionRestoreRequest {
+                keys: vec![key.clone()],
+            });
+        app.update();
+
+        assert!(
+            !app.world()
+                .resource::<ProviderSessionTombstones>()
+                .contains(&key.kind.0, &key.id.0)
+        );
+        let tombstones = app
+            .world_mut()
+            .query_filtered::<Entity, With<ProviderSessionTombstone>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(tombstones, 0);
     }
 
     #[test]
@@ -1383,6 +1667,7 @@ mod tests {
         assert!(filter.is_allowed::<AgentId>());
         assert!(filter.is_allowed::<ProviderStage>());
         assert!(filter.is_allowed::<ProviderArchive>());
+        assert!(filter.is_allowed::<ProviderSessionTombstone>());
         assert!(filter.is_allowed::<SourceUpdatedAt>());
         assert!(filter.is_allowed::<ProviderKind>());
         assert!(filter.is_allowed::<ProviderSessionId>());

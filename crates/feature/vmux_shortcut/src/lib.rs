@@ -58,6 +58,14 @@ pub struct ShortcutProbePressRequest {
 #[vmux_api::ui_event]
 pub struct ShortcutProbeClearRequest;
 
+#[vmux_api::ui_event]
+pub struct ShortcutCloseRequest;
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ShortcutCollectionViewRequest {
+    pub view: vmux_ecs::CollectionView,
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct ShortcutCatalog {
     pub groups: Vec<ShortcutGroup>,
@@ -102,6 +110,7 @@ pub struct ShortcutUiState {
     pub groups: Vec<ShortcutGroup>,
     pub probe: ShortcutProbeView,
     pub shortcut_count: u32,
+    pub collection_view: vmux_ecs::CollectionView,
 }
 
 #[cfg(host)]

@@ -1,11 +1,15 @@
 #![allow(non_snake_case)]
 
 use crate::{
-    ShortcutProbeClearRequest, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutStroke,
-    ShortcutUiState,
+    ShortcutCloseRequest, ShortcutCollectionViewRequest, ShortcutProbeClearRequest,
+    ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutStroke, ShortcutUiState,
 };
 use dioxus::prelude::*;
-use vmux_ui::components::page::{PageContent, PageHeader, PageShell};
+use vmux_ui::components::manager::{
+    ManagerCollection, ManagerGridSize, ManagerList, ManagerRow, ManagerSection, ManagerView,
+    ManagerViewToggle, WorkspaceBreadcrumbHeader, WorkspacePage,
+};
+use vmux_ui::components::page::PageShell;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, LineIcon, LineIconView};
@@ -20,7 +24,12 @@ pub(crate) struct ShortcutPage;
 pub fn Page() -> Element {
     use_theme();
     let state = use_ui_state::<ShortcutUiState>().state;
+    let mut close_armed = use_signal(|| false);
     let state = state();
+    let view = match state.collection_view {
+        vmux_ecs::CollectionView::List => ManagerView::List,
+        vmux_ecs::CollectionView::Grid => ManagerView::Grid,
+    };
     let probe = state.probe;
     let groups = state.groups;
     let (status_label, status_tone) = probe_presentation(&probe.status);
@@ -37,6 +46,22 @@ pub fn Page() -> Element {
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {
                 let modifiers = event.modifiers();
+                let closes_page = event.code().to_string() == "KeyW"
+                    && modifiers.meta()
+                    && !modifiers.ctrl()
+                    && !modifiers.alt();
+                if closes_page && close_armed() {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    close_armed.set(false);
+                    let _ = send(&ShortcutCloseRequest);
+                    return;
+                }
+                if event.code().to_string() != "MetaLeft"
+                    && event.code().to_string() != "MetaRight"
+                {
+                    close_armed.set(closes_page);
+                }
                 if event.code().to_string() == "Tab"
                     && !modifiers.ctrl()
                     && !modifiers.alt()
@@ -54,13 +79,26 @@ pub fn Page() -> Element {
                 };
                 let _ = send(&ShortcutProbePressRequest { stroke });
             },
-            PageHeader {
-                div { class: "min-w-0",
-                    h1 { class: "text-base font-semibold tracking-tight", {translate("shortcuts-title")} }
-                    p { class: "mt-0.5 text-xs text-muted-foreground", "{subtitle}" }
-                }
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Shortcuts.option(),
+                options: WorkspacePage::options(),
+                actions: rsx! {
+                    span { class: "text-[10px] tabular-nums text-muted-foreground", "{subtitle}" }
+                    ManagerViewToggle {
+                        view,
+                        list_label: translate("tools-view-list"),
+                        grid_label: translate("tools-view-grid"),
+                        onchange: move |next| {
+                            let view = match next {
+                                ManagerView::List => vmux_ecs::CollectionView::List,
+                                ManagerView::Grid => vmux_ecs::CollectionView::Grid,
+                            };
+                            let _ = send(&ShortcutCollectionViewRequest { view });
+                        },
+                    }
+                },
             }
-            PageContent {
+            ManagerList {
                     div {
                         class: "mb-3 flex min-h-12 w-full items-center gap-3 rounded-lg bg-foreground/[0.035] px-3 py-2",
                         aria_label: translate("shortcuts-try-title"),
@@ -107,11 +145,20 @@ pub fn Page() -> Element {
                             }
                         }
                     } else {
-                        div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
-                            for group in groups {
-                                ShortcutGroupView {
-                                    key: "{group.name}",
-                                    group,
+                        for group in groups {
+                            ManagerSection {
+                                key: "{group.name}",
+                                label: group.name,
+                                count: group.entries.len(),
+                                ManagerCollection {
+                                    view,
+                                    grid_size: ManagerGridSize::Comfortable,
+                                    for entry in group.entries {
+                                        ShortcutEntryView {
+                                            key: "{entry.id}",
+                                            entry,
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -164,36 +211,18 @@ impl ShortcutStroke {
 }
 
 #[component]
-fn ShortcutGroupView(group: crate::ShortcutGroup) -> Element {
-    rsx! {
-        section { class: "w-full border-b border-foreground/[0.055] last:border-b-0",
-            h2 { class: "flex h-8 items-center px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground",
-                "{group.name}"
-            }
-            div {
-                for entry in group.entries {
-                    ShortcutEntryView {
-                        key: "{entry.id}",
-                        entry,
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
 fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
     let selected = entry.shortcuts.iter().any(|shortcut| shortcut.emphasized);
-    let class = if selected {
-        "flex min-h-10 items-center gap-3 bg-foreground/[0.07] px-3 py-2"
-    } else {
-        "flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-foreground/[0.035]"
-    };
     rsx! {
-        div { class: "{class}",
-            span { class: "min-w-0 flex-1 text-xs leading-snug text-foreground", "{entry.name}" }
-            div { class: "flex max-w-[55%] shrink-0 flex-col items-end gap-1",
+        ManagerRow {
+            icon: rsx! {},
+            title: entry.name,
+            subtitle: String::new(),
+            meta: rsx! {},
+            show_icon: false,
+            selected,
+            actions: rsx! {
+                div { class: "flex max-w-full shrink-0 flex-col items-end gap-1",
                 for (shortcut_index, shortcut) in entry.shortcuts.iter().enumerate() {
                     {
                         rsx! {
@@ -216,6 +245,7 @@ fn ShortcutEntryView(entry: crate::ShortcutEntry) -> Element {
                             }
                         }
                     }
+                }
                 }
             }
         }
