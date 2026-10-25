@@ -100,7 +100,7 @@ pub fn BreadcrumbSelector(
             leading,
             align: DropdownAlign::Start,
             match_width: true,
-            popup_class: "max-h-80 min-w-0 overflow-y-auto p-1".to_string(),
+            popup_class: "max-h-80 min-w-48 overflow-y-auto p-1".to_string(),
             ontoggle: move |_| open.set(!open()),
             on_dismiss: move |_| open.set(false),
             for option in options {

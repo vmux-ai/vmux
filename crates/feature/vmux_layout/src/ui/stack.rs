@@ -255,10 +255,10 @@ fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent
     rsx! {
         button {
             r#type: "button",
-            class: "group flex h-9 cursor-pointer items-center gap-2 px-2 text-left text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+            class: "group flex h-9 w-full cursor-pointer items-center justify-center gap-2 px-2 text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
             onclick: move |e| onclick.call(e),
             {icon}
-            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{label}" }
+            span { class: "min-w-0 truncate text-ui font-medium", "{label}" }
         }
     }
 }

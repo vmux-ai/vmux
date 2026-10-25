@@ -181,10 +181,10 @@ impl ActiveProjectRows {
             if !root.is_active {
                 continue;
             }
-            let Some(index) = source
-                .iter()
-                .position(|row| row.depth == 0 && row.path == root.path)
-            else {
+            let root_path = vmux_path::PathIdentity::resolve(&root.path);
+            let Some(index) = source.iter().position(|row| {
+                row.depth == 0 && vmux_path::PathIdentity::resolve(&row.path) == root_path
+            }) else {
                 continue;
             };
             rows.extend(

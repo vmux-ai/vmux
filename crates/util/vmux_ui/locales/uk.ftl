@@ -10,6 +10,7 @@ common-no-results = Немає збігів
 common-remove = Прибрати
 common-add = Додати
 common-archive = Архівувати
+common-archived = В архіві
 sessions-archive-all = Архівувати все
 common-filter = Фільтр
 common-remove-filter = Видалити фільтр

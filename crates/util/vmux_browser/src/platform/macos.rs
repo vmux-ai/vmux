@@ -182,7 +182,7 @@ fn apply_lifecycle(
                         if *entity == envelope.webview {
                             continue;
                         }
-                        let _ = surface.evaluate_script(
+                        surface.evaluate_script(
                             "for (const popup of document.querySelectorAll('[data-vmux-dropdown-popup]:popover-open')) popup.hidePopover();",
                         );
                     }

@@ -455,14 +455,14 @@ impl SessionLocationBreadcrumb {
         }
         if presentation.archived_count > 0 {
             options.push(Self::option(
-                translate("sessions-archived"),
+                translate("common-archived"),
                 Self::ARCHIVED,
                 vmux_api::BuiltinIcon::Clock,
             ));
         }
         if presentation.selected_archived {
             return Self {
-                label: translate("sessions-archived"),
+                label: translate("common-archived"),
                 value: Self::ARCHIVED.to_string(),
                 options,
                 icon: vmux_api::BuiltinIcon::Clock,
@@ -556,7 +556,7 @@ fn SessionCategories(
             }
             if archived_count > 0 {
                 ManagerSidebarItem {
-                    label: translate("sessions-archived"),
+                    label: translate("common-archived"),
                     count: archived_count,
                     selected: archived,
                     icon: Some(LineIcon::Archive),

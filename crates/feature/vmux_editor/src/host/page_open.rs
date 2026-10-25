@@ -209,6 +209,15 @@ impl FilePageTarget {
         if !url.starts_with("file:") {
             return None;
         }
+        if url.trim_end_matches('/') == "file:" {
+            return Some(match projects {
+                Ok(projects) => Self {
+                    path: Some(projects.to_path_buf()),
+                    error: String::new(),
+                },
+                Err(error) => Self { path: None, error },
+            });
+        }
         Some(Self {
             path: vmux_path::FileUrl::parse(url).and_then(|file| file.path()),
             error: format!("malformed file URL '{url}'"),
@@ -388,6 +397,19 @@ mod tests {
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].url, "file:///etc/hostname");
         assert_eq!(recorded[0].title, "hostname");
+    }
+
+    #[test]
+    fn files_root_opens_the_projects_directory() {
+        let projects = tempfile::tempdir().unwrap();
+        let knowledge = tempfile::tempdir().unwrap();
+
+        let target =
+            FilePageTarget::resolve("file://", Ok(projects.path()), knowledge.path(), None)
+                .unwrap();
+
+        assert_eq!(target.path.as_deref(), Some(projects.path()));
+        assert!(target.error.is_empty());
     }
 
     #[test]

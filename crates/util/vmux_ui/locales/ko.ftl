@@ -10,6 +10,7 @@ common-no-results = 결과 없음
 common-remove = 삭제
 common-add = 추가
 common-archive = 보관
+common-archived = 보관됨
 sessions-archive-all = 모두 보관
 common-filter = 필터
 common-remove-filter = 필터 제거

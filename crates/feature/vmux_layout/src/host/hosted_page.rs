@@ -1,11 +1,13 @@
 use bevy::prelude::*;
 use vmux_ecs::page::{
     HostHistory, HostHistoryObserve, HostHistorySet, HostHistoryTraversed, HostsPage, PageManifest,
+    PageReady,
 };
 use vmux_ecs::{
     PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget,
     PageOpenTask,
 };
+use vmux_flex::prelude::Visibility;
 
 use vmux_ecs::page::HostedPage;
 
@@ -78,6 +80,12 @@ pub struct HostedPagePlugin;
 #[derive(Component)]
 pub(crate) struct Surface(String);
 
+#[derive(Component)]
+pub(crate) struct SurfaceHandoff(Vec<Entity>);
+
+#[derive(Component)]
+struct RetiredSurface;
+
 impl Surface {
     pub(crate) fn new(url: &str) -> Self {
         Self(url.to_string())
@@ -94,11 +102,13 @@ impl Plugin for HostedPagePlugin {
             app.add_plugins(vmux_ecs::page::PagePlugin);
         }
         app.add_message::<PageOpenRequest>()
+            .add_systems(First, retire_surfaces)
             .add_systems(
                 Update,
                 open.in_set(PageOpenSet::HandleKnownPages)
                     .after(PageOpenSet::ResolveTarget),
             )
+            .add_systems(PostUpdate, finish_handoffs)
             .add_systems(Update, open_traversed_history.in_set(HostHistorySet::Apply))
             .add_systems(Update, record_history.in_set(HostHistorySet::Record));
     }
@@ -151,14 +161,43 @@ fn open(
             if let Some(browser) = existing {
                 commands.entity(browser).insert(metadata);
             } else {
-                commands.entity(task.stack).despawn_children();
+                let previous = children
+                    .get(task.stack)
+                    .map(|children| children.iter().collect())
+                    .unwrap_or_default();
                 commands.spawn((
                     Browser::hosted_page(&task.url, page.title),
+                    SurfaceHandoff(previous),
                     ChildOf(task.stack),
                 ));
             }
         }
         commands.entity(task_entity).insert(PageOpenHandled);
+    }
+}
+
+fn finish_handoffs(
+    ready: Query<(Entity, &SurfaceHandoff), With<PageReady>>,
+    mut commands: Commands,
+) {
+    for (entity, handoff) in &ready {
+        for previous in &handoff.0 {
+            if let Ok(mut previous) = commands.get_entity(*previous) {
+                previous.insert((Visibility::Hidden, RetiredSurface));
+            }
+        }
+        if let Ok(mut current) = commands.get_entity(entity) {
+            current
+                .insert(Visibility::Visible)
+                .remove::<SurfaceHandoff>()
+                .remove::<crate::PendingWebviewReveal>();
+        }
+    }
+}
+
+fn retire_surfaces(retired: Query<Entity, With<RetiredSurface>>, mut commands: Commands) {
+    for entity in &retired {
+        commands.entity(entity).despawn();
     }
 }
 
@@ -405,7 +444,13 @@ mod tests {
                 .get::<Children>(stack)
                 .unwrap()
                 .iter()
-                .find(|child| app.world().entity(*child).contains::<Browser>())
+                .find(|child| {
+                    app.world().entity(*child).contains::<Browser>()
+                        && app
+                            .world()
+                            .get::<PageMetadata>(*child)
+                            .is_some_and(|metadata| metadata.url == url)
+                })
                 .unwrap()
         };
 
@@ -451,12 +496,24 @@ mod tests {
                 .get::<Children>(stack)
                 .unwrap()
                 .iter()
-                .find(|child| app.world().entity(*child).contains::<Browser>())
+                .find(|child| {
+                    app.world().entity(*child).contains::<Browser>()
+                        && app
+                            .world()
+                            .get::<PageMetadata>(*child)
+                            .is_some_and(|metadata| metadata.url == url)
+                })
                 .unwrap()
         };
 
         let sessions = open(&mut app, "vmux://sessions/");
         let projects = open(&mut app, "vmux://projects/");
+
+        assert!(app.world().get_entity(sessions).is_ok());
+        assert!(app.world().get::<SurfaceHandoff>(projects).is_some());
+        app.world_mut().entity_mut(projects).insert(PageReady {});
+        app.update();
+        app.update();
 
         assert_ne!(sessions, projects);
         assert_eq!(

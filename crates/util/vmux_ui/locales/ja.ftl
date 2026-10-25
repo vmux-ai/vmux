@@ -10,6 +10,7 @@ common-no-results = 一致なし
 common-remove = 削除
 common-add = 追加
 common-archive = アーカイブ
+common-archived = アーカイブ済み
 sessions-archive-all = すべてアーカイブ
 common-filter = フィルター
 common-remove-filter = フィルターを削除

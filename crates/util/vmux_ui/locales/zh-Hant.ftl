@@ -10,6 +10,7 @@ common-no-results = 無結果
 common-remove = 移除
 common-add = 新增
 common-archive = 封存
+common-archived = 已封存
 sessions-archive-all = 全部封存
 common-filter = 篩選
 common-remove-filter = 移除篩選條件

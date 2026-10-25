@@ -10,6 +10,7 @@ common-no-results = 无结果
 common-remove = 移除
 common-add = 添加
 common-archive = 归档
+common-archived = 已归档
 sessions-archive-all = 全部归档
 common-filter = 筛选
 common-remove-filter = 移除筛选条件

@@ -812,7 +812,8 @@ fn side_sheet_stack_close(
 fn side_sheet_stack_create(
     trigger: On<UiInput<SideSheetStackCreateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+    focused_space: vmux_layout::space::FocusedSpace,
+    mut requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     let Some(target_pane) = leaf_panes
@@ -822,9 +823,10 @@ fn side_sheet_stack_create(
         return;
     };
     commands.entity(target_pane).insert(LastActivatedAt::now());
-    requests.write(vmux_layout::stack::OpenRequest {
-        url: None,
-        focus_existing: false,
+    requests.write(PageOpenRequest {
+        target: PageOpenTarget::NewStackInPane(target_pane),
+        url: focused_space.resolved_startup_url(),
+        request_id: None,
     });
 }
 

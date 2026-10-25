@@ -10,6 +10,7 @@ common-no-results = لا نتائج
 common-remove = إزالة
 common-add = إضافة
 common-archive = أرشفة
+common-archived = مؤرشف
 sessions-archive-all = أرشفة الكل
 common-filter = تصفية
 common-remove-filter = إزالة عامل التصفية

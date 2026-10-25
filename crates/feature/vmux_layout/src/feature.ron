@@ -366,7 +366,6 @@
                 id: "open_in_pane_top",
                 label: "Open in Pane Top",
                 group: "Browser > Open",
-                shortcuts: [(shortcut: Direct("Super+Shift+K"), when: None)],
             ),
             (
                 id: "open_in_pane_right",
@@ -374,7 +373,6 @@
                 label: "Open in Pane Right",
                 group: "Browser > Open",
                 shortcuts: [
-                    (shortcut: Direct("Super+Shift+L"), when: None),
                     (shortcut: Chord("Ctrl+b, %"), when: None),
                 ],
             ),
@@ -384,7 +382,6 @@
                 label: "Open in Pane Bottom",
                 group: "Browser > Open",
                 shortcuts: [
-                    (shortcut: Direct("Super+Shift+J"), when: None),
                     (shortcut: Chord("Ctrl+b, \""), when: None),
                 ],
             ),
@@ -392,7 +389,6 @@
                 id: "open_in_pane_left",
                 label: "Open in Pane Left",
                 group: "Browser > Open",
-                shortcuts: [(shortcut: Direct("Super+Shift+H"), when: None)],
             ),
             (
                 id: "close_pane",
@@ -574,14 +570,14 @@
                 id: "stack_next",
                 label: "Next Stack",
                 group: "Layout > Stack",
-                accelerator: Some("super+shift+n"),
+                accelerator: Some("super+shift+j"),
                 shortcuts: [(shortcut: Direct("Super+Shift+J"), when: None)],
             ),
             (
                 id: "stack_previous",
                 label: "Previous Stack",
                 group: "Layout > Stack",
-                accelerator: Some("super+shift+p"),
+                accelerator: Some("super+shift+k"),
                 shortcuts: [(shortcut: Direct("Super+Shift+K"), when: None)],
             ),
             (
@@ -673,9 +669,9 @@
                 id: "new_window",
                 label: "New Window",
                 group: "Layout > Window",
-                accelerator: Some("super+n"),
+                accelerator: Some("super+shift+n"),
                 hidden: true,
-                shortcuts: [(shortcut: Direct("Super+N"), when: None)],
+                shortcuts: [(shortcut: Direct("Super+Shift+N"), when: None)],
             ),
             (
                 id: "close_window",

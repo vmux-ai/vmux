@@ -215,7 +215,7 @@ impl SessionFilter {
                 label: format!(
                     "{} · {}",
                     translate("common-status"),
-                    translate("sessions-archived")
+                    translate("common-archived")
                 ),
                 dot: String::new(),
             },
@@ -512,7 +512,7 @@ impl StageGroup {
         vec![Self {
             stage: StageSummary {
                 id: "archived".into(),
-                name: "sessions-archived".into(),
+                name: "common-archived".into(),
                 order: u32::MAX,
                 terminal: true,
             },

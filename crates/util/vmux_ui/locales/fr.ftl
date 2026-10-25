@@ -10,6 +10,7 @@ common-no-results = Aucun résultat
 common-remove = Supprimer
 common-add = Ajouter
 common-archive = Archiver
+common-archived = Archivé
 sessions-archive-all = Tout archiver
 common-filter = Filtre
 common-remove-filter = Supprimer le filtre

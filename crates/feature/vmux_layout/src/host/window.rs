@@ -319,6 +319,7 @@ fn setup_shells(
     windows: Query<(Entity, &Window, Has<NewWindowWorkspace>)>,
     roots: Query<&HostWindow, With<VmuxWindow>>,
     spaces: Query<&crate::space::SpaceId, With<crate::space::Space>>,
+    sections: Query<&crate::side_sheet::SideSheetSectionsExpanded>,
     focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
@@ -340,6 +341,10 @@ fn setup_shells(
             let name = format!("Space {next_space_number}");
             existing_space_ids.insert(id.clone());
             next_space_number += 1;
+            let expanded_sections = focused_space
+                .entity()
+                .and_then(|space| sections.get(space).ok())
+                .copied();
             spawn_new_window_workspace(
                 &mut commands,
                 &mut requests,
@@ -348,6 +353,7 @@ fn setup_shells(
                 id,
                 name,
                 focused_space.startup_url().map(str::to_string),
+                expanded_sections,
             );
         }
     }
@@ -498,19 +504,22 @@ fn spawn_new_window_workspace(
     id: String,
     name: String,
     startup_url: Option<String>,
+    expanded_sections: Option<crate::side_sheet::SideSheetSectionsExpanded>,
 ) {
-    let space = commands
-        .spawn((
-            crate::space::SpaceId(id.clone()),
-            Name::new(name),
-            Order(0),
-            Active,
-            EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
-            LastActivatedAt::now(),
-            crate::space::Space::bundle(),
-            ChildOf(main),
-        ))
-        .id();
+    let mut space = commands.spawn((
+        crate::space::SpaceId(id.clone()),
+        Name::new(name),
+        Order(0),
+        Active,
+        EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
+        LastActivatedAt::now(),
+        crate::space::Space::bundle(),
+        ChildOf(main),
+    ));
+    if let Some(expanded_sections) = expanded_sections {
+        space.insert(expanded_sections);
+    }
+    let space = space.id();
     requests.write(TabLayoutSpawnRequest {
         space,
         primary_window: window,
