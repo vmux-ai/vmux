@@ -495,7 +495,6 @@ pub fn DropdownPopup(
         id: owner.id(),
         popover: "auto",
         class: "invisible fixed left-0 top-0 z-[1000] isolate m-0 origin-top rounded-lg bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.28)] [backdrop-filter:none] [-webkit-backdrop-filter:none] animate-[dx-fade-zoom-in_120ms_ease-out_forwards] will-change-[transform,opacity] motion-reduce:animate-none",
-        style: "background-color:var(--popover);backdrop-filter:none;-webkit-backdrop-filter:none;",
         "data-vmux-dropdown-popup": "",
     });
     let merged = merge_attributes(vec![base, attributes]);
