@@ -159,6 +159,18 @@ pub struct ActiveProjectRows {
 }
 
 impl ActiveProjectRows {
+    fn selector_rows(&self, space: Option<&str>, source: &[ProjectRow]) -> Vec<ProjectRow> {
+        if self.space.as_deref() == space {
+            return self.rows.clone();
+        }
+        source
+            .iter()
+            .find(|row| row.depth == 0 && row.is_active)
+            .cloned()
+            .into_iter()
+            .collect()
+    }
+
     pub fn layout_rows(&self, space: Option<&str>, source: &[ProjectRow]) -> Vec<ProjectRow> {
         if self.space.as_deref() != space || self.rows.is_empty() {
             return Self::active_source_rows(source);
@@ -541,6 +553,19 @@ impl SpaceProjects<'_, '_> {
             return Vec::new();
         };
         self.projects_of(space_id)
+    }
+
+    pub fn selector_rows(&self, entity: Entity, catalog: &ActiveProjectRows) -> Vec<ProjectRow> {
+        let Some(space) = self.hierarchy.get(entity) else {
+            let source = self.active_projects();
+            return catalog.selector_rows(self.active_space.id(), &source);
+        };
+        let Ok(space_id) = self.space_ids.get(space) else {
+            let source = self.active_projects();
+            return catalog.selector_rows(self.active_space.id(), &source);
+        };
+        let source = self.projects_of(&space_id.0);
+        catalog.selector_rows(Some(&space_id.0), &source)
     }
 
     fn projects_of(&self, space_id: &str) -> Vec<ProjectRow> {

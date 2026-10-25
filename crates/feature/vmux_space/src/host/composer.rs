@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use super::project::SpaceProjects;
+use super::project::{ActiveProjectRows, SpaceProjects};
 use super::{AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch};
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
@@ -62,6 +62,7 @@ struct ComposerProjection<'w, 's> {
     >,
     repo_info: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
     space_projects: SpaceProjects<'w, 's>,
+    active_project_rows: Res<'w, ActiveProjectRows>,
 }
 
 impl ComposerProjection<'_, '_> {
@@ -69,7 +70,9 @@ impl ComposerProjection<'_, '_> {
         let session = self.targets.get(stack).ok()?.entity();
         let (cwd, policy) = self.sessions.get(session).ok()?;
         let mut input = self.input(stack, cwd, policy);
-        input.projects = self.space_projects.rows(stack);
+        input.projects = self
+            .space_projects
+            .selector_rows(stack, &self.active_project_rows);
         let info = if input.cwd.as_os_str().is_empty() {
             if let Some(observer) = observer
                 && let Some(cache) = self.repo_info.as_mut()

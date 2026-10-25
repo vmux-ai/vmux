@@ -550,6 +550,7 @@ fn sync_pages(
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
+    active_project_rows: Res<vmux_space::ActiveProjectRows>,
     projector: CommandBarProjector,
     mut commands: Commands,
 ) {
@@ -586,6 +587,7 @@ fn sync_pages(
     let changed = contributions_changed
         || focus_changed
         || prompt_context.changed(tab_gather.active_tab.get())
+        || active_project_rows.is_changed()
         || git_changed
         || locale.as_ref().is_some_and(|locale| locale.is_changed());
     let locale = locale
@@ -609,12 +611,13 @@ fn sync_pages(
     if git_changed {
         *last_git = (cwd.clone(), git_info.clone());
     }
+    let active_tab = tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER);
     let payload = prompt_context.project(
         &projector,
         &tab_gather,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
-        space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
+        space_projects.selector_rows(active_tab, &active_project_rows),
         &locale,
     );
     for (e, focus_requested) in targets {
