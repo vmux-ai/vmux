@@ -407,10 +407,10 @@ impl CommandPreview {
         if let Some(url) = Self::url(token) {
             return url;
         }
-        if let Some((name, _)) = token.split_once('=') {
-            if Self::sensitive(name) || Self::redacts_value(name) {
-                return format!("{name}=•••");
-            }
+        if let Some((name, _)) = token.split_once('=')
+            && (Self::sensitive(name) || Self::redacts_value(name))
+        {
+            return format!("{name}=•••");
         }
         if Self::sensitive(token) {
             *redact_rest = true;
