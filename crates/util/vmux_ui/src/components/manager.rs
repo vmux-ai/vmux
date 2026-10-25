@@ -298,7 +298,7 @@ pub fn WorkspaceBreadcrumbHeader(
                             class: "size-4 shrink-0".to_string(),
                         }
                     },
-                    onselect: move |url| PageNavigation::replace(url),
+                    onselect: PageNavigation::replace,
                 }
                 {children}
             }
