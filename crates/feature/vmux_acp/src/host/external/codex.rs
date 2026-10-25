@@ -550,6 +550,14 @@ impl RolloutActivity {
         session.updated_at = session.updated_at.max(self.updated_at);
         true
     }
+
+    pub(super) fn sid(&self) -> &str {
+        &self.sid
+    }
+
+    pub(super) fn updated_at(&self) -> i64 {
+        self.updated_at
+    }
 }
 
 #[derive(Deserialize)]

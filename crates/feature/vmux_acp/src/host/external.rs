@@ -48,6 +48,7 @@ pub(super) fn add(app: &mut App) {
         .init_resource::<ArchiveOverlay>()
         .init_resource::<ActivationDirty>()
         .add_message::<ToolInventoryChanged>()
+        .add_message::<ProviderConversationChanged>()
         .add_service_message::<AcpCatalogReceived>()
         .add_observer(open)
         .add_observer(attach)
@@ -61,6 +62,7 @@ pub(super) fn add(app: &mut App) {
                 archive,
                 finish_archives,
                 watch,
+                request_changed_conversations,
                 scan,
                 finish,
                 project,
@@ -1156,6 +1158,24 @@ enum SourceChange {
     CodexActivity(PathBuf),
 }
 
+#[derive(Message)]
+struct ProviderConversationChanged {
+    session: ProviderSessionKey,
+    updated_at: i64,
+}
+
+impl ProviderConversationChanged {
+    fn codex(activity: &codex::RolloutActivity) -> Self {
+        Self {
+            session: ProviderSessionKey::new(
+                ProviderKind("acp:codex".to_string()),
+                ProviderSessionId(activity.sid().to_string()),
+            ),
+            updated_at: activity.updated_at(),
+        }
+    }
+}
+
 #[derive(Default)]
 struct SourceChanges {
     scans: HashSet<SourceKind>,
@@ -1375,6 +1395,7 @@ fn watch(
     mut snapshot: ResMut<SourceSnapshot>,
     mut acp: ResMut<AcpSnapshot>,
     mut catalogs: ResMut<CatalogRequests>,
+    mut conversations: MessageWriter<ProviderConversationChanged>,
     mut commands: Commands,
 ) {
     let (entity, mut runtime, paths) = runtime.into_inner();
@@ -1401,6 +1422,7 @@ fn watch(
         let Some(activity) = codex::RolloutActivity::read(&path) else {
             continue;
         };
+        conversations.write(ProviderConversationChanged::codex(&activity));
         if runtime.watch_codex_activity {
             if !acp.refresh_codex_activity(&activity) {
                 catalogs.refresh = true;
@@ -1422,6 +1444,41 @@ fn watch(
         requested.0.extend(changes.scans);
     } else {
         commands.entity(entity).insert(ScanRequested(changes.scans));
+    }
+}
+
+fn request_changed_conversations(
+    mut changed: MessageReader<ProviderConversationChanged>,
+    mut sessions: Query<
+        (
+            Entity,
+            &ProviderKind,
+            &ProviderSessionId,
+            &mut vmux_ecs::LastActivatedAt,
+            Option<&ConversationRevision>,
+            Option<&mut ConversationRefreshRequested>,
+        ),
+        (With<Session>, Without<SessionDuplicate>),
+    >,
+    mut commands: Commands,
+) {
+    for changed in changed.read() {
+        for (session, kind, sid, mut activated_at, revision, requested) in &mut sessions {
+            if !changed.session.matches(&kind.0, &sid.0) {
+                continue;
+            }
+            activated_at.0 = activated_at.0.max(changed.updated_at);
+            if revision.is_some_and(|revision| revision.0 >= changed.updated_at) {
+                continue;
+            }
+            if let Some(mut requested) = requested {
+                requested.0 = requested.0.max(changed.updated_at);
+            } else {
+                commands
+                    .entity(session)
+                    .insert(ConversationRefreshRequested(changed.updated_at));
+            }
+        }
     }
 }
 
@@ -2686,6 +2743,49 @@ mod tests {
         assert_eq!(
             app.world()
                 .get::<vmux_ecs::LastActivatedAt>(stale)
+                .unwrap()
+                .0,
+            300
+        );
+    }
+
+    #[test]
+    fn rollout_activity_refreshes_an_imported_session_without_a_catalog_entry() {
+        let mut app = App::new();
+        app.add_message::<ProviderConversationChanged>()
+            .add_systems(Update, request_changed_conversations);
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId::new("local-session"),
+                ProviderKind("acp:codex".into()),
+                ProviderSessionId("provider-session".into()),
+                vmux_ecs::LastActivatedAt(200),
+                ConversationRevision(200),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<ProviderConversationChanged>>()
+            .write(ProviderConversationChanged {
+                session: ProviderSessionKey::new(
+                    ProviderKind("acp:codex".into()),
+                    ProviderSessionId("provider-session".into()),
+                ),
+                updated_at: 300,
+            });
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<ConversationRefreshRequested>(session)
+                .map(|requested| requested.0),
+            Some(300)
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_ecs::LastActivatedAt>(session)
                 .unwrap()
                 .0,
             300
