@@ -69,16 +69,16 @@ impl ChatHeaderCatalog {
             .collect();
         let mut contextual = Vec::new();
         if let Some(session) = session {
-            if let Some(repository) = repository {
-                if !repository.url.is_empty() {
-                    contextual.push(BreadcrumbOption {
-                        label: translate("git-title"),
-                        value: repository.url.clone(),
-                        identity_seed: String::new(),
-                        icon_url: "assets/favicons/git.svg".to_string(),
-                        icon: Some(vmux_api::BuiltinIcon::GitBranch),
-                    });
-                }
+            if let Some(repository) = repository
+                && !repository.url.is_empty()
+            {
+                contextual.push(BreadcrumbOption {
+                    label: translate("git-title"),
+                    value: repository.url.clone(),
+                    identity_seed: String::new(),
+                    icon_url: "assets/favicons/git.svg".to_string(),
+                    icon: Some(vmux_api::BuiltinIcon::GitBranch),
+                });
             }
             if !session.cwd.is_empty()
                 && let Ok(url) = url::Url::from_directory_path(&session.cwd)
@@ -179,7 +179,7 @@ pub(super) fn ChatHeader(
                         class: "size-5".to_string(),
                     }
                 },
-                onselect: move |url| PageNavigation::replace(url),
+                onselect: PageNavigation::replace,
             }
             BreadcrumbSeparator {}
             BreadcrumbSelector {
@@ -194,7 +194,7 @@ pub(super) fn ChatHeader(
                         class: "size-5".to_string(),
                     }
                 },
-                onselect: move |url| PageNavigation::replace(url),
+                onselect: PageNavigation::replace,
             }
         }
     }

@@ -788,6 +788,7 @@ mod tests {
         let mut view = Shortcuts {
             catalog: shortcuts,
             probe: ShortcutProbe::default(),
+            collection_view: vmux_ecs::CollectionView::default(),
         };
 
         view.probe.press(stroke("KeyG", true), &view.catalog, 1_000);

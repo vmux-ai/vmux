@@ -713,11 +713,9 @@ impl Transcript {
         if *self.initial_follow.peek() {
             return;
         }
-        if distance <= 48 {
-            if !*self.at_bottom.peek() {
-                let mut at_bottom = self.at_bottom;
-                at_bottom.set(true);
-            }
+        if distance <= 48 && !*self.at_bottom.peek() {
+            let mut at_bottom = self.at_bottom;
+            at_bottom.set(true);
         }
     }
 

@@ -279,7 +279,7 @@ fn handle_command(
         .unwrap_or(existing_zoom.is_some());
     let target_zoomed = if unzoom_only {
         false
-    } else if toggle_count % 2 == 0 {
+    } else if toggle_count.is_multiple_of(2) {
         current_target
     } else {
         !current_target
