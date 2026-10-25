@@ -51,7 +51,6 @@ pub(super) fn EmptyRepository() -> Element {
                             class: "size-4 shrink-0 text-muted-foreground".to_string(),
                         }
                         span { class: "min-w-0 flex-1 truncate font-medium", "{current_label}" }
-                        LineIconView { icon: LineIcon::ChevronDown, class: "size-3.5 shrink-0 text-muted-foreground" }
                     }
                     if open() {
                         DropdownPopup { match_width: true, class: "p-1.5 text-left outline-none",
@@ -122,13 +121,11 @@ fn GitLoadingSkeleton() -> Element {
                         class: "size-4 shrink-0 text-muted-foreground".to_string(),
                     }
                     Skeleton { class: "h-3 w-24 bg-foreground/[0.07]" }
-                    LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground/60" }
                 }
                 span { class: "px-1 text-muted-foreground/50", "/" }
                 div { class: "flex h-8 min-w-0 items-center gap-1.5 px-2",
                     LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground" }
                     Skeleton { class: "h-3 w-40 bg-foreground/[0.07]" }
-                    LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 text-muted-foreground/60" }
                 }
                 Skeleton { class: "ml-auto h-8 w-20 rounded-md bg-foreground/[0.055]" }
             }

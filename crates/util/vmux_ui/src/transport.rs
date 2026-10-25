@@ -54,7 +54,7 @@ pub trait PageHost {
     }
 }
 
-pub type BytesListener = Box<dyn FnMut(&[u8])>;
+pub type BytesListener = Box<dyn FnMut(&[u8]) -> bool>;
 
 pub type TextOffsetAnswer = std::pin::Pin<Box<dyn std::future::Future<Output = Option<u32>>>>;
 
@@ -211,11 +211,9 @@ mod tests {
 
     impl PageHost for LoopbackHost {
         fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-            for (registered, on_bytes) in self.listeners.borrow_mut().iter_mut() {
-                if registered == id {
-                    on_bytes(bytes);
-                }
-            }
+            self.listeners
+                .borrow_mut()
+                .retain_mut(|(registered, on_bytes)| registered != id || on_bytes(bytes));
             Ok(())
         }
 
@@ -237,6 +235,7 @@ mod tests {
                 if let Some(ping) = HostPayload::new(bytes).decode::<Ping>() {
                     sink.borrow_mut().push(ping);
                 }
+                true
             }),
         )
         .unwrap();
@@ -246,6 +245,18 @@ mod tests {
         Host::emit("other", &bytes).unwrap();
 
         assert_eq!(*seen.borrow(), vec![Ping { value: 7 }]);
+    }
+
+    #[test]
+    fn an_inactive_listener_is_removed_after_delivery() {
+        let host = Rc::new(LoopbackHost::default());
+        install_host(host.clone());
+        Host::listen("once", Box::new(|_| false)).unwrap();
+
+        Host::emit("once", &[]).unwrap();
+        Host::emit("once", &[]).unwrap();
+
+        assert!(host.listeners.borrow().is_empty());
     }
 
     #[derive(Default)]

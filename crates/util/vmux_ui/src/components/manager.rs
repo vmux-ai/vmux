@@ -118,12 +118,14 @@ pub enum WorkspacePage {
     Editor,
     Git,
     History,
+    Knowledge,
     Projects,
     Services,
     Sessions,
     Settings,
     Shortcuts,
     Simulator,
+    Start,
     Team,
     Terminal,
     Tools,
@@ -131,20 +133,22 @@ pub enum WorkspacePage {
 }
 
 impl WorkspacePage {
-    const ALL: [Self; 13] = [
-        Self::Editor,
-        Self::Git,
-        Self::History,
-        Self::Projects,
-        Self::Services,
+    const ALL: [Self; 15] = [
+        Self::Start,
         Self::Sessions,
-        Self::Settings,
-        Self::Shortcuts,
-        Self::Simulator,
-        Self::Team,
+        Self::Projects,
+        Self::Git,
+        Self::Editor,
         Self::Terminal,
+        Self::Knowledge,
+        Self::Team,
         Self::Tools,
         Self::Vault,
+        Self::History,
+        Self::Shortcuts,
+        Self::Simulator,
+        Self::Services,
+        Self::Settings,
     ];
 
     pub fn option(self) -> BreadcrumbOption {
@@ -166,6 +170,12 @@ impl WorkspacePage {
                 "vmux://history/",
                 "assets/favicons/history.svg",
                 BuiltinIcon::Clock,
+            ),
+            Self::Knowledge => (
+                translate("layout-knowledge"),
+                "vmux://knowledge/",
+                "assets/favicons/knowledge.svg",
+                BuiltinIcon::Brain,
             ),
             Self::Projects => (
                 translate("layout-projects"),
@@ -203,6 +213,12 @@ impl WorkspacePage {
                 "assets/favicons/simulator.svg",
                 BuiltinIcon::Smartphone,
             ),
+            Self::Start => (
+                translate("start-title"),
+                "vmux://start/",
+                "assets/favicons/start.svg",
+                BuiltinIcon::Sparkles,
+            ),
             Self::Team => (
                 translate("team-title"),
                 "vmux://team/",
@@ -238,9 +254,11 @@ impl WorkspacePage {
     }
 
     pub fn options() -> Vec<BreadcrumbOption> {
-        let mut options = Self::ALL.into_iter().map(Self::option).collect::<Vec<_>>();
-        Self::sort(&mut options);
-        options
+        Self::ALL
+            .into_iter()
+            .filter(|page| *page != Self::Editor)
+            .map(Self::option)
+            .collect()
     }
 
     pub fn options_with(contextual: Vec<BreadcrumbOption>) -> Vec<BreadcrumbOption> {
@@ -254,7 +272,7 @@ impl WorkspacePage {
             }
             options.push(option);
         }
-        Self::sort(&mut options);
+        options.sort_by_cached_key(|option| Self::rank(&option.value));
         options
     }
 
@@ -263,16 +281,26 @@ impl WorkspacePage {
             Self::Editor => url.starts_with("file:"),
             Self::Git => url.starts_with("git:"),
             Self::Terminal => url.starts_with("vmux://terminal"),
-            _ => self.option().value.trim_end_matches('/') == url.trim_end_matches('/'),
+            Self::History => url.starts_with("vmux://history"),
+            Self::Knowledge => url.starts_with("vmux://knowledge"),
+            Self::Projects => url.starts_with("vmux://projects"),
+            Self::Services => url.starts_with("vmux://services"),
+            Self::Sessions => url.starts_with("vmux://sessions"),
+            Self::Settings => url.starts_with("vmux://settings"),
+            Self::Shortcuts => url.starts_with("vmux://shortcuts"),
+            Self::Simulator => url.starts_with("vmux://simulator"),
+            Self::Start => url.starts_with("vmux://start"),
+            Self::Team => url.starts_with("vmux://team"),
+            Self::Tools => url.starts_with("vmux://tools"),
+            Self::Vault => url.starts_with("vmux://vault"),
         }
     }
 
-    fn sort(options: &mut [BreadcrumbOption]) {
-        options.sort_by(|left, right| {
-            left.label
-                .to_ascii_lowercase()
-                .cmp(&right.label.to_ascii_lowercase())
-        });
+    fn rank(url: &str) -> usize {
+        Self::ALL
+            .iter()
+            .position(|page| page.answers_for(url))
+            .unwrap_or(usize::MAX)
     }
 }
 

@@ -36,6 +36,8 @@ impl bevy::prelude::Plugin for Plugin {
                 Update,
                 (
                     track_turn_duration,
+                    reset_navigated,
+                    bevy::ecs::schedule::ApplyDeferred,
                     push_to_page,
                     sync_ready_views,
                     resolve_queries,
@@ -514,6 +516,15 @@ fn reset_synced(
     }
 }
 
+fn reset_navigated(
+    views: Query<Entity, (With<SessionView>, With<ChatSynced>, Changed<PageMetadata>)>,
+    mut commands: Commands,
+) {
+    for view in &views {
+        commands.entity(view).remove::<ChatSynced>();
+    }
+}
+
 fn request_more(
     trigger: On<UiInput<ChatHistoryMoreRequest>>,
     targets: super::session::SessionViews,
@@ -914,6 +925,36 @@ mod tests {
             app.world().get::<ChatSynced>(other).is_some(),
             "a non-chat view must be left untouched"
         );
+    }
+
+    #[test]
+    fn route_changes_clear_chat_synced_before_reusing_a_view() {
+        let mut app = App::new();
+        app.add_systems(Update, reset_navigated);
+        let view = app
+            .world_mut()
+            .spawn((
+                SessionView,
+                PageMetadata {
+                    title: "First".into(),
+                    url: "vmux://sessions/codex/first".into(),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.update();
+        app.world_mut().entity_mut(view).insert((
+            ChatSynced,
+            PageMetadata {
+                title: "Second".into(),
+                url: "vmux://sessions/codex/second".into(),
+                ..Default::default()
+            },
+        ));
+
+        app.update();
+
+        assert!(app.world().get::<ChatSynced>(view).is_none());
     }
 
     fn duration_app() -> App {

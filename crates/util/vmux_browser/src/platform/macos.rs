@@ -85,11 +85,12 @@ impl Plugin for MacosBrowserPlugin {
     }
 }
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone)]
 struct HostedSurface {
     placement: PagePlacement,
     page: &'static Page,
     window: Entity,
+    url: String,
 }
 
 #[derive(Default)]
@@ -304,18 +305,38 @@ fn open(
             };
             (
                 window_entity,
-                candidate.get::<HostedSurface>().copied(),
+                candidate.get::<HostedSurface>().cloned(),
                 registration.instance(candidate),
+                candidate
+                    .get::<PageMetadata>()
+                    .map(|metadata| metadata.url.clone())
+                    .unwrap_or_else(|| page.url.to_string()),
             )
         };
-        let (window_entity, current, instance) = candidate;
+        let (window_entity, current, instance, url) = candidate;
         let has_surface = state.p1().0.contains_key(&entity);
-        if current.is_some_and(|current| {
+        if let Some(current) = current.as_ref().filter(|current| {
             std::ptr::eq(current.page, page) && current.window == window_entity && has_surface
         }) {
+            let route_changed = current.url != url;
+            let placement_changed = current.placement != placement;
+            if route_changed {
+                let renderer = state.p1();
+                let surface = renderer.0.get(&entity).expect("the page was just found");
+                surface.navigate(page, instance);
+                info!("browser_platform: updated {entity:?} within {}", page.url);
+            }
+            if route_changed || placement_changed {
+                commands.entity(entity).insert(HostedSurface {
+                    placement,
+                    page,
+                    window: window_entity,
+                    url,
+                });
+            }
             continue;
         }
-        if current.is_some_and(|current| {
+        if current.as_ref().is_some_and(|current| {
             current.page.transparent == page.transparent
                 && current.page.document_url() == page.document_url()
                 && current.window == window_entity
@@ -330,6 +351,7 @@ fn open(
                 placement,
                 page,
                 window: window_entity,
+                url,
             });
             if remounted {
                 commands.entity(entity).remove::<PageReady>();
@@ -379,6 +401,7 @@ fn open(
                         placement,
                         page,
                         window: window_entity,
+                        url,
                     },
                     crate::HostedPageLifecycle::default(),
                 ));

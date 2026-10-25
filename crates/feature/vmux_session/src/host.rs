@@ -23,8 +23,8 @@ pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};
 pub use session::{
     ChatAttachmentProjection, ChatBranchesProjection, ChatComposerContext, ChatHistoryQuery,
     ChatHistoryResult, ChatMediaProjection, ChatResumeProjection, ChatSnapshotProjection,
-    ChatSynced, ChatTranscriptProjection, PendingAgentChoice, SessionView, StartRequest,
-    TranscriptPage, TranscriptTail, USER_CHOICE_REQUESTED,
+    ChatSynced, ChatTranscriptProjection, PendingAgentChoice, SessionView, SessionViews,
+    StartRequest, TranscriptPage, TranscriptTail, USER_CHOICE_REQUESTED,
 };
 pub use state::{ChatRuntime, PublishComposerEffect, RepublishChatUiState};
 #[cfg(host)]

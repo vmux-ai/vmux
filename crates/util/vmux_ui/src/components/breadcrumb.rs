@@ -88,7 +88,7 @@ pub fn BreadcrumbSelector(
     #[props(default = rsx! {})] leading: Element,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let root_class = cn(["min-w-0 max-w-full", class.as_str()]);
+    let root_class = cn(["w-fit min-w-0 max-w-full", class.as_str()]);
     let selected_value = value.clone();
     let selected_label = label.clone();
     rsx! {
@@ -99,7 +99,8 @@ pub fn BreadcrumbSelector(
             active,
             leading,
             align: DropdownAlign::Start,
-            popup_class: "max-h-80 min-w-56 max-w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-1".to_string(),
+            match_width: true,
+            popup_class: "max-h-80 min-w-0 overflow-y-auto p-1".to_string(),
             ontoggle: move |_| open.set(!open()),
             on_dismiss: move |_| open.set(false),
             for option in options {

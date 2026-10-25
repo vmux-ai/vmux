@@ -179,21 +179,22 @@ pub(super) fn BookmarksSection(
                 }
             }
             Collapsible { expanded,
-                div { class: "px-1.5 pb-0 pt-0.5",
-                        if !pins.is_empty() {
-                            div {
-                                "data-bookmark-drop": "",
-                                class: "mb-1 grid grid-cols-[repeat(auto-fill,2rem)] justify-start gap-1.5 p-1",
-                                for (index, pin) in pins.iter().enumerate() {
-                                    PinTile {
-                                        key: "{pin.row.uuid}",
-                                        row: pin.row.clone(),
-                                        index,
-                                        active: pin.active,
-                                    }
+                div { class: "pb-0 pt-0.5",
+                    if !pins.is_empty() {
+                        div {
+                            "data-bookmark-drop": "",
+                            class: "mb-1 grid w-full grid-cols-[repeat(auto-fill,2rem)] justify-start gap-1.5",
+                            for (index, pin) in pins.iter().enumerate() {
+                                PinTile {
+                                    key: "{pin.row.uuid}",
+                                    row: pin.row.clone(),
+                                    index,
+                                    active: pin.active,
                                 }
                             }
                         }
+                    }
+                    div { class: "px-1.5",
                         if creating_folder {
                             div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
                                 Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
@@ -234,6 +235,7 @@ pub(super) fn BookmarksSection(
                             }
                             }
                         }
+                    }
                 }
             }
         }

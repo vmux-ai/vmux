@@ -29,9 +29,9 @@ use super::window_drag::WindowDragRegion;
 #[component]
 fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     let handle_class = if resizing() {
-        "h-10 w-1 rounded-full bg-foreground/45 opacity-100"
+        "h-9 w-1 rounded-full bg-foreground/45 scale-110"
     } else {
-        "h-8 w-1 rounded-full bg-foreground/20 opacity-0 transition-[height,background-color,opacity] duration-150 group-hover:opacity-100"
+        "h-8 w-1 rounded-full bg-foreground/25 transition-[background-color,transform] duration-150 group-hover:bg-foreground/35"
     };
     rsx! {
         div {
@@ -114,16 +114,10 @@ fn SideSheetContent() -> Element {
     });
     let host_sheet_width = state.side_sheet_width;
     let sheet_left = state.window_pad_left;
-    let mut sheet_width = use_signal(|| host_sheet_width);
     let mut sheet_resizing = use_signal(|| false);
-    use_effect(use_reactive!(|host_sheet_width| {
-        if !*sheet_resizing.peek() {
-            sheet_width.set(host_sheet_width);
-        }
-    }));
     let side_sheet_vars = format!(
         "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
-        sheet_width(),
+        host_sheet_width,
         state.window_pad_left,
         state.window_pad_top,
         state.window_pad_bottom,
@@ -142,7 +136,7 @@ fn SideSheetContent() -> Element {
             style: "{side_sheet_vars}",
             WindowDragRegion {
                 id: "side-sheet-titlebar",
-                revision: sheet_width().to_string(),
+                revision: host_sheet_width.to_string(),
                 class: "pointer-events-none absolute top-0 h-7",
                 style: "left:80px;right:4px;",
             }
@@ -192,12 +186,13 @@ fn SideSheetContent() -> Element {
                 onmousemove: move |event: Event<MouseData>| {
                     let x = event.client_coordinates().x as f32 - sheet_left;
                     let width = crate::event::SideSheetResizeEvent::live(x).clamped();
-                    sheet_width.set(width);
                     let _ = send(&crate::event::SideSheetResizeEvent::live(width));
                 },
-                onmouseup: move |_| {
+                onmouseup: move |event: Event<MouseData>| {
+                    let x = event.client_coordinates().x as f32 - sheet_left;
+                    let width = crate::event::SideSheetResizeEvent::settled(x).clamped();
                     sheet_resizing.set(false);
-                    let _ = send(&crate::event::SideSheetResizeEvent::settled(sheet_width()));
+                    let _ = send(&crate::event::SideSheetResizeEvent::settled(width));
                 },
             }
         }
@@ -272,9 +267,19 @@ fn SideSheetSpaceRow(
                             onclick: move |_| on_toggle.call(()),
                         }
                         div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2 @max-[12rem]:gap-1",
-                            LineIconView {
-                                icon: LineIcon::Planet,
-                                class: "h-4 w-4 shrink-0".to_string(),
+                            div { class: "pointer-events-auto",
+                                SheetHeaderAction {
+                                    label: translate("spaces-switch"),
+                                    active: open(),
+                                    onclick: move |event: MouseEvent| {
+                                        event.stop_propagation();
+                                        open.set(!open());
+                                    },
+                                    LineIconView {
+                                        icon: LineIcon::Planet,
+                                        class: "h-4 w-4 shrink-0".to_string(),
+                                    }
+                                }
                             }
                             if editing {
                                 SpaceRenameInput { form: form.clone() }
@@ -290,20 +295,6 @@ fn SideSheetSpaceRow(
                                         });
                                     },
                                     {space.display_name()}
-                                }
-                            }
-                            div { class: "pointer-events-auto",
-                                SheetHeaderAction {
-                                    label: translate("spaces-switch"),
-                                    active: open(),
-                                    onclick: move |event: MouseEvent| {
-                                        event.stop_propagation();
-                                        open.set(!open());
-                                    },
-                                    LineIconView {
-                                        icon: LineIcon::ChevronsUpDown,
-                                        class: "size-3.5".to_string(),
-                                    }
                                 }
                             }
                             div { class: "pointer-events-auto",

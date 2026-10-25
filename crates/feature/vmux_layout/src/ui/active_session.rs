@@ -2,12 +2,13 @@
 
 use dioxus::prelude::*;
 use vmux_ecs::event::{ProjectPickerRequest, ProjectRow, ProjectTreeToggle};
+use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::dropdown::DropdownPopup;
 use vmux_ui::components::motion::Collapsible;
-use vmux_ui::components::project_picker::{ProjectSelectPopup, ProjectSelectTrigger};
-use vmux_ui::components::sheet::SheetHeaderChevron;
+use vmux_ui::components::project_picker::ProjectSelectPopup;
+use vmux_ui::components::sheet::{SheetSelectorRow, SheetToggleRow};
 use vmux_ui::components::tree_row::{FileTreeRow, FileTreeRowGroup};
-use vmux_ui::hooks::send;
+use vmux_ui::hooks::{send, use_optimistic_map};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView, PageIconView};
 
@@ -114,6 +115,11 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
     let mut choosing = use_signal(|| false);
     let mut choosing_branch = use_signal(|| false);
     let mut optimistic_project = use_signal(|| None::<ProjectRow>);
+    let branch_key = format!("{pane_id}:{project_dir}");
+    let optimistic_branch = use_optimistic_map(std::collections::HashMap::from([(
+        branch_key.clone(),
+        current_branch.clone(),
+    )]));
     let selected_project = optimistic_project().unwrap_or_else(|| root.clone());
     let selected_path = selected_project.path.clone();
     let selected_label = selected_project.label.clone();
@@ -127,21 +133,17 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
             optimistic_project.set(None);
         }
     });
-    let current_branch_label = if current_branch.is_empty() {
+    let selected_branch = optimistic_branch.value(&branch_key, &current_branch);
+    let current_branch_label = if selected_branch.is_empty() {
         "HEAD".to_string()
     } else {
-        current_branch.clone()
+        selected_branch.clone()
     };
     let branch_choices = branches
         .into_iter()
-        .filter(|branch| branch.branch != current_branch)
+        .filter(|branch| branch.branch != selected_branch)
         .collect::<Vec<_>>();
     let project_choices = choices;
-    let toggle_label = if expanded {
-        translate("common-collapse")
-    } else {
-        translate("common-expand")
-    };
     rsx! {
         div { class: "relative w-full max-w-full min-w-0 self-stretch overflow-visible",
             div { class: "flex min-w-0 flex-col gap-0.5 py-1 @max-[12rem]:py-0.5",
@@ -150,12 +152,15 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     open: choosing(),
                     class: "w-full min-w-0".to_string(),
                     on_dismiss: move |_| choosing.set(false),
-                    ProjectSelectTrigger {
+                    SheetSelectorRow {
                         label: selected_label.clone(),
                         title: selected_display_path.clone(),
                         open: choosing(),
-                        seed: selected_path.clone(),
-                        class: "w-full @max-[12rem]:gap-1.5 @max-[12rem]:px-1".to_string(),
+                        leading: rsx! { IdentityOrb {
+                            seed: selected_path.clone(),
+                            alt: selected_label.clone(),
+                            class: "size-4".to_string(),
+                        } },
                         onclick: move |_| choosing.set(!choosing()),
                     }
                     if choosing() {
@@ -203,24 +208,49 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                             open: choosing_branch(),
                             class: "w-full min-w-0".to_string(),
                             on_dismiss: move |_| choosing_branch.set(false),
-                            button {
-                                r#type: "button",
-                                class: "group flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left hover:bg-foreground/[0.055] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
-                                aria_expanded: choosing_branch(),
+                            SheetSelectorRow {
+                                label: current_branch_label.clone(),
+                                open: choosing_branch(),
+                                label_class: "font-mono font-normal".to_string(),
+                                leading: rsx! { LineIconView {
+                                    icon: LineIcon::GitBranch,
+                                    class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
+                                } },
                                 onclick: move |_| choosing_branch.set(!choosing_branch()),
-                                LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                                span { class: "w-0 min-w-0 flex-1 truncate font-mono text-[10px] text-foreground/85", "{current_branch_label}" }
-                                LineIconView { icon: LineIcon::ChevronsUpDown, class: "size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100".to_string() }
                             }
                             if choosing_branch() {
                                 DropdownPopup { match_width: true, class: "max-h-64 min-w-0 overflow-y-auto p-1",
                                     for branch in branch_choices {
-                                        ActiveWorkspaceBranchChoice {
-                                            key: "{branch.branch}",
-                                            project_path: project_dir.clone(),
-                                            branch,
-                                            pane_id,
-                                            on_pick: move |_| choosing_branch.set(false),
+                                        {
+                                            let branch_name = branch.branch.clone();
+                                            let checkout = branch.checkout.clone();
+                                            let project_path = project_dir.clone();
+                                            let observed_branch = current_branch.clone();
+                                            let optimistic_key = branch_key.clone();
+                                            rsx! {
+                                                ActiveWorkspaceBranchChoice {
+                                                    key: "{branch.branch}",
+                                                    branch,
+                                                    on_pick: move |_| {
+                                                        choosing_branch.set(false);
+                                                        optimistic_branch.set(
+                                                            optimistic_key.clone(),
+                                                            observed_branch.clone(),
+                                                            branch_name.clone(),
+                                                        );
+                                                        if send(&vmux_ecs::event::space::ProjectActivateRequest {
+                                                            path: project_path.clone(),
+                                                            branch: branch_name.clone(),
+                                                            checkout: checkout.clone(),
+                                                            pane_id: Some(pane_id),
+                                                        })
+                                                        .is_err()
+                                                        {
+                                                            optimistic_branch.clear(&optimistic_key);
+                                                        }
+                                                    },
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -229,11 +259,13 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     }
                 }
             }
-            div {
-                role: "button",
-                tabindex: "0",
-                class: "flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
-                aria_expanded: expanded,
+            SheetToggleRow {
+                label: translate("git-files"),
+                expanded,
+                leading: rsx! { LineIconView {
+                    icon: LineIcon::File,
+                    class: "size-3.5 shrink-0 text-muted-foreground".to_string(),
+                } },
                 onclick: move |_| {
                     let _ = send(&SideSheetSectionRequest::new(
                         pane_id,
@@ -241,38 +273,6 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                         !expanded,
                     ));
                 },
-                onkeydown: move |event: KeyboardEvent| {
-                    let activates = match event.key() {
-                        Key::Enter => true,
-                        Key::Character(value) => value == " ",
-                        _ => false,
-                    };
-                    if !activates {
-                        return;
-                    }
-                    event.prevent_default();
-                    let _ = send(&SideSheetSectionRequest::new(
-                        pane_id,
-                        "projects",
-                        !expanded,
-                    ));
-                },
-                LineIconView { icon: LineIcon::File, class: "size-3.5 shrink-0 text-muted-foreground".to_string() }
-                span { class: "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85", {translate("git-files")} }
-                div { class: "shrink-0",
-                    SheetHeaderChevron {
-                        expanded,
-                        label: toggle_label,
-                        onclick: move |event: MouseEvent| {
-                            event.stop_propagation();
-                            let _ = send(&SideSheetSectionRequest::new(
-                                pane_id,
-                                "projects",
-                                !expanded,
-                            ));
-                        },
-                    }
-                }
             }
             Collapsible { expanded, content_class: "pb-1".to_string(),
                 for child in children {
@@ -288,27 +288,12 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
 }
 
 #[component]
-fn ActiveWorkspaceBranchChoice(
-    project_path: String,
-    branch: WorkspaceBranch,
-    pane_id: u64,
-    on_pick: EventHandler<()>,
-) -> Element {
-    let branch_name = branch.branch.clone();
-    let checkout = branch.checkout.clone();
+fn ActiveWorkspaceBranchChoice(branch: WorkspaceBranch, on_pick: EventHandler<()>) -> Element {
     rsx! {
         button {
             r#type: "button",
             class: "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
-            onclick: move |_| {
-                on_pick.call(());
-                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
-                    path: project_path.clone(),
-                    branch: branch_name.clone(),
-                    checkout: checkout.clone(),
-                    pane_id: Some(pane_id),
-                });
-            },
+            onclick: move |_| on_pick.call(()),
             LineIconView { icon: LineIcon::GitBranch, class: "size-3.5 shrink-0".to_string() }
             span { class: "min-w-0 flex-1 truncate font-mono text-[10px]", "{branch.branch}" }
             if !branch.label.is_empty() {

@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 
+use crate::cn::cn;
 use crate::components::icon::Icon;
 use crate::components::tree_row::{SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN};
 
@@ -49,6 +50,80 @@ pub fn SheetHeaderChevron(
                 class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
                 path { d: "m9 18 6-6-6-6" }
             }
+        }
+    }
+}
+
+#[component]
+pub fn SheetToggleRow(
+    label: String,
+    expanded: bool,
+    onclick: EventHandler<MouseEvent>,
+    #[props(default)] title: String,
+    #[props(default)] class: String,
+    #[props(default)] label_class: String,
+    #[props(default = rsx! {})] leading: Element,
+) -> Element {
+    let row_class = cn([
+        "group flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+        class.as_str(),
+    ]);
+    let text_class = cn([
+        "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85",
+        label_class.as_str(),
+    ]);
+    rsx! {
+        button {
+            r#type: "button",
+            title,
+            class: row_class,
+            aria_expanded: expanded,
+            onclick: move |event| onclick.call(event),
+            {leading}
+            span { class: text_class, "{label}" }
+            span {
+                class: if expanded {
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground"
+                } else {
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055] text-foreground"
+                },
+                Icon {
+                    class: if expanded { SIDEBAR_CARD_CHEVRON_OPEN } else { SIDEBAR_CARD_CHEVRON_CLOSED },
+                    path { d: "m9 18 6-6-6-6" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn SheetSelectorRow(
+    label: String,
+    open: bool,
+    onclick: EventHandler<MouseEvent>,
+    #[props(default)] title: String,
+    #[props(default)] class: String,
+    #[props(default)] label_class: String,
+    #[props(default = rsx! {})] leading: Element,
+) -> Element {
+    let row_class = cn([
+        "group flex h-8 w-full min-w-0 items-center gap-2 rounded px-2 text-left transition-colors hover:bg-foreground/[0.04] @max-[12rem]:gap-1.5 @max-[12rem]:px-1",
+        class.as_str(),
+    ]);
+    let text_class = cn([
+        "min-w-0 flex-1 truncate text-[10px] font-medium text-foreground/85",
+        label_class.as_str(),
+    ]);
+    rsx! {
+        button {
+            r#type: "button",
+            title,
+            class: row_class,
+            "data-vmux-dropdown-trigger": "",
+            aria_expanded: open,
+            onclick: move |event| onclick.call(event),
+            {leading}
+            span { class: text_class, "{label}" }
         }
     }
 }

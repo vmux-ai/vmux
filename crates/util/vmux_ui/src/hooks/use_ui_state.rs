@@ -52,7 +52,7 @@ where
         let scope = current_scope_id();
         match Host::listen_state::<T, _>(move |state| {
             let listener = listener.clone();
-            runtime.in_scope(scope, || listener.call(state));
+            runtime.in_scope(scope, || listener.call(state))
         }) {
             Ok(()) => {
                 listening.set(true);

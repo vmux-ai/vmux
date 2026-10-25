@@ -8,6 +8,7 @@ use vmux_api::chat::{
 };
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
+use vmux_ui::components::code::ShellCode;
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -542,9 +543,10 @@ fn FinishedToolCalls(calls: Vec<ChatToolCall>, open: bool) -> Element {
 fn ToolCall(call: ChatToolCall) -> Element {
     let key = call.index;
     let label = ToolPresentation::for_call(call.kind, &call.fallback_label).label;
+    let command = call.command();
     let children = call.children.clone();
     rsx! {
-        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
+        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
             ToolActivityIcon {
                 name: call.name.clone(),
                 file_path: call.file_path.clone(),
@@ -553,14 +555,30 @@ fn ToolCall(call: ChatToolCall) -> Element {
             div { class: "min-w-0",
                 details { open: call.live, class: "disclosure text-sm text-muted-foreground",
                     summary { class: ROW_SUMMARY,
-                        span { class: "font-medium", "{label}" }
+                        span { class: "shrink-0 font-medium", "{label}" }
+                        if let Some(command) = &command {
+                            div { class: "min-w-0 flex-1 overflow-hidden",
+                                ShellCode {
+                                    source: command.preview.clone(),
+                                    inline: true,
+                                    class: "block truncate".to_string(),
+                                }
+                            }
+                        }
                         DisclosureIcon {}
                     }
-                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
-                    ToolArguments { arguments: call.arguments.clone() }
+                    if let Some(command) = command {
+                        div { class: "mt-1.5 max-h-56 overflow-auto rounded-lg bg-foreground/[0.035] px-2.5 py-2",
+                            ShellCode { source: command.source }
+                        }
+                        ToolArguments { arguments: command.metadata }
+                    } else {
+                        div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
+                        ToolArguments { arguments: call.arguments.clone() }
+                    }
                 }
                 if !children.is_empty() {
-                    div { class: "mt-1.5 flex flex-col gap-1 rounded-lg bg-foreground/[0.025] px-2 py-1",
+                    div { class: "mt-1.5 flex flex-col gap-1",
                         for child in children {
                             ToolChild { key: "{child.index()}", child }
                         }
@@ -768,14 +786,31 @@ fn ToolChild(child: ChatToolChild) -> Element {
 #[component]
 fn ToolChildCall(call: ChatToolChildCall) -> Element {
     let label = ToolPresentation::for_call(call.kind, &call.fallback_label).label;
+    let command = call.command();
     rsx! {
         details { class: "disclosure text-xs text-muted-foreground",
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
-                span { class: "font-medium", "{label}" }
+                span { class: "shrink-0 font-medium", "{label}" }
+                if let Some(command) = &command {
+                    div { class: "min-w-0 flex-1 overflow-hidden",
+                        ShellCode {
+                            source: command.preview.clone(),
+                            inline: true,
+                            class: "block truncate".to_string(),
+                        }
+                    }
+                }
                 DisclosureIcon {}
             }
-            div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
-            ToolArguments { arguments: call.arguments }
+            if let Some(command) = command {
+                div { class: "mt-1.5 max-h-56 overflow-auto rounded-lg bg-foreground/[0.035] px-2.5 py-2",
+                    ShellCode { source: command.source }
+                }
+                ToolArguments { arguments: command.metadata }
+            } else {
+                div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
+                ToolArguments { arguments: call.arguments }
+            }
         }
     }
 }
@@ -837,9 +872,9 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
         "text-foreground/70"
     };
     let panel = if is_error {
-        "bg-red-500/[0.045] ring-red-500/15"
+        "bg-red-500/[0.045]"
     } else {
-        "bg-foreground/[0.045] ring-foreground/[0.06]"
+        "bg-foreground/[0.03]"
     };
     let label = if is_error {
         translate("common-error")
@@ -847,12 +882,12 @@ fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Eleme
         translate("common-output")
     };
     rsx! {
-        details { key: "{key}", class: "disclosure text-xs {tone}",
-            summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+        details { key: "{key}", class: "disclosure rounded-lg px-2 py-1 text-xs {tone} {panel}",
+            summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                 span { class: "font-medium", "{label}" }
                 DisclosureIcon {}
             }
-            pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
+            pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
         }
     }
 }
@@ -867,9 +902,9 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
         "text-foreground/70"
     };
     let panel = if is_error {
-        "bg-red-500/[0.045] ring-red-500/15"
+        "bg-red-500/[0.045]"
     } else {
-        "bg-foreground/[0.045] ring-foreground/[0.06]"
+        "bg-foreground/[0.03]"
     };
     let row = if is_error {
         "hover:bg-red-500/[0.035]"
@@ -889,12 +924,12 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
             ActivityIconView { kind: icon }
-            details { class: "disclosure min-w-0 text-sm {tone}",
-                summary { class: ROW_SUMMARY,
+            details { class: "disclosure min-w-0 rounded-lg px-2 py-1 text-sm {tone} {panel}",
+                summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                     span { class: "font-medium", "{label}" }
                     DisclosureIcon {}
                 }
-                pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
+                pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap px-0.5 pb-1 font-mono text-[11px] leading-relaxed text-muted-foreground", "{content}" }
             }
         }
     }

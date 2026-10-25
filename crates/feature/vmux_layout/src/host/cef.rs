@@ -216,6 +216,7 @@ impl Browser {
     pub fn hosted_page_with_icon(url: &str, title: &str, icon: PageIcon) -> impl Bundle {
         (
             Self,
+            crate::hosted_page::Surface::new(url),
             WebviewWindowed,
             WebviewOpaqueWindowedBackground,
             HostsPage,

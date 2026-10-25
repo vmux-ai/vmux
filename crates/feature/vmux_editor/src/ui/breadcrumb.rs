@@ -166,7 +166,6 @@ pub fn EditorBreadcrumbs(
                                         class: if last { "truncate text-foreground/90" } else { "truncate" },
                                         "{label}"
                                     }
-                                    LineIconView { icon: LineIcon::ChevronDown, class: "size-3 shrink-0 opacity-55".to_string() }
                                 }
                                 if !last {
                                     CrumbChevron {}
@@ -185,7 +184,6 @@ pub fn EditorBreadcrumbs(
                         let line = crumb.row.line;
                         let name = crumb.row.name.clone();
                         let kind = crumb.row.kind;
-                        let has_siblings = rows.len() > 1;
                         rsx! {
                             span {
                                 key: "{line}-{name}",
@@ -210,9 +208,6 @@ pub fn EditorBreadcrumbs(
                                     },
                                     OutlineGlyph { kind }
                                     span { class: "truncate", "{name}" }
-                                    if has_siblings {
-                                        LineIconView { icon: LineIcon::ChevronDown, class: "ml-1 size-3 shrink-0 opacity-55".to_string() }
-                                    }
                                 }
                             }
                         }

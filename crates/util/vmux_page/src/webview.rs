@@ -124,6 +124,8 @@ impl WebView {
         self.outbox.set_page(page.url);
         if remounted {
             self.dom.remount(page.component, instance);
+        } else {
+            self.dom.update_instance(instance);
         }
         if document_changed && let Err(error) = self.webview.load_url(page.document_url()) {
             error!("vmux_page: navigation failed for {}: {error}", page.url);

@@ -13,13 +13,13 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_api::chat::ResumeSession;
 use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_api::protocol::AcpProviderSession;
-use vmux_ecs::page::Activity;
+use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
 use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget};
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
-use vmux_session::host::SessionManagerView;
+use vmux_session::host::{SessionManagerView, SessionView, SessionViews};
 use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
@@ -46,6 +46,7 @@ pub(super) fn add(app: &mut App) {
         .init_resource::<ProviderCatalog>()
         .init_resource::<ArchiveQueue>()
         .init_resource::<ArchiveOverlay>()
+        .init_resource::<ActivationDirty>()
         .add_message::<ToolInventoryChanged>()
         .add_service_message::<AcpCatalogReceived>()
         .add_observer(open)
@@ -55,6 +56,7 @@ pub(super) fn add(app: &mut App) {
             (
                 request_catalogs,
                 receive_catalogs.after(ServiceMessageSet),
+                mark_activation_dirty,
                 activate,
                 archive,
                 finish_archives,
@@ -96,6 +98,15 @@ struct AcpSnapshot(HashMap<String, AcpSource>);
 struct AcpSource {
     state: AcpSourceState,
     sessions: Vec<ProviderSession>,
+}
+
+#[derive(Resource)]
+struct ActivationDirty(bool);
+
+impl Default for ActivationDirty {
+    fn default() -> Self {
+        Self(true)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -503,6 +514,25 @@ impl SourceSnapshot {
             fallback = Some(session);
         }
         if matches == 1 { fallback } else { None }
+    }
+}
+
+struct ProviderSessionIndex<'a>(HashMap<(&'a str, &'a str), &'a ProviderSession>);
+
+impl<'a> ProviderSessionIndex<'a> {
+    fn from_snapshots(snapshot: &'a SourceSnapshot, acp: &'a AcpSnapshot) -> Self {
+        let mut sessions = HashMap::new();
+        for session in snapshot.0.values().flatten() {
+            sessions.insert((session.kind.as_str(), session.sid.as_str()), session);
+        }
+        for session in acp.sessions() {
+            sessions.insert((session.kind.as_str(), session.sid.as_str()), session);
+        }
+        Self(sessions)
+    }
+
+    fn get(&self, kind: &str, sid: &str) -> Option<&'a ProviderSession> {
+        self.0.get(&(kind, sid)).copied()
     }
 }
 
@@ -1171,30 +1201,52 @@ impl SourceChanges {
 }
 
 fn activate(
-    activity: Activity<SessionManagerView>,
+    manager_activity: Activity<SessionManagerView>,
+    session_activity: Activity<SessionView>,
     acp: Res<AcpSnapshot>,
-    sessions: Query<&ProviderKind, With<Session>>,
+    view_targets: SessionViews,
+    views: Query<Entity, With<SessionView>>,
+    sessions: Query<(Entity, &ProviderKind), With<Session>>,
+    mut dirty: ResMut<ActivationDirty>,
     mut runtime: Query<(Entity, &mut Runtime, &SourcePaths)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let manager = Activity::present(activity);
+    if !dirty.0 {
+        return;
+    }
+    dirty.0 = false;
+    let manager = Activity::present(manager_activity);
+    let session = Activity::present(session_activity);
     let available = SourceKind::ALL
         .into_iter()
         .filter(|source| acp.allows_fallback(&source.family()))
         .collect::<HashSet<_>>();
+    let codex_family = SourceKind::Codex.family();
+    let viewed = if session {
+        views
+            .iter()
+            .filter_map(|view| view_targets.session(view))
+            .collect::<HashSet<_>>()
+    } else {
+        HashSet::new()
+    };
     let watch_codex_activity = manager && acp.supports(&SourceKind::Codex.family());
     let mut sources = if manager {
         available.clone()
     } else {
         HashSet::new()
     };
+    let mut watch_codex_activity = watch_codex_activity;
     if !manager {
-        for kind in &sessions {
+        for (entity, kind) in &sessions {
             let Some(agent) = kind.0.strip_prefix("acp:") else {
                 continue;
             };
             let family = AgentFamily::of(agent);
+            if viewed.contains(&entity) && family == codex_family && acp.supports(&family) {
+                watch_codex_activity = true;
+            }
             let Some(source) = SourceKind::for_family(&family) else {
                 continue;
             };
@@ -1266,6 +1318,54 @@ fn activate(
     let mut entity = commands.spawn((Name::new("ACP provider session catalog"), runtime, paths));
     if !sources.is_empty() {
         entity.insert(ScanRequested(sources));
+    }
+}
+
+fn mark_activation_dirty(
+    acp: Res<AcpSnapshot>,
+    managers: Query<
+        (),
+        (
+            With<SessionManagerView>,
+            Or<(Added<SessionManagerView>, Added<PageReady>)>,
+        ),
+    >,
+    views: Query<
+        (),
+        (
+            With<SessionView>,
+            Or<(Added<SessionView>, Added<PageReady>, Changed<ChildOf>)>,
+        ),
+    >,
+    sessions: Query<
+        (),
+        (
+            With<Session>,
+            Or<(Added<Session>, Added<ProviderKind>, Changed<ProviderKind>)>,
+        ),
+    >,
+    targets: Query<(), Changed<vmux_ecs::EntityTarget<Session>>>,
+    mut removed_managers: RemovedComponents<SessionManagerView>,
+    mut removed_views: RemovedComponents<SessionView>,
+    mut removed_ready: RemovedComponents<PageReady>,
+    mut removed_sessions: RemovedComponents<Session>,
+    mut removed_providers: RemovedComponents<ProviderKind>,
+    mut removed_targets: RemovedComponents<vmux_ecs::EntityTarget<Session>>,
+    mut dirty: ResMut<ActivationDirty>,
+) {
+    let changed = acp.is_changed()
+        || !managers.is_empty()
+        || !views.is_empty()
+        || !sessions.is_empty()
+        || !targets.is_empty()
+        || removed_managers.read().next().is_some()
+        || removed_views.read().next().is_some()
+        || removed_ready.read().next().is_some()
+        || removed_sessions.read().next().is_some()
+        || removed_providers.read().next().is_some()
+        || removed_targets.read().next().is_some();
+    if changed {
+        dirty.0 = true;
     }
 }
 
@@ -1592,6 +1692,7 @@ fn associate(
 
 fn request_conversation_refreshes(
     snapshot: Res<SourceSnapshot>,
+    acp: Res<AcpSnapshot>,
     archive_overrides: Query<
         (
             &ProviderKind,
@@ -1617,9 +1718,10 @@ fn request_conversation_refreshes(
     mut archive_requests: MessageWriter<ArchiveRequest>,
     mut commands: Commands,
 ) {
-    if !snapshot.is_changed() {
+    if !snapshot.is_changed() && !acp.is_changed() {
         return;
     }
+    let sources = ProviderSessionIndex::from_snapshots(&snapshot, &acp);
     let mut archive_overrides_by_session = HashMap::new();
     for (kind, sid, source_updated_at, archived_at) in &archive_overrides {
         archive_overrides_by_session.insert(
@@ -1641,7 +1743,7 @@ fn request_conversation_refreshes(
         requested,
     ) in &mut sessions
     {
-        let Some(source) = snapshot.get(&kind.0, &provider_sid.0) else {
+        let Some(source) = sources.get(&kind.0, &provider_sid.0) else {
             continue;
         };
         let archive_override =
@@ -2530,6 +2632,7 @@ mod tests {
     fn newer_provider_activity_requests_an_imported_conversation_refresh() {
         let mut app = App::new();
         app.init_resource::<SourceSnapshot>()
+            .init_resource::<AcpSnapshot>()
             .add_message::<ArchiveRequest>()
             .add_systems(Update, request_conversation_refreshes);
         app.world_mut()
@@ -2593,6 +2696,7 @@ mod tests {
     fn durable_archive_overrides_win_until_the_provider_has_newer_state() {
         let mut app = App::new();
         app.init_resource::<SourceSnapshot>()
+            .init_resource::<AcpSnapshot>()
             .add_message::<ArchiveRequest>()
             .add_systems(Update, request_conversation_refreshes);
         app.world_mut()

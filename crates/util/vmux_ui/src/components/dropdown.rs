@@ -4,11 +4,61 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
 use crate::cn::cn;
-use crate::icon::{LineIcon, LineIconView};
+
+const DROPDOWN_CONNECTION_WATCHER: &str = r#"
+const watchConnection = globalThis.__vmuxDropdownWatchConnection ??= (() => {
+  const entries = new Map();
+  let observer = null;
+  const stop = () => {
+    if (entries.size || !observer) return;
+    observer.disconnect();
+    observer = null;
+  };
+  const inspect = () => {
+    for (const [key, entry] of entries) {
+      if (entry.active()) continue;
+      entries.delete(key);
+      for (const cleanup of entry.cleanups) cleanup();
+    }
+    stop();
+  };
+  const start = () => {
+    if (observer) return;
+    observer = new MutationObserver(inspect);
+    observer.observe(document, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-vmux-dropdown-open'],
+    });
+  };
+  return (key, element, cleanup, active = () => element.isConnected) => {
+    let entry = entries.get(key);
+    if (!entry) {
+      entry = { element, active, cleanups: new Set() };
+      entries.set(key, entry);
+    }
+    entry.element = element;
+    entry.active = active;
+    entry.cleanups.add(cleanup);
+    start();
+    return () => {
+      const current = entries.get(key);
+      if (!current) return;
+      current.cleanups.delete(cleanup);
+      if (!current.cleanups.size) entries.delete(key);
+      stop();
+    };
+  };
+})();
+"#;
 
 const DROPDOWN_KEYBOARD_SCRIPT: &str = r#"
+__VMUX_DROPDOWN_CONNECTION_WATCHER__
 globalThis.__vmuxDropdownKeyboardCleanup?.();
 let active = true;
+const root = document.getElementById('__VMUX_DROPDOWN_ROOT__');
+let unwatch = () => {};
 const rootFor = event => event.target instanceof Element
   ? event.target.closest('[data-vmux-dropdown-keyboard="true"]')
   : null;
@@ -59,19 +109,29 @@ const input = event => {
 const cleanup = () => {
   if (!active) return;
   active = false;
+  unwatch();
   document.removeEventListener('keydown', keydown, true);
   document.removeEventListener('input', input, true);
   if (globalThis.__vmuxDropdownKeyboardCleanup === cleanup) {
     delete globalThis.__vmuxDropdownKeyboardCleanup;
   }
-  dioxus.send(true);
 };
 globalThis.__vmuxDropdownKeyboardCleanup = cleanup;
 document.addEventListener('keydown', keydown, true);
 document.addEventListener('input', input, true);
+if (root) {
+  unwatch = watchConnection(
+    `keyboard:${root.id}`,
+    root,
+    cleanup,
+    () => root.isConnected && root.getAttribute('data-vmux-dropdown-open') === 'true',
+  );
+}
+dioxus.send(true);
 "#;
 
 const DROPDOWN_POPUP_SCRIPT: &str = r#"
+__VMUX_DROPDOWN_CONNECTION_WATCHER__
 const id = '__VMUX_DROPDOWN_POPUP__';
 const entries = globalThis.__vmuxDropdownPopupEntries ??= new Map();
 entries.get(id)?.cleanup();
@@ -95,18 +155,18 @@ if (popup && root) {
   const baseMinWidth = popup.style.minWidth;
   const baseMaxHeight = popup.style.maxHeight;
   const baseOverflowY = popup.style.overflowY;
+  const anchor = root.querySelector('[data-vmux-dropdown-trigger]') ?? root;
+  let unwatch = () => {};
   const place = () => {
     frame = 0;
-    if (!active || !popup.isConnected || !root.isConnected) return;
-    if (!popup.matches(':popover-open')) {
-      try { popup.showPopover(); } catch (error) {}
-    }
-    const anchor = root.getBoundingClientRect();
+    if (!active || !popup.isConnected || !root.isConnected || !anchor.isConnected) return;
+    if (!popup.matches(':popover-open')) return;
+    const anchorBounds = anchor.getBoundingClientRect();
     popup.style.width = baseWidth;
     popup.style.minWidth = baseMinWidth;
     popup.style.maxHeight = baseMaxHeight;
     popup.style.overflowY = baseOverflowY;
-    if (matchWidth) popup.style.width = `${Math.max(0, anchor.width - inset * 2)}px`;
+    if (matchWidth) popup.style.width = `${Math.max(0, anchorBounds.width - inset * 2)}px`;
     const availableWidth = Math.max(0, window.innerWidth - margin * 2);
     const availableHeight = Math.max(0, window.innerHeight - margin * 2);
     popup.style.maxWidth = `${availableWidth}px`;
@@ -124,13 +184,13 @@ if (popup && root) {
     const width = bounds.width;
     const height = bounds.height;
     let x = align === 'end'
-      ? anchor.right - inset - width
-      : anchor.left + inset;
+      ? anchorBounds.right - inset - width
+      : anchorBounds.left + inset;
     let y = placement === 'top'
-      ? anchor.top - gap - height
-      : anchor.bottom + gap;
-    const below = anchor.bottom + gap;
-    const above = anchor.top - gap - height;
+      ? anchorBounds.top - gap - height
+      : anchorBounds.bottom + gap;
+    const below = anchorBounds.bottom + gap;
+    const above = anchorBounds.top - gap - height;
     if (placement === 'bottom' && y + height > window.innerHeight - margin && above >= margin) {
       y = above;
     } else if (placement === 'top' && y < margin && below + height <= window.innerHeight - margin) {
@@ -148,9 +208,13 @@ if (popup && root) {
     if (!active || frame) return;
     frame = requestAnimationFrame(place);
   };
+  const toggle = event => {
+    if (event.newState === 'open') schedule();
+  };
   const observer = new ResizeObserver(schedule);
-  observer.observe(root);
+  observer.observe(anchor);
   observer.observe(popup);
+  popup.addEventListener('toggle', toggle);
   window.addEventListener('resize', schedule, true);
   window.addEventListener('scroll', schedule, true);
   const cleanup = () => {
@@ -158,6 +222,8 @@ if (popup && root) {
     active = false;
     if (frame) cancelAnimationFrame(frame);
     observer.disconnect();
+    unwatch();
+    popup.removeEventListener('toggle', toggle);
     window.removeEventListener('resize', schedule, true);
     window.removeEventListener('scroll', schedule, true);
     if (popup.matches(':popover-open')) {
@@ -165,6 +231,7 @@ if (popup && root) {
     }
     if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
   };
+  unwatch = watchConnection(id, popup, cleanup);
   entries.set(id, { cleanup });
   place();
 }
@@ -213,6 +280,7 @@ pub fn DropdownTrigger(
     rsx! {
         button {
             r#type: "button",
+            "data-vmux-dropdown-trigger": "",
             class: cn([
                 "group flex h-7 w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs transition-colors hover:bg-foreground/[0.05]",
                 tone,
@@ -225,14 +293,6 @@ pub fn DropdownTrigger(
             {leading}
             span { class: "min-w-0 truncate", "{label}" }
             {trailing}
-            LineIconView {
-                icon: LineIcon::ChevronDown,
-                class: if open {
-                    "size-3 shrink-0 rotate-180 text-muted-foreground opacity-100 transition-[opacity,transform]".to_string()
-                } else {
-                    "size-3 shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100".to_string()
-                },
-            }
         }
     }
 }
@@ -358,6 +418,10 @@ impl DropdownPopupOwner {
         gap: f64,
     ) -> String {
         DROPDOWN_POPUP_SCRIPT
+            .replace(
+                "__VMUX_DROPDOWN_CONNECTION_WATCHER__",
+                DROPDOWN_CONNECTION_WATCHER,
+            )
             .replace("__VMUX_DROPDOWN_POPUP__", &self.id())
             .replace("__VMUX_DROPDOWN_ALIGN__", align.as_str())
             .replace("__VMUX_DROPDOWN_PLACEMENT__", placement.as_str())
@@ -369,51 +433,44 @@ impl DropdownPopupOwner {
             .replace("__VMUX_DROPDOWN_GAP__", &gap.to_string())
     }
 
-    fn cleanup_script(self) -> String {
-        format!(
-            "globalThis.__vmuxDropdownPopupEntries?.get('{}')?.cleanup();",
-            self.id()
-        )
-    }
-
     fn dismiss_script(self) -> String {
         format!(
             r#"
+__VMUX_DROPDOWN_CONNECTION_WATCHER__
 const id = '{}';
 const popup = document.getElementById(id);
 if (popup) {{
-  const root = popup.closest('[data-vmux-dropdown-root]');
   const entries = globalThis.__vmuxDropdownToggleEntries ??= new Map();
   entries.get(id)?.cleanup();
   let active = true;
+  let unwatch = () => {{}};
   const cleanup = () => {{
     if (!active) return;
     active = false;
-    popup.removeEventListener('toggle', toggle);
+    unwatch();
+    popup.removeEventListener('beforetoggle', beforetoggle);
     window.removeEventListener('blur', dismiss, true);
     if (entries.get(id)?.cleanup === cleanup) entries.delete(id);
   }};
   const dismiss = () => {{
     if (!active) return;
     cleanup();
-    dioxus.send(true);
+    dioxus.send('dismissed');
   }};
-  const toggle = () => {{
-    if (!popup.matches(':popover-open')) dismiss();
+  const beforetoggle = event => {{
+    if (event.newState === 'closed') dismiss();
   }};
   entries.set(id, {{ cleanup }});
-  popup.addEventListener('toggle', toggle);
+  unwatch = watchConnection(id, popup, cleanup);
+  popup.addEventListener('beforetoggle', beforetoggle);
   window.addEventListener('blur', dismiss, true);
 }}
 "#,
             self.id()
         )
-    }
-
-    fn dismiss_cleanup_script(self) -> String {
-        format!(
-            "globalThis.__vmuxDropdownToggleEntries?.get('{}')?.cleanup();",
-            self.id()
+        .replace(
+            "__VMUX_DROPDOWN_CONNECTION_WATCHER__",
+            DROPDOWN_CONNECTION_WATCHER,
         )
     }
 
@@ -434,10 +491,6 @@ if (popup) {{
             gap,
         ));
     }
-
-    fn cleanup(self) {
-        crate::transport::Host::run_script(self.cleanup_script());
-    }
 }
 
 #[component]
@@ -449,6 +502,7 @@ pub fn Dropdown(
     children: Element,
 ) -> Element {
     use_context_provider(|| DropdownContext(on_dismiss));
+    let root_id = format!("vmux-dropdown-root-{}", current_scope_id().0);
     let layer = if open { "z-[100]" } else { "z-auto" };
     let root_class = cn([
         "relative [&_button]:transition-[background-color,color,opacity,transform] [&_button]:duration-150 [&_button]:ease-out [&_svg]:transition-transform [&_svg]:duration-150 motion-reduce:[&_button]:transition-none motion-reduce:[&_svg]:transition-none",
@@ -457,6 +511,7 @@ pub fn Dropdown(
     ]);
     rsx! {
         div {
+            id: root_id.clone(),
             class: root_class,
             "data-vmux-dropdown-root": "",
             "data-vmux-dropdown-open": if open { "true" } else { "false" },
@@ -470,7 +525,7 @@ pub fn Dropdown(
             },
             if open {
                 if keyboard_navigation {
-                    DropdownKeyboardNavigation {}
+                    DropdownKeyboardNavigation { root_id: root_id.clone() }
                 }
             }
             {children}
@@ -498,13 +553,10 @@ pub fn DropdownPopup(
         "data-vmux-dropdown-popup": "",
     });
     let merged = merge_attributes(vec![base, attributes]);
-    use_drop(move || {
-        crate::transport::Host::run_script(owner.dismiss_cleanup_script());
-        owner.cleanup();
-    });
     rsx! {
         div {
             onmounted: move |_| {
+                let mut eval = document::eval(&owner.dismiss_script());
                 owner.mount(
                     align,
                     placement,
@@ -512,9 +564,12 @@ pub fn DropdownPopup(
                     horizontal_inset,
                     gap,
                 );
-                let mut eval = document::eval(&owner.dismiss_script());
                 spawn(async move {
-                    if eval.recv::<bool>().await.is_ok_and(|dismiss| dismiss) {
+                    if eval
+                        .recv::<String>()
+                        .await
+                        .is_ok_and(|message| message == "dismissed")
+                    {
                         dismiss.call(());
                     }
                 });
@@ -531,13 +586,19 @@ pub fn DropdownPopup(
 }
 
 #[component]
-fn DropdownKeyboardNavigation() -> Element {
-    use_future(move || async move {
-        let mut eval = document::eval(DROPDOWN_KEYBOARD_SCRIPT);
-        let _ = eval.recv::<bool>().await;
-    });
-    use_drop(move || {
-        let _ = document::eval("globalThis.__vmuxDropdownKeyboardCleanup?.();");
+fn DropdownKeyboardNavigation(root_id: String) -> Element {
+    use_future(move || {
+        let root_id = root_id.clone();
+        async move {
+            let script = DROPDOWN_KEYBOARD_SCRIPT
+                .replace(
+                    "__VMUX_DROPDOWN_CONNECTION_WATCHER__",
+                    DROPDOWN_CONNECTION_WATCHER,
+                )
+                .replace("__VMUX_DROPDOWN_ROOT__", &root_id);
+            let mut eval = document::eval(&script);
+            let _ = eval.recv::<bool>().await;
+        }
     });
     rsx! {}
 }

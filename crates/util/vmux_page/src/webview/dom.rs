@@ -27,6 +27,7 @@ pub(crate) struct Dom {
     lifecycle: Rc<dyn LifecycleSink>,
     mounted: Rc<Cell<bool>>,
     parked: Rc<RefCell<Option<wry::RequestAsyncResponder>>>,
+    pending_instance: Rc<RefCell<Option<crate::Instance>>>,
 }
 
 const FRAME_APPLIED: &str = "x-vmux-applied";
@@ -65,6 +66,7 @@ impl Dom {
             lifecycle: embed.lifecycle.clone(),
             mounted: Rc::new(Cell::new(false)),
             parked: Rc::new(RefCell::new(None)),
+            pending_instance: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -101,7 +103,20 @@ impl Dom {
         self.reads.clear();
         *self.selection.borrow_mut() = EventSelection::default();
         self.mounted.set(false);
+        self.pending_instance.borrow_mut().take();
         self.lifecycle.update(LifecycleUpdate::Remounted);
+    }
+
+    pub(crate) fn update_instance(&self, instance: crate::Instance) {
+        let _reactor = self.reactor.enter();
+        let _host = HostScope::enter(self.host.clone());
+        if let Ok(mut page) = self.page.try_borrow_mut() {
+            self.pending_instance.borrow_mut().take();
+            page.update_instance(instance);
+        } else {
+            self.pending_instance.borrow_mut().replace(instance);
+        }
+        self.waker.wake();
     }
 
     fn page_flushed(&self) {
@@ -115,6 +130,9 @@ impl Dom {
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
         let mut page = self.page.try_borrow_mut().ok()?;
+        if let Some(instance) = self.pending_instance.borrow_mut().take() {
+            page.update_instance(instance);
+        }
         if self.mounted.get() {
             page.render()
         } else {
@@ -240,9 +258,7 @@ impl Dom {
         };
         drop(borrowed);
 
-        for listener in registered.iter_mut() {
-            listener(payload);
-        }
+        registered.retain_mut(|listener| listener(payload));
         self.lifecycle.update(LifecycleUpdate::HostEventDelivered);
 
         if let Ok(mut borrowed) = self.listeners.try_borrow_mut()

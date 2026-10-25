@@ -37,11 +37,17 @@ impl ComposerChips {
             .find(|agent| agent.url == composer.agent_url)
             .map(|agent| agent.icon.clone())
             .unwrap_or_default();
+        let agent_seed = if composer.agent_url.is_empty() {
+            composer.agent_title.clone()
+        } else {
+            composer.agent_url.clone()
+        };
+        let project_seed = composer.project.clone();
         let agent = ComposerChip::ready(
             composer.agent_title.clone(),
             translate("composer-choose-agent"),
         )
-        .with_icon(agent_icon)
+        .with_agent(agent_icon, agent_seed)
         .opens(EventHandler::new(move |()| {
             let _ = send(&CommandPaletteAgentMenuToggleRequest { open_id });
             PromptFocus::end(PROMPT_INPUT_ID);
@@ -60,6 +66,7 @@ impl ComposerChips {
             composer.workspace_label.clone(),
             composer.workspace_title.clone(),
         )
+        .with_identity(project_seed.clone())
         .opens(EventHandler::new(move |()| {
             let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
             PromptFocus::end(PROMPT_INPUT_ID);
@@ -68,6 +75,7 @@ impl ComposerChips {
             false => None,
             true => Some(
                 ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
+                    .with_identity(format!("{}:{}", project_seed, composer.branch_label))
                     .opens(EventHandler::new(move |()| {
                         let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
                         PromptFocus::end(PROMPT_INPUT_ID);

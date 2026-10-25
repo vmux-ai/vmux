@@ -6,7 +6,7 @@ use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
 use crate::components::agent_menu::AgentMenu;
-use crate::components::avatar::AgentThumbnail;
+use crate::components::avatar::{AgentThumbnail, IdentityOrb};
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
 use crate::components::permission_menu::PermissionMenu;
@@ -419,19 +419,27 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
     }
     let label_class = kind.label_class();
     let label_class = cn([label_class, COMPOSER_CHIP_LABEL_TIGHT]);
-    let icon_url = chip.icon.favicon_url().to_string();
-    let icon = if chip.icon.is_none() {
-        rsx! { ComposerChipIcon { kind } }
-    } else {
-        rsx! {
-            AgentThumbnail {
-                src: (!icon_url.is_empty()).then_some(icon_url),
-                seed: chip.label.clone(),
-                background: String::new(),
-                alt: chip.label.clone(),
-                class: "h-3.5 w-3.5 text-[5px]",
+    let icon = match chip.visual.clone() {
+        ComposerChipVisual::Kind => rsx! { ComposerChipIcon { kind } },
+        ComposerChipVisual::Agent { icon, seed } => {
+            let icon_url = icon.favicon_url().to_string();
+            rsx! {
+                AgentThumbnail {
+                    src: (!icon_url.is_empty()).then_some(icon_url),
+                    seed,
+                    background: String::new(),
+                    alt: chip.label.clone(),
+                    class: "h-3.5 w-3.5 text-[5px]",
+                }
             }
         }
+        ComposerChipVisual::Identity { seed } => rsx! {
+            IdentityOrb {
+                seed,
+                alt: chip.label.clone(),
+                class: "h-3.5 w-3.5".to_string(),
+            }
+        },
     };
     let Some(on_open) = chip.on_open else {
         return rsx! {
@@ -566,9 +574,22 @@ pub fn ComposerChipIcon(kind: ComposerMenuKind) -> Element {
 pub struct ComposerChip {
     pub label: String,
     pub title: String,
-    pub icon: PageIcon,
+    pub visual: ComposerChipVisual,
     pub loading: bool,
     pub on_open: Option<EventHandler<()>>,
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub enum ComposerChipVisual {
+    #[default]
+    Kind,
+    Agent {
+        icon: PageIcon,
+        seed: String,
+    },
+    Identity {
+        seed: String,
+    },
 }
 
 impl ComposerChip {
@@ -576,7 +597,7 @@ impl ComposerChip {
         Self {
             label: String::new(),
             title: String::new(),
-            icon: PageIcon::None,
+            visual: ComposerChipVisual::Kind,
             loading: true,
             on_open: None,
         }
@@ -586,7 +607,7 @@ impl ComposerChip {
         Self {
             label: label.into(),
             title: title.into(),
-            icon: PageIcon::None,
+            visual: ComposerChipVisual::Kind,
             loading: false,
             on_open: None,
         }
@@ -597,8 +618,19 @@ impl ComposerChip {
         self
     }
 
-    pub fn with_icon(mut self, icon: PageIcon) -> Self {
-        self.icon = icon;
+    pub fn with_agent(mut self, icon: PageIcon, seed: impl Into<String>) -> Self {
+        self.visual = ComposerChipVisual::Agent {
+            icon,
+            seed: seed.into(),
+        };
+        self
+    }
+
+    pub fn with_identity(mut self, seed: impl Into<String>) -> Self {
+        let seed = seed.into();
+        if !seed.is_empty() {
+            self.visual = ComposerChipVisual::Identity { seed };
+        }
         self
     }
 }

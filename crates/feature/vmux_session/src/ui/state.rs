@@ -498,12 +498,16 @@ impl Chat {
             let chat = *self;
             let open =
                 EventHandler::new(move |()| chat.open_menu_at(ComposerMenuKind::Project, selected));
-            return Some(ComposerChip::ready(label, title).opens(open));
+            return Some(
+                ComposerChip::ready(label, title)
+                    .with_identity(workspace_path.to_string())
+                    .opens(open),
+            );
         }
         if context.cwd.is_empty() {
             return None;
         }
-        Some(ComposerChip::ready(label, context.cwd))
+        Some(ComposerChip::ready(label, context.cwd.clone()).with_identity(context.cwd))
     }
 
     pub fn branch_chip(&self) -> Option<ComposerChip> {
@@ -524,6 +528,7 @@ impl Chat {
                     translate("composer-git"),
                     translate("composer-git-repository"),
                 )
+                .with_identity(format!("{}:git", context.cwd))
                 .opens(open),
             );
         }
@@ -531,7 +536,12 @@ impl Chat {
             "composer-branch-name",
             &[("branch", TranslationValue::String(&context.branch))],
         );
-        Some(ComposerChip::ready(context.branch, title).opens(open))
+        let branch_seed = format!("{}:{}", context.cwd, context.branch);
+        Some(
+            ComposerChip::ready(context.branch, title)
+                .with_identity(branch_seed)
+                .opens(open),
+        )
     }
 }
 

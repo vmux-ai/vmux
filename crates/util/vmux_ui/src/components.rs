@@ -6,6 +6,7 @@ pub mod breadcrumb;
 pub mod button;
 pub mod card;
 pub mod checkbox;
+pub mod code;
 pub mod composer;
 pub mod composer_bar;
 pub mod context_menu;

@@ -19,7 +19,7 @@ use vmux_ecs::EntityTarget;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::event::{ModelOptionEntry, SelectMode, SelectModel, SetAgentEffort};
-use vmux_session::host::{ChatModeStateChanged, ChatModelStateChanged, SessionView};
+use vmux_session::host::{ChatModeStateChanged, ChatModelStateChanged, SessionView, SessionViews};
 use vmux_session::{AgentId, Session, SessionId};
 
 use super::config_driver::AcpConfigProjection;
@@ -58,19 +58,6 @@ pub(crate) fn add(app: &mut App) {
                 publish_modes.after(ModelSelectionSet),
             ),
         );
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct SessionViews<'w, 's> {
-    child_of: Query<'w, 's, &'static ChildOf>,
-    targets: Query<'w, 's, &'static EntityTarget<Session>>,
-}
-
-impl SessionViews<'_, '_> {
-    fn session(&self, webview: Entity) -> Option<Entity> {
-        let stack = self.child_of.get(webview).ok()?.parent();
-        self.targets.get(stack).ok().map(EntityTarget::entity)
-    }
 }
 
 #[derive(Message)]

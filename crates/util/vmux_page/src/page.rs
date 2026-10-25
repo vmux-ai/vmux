@@ -22,9 +22,10 @@ impl Page {
     }
 
     pub fn preserves_dom_for(&self, next: &Self) -> bool {
-        self.document_url() == next.document_url()
-            && self.dom_group.is_some()
-            && self.dom_group == next.dom_group
+        std::ptr::eq(self, next)
+            || (self.document_url() == next.document_url()
+                && self.dom_group.is_some()
+                && self.dom_group == next.dom_group)
     }
 
     pub fn document_url(&self) -> &'static str {
@@ -215,6 +216,13 @@ mod tests {
             .sharing_dom("editor");
 
         assert!(directory.preserves_dom_for(&file));
+    }
+
+    #[test]
+    fn a_route_owned_by_the_same_page_preserves_its_dom() {
+        static PAGE: Page = Page::pane("vmux://sessions/", first).owning_subtree();
+
+        assert!(PAGE.preserves_dom_for(&PAGE));
     }
 
     #[test]

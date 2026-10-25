@@ -37,13 +37,13 @@ use vmux_session::{
 type ChatUiStateUpdates = UiState<ChatUiState>;
 
 #[derive(SystemParam)]
-pub(crate) struct SessionViews<'w, 's> {
+pub struct SessionViews<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     targets: Query<'w, 's, &'static EntityTarget<Session>>,
 }
 
 impl SessionViews<'_, '_> {
-    pub(crate) fn session(&self, webview: Entity) -> Option<Entity> {
+    pub fn session(&self, webview: Entity) -> Option<Entity> {
         let stack = self.child_of.get(webview).ok()?.parent();
         self.targets.get(stack).ok().map(EntityTarget::entity)
     }

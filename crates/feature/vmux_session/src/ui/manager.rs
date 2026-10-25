@@ -9,7 +9,7 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, IdentityOrb};
-use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbSeparator};
+use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
 use vmux_ui::components::checkbox::{Checkbox, CheckboxTone};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
@@ -337,6 +337,7 @@ fn SessionsManagerContent(
     filter_picker: SessionFilterPicker,
     presentation: Rc<ManagerPresentation>,
 ) -> Element {
+    let location = SessionLocationBreadcrumb::new(&presentation);
     rsx! {
         WorkspaceLayout {
             header: rsx! {
@@ -360,17 +361,27 @@ fn SessionsManagerContent(
                         }
                     },
                     BreadcrumbSeparator {}
-                    BreadcrumbItem {
-                        label: if presentation.selected_archived {
-                            translate("sessions-archived")
-                        } else {
-                            translate("sessions-inbox")
-                        },
-                        active: presentation.selected_stage.is_none() && !presentation.selected_archived,
-                        onclick: EventHandler::new(move |_| {
-                            controls.update_filters(|filters| SessionFilter::set_stage(filters, None));
+                    BreadcrumbSelector {
+                        label: location.label,
+                        value: location.value,
+                        options: location.options,
+                        active: true,
+                        leading: rsx! { BuiltinIconView {
+                            icon: location.icon,
+                            class: "size-4 shrink-0 text-muted-foreground".to_string(),
+                        } },
+                        onselect: move |value: String| {
+                            controls.update_filters(|filters| {
+                                if value == SessionLocationBreadcrumb::ARCHIVED {
+                                    SessionFilter::upsert(filters, SessionFilter::Archived);
+                                } else if value == SessionLocationBreadcrumb::INBOX {
+                                    SessionFilter::set_stage(filters, None);
+                                } else {
+                                    SessionFilter::set_stage(filters, Some(value));
+                                }
+                            });
                             controls.set_query(String::new());
-                        }),
+                        },
                     }
                 }
             },
@@ -412,6 +423,90 @@ fn SessionsManagerContent(
                 }
             }
         }
+    }
+}
+
+struct SessionLocationBreadcrumb {
+    label: String,
+    value: String,
+    options: Vec<BreadcrumbOption>,
+    icon: vmux_api::BuiltinIcon,
+}
+
+impl SessionLocationBreadcrumb {
+    const INBOX: &str = "inbox";
+    const ARCHIVED: &str = "archived";
+
+    fn new(presentation: &ManagerPresentation) -> Self {
+        let mut options = vec![Self::option(
+            translate("sessions-inbox"),
+            Self::INBOX,
+            vmux_api::BuiltinIcon::MessagesRound,
+        )];
+        for group in &presentation.category_groups {
+            if group.sessions.is_empty() {
+                continue;
+            }
+            options.push(Self::option(
+                translate_humanized(&group.stage.name),
+                &group.stage.id,
+                Self::stage_icon(&group.stage),
+            ));
+        }
+        if presentation.archived_count > 0 {
+            options.push(Self::option(
+                translate("sessions-archived"),
+                Self::ARCHIVED,
+                vmux_api::BuiltinIcon::Clock,
+            ));
+        }
+        if presentation.selected_archived {
+            return Self {
+                label: translate("sessions-archived"),
+                value: Self::ARCHIVED.to_string(),
+                options,
+                icon: vmux_api::BuiltinIcon::Clock,
+            };
+        }
+        if let Some(selected) = presentation.selected_stage.as_deref()
+            && let Some(group) = presentation
+                .category_groups
+                .iter()
+                .find(|group| group.stage.id == selected)
+        {
+            return Self {
+                label: translate_humanized(&group.stage.name),
+                value: selected.to_string(),
+                options,
+                icon: Self::stage_icon(&group.stage),
+            };
+        }
+        Self {
+            label: translate("sessions-inbox"),
+            value: Self::INBOX.to_string(),
+            options,
+            icon: vmux_api::BuiltinIcon::MessagesRound,
+        }
+    }
+
+    fn option(label: String, value: &str, icon: vmux_api::BuiltinIcon) -> BreadcrumbOption {
+        BreadcrumbOption {
+            label,
+            value: value.to_string(),
+            identity_seed: String::new(),
+            icon_url: String::new(),
+            icon: Some(icon),
+        }
+    }
+
+    fn stage_icon(stage: &StageSummary) -> vmux_api::BuiltinIcon {
+        if stage.terminal {
+            return vmux_api::BuiltinIcon::CheckCircle;
+        }
+        if stage.id == "stale" {
+            return vmux_api::BuiltinIcon::Clock;
+        }
+        vmux_api::BuiltinIcon::Activity
     }
 }
 
@@ -1435,14 +1530,6 @@ fn StagePicker(target: StageTarget, selected: String, stages: Vec<StageSummary>)
                 onclick: move |_| open.set(!open()),
                 span { class: "size-1.5 shrink-0 rounded-full {stage_dot}" }
                 span { class: "min-w-0 truncate", "{selected_name}" }
-                LineIconView {
-                    icon: LineIcon::ChevronDown,
-                    class: if open() {
-                        "size-2.5 shrink-0 rotate-180 text-muted-foreground".to_string()
-                    } else {
-                        "size-2.5 shrink-0 text-muted-foreground".to_string()
-                    },
-                }
             }
             if open() {
                 DropdownPopup { match_width: true, class: "min-w-full p-1",

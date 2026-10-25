@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_ecs::page::{
-    HostHistory, HostHistoryObserve, HostHistorySet, HostHistoryTraversed, PageManifest,
+    HostHistory, HostHistoryObserve, HostHistorySet, HostHistoryTraversed, HostsPage, PageManifest,
 };
 use vmux_ecs::{
     PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget,
@@ -57,10 +57,7 @@ impl<M> HostedUiManifest<M> {
 
 fn sync_hosted_view<M: Component + Default>(
     manifest: Res<HostedUiManifest<M>>,
-    views: Query<
-        (Entity, &PageMetadata, Has<M>),
-        (With<vmux_ecs::page::HostsPage>, Changed<PageMetadata>),
-    >,
+    views: Query<(Entity, &PageMetadata, Has<M>), (With<HostsPage>, Changed<PageMetadata>)>,
     mut commands: Commands,
 ) {
     for (entity, page, marked) in &views {
@@ -77,6 +74,19 @@ fn sync_hosted_view<M: Component + Default>(
 }
 
 pub struct HostedPagePlugin;
+
+#[derive(Component)]
+pub(crate) struct Surface(String);
+
+impl Surface {
+    pub(crate) fn new(url: &str) -> Self {
+        Self(url.to_string())
+    }
+
+    fn belongs_to(&self, page: &HostedPage) -> bool {
+        page.answers_for(&self.0)
+    }
+}
 
 impl Plugin for HostedPagePlugin {
     fn build(&self, app: &mut App) {
@@ -100,6 +110,8 @@ fn open(
     pages: Query<(&HostedPage, Option<&PageManifest>)>,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     histories: Query<(), With<HostHistory>>,
+    children: Query<&Children>,
+    hosted_browsers: Query<&Surface, (With<Browser>, With<HostsPage>)>,
     mut commands: Commands,
 ) {
     let mut opened = std::collections::HashSet::new();
@@ -117,7 +129,6 @@ fn open(
             continue;
         };
         if opened.insert(task.stack) {
-            commands.entity(task.stack).despawn_children();
             let metadata = manifest.map_or_else(
                 || PageMetadata {
                     url: task.url.clone(),
@@ -126,14 +137,26 @@ fn open(
                 },
                 |manifest| manifest.metadata_for(&task.url),
             );
-            commands.entity(task.stack).insert(metadata);
+            commands.entity(task.stack).insert(metadata.clone());
             if !histories.contains(task.stack) {
                 commands.entity(task.stack).insert(HostHistory::default());
             }
-            commands.spawn((
-                Browser::hosted_page(&task.url, page.title),
-                ChildOf(task.stack),
-            ));
+            let existing = children.get(task.stack).ok().and_then(|children| {
+                children.iter().find(|child| {
+                    hosted_browsers
+                        .get(*child)
+                        .is_ok_and(|surface| surface.belongs_to(page))
+                })
+            });
+            if let Some(browser) = existing {
+                commands.entity(browser).insert(metadata);
+            } else {
+                commands.entity(task.stack).despawn_children();
+                commands.spawn((
+                    Browser::hosted_page(&task.url, page.title),
+                    ChildOf(task.stack),
+                ));
+            }
         }
         commands.entity(task_entity).insert(PageOpenHandled);
     }
@@ -212,7 +235,7 @@ mod tests {
         let view = app
             .world_mut()
             .spawn((
-                vmux_ecs::page::HostsPage,
+                HostsPage,
                 PageMetadata {
                     url: "vmux://services/".into(),
                     ..Default::default()
@@ -358,5 +381,92 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].url, "vmux://projects/");
         assert!(matches!(requests[0].target, PageOpenTarget::Stack(entity) if entity == stack));
+    }
+
+    #[test]
+    fn hosted_navigation_reuses_the_rendering_surface() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::page::PagePlugin, HostedPagePlugin))
+            .add_message::<PageOpenRequest>();
+        app.world_mut()
+            .spawn(HostedPage::subtree("vmux://sessions/", "Sessions"));
+        let stack = app.world_mut().spawn(crate::stack::Stack::default()).id();
+
+        let open = |app: &mut App, url: &str| {
+            app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: url.to_string(),
+                request_id: None,
+            });
+            app.update();
+            app.update();
+            app.world()
+                .get::<Children>(stack)
+                .unwrap()
+                .iter()
+                .find(|child| app.world().entity(*child).contains::<Browser>())
+                .unwrap()
+        };
+
+        let first = open(&mut app, "vmux://sessions/");
+        let second = open(&mut app, "vmux://sessions/codex/session-1");
+
+        let browsers = app
+            .world()
+            .get::<Children>(stack)
+            .unwrap()
+            .iter()
+            .filter(|child| app.world().entity(*child).contains::<Browser>())
+            .collect::<Vec<_>>();
+        assert_eq!(browsers.len(), 1);
+        assert_eq!(first, second);
+        assert_eq!(
+            app.world().get::<PageMetadata>(browsers[0]).unwrap().url,
+            "vmux://sessions/codex/session-1"
+        );
+    }
+
+    #[test]
+    fn navigation_between_page_families_replaces_the_rendering_surface() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_ecs::page::PagePlugin, HostedPagePlugin))
+            .add_message::<PageOpenRequest>();
+        app.world_mut()
+            .spawn(HostedPage::subtree("vmux://sessions/", "Sessions"));
+        app.world_mut()
+            .spawn(HostedPage::subtree("vmux://projects/", "Projects"));
+        let stack = app.world_mut().spawn(crate::stack::Stack::default()).id();
+
+        let open = |app: &mut App, url: &str| {
+            app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: url.to_string(),
+                request_id: None,
+            });
+            app.update();
+            app.update();
+            app.world()
+                .get::<Children>(stack)
+                .unwrap()
+                .iter()
+                .find(|child| app.world().entity(*child).contains::<Browser>())
+                .unwrap()
+        };
+
+        let sessions = open(&mut app, "vmux://sessions/");
+        let projects = open(&mut app, "vmux://projects/");
+
+        assert_ne!(sessions, projects);
+        assert_eq!(
+            app.world()
+                .get::<Children>(stack)
+                .unwrap()
+                .iter()
+                .filter(|child| app.world().entity(*child).contains::<Browser>())
+                .count(),
+            1
+        );
     }
 }
