@@ -13,7 +13,9 @@ use vmux_ecs::{
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
-use vmux_session::host::{ImportedConversation, SessionView};
+use vmux_session::event::{ChatSnapshot, ChatTranscriptState};
+use vmux_session::host::{ImportedConversation, SessionManagerView, SessionView};
+use vmux_session::state::{ChatUiState, SessionDetailUiState};
 use vmux_session::{AgentId, Cleanup, PromptQueue, Route, Session, SessionId};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
@@ -130,6 +132,7 @@ fn prepare(
     pending: Query<(), With<TabWorktreePending>>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
+    manager_views: Query<(Entity, &ChildOf), With<SessionManagerView>>,
     workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
     child_of: Query<&ChildOf>,
     space_hierarchy: vmux_layout::space::SpaceHierarchy,
@@ -151,16 +154,28 @@ fn prepare(
         .iter()
         .map(|(entity, child_of)| (child_of.parent(), entity))
         .collect();
+    let manager_by_stack = manager_views
+        .iter()
+        .map(|(entity, child_of)| (child_of.parent(), entity))
+        .collect::<std::collections::HashMap<_, _>>();
     let mut opened_stacks = std::collections::HashSet::new();
     for (task_entity, task) in &tasks {
         let Some(route) = Route::parse(&task.url) else {
             continue;
         };
+        let transition_view = transitions
+            .get(task.stack)
+            .ok()
+            .map(|transition| transition.webview)
+            .or_else(|| {
+                matches!(route, Route::Session(_))
+                    .then(|| manager_by_stack.get(&task.stack).copied())
+                    .flatten()
+            });
         if !preparing_by_stack.contains_key(&task.stack)
-            && let Ok(transition) = transitions.get(task.stack)
+            && let Some(view) = transition_view
             && let Some(target) = AgentChatTarget::parse(&task.url)
         {
-            let view = transition.webview;
             commands
                 .entity(view)
                 .insert((
@@ -174,10 +189,26 @@ fn prepare(
                     PreparingAgentChatView,
                 ))
                 .remove::<(
+                    SessionManagerView,
                     StartInlineTransitionView,
                     vmux_ecs::launcher::HostsLauncher,
                     vmux_ecs::page::PageReady,
                 )>();
+            commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
+                view,
+                &ChatSnapshot {
+                    transcript_loading: true,
+                    ..Default::default()
+                },
+            ));
+            commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
+                view,
+                &ChatTranscriptState::default(),
+            ));
+            commands.trigger(vmux_ecs::UiStateWrite::<SessionDetailUiState>::from_event(
+                view,
+                &SessionDetailUiState::default(),
+            ));
             commands
                 .entity(task.stack)
                 .insert(StartInlineTransition { webview: view });

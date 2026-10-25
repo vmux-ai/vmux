@@ -545,7 +545,7 @@ struct PendingImports {
 }
 
 impl PendingImports {
-    fn reserve(&mut self, id: SessionId, import: PendingImport) -> bool {
+    fn reserve(&mut self, id: SessionId, import: PendingImport) -> PendingImportReservation {
         let key = (
             AgentFamily::of(&import.source.agent),
             import.source.sid.clone(),
@@ -554,11 +554,22 @@ impl PendingImports {
             && let Some(pending) = self.by_id.get_mut(existing)
         {
             pending.destination = import.destination;
-            return false;
+            let open_now = pending.deferred_open && !import.deferred_open;
+            pending.deferred_open = import.deferred_open;
+            return PendingImportReservation {
+                id: existing.clone(),
+                created: false,
+                open_now,
+            };
         }
         self.by_source.insert(key, id.clone());
-        self.by_id.insert(id, import);
-        true
+        let open_now = !import.deferred_open;
+        self.by_id.insert(id.clone(), import);
+        PendingImportReservation {
+            id,
+            created: true,
+            open_now,
+        }
     }
 
     fn take(&mut self, id: &SessionId) -> Option<PendingImport> {
@@ -573,8 +584,15 @@ impl PendingImports {
 
 struct PendingImport {
     destination: ResumeDestination,
+    deferred_open: bool,
     source: ProviderSession,
     agent: AgentId,
+}
+
+struct PendingImportReservation {
+    id: SessionId,
+    created: bool,
+    open_now: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -636,6 +654,19 @@ impl ResumeOpener<'_> {
             url,
             request_id: None,
         });
+    }
+}
+
+impl ResumeDestination {
+    fn opens_in_place(self) -> bool {
+        matches!(
+            self.open,
+            OpenTarget::InPlace
+                | OpenTarget::InPane {
+                    mode: PaneOpenMode::InPlace,
+                    ..
+                }
+        )
     }
 }
 
@@ -2105,17 +2136,22 @@ fn open(
         source.created_at,
         source.updated_at,
     );
-    if !pending.reserve(
+    let deferred_open = !destination.opens_in_place();
+    let reservation = pending.reserve(
         create.id().clone(),
         PendingImport {
             destination,
+            deferred_open,
             source,
             agent,
         },
-    ) {
-        return;
+    );
+    if reservation.open_now {
+        opener.open(destination, Route::Session(reservation.id.clone()).url());
     }
-    creates.write(create);
+    if reservation.created {
+        creates.write(create);
+    }
 }
 
 fn attach(
@@ -2140,7 +2176,9 @@ fn attach(
         ProviderSessionId(import.source.sid),
         AgentConversationTitle(title),
     ));
-    opener.open(import.destination, Route::Session(event.id.clone()).url());
+    if import.deferred_open {
+        opener.open(import.destination, Route::Session(event.id.clone()).url());
+    }
 }
 
 #[derive(SystemParam)]
@@ -2349,7 +2387,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_resume_materializes_a_vmux_session_before_navigation() {
+    fn provider_resume_opens_the_pending_session_before_materialization() {
         let cwd = tempfile::tempdir().unwrap();
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
@@ -2407,6 +2445,17 @@ mod tests {
         assert_eq!(created.len(), 1);
         assert_eq!(created[0].agent, Some(AgentId("codex".into())));
         let id = created[0].id().clone();
+        let opened = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].url, Route::Session(id.clone()).url());
+        assert!(matches!(
+            opened[0].target,
+            PageOpenTarget::Stack(entity) if entity == stack
+        ));
         let session = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(Created {
             entity: session,
@@ -2426,6 +2475,75 @@ mod tests {
             app.world().get::<ProviderSessionId>(session),
             Some(&ProviderSessionId("provider-session".into()))
         );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn provider_resume_defers_new_stack_navigation_until_materialization() {
+        let cwd = tempfile::tempdir().unwrap();
+        let cwd = cwd.path().canonicalize().unwrap();
+        let mut app = App::new();
+        app.init_resource::<ProviderCatalog>()
+            .init_resource::<PendingImports>()
+            .init_resource::<ProviderSessionTombstones>()
+            .init_resource::<AppSettings>()
+            .add_message::<CreateRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .add_observer(open)
+            .add_observer(attach);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                agent: "codex".into(),
+                name: "Provider task".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+                ..Default::default()
+            });
+        let stack = app.world_mut().spawn_empty().id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+                open: Some(OpenTarget::InNewStack),
+            },
+        });
+
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<PageOpenRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        let [created] = app
+            .world_mut()
+            .resource_mut::<Messages<CreateRequest>>()
+            .drain()
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let id = created.id().clone();
+        let session = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(Created {
+            entity: session,
+            id: id.clone(),
+        });
+        app.world_mut().flush();
+
         let opened = app
             .world_mut()
             .resource_mut::<Messages<PageOpenRequest>>()
@@ -2433,10 +2551,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(opened.len(), 1);
         assert_eq!(opened[0].url, Route::Session(id).url());
-        assert!(matches!(
-            opened[0].target,
-            PageOpenTarget::Stack(entity) if entity == stack
-        ));
+        assert!(matches!(opened[0].target, PageOpenTarget::NewStack));
     }
 
     #[test]
