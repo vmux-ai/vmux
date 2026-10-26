@@ -3,7 +3,7 @@ use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, Shar
 #[cfg(test)]
 use vmux_ecs::ProcessId;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
-use vmux_ecs::team::Profile;
+use vmux_ecs::team::{Avatar, Profile, Profiles};
 use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
 use vmux_feature::AppFeatureExt;
 use vmux_git::worktree::ValidatedLinkedWorkspace;
@@ -81,17 +81,27 @@ pub(super) struct InitialAcpSessionConfig {
 
 fn info(
     mut reader: MessageReader<AcpAgentInfo>,
-    mut sessions: Query<(&Id<Session>, &AgentId, &mut Profile), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentId), With<Session>>,
+    profiles: Profiles,
+    mut commands: Commands,
 ) {
     for event in reader.read() {
         let name = event.name.trim();
         if name.is_empty() {
             continue;
         }
-        for (session_id, agent_id, mut profile) in &mut sessions {
-            if session_id.as_str() == event.sid && profile.name != name {
-                let icon = profile.icon.clone();
-                *profile = Profile::registry(name, &agent_id.0).with_icon(icon);
+        for (session, session_id, agent_id) in &sessions {
+            if session_id.as_str() != event.sid {
+                continue;
+            }
+            let Some(profile) = profiles.get(session) else {
+                continue;
+            };
+            if profile.name() != name {
+                commands.entity(profile.entity()).insert((
+                    Name::new(name.to_string()),
+                    Avatar(vmux_ecs::team::AvatarSpec::for_registry(name, &agent_id.0)),
+                ));
             }
         }
     }
@@ -776,22 +786,32 @@ mod tests {
         });
         app.update();
 
+        let profile = app
+            .world_mut()
+            .run_system_once(move |profiles: Profiles| {
+                profiles.get(matching).map(|profile| {
+                    (
+                        profile.name().to_string(),
+                        profile.icon().map(str::to_string),
+                    )
+                })
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(profile.0, "Antigravity");
         assert_eq!(
-            app.world().get::<Profile>(matching).unwrap().name,
-            "Antigravity"
-        );
-        assert_eq!(
-            app.world()
-                .get::<Profile>(matching)
-                .unwrap()
-                .icon
-                .as_deref(),
+            profile.1.as_deref(),
             Some("https://cdn.example/antigravity.svg")
         );
-        assert_eq!(
-            app.world().get::<Profile>(unrelated).unwrap().name,
-            "Claude"
-        );
+        let unrelated_name = app
+            .world_mut()
+            .run_system_once(move |profiles: Profiles| {
+                profiles
+                    .get(unrelated)
+                    .map(|profile| profile.name().to_string())
+            })
+            .unwrap();
+        assert_eq!(unrelated_name.as_deref(), Some("Claude"));
 
         app.world_mut().write_message(AcpAgentInfo {
             sid: "s1".into(),
@@ -799,10 +819,15 @@ mod tests {
         });
         app.update();
 
-        assert_eq!(
-            app.world().get::<Profile>(matching).unwrap().name,
-            "Antigravity"
-        );
+        let matching_name = app
+            .world_mut()
+            .run_system_once(move |profiles: Profiles| {
+                profiles
+                    .get(matching)
+                    .map(|profile| profile.name().to_string())
+            })
+            .unwrap();
+        assert_eq!(matching_name.as_deref(), Some("Antigravity"));
     }
 
     #[test]

@@ -4,7 +4,7 @@ use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{AgentTurnEnded, ProcessId};
 use vmux_ecs::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 use vmux_ecs::service::ServiceMessageSet;
-use vmux_ecs::team::{Agent, Profile};
+use vmux_ecs::team::{Agent, Profile, Profiles};
 #[cfg(test)]
 use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::ComputeFocusSet;
@@ -61,7 +61,8 @@ fn mark_done(
     mut reader: MessageReader<AgentAttention>,
     mut notify: MessageWriter<OsNotify>,
     context: AttentionContext,
-    meta: Query<(&Profile, Option<&Id<Session>>, Option<&Agent>)>,
+    meta: Query<(Option<&Id<Session>>, Option<&Agent>)>,
+    profiles: Profiles,
     time: Res<Time>,
     mut last_notify: Local<std::collections::HashMap<Entity, f64>>,
     mut commands: Commands,
@@ -80,16 +81,16 @@ fn mark_done(
             continue;
         }
         last_notify.insert(att.entity, now);
-        let (name, sid) = match meta.get(att.entity) {
-            Ok((profile, session, agent)) => {
+        let (name, sid) = match (profiles.get(att.entity), meta.get(att.entity)) {
+            (Some(profile), Ok((session, agent))) => {
                 let sid = session
                     .map(|s| s.as_str().to_string())
                     .filter(|s| !s.is_empty())
                     .or_else(|| agent.map(|a| a.sid.clone()).filter(|s| !s.is_empty()))
                     .unwrap_or_default();
-                (profile.name.clone(), sid)
+                (profile.name().to_string(), sid)
             }
-            Err(_) => ("Agent".to_string(), String::new()),
+            _ => ("Agent".to_string(), String::new()),
         };
         let short_sid: String = sid.chars().take(8).collect();
         let title = att
