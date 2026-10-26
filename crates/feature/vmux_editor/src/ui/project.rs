@@ -17,10 +17,10 @@ use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterPill, FilterTrigger};
 use vmux_ui::components::manager::{
-    ManagerAddButton, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty, ManagerGridSize,
-    ManagerList, ManagerPage, ManagerRow, ManagerSearch, ManagerSearchPopover, ManagerSidebarItem,
-    ManagerSkeleton, ManagerTone, ManagerView, ManagerViewToggle, WorkspaceBreadcrumbHeader,
-    WorkspaceLayout, WorkspacePage,
+    ManagerAddButton, ManagerBadge, ManagerCard, ManagerCollection, ManagerEmpty,
+    ManagerExpandableSearch, ManagerGridSize, ManagerList, ManagerPage, ManagerRow, ManagerSearch,
+    ManagerSidebarItem, ManagerSkeleton, ManagerTone, ManagerView, ManagerViewToggle,
+    WorkspaceBreadcrumbHeader, WorkspaceLayout, WorkspacePage,
 };
 use vmux_ui::components::page::PageContent;
 use vmux_ui::components::sheet::SheetHeaderChevron;
@@ -150,7 +150,7 @@ fn ProjectManagerActions(
     let active = !controls.query().is_empty() || !presentation.selected_filters.is_empty();
     rsx! {
         div { class: "flex shrink-0 items-center gap-1",
-            ManagerSearchPopover {
+            ManagerExpandableSearch {
                 open,
                 active,
                 label: translate("layout-projects"),

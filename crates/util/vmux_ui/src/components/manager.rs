@@ -3,9 +3,7 @@ use crate::components::badge::Badge;
 use crate::components::breadcrumb::{
     BreadcrumbOption, BreadcrumbOptionIcon, BreadcrumbSelector, Breadcrumbs,
 };
-use crate::components::dropdown::{
-    Dropdown, DropdownAlign, DropdownOption, DropdownPopup, DropdownSelector,
-};
+use crate::components::dropdown::{Dropdown, DropdownOption, DropdownSelector};
 use crate::components::page::{PageContent, PageHeader, PageShell};
 use crate::components::skeleton::Skeleton;
 use crate::components::tooltip::Tooltip;
@@ -14,7 +12,7 @@ use crate::icon::{LineIcon, LineIconView};
 use crate::navigation::NavigationGesture;
 use crate::navigation::PageNavigation;
 use crate::platform::Platform;
-use dioxus::core::Task;
+use dioxus::core::{Task, current_scope_id};
 use dioxus::prelude::*;
 use vmux_api::BuiltinIcon;
 
@@ -615,41 +613,110 @@ pub fn ManagerAddButton(
 }
 
 #[component]
-pub fn ManagerSearchPopover(
+pub fn ManagerExpandableSearch(
     open: bool,
     active: bool,
     label: String,
-    #[props(default)] align_left: bool,
     ontoggle: EventHandler<()>,
     ondismiss: EventHandler<()>,
     children: Element,
 ) -> Element {
-    let align = if align_left {
-        DropdownAlign::Start
+    let root_id = format!("vmux-manager-search-{}", current_scope_id().0);
+    let class = if open {
+        "relative z-[100] h-7 w-[min(28rem,45vw)] shrink-0 transition-[width] duration-200 ease-out motion-reduce:transition-none"
     } else {
-        DropdownAlign::End
+        "relative z-auto h-7 w-7 shrink-0 transition-[width] duration-200 ease-out motion-reduce:transition-none"
     };
     rsx! {
         Dropdown {
             open,
-            class: "shrink-0".to_string(),
+            class: class.to_string(),
             keyboard_navigation: true,
             on_dismiss: move |_| ondismiss.call(()),
-            ManagerIconButton {
-                label,
-                active,
-                onclick: move |_| ontoggle.call(()),
-                LineIconView { icon: LineIcon::Search, class: "size-3.5".to_string() }
-            }
-            if open {
-                DropdownPopup {
-                    align,
-                    class: "w-[min(28rem,calc(100vw-2rem))]",
-                    {children}
+            div {
+                id: root_id.clone(),
+                class: "h-7 w-full",
+                "data-vmux-search-open": if open { "true" } else { "false" },
+                if open {
+                    ManagerSearchDismiss {
+                        root_id: root_id.clone(),
+                        ondismiss: move |_| ondismiss.call(()),
+                    }
+                    div { class: "relative h-7 w-full animate-[dx-fade-in_120ms_ease-out_forwards]", {children} }
+                } else {
+                    ManagerIconButton {
+                        label,
+                        active,
+                        onclick: move |_| ontoggle.call(()),
+                        LineIconView { icon: LineIcon::Search, class: "size-3.5".to_string() }
+                    }
                 }
             }
         }
     }
+}
+
+#[component]
+fn ManagerSearchDismiss(root_id: String, ondismiss: EventHandler<()>) -> Element {
+    use_future(move || {
+        let script = format!(
+            r#"
+const root = document.getElementById({root_id:?});
+if (!root) {{
+  dioxus.send(false);
+}} else {{
+  const entries = globalThis.__vmuxManagerSearchEntries ??= new Map();
+  entries.get(root.id)?.();
+  let active = true;
+  const cleanup = () => {{
+    if (!active) return;
+    active = false;
+    observer.disconnect();
+    document.removeEventListener('pointerdown', pointerdown, true);
+    document.removeEventListener('keydown', keydown, true);
+    window.removeEventListener('blur', dismiss, true);
+    if (entries.get(root.id) === cleanup) entries.delete(root.id);
+  }};
+  const dismiss = () => {{
+    if (!active) return;
+    cleanup();
+    dioxus.send(true);
+  }};
+  const pointerdown = event => {{
+    if (event.composedPath().includes(root)) return;
+    dismiss();
+  }};
+  const keydown = event => {{
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    dismiss();
+  }};
+  const observer = new MutationObserver(() => {{
+    if (root.isConnected && root.getAttribute('data-vmux-search-open') === 'true') return;
+    cleanup();
+  }});
+  entries.set(root.id, cleanup);
+  observer.observe(document, {{
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-vmux-search-open'],
+  }});
+  document.addEventListener('pointerdown', pointerdown, true);
+  document.addEventListener('keydown', keydown, true);
+  window.addEventListener('blur', dismiss, true);
+}}
+"#
+        );
+        async move {
+            let mut eval = document::eval(&script);
+            if eval.recv::<bool>().await.is_ok_and(|dismiss| dismiss) {
+                ondismiss.call(());
+            }
+        }
+    });
+    rsx! {}
 }
 
 #[component]
@@ -670,7 +737,7 @@ pub fn ManagerSearchAction(
         label
     };
     rsx! {
-        ManagerSearchPopover {
+        ManagerExpandableSearch {
             open: open(),
             active: active || !value.is_empty(),
             label,

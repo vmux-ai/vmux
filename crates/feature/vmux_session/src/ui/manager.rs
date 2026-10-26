@@ -15,9 +15,9 @@ use vmux_ui::components::dropdown::{Dropdown, DropdownAlign, DropdownPopup};
 use vmux_ui::components::filter::{FilterMenu, FilterOption, FilterPill, FilterTrigger};
 use vmux_ui::components::inline_edit::EditableText;
 use vmux_ui::components::manager::{
-    ManagerAddButton, ManagerEmpty, ManagerIconButton, ManagerPage, ManagerSearch,
-    ManagerSearchPopover, ManagerSidebarItem, ManagerSidebarSection, ManagerView,
-    ManagerViewToggle, WorkspaceBreadcrumbHeader, WorkspaceLayout, WorkspacePage,
+    ManagerAddButton, ManagerEmpty, ManagerExpandableSearch, ManagerIconButton, ManagerPage,
+    ManagerSearch, ManagerSidebarItem, ManagerSidebarSection, ManagerView, ManagerViewToggle,
+    WorkspaceBreadcrumbHeader, WorkspaceLayout, WorkspacePage,
 };
 use vmux_ui::components::motion::{Collapse, Collapsible};
 use vmux_ui::components::sheet::{SheetHeaderAction, SheetHeaderChevron};
@@ -232,7 +232,7 @@ fn SessionsManagerActions(
                     LineIconView { icon: LineIcon::X, class: "size-3.5".to_string() }
                 }
             }
-            ManagerSearchPopover {
+            ManagerExpandableSearch {
                 open,
                 active,
                 label: translate("sessions-search"),
