@@ -1838,7 +1838,7 @@ mod tests {
             .world_mut()
             .query_filtered::<
                 &crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >()
             .single(app.world())
             .unwrap();
@@ -1868,7 +1868,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &mut crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             let mut active = query.single_mut(world).unwrap();
             active.tab = Some(tab);
@@ -1898,7 +1898,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             *query.single(world).unwrap()
         };

@@ -1,5 +1,5 @@
 use crate::{
-    active_pane::{ActiveStack, ProfileId},
+    active_pane::{ActivePaneScope, ActiveStack},
     host::swap::SiblingOrder,
     pane::{Pane, PaneHierarchy, PaneSplit, PaneStacks, PendingCursorWarp},
     presentation::{Projection, Retiring, Transition},
@@ -785,7 +785,7 @@ impl LayoutFocus<'_, '_> {
 }
 
 fn compute_focused(
-    mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
+    mut scopes: Query<(&ActivePaneScope, &mut ActiveStack)>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
     mut changes: MessageWriter<crate::presentation::FocusChanged>,
@@ -794,8 +794,8 @@ fn compute_focused(
     let tab = active_tab_param.get();
     let (_, pane, stack) = focus.resolve(tab);
     let next = ActiveStack { tab, pane, stack };
-    for (profile, mut active) in &mut profiles {
-        if *profile == ProfileId::Local {
+    for (scope, mut active) in &mut scopes {
+        if *scope == ActivePaneScope::Local {
             if *active != next {
                 changes.write(crate::presentation::FocusChanged {
                     previous: *active,

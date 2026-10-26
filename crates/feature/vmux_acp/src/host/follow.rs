@@ -181,7 +181,7 @@ fn file_touch(
                 .or(existing.map(|(_, pane)| pane))
             {
                 resolve.activate.write(ActivatePane {
-                    profile: vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}")),
+                    scope: vmux_layout::active_pane::ActivePaneScope::Agent(format!("{anchor:?}")),
                     active: vmux_layout::active_pane::ActiveStack {
                         tab: None,
                         pane: Some(pane),
