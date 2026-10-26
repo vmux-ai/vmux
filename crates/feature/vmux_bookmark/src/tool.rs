@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::BinEvent;
-use vmux_api::PageIcon;
+use vmux_api::bookmark::BookmarkEntry;
 use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentQueryResult, AgentRequest,
     AgentRequestId, ClientMessage,
 };
+use vmux_api::{BinEvent, Id, PageIcon};
 use vmux_ecs::service::ServiceRequest;
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin};
 use vmux_feature::AppFeatureExt;
 use vmux_layout::bookmark::{
     AddRequest, CreateFolderRequest, PinRequest, PinUrlRequest, RemoveRequest, UnpinRequest,
@@ -222,10 +222,10 @@ fn route_queries(
 
 fn answer_queries(
     mut requests: MessageReader<BookmarkListRequest>,
-    pins: Query<(&Uuid, &PageMetadata, &BookmarkOrder), With<Pin>>,
+    pins: Query<(&Id<BookmarkEntry>, &PageMetadata, &BookmarkOrder), With<Pin>>,
     folders: Query<
         (
-            &Uuid,
+            &Id<BookmarkEntry>,
             &Name,
             Option<&Children>,
             Has<Collapsed>,
@@ -233,8 +233,11 @@ fn answer_queries(
         ),
         With<Folder>,
     >,
-    top_level: Query<(&Uuid, &PageMetadata, &BookmarkOrder), (With<Bookmark>, Without<ChildOf>)>,
-    bookmarks: Query<(&Uuid, &PageMetadata, &BookmarkOrder), With<Bookmark>>,
+    top_level: Query<
+        (&Id<BookmarkEntry>, &PageMetadata, &BookmarkOrder),
+        (With<Bookmark>, Without<ChildOf>),
+    >,
+    bookmarks: Query<(&Id<BookmarkEntry>, &PageMetadata, &BookmarkOrder), With<Bookmark>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
@@ -244,7 +247,7 @@ fn answer_queries(
                 (
                     order.0,
                     AgentBookmark::new(
-                        uuid.0.clone(),
+                        uuid.as_str().to_string(),
                         metadata.url.clone(),
                         metadata.title.clone(),
                         metadata.icon.favicon_url(),
@@ -263,7 +266,7 @@ fn answer_queries(
                         child_rows.push((
                             child_order.0,
                             AgentBookmark::new(
-                                child_uuid.0.clone(),
+                                child_uuid.as_str().to_string(),
                                 metadata.url.clone(),
                                 metadata.title.clone(),
                                 metadata.icon.favicon_url(),
@@ -280,7 +283,7 @@ fn answer_queries(
             roots.push((
                 order.0,
                 AgentBookmarkNode::Folder {
-                    uuid: uuid.0.clone(),
+                    uuid: uuid.as_str().to_string(),
                     name: name.to_string(),
                     collapsed,
                     children,
@@ -292,7 +295,7 @@ fn answer_queries(
                 order.0,
                 AgentBookmarkNode::Entry {
                     bookmark: AgentBookmark::new(
-                        uuid.0.clone(),
+                        uuid.as_str().to_string(),
                         metadata.url.clone(),
                         metadata.title.clone(),
                         metadata.icon.favicon_url(),
