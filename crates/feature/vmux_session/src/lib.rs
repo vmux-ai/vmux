@@ -26,6 +26,7 @@ pub use model::{
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderSessionRestoreRequest,
     ProviderSessionTombstone, ProviderStage, ProviderStageChangeRequest, RenameRequest,
     SessionDuplicate, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
+    TerminalStage,
 };
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};
