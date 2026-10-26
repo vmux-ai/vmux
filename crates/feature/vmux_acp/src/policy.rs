@@ -68,6 +68,8 @@ mod tests {
             .register_feature::<crate::Feature>()
             .register_feature::<ForeignFeature>();
         add(&mut app);
+        app.finish();
+        app.cleanup();
         app.update();
 
         let entries = app
