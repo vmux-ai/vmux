@@ -2,11 +2,11 @@ use bevy_app::{App, Plugin};
 #[cfg(all(host, not(target_os = "android")))]
 use bevy_app::{PreStartup, Startup};
 #[cfg(all(host, not(target_os = "android")))]
-use bevy_ecs::prelude::{Commands, Name};
+use bevy_ecs::prelude::{Commands, Name, World};
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::host_spawn::HostSpawnRoute;
 #[cfg(all(host, not(target_os = "android")))]
-use vmux_ecs::persistence::WorkspaceStoreValidator;
+use vmux_ecs::persistence::{WorkspaceRestoreValidator, WorkspaceStoreValidator};
 #[cfg(host)]
 use vmux_feature::AppFeatureExt;
 
@@ -94,6 +94,48 @@ fn spawn_store_validator(mut commands: Commands) {
             rejects: crate::Route::rejects_persisted_store,
         },
     ));
+    commands.spawn((
+        Name::new("Session identity validator"),
+        WorkspaceRestoreValidator::unique::<crate::Id<crate::Session>>("Session identity"),
+    ));
+    commands.spawn((
+        Name::new("Session composition validator"),
+        WorkspaceRestoreValidator::new("Session composition", validate_sessions),
+    ));
+}
+
+#[cfg(all(host, not(target_os = "android")))]
+fn validate_sessions(world: &mut World) -> Result<(), String> {
+    let mut sessions = world.query_filtered::<(
+        bevy_ecs::entity::Entity,
+        Option<&crate::Id<crate::Session>>,
+        Option<&Name>,
+        Option<&vmux_ecs::Description>,
+        Option<&vmux_ecs::Cwd>,
+        Option<&vmux_ecs::CreatedAt>,
+        Option<&vmux_ecs::LastActivatedAt>,
+        Option<&crate::Stage>,
+        Option<&crate::StageChangedAt>,
+    ), bevy_ecs::query::With<crate::Session>>();
+    for (entity, id, name, description, cwd, created, activated, stage, changed) in
+        sessions.iter(world)
+    {
+        if id.is_none()
+            || name.is_none()
+            || description.is_none()
+            || cwd.is_none()
+            || created.is_none()
+            || activated.is_none()
+            || stage.is_none()
+            || changed.is_none()
+        {
+            return Err(format!("Session {entity} is partially initialized"));
+        }
+        if stage.is_some_and(|stage| stage.0.0.trim().is_empty()) {
+            return Err(format!("Session {entity} has an empty stage"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(all(host, not(target_os = "android")))]

@@ -563,6 +563,10 @@ a revision is saving remain dirty and trigger the next save. Specialized domains
 entity scope, path, validation, seeding, and one writer while sharing the durability mechanics.
 Materialization runs through a tracked load event, so deserialize or scene failures update the same
 typed state, hard-reset only that store, and cannot leave restore silently pending.
+The first `PreUpdate` completes `Validate → Resolve → Ready`: owner-registered validators reject
+duplicate stable IDs, partial canonical entities, missing owners, and ownership cycles before layout
+reconstruction. A failed restore despawns the materialized entities, hard-resets the store, and
+bootstraps fresh state. Feature projections begin in `Update`, after restore is ready.
 
 Collaborative roots own persisted committed-operation, snapshot, tombstone, and replica-ack child
 entities. Replay orders operations by sequence and rejects duplicate identities, duplicate

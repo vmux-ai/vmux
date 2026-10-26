@@ -9,6 +9,8 @@ use moonshine_save::load::{DefaultUnloadFilter, LoadCommand, LoadStream, LoadWor
 use moonshine_save::prelude::{SaveEvent, SaveOutput};
 use moonshine_save::save::{DefaultSaveFilter, EntityFilter, SaveResult};
 use moonshine_util::event::{OnSingle, SingleEvent, TriggerSingle};
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
@@ -59,6 +61,13 @@ pub enum RestorePhase {
     Resolve,
     Ready,
     Failed,
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WorkspaceRestoreSet {
+    Validate,
+    Resolve,
+    Ready,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -295,6 +304,65 @@ pub struct WorkspaceSaveRequest {
 pub struct WorkspaceStoreValidator {
     pub name: &'static str,
     pub rejects: fn(&str) -> bool,
+}
+
+#[derive(Component)]
+pub struct WorkspaceRestoreValidator {
+    pub name: &'static str,
+    pub validate: fn(&mut World) -> Result<(), String>,
+}
+
+impl WorkspaceRestoreValidator {
+    pub const fn new(name: &'static str, validate: fn(&mut World) -> Result<(), String>) -> Self {
+        Self { name, validate }
+    }
+
+    pub fn unique<T>(name: &'static str) -> Self
+    where
+        T: Component + Clone + Eq + Hash,
+    {
+        Self::new(name, validate_unique::<T>)
+    }
+
+    pub const fn ownership() -> Self {
+        Self::new("ownership graph", validate_ownership)
+    }
+}
+
+fn validate_unique<T>(world: &mut World) -> Result<(), String>
+where
+    T: Component + Clone + Eq + Hash,
+{
+    let mut seen = HashSet::new();
+    let mut values = world.query::<&T>();
+    for value in values.iter(world) {
+        if !seen.insert(value.clone()) {
+            return Err(format!("duplicate {}", std::any::type_name::<T>()));
+        }
+    }
+    Ok(())
+}
+
+fn validate_ownership(world: &mut World) -> Result<(), String> {
+    let mut relationships = world.query::<(Entity, &ChildOf)>();
+    let parents = relationships
+        .iter(world)
+        .map(|(entity, parent)| (entity, parent.parent()))
+        .collect::<HashMap<_, _>>();
+    for (entity, parent) in &parents {
+        if world.get_entity(*parent).is_err() {
+            return Err(format!("{entity} has missing owner {parent}"));
+        }
+        let mut visited = HashSet::new();
+        let mut current = *entity;
+        while let Some(parent) = parents.get(&current) {
+            if !visited.insert(current) {
+                return Err(format!("ownership cycle contains {current}"));
+            }
+            current = *parent;
+        }
+    }
+    Ok(())
 }
 
 #[derive(SystemParam)]
@@ -803,5 +871,19 @@ mod tests {
         let state = app.world().get::<PersistenceState>(state).unwrap();
         assert_eq!(state.phase(), RestorePhase::Failed);
         assert!(matches!(state.recovery(), PersistenceRecovery::Failed(_)));
+    }
+
+    #[test]
+    fn restore_validator_rejects_duplicate_stable_identity() {
+        enum Record {}
+
+        let mut app = App::new();
+        app.world_mut()
+            .spawn(vmux_api::Id::<Record>::new("record-1"));
+        app.world_mut()
+            .spawn(vmux_api::Id::<Record>::new("record-1"));
+        let validator = WorkspaceRestoreValidator::unique::<vmux_api::Id<Record>>("record IDs");
+
+        assert!((validator.validate)(app.world_mut()).is_err());
     }
 }

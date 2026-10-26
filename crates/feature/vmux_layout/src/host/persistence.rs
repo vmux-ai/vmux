@@ -2,29 +2,29 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_ecs::persistence::{PageRestore, WorkspaceStoreValidator};
+use vmux_ecs::persistence::{
+    PageRestore, WorkspaceRestoreSet, WorkspaceRestoreValidator, WorkspaceStoreValidator,
+};
 use vmux_ecs::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
-use crate::LayoutStartupSet;
-use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
-use crate::space::Space;
+use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+use crate::space::{Space, SpaceId};
 use crate::stack::Stack;
 use crate::tab::Tab;
 use crate::window::Main;
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LayoutPersistenceSet {
-    Restore,
-}
 
 pub(crate) struct LayoutPersistencePlugin;
 
 impl Plugin for LayoutPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreStartup, spawn_store_validator)
-            .add_systems(Startup, restore_views.in_set(LayoutStartupSet::Post))
-            .add_systems(Update, restore_views.in_set(LayoutPersistenceSet::Restore));
+            .add_systems(
+                PreUpdate,
+                (restore_views, ApplyDeferred)
+                    .chain()
+                    .in_set(WorkspaceRestoreSet::Resolve),
+            );
     }
 }
 
@@ -36,6 +36,47 @@ fn spawn_store_validator(mut commands: Commands) {
             rejects: persisted_store_has_only_empty_page_urls,
         },
     ));
+    commands.spawn((
+        Name::new("Space identity validator"),
+        WorkspaceRestoreValidator::unique::<SpaceId>("Space identity"),
+    ));
+    commands.spawn((
+        Name::new("Pane identity validator"),
+        WorkspaceRestoreValidator::unique::<PaneId>("Pane identity"),
+    ));
+    commands.spawn((
+        Name::new("Layout composition validator"),
+        WorkspaceRestoreValidator::new("layout composition", validate_layout),
+    ));
+}
+
+fn validate_layout(world: &mut World) -> Result<(), String> {
+    let mut spaces = world.query_filtered::<(Entity, Option<&SpaceId>), With<Space>>();
+    for (entity, id) in spaces.iter(world) {
+        if id.is_none_or(|id| id.0.trim().is_empty()) {
+            return Err(format!("Space {entity} has no valid identity"));
+        }
+    }
+    let mut panes = world.query_filtered::<(Entity, Option<&PaneId>), With<Pane>>();
+    for (entity, id) in panes.iter(world) {
+        if id.is_none_or(|id| id.0.trim().is_empty()) {
+            return Err(format!("Pane {entity} has no valid identity"));
+        }
+    }
+    let mut tabs = world
+        .query_filtered::<(Entity, Option<&Name>, Option<&crate::tab::StartupDir>), With<Tab>>();
+    for (entity, name, startup_dir) in tabs.iter(world) {
+        if name.is_none() || startup_dir.is_none() {
+            return Err(format!("Tab {entity} is partially initialized"));
+        }
+    }
+    let mut stacks = world.query_filtered::<(Entity, Option<&PageMetadata>), With<Stack>>();
+    for (entity, metadata) in stacks.iter(world) {
+        if metadata.is_none() {
+            return Err(format!("Stack {entity} has no page metadata"));
+        }
+    }
+    Ok(())
 }
 
 fn persisted_store_has_only_empty_page_urls(body: &str) -> bool {

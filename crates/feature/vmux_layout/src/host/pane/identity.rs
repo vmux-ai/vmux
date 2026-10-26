@@ -24,7 +24,7 @@ impl Plugin for IdentityPlugin {
     }
 }
 
-#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq, Hash)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::pane"]
 #[require(Save)]

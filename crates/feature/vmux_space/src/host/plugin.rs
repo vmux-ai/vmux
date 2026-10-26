@@ -8,7 +8,7 @@ use vmux_command::{
 use vmux_command::{CommandInvocation, CommandRuntimePlugin, ReadCommandRequests};
 use vmux_ecs::UiStateWrite;
 use vmux_ecs::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
-use vmux_ecs::persistence::{PersistenceState, WorkspaceStore};
+use vmux_ecs::persistence::{PersistenceState, WorkspaceRestoreSet, WorkspaceStore};
 use vmux_ecs::{
     ActivateRequest, Active, EffectiveStartupUrl, Order, PageMetadata, PageOpenRequest,
     PageOpenTarget,
@@ -103,6 +103,10 @@ impl Plugin for SpacePlugin {
                 .after(SettingsLoadSet)
                 .after(LayoutStartupSet::Persistence)
                 .before(LayoutStartupSet::DefaultTab),
+        )
+        .add_systems(
+            PreUpdate,
+            ensure_bootstrap.after(WorkspaceRestoreSet::Ready),
         )
         .add_message::<SpacesPageSpawnRequest>()
         .add_systems(Update, respond_spaces_spawn.in_set(ReadCommandRequests))

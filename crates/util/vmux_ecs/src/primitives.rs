@@ -38,8 +38,16 @@ impl Plugin for PrimitivesPlugin {
             .track_persistence::<Name>()
             .track_persistence::<Children>()
             .track_persistence::<ChildOf>()
+            .add_systems(PreStartup, spawn_restore_validator)
             .add_observer(activate);
     }
+}
+
+fn spawn_restore_validator(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Workspace ownership validator"),
+        super::persistence::WorkspaceRestoreValidator::ownership(),
+    ));
 }
 
 fn activate(trigger: On<ActivateRequest>, child_of: Query<&ChildOf>, mut commands: Commands) {

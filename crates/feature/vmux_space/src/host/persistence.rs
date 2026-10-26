@@ -8,25 +8,27 @@ use bevy_cef::prelude::HostWindow;
 use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use moonshine_save::save::EntityFilter;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[cfg(test)]
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::persistence::{
     AtomicSaveWorld, DurableStore, PersistenceDirty, PersistenceRecovery, PersistenceState,
-    RestorePhase, StoreLoad, TrackedLoadWorld, WorkspacePersisted, WorkspaceSaveRequest,
-    WorkspaceStore, WorkspaceStoreValidators, load_tracked_on,
+    RestorePhase, StoreLoad, TrackedLoadWorld, WorkspacePersisted, WorkspaceRestoreSet,
+    WorkspaceRestoreValidator, WorkspaceSaveRequest, WorkspaceStore, WorkspaceStoreValidators,
+    load_tracked_on,
 };
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
 use vmux_ecs::profile::{CurrentProfile, SessionEnvironment};
 #[cfg(test)]
 use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
+use vmux_layout::LayoutStartupSet;
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
 use vmux_layout::window::WindowHierarchy;
-use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet};
 #[cfg(test)]
 use vmux_layout::{
     pane::{Pane, PaneId},
@@ -49,10 +51,23 @@ impl Plugin for WorkspacePersistencePlugin {
             )
             .add_observer(mark_restore_pending)
             .add_observer(mark_dirty)
+            .configure_sets(
+                PreUpdate,
+                (
+                    WorkspaceRestoreSet::Validate,
+                    WorkspaceRestoreSet::Resolve,
+                    WorkspaceRestoreSet::Ready,
+                )
+                    .chain(),
+            )
             .add_systems(
-                Update,
+                PreUpdate,
+                validate_restore.in_set(WorkspaceRestoreSet::Validate),
+            )
+            .add_systems(
+                PreUpdate,
                 complete_restore
-                    .after(LayoutPersistenceSet::Restore)
+                    .in_set(WorkspaceRestoreSet::Ready)
                     .run_if(any_with_component::<RestorePending>),
             )
             .add_systems(Update, (auto_save, handle_save_requests));
@@ -110,47 +125,148 @@ fn handle_save_requests(
 }
 
 #[derive(Component)]
-struct RestorePending;
+struct RestorePending(Vec<Entity>);
+
+#[derive(Component, Default)]
+struct RestoreBaseline(HashSet<Entity>);
 
 fn mark_restore_pending(
-    _trigger: On<Loaded>,
-    mut state: Single<&mut PersistenceState, With<WorkspaceStore>>,
+    trigger: On<Loaded>,
+    mut persistence: Single<(Entity, &mut PersistenceState), With<WorkspaceStore>>,
+    mut commands: Commands,
 ) {
-    state.begin_resolve();
+    let (entity, state) = &mut *persistence;
+    if state.phase() != RestorePhase::Materialize {
+        return;
+    }
+    commands.entity(*entity).insert(RestorePending(
+        trigger.event().entities().collect::<Vec<_>>(),
+    ));
+}
+
+fn validate_restore(world: &mut World) {
+    let store = {
+        let mut stores = world.query_filtered::<Entity, (
+            With<WorkspaceStore>,
+            Or<(With<RestorePending>, With<RestoreBaseline>)>,
+        )>();
+        stores.iter(world).next()
+    };
+    let Some(store) = store else {
+        return;
+    };
+    let phase = world
+        .get::<PersistenceState>(store)
+        .map(PersistenceState::phase);
+    if phase == Some(RestorePhase::Failed) {
+        let reason = world
+            .get::<PersistenceState>(store)
+            .and_then(|state| match state.recovery() {
+                PersistenceRecovery::Failed(reason) => Some(reason.clone()),
+                PersistenceRecovery::Healthy | PersistenceRecovery::HardReset(_) => None,
+            })
+            .unwrap_or_else(|| "workspace restore failed".to_string());
+        reset_restore(world, store, reason);
+        return;
+    }
+    if phase != Some(RestorePhase::Materialize) || world.get::<RestorePending>(store).is_none() {
+        return;
+    }
+    let validators = {
+        let mut query = world.query::<&WorkspaceRestoreValidator>();
+        query
+            .iter(world)
+            .map(|validator| (validator.name, validator.validate))
+            .collect::<Vec<_>>()
+    };
+    for (name, validate) in validators {
+        if let Err(error) = validate(world) {
+            reset_restore(world, store, format!("{name}: {error}"));
+            return;
+        }
+    }
+    if let Some(mut state) = world.get_mut::<PersistenceState>(store) {
+        state.begin_resolve();
+    }
+}
+
+fn reset_restore(world: &mut World, entity: Entity, reason: String) {
+    let loaded = world
+        .get::<RestorePending>(entity)
+        .map(|pending| pending.0.clone());
+    let baseline = world
+        .get::<RestoreBaseline>(entity)
+        .map(|baseline| baseline.0.clone())
+        .unwrap_or_default();
+    let discard = match loaded {
+        Some(loaded) => loaded,
+        None => {
+            let mut saved = world.query_filtered::<Entity, With<Save>>();
+            saved
+                .iter(world)
+                .filter(|loaded| !baseline.contains(loaded))
+                .collect()
+        }
+    };
+    for loaded in discard {
+        if !baseline.contains(&loaded) {
+            let _ = world.despawn(loaded);
+        }
+    }
+    let path = world
+        .get::<WorkspaceStorePath>(entity)
+        .map(|path| path.0.clone());
+    let Some(path) = path else {
+        if let Some(mut state) = world.get_mut::<PersistenceState>(entity) {
+            state.restore_failed("workspace store path missing");
+        }
+        world
+            .entity_mut(entity)
+            .remove::<RestorePending>()
+            .remove::<RestoreBaseline>();
+        return;
+    };
+    let store = DurableStore::new(path, STORE_NAME, STORE_SCHEMA_VERSION);
+    match store.hard_reset(reason.clone()) {
+        Ok(_) => {
+            warn!(
+                path = %store.path().display(),
+                new_schema = store.schema_version(),
+                %reason,
+                "workspace store hard reset after restore failure"
+            );
+            if let Some(mut state) = world.get_mut::<PersistenceState>(entity) {
+                state.hard_reset(reason);
+            }
+        }
+        Err(error) => {
+            if let Some(mut state) = world.get_mut::<PersistenceState>(entity) {
+                state.restore_failed(error.to_string());
+            }
+        }
+    }
+    world
+        .entity_mut(entity)
+        .remove::<RestorePending>()
+        .remove::<RestoreBaseline>();
 }
 
 fn complete_restore(
     mut persistence: Single<
-        (Entity, &WorkspaceStorePath, &mut PersistenceState),
+        (Entity, &mut PersistenceState),
         (With<WorkspaceStore>, With<RestorePending>),
     >,
     mut commands: Commands,
 ) {
-    let (entity, path, state) = &mut *persistence;
-    if state.phase() == RestorePhase::Failed {
-        let reason = match state.recovery() {
-            PersistenceRecovery::Failed(reason) => reason.clone(),
-            PersistenceRecovery::Healthy | PersistenceRecovery::HardReset(_) => {
-                "workspace restore failed".to_string()
-            }
-        };
-        let store = path.store();
-        match store.hard_reset(reason.clone()) {
-            Ok(_) => {
-                warn!(
-                    path = %store.path().display(),
-                    new_schema = store.schema_version(),
-                    %reason,
-                    "workspace store hard reset after restore failure"
-                );
-                state.hard_reset(reason);
-            }
-            Err(error) => state.restore_failed(error.to_string()),
-        }
-    } else {
-        state.ready(true);
+    let (entity, state) = &mut *persistence;
+    if state.phase() != RestorePhase::Resolve {
+        return;
     }
-    commands.entity(*entity).remove::<RestorePending>();
+    state.ready(true);
+    commands
+        .entity(*entity)
+        .remove::<RestorePending>()
+        .remove::<RestoreBaseline>();
 }
 
 #[derive(Component)]
@@ -318,6 +434,7 @@ fn save_space_to_path(world: &mut World, path: PathBuf) {
 fn load_on_startup(
     registry: Res<AppTypeRegistry>,
     validators: WorkspaceStoreValidators,
+    saved: Query<Entity, With<Save>>,
     mut persistence: Single<
         (Entity, &WorkspaceStorePath, &mut PersistenceState),
         With<WorkspaceStore>,
@@ -383,7 +500,9 @@ fn load_on_startup(
     }
     info!(path = %store.path().display(), "loading workspace store");
     state.begin_materialize();
-    commands.entity(*entity).insert(RestorePending);
+    commands
+        .entity(*entity)
+        .insert(RestoreBaseline(saved.iter().collect()));
     TrackedLoadWorld::default_from_stream(
         *entity,
         std::io::Cursor::new(snapshot.into_payload().into_bytes()),
@@ -1055,6 +1174,102 @@ mod tests {
             state.recovery(),
             vmux_ecs::persistence::PersistenceRecovery::HardReset(_)
         ));
+    }
+
+    #[test]
+    fn invalid_materialized_world_is_discarded_before_ready() {
+        let _home = HomeEnvGuard::use_temp_home("invalid-materialized-world-is-discarded");
+        let path = WorkspaceStorePath::default();
+        std::fs::write(&path.0, "invalid").unwrap();
+        let mut state = PersistenceState::new(STORE_SCHEMA_VERSION);
+        state.begin_read();
+        state.begin_validation(vmux_ecs::Revision::new(1));
+        state.begin_materialize();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(PreUpdate, validate_restore);
+        let first = app
+            .world_mut()
+            .spawn((Save, SpaceId("duplicate".to_string())))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((Save, SpaceId("duplicate".to_string())))
+            .id();
+        app.world_mut().spawn((
+            Name::new("Space identity validator"),
+            WorkspaceRestoreValidator::unique::<SpaceId>("Space identity"),
+        ));
+        let store = app
+            .world_mut()
+            .spawn((
+                WorkspaceStore,
+                state,
+                path,
+                RestorePending(vec![first, second]),
+                RestoreBaseline::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get_entity(first).is_err());
+        assert!(app.world().get_entity(second).is_err());
+        assert!(matches!(
+            app.world()
+                .get::<PersistenceState>(store)
+                .unwrap()
+                .recovery(),
+            PersistenceRecovery::HardReset(_)
+        ));
+        assert!(!WorkspaceStorePath::default().0.exists());
+    }
+
+    #[test]
+    fn valid_materialized_world_becomes_ready_after_resolution() {
+        let mut state = PersistenceState::new(STORE_SCHEMA_VERSION);
+        state.begin_read();
+        state.begin_validation(vmux_ecs::Revision::new(1));
+        state.begin_materialize();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .configure_sets(
+                PreUpdate,
+                (
+                    WorkspaceRestoreSet::Validate,
+                    WorkspaceRestoreSet::Resolve,
+                    WorkspaceRestoreSet::Ready,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                PreUpdate,
+                validate_restore.in_set(WorkspaceRestoreSet::Validate),
+            )
+            .add_systems(
+                PreUpdate,
+                complete_restore.in_set(WorkspaceRestoreSet::Ready),
+            );
+        let loaded = app.world_mut().spawn(Save).id();
+        let store = app
+            .world_mut()
+            .spawn((
+                WorkspaceStore,
+                state,
+                WorkspaceStorePath::default(),
+                RestorePending(vec![loaded]),
+                RestoreBaseline::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PersistenceState>(store).unwrap().phase(),
+            RestorePhase::Ready
+        );
+        assert!(app.world().get_entity(loaded).is_ok());
+        assert!(app.world().get::<RestorePending>(store).is_none());
     }
 
     #[test]
