@@ -200,6 +200,8 @@ mod tests {
                 ),
             );
         app.add_plugins(Plugin);
+        app.finish();
+        app.cleanup();
         app.update();
 
         app.world_mut()

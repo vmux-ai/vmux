@@ -135,6 +135,9 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins).add_plugins(SpaceKeyPlugin);
+            app.finish();
+            app.cleanup();
+            app.update();
             app
         }
 
