@@ -10904,6 +10904,7 @@ name = "vmux_path"
 version = "0.0.35"
 dependencies = [
  "percent-encoding",
+ "sha2",
  "tempfile",
  "url",
 ]

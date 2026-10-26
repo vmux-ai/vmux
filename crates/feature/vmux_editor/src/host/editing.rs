@@ -484,12 +484,9 @@ fn apply_edit_request(
                     continue;
                 }
             };
-            match vmux_path::AtomicFile::write(&path, &bytes) {
-                Ok(()) => {
-                    self_writes.0.insert(
-                        vmux_path::PathIdentity::resolve(&path).into_path_buf(),
-                        std::time::Instant::now(),
-                    );
+            match vmux_path::AtomicFile::write_revision(&path, &bytes) {
+                Ok(revision) => {
+                    self_writes.record(&path, revision);
                     let was_dirty = edit.core.dirty;
                     edit.core.mark_saved();
                     if was_dirty {

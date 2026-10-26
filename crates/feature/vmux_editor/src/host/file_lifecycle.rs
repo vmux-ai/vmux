@@ -238,7 +238,22 @@ impl FileLoad {
 }
 
 #[derive(Default)]
-pub(super) struct SelfWrites(pub(super) HashMap<PathBuf, std::time::Instant>);
+pub(super) struct SelfWrites(HashMap<vmux_path::PathIdentity, vmux_path::FileRevision>);
+
+impl SelfWrites {
+    pub(super) fn record(&mut self, path: impl AsRef<Path>, revision: vmux_path::FileRevision) {
+        self.0
+            .insert(vmux_path::PathIdentity::resolve(path), revision);
+    }
+
+    fn suppress(&mut self, path: impl AsRef<Path>) -> bool {
+        let path = vmux_path::PathIdentity::resolve(path);
+        let Some(expected) = self.0.remove(&path) else {
+            return false;
+        };
+        vmux_path::FileRevision::read(path).is_ok_and(|current| current == expected)
+    }
+}
 
 #[derive(Component)]
 struct FileReloadRequested;
@@ -494,18 +509,16 @@ fn drain_file_changes(
         return;
     }
     let mut self_writes = self_writes;
-    if let Some(self_writes) = self_writes.as_mut() {
-        self_writes
-            .0
-            .retain(|_, written| written.elapsed() < std::time::Duration::from_secs(2));
-    }
     for (entity, file, missing) in &views {
         let path = vmux_path::PathIdentity::resolve(&file.path).into_path_buf();
-        let self_written = self_writes
-            .as_ref()
-            .is_some_and(|self_writes| self_writes.0.contains_key(&path));
         let ancestor_changed = missing && changed.iter().any(|changed| path.starts_with(changed));
-        if (changed.contains(&path) || ancestor_changed) && !self_written {
+        if !changed.contains(&path) && !ancestor_changed {
+            continue;
+        }
+        let self_written = self_writes
+            .as_mut()
+            .is_some_and(|self_writes| self_writes.suppress(&path));
+        if !self_written {
             commands.entity(entity).insert(FileReloadRequested);
         }
     }
@@ -693,5 +706,57 @@ mod tests {
         let dir = app.world().get::<FileDir>(entity).unwrap();
         assert!(dir.entries.iter().any(|entry| entry.name == "second.txt"));
         assert!(!dir.entries.iter().any(|entry| entry.name == "first.txt"));
+    }
+
+    #[test]
+    fn self_write_is_suppressed_once_when_the_revision_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("file.txt");
+        let revision = vmux_path::AtomicFile::write_revision(&path, b"self").unwrap();
+        let mut writes = SelfWrites::default();
+        writes.record(&path, revision);
+
+        assert!(writes.suppress(&path));
+        assert!(!writes.suppress(&path));
+    }
+
+    #[test]
+    fn concurrent_external_write_is_not_suppressed() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("file.txt");
+        vmux_path::AtomicFile::write(&path, b"original").unwrap();
+        let (tx, rx) = mpsc::channel();
+        let watcher = notify::recommended_watcher(|_| {}).unwrap();
+        let mut app = app();
+        app.world_mut().insert_non_send(FileWatch {
+            watcher,
+            rx,
+            dirs: HashSet::new(),
+        });
+        let entity = app.world_mut().spawn(file_view(path.clone())).id();
+        FileLoadTask::settle(&mut app, entity);
+
+        let revision = vmux_path::AtomicFile::write_revision(&path, b"self").unwrap();
+        app.world_mut()
+            .non_send_mut::<SelfWrites>()
+            .record(&path, revision);
+
+        vmux_path::AtomicFile::write(&path, b"external").unwrap();
+        tx.send(Ok(
+            notify::Event::new(notify::EventKind::Any).add_path(path.clone())
+        ))
+        .unwrap();
+        app.update();
+        FileLoadTask::settle(&mut app, entity);
+
+        assert_eq!(
+            app.world()
+                .get::<Editor>(entity)
+                .unwrap()
+                .core
+                .buffer
+                .text(),
+            "external"
+        );
     }
 }
