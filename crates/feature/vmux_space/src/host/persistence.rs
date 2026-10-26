@@ -29,7 +29,7 @@ use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet};
 #[cfg(test)]
 use vmux_layout::{
     pane::{Pane, PaneId},
-    tab::{Tab, TabWorkspace, TabWorktree},
+    tab::{StartupDir, Tab, TabWorkspace, TabWorktree},
     window::WindowGeometry,
 };
 pub(crate) struct WorkspacePersistencePlugin;
@@ -464,15 +464,16 @@ mod tests {
     fn changing_tab_startup_dir_marks_store_dirty() {
         let mut app = App::new();
         let store = TestStore::spawn(&mut app);
-        app.register_persisted::<Tab>().add_observer(mark_dirty);
+        app.register_persisted::<StartupDir>()
+            .add_observer(mark_dirty);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
         store.clear(&mut app);
         app.world_mut()
             .entity_mut(tab)
-            .get_mut::<Tab>()
+            .get_mut::<StartupDir>()
             .unwrap()
-            .startup_dir = Some("/tmp/rebound".into());
+            .0 = Some("/tmp/rebound".into());
 
         app.update();
 
@@ -956,7 +957,10 @@ mod tests {
             .expect("tab archive metadata round-tripped");
         assert_eq!(tab.group_id, "tab-group");
         assert_eq!(tab.tab_name, "Recovered");
-        assert_eq!(tab.tab_startup_dir.as_deref(), Some("/tmp/recovered"));
+        assert_eq!(
+            tab.tab_startup_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/recovered"))
+        );
         assert!(tab.active);
     }
 

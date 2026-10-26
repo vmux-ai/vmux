@@ -176,10 +176,10 @@ impl AppSettings {
     pub fn workspace_dir(
         &self,
         space_id: &str,
-        tab_dir: Option<&str>,
+        tab_dir: Option<&std::path::Path>,
     ) -> Result<Option<std::path::PathBuf>, String> {
         match tab_dir {
-            Some(tab_dir) => StartupDir::from_tab(tab_dir).map(|dir| Some(dir.path)),
+            Some(tab_dir) => StartupDir::from_tab_path(tab_dir).map(|dir| Some(dir.path)),
             None => Ok(self.startup_dir(space_id)),
         }
     }
@@ -760,7 +760,10 @@ impl StartupDir {
         if trimmed.is_empty() {
             return Err("tab workspace directory is empty".to_string());
         }
-        let path = std::path::PathBuf::from(trimmed);
+        Self::from_tab_path(std::path::Path::new(trimmed))
+    }
+
+    pub fn from_tab_path(path: &std::path::Path) -> Result<Self, String> {
         if !path.is_absolute() {
             return Err(format!(
                 "tab workspace directory is not absolute: {}",
@@ -2480,7 +2483,7 @@ mod tests {
         );
 
         assert!(
-            s.workspace_dir("work", Some("/no/such/tab/xyz-vmux"))
+            s.workspace_dir("work", Some(std::path::Path::new("/no/such/tab/xyz-vmux")))
                 .is_err()
         );
         assert_eq!(

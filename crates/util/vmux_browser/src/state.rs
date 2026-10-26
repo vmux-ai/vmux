@@ -54,7 +54,7 @@ impl PagePresentation {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct TabProjectionData<'w, 's> {
-    tabs: Query<'w, 's, (Entity, &'static Tab, &'static LastActivatedAt)>,
+    tabs: Query<'w, 's, (Entity, &'static Name, &'static LastActivatedAt), With<Tab>>,
     hierarchy: vmux_layout::tab::TabHierarchy<'w, 's>,
     active_tab: ActiveTabParam<'w, 's>,
     focus: LayoutFocus<'w, 's>,
@@ -96,7 +96,7 @@ impl TabProjectionData<'_, '_> {
         };
         let mut rows = Vec::new();
         for entity in ordered {
-            let Ok((entity, tab, _)) = self.tabs.get(entity) else {
+            let Ok((entity, name, _)) = self.tabs.get(entity) else {
                 continue;
             };
             let page = self.active_stack(entity).and_then(|stack| self.page(stack));
@@ -114,10 +114,10 @@ impl TabProjectionData<'_, '_> {
                 .unwrap_or_default();
             rows.push(TabRow {
                 id: entity.to_bits().to_string(),
-                name: if tab.name.is_empty() {
+                name: if name.as_str().is_empty() {
                     "Tab".to_string()
                 } else {
-                    tab.name.clone()
+                    name.as_str().to_string()
                 },
                 is_active: Some(entity) == active_tab,
                 bg_color,

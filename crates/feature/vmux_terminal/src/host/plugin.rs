@@ -2425,10 +2425,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "t".into(),
-                startup_dir: Some(tab_dir.path().to_string_lossy().into()),
-            })
+            .spawn(Tab::named("t").with_startup_dir(tab_dir.path()))
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         app.world_mut().spawn(PageOpenTask {
@@ -2472,10 +2469,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "t".into(),
-                startup_dir: Some("/no/such/vmux-tab-workspace".into()),
-            })
+            .spawn(Tab::named("t").with_startup_dir("/no/such/vmux-tab-workspace"))
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         let task = app
@@ -2523,10 +2517,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "t".into(),
-                startup_dir: Some("/no/such/vmux-tab-workspace".into()),
-            })
+            .spawn(Tab::named("t").with_startup_dir("/no/such/vmux-tab-workspace"))
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         app.world_mut()

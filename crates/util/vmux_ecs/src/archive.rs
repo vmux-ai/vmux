@@ -33,7 +33,7 @@ pub struct ArchivedPagePosition {
 pub struct ArchivedTabPage {
     pub group_id: String,
     pub tab_name: String,
-    pub tab_startup_dir: Option<String>,
+    pub tab_startup_dir: Option<std::path::PathBuf>,
     pub active: bool,
 }
 

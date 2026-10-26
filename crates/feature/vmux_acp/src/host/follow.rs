@@ -24,7 +24,7 @@ use vmux_layout::pane::Pane;
 #[cfg(test)]
 use vmux_layout::stack::Stack;
 #[cfg(test)]
-use vmux_layout::tab::Tab;
+use vmux_layout::tab::{StartupDir, Tab};
 use vmux_layout::worktree::{
     TabDirectoryObservationKind, TabDirectoryObserved, TabDirectoryRebindSet,
 };
@@ -755,26 +755,20 @@ mod tests {
         fn capture_run_cwd(
             mut reader: MessageReader<AgentRequestInput>,
             run_tab: Res<RunTab>,
-            tabs: Query<&Tab>,
+            tabs: Query<&StartupDir, With<Tab>>,
             mut captured: ResMut<CapturedRunCwd>,
         ) {
             for request in reader.read() {
                 if matches!(request.decode::<AgentRunProbe>(), Ok(Some(_))) {
-                    let tab = tabs.get(run_tab.0).unwrap();
+                    let startup_dir = tabs.get(run_tab.0).unwrap();
                     captured.0 =
-                        vmux_space::WorkspaceCwd::resolve(tab.startup_dir.as_deref(), None).ok();
+                        vmux_space::WorkspaceCwd::resolve(startup_dir.0.as_deref(), None).ok();
                 }
             }
         }
 
         let current = TestRepo::new("current");
         let observed = TestRepo::new("observed");
-        let expected = observed
-            .path()
-            .canonicalize()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
         let mut settings = test_settings();
         settings.agent.follow_files = false;
         let mut app = App::new();
@@ -797,10 +791,7 @@ mod tests {
         );
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "test".into(),
-                startup_dir: Some(current.path().to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("test").with_startup_dir(current.path()))
             .id();
         app.insert_resource(RunTab(tab));
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -843,8 +834,8 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(expected.as_str())
+            app.world().get::<StartupDir>(tab).unwrap().0.as_deref(),
+            Some(observed.path().canonicalize().unwrap().as_path())
         );
         assert_eq!(
             app.world().resource::<CapturedRunCwd>().0.as_deref(),

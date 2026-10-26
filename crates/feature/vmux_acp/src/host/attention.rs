@@ -4,7 +4,9 @@ use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{AgentTurnEnded, ProcessId};
 use vmux_ecs::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 use vmux_ecs::service::ServiceMessageSet;
-use vmux_ecs::team::{Agent, Profile, Profiles};
+#[cfg(test)]
+use vmux_ecs::team::Profile;
+use vmux_ecs::team::{Agent, Profiles};
 #[cfg(test)]
 use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::ComputeFocusSet;

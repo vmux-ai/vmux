@@ -23,7 +23,7 @@ use vmux_layout::pane::Pane;
 use vmux_layout::pane::{PaneSplitDirection, SpawnCounter, SpawnSeq};
 #[cfg(test)]
 use vmux_layout::stack::Stack;
-use vmux_layout::tab::Tab;
+use vmux_layout::tab::{StartupDir, Tab};
 use vmux_setting::AppSettings;
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};
@@ -606,7 +606,7 @@ pub(super) struct AgentRunContext<'w, 's> {
     session_targets: Query<'w, 's, &'static vmux_ecs::EntityTarget<vmux_session::Session>>,
     sessions: Query<'w, 's, &'static vmux_ecs::Cwd, With<vmux_session::Session>>,
     panes: AgentPanes<'w, 's>,
-    tabs: Query<'w, 's, &'static Tab>,
+    tabs: Query<'w, 's, &'static StartupDir, With<Tab>>,
     next_pane_sequence: NextPaneSpawnSequence<'w, 's>,
 }
 
@@ -621,11 +621,11 @@ impl AgentRunContext<'_, '_> {
         Some((terminal, pane, region.copied().unwrap_or_default()))
     }
 
-    fn tab_cwd(&self, pane: Entity) -> Option<String> {
+    fn tab_cwd(&self, pane: Entity) -> Option<std::path::PathBuf> {
         let mut current = pane;
         loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                return tab.startup_dir.clone();
+            if let Ok(startup_dir) = self.tabs.get(current) {
+                return startup_dir.0.clone();
             }
             current = self.panes.placement.child_of_q.get(current).ok()?.parent();
         }
@@ -961,7 +961,7 @@ mod tests {
         let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         assert_eq!(
             WorkspaceCwd::resolve(
-                Some(tab_dir.to_string_lossy().as_ref()),
+                Some(tab_dir.as_path()),
                 Some(agent_dir.to_string_lossy().as_ref()),
             )
             .unwrap(),
@@ -1019,13 +1019,17 @@ mod tests {
         let agent_dir = std::env::temp_dir();
 
         assert!(
-            WorkspaceCwd::resolve(Some("/no/such/vmux-tab-workspace"), agent_dir.to_str()).is_err()
+            WorkspaceCwd::resolve(
+                Some(Path::new("/no/such/vmux-tab-workspace")),
+                agent_dir.to_str(),
+            )
+            .is_err()
         );
     }
 
     #[test]
     fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(WorkspaceCwd::resolve(Some("."), None).is_err());
+        assert!(WorkspaceCwd::resolve(Some(Path::new(".")), None).is_err());
     }
 
     #[test]

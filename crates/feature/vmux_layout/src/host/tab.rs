@@ -7,6 +7,7 @@ use bevy::window::PrimaryWindow;
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use std::path::PathBuf;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 #[cfg(test)]
@@ -29,7 +30,8 @@ impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(TabCommandPlugin)
             .register_persisted::<Tab>()
-            .register_type::<Option<String>>()
+            .register_persisted::<StartupDir>()
+            .register_type::<Option<PathBuf>>()
             .register_persisted::<TabWorkspace>()
             .register_persisted::<TabWorktree>()
             .register_persisted::<TabDirDecided>()
@@ -192,16 +194,41 @@ pub struct CloseTabRequest {
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
+#[require(Save, Name = Name::new("Tab"), StartupDir)]
+pub struct Tab;
+
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::tab"]
 #[require(Save)]
-pub struct Tab {
-    pub name: String,
-    pub startup_dir: Option<String>,
+pub struct StartupDir(pub Option<PathBuf>);
+
+#[derive(Bundle)]
+pub struct TabStateBundle {
+    tab: Tab,
+    name: Name,
+    startup_dir: StartupDir,
+}
+
+impl TabStateBundle {
+    pub fn with_startup_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.startup_dir = StartupDir(Some(path.into()));
+        self
+    }
 }
 
 impl Tab {
+    pub fn named(name: impl Into<String>) -> TabStateBundle {
+        TabStateBundle {
+            tab: Self,
+            name: Name::new(name.into()),
+            startup_dir: StartupDir::default(),
+        }
+    }
+
     pub fn bundle() -> impl Bundle {
         (
-            Self::default(),
+            Self,
             Transform::default(),
             Visibility::default(),
             Node {
@@ -253,7 +280,8 @@ pub struct TabDirDecided;
 pub struct TabHierarchy<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     children: Query<'w, 's, &'static Children>,
-    tabs: Query<'w, 's, &'static Tab>,
+    tabs: Query<'w, 's, (), With<Tab>>,
+    startup_dirs: Query<'w, 's, &'static StartupDir>,
 }
 
 impl TabHierarchy<'_, '_> {
@@ -267,9 +295,9 @@ impl TabHierarchy<'_, '_> {
         }
     }
 
-    pub fn startup_dir(&self, entity: Entity) -> Option<String> {
+    pub fn startup_dir(&self, entity: Entity) -> Option<PathBuf> {
         let tab = self.entity(entity)?;
-        self.tabs.get(tab).ok()?.startup_dir.clone()
+        self.startup_dirs.get(tab).ok()?.0.clone()
     }
 
     pub fn siblings(&self, active: Entity) -> Vec<Entity> {
@@ -763,36 +791,9 @@ mod tests {
     fn sync_tab_order_stamps_children_index() {
         let mut app = order_app();
         let main = app.world_mut().spawn(crate::space::Space).id();
-        let a = app
-            .world_mut()
-            .spawn((
-                Tab {
-                    name: "a".into(),
-                    startup_dir: None,
-                },
-                ChildOf(main),
-            ))
-            .id();
-        let b = app
-            .world_mut()
-            .spawn((
-                Tab {
-                    name: "b".into(),
-                    startup_dir: None,
-                },
-                ChildOf(main),
-            ))
-            .id();
-        let c = app
-            .world_mut()
-            .spawn((
-                Tab {
-                    name: "c".into(),
-                    startup_dir: None,
-                },
-                ChildOf(main),
-            ))
-            .id();
+        let a = app.world_mut().spawn((Tab::named("a"), ChildOf(main))).id();
+        let b = app.world_mut().spawn((Tab::named("b"), ChildOf(main))).id();
+        let c = app.world_mut().spawn((Tab::named("c"), ChildOf(main))).id();
 
         app.update();
 
@@ -805,36 +806,9 @@ mod tests {
     fn sync_tab_order_updates_after_reorder() {
         let mut app = order_app();
         let main = app.world_mut().spawn(crate::space::Space).id();
-        let a = app
-            .world_mut()
-            .spawn((
-                Tab {
-                    name: "a".into(),
-                    startup_dir: None,
-                },
-                ChildOf(main),
-            ))
-            .id();
-        let b = app
-            .world_mut()
-            .spawn((
-                Tab {
-                    name: "b".into(),
-                    startup_dir: None,
-                },
-                ChildOf(main),
-            ))
-            .id();
-        let c = app
-            .world_mut()
-            .spawn((
-                Tab {
-                    name: "c".into(),
-                    startup_dir: None,
-                },
-                ChildOf(main),
-            ))
-            .id();
+        let a = app.world_mut().spawn((Tab::named("a"), ChildOf(main))).id();
+        let b = app.world_mut().spawn((Tab::named("b"), ChildOf(main))).id();
+        let c = app.world_mut().spawn((Tab::named("c"), ChildOf(main))).id();
 
         app.update();
 
@@ -921,14 +895,8 @@ mod tests {
             crate::space::EffectiveStartupDir(Some(std::env::current_dir().unwrap())),
             vmux_ecs::EffectiveStartupUrl(startup_url.to_string()),
         ));
-        app.world_mut().spawn((
-            Tab {
-                name: "Tab 1".into(),
-                startup_dir: None,
-            },
-            LastActivatedAt::now(),
-            ChildOf(space),
-        ));
+        app.world_mut()
+            .spawn((Tab::named("Tab 1"), LastActivatedAt::now(), ChildOf(space)));
         main
     }
 
@@ -1037,10 +1005,7 @@ mod tests {
             .unwrap();
         let existing_dir = std::env::current_dir().unwrap();
         app.world_mut().entity_mut(existing_tab).insert((
-            Tab {
-                name: "vmux".into(),
-                startup_dir: Some(existing_dir.to_string_lossy().into_owned()),
-            },
+            Tab::named("vmux").with_startup_dir(existing_dir.clone()),
             TabWorkspace {
                 project_dir: existing_dir.to_string_lossy().into_owned(),
             },
@@ -1055,12 +1020,15 @@ mod tests {
 
         let tabs: Vec<_> = app
             .world_mut()
-            .query::<(Entity, &Tab)>()
+            .query_filtered::<(Entity, &Name, &StartupDir), With<Tab>>()
             .iter(app.world())
             .collect();
         assert_eq!(tabs.len(), 2);
-        let (new_tab_entity, new_tab) = tabs.iter().find(|(_, tab)| tab.name == "Tab 2").unwrap();
-        assert_eq!(new_tab.startup_dir, None);
+        let (new_tab_entity, _, startup_dir) = tabs
+            .iter()
+            .find(|(_, name, _)| name.as_str() == "Tab 2")
+            .unwrap();
+        assert_eq!(startup_dir.0, None);
         assert!(app.world().get::<TabWorkspace>(*new_tab_entity).is_none());
         assert!(app.world().get::<TabDirDecided>(*new_tab_entity).is_none());
     }
@@ -1087,18 +1055,18 @@ mod tests {
 
         app.update();
 
-        let tabs: Vec<_> = app.world_mut().query::<&Tab>().iter(app.world()).collect();
-        let new_tab = tabs.iter().find(|tab| tab.name == "Tab 2").unwrap();
+        let tabs: Vec<_> = app
+            .world_mut()
+            .query_filtered::<(&Name, &StartupDir), With<Tab>>()
+            .iter(app.world())
+            .collect();
+        let (_, new_tab) = tabs
+            .iter()
+            .find(|(name, _)| name.as_str() == "Tab 2")
+            .unwrap();
         assert_eq!(
-            new_tab.startup_dir.as_deref(),
-            Some(
-                configured
-                    .path()
-                    .canonicalize()
-                    .unwrap()
-                    .to_string_lossy()
-                    .as_ref()
-            )
+            new_tab.0.as_deref(),
+            Some(configured.path().canonicalize().unwrap().as_path())
         );
     }
 
@@ -1206,25 +1174,11 @@ mod tests {
         let main = app.world_mut().spawn(MainNode).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab {
-                    name: "Tab 1".into(),
-                    startup_dir: None,
-                },
-                LastActivatedAt::now(),
-                ChildOf(main),
-            ))
+            .spawn((Tab::named("Tab 1"), LastActivatedAt::now(), ChildOf(main)))
             .id();
         let other_tab = app
             .world_mut()
-            .spawn((
-                Tab {
-                    name: "Tab 2".into(),
-                    startup_dir: None,
-                },
-                LastActivatedAt(1),
-                ChildOf(main),
-            ))
+            .spawn((Tab::named("Tab 2"), LastActivatedAt(1), ChildOf(main)))
             .id();
         app.world_mut().spawn(PrimaryWindow);
 

@@ -67,7 +67,7 @@ impl AgentBrowserResolve<'_, '_> {
     pub fn working_directory(&self, anchor: vmux_ecs::ProcessId) -> Option<std::path::PathBuf> {
         let pane = self.agent_pane(anchor)?;
         let path = self.tabs.startup_dir(pane)?;
-        vmux_setting::StartupDir::from_tab(&path)
+        vmux_setting::StartupDir::from_tab_path(&path)
             .ok()
             .map(|dir| dir.path)
     }

@@ -25,6 +25,8 @@ use vmux_layout::space::{
 };
 use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::state::UiLayout;
+#[cfg(test)]
+use vmux_layout::tab::StartupDir as TabStartupDir;
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, Main, WindowHierarchy};
 use vmux_layout::{
@@ -1525,7 +1527,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            app.world().get::<TabStartupDir>(tab).unwrap().0.as_deref(),
             None
         );
         app.world_mut()
@@ -1538,7 +1540,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            app.world().get::<TabStartupDir>(tab).unwrap().0.as_deref(),
             None
         );
     }
@@ -1651,19 +1653,16 @@ mod tests {
             .iter()
             .map(|dir| {
                 app.world_mut()
-                    .spawn(Tab {
-                        startup_dir: Some((*dir).to_string()),
-                        ..Default::default()
-                    })
+                    .spawn(Tab::named("Tab").with_startup_dir(*dir))
                     .id()
             })
             .collect();
-        let before: Vec<Option<String>> = tabs
+        let before: Vec<Option<std::path::PathBuf>> = tabs
             .iter()
             .map(|tab| {
                 app.world()
-                    .get::<Tab>(*tab)
-                    .and_then(|t| t.startup_dir.clone())
+                    .get::<TabStartupDir>(*tab)
+                    .and_then(|dir| dir.0.clone())
             })
             .collect();
 
@@ -1678,12 +1677,12 @@ mod tests {
         );
 
         assert_eq!(space_state(&app).1.as_deref(), Some("/repo/beta"));
-        let after: Vec<Option<String>> = tabs
+        let after: Vec<Option<std::path::PathBuf>> = tabs
             .iter()
             .map(|tab| {
                 app.world()
-                    .get::<Tab>(*tab)
-                    .and_then(|t| t.startup_dir.clone())
+                    .get::<TabStartupDir>(*tab)
+                    .and_then(|dir| dir.0.clone())
             })
             .collect();
         assert_eq!(

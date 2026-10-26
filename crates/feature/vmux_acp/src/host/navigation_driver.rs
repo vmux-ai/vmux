@@ -9,7 +9,7 @@ use vmux_ecs::{
     ProcessAnchor,
 };
 use vmux_layout::space::FocusedSpace;
-use vmux_layout::tab::{Tab, TabWorkspace};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
 use vmux_session::{AgentConversationTitle, AgentId, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
@@ -48,7 +48,7 @@ pub(super) struct PageOpener<'w, 's> {
     links: AcpSessionLinks<'w, 's>,
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    tabs: Query<'w, 's, &'static mut Tab>,
+    tabs: Query<'w, 's, &'static mut StartupDir, With<Tab>>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     queues: Query<'w, 's, &'static mut PromptQueue>,
     transcripts: vmux_session::Transcripts<'w, 's>,
@@ -105,11 +105,11 @@ impl AgentPageOpenWorkspace<'_, '_> {
 }
 
 impl PageOpener<'_, '_> {
-    pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<String>)> {
+    pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<std::path::PathBuf>)> {
         let mut current = entity;
         loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                return Some((current, tab.startup_dir.clone()));
+            if let Ok(startup_dir) = self.tabs.get(current) {
+                return Some((current, startup_dir.0.clone()));
             }
             current = self.child_of.get(current).ok()?.parent();
         }
@@ -343,10 +343,10 @@ impl PageOpener<'_, '_> {
         let Some((tab_entity, _)) = self.tab(stack) else {
             return;
         };
-        let cwd = cwd.to_string_lossy().into_owned();
-        if let Ok(mut tab) = self.tabs.get_mut(tab_entity) {
-            tab.startup_dir = Some(cwd.clone());
+        if let Ok(mut startup_dir) = self.tabs.get_mut(tab_entity) {
+            startup_dir.0 = Some(cwd.to_path_buf());
         }
+        let cwd = cwd.to_string_lossy().into_owned();
         if let Ok(mut workspace) = self.workspaces.get_mut(tab_entity) {
             workspace.project_dir.clone_from(&cwd);
         } else {

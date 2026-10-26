@@ -1215,10 +1215,7 @@ mod tests {
         let tab_e = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "Worktree".to_string(),
-                    startup_dir: Some(worktree.path().to_string_lossy().into_owned()),
-                },
+                Tab::named("Worktree").with_startup_dir(worktree.path()),
                 crate::tab::TabWorktree {
                     repo_root: worktree.path().to_string_lossy().into_owned(),
                     checkout_dir: worktree.path().to_string_lossy().into_owned(),
@@ -1281,7 +1278,10 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            app.world().get::<Tab>(replacement_tab).unwrap().startup_dir,
+            app.world()
+                .get::<crate::tab::StartupDir>(replacement_tab)
+                .unwrap()
+                .0,
             None
         );
         let opened = app

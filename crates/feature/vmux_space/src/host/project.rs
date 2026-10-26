@@ -14,7 +14,9 @@ use vmux_layout::pane::Pane;
 use vmux_layout::space::{
     EffectiveStartupSet, FocusedSpace, Space, SpaceHierarchy, SpaceId, SpaceOfPane,
 };
-use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+#[cfg(test)]
+use vmux_layout::tab::Tab;
+use vmux_layout::tab::{StartupDir, TabWorkspace, TabWorktree};
 #[cfg(test)]
 use vmux_setting::SpaceOverrides;
 use vmux_setting::{AppSettings, SettingsSaveRequest, SpaceProject};
@@ -640,7 +642,7 @@ fn remember(
         Entity,
         Ref<TabWorkspace>,
         Option<Ref<TabWorktree>>,
-        Option<&Tab>,
+        Option<&StartupDir>,
     )>,
     space_of_tab: SpaceOfTab,
     roots: Single<&RepoRoots>,
@@ -675,13 +677,14 @@ fn remember(
                     .entity(tab_entity)
                     .remove::<(PendingRepoRoot, RepoRootTask)>();
                 let checkout = tab
-                    .and_then(|tab| tab.startup_dir.as_deref())
-                    .filter(|path| !path.is_empty())
+                    .and_then(|startup_dir| startup_dir.0.as_deref())
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or_else(|| {
                         if worktree.checkout_dir.is_empty() {
-                            dir
+                            dir.to_string()
                         } else {
-                            &worktree.checkout_dir
+                            worktree.checkout_dir.clone()
                         }
                     });
                 SpaceProject::checked_out(&worktree.repo_root, checkout)
@@ -862,9 +865,9 @@ mod tests {
         fn select_worktree(&mut self, project_dir: &str, repo_root: &str) {
             self.app
                 .world_mut()
-                .get_mut::<Tab>(self.tab)
+                .get_mut::<StartupDir>(self.tab)
                 .unwrap()
-                .startup_dir = Some(project_dir.to_string());
+                .0 = Some(project_dir.into());
             self.app.world_mut().entity_mut(self.tab).insert((
                 TabWorkspace {
                     project_dir: project_dir.to_string(),
@@ -887,9 +890,9 @@ mod tests {
         ) {
             self.app
                 .world_mut()
-                .get_mut::<Tab>(self.tab)
+                .get_mut::<StartupDir>(self.tab)
                 .unwrap()
-                .startup_dir = Some(checkout_dir.to_string());
+                .0 = Some(checkout_dir.into());
             self.app.world_mut().entity_mut(self.tab).insert((
                 TabWorkspace {
                     project_dir: project_dir.to_string(),

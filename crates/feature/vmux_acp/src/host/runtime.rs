@@ -3,11 +3,15 @@ use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, Shar
 #[cfg(test)]
 use vmux_ecs::ProcessId;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
-use vmux_ecs::team::{Avatar, Profile, Profiles};
+#[cfg(test)]
+use vmux_ecs::team::Profile;
+use vmux_ecs::team::{Avatar, Profiles};
 use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
 use vmux_feature::AppFeatureExt;
 use vmux_git::worktree::ValidatedLinkedWorkspace;
-use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_layout::tab::{
+    StartupDir, Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable,
+};
 use vmux_layout::worktree::TabWorktreeReady;
 
 use super::handoff::PendingHandoff;
@@ -127,7 +131,7 @@ fn workspace(
     session_views: Query<(Entity, &EntityTarget<Session>)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
-    mut tabs: Query<&mut Tab>,
+    mut tabs: Query<&mut StartupDir, With<Tab>>,
     mut workspaces: Query<&mut TabWorkspace>,
     managed: Query<&TabWorktree>,
     mut commands: Commands,
@@ -159,8 +163,8 @@ fn workspace(
             let Some(tab_entity) = ancestor_tab(stack, &child_of, &tab_entities) else {
                 continue;
             };
-            if let Ok(mut tab) = tabs.get_mut(tab_entity) {
-                tab.startup_dir = Some(cwd.to_string_lossy().into_owned());
+            if let Ok(mut startup_dir) = tabs.get_mut(tab_entity) {
+                startup_dir.0 = Some(cwd.clone());
             }
             let workspace_project_dir = workspace_cwd.to_string_lossy().into_owned();
             if let Ok(mut workspace) = workspaces.get_mut(tab_entity) {
@@ -606,13 +610,7 @@ mod tests {
     #[test]
     fn ancestor_workspace_state_tracks_pending_and_bound_tab() {
         let mut app = App::new();
-        let tab = app
-            .world_mut()
-            .spawn(Tab {
-                name: "Tab 1".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(Tab::named("Tab 1")).id();
         let session = app.world_mut().spawn(Session).id();
         app.world_mut()
             .spawn((EntityTarget::<Session>::new(session), ChildOf(tab)));
@@ -631,10 +629,7 @@ mod tests {
             Some(AcpWorkspaceState::PendingWorktree)
         );
         app.world_mut().entity_mut(tab).insert((
-            Tab {
-                name: "Tab 1".into(),
-                startup_dir: Some("/repo".into()),
-            },
+            StartupDir(Some("/repo".into())),
             vmux_space::RepositoryNeedsWorktree,
         ));
         assert_eq!(
@@ -686,10 +681,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "matching".into(),
-                    startup_dir: Some(project_dir.to_string_lossy().into_owned()),
-                },
+                Tab::named("matching").with_startup_dir(project_dir.clone()),
                 TabWorkspace {
                     project_dir: project_dir.to_string_lossy().into_owned(),
                 },
@@ -707,10 +699,7 @@ mod tests {
             .spawn((EntityTarget::<Session>::new(session), ChildOf(tab)));
         let unrelated_tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "unrelated".into(),
-                startup_dir: Some(project_dir.to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("unrelated").with_startup_dir(project_dir.clone()))
             .id();
         app.world_mut()
             .resource_mut::<Messages<crate::host::event::AcpWorkspaceChanged>>()
@@ -725,16 +714,16 @@ mod tests {
 
         assert_eq!(app.world().get::<Cwd>(session).unwrap().0, worktree_dir);
         assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(worktree_dir.to_string_lossy().as_ref())
+            app.world().get::<StartupDir>(tab).unwrap().0.as_deref(),
+            Some(worktree_dir.as_path())
         );
         assert_eq!(
             app.world()
-                .get::<Tab>(unrelated_tab)
+                .get::<StartupDir>(unrelated_tab)
                 .unwrap()
-                .startup_dir
+                .0
                 .as_deref(),
-            Some(project_dir.to_string_lossy().as_ref())
+            Some(project_dir.as_path())
         );
 
         let background = app

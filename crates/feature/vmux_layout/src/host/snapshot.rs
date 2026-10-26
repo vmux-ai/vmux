@@ -12,7 +12,7 @@ use crate::tab::Tab as LayoutTab;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct LayoutSnapshotQuery<'w, 's> {
-    tabs: Query<'w, 's, (Entity, &'static LayoutTab, Option<&'static Children>)>,
+    tabs: Query<'w, 's, (Entity, &'static Name, Option<&'static Children>), With<LayoutTab>>,
     splits: Query<'w, 's, (Entity, &'static PaneSplit, Option<&'static Children>), With<Pane>>,
     leaves: Query<'w, 's, (Entity, Option<&'static Children>), (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<
@@ -36,7 +36,7 @@ impl LayoutSnapshotQuery<'_, '_> {
         let tabs = self
             .tabs
             .iter()
-            .map(|(tab_entity, tab, children)| {
+            .map(|(tab_entity, name, children)| {
                 let zoomed_leaf = self.zoomed.get(tab_entity).ok().map(|zoomed| zoomed.leaf);
                 let root = children
                     .and_then(|children| children.iter().next())
@@ -48,7 +48,7 @@ impl LayoutSnapshotQuery<'_, '_> {
                     });
                 TabDto {
                     id: Some(NodeKind::Tab.id(tab_entity.to_bits())),
-                    name: tab.name.clone(),
+                    name: name.as_str().to_string(),
                     is_active: Some(tab_entity) == active_tab,
                     root,
                 }
@@ -200,13 +200,7 @@ mod tests {
     #[test]
     fn self_stack_is_marked_is_self() {
         let mut app = make_app();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let leaf = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
@@ -242,13 +236,7 @@ mod tests {
     #[test]
     fn terminal_url_classifies_tab_as_terminal() {
         let mut app = make_app();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let leaf = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
@@ -284,13 +272,7 @@ mod tests {
     #[test]
     fn browser_url_classifies_tab_as_browser() {
         let mut app = make_app();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let leaf = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
@@ -342,13 +324,7 @@ mod tests {
     #[test]
     fn split_with_two_panes_produces_recursive_node() {
         let mut app = make_app();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let split = app
             .world_mut()
             .spawn((
@@ -404,13 +380,7 @@ mod tests {
     #[test]
     fn zoomed_pane_reports_is_zoomed_true() {
         let mut app = make_app();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let split = app
             .world_mut()
             .spawn((
@@ -480,13 +450,7 @@ mod tests {
     #[test]
     fn favicon_url_propagated_from_page_metadata() {
         let mut app = make_app();
-        let tab = app
-            .world_mut()
-            .spawn(LayoutTab {
-                name: "S".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(LayoutTab::named("S")).id();
         let leaf = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
