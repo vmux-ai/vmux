@@ -95,7 +95,7 @@ fn spawn(profile: vmux_ecs::profile::CurrentProfile, mut commands: Commands) {
     };
     commands.spawn((
         Name::new("Bookmark persistence"),
-        BookmarkAutoSave::default(),
+        BookmarkAutoSave,
         BookmarkStore,
         PersistenceState::new(STORE_SCHEMA_VERSION),
         BookmarkPersistencePath(path),
