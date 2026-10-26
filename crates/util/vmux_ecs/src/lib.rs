@@ -38,6 +38,13 @@ pub use primitives::PrimitivesPlugin;
 pub use process_id::ProcessId;
 #[cfg(all(host, feature = "host"))]
 pub use process_id::ProcessPresentationRequest;
+#[cfg(host)]
+pub use replication::{
+    AcknowledgedSequence, Actor, CommittedAt, CommittedOperation, CommittedRevision,
+    DeletionRevision, DeletionSequence, OperationSequence, Replica, ReplicaAck,
+    ReplicationConflict, ReplicationIndex, ReplicationPlugin, ReplicationRoot, ReplicationSnapshot,
+    SnapshotRevision, SnapshotSequence, Tombstone, TombstoneRetention,
+};
 #[cfg(all(host, feature = "host"))]
 pub use ui_file::{UiFileUpdates, UiFileWrite};
 #[cfg(all(host, feature = "host"))]
@@ -80,6 +87,8 @@ mod primitives;
 pub mod process_id;
 #[cfg(all(host, feature = "host"))]
 pub mod profile;
+#[cfg(host)]
+mod replication;
 pub mod scroll;
 #[cfg(all(host, feature = "host"))]
 pub mod search;

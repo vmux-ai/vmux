@@ -561,6 +561,14 @@ Each store has an entity-owned `PersistenceState` for restore phase, loaded, dir
 revisions, last success, and recovery failure. Saves serialize per store; mutations received while
 a revision is saving remain dirty and trigger the next save. Specialized domains keep their own
 entity scope, path, validation, seeding, and one writer while sharing the durability mechanics.
+Materialization runs through a tracked load event, so deserialize or scene failures update the same
+typed state, hard-reset only that store, and cannot leave restore silently pending.
+
+Collaborative roots own persisted committed-operation, snapshot, tombstone, and replica-ack child
+entities. Replay orders operations by sequence and rejects duplicate identities, duplicate
+sequences, and non-monotonic revisions. Compaction removes only entries covered by a snapshot and
+every replica acknowledgement; tombstones additionally remain until their retention window ends.
+Provider synchronization stays outside this replication log.
 
 ---
 

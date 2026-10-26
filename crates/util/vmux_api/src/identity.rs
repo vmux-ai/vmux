@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 
 #[cfg(feature = "bevy")]
 use bevy_ecs::reflect::ReflectComponent;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Deserialize, Serialize, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Serialize, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize)]
 #[cfg_attr(
     feature = "bevy",
     derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
@@ -63,10 +63,18 @@ impl<T> std::hash::Hash for Id<T> {
 
 impl<T> Id<T> {
     pub fn new(value: impl Into<String>) -> Self {
-        Self {
-            value: value.into(),
-            marker: PhantomData,
+        Self::try_new(value).expect("ID must not be empty")
+    }
+
+    pub fn try_new(value: impl Into<String>) -> Result<Self, String> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err("ID must not be empty".to_string());
         }
+        Ok(Self {
+            value,
+            marker: PhantomData,
+        })
     }
 
     pub fn as_str(&self) -> &str {
@@ -75,6 +83,16 @@ impl<T> Id<T> {
 
     pub fn into_string(self) -> String {
         self.value
+    }
+}
+
+impl<'de, T> Deserialize<'de> for Id<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::try_new(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -132,6 +150,12 @@ mod tests {
         let decoded = rkyv::from_bytes::<Id<Issue>, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded, id);
+    }
+
+    #[test]
+    fn rejects_empty_construction_and_deserialization() {
+        assert!(Id::<Issue>::try_new(" \n").is_err());
+        assert!(serde_json::from_str::<Id<Issue>>("\"\"").is_err());
     }
 
     #[cfg(feature = "bevy")]

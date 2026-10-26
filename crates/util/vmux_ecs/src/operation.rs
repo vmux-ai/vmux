@@ -65,7 +65,10 @@ pub enum OperationState {
 #[type_path = "vmux_ecs"]
 pub struct OperationTarget(pub Entity);
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[derive(
+    Component, Clone, Copy, Debug, PartialEq, Eq, Reflect, serde::Deserialize, serde::Serialize,
+)]
+#[component(immutable)]
 #[reflect(Component)]
 #[type_path = "vmux_ecs"]
 pub struct OperationTargetRevision(pub Revision);

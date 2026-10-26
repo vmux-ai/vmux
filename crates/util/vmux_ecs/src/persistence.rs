@@ -5,9 +5,10 @@ use bevy_ecs::reflect::AppTypeRegistry;
 use bevy_ecs::system::SystemParam;
 use bevy_reflect::{FromType, GetTypeRegistration, Reflect, TypePath, TypeRegistry};
 use bevy_world_serialization::WorldFilter;
+use moonshine_save::load::{DefaultUnloadFilter, LoadCommand, LoadStream, LoadWorld};
 use moonshine_save::prelude::{SaveEvent, SaveOutput};
 use moonshine_save::save::{DefaultSaveFilter, EntityFilter, SaveResult};
-use moonshine_util::event::SingleEvent;
+use moonshine_util::event::{OnSingle, SingleEvent, TriggerSingle};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
@@ -239,6 +240,51 @@ pub struct PageRestore;
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct WorkspaceStore;
+
+pub struct TrackedLoadWorld<U: QueryFilter = DefaultUnloadFilter> {
+    load: LoadWorld<U>,
+    state: Entity,
+}
+
+impl<U: QueryFilter> TrackedLoadWorld<U> {
+    pub fn from_stream(state: Entity, stream: impl LoadStream) -> Self {
+        Self {
+            load: LoadWorld::from_stream(stream),
+            state,
+        }
+    }
+
+    pub fn trigger(self, commands: &mut Commands)
+    where
+        U: Send + Sync + 'static,
+    {
+        commands.trigger_single(self);
+    }
+}
+
+impl TrackedLoadWorld {
+    pub fn default_from_stream(state: Entity, stream: impl LoadStream) -> Self {
+        Self::from_stream(state, stream)
+    }
+}
+
+impl<U> SingleEvent for TrackedLoadWorld<U> where U: QueryFilter + Send + Sync + 'static {}
+
+pub fn load_tracked_on<U>(event: OnSingle<TrackedLoadWorld<U>>, mut commands: Commands)
+where
+    U: QueryFilter + Send + Sync + 'static,
+{
+    let tracked = event.consume().unwrap();
+    commands.queue(move |world: &mut World| {
+        let result = LoadCommand(tracked.load).apply(world);
+        let Err(error) = result else {
+            return;
+        };
+        if let Some(mut state) = world.get_mut::<PersistenceState>(tracked.state) {
+            state.restore_failed(error.to_string());
+        }
+    });
+}
 
 #[derive(Message, Clone)]
 pub struct WorkspaceSaveRequest {
@@ -738,5 +784,24 @@ mod tests {
 
         assert!(reset.reason().contains("invalid store document"));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn materialization_failure_becomes_typed_persistence_state() {
+        let mut app = App::new();
+        app.add_plugins((bevy::MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .add_observer(load_tracked_on::<DefaultUnloadFilter>);
+        let state = app.world_mut().spawn(PersistenceState::new(1)).id();
+        app.world_mut()
+            .trigger_single(TrackedLoadWorld::default_from_stream(
+                state,
+                std::io::Cursor::new(b"not a world".to_vec()),
+            ));
+
+        app.update();
+
+        let state = app.world().get::<PersistenceState>(state).unwrap();
+        assert_eq!(state.phase(), RestorePhase::Failed);
+        assert!(matches!(state.recovery(), PersistenceRecovery::Failed(_)));
     }
 }

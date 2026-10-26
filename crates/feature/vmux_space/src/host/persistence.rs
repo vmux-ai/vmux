@@ -13,8 +13,9 @@ use std::path::PathBuf;
 #[cfg(test)]
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::persistence::{
-    AtomicSaveWorld, DurableStore, PersistenceDirty, PersistenceState, StoreLoad,
-    WorkspacePersisted, WorkspaceSaveRequest, WorkspaceStore, WorkspaceStoreValidators,
+    AtomicSaveWorld, DurableStore, PersistenceDirty, PersistenceRecovery, PersistenceState,
+    RestorePhase, StoreLoad, TrackedLoadWorld, WorkspacePersisted, WorkspaceSaveRequest,
+    WorkspaceStore, WorkspaceStoreValidators, load_tracked_on,
 };
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
@@ -39,6 +40,7 @@ impl Plugin for WorkspacePersistencePlugin {
         app.add_message::<WorkspaceSaveRequest>()
             .add_observer(save_on::<AtomicSaveWorld>)
             .add_observer(load_on_default_event)
+            .add_observer(load_tracked_on::<moonshine_save::load::DefaultUnloadFilter>)
             .add_systems(
                 Startup,
                 (spawn, ApplyDeferred, load_on_startup)
@@ -118,12 +120,37 @@ fn mark_restore_pending(
 }
 
 fn complete_restore(
-    mut state: Single<&mut PersistenceState, With<WorkspaceStore>>,
-    persistence: Single<Entity, With<RestorePending>>,
+    mut persistence: Single<
+        (Entity, &WorkspaceStorePath, &mut PersistenceState),
+        (With<WorkspaceStore>, With<RestorePending>),
+    >,
     mut commands: Commands,
 ) {
-    state.ready(true);
-    commands.entity(*persistence).remove::<RestorePending>();
+    let (entity, path, state) = &mut *persistence;
+    if state.phase() == RestorePhase::Failed {
+        let reason = match state.recovery() {
+            PersistenceRecovery::Failed(reason) => reason.clone(),
+            PersistenceRecovery::Healthy | PersistenceRecovery::HardReset(_) => {
+                "workspace restore failed".to_string()
+            }
+        };
+        let store = path.store();
+        match store.hard_reset(reason.clone()) {
+            Ok(_) => {
+                warn!(
+                    path = %store.path().display(),
+                    new_schema = store.schema_version(),
+                    %reason,
+                    "workspace store hard reset after restore failure"
+                );
+                state.hard_reset(reason);
+            }
+            Err(error) => state.restore_failed(error.to_string()),
+        }
+    } else {
+        state.ready(true);
+    }
+    commands.entity(*entity).remove::<RestorePending>();
 }
 
 #[derive(Component)]
@@ -357,9 +384,11 @@ fn load_on_startup(
     info!(path = %store.path().display(), "loading workspace store");
     state.begin_materialize();
     commands.entity(*entity).insert(RestorePending);
-    commands.trigger_load(LoadWorld::default_from_stream(std::io::Cursor::new(
-        snapshot.into_payload().into_bytes(),
-    )));
+    TrackedLoadWorld::default_from_stream(
+        *entity,
+        std::io::Cursor::new(snapshot.into_payload().into_bytes()),
+    )
+    .trigger(&mut commands);
 }
 
 fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {
