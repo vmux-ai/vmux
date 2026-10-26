@@ -35,8 +35,7 @@ pub struct CurrentSpaceSet;
     SpaceId,
     vmux_ecs::CollectionView,
     EffectiveStartupDir,
-    EffectiveStartupUrl,
-    crate::profile::Profile
+    EffectiveStartupUrl
 )]
 pub struct Space;
 
@@ -91,12 +90,12 @@ pub struct FocusedSpace<'w, 's> {
             &'static SpaceId,
             &'static EffectiveStartupDir,
             &'static EffectiveStartupUrl,
-            &'static crate::profile::Profile,
             Has<CurrentSpace>,
             Has<Active>,
         ),
         With<Space>,
     >,
+    profiles: crate::profile::Profiles<'w, 's>,
 }
 
 impl FocusedSpace<'_, '_> {
@@ -107,22 +106,21 @@ impl FocusedSpace<'_, '_> {
         &SpaceId,
         &EffectiveStartupDir,
         &EffectiveStartupUrl,
-        &crate::profile::Profile,
     )> {
         let focused = self.focused_window.entity().and_then(|focused_window| {
             self.spaces
                 .iter()
-                .filter(|(entity, _, _, _, _, _, _)| {
+                .filter(|(entity, _, _, _, _, _)| {
                     self.hierarchy.get(*entity) == Some(focused_window)
                 })
-                .find(|(_, _, _, _, _, current, _)| *current)
+                .find(|(_, _, _, _, current, _)| *current)
                 .or_else(|| {
                     self.spaces
                         .iter()
-                        .filter(|(entity, _, _, _, _, _, _)| {
+                        .filter(|(entity, _, _, _, _, _)| {
                             self.hierarchy.get(*entity) == Some(focused_window)
                         })
-                        .find(|(_, _, _, _, _, _, active)| *active)
+                        .find(|(_, _, _, _, _, active)| *active)
                 })
         });
         focused
@@ -130,51 +128,50 @@ impl FocusedSpace<'_, '_> {
                 if self
                     .spaces
                     .iter()
-                    .any(|(space, _, _, _, _, _, _)| self.hierarchy.get(space).is_some())
+                    .any(|(space, _, _, _, _, _)| self.hierarchy.get(space).is_some())
                 {
                     return None;
                 }
                 self.spaces
                     .iter()
-                    .find(|(_, _, _, _, _, current, _)| *current)
+                    .find(|(_, _, _, _, current, _)| *current)
                     .or_else(|| {
                         self.spaces
                             .iter()
-                            .find(|(_, _, _, _, _, _, active)| *active)
+                            .find(|(_, _, _, _, _, active)| *active)
                     })
                     .or_else(|| self.spaces.iter().next())
             })
-            .map(|(entity, id, startup_dir, startup_url, profile, _, _)| {
-                (entity, id, startup_dir, startup_url, profile)
+            .map(|(entity, id, startup_dir, startup_url, _, _)| {
+                (entity, id, startup_dir, startup_url)
             })
     }
 
     pub fn get(&self) -> Option<(Entity, Option<std::path::PathBuf>)> {
         self.selected()
-            .map(|(entity, _, startup_dir, _, _)| (entity, startup_dir.0.clone()))
+            .map(|(entity, _, startup_dir, _)| (entity, startup_dir.0.clone()))
     }
 
     pub fn entity(&self) -> Option<Entity> {
-        self.selected().map(|(entity, _, _, _, _)| entity)
+        self.selected().map(|(entity, _, _, _)| entity)
     }
 
     pub fn id(&self) -> Option<&str> {
-        self.selected().map(|(_, id, _, _, _)| id.0.as_str())
+        self.selected().map(|(_, id, _, _)| id.0.as_str())
     }
 
     pub fn profile(&self) -> Option<&str> {
-        self.selected()
-            .map(|(_, _, _, _, profile)| profile.name.as_str())
+        self.entity().and_then(|space| self.profiles.name(space))
     }
 
     pub fn startup_dir(&self) -> Option<&std::path::Path> {
         self.selected()
-            .and_then(|(_, _, startup_dir, _, _)| startup_dir.0.as_deref())
+            .and_then(|(_, _, startup_dir, _)| startup_dir.0.as_deref())
     }
 
     pub fn startup_url(&self) -> Option<&str> {
         self.selected()
-            .map(|(_, _, _, startup_url, _)| startup_url.0.as_str())
+            .map(|(_, _, _, startup_url)| startup_url.0.as_str())
             .filter(|url| !url.is_empty())
     }
 
