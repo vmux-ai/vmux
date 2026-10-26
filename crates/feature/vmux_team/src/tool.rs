@@ -53,6 +53,8 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins((ToolRegistryPlugin, TeamToolPlugin));
+            app.finish();
+            app.cleanup();
             app.update();
             app
         }
