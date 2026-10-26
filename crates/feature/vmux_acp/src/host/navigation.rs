@@ -11,7 +11,9 @@ use vmux_ecs::{
     PageOpenTask, PendingPrompt, PendingPromptAttachments, UiState, UiStateWriter,
 };
 use vmux_layout::space::FocusedSpace;
-use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_layout::tab::{
+    StartupDir, Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable,
+};
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
 use vmux_session::event::{ChatSnapshot, ChatTranscriptState};
 use vmux_session::host::{ImportedConversation, SessionManagerView, SessionView};
@@ -82,7 +84,7 @@ pub(super) struct InlineTransitionSnapshot {
 struct WorkspaceCheckRequest {
     tab: Entity,
     project_dir: String,
-    startup_dir: Option<String>,
+    startup_dir: Option<PathBuf>,
 }
 
 impl WorkspaceCheckRequest {
@@ -90,7 +92,6 @@ impl WorkspaceCheckRequest {
         let linked = self
             .startup_dir
             .as_deref()
-            .map(Path::new)
             .and_then(|path| path.canonicalize().ok())
             .as_deref()
             .is_some_and(vmux_git::worktree::CheckoutInfo::is_linked);
@@ -129,14 +130,17 @@ impl AgentChatTarget {
 fn ancestor_tab_entity(
     entity: Entity,
     child_of: &Query<&ChildOf>,
-    tabs: &Query<(
-        Entity,
-        &mut Tab,
-        Option<&TabWorkspace>,
-        Option<&TabWorktree>,
-        Option<&TabWorktreeReady>,
-        Option<&TabDirDecided>,
-    )>,
+    tabs: &Query<
+        (
+            Entity,
+            &mut StartupDir,
+            Option<&TabWorkspace>,
+            Option<&TabWorktree>,
+            Option<&TabWorktreeReady>,
+            Option<&TabDirDecided>,
+        ),
+        With<Tab>,
+    >,
 ) -> Option<Entity> {
     let mut current = entity;
     loop {
@@ -167,14 +171,17 @@ fn prepare(
     workspace_checks: Query<(), Or<(With<WorkspaceCheckRequest>, With<WorkspaceCheckTask>)>>,
     child_of: Query<&ChildOf>,
     space_hierarchy: vmux_layout::space::SpaceHierarchy,
-    mut tabs: Query<(
-        Entity,
-        &mut Tab,
-        Option<&TabWorkspace>,
-        Option<&TabWorktree>,
-        Option<&TabWorktreeReady>,
-        Option<&TabDirDecided>,
-    )>,
+    mut tabs: Query<
+        (
+            Entity,
+            &mut StartupDir,
+            Option<&TabWorkspace>,
+            Option<&TabWorktree>,
+            Option<&TabWorktreeReady>,
+            Option<&TabDirDecided>,
+        ),
+        With<Tab>,
+    >,
     settings: Option<Res<AppSettings>>,
     active_space: FocusedSpace,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -303,7 +310,9 @@ fn prepare(
             vmux_setting::StartupDir::resolve(settings, &space_id, None)
                 .map(|dir| dir.path.to_string_lossy().into_owned())
         });
-        let Ok((_, mut tab, workspace, metadata, ready, decided)) = tabs.get_mut(tab_entity) else {
+        let Ok((_, mut startup_dir, workspace, metadata, ready, decided)) =
+            tabs.get_mut(tab_entity)
+        else {
             continue;
         };
         let has_workspace = workspace.is_some();
@@ -311,7 +320,12 @@ fn prepare(
             let project_dir = metadata
                 .map(|metadata| metadata.repo_root.clone())
                 .filter(|path| !path.is_empty())
-                .or_else(|| tab.startup_dir.clone())
+                .or_else(|| {
+                    startup_dir
+                        .0
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned())
+                })
                 .or_else(|| configured_project_dir.clone())
                 .unwrap_or_default();
             TabWorkspace { project_dir }
@@ -320,16 +334,16 @@ fn prepare(
             continue;
         }
         if metadata.is_none()
-            && vmux_space::WorkspaceCwd::from_tab(tab.startup_dir.as_deref())
+            && vmux_space::WorkspaceCwd::from_tab(startup_dir.0.as_deref())
                 .ok()
                 .flatten()
                 .is_none()
-            && vmux_space::WorkspaceCwd::from_tab(Some(&workspace.project_dir))
+            && vmux_space::WorkspaceCwd::from_tab(Some(Path::new(&workspace.project_dir)))
                 .ok()
                 .flatten()
                 .is_none()
         {
-            tab.startup_dir = None;
+            startup_dir.0 = None;
             commands
                 .entity(tab_entity)
                 .remove::<TabWorkspace>()
@@ -345,7 +359,7 @@ fn prepare(
             commands
                 .entity(tab_entity)
                 .remove::<vmux_space::RepositoryNeedsWorktree>();
-            if ready.is_some_and(|ready| ready.is_current(&tab, &workspace, metadata)) {
+            if ready.is_some_and(|ready| ready.is_current(&startup_dir, &workspace, metadata)) {
                 commands
                     .entity(tab_entity)
                     .remove::<TabWorktreeUnavailable>();
@@ -366,7 +380,7 @@ fn prepare(
                     WorkspaceCheckRequest {
                         tab: tab_entity,
                         project_dir: workspace.project_dir,
-                        startup_dir: tab.startup_dir.clone(),
+                        startup_dir: startup_dir.0.clone(),
                     },
                 ));
             }
@@ -396,7 +410,7 @@ fn start_workspace_checks(
 
 fn poll_workspace_checks(
     mut tasks: Query<(Entity, &mut WorkspaceCheckTask)>,
-    tabs: Query<(&Tab, &TabWorkspace, Has<TabWorktree>)>,
+    tabs: Query<(&StartupDir, &TabWorkspace, Has<TabWorktree>), With<Tab>>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -405,10 +419,10 @@ fn poll_workspace_checks(
         };
         let current = tabs
             .get(task.request.tab)
-            .is_ok_and(|(tab, workspace, worktree)| {
+            .is_ok_and(|(startup_dir, workspace, worktree)| {
                 !worktree
                     && workspace.project_dir == task.request.project_dir
-                    && tab.startup_dir == task.request.startup_dir
+                    && startup_dir.0 == task.request.startup_dir
             });
         let mut request = commands.entity(entity);
         request.remove::<(WorkspaceCheckRequest, WorkspaceCheckTask, PageOpenDeferred)>();
@@ -994,10 +1008,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    startup_dir: Some(path.clone()),
-                    ..Default::default()
-                },
+                Tab::named("Tab").with_startup_dir(&path),
                 TabWorkspace {
                     project_dir: path.clone(),
                 },
@@ -1010,7 +1021,7 @@ mod tests {
                 WorkspaceCheckRequest {
                     tab,
                     project_dir: path.clone(),
-                    startup_dir: Some(path),
+                    startup_dir: Some(path.into()),
                 },
             ))
             .id();
@@ -1039,10 +1050,7 @@ mod tests {
         world.insert_resource(Time::<()>::default());
         let tab = world
             .spawn((
-                Tab {
-                    startup_dir: Some("/old".into()),
-                    ..Default::default()
-                },
+                Tab::named("Tab").with_startup_dir("/old"),
                 TabWorkspace {
                     project_dir: "/old".into(),
                 },
@@ -1057,8 +1065,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            world.get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some("/project")
+            world.get::<StartupDir>(tab).unwrap().0.as_deref(),
+            Some(Path::new("/project"))
         );
         assert_eq!(
             world.get::<TabWorkspace>(tab).unwrap().project_dir,

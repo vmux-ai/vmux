@@ -5,7 +5,7 @@ use crate::{
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition},
     stack::Stack,
-    tab::Tab,
+    tab::{StartupDir, Tab},
     unit::WindowExt,
 };
 use bevy::{
@@ -759,17 +759,16 @@ fn spawn_requested_tab_layouts(
             .startup_dir
             .as_ref()
             .and_then(|startup_dir| startup_dir.canonicalize().ok())
-            .filter(|startup_dir| startup_dir.is_dir())
-            .and_then(|startup_dir| startup_dir.to_str().map(str::to_string));
+            .filter(|startup_dir| startup_dir.is_dir());
         let TabScaffold {
             tab: tab_e,
             pane: leaf,
             stack,
         } = tabs.spawn(request.space, request.primary_window, settings.pane.gap);
-        commands.entity(tab_e).insert(Tab {
-            name: request.name.clone().unwrap_or_default(),
-            startup_dir,
-        });
+        commands.entity(tab_e).insert((
+            Name::new(request.name.clone().unwrap_or_else(|| "Tab".to_string())),
+            StartupDir(startup_dir.map(PathBuf::from)),
+        ));
         if let Some(previous) = previous {
             commands
                 .entity(tab_e)
@@ -1396,10 +1395,14 @@ mod tests {
 
         app.update();
 
-        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
+        let tab = app
+            .world_mut()
+            .query_filtered::<&StartupDir, With<Tab>>()
+            .single(app.world())
+            .unwrap();
         assert_eq!(
-            tab.startup_dir.as_deref(),
-            startup_dir.path().canonicalize().unwrap().to_str()
+            tab.0.as_deref(),
+            Some(startup_dir.path().canonicalize().unwrap().as_path())
         );
     }
 
@@ -1425,8 +1428,12 @@ mod tests {
 
         app.update();
 
-        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
-        assert_eq!(tab.startup_dir, None);
+        let tab = app
+            .world_mut()
+            .query_filtered::<&StartupDir, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(tab.0, None);
     }
 
     #[test]
@@ -1457,8 +1464,12 @@ mod tests {
 
         app.update();
 
-        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
-        assert_eq!(tab.startup_dir, None);
+        let tab = app
+            .world_mut()
+            .query_filtered::<&StartupDir, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(tab.0, None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_ecs::EntityTarget;
-use vmux_layout::tab::{Tab, TabWorkspace};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace};
 use vmux_session::Session;
 
 use crate::policy::AcpWorkspacePolicy;
@@ -18,7 +18,7 @@ pub(super) enum AcpWorkspaceState {
 pub(super) struct PromptWorkspace<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     session_views: Query<'w, 's, (Entity, &'static EntityTarget<Session>)>,
-    tabs: Query<'w, 's, &'static Tab>,
+    tabs: Query<'w, 's, &'static StartupDir, With<Tab>>,
     workspaces: Query<'w, 's, (), With<TabWorkspace>>,
     pending: Query<'w, 's, (), With<vmux_space::PendingProject>>,
     worktrees: Query<'w, 's, (), With<vmux_space::RepositoryNeedsWorktree>>,
@@ -61,8 +61,8 @@ impl PromptWorkspace<'_, '_> {
             .find(|(_, target)| target.entity() == entity)
             .map(|(stack, _)| stack)?;
         loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                let state = match tab.startup_dir.as_deref() {
+            if let Ok(startup_dir) = self.tabs.get(current) {
+                let state = match startup_dir.0.as_deref() {
                     Some(_) if self.worktrees.contains(current) => {
                         AcpWorkspaceState::RepositoryNeedsWorktree
                     }

@@ -10,6 +10,7 @@ use vmux_command::WriteCommandRequests;
 use vmux_ecs::agent::CommandOrigin;
 use vmux_ecs::agent::{AgentRequestBlocked, AgentRequestInput, AgentRequestPrerequisiteSet};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_layout::tab::{StartupDir as TabStartupDir, Tab};
 use vmux_session::host::USER_CHOICE_REQUESTED;
 use vmux_setting::{AppSettings, StartupDir};
 
@@ -28,11 +29,11 @@ use vmux_api::protocol::{AgentCommandResult, ClientMessage};
 struct WorkspaceDirectory;
 
 impl WorkspaceDirectory {
-    fn stored(path: Option<&str>) -> Result<Option<PathBuf>, String> {
+    fn stored(path: Option<&Path>) -> Result<Option<PathBuf>, String> {
         let Some(path) = path else {
             return Ok(None);
         };
-        StartupDir::from_tab(path).map(|directory| Some(directory.path))
+        StartupDir::from_tab_path(path).map(|directory| Some(directory.path))
     }
 }
 
@@ -71,7 +72,7 @@ fn self_pane(
 
 fn ancestor_self_tab(
     pane: Entity,
-    tabs: &Query<&mut vmux_layout::tab::Tab>,
+    tabs: &Query<(&mut Name, &mut TabStartupDir), With<Tab>>,
     child_of: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = pane;
@@ -225,10 +226,8 @@ fn requests(
                         ));
                         continue;
                     };
-                    let current_dir = workspace.tabs.get(tab_entity).ok().and_then(|tab| {
-                        WorkspaceDirectory::stored(tab.startup_dir.as_deref())
-                            .ok()
-                            .flatten()
+                    let current_dir = workspace.tabs.get(tab_entity).ok().and_then(|(_, dir)| {
+                        WorkspaceDirectory::stored(dir.0.as_deref()).ok().flatten()
                     });
                     if let Some(current_dir) = current_dir.as_deref()
                         && vmux_git::worktree::CheckoutInfo::is_linked(current_dir)
@@ -240,7 +239,7 @@ fn requests(
                             .get(tab_entity)
                             .ok()
                             .and_then(|workspace| {
-                                WorkspaceDirectory::stored(Some(&workspace.project_dir))
+                                WorkspaceDirectory::stored(Some(Path::new(&workspace.project_dir)))
                                     .ok()
                                     .flatten()
                             })
@@ -310,7 +309,7 @@ fn requests(
                                                 .tabs
                                                 .get(tab_entity)
                                                 .ok()
-                                                .map(|tab| tab.name.clone())
+                                                .map(|(name, _)| name.as_str().to_string())
                                         })
                                         .unwrap_or_else(|| "task".to_string());
                                     let slug_hint = vmux_layout::worktree::WorktreeName::hint(
@@ -381,7 +380,7 @@ fn requests(
                                 .tabs
                                 .get(tab_e)
                                 .ok()
-                                .and_then(|t| t.startup_dir.clone());
+                                .and_then(|(_, dir)| dir.0.clone());
                             match WorkspaceDirectory::stored(tab_dir.as_deref()) {
                                 Ok(Some(path)) => {
                                     AgentCommandResult::Text(path.to_string_lossy().into_owned())
@@ -397,11 +396,11 @@ fn requests(
                                 .tabs
                                 .get(tab_e)
                                 .ok()
-                                .and_then(|t| t.startup_dir.clone());
+                                .and_then(|(_, dir)| dir.0.clone());
                             let name = workspace
                                 .tabs
                                 .get(tab_e)
-                                .map(|t| t.name.clone())
+                                .map(|(name, _)| name.as_str().to_string())
                                 .unwrap_or_default();
                             match WorkspaceDirectory::stored(tab_dir.as_deref()) {
                                 Err(message) => AgentCommandResult::Error(message),
@@ -409,15 +408,16 @@ fn requests(
                                     let configured_dir = active_space
                                         .id()
                                         .and_then(|space_id| settings.startup_dir(space_id));
-                                    let workspace_dir = workspace
-                                        .workspaces
-                                        .get(tab_e)
-                                        .ok()
-                                        .and_then(|workspace| {
-                                            WorkspaceDirectory::stored(Some(&workspace.project_dir))
+                                    let workspace_dir =
+                                        workspace.workspaces.get(tab_e).ok().and_then(
+                                            |workspace| {
+                                                WorkspaceDirectory::stored(Some(Path::new(
+                                                    &workspace.project_dir,
+                                                )))
                                                 .ok()
                                                 .flatten()
-                                        });
+                                            },
+                                        );
                                     let Some(current_dir) =
                                         stored.or(configured_dir).or_else(|| workspace_dir.clone())
                                     else {
@@ -451,12 +451,13 @@ fn requests(
                                         ) {
                                             Ok(activation) => {
                                                 let branch = activation.metadata.branch.clone();
-                                                let path = activation
-                                                    .execution_dir
-                                                    .to_string_lossy()
-                                                    .into_owned();
-                                                if let Ok(mut t) = workspace.tabs.get_mut(tab_e) {
-                                                    t.startup_dir = Some(path.clone());
+                                                let execution_dir = activation.execution_dir;
+                                                let path =
+                                                    execution_dir.to_string_lossy().into_owned();
+                                                if let Ok((_, mut dir)) =
+                                                    workspace.tabs.get_mut(tab_e)
+                                                {
+                                                    dir.0 = Some(execution_dir);
                                                 }
                                                 commands
                                                         .entity(tab_e)
@@ -518,9 +519,11 @@ fn requests(
                                 .tabs
                                 .get(tab_entity)
                                 .ok()
-                                .and_then(|tab| tab.startup_dir.clone());
+                                .and_then(|(_, dir)| dir.0.clone());
                             match path {
-                                Some(path) => AgentCommandResult::Text(path),
+                                Some(path) => {
+                                    AgentCommandResult::Text(path.to_string_lossy().into_owned())
+                                }
                                 None => AgentCommandResult::Error(
                                     "tab worktree directory is missing".to_string(),
                                 ),
@@ -531,7 +534,9 @@ fn requests(
                             project
                                 .as_ref()
                                 .and_then(|picked| {
-                                    WorkspaceDirectory::stored(Some(picked)).ok().flatten()
+                                    WorkspaceDirectory::stored(Some(Path::new(picked)))
+                                        .ok()
+                                        .flatten()
                                 })
                                 .or_else(|| {
                                     workspace
@@ -543,9 +548,11 @@ fn requests(
                                 .or_else(|| {
                                     workspace.workspaces.get(tab_entity).ok().and_then(
                                         |workspace| {
-                                            WorkspaceDirectory::stored(Some(&workspace.project_dir))
-                                                .ok()
-                                                .flatten()
+                                            WorkspaceDirectory::stored(Some(Path::new(
+                                                &workspace.project_dir,
+                                            )))
+                                            .ok()
+                                            .flatten()
                                         },
                                     )
                                 });

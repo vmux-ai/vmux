@@ -351,7 +351,7 @@ impl TabArchiveLayout<'_, '_> {
 struct TabCloseLayout<'w, 's> {
     active_tab: ActiveTabParam<'w, 's>,
     hierarchy: TabHierarchy<'w, 's>,
-    tabs: Query<'w, 's, &'static Tab>,
+    tabs: Query<'w, 's, (&'static Name, &'static crate::tab::StartupDir), With<Tab>>,
     retiring: Query<'w, 's, (), With<Retiring>>,
     transitions: Query<'w, 's, &'static Transition>,
     presentation: Projection<'w, 's>,
@@ -471,7 +471,13 @@ fn handle_close_tab_requests(
             }
         }
 
-        archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
+        archive_tab(
+            request.tab,
+            tab.0,
+            tab.1,
+            &layout.archive,
+            &mut layout.commands,
+        );
         layout.commands.trigger(TabClosed);
         if deferred {
             layout.commands.entity(request.tab).insert(Retiring);
@@ -481,7 +487,13 @@ fn handle_close_tab_requests(
     }
 }
 
-fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, commands: &mut Commands) {
+fn archive_tab(
+    tab_entity: Entity,
+    name: &Name,
+    startup_dir: &crate::tab::StartupDir,
+    layout: &TabArchiveLayout,
+    commands: &mut Commands,
+) {
     let Some(space) = layout.space_hierarchy.get(tab_entity) else {
         return;
     };
@@ -528,8 +540,8 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
             closed_at,
             Some(ArchivedTabPage {
                 group_id: group_id.clone(),
-                tab_name: tab.name.clone(),
-                tab_startup_dir: tab.startup_dir.clone(),
+                tab_name: name.as_str().to_string(),
+                tab_startup_dir: startup_dir.0.clone(),
                 active: active_stack == Some(stack),
             }),
         ) {
@@ -816,10 +828,10 @@ fn restore_archived_tab(
             ChildOf(space),
         ))
         .id();
-    commands.entity(tab).insert(Tab {
-        name: archived_tab.tab_name.clone(),
-        startup_dir: archived_tab.tab_startup_dir.clone(),
-    });
+    commands.entity(tab).insert((
+        Name::new(archived_tab.tab_name.clone()),
+        crate::tab::StartupDir(archived_tab.tab_startup_dir.clone()),
+    ));
     if origin_matches && let Some(index) = entries.first().and_then(|entry| entry.page.tab_index) {
         commands.entity(space).insert_children(index, &[tab]);
     }
@@ -1723,10 +1735,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "Work".to_string(),
-                    startup_dir: Some("/tmp/work".to_string()),
-                },
+                Tab::named("Work").with_startup_dir("/tmp/work"),
                 LastActivatedAt(2),
                 Active,
                 ChildOf(space),
@@ -1836,7 +1845,7 @@ mod tests {
         assert!(
             archived
                 .iter()
-                .all(|entry| entry.4.as_deref() == Some("/tmp/work"))
+                .all(|entry| entry.4.as_deref() == Some(std::path::Path::new("/tmp/work")))
         );
         assert_eq!(archived.iter().filter(|entry| entry.5).count(), 1);
         assert!(
@@ -1967,13 +1976,8 @@ mod tests {
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string())))
             .id();
-        app.world_mut().spawn((
-            Tab {
-                name: "Existing".to_string(),
-                startup_dir: None,
-            },
-            ChildOf(space),
-        ));
+        app.world_mut()
+            .spawn((Tab::named("Existing"), ChildOf(space)));
         for (url, leaf, stack_index, child_index, active) in [
             ("https://left-1.example", "left", 0, 0, false),
             ("https://left-2.example", "left", 1, 0, false),
@@ -2001,7 +2005,7 @@ mod tests {
                 ArchivedTabPage {
                     group_id: "group-1".to_string(),
                     tab_name: "Recovered".to_string(),
-                    tab_startup_dir: Some("/tmp/recovered".to_string()),
+                    tab_startup_dir: Some("/tmp/recovered".into()),
                     active,
                 },
             ));
@@ -2019,12 +2023,18 @@ mod tests {
             .into_iter()
             .find(|entity| {
                 app.world()
-                    .get::<Tab>(*entity)
-                    .is_some_and(|tab| tab.name == "Recovered")
+                    .get::<Name>(*entity)
+                    .is_some_and(|name| name.as_str() == "Recovered")
             })
             .expect("recovered tab");
-        let recovered_tab = app.world().get::<Tab>(recovered).unwrap();
-        assert_eq!(recovered_tab.startup_dir.as_deref(), Some("/tmp/recovered"));
+        let recovered_tab = app
+            .world()
+            .get::<crate::tab::StartupDir>(recovered)
+            .unwrap();
+        assert_eq!(
+            recovered_tab.0.as_deref(),
+            Some(std::path::Path::new("/tmp/recovered"))
+        );
         let space_tabs: Vec<Entity> = app
             .world()
             .get::<Children>(space)
