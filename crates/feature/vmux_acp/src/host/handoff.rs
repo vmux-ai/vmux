@@ -52,14 +52,14 @@ fn persist(
     directory: Single<&HandoffDriver>,
     mut created: MessageReader<crate::host::event::AcpSessionCreated>,
     sessions: Query<(
-        &vmux_session::SessionId,
+        &vmux_session::Id<vmux_session::Session>,
         &vmux_session::AgentId,
         &ImportedConversation,
     )>,
 ) {
     for event in created.read() {
         for (session_id, agent_id, imported) in &sessions {
-            if session_id.0 != event.sid || imported.first_prompt.is_none() {
+            if session_id.as_str() != event.sid || imported.first_prompt.is_none() {
                 continue;
             }
             if let Err(error) = directory.save(imported, &agent_id.0, &event.acp_session_id) {

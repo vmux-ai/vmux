@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
-#[cfg(test)]
-use vmux_session::Session;
-use vmux_session::{RunState, SessionId};
+use vmux_session::{Id, RunState, Session};
 
 pub(super) fn add(app: &mut App) {
     app.add_message::<AgentToast>()
@@ -30,7 +28,7 @@ pub(super) struct ErrorSurfaced;
 fn surface_errors(
     mut commands: Commands,
     mut writer: MessageWriter<AgentToast>,
-    sessions: Query<(Entity, &RunState, &SessionId, Option<&ErrorSurfaced>), Changed<RunState>>,
+    sessions: Query<(Entity, &RunState, &Id<Session>, Option<&ErrorSurfaced>), Changed<RunState>>,
 ) {
     for (entity, state, session, surfaced) in &sessions {
         let RunState::Errored(message) = state else {
@@ -44,7 +42,7 @@ fn surface_errors(
         }
         commands.entity(entity).insert(ErrorSurfaced);
         writer.write(AgentToast {
-            session_sid: session.0.clone(),
+            session_sid: session.as_str().to_string(),
             level: ToastLevel::Error,
             message: message.clone(),
         });
@@ -78,7 +76,7 @@ mod tests {
             .add_systems(Update, surface_errors);
         app.world_mut().spawn((
             Session,
-            SessionId("abc".into()),
+            Id::<Session>::new("abc"),
             RunState::Errored("boom".into()),
         ));
         app.update();
@@ -101,7 +99,7 @@ mod tests {
             .add_systems(Update, surface_errors);
         app.world_mut().spawn((
             Session,
-            SessionId("acp1".into()),
+            Id::<Session>::new("acp1"),
             RunState::Errored("kaboom".into()),
         ));
         app.update();
@@ -123,7 +121,7 @@ mod tests {
             .add_systems(Update, surface_errors);
         app.world_mut().spawn((
             Session,
-            SessionId("abc".into()),
+            Id::<Session>::new("abc"),
             ErrorSurfaced,
             RunState::Errored("old".into()),
         ));

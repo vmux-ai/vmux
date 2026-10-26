@@ -20,7 +20,7 @@ use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::event::{ModelOptionEntry, SelectMode, SelectModel, SetAgentEffort};
 use vmux_session::host::{ChatModeStateChanged, ChatModelStateChanged, SessionView, SessionViews};
-use vmux_session::{AgentId, Session, SessionId};
+use vmux_session::{AgentId, Id, Session};
 
 use super::config_driver::AcpConfigProjection;
 use vmux_session::Route as SessionRoute;
@@ -69,7 +69,7 @@ struct SessionConfigSelectRequest {
 
 fn answer_remote_model_commands(
     mut reader: MessageReader<AgentRequestInput>,
-    sessions: Query<(&SessionId, &AcpSessionConfigState), With<Session>>,
+    sessions: Query<(&Id<Session>, &AcpSessionConfigState), With<Session>>,
     mut selects: MessageWriter<SessionConfigSelectRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -85,7 +85,7 @@ fn answer_remote_model_commands(
         } else if let Ok(Some(payload)) = request.decode::<AgentSelectModel>() {
             if !sessions
                 .iter()
-                .any(|(session_id, _)| session_id.0 == payload.sid)
+                .any(|(session_id, _)| session_id.as_str() == payload.sid)
             {
                 AgentCommandResult::Error("no such session".to_string())
             } else {
@@ -99,7 +99,7 @@ fn answer_remote_model_commands(
         } else if let Ok(Some(payload)) = request.decode::<AgentSetEffort>() {
             if sessions
                 .iter()
-                .any(|(session_id, _)| session_id.0 == payload.sid)
+                .any(|(session_id, _)| session_id.as_str() == payload.sid)
             {
                 selects.write(SessionConfigSelectRequest {
                     sid: payload.sid,
@@ -122,11 +122,11 @@ fn answer_remote_model_commands(
 
 fn remote_model_state(
     sid: &str,
-    sessions: &Query<(&SessionId, &AcpSessionConfigState), With<Session>>,
+    sessions: &Query<(&Id<Session>, &AcpSessionConfigState), With<Session>>,
 ) -> Option<RemoteModelState> {
     let (_, state) = sessions
         .iter()
-        .find(|(session_id, _)| session_id.0 == sid)?;
+        .find(|(session_id, _)| session_id.as_str() == sid)?;
     let model = state.category("model")?;
     let mut models = Vec::new();
     for option in &model.values {
@@ -157,7 +157,7 @@ fn remote_model_state(
 
 fn apply_session_selection(
     mut reader: MessageReader<SessionConfigSelectRequest>,
-    mut sessions: Query<(&SessionId, &AgentId, &mut AcpSessionConfigState), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &AgentId, &mut AcpSessionConfigState), With<Session>>,
     mut counter: Single<&mut AcpSessionConfigRequestCounter>,
     mut remembered_models: MessageWriter<RememberModel>,
     mut remembered_modes: MessageWriter<RememberMode>,
@@ -166,7 +166,7 @@ fn apply_session_selection(
     for request in reader.read() {
         let Some((session_id, agent_id, mut state)) = sessions
             .iter_mut()
-            .find(|(session_id, _, _)| session_id.0 == request.sid)
+            .find(|(session_id, _, _)| session_id.as_str() == request.sid)
         else {
             continue;
         };
@@ -195,7 +195,7 @@ fn apply_session_selection(
             });
         }
         requests.write(AcpSetSessionConfigRequest {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             request_id,
             config_id: config.config_id.clone(),
             value: request.value.clone(),
@@ -442,7 +442,7 @@ fn sync_page_model_state(
 fn select_model(
     trigger: On<UiInput<SelectModel>>,
     targets: SessionViews,
-    sessions: Query<&SessionId, With<Session>>,
+    sessions: Query<&Id<Session>, With<Session>>,
     mut selects: MessageWriter<SessionConfigSelectRequest>,
 ) {
     let Some(session) = targets.session(trigger.event().webview) else {
@@ -452,7 +452,7 @@ fn select_model(
         return;
     };
     selects.write(SessionConfigSelectRequest {
-        sid: session_id.0.clone(),
+        sid: session_id.as_str().to_string(),
         category: "model",
         value: trigger.event().payload.model_id.clone(),
     });
@@ -461,7 +461,7 @@ fn select_model(
 fn select_mode(
     trigger: On<UiInput<SelectMode>>,
     targets: SessionViews,
-    sessions: Query<&SessionId, With<Session>>,
+    sessions: Query<&Id<Session>, With<Session>>,
     mut selects: MessageWriter<SessionConfigSelectRequest>,
 ) {
     let Some(session) = targets.session(trigger.event().webview) else {
@@ -471,7 +471,7 @@ fn select_mode(
         return;
     };
     selects.write(SessionConfigSelectRequest {
-        sid: session_id.0.clone(),
+        sid: session_id.as_str().to_string(),
         category: "mode",
         value: trigger.event().payload.mode_id.clone(),
     });
@@ -480,7 +480,7 @@ fn select_mode(
 fn set_effort(
     trigger: On<UiInput<SetAgentEffort>>,
     targets: SessionViews,
-    sessions: Query<&SessionId, With<Session>>,
+    sessions: Query<&Id<Session>, With<Session>>,
     mut selects: MessageWriter<SessionConfigSelectRequest>,
 ) {
     let Some(session) = targets.session(trigger.event().webview) else {
@@ -490,7 +490,7 @@ fn set_effort(
         return;
     };
     selects.write(SessionConfigSelectRequest {
-        sid: session_id.0.clone(),
+        sid: session_id.as_str().to_string(),
         category: "thought_level",
         value: trigger.event().payload.level.trim().to_string(),
     });
@@ -498,7 +498,7 @@ fn set_effort(
 
 fn apply_last_used_model(
     mut sessions: Query<
-        (&SessionId, &AgentId, &mut AcpSessionConfigState),
+        (&Id<Session>, &AgentId, &mut AcpSessionConfigState),
         (With<Session>, Added<AcpSessionConfigState>),
     >,
     last_used: Single<&AgentModelSelections>,
@@ -524,7 +524,7 @@ fn apply_last_used_model(
         counter.0 = counter.0.wrapping_add(1);
         let request_id = counter.0;
         requests.write(AcpSetSessionConfigRequest {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             request_id,
             config_id: model.config_id.clone(),
             value: model_id.clone(),
@@ -571,7 +571,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId("s1".into()),
+                Id::<Session>::new("s1"),
                 AgentId("claude".into()),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
@@ -684,7 +684,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId("s1".into()),
+                Id::<Session>::new("s1"),
                 AgentId("claude".into()),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
@@ -755,7 +755,7 @@ mod tests {
             .add_systems(Update, remember_mode_lists);
         app.world_mut().spawn((
             Session,
-            SessionId("s1".into()),
+            Id::<Session>::new("s1"),
             AgentId("codex-acp".into()),
             vmux_ecs::Cwd("/tmp".into()),
             vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
@@ -824,7 +824,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId("s2".into()),
+                Id::<Session>::new("s2"),
                 AgentId("claude".into()),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),

@@ -12,7 +12,7 @@ use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
 use vmux_editor::lsp::store::PackageStore;
-use vmux_session::{AgentId, RunState, Session, SessionId};
+use vmux_session::{AgentId, Id, RunState, Session};
 use vmux_setting::{AcpAgentConfig, AppSettings};
 use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_tool::{
@@ -344,7 +344,7 @@ mod tests {
         fn bundle(agent_id: &str, sid: &str) -> impl Bundle {
             (
                 Session,
-                SessionId(sid.to_string()),
+                Id::<Session>::new(sid.to_string()),
                 AgentId(agent_id.to_string()),
                 Cwd(PathBuf::from("/workspace")),
                 ProcessAnchor(vmux_ecs::ProcessId::new()),

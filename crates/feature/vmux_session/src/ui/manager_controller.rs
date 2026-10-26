@@ -5,12 +5,12 @@ use vmux_session::SessionSummary;
 use vmux_ui::hooks::{CollectionController, OptimisticMap, send, try_send};
 use vmux_ui::navigation::{NavigationGesture, PageNavigation};
 
-use crate::SessionId;
 use crate::event::{
     ProviderSessionTarget, ResumeSession, SessionsArchive, SessionsCleanup, SessionsRestoreDeleted,
     SessionsStageChange,
 };
 use crate::route::Route;
+use crate::{Id, Session};
 
 use super::manager_model::{
     ArchiveTarget, DeleteTarget, SessionFilter, SessionFilterStep, StageTarget,
@@ -250,7 +250,10 @@ impl ResumeTarget {
     pub fn click(&self, event: &MouseEvent) {
         let gesture = NavigationGesture::from_mouse(event);
         if self.managed {
-            PageNavigation::gesture(Route::Session(SessionId(self.id.clone())).url(), gesture);
+            PageNavigation::gesture(
+                Route::Session(Id::<Session>::new(self.id.clone())).url(),
+                gesture,
+            );
             return;
         }
         send(&ResumeSession {

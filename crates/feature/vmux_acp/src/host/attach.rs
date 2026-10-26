@@ -6,7 +6,7 @@ use vmux_ecs::{
 };
 use vmux_flex::Visibility;
 use vmux_layout::tab::{Tab, TabWorkspace};
-use vmux_session::{AgentConversationTitle, PromptQueue, SessionId, TitlePending};
+use vmux_session::{AgentConversationTitle, Id, PromptQueue, Session, TitlePending};
 
 pub(super) use super::attach_driver::AcpAgentAttachment;
 use super::attach_driver::{
@@ -29,7 +29,7 @@ fn attach(
             &SessionName,
             &AgentName,
             &AcpId,
-            &SessionId,
+            &Id<Session>,
             &WorkingDirectory,
             &AcpAttachmentIcon,
             &AcpResume,
@@ -59,7 +59,7 @@ fn attach(
         SessionName(session_name),
         AgentName(agent_name),
         AcpId(agent_id),
-        SessionId(sid),
+        session_id,
         WorkingDirectory(cwd),
         AcpAttachmentIcon(icon),
         AcpResume(resume),
@@ -78,7 +78,8 @@ fn attach(
             continue;
         }
         let agent_id = agent_id.as_str();
-        let url = vmux_session::Route::Session(SessionId(sid.clone())).url();
+        let sid = session_id.as_str();
+        let url = vmux_session::Route::Session(session_id.clone()).url();
         let page_metadata = PageMetadata {
             url: url.clone(),
             title: session_name.clone(),
@@ -152,7 +153,9 @@ fn attach(
             vmux_session::RunState::default(),
             vmux_session::ApprovalPolicy::default(),
             vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
-            vmux_ecs::team::Agent { sid: sid.clone() },
+            vmux_ecs::team::Agent {
+                sid: sid.to_string(),
+            },
         ));
         commands
             .entity(*session_entity)
@@ -296,10 +299,7 @@ mod tests {
         assert_eq!(meta.title, "Task");
         assert_eq!(meta.icon.favicon_url(), "https://cdn.example/vibe.svg");
         assert_eq!(
-            world
-                .get::<EntityTarget<vmux_session::Session>>(stack)
-                .unwrap()
-                .entity(),
+            world.get::<EntityTarget<Session>>(stack).unwrap().entity(),
             session
         );
     }

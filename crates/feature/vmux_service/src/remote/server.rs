@@ -60,7 +60,7 @@ struct Dialer;
 struct RemoteSession;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
-struct SessionId(usize);
+struct RemoteTransportSessionId(usize);
 
 #[derive(Component, Clone)]
 struct SessionDevice(DeviceId);
@@ -194,7 +194,7 @@ fn dial(runtimes: RemoteRuntimes, mut commands: Commands) {
 
 fn connect(
     mut servers: Query<(Entity, &mut SessionStartedInbox)>,
-    sessions: Query<(&SessionId, &ChildOf), With<RemoteSession>>,
+    sessions: Query<(&RemoteTransportSessionId, &ChildOf), With<RemoteSession>>,
     mut commands: Commands,
 ) {
     for (server, mut inbox) in &mut servers {
@@ -209,7 +209,7 @@ fn connect(
                 Name::new(format!("remote session: {}", started.device.as_str())),
                 RemoteSession,
                 ChildOf(server),
-                SessionId(started.id),
+                RemoteTransportSessionId(started.id),
                 SessionDevice(started.device),
             ));
         }
@@ -218,7 +218,10 @@ fn connect(
 
 fn disconnect(
     mut servers: Query<(Entity, &mut SessionEndedInbox)>,
-    sessions: Query<(Entity, &SessionId, &ChildOf, &SessionDevice), With<RemoteSession>>,
+    sessions: Query<
+        (Entity, &RemoteTransportSessionId, &ChildOf, &SessionDevice),
+        With<RemoteSession>,
+    >,
     mut commands: Commands,
 ) {
     for (server, mut inbox) in &mut servers {

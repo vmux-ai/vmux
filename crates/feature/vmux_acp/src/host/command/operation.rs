@@ -7,7 +7,7 @@ use vmux_api::protocol::{
 use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 use vmux_ecs::{Operation, OperationKind, OperationState, PageOpenTarget};
 use vmux_session::host::StartRequest;
-use vmux_session::{Created, SessionId};
+use vmux_session::{Created, Session};
 
 use super::CommandSet;
 use crate::host::acp::registry::RegistryAgent;
@@ -36,7 +36,7 @@ impl bevy::prelude::Plugin for Plugin {
 
 #[derive(Component)]
 struct PendingSessionCreation {
-    session_id: SessionId,
+    session_id: Id<Session>,
     request_id: vmux_api::protocol::AgentRequestId,
 }
 

@@ -14,7 +14,7 @@ pub(super) fn add(app: &mut App) {
 
 fn project(
     mut sessions: Query<(
-        &super::SessionId,
+        &super::Id<Session>,
         &AcpSessionShared,
         &mut AcpTranscriptInbox,
         &mut AcpProjector,

@@ -14,7 +14,7 @@ use vmux_api::session::{
 use vmux_ecs::CreatedAt;
 use vmux_ecs::persistence::PersistenceAppExt;
 
-use crate::{AgentId, Session, SessionId};
+use crate::{AgentId, Id, Session};
 
 pub(crate) struct ConversationPlugin;
 
@@ -100,13 +100,13 @@ pub enum DocumentKind {
 
 #[derive(Message, Clone, Debug)]
 pub struct SnapshotReceived {
-    pub session: SessionId,
+    pub session: Id<Session>,
     pub messages: Vec<Message>,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct ConversationAppendReceived {
-    pub session: SessionId,
+    pub session: Id<Session>,
     pub messages: Vec<Message>,
 }
 
@@ -322,13 +322,13 @@ impl EventIdentity {
 }
 
 fn ensure(
-    sessions: Query<(Entity, &SessionId, Option<&Children>), Added<Session>>,
+    sessions: Query<(Entity, &Id<Session>, Option<&Children>), Added<Session>>,
     members: Query<&MemberKind, With<Member>>,
     documents: Query<(), With<Document>>,
     mut commands: Commands,
 ) {
     for (session, id, children) in &sessions {
-        let prefix = format!("session:{}", id.0);
+        let prefix = format!("session:{}", id.as_str());
         let has_local = children
             .into_iter()
             .flat_map(|children| children.iter())
@@ -363,7 +363,7 @@ fn ensure(
 }
 
 fn sync_agent(
-    sessions: Query<(Entity, &SessionId, &AgentId, Option<&Children>), Changed<AgentId>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentId, Option<&Children>), Changed<AgentId>>,
     mut members: Query<(&mut MemberId, &mut Name, &mut MemberRole, &MemberKind), With<Member>>,
     mut commands: Commands,
 ) {
@@ -399,7 +399,7 @@ fn materialize(
     mut appended: MessageReader<ConversationAppendReceived>,
     mut received: MessageReader<OperationReceived>,
     mut committed: MessageReader<OperationCommitted>,
-    sessions: Query<(Entity, &SessionId, Option<&Children>), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, Option<&Children>), With<Session>>,
     existing: Query<
         (
             Entity,
@@ -513,7 +513,7 @@ fn materialize(
 }
 
 struct EventIndex {
-    sessions: HashMap<SessionId, Entity>,
+    sessions: HashMap<Id<Session>, Entity>,
     events: HashMap<(Entity, EventId), Entity>,
     operations: HashMap<(Entity, ClientOpId), Entity>,
     entity_keys: HashMap<Entity, (EventId, Option<ClientOpId>)>,
@@ -551,7 +551,7 @@ struct EventMaterializer<'w, 's> {
 }
 
 impl EventMaterializer<'_, '_> {
-    fn append(&mut self, index: &mut EventIndex, session_id: &SessionId, messages: &[Message]) {
+    fn append(&mut self, index: &mut EventIndex, session_id: &Id<Session>, messages: &[Message]) {
         let Some(&session) = index.sessions.get(session_id) else {
             return;
         };
@@ -691,13 +691,13 @@ mod tests {
         app.add_plugins(ConversationPlugin);
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into())))
+            .spawn((Session, Id::<Session>::new("session-1")))
             .id();
         app.update();
         app.world_mut()
             .resource_mut::<Messages<SnapshotReceived>>()
             .write(SnapshotReceived {
-                session: SessionId("session-1".into()),
+                session: Id::<Session>::new("session-1"),
                 messages: vec![
                     Message::user("hello"),
                     Message::Assistant {
@@ -730,7 +730,7 @@ mod tests {
         app.add_plugins(ConversationPlugin);
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into())))
+            .spawn((Session, Id::<Session>::new("session-1")))
             .id();
         app.update();
 
@@ -764,7 +764,7 @@ mod tests {
     fn committed_operation_replaces_the_pending_client_operation() {
         let mut app = App::new();
         app.add_plugins(ConversationPlugin);
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         let client_op_id = ClientOpId::new("op-1");
         let pending = app
@@ -821,7 +821,7 @@ mod tests {
     fn snapshot_does_not_remove_operation_events() {
         let mut app = App::new();
         app.add_plugins(ConversationPlugin);
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
             .resource_mut::<Messages<OperationCommitted>>()
@@ -856,7 +856,7 @@ mod tests {
     fn append_preserves_the_snapshot_and_orders_new_messages() {
         let mut app = App::new();
         app.add_plugins(ConversationPlugin);
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
             .resource_mut::<Messages<SnapshotReceived>>()
@@ -899,7 +899,7 @@ mod tests {
     fn operation_replaces_stale_snapshot_event_in_the_same_update() {
         let mut app = App::new();
         app.add_plugins(ConversationPlugin);
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
             .resource_mut::<Messages<SnapshotReceived>>()
@@ -940,7 +940,7 @@ mod tests {
     fn operation_replacement_survives_a_later_snapshot() {
         let mut app = App::new();
         app.add_plugins(ConversationPlugin);
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut()
             .resource_mut::<Messages<SnapshotReceived>>()
@@ -982,7 +982,7 @@ mod tests {
     fn repeated_snapshot_preserves_existing_timestamp() {
         let mut app = App::new();
         app.add_plugins(ConversationPlugin);
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         app.world_mut().spawn((Session, session_id.clone()));
         app.world_mut()
             .resource_mut::<Messages<SnapshotReceived>>()

@@ -17,7 +17,7 @@ use vmux_layout::worktree::{
 };
 use vmux_session::event::ChatChoiceSelected;
 use vmux_session::host::{ChatSynced, PendingAgentChoice, SessionView};
-use vmux_session::{Session, SessionId};
+use vmux_session::{Id, Session};
 use vmux_ui::i18n::Locale;
 
 use super::agent_workspace::AgentWorkspaceRequestSet;
@@ -238,7 +238,7 @@ pub(super) struct AgentWorkspaceState<'w, 's> {
     pub(super) workspaces: Query<'w, 's, &'static TabWorkspace>,
     pub(super) pending_projects: Query<'w, 's, &'static PendingProject>,
     pub(super) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
-    sessions: Query<'w, 's, (&'static SessionId, &'static mut Cwd), With<Session>>,
+    sessions: Query<'w, 's, (&'static Id<Session>, &'static mut Cwd), With<Session>>,
     session_targets: Query<'w, 's, &'static EntityTarget<Session>>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
@@ -347,7 +347,7 @@ impl AgentWorkspaceState<'_, '_> {
         session_cwd.0 = cwd.to_path_buf();
         let cwd = cwd.to_string_lossy().into_owned();
         Some(ClientMessage::RebindAcpWorkspace {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             cwd,
         })
     }
@@ -702,7 +702,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId("routing-session".into()),
+                Id::<Session>::new("routing-session"),
                 Cwd(projects.clone()),
                 ProcessAnchor(anchor),
             ))
@@ -751,7 +751,7 @@ mod tests {
         assert!(app.world().get::<TabWorktreeReady>(tab).is_some());
         assert!(app.world().get::<PendingProject>(tab).is_none());
         assert_eq!(
-            app.world().get::<SessionId>(session).unwrap().0,
+            app.world().get::<Id<Session>>(session).unwrap().as_str(),
             "routing-session"
         );
         assert_eq!(app.world().get::<ProcessAnchor>(session).unwrap().0, anchor);

@@ -5,7 +5,7 @@ use vmux_api::command_bar::CommandBarPage;
 use vmux_command::{CommandBarWorkDirectory, ContributedPage, WriteCommandBarSnapshots};
 use vmux_ecs::{Cwd, EntityTarget, LastActivatedAt};
 #[cfg(test)]
-use vmux_session::SessionId;
+use vmux_session::Id;
 use vmux_session::{AgentId, Session};
 
 use super::acp::AcpPackageChanged;
@@ -174,7 +174,7 @@ mod tests {
             .spawn((RegistryAgent::test("codex", "Codex", None), InstalledAgent));
         app.world_mut().spawn((
             Session,
-            SessionId("session".into()),
+            Id::<Session>::new("session"),
             AgentId("codex".into()),
             Cwd::default(),
             vmux_ecs::ProcessAnchor(ProcessId::new()),

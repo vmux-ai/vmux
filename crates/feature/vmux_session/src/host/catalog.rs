@@ -20,9 +20,9 @@ use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
     AgentId, ArchiveRequest, CatalogSnapshot, CleanupRequest, CleanupTarget, CreateRequest,
-    Created, DescriptionUpdateRequest, ProviderArchiveRequest, ProviderCatalog,
+    Created, DescriptionUpdateRequest, Id, ProviderArchiveRequest, ProviderCatalog,
     ProviderSessionRestoreRequest, ProviderStageChangeRequest, RenameRequest, Route, Session,
-    SessionId, SessionSummary, SessionSummaryProjection, StageChangeRequest, StageId,
+    SessionSummary, SessionSummaryProjection, StageChangeRequest, StageId,
 };
 
 use super::session::SessionView;
@@ -269,7 +269,7 @@ pub struct ScopeProjectionRequest {
 
 #[derive(Component)]
 struct PendingOpen {
-    session_id: SessionId,
+    session_id: Id<Session>,
     stack: Entity,
 }
 
@@ -413,7 +413,7 @@ impl CatalogViews<'_, '_> {
 
 enum MutationAuthority {
     All,
-    Session(SessionId),
+    Session(Id<Session>),
     Project(PathBuf),
     None,
 }
@@ -422,7 +422,7 @@ impl MutationAuthority {
     fn allows(&self, session: &SessionSummary) -> bool {
         match self {
             Self::All => true,
-            Self::Session(id) => id.0 == session.id,
+            Self::Session(id) => id.as_str() == session.id,
             Self::Project(root) => {
                 !session.cwd.is_empty() && Path::new(&session.cwd).starts_with(root)
             }
@@ -435,7 +435,7 @@ impl MutationAuthority {
 struct ArchiveSources<'w, 's> {
     catalog: Res<'w, CatalogSnapshot>,
     providers: Res<'w, ProviderCatalog>,
-    sessions: Query<'w, 's, &'static SessionId, With<Session>>,
+    sessions: Query<'w, 's, &'static Id<Session>, With<Session>>,
     external_links: Query<
         'w,
         's,
@@ -593,7 +593,7 @@ fn rename(
         return;
     }
     requests.write(RenameRequest {
-        id: SessionId(request.id.clone()),
+        id: Id::<Session>::new(request.id.clone()),
         name: request.name.clone(),
     });
 }
@@ -616,7 +616,7 @@ fn update_description(
         return;
     }
     requests.write(DescriptionUpdateRequest {
-        id: SessionId(request.id.clone()),
+        id: Id::<Session>::new(request.id.clone()),
         description: request.description.clone(),
     });
 }
@@ -655,7 +655,7 @@ fn change_stage(
         return;
     }
     requests.write(StageChangeRequest {
-        id: SessionId(request.id.clone()),
+        id: Id::<Session>::new(request.id.clone()),
         stage: StageId(request.stage.clone()),
     });
 }
@@ -689,7 +689,7 @@ fn archive(
             }
             let id = sources.sessions.get(owner.parent()).ok()?;
             Some((
-                id.0.as_str(),
+                id.as_str(),
                 ExternalLinkIdentity::new(
                     provider.clone(),
                     scope.id().clone(),
@@ -737,7 +737,7 @@ fn archive(
             });
         }
         requests.write(ArchiveRequest {
-            id: SessionId(id.clone()),
+            id: Id::<Session>::new(id.clone()),
             archived_at: request.archived.then_some(source_updated_at),
         });
     }
@@ -769,7 +769,7 @@ fn cleanup(
             continue;
         }
         let target = if summary.managed {
-            CleanupTarget::Session(SessionId(id.clone()))
+            CleanupTarget::Session(Id::<Session>::new(id.clone()))
         } else {
             let Some(identity) = providers
                 .get(&summary.kind, &summary.sid)
@@ -832,7 +832,7 @@ impl UiSessionDetail {
         repositories: &SessionRepositories,
     ) -> Self {
         let id = match Route::parse(&page.url) {
-            Some(Route::Session(id)) => id.0,
+            Some(Route::Session(id)) => id.into_string(),
             Some(Route::Manager) | None => return Self::default(),
         };
         let session = catalog
@@ -1247,7 +1247,7 @@ mod tests {
         assert_eq!(created.len(), 1);
         assert_eq!(created[0].cwd, cwd);
         let id = created[0].id().clone();
-        assert!(!id.0.is_empty());
+        assert!(!id.as_str().is_empty());
         let session = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(Created {
             entity: session,
@@ -1324,7 +1324,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests[0].targets,
-            vec![CleanupTarget::Session(SessionId("canonical".into()))]
+            vec![CleanupTarget::Session(Id::<Session>::new("canonical"))]
         );
     }
 
@@ -1368,7 +1368,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests[0].targets,
-            vec![CleanupTarget::Session(SessionId("inside".into()))]
+            vec![CleanupTarget::Session(Id::<Session>::new("inside"))]
         );
     }
 
@@ -1454,7 +1454,7 @@ mod tests {
             .spawn((
                 super::super::session::SessionView,
                 PageMetadata {
-                    url: Route::Session(SessionId("session-1".into())).url(),
+                    url: Route::Session(Id::<Session>::new("session-1")).url(),
                     ..Default::default()
                 },
             ))
@@ -1471,7 +1471,7 @@ mod tests {
         app.world_mut().flush();
 
         let published = app.world().resource::<Published>();
-        assert_eq!(published.catalogs, vec![manager]);
+        assert_eq!(published.catalogs, vec![session, manager]);
         assert_eq!(published.details, vec![session]);
     }
 
@@ -1596,7 +1596,7 @@ mod tests {
                 super::super::session::SessionView,
                 SessionDetailView,
                 PageMetadata {
-                    url: Route::Session(SessionId("session-1".into())).url(),
+                    url: Route::Session(Id::<Session>::new("session-1")).url(),
                     ..Default::default()
                 },
             ))

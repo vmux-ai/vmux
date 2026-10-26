@@ -23,7 +23,7 @@ use crate::policy::AcpWorkspacePolicy;
 use crate::session::{AcpSessionLink, AcpSessionLinks};
 use vmux_session::host::{ImportedConversation, SessionView};
 use vmux_session::{
-    AgentId, ApprovalPolicy, PromptQueue, Route, RunState, Session, SessionId, TitlePending,
+    AgentId, ApprovalPolicy, Id, PromptQueue, Route, RunState, Session, TitlePending,
 };
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -81,7 +81,7 @@ pub(super) struct InitialAcpSessionConfig {
 
 fn info(
     mut reader: MessageReader<AcpAgentInfo>,
-    mut sessions: Query<(&SessionId, &AgentId, &mut Profile), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &AgentId, &mut Profile), With<Session>>,
 ) {
     for event in reader.read() {
         let name = event.name.trim();
@@ -89,7 +89,7 @@ fn info(
             continue;
         }
         for (session_id, agent_id, mut profile) in &mut sessions {
-            if session_id.0 == event.sid && profile.name != name {
+            if session_id.as_str() == event.sid && profile.name != name {
                 let icon = profile.icon.clone();
                 *profile = Profile::registry(name, &agent_id.0).with_icon(icon);
             }
@@ -113,7 +113,7 @@ fn ancestor_tab(
 
 fn workspace(
     mut reader: MessageReader<AcpWorkspaceChanged>,
-    mut sessions: Query<(Entity, &SessionId, &mut Cwd), With<Session>>,
+    mut sessions: Query<(Entity, &Id<Session>, &mut Cwd), With<Session>>,
     session_views: Query<(Entity, &EntityTarget<Session>)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
@@ -135,7 +135,7 @@ fn workspace(
         let workspace_cwd = validated.workspace_cwd;
         let checkout = validated.checkout;
         for (session_entity, session_id, mut session_cwd) in &mut sessions {
-            if session_id.0 != event.sid {
+            if session_id.as_str() != event.sid {
                 continue;
             }
             session_cwd.0.clone_from(&cwd);
@@ -190,12 +190,12 @@ fn workspace(
 
 fn config(
     mut reader: MessageReader<AcpSessionConfigSnapshot>,
-    mut sessions: Query<(Entity, &SessionId, Option<&mut AcpSessionConfigState>), With<Session>>,
+    mut sessions: Query<(Entity, &Id<Session>, Option<&mut AcpSessionConfigState>), With<Session>>,
     mut commands: Commands,
 ) {
     for event in reader.read() {
         for (entity, session_id, current) in &mut sessions {
-            if session_id.0 != event.sid {
+            if session_id.as_str() != event.sid {
                 continue;
             }
             if event.configs.is_empty() {
@@ -248,11 +248,11 @@ fn config(
 
 fn selection(
     mut reader: MessageReader<AcpSessionConfigSelectionResult>,
-    mut sessions: Query<(&SessionId, &mut AcpSessionConfigState), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &mut AcpSessionConfigState), With<Session>>,
 ) {
     for event in reader.read() {
         for (session_id, mut state) in &mut sessions {
-            if session_id.0 != event.sid {
+            if session_id.as_str() != event.sid {
                 continue;
             }
             let Some(index) = state.pending.iter().position(|pending| {
@@ -277,7 +277,7 @@ fn selection(
 
 fn auto_allow(
     trigger: On<AgentApprovalRequest>,
-    sessions: Query<(&SessionId, &ApprovalPolicy), With<Session>>,
+    sessions: Query<(&Id<Session>, &ApprovalPolicy), With<Session>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let request = trigger.event();
@@ -289,7 +289,7 @@ fn auto_allow(
     }
     service_requests.write(ServiceRequest(ClientMessage::Shared(
         SharedMessage::AgentApprove {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             call_id: request.call_id.clone(),
             decision: ApprovalDecision::AllowAlways,
         },
@@ -299,7 +299,7 @@ fn auto_allow(
 #[allow(clippy::type_complexity)]
 fn session(
     mut reader: MessageReader<AcpSessionCreated>,
-    sessions: Query<(Entity, &SessionId, &AgentId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentId), With<Session>>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
     mut page_meta: Query<&mut PageMetadata, With<SessionView>>,
     links: AcpSessionLinks,
@@ -307,7 +307,7 @@ fn session(
 ) {
     for ev in reader.read() {
         for (session_entity, session_id, agent_id) in &sessions {
-            if session_id.0 != ev.sid {
+            if session_id.as_str() != ev.sid {
                 continue;
             }
             links.set(
@@ -336,13 +336,13 @@ fn session(
 
 fn present_process(
     mut reader: MessageReader<AcpTerminalCreated>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>), With<Session>>,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
         let Some(session_entity) = sessions
             .iter()
-            .find(|(_, session_id)| session_id.0 == ev.sid)
+            .find(|(_, session_id)| session_id.as_str() == ev.sid)
             .map(|(entity, _)| entity)
         else {
             continue;
@@ -357,7 +357,7 @@ fn present_process(
 fn input(
     mut q: Query<(
         Entity,
-        &SessionId,
+        &Id<Session>,
         &AgentId,
         &mut RunState,
         &mut PromptQueue,
@@ -412,7 +412,7 @@ fn input(
             .filter(|mode| !mode.is_empty());
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
-                sid: session_id.0.clone(),
+                sid: session_id.as_str().to_string(),
                 text,
                 context,
                 attachments: prompt.attachments,
@@ -430,14 +430,14 @@ fn acp_prompt_dispatch_ready(state: &RunState, queue: &PromptQueue, spawn_queued
 
 fn close_on_remove(
     trigger: On<Remove, ProcessAnchor>,
-    sessions: Query<&SessionId, With<Session>>,
+    sessions: Query<&Id<Session>, With<Session>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let Ok(session_id) = sessions.get(trigger.event_target()) else {
         return;
     };
     service_requests.write(ServiceRequest(ClientMessage::CloseAgentSession {
-        sid: session_id.0.clone(),
+        sid: session_id.as_str().to_string(),
     }));
 }
 
@@ -454,7 +454,7 @@ mod tests {
         fn bundle(agent: &str, sid: &str, cwd: impl Into<std::path::PathBuf>) -> impl Bundle {
             (
                 Session,
-                SessionId(sid.into()),
+                Id::<Session>::new(sid),
                 AgentId(agent.into()),
                 Cwd(cwd.into()),
                 ProcessAnchor(ProcessId::new()),
