@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
-use crate::AcpSessionId;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 #[cfg(test)]

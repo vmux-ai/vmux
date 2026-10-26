@@ -7,16 +7,18 @@ use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
+use vmux_connector::{
+    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
+};
 use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::{KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
     AgentId, ArchiveRequest, CatalogSnapshot, CleanupRequest, CleanupTarget, CreateRequest,
-    Created, DescriptionUpdateRequest, ProviderArchiveRequest, ProviderCatalog, ProviderKind,
-    ProviderSessionId, ProviderSessionKey, ProviderSessionRestoreRequest,
-    ProviderStageChangeRequest, RenameRequest, Route, SessionId, SessionSummary,
-    SessionSummaryProjection, StageChangeRequest, StageId,
+    Created, DescriptionUpdateRequest, ProviderArchiveRequest, ProviderCatalog,
+    ProviderSessionRestoreRequest, ProviderStageChangeRequest, RenameRequest, Route, Session,
+    SessionId, SessionSummary, SessionSummaryProjection, StageChangeRequest, StageId,
 };
 
 use super::session::SessionView;
@@ -267,6 +269,25 @@ impl MutationAuthority {
     }
 }
 
+#[derive(SystemParam)]
+struct ArchiveSources<'w, 's> {
+    catalog: Res<'w, CatalogSnapshot>,
+    providers: Res<'w, ProviderCatalog>,
+    sessions: Query<'w, 's, &'static SessionId, With<Session>>,
+    external_links: Query<
+        'w,
+        's,
+        (
+            &'static ChildOf,
+            &'static ProviderKey,
+            &'static ExternalScopeRef,
+            &'static ResourceKind,
+            &'static ExternalId,
+        ),
+        With<ExternalLink>,
+    >,
+}
+
 fn create(
     trigger: On<UiInput<SessionsCreate>>,
     parents: Query<&ChildOf>,
@@ -436,15 +457,16 @@ fn change_stage(
         return;
     }
     if !request.kind.is_empty() && request.kind != "session" && !request.sid.is_empty() {
-        let source_updated_at = providers
-            .get(&request.kind, &request.sid)
-            .map(vmux_session::ProviderSession::source_updated_at)
-            .unwrap_or_default();
+        let Some(provider) = providers.get(&request.kind, &request.sid) else {
+            return;
+        };
+        let Some(identity) = provider.identity() else {
+            return;
+        };
         provider_requests.write(ProviderStageChangeRequest {
-            kind: ProviderKind(request.kind.clone()),
-            id: ProviderSessionId(request.sid.clone()),
+            identity,
             stage: StageId(request.stage.clone()),
-            source_updated_at,
+            source_updated_at: provider.source_updated_at(),
         });
         return;
     }
@@ -457,13 +479,7 @@ fn change_stage(
 fn archive(
     trigger: On<UiInput<SessionsArchive>>,
     views: CatalogViews,
-    catalog: Res<CatalogSnapshot>,
-    providers: Res<ProviderCatalog>,
-    sessions: Query<(
-        &SessionId,
-        Option<&ProviderKind>,
-        Option<&ProviderSessionId>,
-    )>,
+    sources: ArchiveSources,
     mut requests: MessageWriter<ArchiveRequest>,
     mut provider_requests: MessageWriter<ProviderArchiveRequest>,
 ) {
@@ -473,16 +489,30 @@ fn archive(
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
-    let summaries = catalog
+    let summaries = sources
+        .catalog
         .sessions
         .iter()
         .filter(|session| requested.contains(session.id.as_str()))
         .map(|session| (session.id.as_str(), session))
         .collect::<HashMap<_, _>>();
-    let links = sessions
+    let links = sources
+        .external_links
         .iter()
-        .filter_map(|(id, kind, provider_id)| {
-            Some((id.0.as_str(), (kind?.clone(), provider_id?.clone())))
+        .filter_map(|(owner, provider, scope, kind, external_id)| {
+            if kind.as_str() != "session" {
+                return None;
+            }
+            let id = sources.sessions.get(owner.parent()).ok()?;
+            Some((
+                id.0.as_str(),
+                ExternalLinkIdentity::new(
+                    provider.clone(),
+                    scope.id().clone(),
+                    kind.clone(),
+                    external_id.clone(),
+                ),
+            ))
         })
         .collect::<HashMap<_, _>>();
     let source_updated_at = vmux_ecs::UnixMillis::now().0;
@@ -494,27 +524,29 @@ fn archive(
             continue;
         }
         if !session.managed {
-            let native = providers
-                .get(&session.kind, &session.sid)
-                .is_some_and(|provider| provider.archive.is_some());
+            let Some(provider) = sources.providers.get(&session.kind, &session.sid) else {
+                continue;
+            };
+            let Some(identity) = provider.identity() else {
+                continue;
+            };
             provider_requests.write(ProviderArchiveRequest {
-                kind: ProviderKind(session.kind.clone()),
-                id: ProviderSessionId(session.sid.clone()),
+                identity,
                 archived: request.archived,
                 source_updated_at,
-                native,
+                native: provider.archive.is_some(),
             });
             continue;
         }
-        let native = links.get(id.as_str()).is_some_and(|(kind, provider_id)| {
-            providers
-                .get(&kind.0, &provider_id.0)
+        let native = links.get(id.as_str()).is_some_and(|identity| {
+            sources
+                .providers
+                .get(identity.scope().as_str(), identity.external_id().as_str())
                 .is_some_and(|provider| provider.archive.is_some())
         });
-        if let Some((kind, provider_id)) = links.get(id.as_str()) {
+        if let Some(identity) = links.get(id.as_str()) {
             provider_requests.write(ProviderArchiveRequest {
-                kind: kind.clone(),
-                id: provider_id.clone(),
+                identity: identity.clone(),
                 archived: request.archived,
                 source_updated_at,
                 native,
@@ -531,6 +563,7 @@ fn cleanup(
     trigger: On<UiInput<SessionsCleanup>>,
     views: CatalogViews,
     catalog: Res<CatalogSnapshot>,
+    providers: Res<ProviderCatalog>,
     mut requests: MessageWriter<CleanupRequest>,
 ) {
     let authority = views.authority(trigger.event().webview);
@@ -554,10 +587,13 @@ fn cleanup(
         let target = if summary.managed {
             CleanupTarget::Session(SessionId(id.clone()))
         } else {
-            CleanupTarget::Provider(ProviderSessionKey::new(
-                ProviderKind(summary.kind.clone()),
-                ProviderSessionId(summary.sid.clone()),
-            ))
+            let Some(identity) = providers
+                .get(&summary.kind, &summary.sid)
+                .and_then(|provider| provider.identity())
+            else {
+                continue;
+            };
+            CleanupTarget::Provider(identity)
         };
         targets.push(target);
     }
@@ -569,28 +605,24 @@ fn cleanup(
 fn restore_deleted(
     trigger: On<UiInput<SessionsRestoreDeleted>>,
     views: CatalogViews,
+    providers: Res<ProviderCatalog>,
     mut requests: MessageWriter<ProviderSessionRestoreRequest>,
 ) {
     if !views.manager_contains(trigger.event().webview) {
         return;
     }
-    let mut keys = trigger
+    let mut unique = HashSet::new();
+    let identities = trigger
         .event()
         .payload
         .sessions
         .iter()
-        .filter(|session| !session.kind.is_empty() && !session.sid.is_empty())
-        .map(|session| {
-            ProviderSessionKey::new(
-                ProviderKind(session.kind.clone()),
-                ProviderSessionId(session.sid.clone()),
-            )
-        })
+        .filter_map(|session| providers.get(&session.kind, &session.sid))
+        .filter_map(|provider| provider.identity())
+        .filter(|identity| unique.insert(identity.clone()))
         .collect::<Vec<_>>();
-    keys.sort_by(|left, right| (&left.kind.0, &left.id.0).cmp(&(&right.kind.0, &right.id.0)));
-    keys.dedup();
-    if !keys.is_empty() {
-        requests.write(ProviderSessionRestoreRequest { keys });
+    if !identities.is_empty() {
+        requests.write(ProviderSessionRestoreRequest { identities });
     }
 }
 

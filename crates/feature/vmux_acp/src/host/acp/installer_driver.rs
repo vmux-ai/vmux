@@ -3,6 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use vmux_api::protocol::ClientMessage;
+use vmux_connector::ExternalId;
 use vmux_ecs::event::InstallPhase;
 use vmux_ecs::{Cwd, ProcessAnchor};
 use vmux_editor::lsp::archive::ArchiveKind;
@@ -18,8 +19,6 @@ use super::{
     AcpInstallJob, AcpInstallKey, AcpInstallOutcome, AcpInstallProgressSink, AcpInstallRequest,
     AcpInstallWaiter, AcpLaunch, InstallState,
 };
-use crate::AcpSessionId;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ResolvedAgent {
     pub command: String,
@@ -195,7 +194,7 @@ impl AcpLaunch {
         agent_id: &AgentId,
         cwd: &Cwd,
         anchor: &ProcessAnchor,
-        resume: Option<&AcpSessionId>,
+        resume: Option<&ExternalId>,
         settings: Option<&AppSettings>,
     ) -> ClientMessage {
         let shell = settings
@@ -219,7 +218,7 @@ impl AcpLaunch {
             anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
             mcp_args: mcp.map(|mcp| mcp.args).unwrap_or_default(),
-            resume_acp_session_id: resume.map(|resume| resume.0.clone()),
+            resume_acp_session_id: resume.map(|resume| resume.as_str().to_string()),
         }
     }
 }

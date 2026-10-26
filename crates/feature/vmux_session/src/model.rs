@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, path::PathBuf};
+use std::path::PathBuf;
 
 #[cfg(host)]
 use bevy_app::{App, Plugin, PostUpdate, Update};
@@ -11,11 +11,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(host)]
 use std::collections::{HashMap, HashSet};
 use vmux_api::session::SessionId;
+use vmux_connector::{
+    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
+};
 #[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 #[cfg(host)]
 use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order, PageMetadata};
-use vmux_ecs::{ArchivedAt, Cwd, Description};
+use vmux_ecs::{ArchivedAt, Cwd, Description, RemoteUpdatedAt, UnixMillis};
 
 #[cfg(host)]
 use crate::{AgentConversationTitle, TitlePending};
@@ -32,12 +35,8 @@ impl Plugin for EntityPlugin {
             .register_persisted::<ProviderStage>()
             .register_persisted::<ProviderArchive>()
             .register_persisted::<ProviderSessionTombstone>()
-            .register_persisted::<SourceUpdatedAt>()
-            .register_persisted::<ProviderKind>()
-            .register_persisted::<ProviderSessionId>()
             .register_persisted::<AgentConversationTitle>()
             .register_persisted::<TitlePending>()
-            .register_persisted::<LocalTask>()
             .init_resource::<ProviderArchiveOperations>()
             .init_resource::<ProviderSessionTombstones>()
             .add_message::<CreateRequest>()
@@ -193,17 +192,11 @@ impl StageChangedAt {
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct LocalTask;
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[require(Save, SourceUpdatedAt)]
-#[type_path = "vmux_session"]
 pub struct ProviderStage;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
-#[require(Save, SourceUpdatedAt)]
+#[require(Save)]
 #[type_path = "vmux_session"]
 pub struct ProviderArchive;
 
@@ -212,60 +205,6 @@ pub struct ProviderArchive;
 #[require(Save)]
 #[type_path = "vmux_session"]
 pub struct ProviderSessionTombstone;
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct SourceUpdatedAt(pub i64);
-
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct ProviderKind(pub String);
-
-impl Borrow<str> for ProviderKind {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct ProviderSessionId(pub String);
-
-impl Borrow<str> for ProviderSessionId {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct ProviderSessionKey {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
-}
-
-impl ProviderSessionKey {
-    pub fn new(kind: ProviderKind, id: ProviderSessionId) -> Self {
-        Self { kind, id }
-    }
-
-    pub fn from_components(kind: &ProviderKind, id: &ProviderSessionId) -> Self {
-        Self::new(kind.clone(), id.clone())
-    }
-
-    pub fn matches(&self, kind: &str, id: &str) -> bool {
-        self.kind.0 == kind && self.id.0 == id
-    }
-}
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
@@ -281,7 +220,6 @@ pub struct CreateRequest {
     pub agent: Option<AgentId>,
     created_at: Option<i64>,
     activated_at: Option<i64>,
-    local: bool,
 }
 
 impl CreateRequest {
@@ -299,7 +237,6 @@ impl CreateRequest {
             agent,
             created_at: None,
             activated_at: None,
-            local: true,
         }
     }
 
@@ -319,7 +256,6 @@ impl CreateRequest {
             agent: Some(agent),
             created_at: Some(created_at),
             activated_at: Some(activated_at),
-            local: false,
         }
     }
 
@@ -361,8 +297,7 @@ pub struct ArchiveRequest {
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderArchiveRequest {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
+    pub identity: ExternalLinkIdentity,
     pub archived: bool,
     pub source_updated_at: i64,
     pub native: bool,
@@ -370,16 +305,14 @@ pub struct ProviderArchiveRequest {
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderArchiveWriteRequest {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
+    pub identity: ExternalLinkIdentity,
     pub archived: bool,
     pub revision: u64,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderArchiveCompleted {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
+    pub identity: ExternalLinkIdentity,
     pub archived: bool,
     pub revision: u64,
     pub success: bool,
@@ -387,13 +320,12 @@ pub struct ProviderArchiveCompleted {
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderSessionRestoreRequest {
-    pub keys: Vec<ProviderSessionKey>,
+    pub identities: Vec<ExternalLinkIdentity>,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderStageChangeRequest {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
+    pub identity: ExternalLinkIdentity,
     pub stage: StageId,
     pub source_updated_at: i64,
 }
@@ -406,14 +338,14 @@ pub struct CleanupRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CleanupTarget {
     Session(SessionId),
-    Provider(ProviderSessionKey),
+    Provider(ExternalLinkIdentity),
 }
 
 #[cfg(host)]
 #[derive(Resource, Default)]
 pub(crate) struct ProviderArchiveOperations {
     next_revision: u64,
-    pending: HashMap<ProviderSessionKey, ProviderArchiveOperation>,
+    pending: HashMap<ExternalLinkIdentity, ProviderArchiveOperation>,
 }
 
 #[cfg(host)]
@@ -429,7 +361,7 @@ impl ProviderArchiveOperations {
     fn request(&mut self, request: &ProviderArchiveRequest) -> Option<ProviderArchiveWriteRequest> {
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
         let revision = self.next_revision;
-        let key = ProviderSessionKey::from_components(&request.kind, &request.id);
+        let key = request.identity.clone();
         let operation = self.pending.entry(key).or_insert(ProviderArchiveOperation {
             archived: request.archived,
             source_updated_at: request.source_updated_at,
@@ -444,8 +376,7 @@ impl ProviderArchiveOperations {
         }
         operation.in_flight = Some(revision);
         Some(ProviderArchiveWriteRequest {
-            kind: request.kind.clone(),
-            id: request.id.clone(),
+            identity: request.identity.clone(),
             archived: request.archived,
             revision,
         })
@@ -455,7 +386,7 @@ impl ProviderArchiveOperations {
         &mut self,
         result: &ProviderArchiveCompleted,
     ) -> Option<ProviderArchiveWriteRequest> {
-        let key = ProviderSessionKey::from_components(&result.kind, &result.id);
+        let key = result.identity.clone();
         let operation = self.pending.get_mut(&key)?;
         if operation.in_flight != Some(result.revision) {
             return None;
@@ -466,15 +397,14 @@ impl ProviderArchiveOperations {
         }
         operation.in_flight = Some(operation.revision);
         Some(ProviderArchiveWriteRequest {
-            kind: result.kind.clone(),
-            id: result.id.clone(),
+            identity: result.identity.clone(),
             archived: operation.archived,
             revision: operation.revision,
         })
     }
 
-    pub(crate) fn archived_at(&self, key: &ProviderSessionKey) -> Option<i64> {
-        self.pending.get(key).map(|operation| {
+    pub(crate) fn archived_at(&self, identity: &ExternalLinkIdentity) -> Option<i64> {
+        self.pending.get(identity).map(|operation| {
             if operation.archived {
                 operation.source_updated_at.max(1)
             } else {
@@ -487,50 +417,32 @@ impl ProviderArchiveOperations {
 #[cfg(host)]
 #[derive(Resource, Default)]
 pub struct ProviderSessionTombstones {
-    entries: HashMap<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>,
+    entries: HashMap<ExternalLinkIdentity, Option<Entity>>,
 }
 
 #[cfg(host)]
 impl ProviderSessionTombstones {
-    pub fn new(keys: impl IntoIterator<Item = ProviderSessionKey>) -> Self {
+    pub fn new(identities: impl IntoIterator<Item = ExternalLinkIdentity>) -> Self {
         let mut tombstones = Self::default();
-        for key in keys {
-            tombstones
-                .entries
-                .entry(key.kind)
-                .or_default()
-                .insert(key.id, None);
+        for identity in identities {
+            tombstones.entries.insert(identity, None);
         }
         tombstones
     }
 
-    pub fn contains(&self, kind: &str, id: &str) -> bool {
-        self.entries
-            .get(kind)
-            .is_some_and(|entries| entries.contains_key(id))
+    pub fn contains(&self, identity: &ExternalLinkIdentity) -> bool {
+        self.entries.contains_key(identity)
     }
 
-    fn insert(&mut self, key: ProviderSessionKey, entity: Entity) {
-        self.entries
-            .entry(key.kind)
-            .or_default()
-            .insert(key.id, Some(entity));
+    fn insert(&mut self, identity: ExternalLinkIdentity, entity: Entity) {
+        self.entries.insert(identity, Some(entity));
     }
 
-    fn remove(&mut self, key: &ProviderSessionKey) -> Option<Entity> {
-        let entries = self.entries.get_mut(key.kind.0.as_str())?;
-        let entity = entries.remove(key.id.0.as_str()).flatten();
-        let remove_kind = entries.is_empty();
-        if remove_kind {
-            self.entries.remove(key.kind.0.as_str());
-        }
-        entity
+    fn remove(&mut self, identity: &ExternalLinkIdentity) -> Option<Entity> {
+        self.entries.remove(identity).flatten()
     }
 
-    fn replace(
-        &mut self,
-        entries: HashMap<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>,
-    ) {
+    fn replace(&mut self, entries: HashMap<ExternalLinkIdentity, Option<Entity>>) {
         if self.entries != entries {
             self.entries = entries;
         }
@@ -551,22 +463,28 @@ impl TombstoneMutations<'_, '_> {
         self.commands.entity(entity).despawn();
     }
 
-    fn dismiss(&mut self, keys: impl IntoIterator<Item = ProviderSessionKey>) {
-        for key in keys {
-            if self.index.contains(&key.kind.0, &key.id.0) {
+    fn dismiss(&mut self, identities: impl IntoIterator<Item = ExternalLinkIdentity>) {
+        for identity in identities {
+            if self.index.contains(&identity) {
                 continue;
             }
             let entity = self
                 .commands
-                .spawn((ProviderSessionTombstone, key.kind.clone(), key.id.clone()))
+                .spawn((
+                    ProviderSessionTombstone,
+                    identity.provider().clone(),
+                    ExternalScopeRef::new(identity.scope().clone()),
+                    identity.kind().clone(),
+                    identity.external_id().clone(),
+                ))
                 .id();
-            self.index.insert(key, entity);
+            self.index.insert(identity, entity);
         }
     }
 
-    fn restore(&mut self, keys: impl IntoIterator<Item = ProviderSessionKey>) {
-        for key in keys {
-            if let Some(entity) = self.index.remove(&key) {
+    fn restore(&mut self, identities: impl IntoIterator<Item = ExternalLinkIdentity>) {
+        for identity in identities {
+            if let Some(entity) = self.index.remove(&identity) {
                 self.commands.entity(entity).despawn();
             }
         }
@@ -681,29 +599,24 @@ fn create(
         if !ids.insert(request.id.clone()) {
             continue;
         }
-        let now = vmux_ecs::UnixMillis::now().0;
+        let now = UnixMillis::now().0;
         let created_at = request.created_at.unwrap_or(now);
         let activated_at = request.activated_at.unwrap_or(now);
-        let entity = {
-            let mut session = commands.spawn((
-                Session,
-                request.id.clone(),
-                Name::new(request.name.clone()),
-                Description(request.description.clone()),
-                Cwd(request.cwd.clone()),
-                CreatedAt(created_at),
-                LastActivatedAt(activated_at),
-                Stage(configuration.default_stage.clone()),
-                StageChangedAt(activated_at),
-            ));
-            if request.local {
-                session.insert(LocalTask);
-            }
-            if let Some(agent) = request.agent.clone() {
-                session.insert(agent);
-            }
-            session.id()
-        };
+        let mut session = commands.spawn((
+            Session,
+            request.id.clone(),
+            Name::new(request.name.clone()),
+            Description(request.description.clone()),
+            Cwd(request.cwd.clone()),
+            CreatedAt(created_at),
+            LastActivatedAt(activated_at),
+            Stage(configuration.default_stage.clone()),
+            StageChangedAt(activated_at),
+        ));
+        if let Some(agent) = request.agent.clone() {
+            session.insert(agent);
+        }
+        let entity = session.id();
         commands.trigger(Created {
             entity,
             id: request.id.clone(),
@@ -836,7 +749,7 @@ fn change_stage(
         for (id, mut stage, mut changed_at) in &mut sessions {
             if id == &request.id && stage.0 != request.stage {
                 stage.0.clone_from(&request.stage);
-                changed_at.record_transition(vmux_ecs::UnixMillis::now().0);
+                changed_at.record_transition(UnixMillis::now().0);
             }
         }
     }
@@ -871,9 +784,11 @@ fn archive_provider(
     mut overrides: Query<
         (
             Entity,
-            &ProviderKind,
-            &ProviderSessionId,
-            &mut SourceUpdatedAt,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+            &RemoteUpdatedAt,
             Option<&ArchivedAt>,
         ),
         With<ProviderArchive>,
@@ -881,21 +796,30 @@ fn archive_provider(
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
     mut commands: Commands,
 ) {
-    let mut latest = HashMap::<ProviderSessionKey, ProviderArchiveRequest>::new();
+    let mut latest = HashMap::<ExternalLinkIdentity, ProviderArchiveRequest>::new();
     for request in requests.read().cloned() {
-        latest.insert(
-            ProviderSessionKey::from_components(&request.kind, &request.id),
-            request,
-        );
+        latest.insert(request.identity.clone(), request);
     }
     for request in latest.into_values() {
         let next_archived_at = request.source_updated_at.max(1);
         let mut found = false;
-        for (entity, kind, id, mut source_updated_at, current_archived_at) in &mut overrides {
-            if kind != &request.kind || id != &request.id {
+        for (entity, provider, scope, kind, id, source_updated_at, current_archived_at) in
+            &mut overrides
+        {
+            let identity = ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            );
+            if identity != request.identity {
                 continue;
             }
-            source_updated_at.0 = request.source_updated_at;
+            if source_updated_at.0.0 != request.source_updated_at {
+                commands
+                    .entity(entity)
+                    .insert(RemoteUpdatedAt(UnixMillis(request.source_updated_at)));
+            }
             if request.archived && current_archived_at.is_none() {
                 commands.entity(entity).insert(ArchivedAt(next_archived_at));
             } else if !request.archived && current_archived_at.is_some() {
@@ -914,9 +838,11 @@ fn archive_provider(
         }
         let mut entity = commands.spawn((
             ProviderArchive,
-            request.kind.clone(),
-            request.id.clone(),
-            SourceUpdatedAt(request.source_updated_at),
+            request.identity.provider().clone(),
+            ExternalScopeRef::new(request.identity.scope().clone()),
+            request.identity.kind().clone(),
+            request.identity.external_id().clone(),
+            RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
         ));
         if request.archived {
             entity.insert(ArchivedAt(next_archived_at));
@@ -944,15 +870,26 @@ fn finish_provider_archives(
 
 #[cfg(host)]
 fn sync_tombstones(
-    tombstones: Query<(Entity, &ProviderKind, &ProviderSessionId), With<ProviderSessionTombstone>>,
+    tombstones: Query<
+        (
+            Entity,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+        ),
+        With<ProviderSessionTombstone>,
+    >,
     changed: Query<
         (),
         (
             With<ProviderSessionTombstone>,
             Or<(
                 Added<ProviderSessionTombstone>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
             )>,
         ),
     >,
@@ -963,12 +900,17 @@ fn sync_tombstones(
     if !index.is_added() && changed.is_empty() && !removed {
         return;
     }
-    let mut entries = HashMap::<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>::new();
-    for (entity, kind, id) in &tombstones {
-        entries
-            .entry(kind.clone())
-            .or_default()
-            .insert(id.clone(), Some(entity));
+    let mut entries = HashMap::<ExternalLinkIdentity, Option<Entity>>::new();
+    for (entity, provider, scope, kind, id) in &tombstones {
+        entries.insert(
+            ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            ),
+            Some(entity),
+        );
     }
     index.replace(entries);
 }
@@ -979,7 +921,7 @@ fn restore_tombstones(
     mut tombstones: TombstoneMutations,
 ) {
     for request in requests.read() {
-        tombstones.restore(request.keys.iter().cloned());
+        tombstones.restore(request.identities.iter().cloned());
     }
 }
 
@@ -989,11 +931,14 @@ fn change_provider_stage(
     definitions: Query<&StageId, With<StageDefinition>>,
     mut stages: Query<
         (
-            &ProviderKind,
-            &ProviderSessionId,
+            Entity,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
             &mut Stage,
             &mut StageChangedAt,
-            &mut SourceUpdatedAt,
+            &RemoteUpdatedAt,
         ),
         With<ProviderStage>,
     >,
@@ -1003,10 +948,18 @@ fn change_provider_stage(
         if !definitions.iter().any(|id| id == &request.stage) {
             continue;
         }
-        let now = vmux_ecs::UnixMillis::now().0;
+        let now = UnixMillis::now().0;
         let mut found = false;
-        for (kind, id, mut stage, mut changed_at, mut source_updated_at) in &mut stages {
-            if kind != &request.kind || id != &request.id {
+        for (entity, provider, scope, kind, id, mut stage, mut changed_at, source_updated_at) in
+            &mut stages
+        {
+            let identity = ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            );
+            if identity != request.identity {
                 continue;
             }
             found = true;
@@ -1014,17 +967,23 @@ fn change_provider_stage(
                 stage.0.clone_from(&request.stage);
             }
             changed_at.record_transition(now);
-            source_updated_at.0 = request.source_updated_at;
+            if source_updated_at.0.0 != request.source_updated_at {
+                commands
+                    .entity(entity)
+                    .insert(RemoteUpdatedAt(UnixMillis(request.source_updated_at)));
+            }
             break;
         }
         if !found {
             commands.spawn((
                 ProviderStage,
-                request.kind.clone(),
-                request.id.clone(),
+                request.identity.provider().clone(),
+                ExternalScopeRef::new(request.identity.scope().clone()),
+                request.identity.kind().clone(),
+                request.identity.external_id().clone(),
                 Stage(request.stage.clone()),
                 StageChangedAt(now),
-                SourceUpdatedAt(request.source_updated_at),
+                RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
             ));
         }
     }
@@ -1033,14 +992,16 @@ fn change_provider_stage(
 #[cfg(host)]
 fn cleanup(
     mut requests: MessageReader<CleanupRequest>,
-    sessions: Query<
+    sessions: Query<(Entity, &SessionId), With<Session>>,
+    links: Query<
         (
-            Entity,
-            &SessionId,
-            Option<&ProviderKind>,
-            Option<&ProviderSessionId>,
+            &ChildOf,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
         ),
-        With<Session>,
+        With<ExternalLink>,
     >,
     mut tombstones: TombstoneMutations,
 ) {
@@ -1061,16 +1022,24 @@ fn cleanup(
     if requested_sessions.is_empty() && dismissed_providers.is_empty() {
         return;
     }
-    let sessions = sessions
+    let linked = links
         .iter()
-        .map(|(entity, id, kind, provider_id)| {
+        .filter(|(_, _, _, kind, _)| kind.as_str() == "session")
+        .map(|(owner, provider, scope, kind, id)| {
             (
-                entity,
-                id.clone(),
-                kind.zip(provider_id)
-                    .map(|(kind, id)| ProviderSessionKey::from_components(kind, id)),
+                owner.parent(),
+                ExternalLinkIdentity::new(
+                    provider.clone(),
+                    scope.id().clone(),
+                    kind.clone(),
+                    id.clone(),
+                ),
             )
         })
+        .collect::<HashMap<_, _>>();
+    let sessions = sessions
+        .iter()
+        .map(|(entity, id)| (entity, id.clone(), linked.get(&entity).cloned()))
         .collect::<Vec<_>>();
     for (_, id, provider) in &sessions {
         if requested_sessions.contains(id)
@@ -1111,8 +1080,6 @@ struct CanonicalizationChanges<'w, 's> {
             With<Session>,
             Or<(
                 Added<Session>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
                 Changed<LastActivatedAt>,
                 Changed<StageChangedAt>,
                 Changed<ArchivedAt>,
@@ -1120,10 +1087,30 @@ struct CanonicalizationChanges<'w, 's> {
             )>,
         ),
     >,
+    links: Query<
+        'w,
+        's,
+        (),
+        (
+            With<ExternalLink>,
+            Or<(
+                Added<ExternalLink>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<ChildOf>,
+            )>,
+        ),
+    >,
     targets: Query<'w, 's, (), Or<(Added<EntityTarget<Session>>, Changed<EntityTarget<Session>>)>>,
     removed_sessions: RemovedComponents<'w, 's, Session>,
-    removed_provider_kinds: RemovedComponents<'w, 's, ProviderKind>,
-    removed_provider_ids: RemovedComponents<'w, 's, ProviderSessionId>,
+    removed_links: RemovedComponents<'w, 's, ExternalLink>,
+    removed_providers: RemovedComponents<'w, 's, ProviderKey>,
+    removed_scopes: RemovedComponents<'w, 's, ExternalScopeRef>,
+    removed_kinds: RemovedComponents<'w, 's, ResourceKind>,
+    removed_external_ids: RemovedComponents<'w, 's, ExternalId>,
+    removed_owners: RemovedComponents<'w, 's, ChildOf>,
     removed_activated_at: RemovedComponents<'w, 's, LastActivatedAt>,
     removed_stage_changed_at: RemovedComponents<'w, 's, StageChangedAt>,
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
@@ -1135,10 +1122,15 @@ struct CanonicalizationChanges<'w, 's> {
 impl CanonicalizationChanges<'_, '_> {
     fn any(&mut self) -> bool {
         !self.sessions.is_empty()
+            || !self.links.is_empty()
             || !self.targets.is_empty()
             || self.removed_sessions.read().count() > 0
-            || self.removed_provider_kinds.read().count() > 0
-            || self.removed_provider_ids.read().count() > 0
+            || self.removed_links.read().count() > 0
+            || self.removed_providers.read().count() > 0
+            || self.removed_scopes.read().count() > 0
+            || self.removed_kinds.read().count() > 0
+            || self.removed_external_ids.read().count() > 0
+            || self.removed_owners.read().count() > 0
             || self.removed_activated_at.read().count() > 0
             || self.removed_stage_changed_at.read().count() > 0
             || self.removed_archived_at.read().count() > 0
@@ -1166,9 +1158,6 @@ fn canonicalize_provider_sessions(
     mut changes: CanonicalizationChanges,
     sessions: Query<
         (
-            Entity,
-            &ProviderKind,
-            &ProviderSessionId,
             Option<&LastActivatedAt>,
             Option<&StageChangedAt>,
             Has<ArchivedAt>,
@@ -1176,6 +1165,16 @@ fn canonicalize_provider_sessions(
             Option<&SessionDuplicate>,
         ),
         With<Session>,
+    >,
+    links: Query<
+        (
+            &ChildOf,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+        ),
+        With<ExternalLink>,
     >,
     duplicates: Query<(Entity, &SessionDuplicate), With<Session>>,
     targets: Query<&EntityTarget<Session>>,
@@ -1188,15 +1187,24 @@ fn canonicalize_provider_sessions(
         .iter()
         .map(EntityTarget::entity)
         .collect::<HashSet<_>>();
-    let mut groups = HashMap::<ProviderSessionKey, Vec<ProviderSessionCandidate>>::new();
-    for (entity, kind, id, activated_at, stage_changed_at, archived, runtime, duplicate) in
-        &sessions
-    {
-        if kind.0.is_empty() || id.0.is_empty() {
+    let mut groups = HashMap::<ExternalLinkIdentity, Vec<ProviderSessionCandidate>>::new();
+    for (owner, provider, scope, kind, id) in &links {
+        if kind.as_str() != "session" {
             continue;
         }
+        let entity = owner.parent();
+        let Ok((activated_at, stage_changed_at, archived, runtime, duplicate)) =
+            sessions.get(entity)
+        else {
+            continue;
+        };
         groups
-            .entry(ProviderSessionKey::from_components(kind, id))
+            .entry(ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            ))
             .or_default()
             .push(ProviderSessionCandidate {
                 entity,
@@ -1243,6 +1251,7 @@ fn canonicalize_provider_sessions(
 mod tests {
     use super::*;
     use bevy_ecs::reflect::AppTypeRegistry;
+    use vmux_connector::ExternalScope;
 
     #[derive(Resource, Default)]
     struct Cleaned(Vec<Entity>);
@@ -1250,6 +1259,23 @@ mod tests {
     impl Cleaned {
         fn record(trigger: On<Cleanup>, mut cleaned: ResMut<Cleaned>) {
             cleaned.0.push(trigger.event_target());
+        }
+    }
+
+    struct ProviderFixture;
+
+    impl ProviderFixture {
+        fn identity(kind: &str, id: &str) -> ExternalLinkIdentity {
+            let provider = kind
+                .split_once(':')
+                .map(|(provider, _)| provider)
+                .unwrap_or(kind);
+            ExternalLinkIdentity::new(
+                ProviderKey::new(provider).unwrap(),
+                vmux_api::Id::<ExternalScope>::new(kind),
+                ResourceKind::session(),
+                ExternalId::new(id).unwrap(),
+            )
         }
     }
 
@@ -1304,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_import_preserves_time_without_marking_a_local_task() {
+    fn provider_import_preserves_source_time() {
         let mut app = App::new();
         app.add_plugins((EntityPlugin, StagePlugin));
         let request = CreateRequest::imported(
@@ -1323,11 +1349,10 @@ mod tests {
 
         let mut sessions = app
             .world_mut()
-            .query_filtered::<(&CreatedAt, &LastActivatedAt, Has<LocalTask>), With<Session>>();
-        let (created, activated, local) = sessions.single(app.world()).unwrap();
+            .query_filtered::<(&CreatedAt, &LastActivatedAt), With<Session>>();
+        let (created, activated) = sessions.single(app.world()).unwrap();
         assert_eq!(created.0, 100);
         assert_eq!(activated.0, 200);
-        assert!(!local);
     }
 
     #[test]
@@ -1432,8 +1457,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<ProviderStageChangeRequest>>()
             .write(ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("codex", "provider-session"),
                 stage: StageId("done".into()),
                 source_updated_at: 10,
             });
@@ -1441,22 +1465,24 @@ mod tests {
 
         let mut overrides = app.world_mut().query_filtered::<(
             Entity,
-            &ProviderKind,
-            &ProviderSessionId,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ExternalId,
             &Stage,
             &StageChangedAt,
         ), With<ProviderStage>>();
-        let (entity, kind, id, stage, changed_at) = overrides.single(app.world()).unwrap();
-        assert_eq!(kind.0, "codex");
-        assert_eq!(id.0, "provider-session");
+        let (entity, provider, scope, id, stage, changed_at) =
+            overrides.single(app.world()).unwrap();
+        assert_eq!(provider.as_str(), "codex");
+        assert_eq!(scope.id().as_str(), "codex");
+        assert_eq!(id.as_str(), "provider-session");
         assert_eq!(stage.0.0, "done");
         assert!(changed_at.0 > 0);
 
         app.world_mut()
             .resource_mut::<Messages<ProviderStageChangeRequest>>()
             .write(ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("codex", "provider-session"),
                 stage: StageId("in_review".into()),
                 source_updated_at: 20,
             });
@@ -1473,8 +1499,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<ProviderStageChangeRequest>>()
             .write(ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("codex", "provider-session"),
                 stage: StageId("in_review".into()),
                 source_updated_at: 30,
             });
@@ -1488,8 +1513,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((EntityPlugin, StagePlugin));
         let request = ProviderArchiveRequest {
-            kind: ProviderKind("acp:codex".into()),
-            id: ProviderSessionId("provider-session".into()),
+            identity: ProviderFixture::identity("acp:codex", "provider-session"),
             archived: true,
             source_updated_at: 10,
             native: false,
@@ -1502,11 +1526,11 @@ mod tests {
 
         let mut overrides = app.world_mut().query_filtered::<(
             Entity,
-            &SourceUpdatedAt,
+            &RemoteUpdatedAt,
             Option<&ArchivedAt>,
         ), With<ProviderArchive>>();
         let (entity, source_updated_at, archived_at) = overrides.single(app.world()).unwrap();
-        assert_eq!(source_updated_at.0, 10);
+        assert_eq!(source_updated_at.0.0, 10);
         assert!(archived_at.is_some());
 
         app.world_mut()
@@ -1520,10 +1544,10 @@ mod tests {
 
         let mut overrides = app
             .world_mut()
-            .query_filtered::<(Entity, &SourceUpdatedAt, Has<ArchivedAt>), With<ProviderArchive>>();
+            .query_filtered::<(Entity, &RemoteUpdatedAt, Has<ArchivedAt>), With<ProviderArchive>>();
         let (updated, source_updated_at, archived) = overrides.single(app.world()).unwrap();
         assert_eq!(updated, entity);
-        assert_eq!(source_updated_at.0, 20);
+        assert_eq!(source_updated_at.0.0, 20);
         assert!(!archived);
     }
 
@@ -1534,8 +1558,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<ProviderArchiveRequest>>()
             .write(ProviderArchiveRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
                 archived: true,
                 source_updated_at: 40,
                 native: true,
@@ -1545,9 +1568,9 @@ mod tests {
 
         let mut overrides = app
             .world_mut()
-            .query_filtered::<(&SourceUpdatedAt, &ArchivedAt), With<ProviderArchive>>();
+            .query_filtered::<(&RemoteUpdatedAt, &ArchivedAt), With<ProviderArchive>>();
         let (source_updated_at, archived_at) = overrides.single(app.world()).unwrap();
-        assert_eq!(source_updated_at.0, 40);
+        assert_eq!(source_updated_at.0.0, 40);
         assert_eq!(archived_at.0, 40);
         let writes = app
             .world_mut()
@@ -1602,19 +1625,22 @@ mod tests {
     #[test]
     fn cleanup_removes_linked_provider_copies_and_can_restore_visibility() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((vmux_connector::ConnectorPlugin, EntityPlugin, StagePlugin));
+        let identity = ProviderFixture::identity("acp:codex", "provider-session");
         for id in ["canonical", "duplicate"] {
+            let session = app
+                .world_mut()
+                .spawn((Session, SessionId(id.into())))
+                .id();
             app.world_mut().spawn((
-                Session,
-                SessionId(id.into()),
-                ProviderKind("acp:codex".into()),
-                ProviderSessionId("provider-session".into()),
+                ExternalLink,
+                identity.provider().clone(),
+                ExternalScopeRef::new(identity.scope().clone()),
+                identity.kind().clone(),
+                identity.external_id().clone(),
+                ChildOf(session),
             ));
         }
-        let key = ProviderSessionKey::new(
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-        );
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
@@ -1632,20 +1658,20 @@ mod tests {
         assert!(
             app.world()
                 .resource::<ProviderSessionTombstones>()
-                .contains(&key.kind.0, &key.id.0)
+                .contains(&identity)
         );
 
         app.world_mut()
             .resource_mut::<Messages<ProviderSessionRestoreRequest>>()
             .write(ProviderSessionRestoreRequest {
-                keys: vec![key.clone()],
+                identities: vec![identity.clone()],
             });
         app.update();
 
         assert!(
             !app.world()
                 .resource::<ProviderSessionTombstones>()
-                .contains(&key.kind.0, &key.id.0)
+                .contains(&identity)
         );
         let tombstones = app
             .world_mut()
@@ -1668,12 +1694,8 @@ mod tests {
         assert!(filter.is_allowed::<ProviderStage>());
         assert!(filter.is_allowed::<ProviderArchive>());
         assert!(filter.is_allowed::<ProviderSessionTombstone>());
-        assert!(filter.is_allowed::<SourceUpdatedAt>());
-        assert!(filter.is_allowed::<ProviderKind>());
-        assert!(filter.is_allowed::<ProviderSessionId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());
         assert!(filter.is_allowed::<TitlePending>());
-        assert!(filter.is_allowed::<LocalTask>());
         assert!(filter.is_allowed::<Stage>());
         assert!(filter.is_allowed::<StageChangedAt>());
     }

@@ -14,24 +14,28 @@ use vmux_api::chat::ResumeSession;
 use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_api::protocol::AcpProviderSession;
 use vmux_ecs::page::{Activity, PageReady};
+use vmux_connector::{
+    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalLinkIndex, ExternalScopeRef,
+    ProviderKey, ResourceKind,
+};
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget, RemoteUpdatedAt};
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use vmux_session::host::{SessionManagerView, SessionView, SessionViews};
 use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
-    ProviderArchiveWriteRequest, ProviderCatalog, ProviderKind, ProviderSession, ProviderSessionId,
-    ProviderSessionKey, ProviderSessionTombstones, Route, Session, SessionDuplicate, SessionId,
-    SnapshotReceived, SourceUpdatedAt, TranscriptLoading, Transcripts,
+    ProviderArchiveWriteRequest, ProviderCatalog, ProviderSession, Route, Session,
+    SessionDuplicate, SessionId, SnapshotReceived, TranscriptLoading, Transcripts,
+    ProviderSessionTombstones,
 };
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
 
 use super::acp::{AcpLaunch, AcpPackageChanged, registry::RegistryAgent};
-use crate::AcpSessionId;
+use crate::session::{AcpSessionLink, AcpSessionLinks};
 
 mod claude;
 mod codex;
@@ -751,7 +755,7 @@ impl ArchiveTask {
         root: PathBuf,
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
     ) -> Self {
-        let sid = request.id.0.clone();
+        let sid = request.identity.external_id().as_str().to_string();
         let archived = request.archived;
         let task = IoTaskPool::get().spawn(async move {
             let result = codex::Reader::at(&root).set_archive(&sid, archived);
@@ -1059,15 +1063,11 @@ impl SourceRead {
     }
 
     fn deduplicated(sessions: Vec<ProviderSession>) -> Vec<ProviderSession> {
-        let mut indexed = HashMap::<ProviderSessionKey, ProviderSession>::new();
+        let mut indexed = HashMap::<ExternalLinkIdentity, ProviderSession>::new();
         for session in sessions {
-            if session.kind.trim().is_empty() || session.sid.trim().is_empty() {
+            let Some(key) = session.identity() else {
                 continue;
-            }
-            let key = ProviderSessionKey::new(
-                ProviderKind(session.kind.clone()),
-                ProviderSessionId(session.sid.clone()),
-            );
+            };
             match indexed.get(&key) {
                 Some(current) if current.updated_at > session.updated_at => {}
                 _ => {
@@ -1191,17 +1191,14 @@ enum SourceChange {
 
 #[derive(Message)]
 struct ProviderConversationChanged {
-    session: ProviderSessionKey,
+    session: ExternalLinkIdentity,
     updated_at: i64,
 }
 
 impl ProviderConversationChanged {
     fn codex(activity: &codex::RolloutActivity) -> Self {
         Self {
-            session: ProviderSessionKey::new(
-                ProviderKind("acp:codex".to_string()),
-                ProviderSessionId(activity.sid().to_string()),
-            ),
+            session: AcpSessionLink::identity("acp:codex", activity.sid()).unwrap(),
             updated_at: activity.updated_at(),
         }
     }
@@ -1257,8 +1254,9 @@ fn activate(
     acp: Res<AcpSnapshot>,
     view_targets: SessionViews,
     views: Query<Entity, With<SessionView>>,
-    sessions: Query<(Entity, &ProviderKind), With<Session>>,
     mut dirty: ResMut<ActivationDirty>,
+    sessions: Query<(), With<Session>>,
+    links: Query<(&ChildOf, &ProviderKey, &ExternalScopeRef, &ResourceKind), With<ExternalLink>>,
     mut runtime: Query<(Entity, &mut Runtime, &SourcePaths)>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -1290,10 +1288,17 @@ fn activate(
     };
     let mut watch_codex_activity = watch_codex_activity;
     if !manager {
-        for (entity, kind) in &sessions {
-            let Some(agent) = kind.0.strip_prefix("acp:") else {
+        for (owner, provider, scope, kind) in &links {
+            if provider.as_str() != "acp"
+                || kind.as_str() != "session"
+                || !sessions.contains(owner.parent())
+            {
+                continue;
+            }
+            let Some(agent) = scope.id().as_str().strip_prefix("acp:") else {
                 continue;
             };
+            let entity = owner.parent();
             let family = AgentFamily::of(agent);
             if viewed.contains(&entity) && family == codex_family && acp.supports(&family) {
                 watch_codex_activity = true;
@@ -1390,9 +1395,20 @@ fn mark_activation_dirty(
     >,
     sessions: Query<
         (),
+        (With<Session>, Added<Session>),
+    >,
+    links: Query<
+        (),
         (
-            With<Session>,
-            Or<(Added<Session>, Added<ProviderKind>, Changed<ProviderKind>)>,
+            With<ExternalLink>,
+            Or<(
+                Added<ExternalLink>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<ChildOf>,
+            )>,
         ),
     >,
     targets: Query<(), Changed<vmux_ecs::EntityTarget<Session>>>,
@@ -1400,7 +1416,12 @@ fn mark_activation_dirty(
     mut removed_views: RemovedComponents<SessionView>,
     mut removed_ready: RemovedComponents<PageReady>,
     mut removed_sessions: RemovedComponents<Session>,
-    mut removed_providers: RemovedComponents<ProviderKind>,
+    mut removed_links: RemovedComponents<ExternalLink>,
+    mut removed_providers: RemovedComponents<ProviderKey>,
+    mut removed_scopes: RemovedComponents<ExternalScopeRef>,
+    mut removed_kinds: RemovedComponents<ResourceKind>,
+    mut removed_ids: RemovedComponents<ExternalId>,
+    mut removed_owners: RemovedComponents<ChildOf>,
     mut removed_targets: RemovedComponents<vmux_ecs::EntityTarget<Session>>,
     mut dirty: ResMut<ActivationDirty>,
 ) {
@@ -1408,12 +1429,18 @@ fn mark_activation_dirty(
         || !managers.is_empty()
         || !views.is_empty()
         || !sessions.is_empty()
+        || !links.is_empty()
         || !targets.is_empty()
         || removed_managers.read().next().is_some()
         || removed_views.read().next().is_some()
         || removed_ready.read().next().is_some()
         || removed_sessions.read().next().is_some()
+        || removed_links.read().next().is_some()
         || removed_providers.read().next().is_some()
+        || removed_scopes.read().next().is_some()
+        || removed_kinds.read().next().is_some()
+        || removed_ids.read().next().is_some()
+        || removed_owners.read().next().is_some()
         || removed_targets.read().next().is_some();
     if changed {
         dirty.0 = true;
@@ -1480,11 +1507,18 @@ fn watch(
 
 fn request_changed_conversations(
     mut changed: MessageReader<ProviderConversationChanged>,
+    links: Query<
+        (
+            &ChildOf,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+        ),
+        With<ExternalLink>,
+    >,
     mut sessions: Query<
         (
-            Entity,
-            &ProviderKind,
-            &ProviderSessionId,
             &mut vmux_ecs::LastActivatedAt,
             Option<&ConversationRevision>,
             Option<&mut ConversationRefreshRequested>,
@@ -1494,21 +1528,31 @@ fn request_changed_conversations(
     mut commands: Commands,
 ) {
     for changed in changed.read() {
-        for (session, kind, sid, mut activated_at, revision, requested) in &mut sessions {
-            if !changed.session.matches(&kind.0, &sid.0) {
-                continue;
-            }
-            activated_at.0 = activated_at.0.max(changed.updated_at);
-            if revision.is_some_and(|revision| revision.0 >= changed.updated_at) {
-                continue;
-            }
-            if let Some(mut requested) = requested {
-                requested.0 = requested.0.max(changed.updated_at);
-            } else {
-                commands
-                    .entity(session)
-                    .insert(ConversationRefreshRequested(changed.updated_at));
-            }
+        let session = links.iter().find_map(|(owner, provider, scope, kind, id)| {
+            let identity = ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            );
+            (identity == changed.session).then_some(owner.parent())
+        });
+        let Some(session) = session else {
+            continue;
+        };
+        let Ok((mut activated_at, revision, requested)) = sessions.get_mut(session) else {
+            continue;
+        };
+        activated_at.0 = activated_at.0.max(changed.updated_at);
+        if revision.is_some_and(|revision| revision.0 >= changed.updated_at) {
+            continue;
+        }
+        if let Some(mut requested) = requested {
+            requested.0 = requested.0.max(changed.updated_at);
+        } else {
+            commands
+                .entity(session)
+                .insert(ConversationRefreshRequested(changed.updated_at));
         }
     }
 }
@@ -1523,10 +1567,9 @@ fn archive(
     mut commands: Commands,
 ) {
     for request in requests.read().cloned() {
-        if request.kind.0 != "acp:codex" {
+        if request.identity.scope().as_str() != "acp:codex" {
             completed.write(ProviderArchiveCompleted {
-                kind: request.kind,
-                id: request.id,
+                identity: request.identity,
                 archived: request.archived,
                 revision: request.revision,
                 success: false,
@@ -1564,12 +1607,13 @@ fn finish_archives(
         let success = result.is_ok();
         match result {
             Ok(archive) => {
-                overlay.record(SourceKind::Codex, task.request.id.0.clone(), archive);
-                if let Some(session) = snapshot.0.get_mut(&SourceKind::Codex).and_then(|sessions| {
-                    sessions
-                        .iter_mut()
-                        .find(|session| session.sid == task.request.id.0)
-                }) {
+                let id = task.request.identity.external_id().as_str();
+                overlay.record(SourceKind::Codex, id.to_string(), archive);
+                if let Some(session) = snapshot
+                    .0
+                    .get_mut(&SourceKind::Codex)
+                    .and_then(|sessions| sessions.iter_mut().find(|session| session.sid == id))
+                {
                     session.archive = Some(archive);
                 }
                 if let Ok(mut requested) = requested.get_mut(*runtime) {
@@ -1585,8 +1629,7 @@ fn finish_archives(
             }
         }
         completed.write(ProviderArchiveCompleted {
-            kind: task.request.kind.clone(),
-            id: task.request.id.clone(),
+            identity: task.request.identity.clone(),
             archived: task.request.archived,
             revision: task.request.revision,
             success,
@@ -1661,36 +1704,47 @@ fn finish(
 fn project(
     snapshot: Res<SourceSnapshot>,
     acp: Res<AcpSnapshot>,
-    imported: Query<
-        (
-            &AgentId,
-            Option<&ProviderKind>,
-            Option<&ProviderSessionId>,
-            Option<&AcpSessionId>,
-        ),
-        (With<Session>, Without<SessionDuplicate>),
-    >,
+    imported: Query<(Entity, &AgentId), (With<Session>, Without<SessionDuplicate>)>,
     changed: Query<
         (),
         (
             With<Session>,
+            Or<(Changed<AgentId>, Changed<SessionDuplicate>)>,
+        ),
+    >,
+    changed_links: Query<
+        (),
+        (
+            With<ExternalLink>,
             Or<(
-                Changed<AgentId>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
-                Changed<AcpSessionId>,
-                Changed<SessionDuplicate>,
+                Added<ExternalLink>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<ChildOf>,
             )>,
         ),
     >,
-    mut removed: RemovedComponents<AcpSessionId>,
+    links: AcpSessionLinks,
+    mut removed_links: RemovedComponents<ExternalLink>,
+    mut removed_providers: RemovedComponents<ProviderKey>,
+    mut removed_scopes: RemovedComponents<ExternalScopeRef>,
+    mut removed_kinds: RemovedComponents<ResourceKind>,
+    mut removed_ids: RemovedComponents<ExternalId>,
     mut removed_duplicates: RemovedComponents<SessionDuplicate>,
     mut catalog: ResMut<ProviderCatalog>,
 ) {
-    let removed = removed.read().next().is_some() || removed_duplicates.read().next().is_some();
+    let removed = removed_links.read().next().is_some()
+        || removed_providers.read().next().is_some()
+        || removed_scopes.read().next().is_some()
+        || removed_kinds.read().next().is_some()
+        || removed_ids.read().next().is_some()
+        || removed_duplicates.read().next().is_some();
     if !snapshot.is_changed()
         && !acp.is_changed()
         && changed.is_empty()
+        && changed_links.is_empty()
         && !removed
         && !catalog.is_added()
     {
@@ -1698,15 +1752,14 @@ fn project(
     }
     let imported = imported
         .iter()
-        .filter_map(|(agent, kind, provider_sid, resume)| {
-            let sid = provider_sid
-                .map(|sid| sid.0.clone())
-                .or_else(|| resume.map(|sid| sid.0.clone()))?;
-            let family = kind
-                .and_then(|kind| kind.0.strip_prefix("acp:"))
+        .filter_map(|(entity, agent)| {
+            let link = links.get(entity)?;
+            let family = link
+                .kind()
+                .strip_prefix("acp:")
                 .map(AgentFamily::of)
                 .unwrap_or_else(|| AgentFamily::of(&agent.0));
-            Some((family, sid))
+            Some((family, link.id().as_str().to_string()))
         })
         .collect::<HashSet<_>>();
     let mut indexed = HashMap::<(AgentFamily, String), ProviderSession>::new();
@@ -1748,33 +1801,34 @@ fn project(
 
 fn associate(
     snapshot: Res<SourceSnapshot>,
-    sessions: Query<
-        (
-            Entity,
-            &AgentId,
-            &AcpSessionId,
-            &Name,
-            &vmux_ecs::Cwd,
-            &CreatedAt,
-        ),
-        (With<Session>, Without<ProviderSessionId>),
-    >,
+    sessions: Query<(Entity, &AgentId, &Name, &vmux_ecs::Cwd, &CreatedAt), With<Session>>,
+    links: AcpSessionLinks,
     mut commands: Commands,
 ) {
     if snapshot.0.is_empty() {
         return;
     }
-    for (entity, agent, resume, name, cwd, created_at) in &sessions {
-        let cwd = cwd.0.to_string_lossy();
-        let Some(source) =
-            snapshot.association(&agent.0, &resume.0, name.as_str(), &cwd, created_at.0)
-        else {
+    for (entity, agent, name, cwd, created_at) in &sessions {
+        let Some(link) = links.get(entity) else {
             continue;
         };
-        commands.entity(entity).insert((
-            ProviderKind(source.kind.clone()),
-            ProviderSessionId(source.sid.clone()),
-        ));
+        let cwd = cwd.0.to_string_lossy();
+        let Some(source) = snapshot.association(
+            &agent.0,
+            link.id().as_str(),
+            name.as_str(),
+            &cwd,
+            created_at.0,
+        ) else {
+            continue;
+        };
+        links.set(
+            &mut commands,
+            entity,
+            &source.kind,
+            &source.sid,
+            Some(source.updated_at),
+        );
     }
 }
 
@@ -1783,9 +1837,11 @@ fn request_conversation_refreshes(
     acp: Res<AcpSnapshot>,
     archive_overrides: Query<
         (
-            &ProviderKind,
-            &ProviderSessionId,
-            &SourceUpdatedAt,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+            &RemoteUpdatedAt,
             Option<&ArchivedAt>,
         ),
         With<ProviderArchive>,
@@ -1794,8 +1850,6 @@ fn request_conversation_refreshes(
         (
             Entity,
             &SessionId,
-            &ProviderKind,
-            &ProviderSessionId,
             &mut vmux_ecs::LastActivatedAt,
             Option<&ArchivedAt>,
             Option<&ConversationRevision>,
@@ -1803,6 +1857,7 @@ fn request_conversation_refreshes(
         ),
         (With<Session>, Without<SessionDuplicate>),
     >,
+    links: AcpSessionLinks,
     mut archive_requests: MessageWriter<ArchiveRequest>,
     mut commands: Commands,
 ) {
@@ -1811,31 +1866,31 @@ fn request_conversation_refreshes(
     }
     let sources = ProviderSessionIndex::from_snapshots(&snapshot, &acp);
     let mut archive_overrides_by_session = HashMap::new();
-    for (kind, sid, source_updated_at, archived_at) in &archive_overrides {
+    for (provider, scope, kind, id, source_updated_at, archived_at) in &archive_overrides {
         archive_overrides_by_session.insert(
-            (kind.0.as_str(), sid.0.as_str()),
+            ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            ),
             (
-                source_updated_at.0,
+                source_updated_at.0.0,
                 archived_at.map(|archived_at| archived_at.0),
             ),
         );
     }
-    for (
-        session,
-        session_id,
-        kind,
-        provider_sid,
-        mut activated_at,
-        archived_at,
-        revision,
-        requested,
-    ) in &mut sessions
-    {
-        let Some(source) = sources.get(&kind.0, &provider_sid.0) else {
+    for (session, session_id, mut activated_at, archived_at, revision, requested) in &mut sessions {
+        let Some(link) = links.get(session) else {
             continue;
         };
-        let archive_override =
-            archive_overrides_by_session.get(&(kind.0.as_str(), provider_sid.0.as_str()));
+        let Some(identity) = AcpSessionLink::identity(link.kind(), link.id().as_str()) else {
+            continue;
+        };
+        let Some(source) = sources.get(link.kind(), link.id().as_str()) else {
+            continue;
+        };
+        let archive_override = archive_overrides_by_session.get(&identity);
         let archive = match archive_override {
             Some((source_updated_at, override_archived_at))
                 if source
@@ -1869,7 +1924,7 @@ fn request_conversation_refreshes(
         if activated_at.0 < source.updated_at {
             activated_at.0 = source.updated_at;
         }
-        if ConversationSource::new(&kind.0, &provider_sid.0, source.created_at).is_none()
+        if ConversationSource::new(link.kind(), link.id().as_str(), source.created_at).is_none()
             || revision.is_some_and(|revision| revision.0 >= source.updated_at)
         {
             continue;
@@ -1891,8 +1946,6 @@ fn queue_initial_conversations(
         (
             Entity,
             &SessionId,
-            &ProviderKind,
-            &ProviderSessionId,
             &CreatedAt,
             Option<&ConversationRefreshRequested>,
             Option<&ConversationCursor>,
@@ -1904,27 +1957,33 @@ fn queue_initial_conversations(
             Without<SessionDuplicate>,
         ),
     >,
+    links: AcpSessionLinks,
     transcripts: Transcripts,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (session, sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
+    for (session, sid, created_at, requested, cursor) in &sessions {
         if !transcripts.get(session).messages.is_empty() {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         }
-        if snapshot.get(&kind.0, &provider_sid.0).is_none() {
+        let Some(link) = links.get(session) else {
+            commands.entity(session).remove::<TranscriptLoading>();
+            continue;
+        };
+        if snapshot.get(link.kind(), link.id().as_str()).is_none() {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         }
-        let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
+        let Some(source) = ConversationSource::new(link.kind(), link.id().as_str(), created_at.0)
+        else {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         };
         let revision = requested.map_or_else(
             || {
                 snapshot
-                    .get(&kind.0, &provider_sid.0)
+                    .get(link.kind(), link.id().as_str())
                     .map_or(0, |source| source.updated_at)
             },
             |requested| requested.0,
@@ -1958,8 +2017,6 @@ fn queue_conversation_refreshes(
         (
             Entity,
             &SessionId,
-            &ProviderKind,
-            &ProviderSessionId,
             &CreatedAt,
             &ConversationRefreshRequested,
             Option<&ConversationCursor>,
@@ -1971,12 +2028,20 @@ fn queue_conversation_refreshes(
             Without<SessionDuplicate>,
         ),
     >,
+    links: AcpSessionLinks,
     transcripts: Transcripts,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for (session, sid, kind, provider_sid, created_at, requested, cursor) in &sessions {
-        let Some(source) = ConversationSource::new(&kind.0, &provider_sid.0, created_at.0) else {
+    for (session, sid, created_at, requested, cursor) in &sessions {
+        let Some(link) = links.get(session) else {
+            commands
+                .entity(session)
+                .remove::<ConversationRefreshRequested>();
+            continue;
+        };
+        let Some(source) = ConversationSource::new(link.kind(), link.id().as_str(), created_at.0)
+        else {
             commands
                 .entity(session)
                 .remove::<ConversationRefreshRequested>();
@@ -2061,18 +2126,10 @@ fn open(
     windows: vmux_layout::window::WindowHierarchy,
     catalog: Res<ProviderCatalog>,
     agents: AgentCatalog,
-    existing: Query<
-        (
-            Entity,
-            &SessionId,
-            &AgentId,
-            &AcpSessionId,
-            Option<&ProviderKind>,
-            Option<&ProviderSessionId>,
-        ),
-        (With<Session>, Without<SessionDuplicate>),
-    >,
     tombstones: Res<ProviderSessionTombstones>,
+    external_index: Option<Res<ExternalLinkIndex>>,
+    link_owners: Query<&ChildOf, With<ExternalLink>>,
+    existing: Query<&SessionId, (With<Session>, Without<SessionDuplicate>)>,
     mut pending: ResMut<PendingImports>,
     mut creates: MessageWriter<CreateRequest>,
     mut opener: ResumeOpener,
@@ -2081,12 +2138,15 @@ fn open(
     if !request.kind.starts_with("acp:") {
         return;
     }
-    if tombstones.contains(&request.kind, &request.sid) {
-        return;
-    }
     let Some(mut source) = catalog.get(&request.kind, &request.sid).cloned() else {
         return;
     };
+    let Some(identity) = source.identity() else {
+        return;
+    };
+    if tombstones.contains(&identity) {
+        return;
+    }
     let Ok(parent) = parents.get(trigger.event().webview) else {
         return;
     };
@@ -2102,17 +2162,13 @@ fn open(
         window: windows.get(trigger.event().webview),
         open: request.open.unwrap_or_default(),
     };
-    let family = AgentFamily::of(&source.agent);
-    if let Some((_, id, _, _, _, _)) =
-        existing
-            .iter()
-            .find(|(_, _, agent, resume, kind, provider_sid)| {
-                kind.is_some_and(|kind| kind.0 == source.kind)
-                    && provider_sid.is_some_and(|sid| sid.0 == source.sid)
-                    || AgentFamily::of(&agent.0) == family && resume.0 == source.sid
-            })
-    {
-        opener.open(destination, Route::Session(id.clone()).url());
+    let existing_id = external_index.as_ref().and_then(|index| {
+        let link = index.entity(&identity)?;
+        let owner = link_owners.get(link).ok()?.parent();
+        existing.get(owner).ok().cloned()
+    });
+    if let Some(id) = existing_id {
+        opener.open(destination, Route::Session(id).url());
         return;
     }
     let Ok(cwd) = PathBuf::from(&source.cwd).canonicalize() else {
@@ -2158,6 +2214,7 @@ fn attach(
     trigger: On<Created>,
     mut pending: ResMut<PendingImports>,
     mut opener: ResumeOpener,
+    links: AcpSessionLinks,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -2169,13 +2226,16 @@ fn attach(
     } else {
         import.source.conversation_title.clone()
     };
-    commands.entity(event.entity).insert((
-        import.agent,
-        AcpSessionId(import.source.sid.clone()),
-        ProviderKind(import.source.kind),
-        ProviderSessionId(import.source.sid),
-        AgentConversationTitle(title),
-    ));
+    commands
+        .entity(event.entity)
+        .insert((import.agent, AgentConversationTitle(title)));
+    links.set(
+        &mut commands,
+        event.entity,
+        &import.source.kind,
+        &import.source.sid,
+        Some(import.source.updated_at),
+    );
     if import.deferred_open {
         opener.open(import.destination, Route::Session(event.id.clone()).url());
     }
@@ -2260,6 +2320,55 @@ impl PromptText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ProviderFixture;
+
+    impl ProviderFixture {
+        fn identity(kind: &str, id: &str) -> ExternalLinkIdentity {
+            AcpSessionLink::identity(kind, id).unwrap()
+        }
+
+        fn components(
+            kind: &str,
+            id: &str,
+        ) -> (ProviderKey, ExternalScopeRef, ResourceKind, ExternalId) {
+            let identity = Self::identity(kind, id);
+            (
+                identity.provider().clone(),
+                ExternalScopeRef::new(identity.scope().clone()),
+                identity.kind().clone(),
+                identity.external_id().clone(),
+            )
+        }
+
+        fn spawn_link(world: &mut World, owner: Entity, kind: &str, id: &str) -> Entity {
+            world
+                .spawn((Self::components(kind, id), ExternalLink, ChildOf(owner)))
+                .id()
+        }
+
+        fn link(world: &World, owner: Entity) -> Option<(String, String)> {
+            let children = world.get::<Children>(owner)?;
+            for child in children.iter() {
+                let Some(provider) = world.get::<ProviderKey>(child) else {
+                    continue;
+                };
+                let Some(scope) = world.get::<ExternalScopeRef>(child) else {
+                    continue;
+                };
+                let Some(kind) = world.get::<ResourceKind>(child) else {
+                    continue;
+                };
+                let Some(id) = world.get::<ExternalId>(child) else {
+                    continue;
+                };
+                if provider.as_str() == "acp" && kind.as_str() == "session" {
+                    return Some((scope.id().as_str().to_string(), id.as_str().to_string()));
+                }
+            }
+            None
+        }
+    }
 
     #[test]
     fn provider_store_fallback_requires_an_explicitly_unsupported_catalog() {
@@ -2391,7 +2500,8 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
+        app.add_plugins(vmux_connector::ConnectorPlugin)
+            .init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
             .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
@@ -2464,17 +2574,11 @@ mod tests {
         app.world_mut().flush();
 
         assert_eq!(
-            app.world().get::<AcpSessionId>(session),
-            Some(&AcpSessionId("provider-session".into()))
+            ProviderFixture::link(app.world(), session),
+            Some(("acp:codex".into(), "provider-session".into()))
         );
-        assert_eq!(
-            app.world().get::<ProviderKind>(session),
-            Some(&ProviderKind("acp:codex".into()))
-        );
-        assert_eq!(
-            app.world().get::<ProviderSessionId>(session),
-            Some(&ProviderSessionId("provider-session".into()))
-        );
+        assert!(app.world().get::<ProviderKey>(session).is_none());
+        assert!(app.world().get::<ExternalId>(session).is_none());
         assert!(
             app.world_mut()
                 .resource_mut::<Messages<PageOpenRequest>>()
@@ -2489,7 +2593,8 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
+        app.add_plugins(vmux_connector::ConnectorPlugin)
+            .init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
             .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
@@ -2543,7 +2648,12 @@ mod tests {
             id: id.clone(),
         });
         app.world_mut().flush();
-
+        assert_eq!(
+            ProviderFixture::link(app.world(), session),
+            Some(("acp:codex".into(), "provider-session".into()))
+        );
+        assert!(app.world().get::<ProviderKey>(session).is_none());
+        assert!(app.world().get::<ExternalId>(session).is_none());
         let opened = app
             .world_mut()
             .resource_mut::<Messages<PageOpenRequest>>()
@@ -2578,22 +2688,18 @@ mod tests {
             .spawn((
                 Session,
                 AgentId("codex".into()),
-                AcpSessionId("replacement-session".into()),
                 Name::new("Review pull request"),
                 vmux_ecs::Cwd(PathBuf::from("/work/dashboard")),
                 CreatedAt(100),
             ))
             .id();
+        ProviderFixture::spawn_link(app.world_mut(), session, "acp:codex", "replacement-session");
 
         app.update();
 
         assert_eq!(
-            app.world().get::<ProviderKind>(session),
-            Some(&ProviderKind("acp:codex".into()))
-        );
-        assert_eq!(
-            app.world().get::<ProviderSessionId>(session),
-            Some(&ProviderSessionId("source-session".into()))
+            ProviderFixture::link(app.world(), session),
+            Some(("acp:codex".into(), "source-session".into()))
         );
     }
 
@@ -2602,7 +2708,8 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.init_resource::<ProviderCatalog>()
+        app.add_plugins(vmux_connector::ConnectorPlugin)
+            .init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
             .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
@@ -2621,14 +2728,12 @@ mod tests {
                 ..Default::default()
             });
         let id = SessionId::new("canonical-session");
-        app.world_mut().spawn((
-            Session,
-            id.clone(),
-            AgentId("codex".into()),
-            AcpSessionId("replacement-resume-session".into()),
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-        ));
+        let session = app
+            .world_mut()
+            .spawn((Session, id.clone(), AgentId("codex".into())))
+            .id();
+        ProviderFixture::spawn_link(app.world_mut(), session, "acp:codex", "provider-session");
+        app.update();
         let stack = app.world_mut().spawn_empty().id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
@@ -2665,10 +2770,9 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
             .init_resource::<PendingImports>()
-            .insert_resource(ProviderSessionTombstones::new([ProviderSessionKey::new(
-                ProviderKind("acp:codex".into()),
-                ProviderSessionId("provider-session".into()),
-            )]))
+            .insert_resource(ProviderSessionTombstones::new([
+                ProviderFixture::identity("acp:codex", "provider-session"),
+            ]))
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
@@ -2824,23 +2928,21 @@ mod tests {
             .spawn((
                 Session,
                 SessionId::new("stale"),
-                ProviderKind("acp:codex".into()),
-                ProviderSessionId("provider-session".into()),
                 vmux_ecs::LastActivatedAt(200),
                 ConversationRevision(200),
             ))
             .id();
+        ProviderFixture::spawn_link(app.world_mut(), stale, "acp:codex", "provider-session");
         let current = app
             .world_mut()
             .spawn((
                 Session,
                 SessionId::new("current"),
-                ProviderKind("acp:codex".into()),
-                ProviderSessionId("provider-session".into()),
                 vmux_ecs::LastActivatedAt(300),
                 ConversationRevision(300),
             ))
             .id();
+        ProviderFixture::spawn_link(app.world_mut(), current, "acp:codex", "provider-session");
 
         app.update();
 
@@ -2874,19 +2976,15 @@ mod tests {
             .spawn((
                 Session,
                 SessionId::new("local-session"),
-                ProviderKind("acp:codex".into()),
-                ProviderSessionId("provider-session".into()),
                 vmux_ecs::LastActivatedAt(200),
                 ConversationRevision(200),
             ))
             .id();
+        ProviderFixture::spawn_link(app.world_mut(), session, "acp:codex", "provider-session");
         app.world_mut()
             .resource_mut::<Messages<ProviderConversationChanged>>()
             .write(ProviderConversationChanged {
-                session: ProviderSessionKey::new(
-                    ProviderKind("acp:codex".into()),
-                    ProviderSessionId("provider-session".into()),
-                ),
+                session: ProviderFixture::identity("acp:codex", "provider-session"),
                 updated_at: 300,
             });
 
@@ -2947,54 +3045,64 @@ mod tests {
             ]);
         app.world_mut().spawn((
             ProviderArchive,
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("locally-active".into()),
-            SourceUpdatedAt(300),
+            ProviderFixture::components("acp:codex", "locally-active"),
+            RemoteUpdatedAt(vmux_ecs::UnixMillis(300)),
         ));
         app.world_mut().spawn((
             ProviderArchive,
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("locally-archived".into()),
-            SourceUpdatedAt(300),
+            ProviderFixture::components("acp:codex", "locally-archived"),
+            RemoteUpdatedAt(vmux_ecs::UnixMillis(300)),
             ArchivedAt(300),
         ));
         app.world_mut().spawn((
             ProviderArchive,
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-newer".into()),
-            SourceUpdatedAt(300),
+            ProviderFixture::components("acp:codex", "provider-newer"),
+            RemoteUpdatedAt(vmux_ecs::UnixMillis(300)),
             ArchivedAt(300),
         ));
-        app.world_mut().spawn((
-            Session,
-            SessionId::new("active-session"),
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("locally-active".into()),
-            vmux_ecs::LastActivatedAt(0),
-        ));
-        app.world_mut().spawn((
-            Session,
-            SessionId::new("provider-newer-session"),
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-newer".into()),
-            vmux_ecs::LastActivatedAt(0),
-            ArchivedAt(300),
-        ));
-        app.world_mut().spawn((
-            Session,
-            SessionId::new("archived-session"),
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("locally-archived".into()),
-            vmux_ecs::LastActivatedAt(0),
-        ));
-        app.world_mut().spawn((
-            Session,
-            SessionId::new("session-newer"),
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("session-newer".into()),
-            vmux_ecs::LastActivatedAt(0),
-            ArchivedAt(400),
-        ));
+        let active = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId::new("active-session"),
+                vmux_ecs::LastActivatedAt(0),
+            ))
+            .id();
+        ProviderFixture::spawn_link(app.world_mut(), active, "acp:codex", "locally-active");
+        let provider_newer = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId::new("provider-newer-session"),
+                vmux_ecs::LastActivatedAt(0),
+                ArchivedAt(300),
+            ))
+            .id();
+        ProviderFixture::spawn_link(
+            app.world_mut(),
+            provider_newer,
+            "acp:codex",
+            "provider-newer",
+        );
+        let archived = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId::new("archived-session"),
+                vmux_ecs::LastActivatedAt(0),
+            ))
+            .id();
+        ProviderFixture::spawn_link(app.world_mut(), archived, "acp:codex", "locally-archived");
+        let session_newer = app
+            .world_mut()
+            .spawn((
+                Session,
+                SessionId::new("session-newer"),
+                vmux_ecs::LastActivatedAt(0),
+                ArchivedAt(400),
+            ))
+            .id();
+        ProviderFixture::spawn_link(app.world_mut(), session_newer, "acp:codex", "session-newer");
 
         app.update();
 

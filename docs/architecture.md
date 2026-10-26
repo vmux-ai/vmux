@@ -1081,9 +1081,11 @@ entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
 
-`vmux_acp` attaches transient runtime and ACP capability state to Session entities and owns the
-provider-owned `AcpSessionId`, its persistence, and the single runtime detach path used by cleanup
-and agent replacement. `vmux_session` renders the
+`vmux_acp` attaches transient runtime and ACP capability state to Session entities. Provider
+session identity lives on a persisted `ExternalLink` child as `ProviderKey`, `ExternalScopeRef`,
+`ResourceKind`, and `ExternalId`; canonical Sessions never carry provider IDs. The adapter owns the
+single runtime detach path used by cleanup and agent replacement, including removal of its link.
+`vmux_session` renders the
 Sessions page and Dioxus conversation UI. A dedicated manager-view marker is the authorization and
 publication boundary for Session catalog and mutation UI events; Session detail views receive only
 their bound Session state. The service carries serialized agent protocol messages and runs
@@ -1094,8 +1096,8 @@ ACP `session/list` is the primary provider catalog. The Sessions page starts eac
 long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
 sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family
 or the ACP explicitly omits `session/list`. Browsing an external entry does not copy it into durable
-Vmux state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets
-the provider replay the conversation through `session/load`. Compatibility watches exist only while
+Vmux state. Resuming it creates the canonical Session entity, attaches the provider-neutral link,
+and lets the provider replay the conversation through `session/load`. Compatibility watches exist only while
 the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
 the changed provider, and bound untrusted history traversal.
 The Session manager publishes only to its active page and leases Git metadata for every displayed

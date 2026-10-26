@@ -17,7 +17,7 @@ use vmux_ui::i18n::translate;
 
 use super::acp::registry::RegistryAgent;
 use super::attach::AcpAgentAttachment;
-use crate::AcpSessionId;
+use crate::session::AcpSessionLinks;
 
 #[derive(SystemParam)]
 pub(super) struct AcpCatalog<'w, 's> {
@@ -41,11 +41,11 @@ pub(super) struct PageOpener<'w, 's> {
             &'static Name,
             &'static Cwd,
             Option<&'static AgentId>,
-            Option<&'static AcpSessionId>,
             Option<&'static ProcessAnchor>,
         ),
         With<Session>,
     >,
+    links: AcpSessionLinks<'w, 's>,
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
     tabs: Query<'w, 's, &'static mut Tab>,
@@ -136,6 +136,23 @@ impl PageOpener<'_, '_> {
                 Ok(())
             }
             Route::Session(id) => {
+                let mut selected = None;
+                for (entity, candidate, name, cwd, agent, active) in &self.sessions {
+                    if candidate != &id {
+                        continue;
+                    }
+                    selected = Some((
+                        entity,
+                        name.as_str().to_string(),
+                        cwd.0.clone(),
+                        agent.map(|agent| agent.0.clone()),
+                        self.links
+                            .get(entity)
+                            .map(|link| link.id().as_str().to_string()),
+                        active.map(|active| active.0),
+                    ));
+                    break;
+                }
                 let Some((
                     session_entity,
                     session_name,
@@ -143,20 +160,7 @@ impl PageOpener<'_, '_> {
                     selected_agent,
                     resume,
                     active,
-                )) = self
-                    .sessions
-                    .iter()
-                    .find(|(_, candidate, ..)| *candidate == &id)
-                    .map(|(entity, _, name, cwd, agent, resume, active)| {
-                        (
-                            entity,
-                            name.as_str().to_string(),
-                            cwd.0.clone(),
-                            agent.map(|agent| agent.0.clone()),
-                            resume.map(|resume| resume.0.clone()),
-                            active.map(|active| active.0),
-                        )
-                    })
+                )) = selected
                 else {
                     return Err(format!("Session '{}' was not found", id.0));
                 };

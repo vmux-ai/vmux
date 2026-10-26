@@ -23,9 +23,9 @@ use vmux_ui::i18n::translate;
 
 use super::attach::AcpAgentAttachment;
 use super::navigation_driver::{AcpCatalog, AgentPageOpenWorkspace, PageOpener};
-use crate::AcpSessionId;
 #[cfg(test)]
 use crate::host::acp::registry::RegistryAgent;
+use crate::session::AcpSessionLinks;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type ReadyPageOpen = (
@@ -567,12 +567,13 @@ fn swap(
 #[derive(SystemParam)]
 struct SessionRuntime<'w, 's> {
     commands: Commands<'w, 's>,
+    links: AcpSessionLinks<'w, 's>,
 }
 
 impl SessionRuntime<'_, '_> {
     fn detach(&mut self, session: Entity) {
+        self.links.remove(&mut self.commands, session);
         self.commands.entity(session).remove::<(
-            AcpSessionId,
             vmux_ecs::ProcessAnchor,
             crate::host::acp::AcpLaunchStarted,
             crate::host::acp::AcpSpawnQueued,
@@ -788,7 +789,6 @@ mod tests {
         let mut world = World::new();
         let session = world
             .spawn((
-                AcpSessionId("acp-session".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
                 crate::host::acp::AcpLaunchStarted,
                 vmux_session::ApprovalPolicy::default(),
@@ -813,6 +813,18 @@ mod tests {
                 vmux_ecs::team::Profile::registry("Codex", "codex"),
             ))
             .id();
+        let identity =
+            crate::session::AcpSessionLink::identity("acp:codex", "acp-session").unwrap();
+        let link = world
+            .spawn((
+                vmux_connector::ExternalLink,
+                identity.provider().clone(),
+                vmux_connector::ExternalScopeRef::new(identity.scope().clone()),
+                identity.kind().clone(),
+                identity.external_id().clone(),
+                ChildOf(session),
+            ))
+            .id();
 
         world
             .run_system_once(move |mut runtime: SessionRuntime| {
@@ -821,7 +833,7 @@ mod tests {
             .unwrap();
         world.flush();
 
-        assert!(world.get::<AcpSessionId>(session).is_none());
+        assert!(world.get_entity(link).is_err());
         assert!(world.get::<vmux_ecs::ProcessAnchor>(session).is_none());
         assert!(
             world

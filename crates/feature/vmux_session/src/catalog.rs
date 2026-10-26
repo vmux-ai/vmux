@@ -9,19 +9,26 @@ use bevy_ecs::system::SystemParam;
 #[cfg(host)]
 use std::collections::{HashMap, HashSet};
 #[cfg(host)]
+use vmux_api::Id;
+#[cfg(host)]
 use vmux_api::session::{AssistantBlock, Message};
 #[cfg(host)]
-use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
+use vmux_connector::{
+    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScope, ExternalScopeRef, ProviderKey,
+    ResourceKind,
+};
+#[cfg(host)]
+use vmux_ecs::{
+    ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, RemoteUpdatedAt, Terminal,
+};
 
 #[cfg(host)]
-use crate::model::{
-    ProviderArchiveOperations, ProviderSessionKey, ProviderSessionTombstones, SourceUpdatedAt,
-};
+use crate::model::{ProviderArchiveOperations, ProviderSessionTombstones};
 #[cfg(host)]
 use crate::{
     AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
-    ProviderArchive, ProviderKind, ProviderSessionId, ProviderStage, RunState, Session,
-    SessionDuplicate, SessionId, Stage, StageChangedAt, StageDefinition, StageId, Transcripts,
+    ProviderArchive, ProviderStage, RunState, Session, SessionDuplicate, SessionId, Stage,
+    StageChangedAt, StageDefinition, StageId, Transcripts,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -70,6 +77,21 @@ impl ProviderSession {
             .map(ArchiveState::updated_at)
             .unwrap_or_default()
             .max(self.updated_at)
+    }
+
+    #[cfg(host)]
+    pub fn identity(&self) -> Option<ExternalLinkIdentity> {
+        let provider = self
+            .kind
+            .split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or(self.kind.as_str());
+        Some(ExternalLinkIdentity::new(
+            ProviderKey::new(provider).ok()?,
+            Id::<ExternalScope>::new(self.kind.clone()),
+            ResourceKind::session(),
+            ExternalId::new(self.sid.clone()).ok()?,
+        ))
     }
 }
 
@@ -270,8 +292,14 @@ type SessionCatalog<'w, 's> = Query<
 type LinkedSessions<'w, 's> = Query<
     'w,
     's,
-    (Entity, &'static ProviderKind, &'static ProviderSessionId),
-    (With<Session>, Without<SessionDuplicate>),
+    (
+        &'static ChildOf,
+        &'static ProviderKey,
+        &'static ExternalScopeRef,
+        &'static ResourceKind,
+        &'static ExternalId,
+    ),
+    With<ExternalLink>,
 >;
 
 #[cfg(host)]
@@ -292,11 +320,13 @@ type ProviderStages<'w, 's> = Query<
     'w,
     's,
     (
-        &'static ProviderKind,
-        &'static ProviderSessionId,
+        &'static ProviderKey,
+        &'static ExternalScopeRef,
+        &'static ResourceKind,
+        &'static ExternalId,
         &'static Stage,
         &'static StageChangedAt,
-        &'static SourceUpdatedAt,
+        &'static RemoteUpdatedAt,
     ),
     With<ProviderStage>,
 >;
@@ -306,9 +336,11 @@ type ProviderArchives<'w, 's> = Query<
     'w,
     's,
     (
-        &'static ProviderKind,
-        &'static ProviderSessionId,
-        &'static SourceUpdatedAt,
+        &'static ProviderKey,
+        &'static ExternalScopeRef,
+        &'static ResourceKind,
+        &'static ExternalId,
+        &'static RemoteUpdatedAt,
         Option<&'static ArchivedAt>,
     ),
     With<ProviderArchive>,
@@ -349,8 +381,6 @@ type ChangedSessions<'w, 's> = Query<
             Changed<vmux_ecs::team::Profile>,
             Changed<RunState>,
             Changed<AgentConversationTitle>,
-            Changed<ProviderKind>,
-            Changed<ProviderSessionId>,
         )>,
     ),
 >;
@@ -385,6 +415,22 @@ struct CatalogChanges<'w, 's> {
             Or<(Added<ConversationEvent>, Changed<MessageContent>)>,
         ),
     >,
+    links: Query<
+        'w,
+        's,
+        (),
+        (
+            With<ExternalLink>,
+            Or<(
+                Added<ExternalLink>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<ChildOf>,
+            )>,
+        ),
+    >,
     provider_stages: Query<
         'w,
         's,
@@ -393,11 +439,13 @@ struct CatalogChanges<'w, 's> {
             With<ProviderStage>,
             Or<(
                 Added<ProviderStage>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
                 Changed<Stage>,
                 Changed<StageChangedAt>,
-                Changed<SourceUpdatedAt>,
+                Changed<RemoteUpdatedAt>,
             )>,
         ),
     >,
@@ -409,9 +457,11 @@ struct CatalogChanges<'w, 's> {
             With<ProviderArchive>,
             Or<(
                 Added<ProviderArchive>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
-                Changed<SourceUpdatedAt>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<RemoteUpdatedAt>,
                 Changed<ArchivedAt>,
             )>,
         ),
@@ -440,8 +490,12 @@ struct CatalogChanges<'w, 's> {
     removed_provider_stages: RemovedComponents<'w, 's, ProviderStage>,
     removed_provider_archives: RemovedComponents<'w, 's, ProviderArchive>,
     removed_duplicates: RemovedComponents<'w, 's, SessionDuplicate>,
-    removed_provider_kinds: RemovedComponents<'w, 's, ProviderKind>,
-    removed_provider_ids: RemovedComponents<'w, 's, ProviderSessionId>,
+    removed_links: RemovedComponents<'w, 's, ExternalLink>,
+    removed_providers: RemovedComponents<'w, 's, ProviderKey>,
+    removed_scopes: RemovedComponents<'w, 's, ExternalScopeRef>,
+    removed_resource_kinds: RemovedComponents<'w, 's, ResourceKind>,
+    removed_external_ids: RemovedComponents<'w, 's, ExternalId>,
+    removed_owners: RemovedComponents<'w, 's, ChildOf>,
 }
 
 #[cfg(host)]
@@ -450,6 +504,7 @@ impl CatalogChanges<'_, '_> {
         let mut any = !self.sessions.is_empty()
             || !self.stages.is_empty()
             || !self.events.is_empty()
+            || !self.links.is_empty()
             || !self.provider_stages.is_empty()
             || !self.provider_archives.is_empty()
             || !self.duplicates.is_empty();
@@ -476,8 +531,12 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_provider_stages.read().count() > 0;
         any |= self.removed_provider_archives.read().count() > 0;
         any |= self.removed_duplicates.read().count() > 0;
-        any |= self.removed_provider_kinds.read().count() > 0;
-        any |= self.removed_provider_ids.read().count() > 0;
+        any |= self.removed_links.read().count() > 0;
+        any |= self.removed_providers.read().count() > 0;
+        any |= self.removed_scopes.read().count() > 0;
+        any |= self.removed_resource_kinds.read().count() > 0;
+        any |= self.removed_external_ids.read().count() > 0;
+        any |= self.removed_owners.read().count() > 0;
         any
     }
 }
@@ -525,7 +584,18 @@ fn project(
         .unwrap_or_default();
     let linked_sessions = linked_sessions
         .iter()
-        .map(|(entity, kind, id)| (entity, ProviderSessionKey::from_components(kind, id)))
+        .filter(|(_, _, _, kind, _)| kind.as_str() == "session")
+        .map(|(owner, provider, scope, kind, id)| {
+            (
+                owner.parent(),
+                ExternalLinkIdentity::new(
+                    provider.clone(),
+                    scope.id().clone(),
+                    kind.clone(),
+                    id.clone(),
+                ),
+            )
+        })
         .collect::<HashMap<_, _>>();
     for (
         entity,
@@ -556,7 +626,7 @@ fn project(
             .unwrap_or_default();
         let archived_at = linked_sessions
             .get(&entity)
-            .and_then(|key| operations.archived_at(key))
+            .and_then(|identity| operations.archived_at(identity))
             .unwrap_or_else(|| {
                 archived_at
                     .map(|archived_at| archived_at.0)
@@ -568,11 +638,11 @@ fn project(
             sid: id.0.clone(),
             provider_kind: linked_sessions
                 .get(&entity)
-                .map(|key| key.kind.0.clone())
+                .map(|identity| identity.scope().as_str().to_string())
                 .unwrap_or_default(),
             provider_sid: linked_sessions
                 .get(&entity)
-                .map(|key| key.id.0.clone())
+                .map(|identity| identity.external_id().as_str().to_string())
                 .unwrap_or_default(),
             managed: true,
             name: name.as_str().to_string(),
@@ -603,33 +673,44 @@ fn project(
     let linked_sessions = linked_sessions.values().cloned().collect::<HashSet<_>>();
     let provider_stages = provider_stages
         .iter()
-        .map(|(kind, id, stage, changed_at, source_updated_at)| {
-            (
-                ProviderSessionKey::from_components(kind, id),
-                (stage.0.0.clone(), changed_at.0, source_updated_at.0),
-            )
-        })
+        .map(
+            |(provider, scope, kind, id, stage, changed_at, source_updated_at)| {
+                (
+                    ExternalLinkIdentity::new(
+                        provider.clone(),
+                        scope.id().clone(),
+                        kind.clone(),
+                        id.clone(),
+                    ),
+                    (stage.0.0.clone(), changed_at.0, source_updated_at.0.0),
+                )
+            },
+        )
         .collect::<HashMap<_, _>>();
     let provider_archives = provider_archives
         .iter()
-        .map(|(kind, id, source_updated_at, archived_at)| {
-            (
-                ProviderSessionKey::from_components(kind, id),
+        .map(
+            |(provider, scope, kind, id, source_updated_at, archived_at)| {
                 (
-                    source_updated_at.0,
-                    archived_at.map(|archived_at| archived_at.0),
-                ),
-            )
-        })
+                    ExternalLinkIdentity::new(
+                        provider.clone(),
+                        scope.id().clone(),
+                        kind.clone(),
+                        id.clone(),
+                    ),
+                    (
+                        source_updated_at.0.0,
+                        archived_at.map(|archived_at| archived_at.0),
+                    ),
+                )
+            },
+        )
         .collect::<HashMap<_, _>>();
     for session in &providers.sessions {
-        let key = ProviderSessionKey::new(
-            ProviderKind(session.kind.clone()),
-            ProviderSessionId(session.sid.clone()),
-        );
-        if linked_sessions.contains(&key)
-            || provider_tombstones.contains(&session.kind, &session.sid)
-        {
+        let Some(key) = session.identity() else {
+            continue;
+        };
+        if linked_sessions.contains(&key) || provider_tombstones.contains(&key) {
             continue;
         }
         let provider_updated_at = session.source_updated_at();
@@ -776,6 +857,33 @@ mod tests {
     #[cfg(feature = "app")]
     use moonshine_save::prelude::{LoadWorld, load_on_default_event};
 
+    struct ProviderFixture;
+
+    impl ProviderFixture {
+        fn identity(kind: &str, id: &str) -> ExternalLinkIdentity {
+            ProviderSession {
+                kind: kind.to_string(),
+                sid: id.to_string(),
+                ..Default::default()
+            }
+            .identity()
+            .unwrap()
+        }
+
+        fn components(
+            kind: &str,
+            id: &str,
+        ) -> (ProviderKey, ExternalScopeRef, ResourceKind, ExternalId) {
+            let identity = Self::identity(kind, id);
+            (
+                identity.provider().clone(),
+                ExternalScopeRef::new(identity.scope().clone()),
+                identity.kind().clone(),
+                identity.external_id().clone(),
+            )
+        }
+    }
+
     #[test]
     fn catalog_tracks_session_metadata() {
         let mut app = App::new();
@@ -867,8 +975,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
             .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("codex", "provider-session"),
                 stage: StageId("done".into()),
                 source_updated_at: 10,
             });
@@ -906,13 +1013,13 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<CatalogSnapshot>().sessions.len(), 1);
 
+        let identity = app.world().resource::<ProviderCatalog>().sessions[0]
+            .identity()
+            .unwrap();
         app.world_mut()
             .resource_mut::<Messages<crate::CleanupRequest>>()
             .write(crate::CleanupRequest {
-                targets: vec![crate::CleanupTarget::Provider(ProviderSessionKey::new(
-                    ProviderKind("acp:codex".into()),
-                    ProviderSessionId("provider-session".into()),
-                ))],
+                targets: vec![crate::CleanupTarget::Provider(identity)],
             });
         app.update();
         assert!(
@@ -959,8 +1066,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
             .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
                 stage: StageId("in_progress".into()),
                 source_updated_at: 100,
             });
@@ -1011,8 +1117,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderArchiveRequest>>()
             .write(crate::ProviderArchiveRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
                 archived: true,
                 source_updated_at: 10,
                 native: false,
@@ -1053,8 +1158,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
             .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
                 stage: StageId("done".into()),
                 source_updated_at: 10,
             });
@@ -1070,8 +1174,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
             .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
                 stage: StageId("done".into()),
                 source_updated_at: archived_at + 1,
             });
@@ -1080,44 +1183,6 @@ mod tests {
         let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
         assert_eq!(session.stage, "done");
         assert!(session.stage_changed_at > archived_at);
-    }
-
-    #[test]
-    fn legacy_provider_stage_uses_transition_time_as_source_fallback() {
-        let mut app = App::new();
-        app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                agent: "codex".into(),
-                name: "External task".into(),
-                cwd: "/tmp/project".into(),
-                updated_at: 10,
-                ..Default::default()
-            });
-        app.world_mut().spawn((
-            ProviderStage,
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-            Stage(StageId("done".into())),
-            StageChangedAt(20),
-            SourceUpdatedAt(0),
-        ));
-        app.update();
-
-        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
-        assert_eq!(session.stage, "done");
-        assert_eq!(session.stage_changed_at, 20);
-
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 21;
-        app.update();
-
-        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
-        assert_eq!(session.stage, "in_progress");
-        assert_eq!(session.stage_changed_at, 21);
     }
 
     #[test]
@@ -1136,13 +1201,13 @@ mod tests {
                 updated_at: 150,
                 ..Default::default()
             });
+        let identity = ProviderFixture::components("acp:codex", "provider-session");
         app.world_mut().spawn((
             ProviderStage,
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
+            identity,
             Stage(StageId("done".into())),
             StageChangedAt(200),
-            SourceUpdatedAt(100),
+            RemoteUpdatedAt(vmux_ecs::UnixMillis(100)),
         ));
         app.update();
 
