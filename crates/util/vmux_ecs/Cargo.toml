@@ -25,7 +25,9 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
+moonshine-util = { workspace = true }
 rkyv = { workspace = true }
+ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }

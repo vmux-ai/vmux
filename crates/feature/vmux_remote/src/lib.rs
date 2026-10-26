@@ -503,11 +503,8 @@ fn ensure_relay_device_id() -> std::io::Result<String> {
             return Ok(existing.to_string());
         }
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let device_id = uuid::Uuid::new_v4().simple().to_string();
-    std::fs::write(&path, &device_id)?;
+    vmux_path::AtomicFile::write(&path, device_id.as_bytes())?;
     #[cfg(unix)]
     {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
@@ -517,10 +514,7 @@ fn ensure_relay_device_id() -> std::io::Result<String> {
 
 fn persist_enabled(enabled: bool) -> std::io::Result<()> {
     let path = RemotePaths::current().state();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, if enabled { "enabled\n" } else { "disabled\n" })
+    vmux_path::AtomicFile::write(path, if enabled { b"enabled\n" } else { b"disabled\n" })
 }
 
 fn remove_if_exists(path: &Path) -> std::io::Result<()> {

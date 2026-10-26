@@ -139,12 +139,9 @@ impl ExtensionStore {
     }
 
     pub fn save_loaded_ids(&self, profile: &str, ids: &[String]) -> Result<(), String> {
-        std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
         let path = self.loaded_path(profile);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::write(path, ids.join("\n")).map_err(|error| error.to_string())
+        vmux_path::AtomicFile::write(path, ids.join("\n").as_bytes())
+            .map_err(|error| error.to_string())
     }
 
     pub fn packages_dir(&self) -> PathBuf {
@@ -515,9 +512,9 @@ impl ExtensionStore {
     }
 
     pub fn save_index(&self, index: &Index) -> Result<(), String> {
-        std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
         let source = serde_json::to_string_pretty(index).map_err(|error| error.to_string())?;
-        std::fs::write(self.root.join("index.json"), source).map_err(|error| error.to_string())
+        vmux_path::AtomicFile::write(self.root.join("index.json"), source.as_bytes())
+            .map_err(|error| error.to_string())
     }
 
     pub fn update_index(&self, update: impl FnOnce(&mut Index)) -> Result<(), String> {

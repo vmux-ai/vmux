@@ -10557,7 +10557,9 @@ dependencies = [
  "bevy_reflect",
  "bevy_world_serialization",
  "moonshine-save",
+ "moonshine-util",
  "rkyv",
+ "ron 0.12.1",
  "serde",
  "serde_json",
  "sha2",
@@ -10660,6 +10662,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_path",
  "vmux_tool",
  "zip",
 ]
@@ -10958,6 +10961,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "url",
+ "vmux_path",
  "zeroize",
 ]
 
@@ -10971,6 +10975,7 @@ dependencies = [
  "vmux_clipboard",
  "vmux_ecs",
  "vmux_layout",
+ "vmux_path",
  "vmux_service",
 ]
 

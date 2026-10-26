@@ -10,14 +10,17 @@ use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 #[cfg(host)]
 use std::collections::{HashMap, HashSet};
-use vmux_api::session::SessionId;
+use vmux_api::{Id, session::SessionId};
 use vmux_connector::{
     ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
 };
 #[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 #[cfg(host)]
-use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order, PageMetadata};
+use vmux_ecs::{
+    ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Operation, OperationKind,
+    OperationState, OperationTargetRevision, Order, PageMetadata, Revision,
+};
 use vmux_ecs::{ArchivedAt, Cwd, Description, RemoteUpdatedAt, UnixMillis};
 
 #[cfg(host)]
@@ -29,6 +32,9 @@ pub(crate) struct EntityPlugin;
 #[cfg(host)]
 impl Plugin for EntityPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
         app.register_persisted::<Session>()
             .register_persisted::<SessionId>()
             .register_persisted::<AgentId>()
@@ -37,8 +43,8 @@ impl Plugin for EntityPlugin {
             .register_persisted::<ProviderSessionTombstone>()
             .register_persisted::<AgentConversationTitle>()
             .register_persisted::<TitlePending>()
-            .init_resource::<ProviderArchiveOperations>()
             .init_resource::<ProviderSessionTombstones>()
+            .init_resource::<ProviderArchiveRevision>()
             .add_message::<CreateRequest>()
             .add_message::<ArchiveRequest>()
             .add_message::<ProviderArchiveRequest>()
@@ -343,74 +349,86 @@ pub enum CleanupTarget {
 
 #[cfg(host)]
 #[derive(Resource, Default)]
-pub(crate) struct ProviderArchiveOperations {
-    next_revision: u64,
-    pending: HashMap<ExternalLinkIdentity, ProviderArchiveOperation>,
+struct ProviderArchiveRevision(u64);
+
+#[cfg(host)]
+impl ProviderArchiveRevision {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(1).max(1);
+        self.0
+    }
 }
 
 #[cfg(host)]
-struct ProviderArchiveOperation {
+#[derive(Component)]
+pub(crate) struct ProviderArchiveOperation {
+    identity: ExternalLinkIdentity,
     archived: bool,
     source_updated_at: i64,
     revision: u64,
-    in_flight: Option<u64>,
+    in_flight: u64,
 }
 
 #[cfg(host)]
-impl ProviderArchiveOperations {
-    fn request(&mut self, request: &ProviderArchiveRequest) -> Option<ProviderArchiveWriteRequest> {
-        self.next_revision = self.next_revision.wrapping_add(1).max(1);
-        let revision = self.next_revision;
-        let key = request.identity.clone();
-        let operation = self.pending.entry(key).or_insert(ProviderArchiveOperation {
-            archived: request.archived,
-            source_updated_at: request.source_updated_at,
-            revision,
-            in_flight: None,
-        });
-        operation.archived = request.archived;
-        operation.source_updated_at = request.source_updated_at;
-        operation.revision = revision;
-        if operation.in_flight.is_some() {
-            return None;
+impl ProviderArchiveOperation {
+    fn write(&self) -> ProviderArchiveWriteRequest {
+        ProviderArchiveWriteRequest {
+            identity: self.identity.clone(),
+            archived: self.archived,
+            revision: self.revision,
         }
-        operation.in_flight = Some(revision);
-        Some(ProviderArchiveWriteRequest {
-            identity: request.identity.clone(),
-            archived: request.archived,
-            revision,
-        })
     }
 
-    fn complete(
-        &mut self,
-        result: &ProviderArchiveCompleted,
-    ) -> Option<ProviderArchiveWriteRequest> {
-        let key = result.identity.clone();
-        let operation = self.pending.get_mut(&key)?;
-        if operation.in_flight != Some(result.revision) {
-            return None;
-        }
-        if operation.revision == result.revision {
-            self.pending.remove(&key);
-            return None;
-        }
-        operation.in_flight = Some(operation.revision);
-        Some(ProviderArchiveWriteRequest {
-            identity: result.identity.clone(),
-            archived: operation.archived,
-            revision: operation.revision,
-        })
+    pub(crate) fn identity(&self) -> &ExternalLinkIdentity {
+        &self.identity
     }
 
+    pub(crate) fn archived_at(&self) -> i64 {
+        if self.archived {
+            self.source_updated_at.max(1)
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(host)]
+#[derive(SystemParam)]
+pub(crate) struct ProviderArchiveOperations<'w, 's> {
+    operations: Query<
+        'w,
+        's,
+        (&'static ProviderArchiveOperation, &'static OperationState),
+        With<Operation>,
+    >,
+    changed: Query<
+        'w,
+        's,
+        (),
+        (
+            With<Operation>,
+            Or<(
+                Added<ProviderArchiveOperation>,
+                Changed<ProviderArchiveOperation>,
+                Added<OperationState>,
+                Changed<OperationState>,
+            )>,
+        ),
+    >,
+}
+
+#[cfg(host)]
+impl ProviderArchiveOperations<'_, '_> {
     pub(crate) fn archived_at(&self, identity: &ExternalLinkIdentity) -> Option<i64> {
-        self.pending.get(identity).map(|operation| {
-            if operation.archived {
-                operation.source_updated_at.max(1)
-            } else {
-                0
-            }
+        self.operations.iter().find_map(|(operation, state)| {
+            (operation.identity() == identity
+                && matches!(state, OperationState::Pending | OperationState::Running))
+            .then(|| operation.archived_at())
         })
+    }
+
+    pub(crate) fn is_changed(&self) -> bool {
+        !self.changed.is_empty()
     }
 }
 
@@ -780,7 +798,11 @@ fn archive(
 #[cfg(host)]
 fn archive_provider(
     mut requests: MessageReader<ProviderArchiveRequest>,
-    mut operations: ResMut<ProviderArchiveOperations>,
+    mut revision: ResMut<ProviderArchiveRevision>,
+    mut operations: Query<
+        (Entity, &mut ProviderArchiveOperation, &mut OperationState),
+        With<Operation>,
+    >,
     mut overrides: Query<
         (
             Entity,
@@ -828,42 +850,95 @@ fn archive_provider(
             found = true;
             break;
         }
-        if found {
-            if request.native
-                && let Some(write) = operations.request(&request)
-            {
-                writes.write(write);
+        if !found {
+            let mut entity = commands.spawn((
+                ProviderArchive,
+                request.identity.provider().clone(),
+                ExternalScopeRef::new(request.identity.scope().clone()),
+                request.identity.kind().clone(),
+                request.identity.external_id().clone(),
+                RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
+            ));
+            if request.archived {
+                entity.insert(ArchivedAt(next_archived_at));
             }
+        }
+        if !request.native {
             continue;
         }
-        let mut entity = commands.spawn((
-            ProviderArchive,
-            request.identity.provider().clone(),
-            ExternalScopeRef::new(request.identity.scope().clone()),
-            request.identity.kind().clone(),
-            request.identity.external_id().clone(),
-            RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
+        let next_revision = revision.next();
+        let mut accepted = false;
+        for (entity, mut operation, mut state) in &mut operations {
+            if operation.identity != request.identity {
+                continue;
+            }
+            operation.archived = request.archived;
+            operation.source_updated_at = request.source_updated_at;
+            operation.revision = next_revision;
+            commands
+                .entity(entity)
+                .insert(OperationTargetRevision(Revision::new(
+                    request.source_updated_at.max(1) as u64,
+                )));
+            if !matches!(*state, OperationState::Pending | OperationState::Running) {
+                operation.in_flight = next_revision;
+                *state = OperationState::Running;
+                writes.write(operation.write());
+            }
+            accepted = true;
+            break;
+        }
+        if accepted {
+            continue;
+        }
+        let operation = ProviderArchiveOperation {
+            identity: request.identity.clone(),
+            archived: request.archived,
+            source_updated_at: request.source_updated_at,
+            revision: next_revision,
+            in_flight: next_revision,
+        };
+        writes.write(operation.write());
+        commands.spawn((
+            Operation,
+            Id::<Operation>::new(uuid::Uuid::new_v4().to_string()),
+            OperationKind::new("provider_archive").unwrap(),
+            OperationState::Running,
+            OperationTargetRevision(Revision::new(request.source_updated_at.max(1) as u64)),
+            operation,
         ));
-        if request.archived {
-            entity.insert(ArchivedAt(next_archived_at));
-        }
-        if request.native
-            && let Some(write) = operations.request(&request)
-        {
-            writes.write(write);
-        }
     }
 }
 
 #[cfg(host)]
 fn finish_provider_archives(
     mut completed: MessageReader<ProviderArchiveCompleted>,
-    mut operations: ResMut<ProviderArchiveOperations>,
+    mut operations: Query<
+        (Entity, &mut ProviderArchiveOperation, &mut OperationState),
+        With<Operation>,
+    >,
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
+    mut commands: Commands,
 ) {
     for result in completed.read() {
-        if let Some(write) = operations.complete(result) {
-            writes.write(write);
+        for (entity, mut operation, mut state) in &mut operations {
+            if operation.identity != result.identity || operation.in_flight != result.revision {
+                continue;
+            }
+            if operation.revision != result.revision {
+                operation.in_flight = operation.revision;
+                writes.write(operation.write());
+                break;
+            }
+            *state = if result.success {
+                OperationState::Succeeded
+            } else {
+                commands.entity(entity).insert(
+                    vmux_ecs::OperationError::new("provider archive write failed").unwrap(),
+                );
+                OperationState::Failed
+            };
+            break;
         }
     }
 }
