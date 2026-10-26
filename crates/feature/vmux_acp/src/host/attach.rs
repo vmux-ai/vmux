@@ -71,11 +71,15 @@ fn attach(
             ProcessAnchor(anchor),
             vmux_session::RunState::default(),
             vmux_session::ApprovalPolicy::default(),
-            vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
             vmux_ecs::team::Agent {
                 sid: sid.to_string(),
             },
         ));
+        commands.spawn(
+            vmux_ecs::team::Profile::registry(agent_name, agent_id)
+                .with_icon(profile_icon)
+                .owned_by(*session_entity),
+        );
         commands
             .entity(*session_entity)
             .entry::<PromptQueue>()
@@ -143,6 +147,7 @@ fn attach(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
 
     #[derive(Resource)]
     struct DeferredPrompt(Entity);
@@ -173,15 +178,24 @@ mod tests {
         ));
         app.update();
 
-        let world = app.world();
-        let profile = world
-            .get::<vmux_ecs::team::Profile>(session)
+        let (profile_name, profile_icon) = app
+            .world_mut()
+            .run_system_once(move |profiles: vmux_ecs::team::Profiles| {
+                profiles.get(session).map(|profile| {
+                    (
+                        profile.name().to_string(),
+                        profile.icon().map(str::to_string),
+                    )
+                })
+            })
+            .unwrap()
             .expect("profile");
-        assert_eq!(profile.name, "Mistral Vibe");
+        assert_eq!(profile_name, "Mistral Vibe");
         assert_eq!(
-            profile.icon.as_deref(),
+            profile_icon.as_deref(),
             Some("https://cdn.example/vibe.svg")
         );
+        let world = app.world();
         let agent = world.get::<vmux_ecs::team::Agent>(session).expect("agent");
         assert_eq!(agent.sid, "sid-1");
         let meta = world.get::<PageMetadata>(stack).expect("meta");

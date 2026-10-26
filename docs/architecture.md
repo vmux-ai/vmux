@@ -1081,6 +1081,9 @@ parallel aliases such as `SessionId`. The shared `Session` identity tag also ser
 marker, while `vmux_session` registers its required durable composition and owns every mutation.
 Stored profiles use `Id<vmux_profile::Profile>`; layout focus uses `ActivePaneScope` because local
 and agent pane ownership is runtime routing state, not profile identity.
+Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,
+`Avatar`, and `Icon`. Sessions resolve that child through `Profiles`, so agent presentation never
+overloads the Session's canonical task name.
 
 `vmux_session` owns the durable unit of work: one canonical Session entity with `Id<Session>`, task
 metadata, working directory, data-driven stage, conversation-event children, optional agent

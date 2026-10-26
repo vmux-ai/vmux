@@ -9,7 +9,7 @@ use vmux_api::chat::{
     ResumeListRequest, ResumeSession,
 };
 use vmux_api::command_bar::UiCommandBar;
-use vmux_ecs::team::Profile;
+use vmux_ecs::team::Profiles;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
@@ -46,13 +46,13 @@ type Sessions<'w, 's> = Query<
     'w,
     's,
     (
+        Entity,
         &'static Id<Session>,
         &'static Name,
         &'static Description,
         &'static Cwd,
         &'static LastActivatedAt,
         Option<&'static AgentId>,
-        Option<&'static Profile>,
     ),
     (With<Session>, Without<SessionDuplicate>),
 >;
@@ -63,6 +63,7 @@ struct ResumeCatalog<'w, 's> {
     providers: Res<'w, ProviderCatalog>,
     tombstones: Res<'w, ProviderSessionTombstones>,
     cache: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
+    profiles: Profiles<'w, 's>,
 }
 
 impl ResumeCatalog<'_, '_> {
@@ -70,7 +71,8 @@ impl ResumeCatalog<'_, '_> {
         let query_lower = query.trim().to_ascii_lowercase();
         let now = vmux_ecs::UnixMillis::now().0;
         let mut sessions = Vec::new();
-        for (id, name, description, cwd, activated, agent, profile) in &self.sessions {
+        for (entity, id, name, description, cwd, activated, agent) in &self.sessions {
+            let profile = self.profiles.get(entity);
             let path = cwd.0.as_path();
             let info = self.cache.as_mut().and_then(|cache| cache.snapshot(path));
             let subtitle = path
@@ -86,7 +88,8 @@ impl ResumeCatalog<'_, '_> {
             let agent_name = agent
                 .map(|agent| {
                     let fallback = profile
-                        .map(|profile| profile.name.as_str())
+                        .as_ref()
+                        .map(vmux_ecs::team::ProfileView::name)
                         .unwrap_or(agent.0.as_str());
                     AgentFamily::of(&agent.0).name(fallback)
                 })

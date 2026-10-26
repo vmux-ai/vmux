@@ -279,7 +279,6 @@ type SessionCatalog<'w, 's> = Query<
         &'static StageChangedAt,
         Option<&'static ArchivedAt>,
         Option<&'static AgentId>,
-        Option<&'static vmux_ecs::team::Profile>,
         Option<&'static RunState>,
         Option<&'static AgentConversationTitle>,
     ),
@@ -356,6 +355,7 @@ struct CatalogSources<'w, 's> {
     provider_archives: ProviderArchives<'w, 's>,
     provider_tombstones: Res<'w, ProviderSessionTombstones>,
     transcripts: Transcripts<'w, 's>,
+    profiles: vmux_ecs::team::Profiles<'w, 's>,
 }
 
 #[cfg(host)]
@@ -376,7 +376,6 @@ type ChangedSessions<'w, 's> = Query<
             Changed<StageChangedAt>,
             Changed<ArchivedAt>,
             Changed<AgentId>,
-            Changed<vmux_ecs::team::Profile>,
             Changed<RunState>,
             Changed<AgentConversationTitle>,
         )>,
@@ -403,6 +402,21 @@ type ChangedStages<'w, 's> = Query<
 #[derive(SystemParam)]
 struct CatalogChanges<'w, 's> {
     sessions: ChangedSessions<'w, 's>,
+    profiles: Query<
+        'w,
+        's,
+        (),
+        (
+            With<vmux_ecs::team::Profile>,
+            Or<(
+                Added<vmux_ecs::team::Profile>,
+                Changed<Name>,
+                Changed<vmux_ecs::team::Avatar>,
+                Changed<vmux_ecs::team::Icon>,
+                Changed<ChildOf>,
+            )>,
+        ),
+    >,
     stages: ChangedStages<'w, 's>,
     events: Query<
         'w,
@@ -481,6 +495,8 @@ struct CatalogChanges<'w, 's> {
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
     removed_agents: RemovedComponents<'w, 's, AgentId>,
     removed_profiles: RemovedComponents<'w, 's, vmux_ecs::team::Profile>,
+    removed_avatars: RemovedComponents<'w, 's, vmux_ecs::team::Avatar>,
+    removed_icons: RemovedComponents<'w, 's, vmux_ecs::team::Icon>,
     removed_states: RemovedComponents<'w, 's, RunState>,
     removed_titles: RemovedComponents<'w, 's, AgentConversationTitle>,
     removed_events: RemovedComponents<'w, 's, ConversationEvent>,
@@ -500,6 +516,7 @@ struct CatalogChanges<'w, 's> {
 impl CatalogChanges<'_, '_> {
     fn any(&mut self) -> bool {
         let mut any = !self.sessions.is_empty()
+            || !self.profiles.is_empty()
             || !self.stages.is_empty()
             || !self.events.is_empty()
             || !self.links.is_empty()
@@ -522,6 +539,8 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_archived_at.read().count() > 0;
         any |= self.removed_agents.read().count() > 0;
         any |= self.removed_profiles.read().count() > 0;
+        any |= self.removed_avatars.read().count() > 0;
+        any |= self.removed_icons.read().count() > 0;
         any |= self.removed_states.read().count() > 0;
         any |= self.removed_titles.read().count() > 0;
         any |= self.removed_events.read().count() > 0;
@@ -555,6 +574,7 @@ fn project(
         provider_archives,
         provider_tombstones,
         transcripts,
+        profiles,
     } = sources;
     if !catalog.is_added()
         && !providers.is_changed()
@@ -607,17 +627,18 @@ fn project(
         stage_changed_at,
         archived_at,
         agent,
-        profile,
         runtime,
         conversation_title,
     ) in &sessions
     {
+        let profile = profiles.get(entity);
         let conversation =
             ConversationPreview::from(conversation_title, &transcripts.get(entity).messages);
         let agent_name = agent
             .map(|agent| {
                 let fallback = profile
-                    .map(|profile| profile.name.as_str())
+                    .as_ref()
+                    .map(vmux_ecs::team::ProfileView::name)
                     .unwrap_or(agent.0.as_str());
                 AgentFamily::of(&agent.0).name(fallback)
             })
@@ -654,10 +675,13 @@ fn project(
             agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
             agent_name,
             agent_icon: profile
-                .and_then(|profile| profile.icon.clone())
+                .as_ref()
+                .and_then(vmux_ecs::team::ProfileView::icon)
+                .map(str::to_string)
                 .unwrap_or_default(),
             agent_color: profile
-                .map(|profile| profile.avatar.color.clone())
+                .as_ref()
+                .map(|profile| profile.avatar().color.clone())
                 .unwrap_or_default(),
             runtime: runtime
                 .map(RunState::status)

@@ -21,7 +21,7 @@ use vmux_ecs::profile::{
     ActiveProfile, Profile as StoredProfile, ProfileCatalog, ProfileLabel, ProfileRecord,
     SessionEnvironment,
 };
-use vmux_ecs::team::{Agent, Profile, Tester, User};
+use vmux_ecs::team::{Agent, Avatar, Profile, Profiles, Tester, User};
 use vmux_ecs::{ActivateRequest, Active, EntityTarget, PageMetadata};
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
 use vmux_layout::cef::LayoutCef;
@@ -141,7 +141,7 @@ struct TeamPresentation(UiTeam);
 struct ProfileFormState(TeamProfileForm);
 
 fn spawn_user_profile(mut commands: Commands) {
-    let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
+    let mut identity = commands.spawn((Profile::user(), User));
     if SessionEnvironment::is_test() {
         identity.insert(Tester);
     }
@@ -149,16 +149,17 @@ fn spawn_user_profile(mut commands: Commands) {
 
 fn sync_user_profile_name(
     current: vmux_ecs::profile::CurrentProfile,
-    mut user: Query<&mut Profile, With<User>>,
+    mut user: Query<(&mut Name, &mut Avatar), (With<Profile>, With<User>, Without<ActiveProfile>)>,
 ) {
     let Some(name) = current.label() else {
         return;
     };
-    let Ok(mut profile) = user.single_mut() else {
+    let Ok((mut profile_name, mut avatar)) = user.single_mut() else {
         return;
     };
-    if profile.name != name {
-        *profile = Profile::user_named(name.to_string());
+    if profile_name.as_str() != name {
+        *profile_name = Name::new(name.to_string());
+        avatar.0 = AvatarSpec::for_user_named(name);
     }
 }
 
@@ -167,13 +168,12 @@ fn sync_user_profile_name(
 struct TeamProjector<'w, 's> {
     current_space: Query<'w, 's, Entity, With<CurrentSpace>>,
     active_spaces: Query<'w, 's, Entity, (With<Space>, With<Active>)>,
-    user: Query<'w, 's, (Entity, &'static Profile), With<User>>,
+    user: Query<'w, 's, Entity, With<User>>,
     agents: Query<
         'w,
         's,
         (
             Entity,
-            &'static Profile,
             &'static Agent,
             Option<&'static RunState>,
             Option<&'static AgentDoneUnseen>,
@@ -185,6 +185,7 @@ struct TeamProjector<'w, 's> {
     metadata: Query<'w, 's, &'static PageMetadata>,
     children: Query<'w, 's, &'static Children>,
     session_views: Query<'w, 's, (Entity, &'static EntityTarget<Session>)>,
+    profiles: Profiles<'w, 's>,
     profile_labels:
         Query<'w, 's, (&'static Id<StoredProfile>, &'static Name, Has<Active>), With<ProfileLabel>>,
 }
@@ -254,12 +255,14 @@ impl TeamProjector<'_, '_> {
 
     fn members(&self, active_space: Option<Entity>) -> Vec<TeamMemberRow> {
         let mut members = Vec::new();
-        if let Ok((entity, profile)) = self.user.single() {
+        if let Ok(entity) = self.user.single()
+            && let Some(profile) = self.profiles.get(entity)
+        {
             members.push(TeamMemberRow {
                 id: entity.to_bits().to_string(),
-                name: profile.name.clone(),
-                initials: profile.avatar.initials.clone(),
-                color: profile.avatar.color.clone(),
+                name: profile.name().to_string(),
+                initials: profile.avatar().initials.clone(),
+                color: profile.avatar().color.clone(),
                 is_user: true,
                 ..Default::default()
             });
@@ -267,16 +270,19 @@ impl TeamProjector<'_, '_> {
         let Some(active_space) = active_space else {
             return members;
         };
-        for (entity, profile, agent, run, done) in &self.agents {
+        for (entity, agent, run, done) in &self.agents {
             if !self.belongs_to(entity, active_space) {
                 continue;
             }
+            let Some(profile) = self.profiles.get(entity) else {
+                continue;
+            };
             let (icon, url, title) = self.page(entity);
             members.push(TeamMemberRow {
                 id: entity.to_bits().to_string(),
-                name: profile.name.clone(),
-                initials: profile.avatar.initials.clone(),
-                color: profile.avatar.color.clone(),
+                name: profile.name().to_string(),
+                initials: profile.avatar().initials.clone(),
+                color: profile.avatar().color.clone(),
                 icon,
                 url,
                 title,
@@ -716,7 +722,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(app.world().get::<Profile>(user).unwrap().name, "Personal");
+        assert_eq!(app.world().get::<Name>(user).unwrap().as_str(), "Personal");
     }
 
     #[test]

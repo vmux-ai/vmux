@@ -568,11 +568,13 @@ fn swap(
 struct SessionRuntime<'w, 's> {
     commands: Commands<'w, 's>,
     links: AcpSessionLinks<'w, 's>,
+    profiles: vmux_ecs::team::Profiles<'w, 's>,
 }
 
 impl SessionRuntime<'_, '_> {
     fn detach(&mut self, session: Entity) {
         self.links.remove(&mut self.commands, session);
+        self.profiles.remove(&mut self.commands, session);
         self.commands.entity(session).remove::<(
             vmux_ecs::ProcessAnchor,
             crate::host::acp::AcpLaunchStarted,
@@ -586,7 +588,6 @@ impl SessionRuntime<'_, '_> {
             super::handoff::PendingHandoff,
             vmux_ecs::agent::AgentSessionRoot,
             vmux_ecs::team::Agent,
-            vmux_ecs::team::Profile,
         )>();
     }
 
