@@ -20,7 +20,7 @@ use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Profile, User};
 use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};
 use vmux_session::{
-    AgentConversationTitle, AgentId, ConversationEvent, EventIdentity, MessageContent, PromptQueue,
+    AgentConversationTitle, AgentId, ConversationEvent, MessageContent, PromptQueue, Sequence,
     Session, Transcripts,
 };
 use vmux_session::{AgentTurnMeta, RunState};
@@ -77,7 +77,7 @@ type ChangedConversationEvents<'w, 's> = Query<
         With<ConversationEvent>,
         Or<(
             Added<ConversationEvent>,
-            Changed<EventIdentity>,
+            Changed<Sequence>,
             Changed<MessageContent>,
             Changed<CreatedAt>,
         )>,

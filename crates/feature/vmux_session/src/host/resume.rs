@@ -370,13 +370,9 @@ mod tests {
         let session = spawn_session(app.world_mut());
         app.world_mut().spawn((
             vmux_session::ConversationEvent,
-            vmux_session::EventIdentity {
-                event_id: vmux_api::session::EventId::new("event-1"),
-                actor_id: vmux_api::session::MemberId::local(&session_id),
-                client_op_id: None,
-                sequence: 1,
-                reply_to: None,
-            },
+            vmux_api::session::EventId::new("event-1"),
+            vmux_api::session::MemberId::local(&session_id),
+            vmux_session::Sequence(1),
             vmux_session::MessageContent(vmux_api::session::Message::user("First prompt")),
             vmux_ecs::CreatedAt(3),
             ChildOf(session),

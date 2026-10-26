@@ -37,14 +37,21 @@ pub struct Member;
 #[type_path = "vmux_session"]
 pub struct ConversationEvent;
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[component(immutable)]
+pub struct Sequence(pub u64);
+
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct EventIdentity {
-    pub event_id: EventId,
-    pub actor_id: MemberId,
-    pub client_op_id: Option<ClientOpId>,
-    pub sequence: u64,
-    pub reply_to: Option<EventId>,
-}
+#[component(immutable)]
+pub struct ReplyToId(pub EventId);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = Replies)]
+pub struct ReplyTo(Entity);
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = ReplyTo)]
+pub struct Replies(Vec<Entity>);
 
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct MessageContent(pub Message);
@@ -130,7 +137,7 @@ pub struct Transcripts<'w, 's> {
         'w,
         's,
         (
-            &'static EventIdentity,
+            &'static Sequence,
             &'static MessageContent,
             &'static CreatedAt,
         ),
@@ -147,27 +154,11 @@ impl Transcripts<'_, '_> {
             .into_iter()
             .flat_map(|children| children.iter())
             .filter_map(|child| {
-                let (identity, content, created_at) = self.events.get(child).ok()?;
-                Some((
-                    identity.sequence,
-                    content.0.clone(),
-                    created_at.0.max(0) as u64,
-                ))
+                let (sequence, content, created_at) = self.events.get(child).ok()?;
+                Some((sequence.0, content.0.clone(), created_at.0.max(0) as u64))
             })
             .collect();
         Transcript::from_items(items)
-    }
-}
-
-impl EventIdentity {
-    fn from_event(event: &SerializedEvent) -> Self {
-        Self {
-            event_id: event.event_id.clone(),
-            actor_id: event.actor_id.clone(),
-            client_op_id: event.client_op_id.clone(),
-            sequence: event.server_seq,
-            reply_to: event.reply_to.clone(),
-        }
     }
 }
 
@@ -253,7 +244,11 @@ fn materialize(
     existing: Query<
         (
             Entity,
-            &EventIdentity,
+            &EventId,
+            &MemberId,
+            Option<&ClientOpId>,
+            &Sequence,
+            Option<&ReplyToId>,
             &MessageContent,
             &CreatedAt,
             Has<SnapshotEvent>,
@@ -286,6 +281,7 @@ fn materialize(
         snapshot_events: HashMap::new(),
         latest_sequences: HashMap::new(),
         latest_users: HashMap::new(),
+        reply_ids: HashMap::new(),
     };
     for (session, id, children) in &sessions {
         if !requested.contains(id) {
@@ -293,27 +289,40 @@ fn materialize(
         }
         index.sessions.insert(id.clone(), session);
         for child in children.into_iter().flat_map(|children| children.iter()) {
-            let Ok((entity, identity, message, timestamp, from_snapshot)) = existing.get(child)
+            let Ok((
+                entity,
+                event_id,
+                _actor_id,
+                client_op_id,
+                sequence,
+                reply_to,
+                message,
+                timestamp,
+                from_snapshot,
+            )) = existing.get(child)
             else {
                 continue;
             };
-            index
-                .events
-                .insert((session, identity.event_id.clone()), entity);
-            if let Some(client_op_id) = identity.client_op_id.clone() {
+            index.events.insert((session, event_id.clone()), entity);
+            if let Some(client_op_id) = client_op_id.cloned() {
                 index.operations.insert((session, client_op_id), entity);
             }
-            index.entity_keys.insert(
-                entity,
-                (identity.event_id.clone(), identity.client_op_id.clone()),
-            );
+            index
+                .entity_keys
+                .insert(entity, (event_id.clone(), client_op_id.cloned()));
             index.timestamps.insert(entity, *timestamp);
-            index.record_sequence(session, identity, &message.0);
+            index.record_sequence(session, event_id, sequence.0, &message.0);
+            if let Some(reply_to) = reply_to {
+                index
+                    .reply_ids
+                    .insert(entity, (session, reply_to.0.clone()));
+            }
             if from_snapshot {
-                index.snapshot_events.entry(session).or_default().insert(
-                    identity.event_id.clone(),
-                    (entity, identity.client_op_id.clone()),
-                );
+                index
+                    .snapshot_events
+                    .entry(session)
+                    .or_default()
+                    .insert(event_id.clone(), (entity, client_op_id.cloned()));
             }
         }
     }
@@ -338,6 +347,7 @@ fn materialize(
                 index.operations.remove(&(session, client_op_id));
             }
             index.entity_keys.remove(&entity);
+            index.reply_ids.remove(&entity);
             materializer.commands.entity(entity).despawn();
         }
     }
@@ -360,6 +370,7 @@ fn materialize(
             MaterializationSource::Operation,
         );
     }
+    index.resolve_replies(&mut materializer.commands);
 }
 
 struct EventIndex {
@@ -371,20 +382,42 @@ struct EventIndex {
     snapshot_events: HashMap<Entity, HashMap<EventId, (Entity, Option<ClientOpId>)>>,
     latest_sequences: HashMap<Entity, u64>,
     latest_users: HashMap<Entity, (u64, EventId)>,
+    reply_ids: HashMap<Entity, (Entity, EventId)>,
 }
 
 impl EventIndex {
-    fn record_sequence(&mut self, session: Entity, identity: &EventIdentity, message: &Message) {
+    fn record_sequence(
+        &mut self,
+        session: Entity,
+        event_id: &EventId,
+        event_sequence: u64,
+        message: &Message,
+    ) {
         let sequence = self.latest_sequences.entry(session).or_default();
-        *sequence = (*sequence).max(identity.sequence);
+        *sequence = (*sequence).max(event_sequence);
         if matches!(message, Message::User { .. })
             && self
                 .latest_users
                 .get(&session)
-                .is_none_or(|(latest, _)| *latest <= identity.sequence)
+                .is_none_or(|(latest, _)| *latest <= event_sequence)
         {
             self.latest_users
-                .insert(session, (identity.sequence, identity.event_id.clone()));
+                .insert(session, (event_sequence, event_id.clone()));
+        }
+    }
+
+    fn resolve_replies(&self, commands: &mut Commands) {
+        for (source, (session, reply_id)) in &self.reply_ids {
+            let target = self.events.get(&(*session, reply_id.clone())).copied();
+            let mut entity = commands.entity(*source);
+            match target {
+                Some(target) if target != *source => {
+                    entity.insert(ReplyTo(target));
+                }
+                _ => {
+                    entity.remove::<ReplyTo>();
+                }
+            }
         }
     }
 }
@@ -466,7 +499,6 @@ impl EventMaterializer<'_, '_> {
                     .as_ref()
                     .and_then(|id| index.operations.get(&(session, id.clone())).copied())
             });
-        let identity = EventIdentity::from_event(&event);
         let timestamp = CreatedAt(i64::try_from(event.created_at_ms).unwrap_or(i64::MAX));
         let entity = if let Some(entity) = existing {
             if let Some((event_id, client_op_id)) = index.entity_keys.remove(&entity) {
@@ -482,11 +514,30 @@ impl EventMaterializer<'_, '_> {
             };
             let mut entity_commands = self.commands.entity(entity);
             entity_commands.insert((
-                identity.clone(),
+                event.event_id.clone(),
+                event.actor_id.clone(),
+                Sequence(event.server_seq),
                 timestamp,
                 MessageContent(event.message.clone()),
                 delivery,
             ));
+            match &event.client_op_id {
+                Some(client_op_id) => {
+                    entity_commands.insert(client_op_id.clone());
+                }
+                None => {
+                    entity_commands.remove::<ClientOpId>();
+                }
+            }
+            match &event.reply_to {
+                Some(reply_to) => {
+                    entity_commands.insert(ReplyToId(reply_to.clone()));
+                }
+                None => {
+                    entity_commands.remove::<ReplyToId>();
+                    entity_commands.remove::<ReplyTo>();
+                }
+            }
             if source == MaterializationSource::Snapshot {
                 entity_commands.insert(SnapshotEvent);
             } else {
@@ -497,12 +548,20 @@ impl EventMaterializer<'_, '_> {
             let mut entity_commands = self.commands.spawn((
                 ConversationEvent,
                 MaterializedEvent,
-                identity.clone(),
+                event.event_id.clone(),
+                event.actor_id.clone(),
+                Sequence(event.server_seq),
                 timestamp,
                 MessageContent(event.message.clone()),
                 delivery,
                 ChildOf(session),
             ));
+            if let Some(client_op_id) = &event.client_op_id {
+                entity_commands.insert(client_op_id.clone());
+            }
+            if let Some(reply_to) = &event.reply_to {
+                entity_commands.insert(ReplyToId(reply_to.clone()));
+            }
             if source == MaterializationSource::Snapshot {
                 entity_commands.insert(SnapshotEvent);
             }
@@ -511,9 +570,17 @@ impl EventMaterializer<'_, '_> {
         index
             .events
             .insert((session, event.event_id.clone()), entity);
-        index.record_sequence(session, &identity, &event.message);
+        index.record_sequence(session, &event.event_id, event.server_seq, &event.message);
         if let Some(client_op_id) = event.client_op_id.clone() {
             index.operations.insert((session, client_op_id), entity);
+        }
+        match &event.reply_to {
+            Some(reply_to) => {
+                index.reply_ids.insert(entity, (session, reply_to.clone()));
+            }
+            None => {
+                index.reply_ids.remove(&entity);
+            }
         }
         index.timestamps.insert(entity, timestamp);
         if source == MaterializationSource::Snapshot {
@@ -564,14 +631,23 @@ mod tests {
             .unwrap();
         assert_eq!(transcript.messages.len(), 2);
         assert_eq!(transcript.created_at.len(), 2);
-        let mut identities = app
+        let mut events = app
             .world_mut()
-            .query_filtered::<&EventIdentity, With<ConversationEvent>>()
+            .query_filtered::<(Entity, &EventId, &Sequence), With<ConversationEvent>>()
             .iter(app.world())
-            .cloned()
+            .map(|(entity, id, sequence)| (entity, id.clone(), sequence.0))
             .collect::<Vec<_>>();
-        identities.sort_by_key(|identity| identity.sequence);
-        assert_eq!(identities[1].reply_to, Some(identities[0].event_id.clone()));
+        events.sort_by_key(|(_, _, sequence)| *sequence);
+        assert_eq!(
+            app.world().get::<ReplyTo>(events[1].0).map(|reply| reply.0),
+            Some(events[0].0)
+        );
+        assert_eq!(
+            app.world()
+                .get::<ReplyToId>(events[1].0)
+                .map(|reply| reply.0.clone()),
+            Some(events[0].1.clone())
+        );
     }
 
     #[test]
@@ -622,13 +698,10 @@ mod tests {
             .spawn((
                 ConversationEvent,
                 MaterializedEvent,
-                EventIdentity {
-                    event_id: EventId::new("pending-1"),
-                    actor_id: MemberId::local(&session_id),
-                    client_op_id: Some(client_op_id.clone()),
-                    sequence: 0,
-                    reply_to: None,
-                },
+                EventId::new("pending-1"),
+                MemberId::local(&session_id),
+                client_op_id.clone(),
+                Sequence(0),
                 CreatedAt(1),
                 MessageContent(Message::user("draft")),
                 MessageDelivery::Pending(client_op_id.clone()),
