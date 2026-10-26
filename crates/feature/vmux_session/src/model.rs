@@ -217,6 +217,11 @@ pub struct ProviderSessionTombstone;
 #[type_path = "vmux_session"]
 pub struct StageDefinition;
 
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[type_path = "vmux_session"]
+pub struct TerminalStage;
+
 #[derive(Message, Clone, Debug)]
 pub struct CreateRequest {
     id: Id<Session>,
@@ -581,7 +586,7 @@ struct StageSeed {
 fn ensure_stages(
     configuration: Res<Configuration>,
     definitions: Query<
-        (Entity, &StageId, &Name, &Order, Has<vmux_ecs::Terminal>),
+        (Entity, &StageId, &Name, &Order, Has<TerminalStage>),
         With<StageDefinition>,
     >,
     mut commands: Commands,
@@ -597,7 +602,7 @@ fn ensure_stages(
             Order(stage.order),
         ));
         if stage.terminal {
-            entity.insert(vmux_ecs::Terminal);
+            entity.insert(TerminalStage);
         }
     }
 }

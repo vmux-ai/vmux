@@ -190,11 +190,6 @@ pub struct Cwd(pub PathBuf);
 #[type_path = "vmux_ecs"]
 pub struct Description(pub String);
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
-#[reflect(Component, Default)]
-#[type_path = "vmux_ecs"]
-pub struct Terminal;
-
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct JsonArguments(pub serde_json::Value);
 

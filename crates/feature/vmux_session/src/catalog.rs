@@ -18,9 +18,7 @@ use vmux_connector::{
     ResourceKind,
 };
 #[cfg(host)]
-use vmux_ecs::{
-    ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, RemoteUpdatedAt, Terminal,
-};
+use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, RemoteUpdatedAt};
 
 #[cfg(host)]
 use crate::model::{ProviderArchiveOperations, ProviderSessionTombstones};
@@ -28,7 +26,7 @@ use crate::model::{ProviderArchiveOperations, ProviderSessionTombstones};
 use crate::{
     AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
     ProviderArchive, ProviderStage, RunState, Session, SessionDuplicate, Stage, StageChangedAt,
-    StageDefinition, StageId, Transcripts,
+    StageDefinition, StageId, TerminalStage, Transcripts,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -310,7 +308,7 @@ type StageCatalog<'w, 's> = Query<
         &'static StageId,
         &'static Name,
         &'static Order,
-        Has<Terminal>,
+        Has<TerminalStage>,
     ),
     With<StageDefinition>,
 >;
@@ -396,7 +394,7 @@ type ChangedStages<'w, 's> = Query<
             Changed<StageId>,
             Changed<Name>,
             Changed<Order>,
-            Changed<Terminal>,
+            Changed<TerminalStage>,
         )>,
     ),
 >;
@@ -479,7 +477,7 @@ struct CatalogChanges<'w, 's> {
     removed_stage_definitions: RemovedComponents<'w, 's, StageDefinition>,
     removed_stage_ids: RemovedComponents<'w, 's, StageId>,
     removed_orders: RemovedComponents<'w, 's, Order>,
-    removed_terminal: RemovedComponents<'w, 's, Terminal>,
+    removed_terminal: RemovedComponents<'w, 's, TerminalStage>,
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
     removed_agents: RemovedComponents<'w, 's, AgentId>,
     removed_profiles: RemovedComponents<'w, 's, vmux_ecs::team::Profile>,
