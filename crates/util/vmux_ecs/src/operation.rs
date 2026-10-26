@@ -16,7 +16,6 @@ impl Plugin for OperationPlugin {
         app.register_type::<Operation>()
             .register_type::<OperationKind>()
             .register_type::<OperationState>()
-            .register_type::<OperationTarget>()
             .register_type::<OperationTargetRevision>()
             .register_type::<OperationError>()
             .init_resource::<OperationExpiry>()
@@ -60,10 +59,23 @@ pub enum OperationState {
     Canceled,
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_ecs"]
-pub struct OperationTarget(pub Entity);
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = TargetedOperations)]
+pub struct OperationTarget(Entity);
+
+impl OperationTarget {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = OperationTarget)]
+pub struct TargetedOperations(Vec<Entity>);
 
 #[derive(
     Component, Clone, Copy, Debug, PartialEq, Eq, Reflect, serde::Deserialize, serde::Serialize,
@@ -155,5 +167,33 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<OperationExpiresAt>(operation).is_some());
+    }
+
+    #[test]
+    fn operation_targets_are_maintained_as_relationships() {
+        let mut app = App::new();
+        app.add_plugins(OperationPlugin);
+        let target = app.world_mut().spawn_empty().id();
+        let operation = app
+            .world_mut()
+            .spawn((Operation, OperationTarget::new(target)))
+            .id();
+
+        assert_eq!(
+            app.world()
+                .get::<TargetedOperations>(target)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![operation]
+        );
+
+        app.world_mut().entity_mut(operation).despawn();
+
+        assert!(
+            app.world()
+                .get::<TargetedOperations>(target)
+                .is_none_or(|operations| operations.is_empty())
+        );
     }
 }
