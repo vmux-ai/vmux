@@ -4,14 +4,11 @@ use syn::{Data, DeriveInput, Fields, Type};
 
 pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let docs = input
-        .attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident("doc"));
+    let attrs = &input.attrs;
     reject_unless_string_newtype(&input)?;
 
     Ok(quote! {
-        #(#docs)*
+        #(#attrs)*
         #[derive(
             Clone,
             Debug,

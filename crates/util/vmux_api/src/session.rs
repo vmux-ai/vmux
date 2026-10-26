@@ -79,9 +79,23 @@ impl std::fmt::Display for MemberId {
     }
 }
 
+#[cfg_attr(
+    feature = "bevy",
+    derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
+)]
+#[cfg_attr(feature = "bevy", component(immutable))]
+#[cfg_attr(feature = "bevy", reflect(Component))]
+#[cfg_attr(feature = "bevy", type_path = "vmux_api")]
 #[string_id]
 pub struct EventId(pub String);
 
+#[cfg_attr(
+    feature = "bevy",
+    derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
+)]
+#[cfg_attr(feature = "bevy", component(immutable))]
+#[cfg_attr(feature = "bevy", reflect(Component))]
+#[cfg_attr(feature = "bevy", type_path = "vmux_api")]
 #[string_id]
 pub struct ClientOpId(pub String);
 #[vmux_api::contract(Copy, Eq)]
