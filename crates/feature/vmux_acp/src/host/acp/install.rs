@@ -8,7 +8,7 @@ pub(super) fn add(app: &mut App) {
 
 fn start(
     mut commands: Commands,
-    sessions: Query<(Entity, &SessionId, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
+    sessions: Query<(Entity, &Id<Session>, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
     targets: Query<&EntityTarget<Session>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
     profile: CurrentProfile,
@@ -75,7 +75,7 @@ fn start(
             AcpLaunchStarted,
             AcpInstallWaiter {
                 job,
-                sid: session_id.0.clone(),
+                sid: session_id.as_str().to_string(),
                 agent_id: agent_id.0.clone(),
             },
         ));
@@ -97,7 +97,7 @@ fn poll(
     mut waiters: Query<
         (
             Entity,
-            &SessionId,
+            &Id<Session>,
             &AgentId,
             &Cwd,
             &ProcessAnchor,

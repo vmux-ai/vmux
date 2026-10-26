@@ -11,7 +11,7 @@ use vmux_ecs::{
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
-use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
+use vmux_session::{AgentConversationTitle, AgentId, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
 
@@ -37,7 +37,7 @@ pub(super) struct PageOpener<'w, 's> {
         's,
         (
             Entity,
-            &'static SessionId,
+            &'static Id<Session>,
             &'static Name,
             &'static Cwd,
             Option<&'static AgentId>,
@@ -162,7 +162,7 @@ impl PageOpener<'_, '_> {
                     active,
                 )) = selected
                 else {
-                    return Err(format!("Session '{}' was not found", id.0));
+                    return Err(format!("Session '{id}' was not found"));
                 };
                 let agent_id = selected_agent
                     .or_else(|| {
@@ -232,7 +232,7 @@ impl PageOpener<'_, '_> {
                     agent_id.clone(),
                     &session_name,
                     agent_name,
-                    id.0.clone(),
+                    id.as_str().to_string(),
                     cwd,
                     icon,
                     resume,

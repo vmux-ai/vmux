@@ -140,7 +140,8 @@ impl Launcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::session::{RemoteStatus, SessionId};
+    use vmux_api::Id;
+    use vmux_api::session::{RemoteStatus, Session};
 
     impl Roster {
         fn one() -> Self {
@@ -164,7 +165,7 @@ mod tests {
 
         fn session(name: &str) -> RemoteSession {
             RemoteSession {
-                id: SessionId::new(format!("sid-{name}")),
+                id: Id::<Session>::new(format!("sid-{name}")),
                 url: format!("vmux://sessions/sid-{name}"),
                 title: String::new(),
                 name: name.into(),

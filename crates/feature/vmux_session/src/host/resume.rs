@@ -13,8 +13,8 @@ use vmux_ecs::team::Profile;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
-    AgentFamily, AgentId, ProviderCatalog, ProviderSessionTombstones, Route, Session,
-    SessionDuplicate, SessionId, Transcripts,
+    AgentFamily, AgentId, Id, ProviderCatalog, ProviderSessionTombstones, Route, Session,
+    SessionDuplicate, Transcripts,
 };
 #[cfg(test)]
 use vmux_session::{ProviderKind, ProviderSessionId, ProviderSessionKey};
@@ -46,7 +46,7 @@ type Sessions<'w, 's> = Query<
     'w,
     's,
     (
-        &'static SessionId,
+        &'static Id<Session>,
         &'static Name,
         &'static Description,
         &'static Cwd,
@@ -120,7 +120,7 @@ impl ResumeCatalog<'_, '_> {
                 activated.0,
                 ResumableSessionEntry {
                     kind: "session".to_string(),
-                    sid: id.0.clone(),
+                    sid: id.as_str().to_string(),
                     cwd,
                     url: Route::Session(id.clone()).url(),
                     title: name.as_str().to_string(),
@@ -260,11 +260,15 @@ fn list(
 fn open(
     trigger: On<UiInput<ResumeSession>>,
     parents: Query<&ChildOf>,
-    sessions: Query<&SessionId, With<Session>>,
+    sessions: Query<&Id<Session>, With<Session>>,
     mut opens: MessageWriter<PageOpenRequest>,
 ) {
     let request = &trigger.event().payload;
-    if request.kind != "session" || !sessions.iter().any(|session| session.0 == request.sid) {
+    if request.kind != "session"
+        || !sessions
+            .iter()
+            .any(|session| session.as_str() == request.sid)
+    {
         return;
     }
     let Ok(parent) = parents.get(trigger.event().webview) else {
@@ -272,7 +276,7 @@ fn open(
     };
     opens.write(PageOpenRequest {
         target: PageOpenTarget::Stack(parent.parent()),
-        url: Route::Session(SessionId(request.sid.clone())).url(),
+        url: Route::Session(Id::<Session>::new(request.sid.clone())).url(),
         request_id: None,
     });
 }
@@ -343,7 +347,7 @@ mod tests {
         world
             .spawn((
                 Session,
-                SessionId("session-1".into()),
+                Id::<Session>::new("session-1"),
                 Name::new("Repair resume"),
                 Description("Restore delegated session requests".into()),
                 Cwd("/work/vmux".into()),
@@ -362,7 +366,7 @@ mod tests {
             .add_observer(Responses::command_bar);
         let stack = app.world_mut().spawn_empty().id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = spawn_session(app.world_mut());
         app.world_mut().spawn((
             vmux_session::ConversationEvent,

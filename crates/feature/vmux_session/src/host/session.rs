@@ -31,7 +31,7 @@ use vmux_ecs::{
     PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_session::{
-    AgentConversationTitle, AgentId, CreateRequest, Created, PromptQueue, Route, Session, SessionId,
+    AgentConversationTitle, AgentId, CreateRequest, Created, PromptQueue, Route, Session,
 };
 
 type UiChatUpdates = UiState<UiChat>;
@@ -119,14 +119,14 @@ impl StartRequest {
         }
     }
 
-    pub fn id(&self) -> &SessionId {
+    pub fn id(&self) -> &Id<Session> {
         self.create.id()
     }
 }
 
 #[derive(Component)]
 struct PendingSessionStart {
-    session_id: SessionId,
+    session_id: Id<Session>,
     target: PageOpenTarget,
     prompt: String,
     attachments: Vec<vmux_api::protocol::AgentAttachment>,
@@ -461,7 +461,7 @@ type ChatSessions<'w, 's> = Query<
     (
         Entity,
         Option<&'static AgentConversationTitle>,
-        &'static SessionId,
+        &'static Id<Session>,
     ),
     With<Session>,
 >;
@@ -474,7 +474,7 @@ type ChangedChatSessions<'w, 's> = Query<
         With<Session>,
         Or<(
             Changed<AgentConversationTitle>,
-            Changed<SessionId>,
+            Changed<Id<Session>>,
             Changed<Children>,
         )>,
     ),
@@ -503,7 +503,7 @@ fn report_tab_identity(
                 if let Some(title) = title {
                     reported.title = Some(title.0.clone());
                 }
-                reported.icon = Some(PageIcon::favicon(IdenticonSpec::favicon(&id.0)));
+                reported.icon = Some(PageIcon::favicon(IdenticonSpec::favicon(id.as_str())));
                 if current != Some(&reported) {
                     commands.entity(child).insert(reported);
                 }
@@ -828,7 +828,7 @@ mod tests {
                 .world_mut()
                 .spawn((
                     Session,
-                    vmux_session::SessionId("session".into()),
+                    vmux_session::Id::<Session>::new("session"),
                     AgentId("mock".into()),
                     vmux_session::RunState::default(),
                 ))
@@ -921,7 +921,12 @@ mod tests {
         let anchor = ProcessId::new();
         let session = app
             .world_mut()
-            .spawn((Session, AgentSessionRoot, vmux_session::TitlePending))
+            .spawn((
+                Session,
+                AgentSessionRoot,
+                Description::default(),
+                vmux_session::TitlePending,
+            ))
             .id();
         let stack = app
             .world_mut()

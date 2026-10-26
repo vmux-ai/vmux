@@ -18,7 +18,7 @@ use vmux_api::protocol::{AcpSessionConfig, AgentRunStatus, ServiceMessage, Share
 use vmux_api::session::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
-use vmux_session::SessionId;
+use vmux_session::{Id, Session};
 
 use agent_client_protocol::schema::v1::McpServer;
 
@@ -294,7 +294,7 @@ fn receive(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
 fn spawn(
     runtime: Single<&AcpSessionRuntime>,
     wake: Single<&AcpSessionWake>,
-    sessions: Query<&SessionId>,
+    sessions: Query<&Id<Session>>,
     mut requests: Query<(Entity, &mut SpawnAcpSession)>,
     mut commands: Commands,
 ) {
@@ -326,7 +326,7 @@ fn spawn(
             ));
             commands.spawn((
                 Name::new(format!("ACP session {}", request.sid)),
-                SessionId(request.sid.clone()),
+                Id::<Session>::new(request.sid.clone()),
                 AcpSessionInput(input_tx),
                 AcpSessionShared(shared),
                 projection_inboxes,
@@ -351,7 +351,7 @@ fn spawn(
 
 fn project_info(
     mut sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &mut AcpAgentInfoInbox,
         &mut AcpAgentName,
@@ -372,7 +372,7 @@ fn project_info(
 
 fn project_config_state(
     mut sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &mut AcpConfigStateInbox,
         &mut AcpSessionConfigs,
@@ -395,7 +395,7 @@ fn project_config_state(
 
 fn project_selected_config(
     mut sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &mut AcpSelectedConfigInbox,
         &mut AcpSessionConfigs,
@@ -446,7 +446,7 @@ fn project_selected_config(
 
 fn project_status(
     mut sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &mut AcpStatusInbox,
         &mut AcpRunState,
@@ -474,7 +474,7 @@ fn project_status(
 
 fn project_approval_requested(
     mut sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &mut AcpApprovalRequestedInbox,
         &mut AcpApprovalState,
@@ -497,7 +497,7 @@ fn project_approval_requested(
 
 fn project_approval_resolved(
     mut sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &mut AcpApprovalResolvedInbox,
         &mut AcpApprovalState,
@@ -535,7 +535,7 @@ fn snapshot_selection(mut sessions: Query<(&mut AcpSelectionSnapshotInbox, &AcpS
 
 fn route_input(
     mut sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionInput,
         &AcpSessionShared,
         &mut AcpProjector,
@@ -574,7 +574,7 @@ fn route_input(
 }
 
 fn subscribe(
-    sessions: Query<(&SessionId, &AcpSessionShared)>,
+    sessions: Query<(&Id<Session>, &AcpSessionShared)>,
     mut requests: Query<(Entity, &mut SubscribeAcpSession)>,
     mut commands: Commands,
 ) {
@@ -595,7 +595,7 @@ fn subscribe(
 
 fn read(
     sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &AcpProjector,
         &AcpAgentName,
@@ -689,7 +689,7 @@ fn read(
 
 fn list(
     sessions: Query<(
-        &SessionId,
+        &Id<Session>,
         &AcpSessionShared,
         &AcpSessionAgent,
         &CreatedAt,
@@ -770,7 +770,7 @@ fn list(
 }
 
 fn rebind(
-    sessions: Query<(&SessionId, &AcpSessionShared)>,
+    sessions: Query<(&Id<Session>, &AcpSessionShared)>,
     mut requests: Query<(Entity, &mut RebindAcpSession)>,
     mut commands: Commands,
 ) {
@@ -790,7 +790,7 @@ fn rebind(
 }
 
 fn close(
-    sessions: Query<(Entity, &SessionId, &AcpSessionInput)>,
+    sessions: Query<(Entity, &Id<Session>, &AcpSessionInput)>,
     mut requests: Query<(Entity, &mut CloseAcpSession)>,
     mut commands: Commands,
 ) {
@@ -803,7 +803,7 @@ fn close(
             let _ = input.0.send(AcpInput::Close);
             commands
                 .entity(session_entity)
-                .remove::<SessionId>()
+                .remove::<Id<Session>>()
                 .insert(AcpSessionClosing);
             closed = true;
             break;
@@ -848,7 +848,7 @@ mod tests {
         let session = app
             .world_mut()
             .spawn((
-                SessionId("s1".into()),
+                Id::<Session>::new("s1"),
                 AcpSessionInput(input_tx),
                 AcpSessionShared(shared),
                 AcpProjector::default(),

@@ -1200,6 +1200,8 @@ mod tests {
                 .add_observer(ComposerEffects::record)
                 .add_observer(ComposerMenus::record)
                 .add_observer(BranchRequests::record);
+            app.finish();
+            app.cleanup();
             app.update();
             app
         }

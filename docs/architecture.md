@@ -1076,8 +1076,12 @@ Only the application composition root knows which feature plugins are installed.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
 
-`vmux_session` owns the durable unit of work: one canonical Session entity with its stable ID,
-task metadata, working directory, data-driven stage, conversation-event children, optional agent
+Vmux-owned stable identities use `vmux_api::Id<T>` directly; domain names do not introduce
+parallel aliases such as `SessionId`. The shared `Session` identity tag also serves as the ECS
+marker, while `vmux_session` registers its required durable composition and owns every mutation.
+
+`vmux_session` owns the durable unit of work: one canonical Session entity with `Id<Session>`, task
+metadata, working directory, data-driven stage, conversation-event children, optional agent
 identity, and the derived Session catalog. Session creation generates its ID inside the typed
 request and emits a typed creation event before navigation. Layout Stacks reference the Session
 entity and may close without deleting it. `vmux://sessions/` opens the manager;

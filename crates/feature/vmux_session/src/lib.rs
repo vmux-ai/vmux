@@ -24,7 +24,7 @@ pub use model::{
     AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CleanupTarget, CreateRequest,
     Created, DescriptionUpdateRequest, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderSessionRestoreRequest,
-    ProviderSessionTombstone, ProviderStage, ProviderStageChangeRequest, RenameRequest, Session,
+    ProviderSessionTombstone, ProviderStage, ProviderStageChangeRequest, RenameRequest,
     SessionDuplicate, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
 };
 pub use route::Route;
@@ -34,7 +34,7 @@ pub use session::{
     TranscriptLoading,
 };
 pub use title::ConversationTitle;
-pub use vmux_api::session::SessionId;
+pub use vmux_api::{Id, session::Session};
 
 #[cfg(all(host, feature = "app"))]
 pub(crate) struct Feature;

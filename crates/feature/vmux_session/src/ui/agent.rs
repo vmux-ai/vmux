@@ -11,7 +11,7 @@ use vmux_ui::navigation::PageNavigation;
 
 use crate::event::SessionRepository;
 use crate::state::Navigation;
-use crate::{Route, SessionId, SessionSummary};
+use crate::{Id, Route, Session, SessionSummary};
 
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct ChatHeaderCatalog {
@@ -45,7 +45,7 @@ impl ChatHeaderCatalog {
                 project_url: session.project_url.clone(),
                 option: BreadcrumbOption {
                     label: session.title.clone(),
-                    value: Route::Session(SessionId(session.id.clone())).url(),
+                    value: Route::Session(Id::<Session>::new(session.id.clone())).url(),
                     identity_seed: session.id.clone(),
                     icon_url: String::new(),
                     icon: None,

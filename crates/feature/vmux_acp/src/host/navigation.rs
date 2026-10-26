@@ -16,7 +16,7 @@ use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWork
 use vmux_session::event::{ChatSnapshot, ChatTranscriptState};
 use vmux_session::host::{ImportedConversation, SessionManagerView, SessionView};
 use vmux_session::state::{ChatUiState, SessionDetailUiState};
-use vmux_session::{AgentId, Cleanup, PromptQueue, Route, Session, SessionId};
+use vmux_session::{AgentId, Cleanup, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 use vmux_ui::i18n::translate;
@@ -100,7 +100,7 @@ impl AgentChatTarget {
             }),
             Route::Session(id) => Some(Self {
                 url: Route::Session(id.clone()).url(),
-                title: id.0,
+                title: id.into_string(),
             }),
         }
     }
@@ -496,7 +496,7 @@ fn swap(
     settings: Res<AppSettings>,
     catalog: AcpCatalog,
     targets: Query<&EntityTarget<Session>>,
-    sessions: Query<(&SessionId, &Name, &Cwd), With<Session>>,
+    sessions: Query<(&Id<Session>, &Name, &Cwd), With<Session>>,
     mut runtime: SessionRuntime,
 ) {
     for ev in reader.read() {
@@ -550,7 +550,7 @@ fn swap(
             id,
             session_name.as_str(),
             agent_name,
-            session_id.0.clone(),
+            session_id.as_str().to_string(),
             cwd,
             icon,
             None,

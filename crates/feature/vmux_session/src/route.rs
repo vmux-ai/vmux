@@ -1,10 +1,10 @@
-use crate::{AgentId, SessionId};
+use crate::{AgentId, Id, Session};
 use percent_encoding::percent_decode_str;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
     Manager,
-    Session(SessionId),
+    Session(Id<Session>),
 }
 
 impl Route {
@@ -18,7 +18,7 @@ impl Route {
             [] => Some(Self::Manager),
             [id] if route.query().is_none() && route.fragment().is_none() => {
                 let id = percent_decode_str(id).decode_utf8().ok()?;
-                (!id.is_empty()).then(|| Self::Session(SessionId(id.into_owned())))
+                (!id.is_empty()).then(|| Self::Session(Id::<Session>::new(id.into_owned())))
             }
             _ => None,
         }
@@ -32,7 +32,7 @@ impl Route {
                     .expect("static Session route must be valid");
                 url.path_segments_mut()
                     .expect("Session route must support path segments")
-                    .push(&id.0);
+                    .push(id.as_str());
                 url.into()
             }
         }
@@ -90,8 +90,8 @@ mod tests {
         assert_eq!(Route::parse("vmux://sessions/"), Some(Route::Manager));
         assert_eq!(
             Route::parse("vmux://sessions/01a0fc43-68f9-7121-a388-59e1891fdc41"),
-            Some(Route::Session(SessionId(
-                "01a0fc43-68f9-7121-a388-59e1891fdc41".into()
+            Some(Route::Session(Id::<Session>::new(
+                "01a0fc43-68f9-7121-a388-59e1891fdc41"
             )))
         );
     }
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn session_ids_round_trip_as_one_encoded_segment() {
-        let id = SessionId("task/name?draft#1".into());
+        let id = Id::<Session>::new("task/name?draft#1");
         let url = Route::Session(id.clone()).url();
 
         assert_eq!(Route::parse(&url), Some(Route::Session(id)));

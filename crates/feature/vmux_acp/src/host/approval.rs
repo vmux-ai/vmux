@@ -8,7 +8,7 @@ use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Cwd, EntityTarget};
 use vmux_session::event::ChatApproval;
-use vmux_session::{AgentId, ApprovalPolicy, RunState, Session, SessionId};
+use vmux_session::{AgentId, ApprovalPolicy, Id, RunState, Session};
 
 use super::approval_driver::ApprovalDriver;
 
@@ -67,7 +67,7 @@ fn reply(
         (
             &mut RunState,
             &mut ApprovalPolicy,
-            &SessionId,
+            &Id<Session>,
             &AgentId,
             &Cwd,
         ),
@@ -97,7 +97,7 @@ fn reply(
     }
     service_requests.write(ServiceRequest(ClientMessage::Shared(
         SharedMessage::AgentApprove {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             call_id: reply.call_id.clone(),
             decision: reply.decision,
         },
@@ -118,7 +118,7 @@ mod tests {
         fn bundle(agent: &str) -> impl Bundle {
             (
                 Session,
-                SessionId("s".into()),
+                Id::<Session>::new("s"),
                 AgentId(agent.into()),
                 Cwd(PathBuf::from("/tmp")),
                 ProcessAnchor(ProcessId::new()),

@@ -37,7 +37,7 @@ pub fn Page() -> Element {
     match route {
         Some(vmux_session::Route::Manager) => rsx! { manager::SessionsManager {} },
         Some(vmux_session::Route::Session(id)) => {
-            let session_id = id.0;
+            let session_id = id.into_string();
             rsx! { SessionDetail { key: "{session_id}", session_id } }
         }
         None => {

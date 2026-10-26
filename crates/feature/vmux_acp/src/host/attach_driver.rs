@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::PageIcon;
-use vmux_session::SessionId;
+use vmux_session::{Id, Session};
 
 #[derive(Bundle)]
 pub(super) struct AcpAgentAttachment {
@@ -11,7 +11,7 @@ pub(super) struct AcpAgentAttachment {
     session_name: SessionName,
     agent_name: AgentName,
     agent_id: AcpId,
-    session_id: SessionId,
+    session_id: Id<Session>,
     working_directory: WorkingDirectory,
     icon: AcpAttachmentIcon,
     resume: AcpResume,
@@ -37,7 +37,7 @@ impl AcpAgentAttachment {
             session_name: SessionName(session_name.into()),
             agent_name: AgentName(agent_name.into()),
             agent_id: AcpId(agent_id.into()),
-            session_id: SessionId(sid.into()),
+            session_id: Id::<Session>::new(sid),
             working_directory: WorkingDirectory(cwd.into()),
             icon: AcpAttachmentIcon(PageIcon::favicon(icon.unwrap_or_default())),
             resume: AcpResume(resume),

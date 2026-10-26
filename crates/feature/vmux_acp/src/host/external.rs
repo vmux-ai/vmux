@@ -32,8 +32,7 @@ use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveWriteRequest, ProviderCatalog, ProviderSession, Route, Session,
-    SessionDuplicate, SessionId, SnapshotReceived, TranscriptLoading, Transcripts,
-    ProviderSessionTombstones,
+    ProviderSessionTombstones, SessionDuplicate, SnapshotReceived, TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
@@ -552,7 +551,7 @@ impl<'a> ProviderSessionIndex<'a> {
 
 #[derive(Component)]
 struct PendingImport {
-    session_id: SessionId,
+    session_id: Id<Session>,
     destination: ResumeDestination,
     deferred_open: bool,
     source: ProviderSession,
@@ -796,7 +795,7 @@ struct ConversationCursor(u64);
 #[derive(Component)]
 struct ConversationLoadTask {
     session: Entity,
-    sid: SessionId,
+    sid: Id<Session>,
     revision: i64,
     task: Task<Result<ConversationRead, String>>,
 }
@@ -1816,7 +1815,7 @@ fn request_conversation_refreshes(
     mut sessions: Query<
         (
             Entity,
-            &SessionId,
+            &Id<Session>,
             &mut vmux_ecs::LastActivatedAt,
             Option<&ArchivedAt>,
             Option<&ConversationRevision>,
@@ -1912,7 +1911,7 @@ fn queue_initial_conversations(
     sessions: Query<
         (
             Entity,
-            &SessionId,
+            &Id<Session>,
             &CreatedAt,
             Option<&ConversationRefreshRequested>,
             Option<&ConversationCursor>,
@@ -1983,7 +1982,7 @@ fn queue_conversation_refreshes(
     sessions: Query<
         (
             Entity,
-            &SessionId,
+            &Id<Session>,
             &CreatedAt,
             &ConversationRefreshRequested,
             Option<&ConversationCursor>,
@@ -2096,7 +2095,7 @@ fn open(
     tombstones: Res<ProviderSessionTombstones>,
     external_index: Option<Res<ExternalLinkIndex>>,
     link_owners: Query<&ChildOf, With<ExternalLink>>,
-    existing: Query<&SessionId, (With<Session>, Without<SessionDuplicate>)>,
+    existing: Query<&Id<Session>, (With<Session>, Without<SessionDuplicate>)>,
     mut opener: ResumeOpener,
     mut imports: MessageWriter<ProviderImportRequest>,
 ) {
@@ -2758,7 +2757,7 @@ mod tests {
                 cwd: cwd.to_string_lossy().into_owned(),
                 ..Default::default()
             });
-        let id = SessionId::new("canonical-session");
+        let id = Id::<Session>::new("canonical-session");
         let session = app
             .world_mut()
             .spawn((Session, id.clone(), AgentId("codex".into())))
@@ -2958,7 +2957,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId::new("stale"),
+                Id::<Session>::new("stale"),
                 vmux_ecs::LastActivatedAt(200),
                 ConversationRevision(200),
             ))
@@ -2968,7 +2967,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId::new("current"),
+                Id::<Session>::new("current"),
                 vmux_ecs::LastActivatedAt(300),
                 ConversationRevision(300),
             ))
@@ -3006,7 +3005,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId::new("local-session"),
+                Id::<Session>::new("local-session"),
                 vmux_ecs::LastActivatedAt(200),
                 ConversationRevision(200),
             ))
@@ -3095,7 +3094,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId::new("active-session"),
+                Id::<Session>::new("active-session"),
                 vmux_ecs::LastActivatedAt(0),
             ))
             .id();
@@ -3104,7 +3103,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId::new("provider-newer-session"),
+                Id::<Session>::new("provider-newer-session"),
                 vmux_ecs::LastActivatedAt(0),
                 ArchivedAt(300),
             ))
@@ -3119,7 +3118,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId::new("archived-session"),
+                Id::<Session>::new("archived-session"),
                 vmux_ecs::LastActivatedAt(0),
             ))
             .id();
@@ -3128,7 +3127,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId::new("session-newer"),
+                Id::<Session>::new("session-newer"),
                 vmux_ecs::LastActivatedAt(0),
                 ArchivedAt(400),
             ))
@@ -3141,7 +3140,7 @@ mod tests {
             .world_mut()
             .resource_mut::<Messages<ArchiveRequest>>()
             .drain()
-            .map(|request| (request.id.0, request.archived_at))
+            .map(|request| (request.id.into_string(), request.archived_at))
             .collect::<HashMap<_, _>>();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests.get("archived-session"), Some(&Some(300)));

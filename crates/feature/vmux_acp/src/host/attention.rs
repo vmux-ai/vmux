@@ -13,7 +13,7 @@ use vmux_layout::stack::Stack;
 
 use super::attention_driver::AttentionContext;
 use crate::host::event::AgentRequestInput;
-use vmux_session::SessionId;
+use vmux_session::{Id, Session};
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct TurnEndedSet;
@@ -61,7 +61,7 @@ fn mark_done(
     mut reader: MessageReader<AgentAttention>,
     mut notify: MessageWriter<OsNotify>,
     context: AttentionContext,
-    meta: Query<(&Profile, Option<&SessionId>, Option<&Agent>)>,
+    meta: Query<(&Profile, Option<&Id<Session>>, Option<&Agent>)>,
     time: Res<Time>,
     mut last_notify: Local<std::collections::HashMap<Entity, f64>>,
     mut commands: Commands,
@@ -83,7 +83,7 @@ fn mark_done(
         let (name, sid) = match meta.get(att.entity) {
             Ok((profile, session, agent)) => {
                 let sid = session
-                    .map(|s| s.0.clone())
+                    .map(|s| s.as_str().to_string())
                     .filter(|s| !s.is_empty())
                     .or_else(|| agent.map(|a| a.sid.clone()).filter(|s| !s.is_empty()))
                     .unwrap_or_default();

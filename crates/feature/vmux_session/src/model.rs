@@ -10,7 +10,7 @@ use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 #[cfg(host)]
 use std::collections::{HashMap, HashSet};
-use vmux_api::{Id, session::SessionId};
+use vmux_api::{Id, session::Session};
 use vmux_connector::{
     ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
 };
@@ -35,8 +35,14 @@ impl Plugin for EntityPlugin {
         if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
             app.add_plugins(vmux_ecs::OperationPlugin);
         }
+        app.world_mut()
+            .register_required_components::<Session, Save>();
+        app.world_mut()
+            .register_required_components::<Session, Cwd>();
+        app.world_mut()
+            .register_required_components::<Session, Description>();
         app.register_persisted::<Session>()
-            .register_persisted::<SessionId>()
+            .register_persisted::<Id<Session>>()
             .register_persisted::<AgentId>()
             .register_persisted::<ProviderStage>()
             .register_persisted::<ProviderArchive>()
@@ -122,12 +128,6 @@ impl Plugin for StagePlugin {
             );
     }
 }
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[require(Save, Cwd, Description)]
-#[type_path = "vmux_session"]
-pub struct Session;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionDuplicate(pub Entity);
@@ -219,7 +219,7 @@ pub struct StageDefinition;
 
 #[derive(Message, Clone, Debug)]
 pub struct CreateRequest {
-    id: SessionId,
+    id: Id<Session>,
     pub name: String,
     pub description: String,
     pub cwd: PathBuf,
@@ -236,7 +236,7 @@ impl CreateRequest {
         agent: Option<AgentId>,
     ) -> Self {
         Self {
-            id: SessionId(uuid::Uuid::new_v4().to_string()),
+            id: Id::<Session>::new(uuid::Uuid::new_v4().to_string()),
             name: name.into(),
             description: description.into(),
             cwd,
@@ -255,7 +255,7 @@ impl CreateRequest {
         activated_at: i64,
     ) -> Self {
         Self {
-            id: SessionId(uuid::Uuid::new_v4().to_string()),
+            id: Id::<Session>::new(uuid::Uuid::new_v4().to_string()),
             name: name.into(),
             description: description.into(),
             cwd,
@@ -265,7 +265,7 @@ impl CreateRequest {
         }
     }
 
-    pub fn id(&self) -> &SessionId {
+    pub fn id(&self) -> &Id<Session> {
         &self.id
     }
 }
@@ -274,30 +274,30 @@ impl CreateRequest {
 pub struct Created {
     #[event_target]
     pub entity: Entity,
-    pub id: SessionId,
+    pub id: Id<Session>,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct RenameRequest {
-    pub id: SessionId,
+    pub id: Id<Session>,
     pub name: String,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct DescriptionUpdateRequest {
-    pub id: SessionId,
+    pub id: Id<Session>,
     pub description: String,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct StageChangeRequest {
-    pub id: SessionId,
+    pub id: Id<Session>,
     pub stage: StageId,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct ArchiveRequest {
-    pub id: SessionId,
+    pub id: Id<Session>,
     pub archived_at: Option<i64>,
 }
 
@@ -343,7 +343,7 @@ pub struct CleanupRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CleanupTarget {
-    Session(SessionId),
+    Session(Id<Session>),
     Provider(ExternalLinkIdentity),
 }
 
@@ -606,7 +606,7 @@ fn ensure_stages(
 fn create(
     mut requests: MessageReader<CreateRequest>,
     configuration: Res<Configuration>,
-    existing: Query<&SessionId, With<Session>>,
+    existing: Query<&Id<Session>, With<Session>>,
     mut commands: Commands,
 ) {
     if requests.is_empty() {
@@ -670,7 +670,7 @@ fn activate(
 
 #[cfg(host)]
 fn project_views(
-    sessions: Query<(&SessionId, Ref<Name>), With<Session>>,
+    sessions: Query<(&Id<Session>, Ref<Name>), With<Session>>,
     views: Query<(Entity, Ref<EntityTarget<Session>>, Option<&Children>)>,
     mut metadata: Query<&mut PageMetadata>,
 ) {
@@ -715,7 +715,7 @@ fn rename(
     mut sessions: Query<
         (
             Entity,
-            &SessionId,
+            &Id<Session>,
             &mut Name,
             Option<&mut AgentConversationTitle>,
         ),
@@ -743,7 +743,7 @@ fn rename(
 #[cfg(host)]
 fn update_description(
     mut requests: MessageReader<DescriptionUpdateRequest>,
-    mut sessions: Query<(&SessionId, &mut Description), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &mut Description), With<Session>>,
 ) {
     for request in requests.read() {
         for (id, mut description) in &mut sessions {
@@ -758,7 +758,7 @@ fn update_description(
 fn change_stage(
     mut requests: MessageReader<StageChangeRequest>,
     definitions: Query<&StageId, With<StageDefinition>>,
-    mut sessions: Query<(&SessionId, &mut Stage, &mut StageChangedAt), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &mut Stage, &mut StageChangedAt), With<Session>>,
 ) {
     for request in requests.read() {
         if !definitions.iter().any(|id| id == &request.stage) {
@@ -776,7 +776,7 @@ fn change_stage(
 #[cfg(host)]
 fn archive(
     mut requests: MessageReader<ArchiveRequest>,
-    sessions: Query<(Entity, &SessionId, Option<&ArchivedAt>), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, Option<&ArchivedAt>), With<Session>>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -1067,7 +1067,7 @@ fn change_provider_stage(
 #[cfg(host)]
 fn cleanup(
     mut requests: MessageReader<CleanupRequest>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>), With<Session>>,
     links: Query<
         (
             &ChildOf,
@@ -1388,7 +1388,7 @@ mod tests {
         app.update();
 
         let mut sessions = app.world_mut().query_filtered::<(
-            &SessionId,
+            &Id<Session>,
             &Name,
             &Description,
             &Cwd,
@@ -1462,13 +1462,13 @@ mod tests {
         app.add_plugins((EntityPlugin, StagePlugin));
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into())))
+            .spawn((Session, Id::<Session>::new("session-1")))
             .id();
 
         app.world_mut()
             .resource_mut::<Messages<ArchiveRequest>>()
             .write(ArchiveRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 archived_at: Some(10),
             });
         app.update();
@@ -1477,7 +1477,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<ArchiveRequest>>()
             .write(ArchiveRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 archived_at: None,
             });
         app.update();
@@ -1492,7 +1492,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                SessionId("session-1".into()),
+                Id::<Session>::new("session-1"),
                 Stage(StageId("in_progress".into())),
                 StageChangedAt(1),
             ))
@@ -1502,7 +1502,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<StageChangeRequest>>()
             .write(StageChangeRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 stage: StageId("missing".into()),
             });
         app.update();
@@ -1515,7 +1515,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<StageChangeRequest>>()
             .write(StageChangeRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 stage: StageId("done".into()),
             });
         app.update();
@@ -1683,12 +1683,12 @@ mod tests {
             .add_observer(Cleaned::record);
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into())))
+            .spawn((Session, Id::<Session>::new("session-1")))
             .id();
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
-                targets: vec![CleanupTarget::Session(SessionId("session-1".into()))],
+                targets: vec![CleanupTarget::Session(Id::<Session>::new("session-1"))],
             });
 
         app.update();
@@ -1705,7 +1705,7 @@ mod tests {
         for id in ["canonical", "duplicate"] {
             let session = app
                 .world_mut()
-                .spawn((Session, SessionId(id.into())))
+                .spawn((Session, Id::<Session>::new(id)))
                 .id();
             app.world_mut().spawn((
                 ExternalLink,
@@ -1719,7 +1719,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
-                targets: vec![CleanupTarget::Session(SessionId("canonical".into()))],
+                targets: vec![CleanupTarget::Session(Id::<Session>::new("canonical"))],
             });
 
         app.update();
@@ -1764,7 +1764,7 @@ mod tests {
         let filter = vmux_ecs::persistence::WorkspacePersisted::filter(&registry);
 
         assert!(filter.is_allowed::<Session>());
-        assert!(filter.is_allowed::<SessionId>());
+        assert!(filter.is_allowed::<Id<Session>>());
         assert!(filter.is_allowed::<AgentId>());
         assert!(filter.is_allowed::<ProviderStage>());
         assert!(filter.is_allowed::<ProviderArchive>());
@@ -1796,7 +1796,11 @@ mod tests {
         app.add_plugins((EntityPlugin, MetadataPlugin, StagePlugin));
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into()), Name::new("Before")))
+            .spawn((
+                Session,
+                Id::<Session>::new("session-1"),
+                Name::new("Before"),
+            ))
             .id();
         let stack = app
             .world_mut()
@@ -1815,7 +1819,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<RenameRequest>>()
             .write(RenameRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 name: "After".into(),
             });
         app.update();

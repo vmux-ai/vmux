@@ -27,8 +27,8 @@ use crate::model::{ProviderArchiveOperations, ProviderSessionTombstones};
 #[cfg(host)]
 use crate::{
     AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
-    ProviderArchive, ProviderStage, RunState, Session, SessionDuplicate, SessionId, Stage,
-    StageChangedAt, StageDefinition, StageId, Transcripts,
+    ProviderArchive, ProviderStage, RunState, Session, SessionDuplicate, Stage, StageChangedAt,
+    StageDefinition, StageId, Transcripts,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -271,7 +271,7 @@ type SessionCatalog<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static SessionId,
+        &'static Id<Session>,
         &'static Name,
         &'static Description,
         &'static Cwd,
@@ -368,7 +368,7 @@ type ChangedSessions<'w, 's> = Query<
     (
         With<Session>,
         Or<(
-            Changed<SessionId>,
+            Changed<Id<Session>>,
             Changed<Name>,
             Changed<Description>,
             Changed<Cwd>,
@@ -468,7 +468,7 @@ struct CatalogChanges<'w, 's> {
     >,
     duplicates: Query<'w, 's, (), Or<(Added<SessionDuplicate>, Changed<SessionDuplicate>)>>,
     removed_sessions: RemovedComponents<'w, 's, Session>,
-    removed_ids: RemovedComponents<'w, 's, SessionId>,
+    removed_ids: RemovedComponents<'w, 's, Id<Session>>,
     removed_names: RemovedComponents<'w, 's, Name>,
     removed_descriptions: RemovedComponents<'w, 's, Description>,
     removed_cwds: RemovedComponents<'w, 's, Cwd>,
@@ -633,9 +633,9 @@ fn project(
                     .unwrap_or_default()
             });
         next.sessions.push(SessionSummary {
-            id: id.0.clone(),
+            id: id.as_str().to_string(),
             kind: "session".to_string(),
-            sid: id.0.clone(),
+            sid: id.as_str().to_string(),
             provider_kind: linked_sessions
                 .get(&entity)
                 .map(|identity| identity.scope().as_str().to_string())
@@ -897,7 +897,7 @@ mod tests {
 
         let catalog = app.world().resource::<CatalogSnapshot>();
         assert_eq!(catalog.sessions.len(), 1);
-        assert_eq!(catalog.sessions[0].id, id.0);
+        assert_eq!(catalog.sessions[0].id, id.as_str());
         assert_eq!(catalog.sessions[0].name, "Task");
         assert_eq!(catalog.sessions[0].description, "Description");
         assert_eq!(catalog.sessions[0].cwd, "/tmp/project");
@@ -1225,10 +1225,10 @@ mod tests {
     1: (
       components: {
         "bevy_ecs::name::Name": "Task",
-        "vmux_ecs::SessionId": ("session-1"),
+        "vmux_api::Id<vmux_api::Session>": (value: "session-1"),
         "vmux_history::CreatedAt": (1),
         "vmux_history::LastActivatedAt": (2),
-        "vmux_session::Session": (),
+        "vmux_api::Session": (),
         "vmux_session::Stage": (("in_progress")),
         "vmux_session::StageChangedAt": (1),
       },
