@@ -6,6 +6,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
+use vmux_api::Id;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_ecs::Active;
@@ -20,7 +21,7 @@ use vmux_feature::AppFeatureExt;
 use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;
-use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::settings::LayoutSettings;
 use crate::space::{CurrentSpace, Space, SpaceHierarchy, SpaceId};
 #[cfg(test)]
@@ -235,7 +236,7 @@ struct TabArchiveLayout<'w, 's> {
     space_hierarchy: SpaceHierarchy<'w, 's>,
     tabs: Query<'w, 's, (), With<Tab>>,
     stacks: Query<'w, 's, (), With<Stack>>,
-    pane_ids: Query<'w, 's, &'static PaneId>,
+    pane_ids: Query<'w, 's, &'static Id<Pane>>,
     splits: Query<'w, 's, &'static PaneSplit>,
     pane_sizes: Query<'w, 's, &'static PaneSize>,
     panes: Query<'w, 's, (), With<Pane>>,
@@ -264,7 +265,7 @@ impl TabArchiveLayout<'_, '_> {
         if !self.panes.contains(leaf) {
             return None;
         }
-        let leaf_pane_id = self.pane_ids.get(leaf).ok()?.0.clone();
+        let leaf_pane_id = self.pane_ids.get(leaf).ok()?.as_str().to_string();
         let stack_index = self
             .children_q
             .get(leaf)
@@ -302,7 +303,7 @@ impl TabArchiveLayout<'_, '_> {
                 })
                 .collect();
             steps.push(PaneStep {
-                split_id: self.pane_ids.get(parent).ok()?.0.clone(),
+                split_id: self.pane_ids.get(parent).ok()?.as_str().to_string(),
                 axis: match split.direction {
                     PaneSplitDirection::Row => SplitAxis::Row,
                     PaneSplitDirection::Column => SplitAxis::Column,
@@ -491,7 +492,7 @@ fn collect_descendant_stacks(
 
 #[derive(SystemParam)]
 struct ReopenLayout<'w, 's> {
-    pane_ids: Query<'w, 's, (Entity, &'static PaneId)>,
+    pane_ids: Query<'w, 's, (Entity, &'static Id<Pane>)>,
     leaf_panes: Query<'w, 's, (), (With<Pane>, Without<PaneSplit>)>,
     child_of: Query<'w, 's, &'static ChildOf>,
     window_hierarchy: crate::window::WindowHierarchy<'w, 's>,
@@ -734,7 +735,7 @@ fn restore_archived_tab(
         let root = commands
             .spawn((
                 Pane::split_bundle(PaneSplitDirection::Row),
-                PaneId(root_id.clone()),
+                Id::<Pane>::new(root_id.clone()),
                 HostWindow(primary_window),
                 ChildOf(tab),
             ))
@@ -742,7 +743,11 @@ fn restore_archived_tab(
         pane_entities.insert(root_id, root);
         let leaf_id = uuid::Uuid::new_v4().to_string();
         let leaf = commands
-            .spawn((Pane::bundle(), PaneId(leaf_id.clone()), ChildOf(root)))
+            .spawn((
+                Pane::bundle(),
+                Id::<Pane>::new(leaf_id.clone()),
+                ChildOf(root),
+            ))
             .id();
         pane_entities.insert(leaf_id.clone(), leaf);
         leaf_entities.insert(leaf_id, leaf);
@@ -860,7 +865,7 @@ fn spawn_archived_split(
     let entity = commands
         .spawn((
             Pane::split_bundle(direction),
-            PaneId(id.to_string()),
+            Id::<Pane>::new(id),
             ChildOf(parent),
         ))
         .id();
@@ -890,7 +895,11 @@ fn spawn_archived_split(
             }
             ArchivedPaneChild::Leaf(child_id) => {
                 let leaf = commands
-                    .spawn((Pane::bundle(), PaneId(child_id.clone()), ChildOf(entity)))
+                    .spawn((
+                        Pane::bundle(),
+                        Id::<Pane>::new(child_id.clone()),
+                        ChildOf(entity),
+                    ))
                     .id();
                 commands.entity(leaf).insert(PaneSize { flex_grow });
                 pane_entities.insert(child_id.clone(), leaf);
@@ -917,7 +926,7 @@ fn resolve_reopen_stack(
         if let Some(leaf) = layout
             .pane_ids
             .iter()
-            .find(|(e, id)| id.0 == pos.leaf_pane_id && layout.leaf_panes.contains(*e))
+            .find(|(e, id)| id.as_str() == pos.leaf_pane_id && layout.leaf_panes.contains(*e))
             .map(|(e, _)| e)
             .filter(|&leaf| layout.pane_in_space(leaf, space))
         {
@@ -986,7 +995,7 @@ fn reattach_along_path(
     let root = layout
         .pane_ids
         .iter()
-        .find(|(_, id)| id.0 == root_step.split_id)
+        .find(|(_, id)| id.as_str() == root_step.split_id)
         .map(|(e, _)| e)?;
     if !layout.pane_in_space(root, space) {
         return None;
@@ -1004,7 +1013,7 @@ fn reattach_along_path(
             layout
                 .pane_ids
                 .iter()
-                .any(|(e, pid)| e == child && pid.0 == id)
+                .any(|(e, pid)| e == child && pid.as_str() == id)
         })
     };
 
@@ -1050,7 +1059,7 @@ fn reattach_along_path(
             commands
                 .spawn((
                     Pane::bundle(),
-                    PaneId(child_id),
+                    Id::<Pane>::new(child_id),
                     LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
@@ -1063,7 +1072,7 @@ fn reattach_along_path(
             commands
                 .spawn((
                     Pane::split_bundle(axis),
-                    PaneId(child_id),
+                    Id::<Pane>::new(child_id),
                     LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
@@ -1132,7 +1141,7 @@ mod tests {
     use super::*;
     use bevy::ecs::relationship::Relationship;
 
-    use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+    use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 
     fn page(url: &str, closed_at: i64) -> ArchivedPage {
         ArchivedPage {
@@ -1383,7 +1392,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -1391,7 +1400,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("leaf0".to_string()),
+                Id::<Pane>::new("leaf0"),
                 PaneSize { flex_grow: 1.0 },
                 ChildOf(root),
             ))
@@ -1400,7 +1409,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("leaf1".to_string()),
+                Id::<Pane>::new("leaf1"),
                 PaneSize { flex_grow: 3.0 },
                 ChildOf(root),
             ))
@@ -1455,7 +1464,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("leaf".to_string()),
+                Id::<Pane>::new("leaf"),
                 LastActivatedAt::new(1),
                 ChildOf(tab),
             ))
@@ -1561,7 +1570,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -1569,7 +1578,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("left".to_string()),
+                Id::<Pane>::new("left"),
                 PaneSize { flex_grow: 1.0 },
                 ChildOf(root),
             ))
@@ -1578,7 +1587,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("right".to_string()),
+                Id::<Pane>::new("right"),
                 PaneSize { flex_grow: 2.0 },
                 ChildOf(root),
             ))
@@ -1841,9 +1850,9 @@ mod tests {
         assert_eq!(space_tabs[1], recovered);
         let root = app
             .world_mut()
-            .query::<(Entity, &PaneId)>()
+            .query::<(Entity, &Id<Pane>)>()
             .iter(app.world())
-            .find(|(_, id)| id.0 == "root")
+            .find(|(_, id)| id.as_str() == "root")
             .map(|(entity, _)| entity)
             .expect("root pane");
         assert_eq!(
@@ -1876,9 +1885,9 @@ mod tests {
         ] {
             let leaf = app
                 .world_mut()
-                .query::<(Entity, &PaneId)>()
+                .query::<(Entity, &Id<Pane>)>()
                 .iter(app.world())
-                .find(|(_, id)| id.0 == leaf_id)
+                .find(|(_, id)| id.as_str() == leaf_id)
                 .map(|(entity, _)| entity)
                 .expect("leaf pane");
             let expected_flex = if leaf_id == "left" { 1.0 } else { 2.0 };
@@ -2181,7 +2190,7 @@ mod tests {
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let leaf = app
             .world_mut()
-            .spawn((Pane, PaneId("leaf-A".to_string()), ChildOf(tab)))
+            .spawn((Pane, Id::<Pane>::new("leaf-A"), ChildOf(tab)))
             .id();
         app.world_mut().spawn((Stack::default(), ChildOf(leaf)));
         app.world_mut().spawn((
@@ -2243,12 +2252,12 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
         app.world_mut()
-            .spawn((Pane, PaneId("survivor".to_string()), ChildOf(root)));
+            .spawn((Pane, Id::<Pane>::new("survivor"), ChildOf(root)));
         app.world_mut().spawn((
             ArchivedPage {
                 url: "https://z".to_string(),
@@ -2305,12 +2314,12 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
         app.world_mut()
-            .spawn((Pane, PaneId("root-leaf".to_string()), ChildOf(root)));
+            .spawn((Pane, Id::<Pane>::new("root-leaf"), ChildOf(root)));
         app.world_mut().spawn((
             ArchivedPage {
                 url: "https://z".to_string(),
@@ -2339,8 +2348,8 @@ mod tests {
         ));
         dispatch_reopen(&mut app);
 
-        let mut ids = app.world_mut().query::<&PaneId>();
-        let recreated_nested = ids.iter(app.world()).any(|id| id.0 == "nested");
+        let mut ids = app.world_mut().query::<&Id<Pane>>();
+        let recreated_nested = ids.iter(app.world()).any(|id| id.as_str() == "nested");
         assert!(recreated_nested, "nested split recreated by id");
         let stack_count = app.world_mut().query::<&Stack>().iter(app.world()).count();
         assert_eq!(stack_count, 1);
@@ -2357,7 +2366,7 @@ mod tests {
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let leaf = app
             .world_mut()
-            .spawn((Pane, PaneId("leaf-A".to_string()), ChildOf(tab)))
+            .spawn((Pane, Id::<Pane>::new("leaf-A"), ChildOf(tab)))
             .id();
         app.world_mut().spawn((
             ArchivedPage {
@@ -2392,7 +2401,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -2403,7 +2412,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Column,
                 },
-                PaneId("mid".to_string()),
+                Id::<Pane>::new("mid"),
                 ChildOf(root),
             ))
             .id();
@@ -2455,7 +2464,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -2466,13 +2475,13 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Column,
                 },
-                PaneId("old-leaf".to_string()),
+                Id::<Pane>::new("old-leaf"),
                 ChildOf(root),
             ))
             .id();
         let survivor = app
             .world_mut()
-            .spawn((Pane, PaneId("survivor".to_string()), ChildOf(promoted)))
+            .spawn((Pane, Id::<Pane>::new("survivor"), ChildOf(promoted)))
             .id();
         app.world_mut().spawn((Stack::default(), ChildOf(survivor)));
         app.world_mut().spawn((
@@ -2523,7 +2532,7 @@ mod tests {
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let root = app
             .world_mut()
-            .spawn((Pane, PaneId("root".to_string()), ChildOf(tab)))
+            .spawn((Pane, Id::<Pane>::new("root"), ChildOf(tab)))
             .id();
         let survivor_stack = app
             .world_mut()

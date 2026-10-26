@@ -18,7 +18,7 @@ pub use close::{ForcePaneClose, PendingPaneClose};
 use focus::FocusPlugin;
 pub use focus::{PaneHoverCooldown, PendingCursorWarp};
 use identity::IdentityPlugin;
-pub use identity::{PaneId, SpawnCounter, SpawnSeq};
+pub use identity::{SpawnCounter, SpawnSeq};
 use moonshine_save::prelude::*;
 use open::OpenPlugin;
 #[cfg(test)]

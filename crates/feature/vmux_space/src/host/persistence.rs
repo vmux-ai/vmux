@@ -12,6 +12,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[cfg(test)]
+use vmux_api::Id;
+#[cfg(test)]
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::persistence::{
     AtomicSaveWorld, DurableStore, PersistenceDirty, PersistenceRecovery, PersistenceState,
@@ -31,7 +33,7 @@ use vmux_layout::space::SpaceId;
 use vmux_layout::window::WindowHierarchy;
 #[cfg(test)]
 use vmux_layout::{
-    pane::{Pane, PaneId},
+    pane::Pane,
     tab::{StartupDir, Tab, TabWorkspace, TabWorktree},
     window::WindowGeometry,
 };
@@ -1027,7 +1029,7 @@ mod tests {
         app_save.add_plugins(MinimalPlugins);
         app_save.add_plugins(vmux_ecs::PrimitivesPlugin);
         app_save
-            .register_persisted::<PaneId>()
+            .register_persisted::<Id<Pane>>()
             .register_persisted::<ArchivedPage>()
             .register_persisted::<ArchivedPagePosition>()
             .register_persisted::<ArchivedTabPage>()
@@ -1037,7 +1039,7 @@ mod tests {
         app_save.add_observer(save_on::<AtomicSaveWorld>);
         app_save
             .world_mut()
-            .spawn((Save, Pane, PaneId("p-1".to_string())));
+            .spawn((Save, Pane, Id::<Pane>::new("p-1")));
         app_save.world_mut().spawn((
             Save,
             ArchivedPage {
@@ -1069,7 +1071,7 @@ mod tests {
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
             .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .register_type::<PaneId>()
+            .register_type::<Id<Pane>>()
             .register_type::<ArchivedPage>()
             .register_type::<ArchivedPagePosition>()
             .register_type::<ArchivedTabPage>()
@@ -1086,10 +1088,10 @@ mod tests {
 
         let pid = app_load
             .world_mut()
-            .query::<&PaneId>()
+            .query::<&Id<Pane>>()
             .single(app_load.world())
-            .expect("PaneId round-tripped");
-        assert_eq!(pid.0, "p-1");
+            .expect("Pane identity round-tripped");
+        assert_eq!(pid.as_str(), "p-1");
         let pos = app_load
             .world_mut()
             .query::<&ArchivedPagePosition>()

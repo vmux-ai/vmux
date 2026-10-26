@@ -2,13 +2,14 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
+use vmux_api::Id;
 use vmux_ecs::persistence::{
     PageRestore, WorkspaceRestoreSet, WorkspaceRestoreValidator, WorkspaceStoreValidator,
 };
 use vmux_ecs::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
-use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::space::{Space, SpaceId};
 use crate::stack::Stack;
 use crate::tab::Tab;
@@ -42,7 +43,7 @@ fn spawn_store_validator(mut commands: Commands) {
     ));
     commands.spawn((
         Name::new("Pane identity validator"),
-        WorkspaceRestoreValidator::unique::<PaneId>("Pane identity"),
+        WorkspaceRestoreValidator::unique::<Id<Pane>>("Pane identity"),
     ));
     commands.spawn((
         Name::new("Layout composition validator"),
@@ -57,9 +58,9 @@ fn validate_layout(world: &mut World) -> Result<(), String> {
             return Err(format!("Space {entity} has no valid identity"));
         }
     }
-    let mut panes = world.query_filtered::<(Entity, Option<&PaneId>), With<Pane>>();
+    let mut panes = world.query_filtered::<(Entity, Option<&Id<Pane>>), With<Pane>>();
     for (entity, id) in panes.iter(world) {
-        if id.is_none_or(|id| id.0.trim().is_empty()) {
+        if id.is_none() {
             return Err(format!("Pane {entity} has no valid identity"));
         }
     }
