@@ -1021,6 +1021,9 @@ mod tests {
                 }
                 .local_bundle(),
             );
+            app.finish();
+            app.cleanup();
+            app.update();
 
             Self { app, view }
         }
@@ -1069,6 +1072,8 @@ mod tests {
             .add_message::<OpenRequest>()
             .add_message::<ZoomRequest>()
             .add_message::<ShowDevToolsRequest>();
+        app.finish();
+        app.cleanup();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([
