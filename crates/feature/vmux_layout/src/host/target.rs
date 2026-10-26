@@ -104,7 +104,7 @@ impl<B: Component> BrowserTargets<'_, '_, B> {
                     return None;
                 }
                 let (_, timestamp) = self.stack_activity.get(child_of.get()).ok()?;
-                Some((entity, timestamp.0))
+                Some((entity, timestamp.milliseconds()))
             })
             .max_by_key(|&(_, timestamp)| timestamp)
             .map(|(entity, _)| entity)

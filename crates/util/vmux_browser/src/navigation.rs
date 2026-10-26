@@ -326,17 +326,11 @@ fn navigate(
                         };
                         !interaction.active()
                     });
-                    let stack = commands
-                        .spawn((
-                            Stack::bundle(),
-                            if activate_new {
-                                LastActivatedAt::now()
-                            } else {
-                                LastActivatedAt(0)
-                            },
-                            ChildOf(target),
-                        ))
-                        .id();
+                    let mut stack = commands.spawn((Stack::bundle(), ChildOf(target)));
+                    if activate_new {
+                        stack.insert(LastActivatedAt::now());
+                    }
+                    let stack = stack.id();
                     if let Some(profile) = profile {
                         activate.write(vmux_layout::active_pane::ActivatePane {
                             scope: vmux_layout::active_pane::ActivePaneScope::Agent(profile),

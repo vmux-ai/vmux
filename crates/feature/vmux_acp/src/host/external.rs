@@ -1784,7 +1784,7 @@ fn associate(
             link.id().as_str(),
             name.as_str(),
             &cwd,
-            created_at.0,
+            created_at.milliseconds(),
         ) else {
             continue;
         };
@@ -1842,7 +1842,7 @@ fn request_conversation_refreshes(
             ),
             (
                 source_updated_at.0.0,
-                archived_at.map(|archived_at| archived_at.0),
+                archived_at.map(|archived_at| archived_at.milliseconds()),
             ),
         );
     }
@@ -1872,14 +1872,16 @@ fn request_conversation_refreshes(
         };
         match archive {
             Some(ArchiveState::Archived(at))
-                if archived_at.is_none_or(|current| at.max(1) > current.0) =>
+                if archived_at.is_none_or(|current| at.max(1) > current.milliseconds()) =>
             {
                 archive_requests.write(ArchiveRequest {
                     id: session_id.clone(),
                     archived_at: Some(at),
                 });
             }
-            Some(ArchiveState::Active(at)) if archived_at.is_some_and(|current| at > current.0) => {
+            Some(ArchiveState::Active(at))
+                if archived_at.is_some_and(|current| at > current.milliseconds()) =>
+            {
                 archive_requests.write(ArchiveRequest {
                     id: session_id.clone(),
                     archived_at: None,
@@ -1887,8 +1889,8 @@ fn request_conversation_refreshes(
             }
             _ => {}
         }
-        if activated_at.0 < source.updated_at {
-            activated_at.0 = source.updated_at;
+        if activated_at.milliseconds() < source.updated_at {
+            *activated_at = vmux_ecs::LastActivatedAt::new(source.updated_at);
         }
         if ConversationSource::new(link.kind(), link.id().as_str(), source.created_at).is_none()
             || revision.is_some_and(|revision| revision.0 >= source.updated_at)
@@ -1941,7 +1943,8 @@ fn queue_initial_conversations(
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
         }
-        let Some(source) = ConversationSource::new(link.kind(), link.id().as_str(), created_at.0)
+        let Some(source) =
+            ConversationSource::new(link.kind(), link.id().as_str(), created_at.milliseconds())
         else {
             commands.entity(session).remove::<TranscriptLoading>();
             continue;
@@ -2006,7 +2009,8 @@ fn queue_conversation_refreshes(
                 .remove::<ConversationRefreshRequested>();
             continue;
         };
-        let Some(source) = ConversationSource::new(link.kind(), link.id().as_str(), created_at.0)
+        let Some(source) =
+            ConversationSource::new(link.kind(), link.id().as_str(), created_at.milliseconds())
         else {
             commands
                 .entity(session)
@@ -2720,7 +2724,7 @@ mod tests {
                 AgentId("codex".into()),
                 Name::new("Review pull request"),
                 vmux_ecs::Cwd(PathBuf::from("/work/dashboard")),
-                CreatedAt(100),
+                CreatedAt::new(100),
             ))
             .id();
         ProviderFixture::spawn_link(app.world_mut(), session, "acp:codex", "replacement-session");
@@ -2958,7 +2962,7 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("stale"),
-                vmux_ecs::LastActivatedAt(200),
+                vmux_ecs::LastActivatedAt::new(200),
                 ConversationRevision(200),
             ))
             .id();
@@ -2968,7 +2972,7 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("current"),
-                vmux_ecs::LastActivatedAt(300),
+                vmux_ecs::LastActivatedAt::new(300),
                 ConversationRevision(300),
             ))
             .id();
@@ -2991,7 +2995,7 @@ mod tests {
             app.world()
                 .get::<vmux_ecs::LastActivatedAt>(stale)
                 .unwrap()
-                .0,
+                .milliseconds(),
             300
         );
     }
@@ -3082,20 +3086,20 @@ mod tests {
             ProviderArchive,
             ProviderFixture::components("acp:codex", "locally-archived"),
             RemoteUpdatedAt(vmux_ecs::UnixMillis(300)),
-            ArchivedAt(300),
+            ArchivedAt::new(300),
         ));
         app.world_mut().spawn((
             ProviderArchive,
             ProviderFixture::components("acp:codex", "provider-newer"),
             RemoteUpdatedAt(vmux_ecs::UnixMillis(300)),
-            ArchivedAt(300),
+            ArchivedAt::new(300),
         ));
         let active = app
             .world_mut()
             .spawn((
                 Session,
                 Id::<Session>::new("active-session"),
-                vmux_ecs::LastActivatedAt(0),
+                vmux_ecs::LastActivatedAt::new(1),
             ))
             .id();
         ProviderFixture::spawn_link(app.world_mut(), active, "acp:codex", "locally-active");
@@ -3104,8 +3108,8 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("provider-newer-session"),
-                vmux_ecs::LastActivatedAt(0),
-                ArchivedAt(300),
+                vmux_ecs::LastActivatedAt::new(1),
+                ArchivedAt::new(300),
             ))
             .id();
         ProviderFixture::spawn_link(
@@ -3119,7 +3123,7 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("archived-session"),
-                vmux_ecs::LastActivatedAt(0),
+                vmux_ecs::LastActivatedAt::new(1),
             ))
             .id();
         ProviderFixture::spawn_link(app.world_mut(), archived, "acp:codex", "locally-archived");
@@ -3128,8 +3132,8 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("session-newer"),
-                vmux_ecs::LastActivatedAt(0),
-                ArchivedAt(400),
+                vmux_ecs::LastActivatedAt::new(1),
+                ArchivedAt::new(400),
             ))
             .id();
         ProviderFixture::spawn_link(app.world_mut(), session_newer, "acp:codex", "session-newer");

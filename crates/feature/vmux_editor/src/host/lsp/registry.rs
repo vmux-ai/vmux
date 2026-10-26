@@ -174,6 +174,7 @@ mod tests {
             .register_feature::<crate::Feature>()
             .register_feature::<ForeignFeature>();
         add(&mut app);
+        app.finish();
         app.update();
 
         let registries = app

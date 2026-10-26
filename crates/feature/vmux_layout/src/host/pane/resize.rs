@@ -434,13 +434,13 @@ mod tests {
                         ..default()
                     },
                     PaneSize { flex_grow },
-                    LastActivatedAt(activated_at),
+                    LastActivatedAt::new(activated_at),
                     ChildOf(parent),
                 ))
                 .id();
             app.world_mut().spawn((
                 Stack::default(),
-                LastActivatedAt(activated_at),
+                LastActivatedAt::new(activated_at),
                 ChildOf(pane),
             ));
             pane

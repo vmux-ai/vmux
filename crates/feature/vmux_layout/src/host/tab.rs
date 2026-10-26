@@ -1083,13 +1083,13 @@ mod tests {
         app.world_mut().entity_mut(old_tab).insert(vmux_ecs::Active);
         let old_pane = app
             .world_mut()
-            .spawn((crate::pane::Pane, LastActivatedAt(1), ChildOf(old_tab)))
+            .spawn((crate::pane::Pane, LastActivatedAt::new(1), ChildOf(old_tab)))
             .id();
         let old_stack = app
             .world_mut()
             .spawn((
                 crate::stack::Stack::bundle(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(old_pane),
             ))
             .id();
@@ -1178,7 +1178,7 @@ mod tests {
             .id();
         let other_tab = app
             .world_mut()
-            .spawn((Tab::named("Tab 2"), LastActivatedAt(1), ChildOf(main)))
+            .spawn((Tab::named("Tab 2"), LastActivatedAt::new(1), ChildOf(main)))
             .id();
         app.world_mut().spawn(PrimaryWindow);
 
@@ -1225,15 +1225,15 @@ mod tests {
         let space = app.world_mut().spawn(crate::space::Space).id();
         let first = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let second = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(2), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(2), ChildOf(space)))
             .id();
         let third = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(3), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(3), ChildOf(space)))
             .id();
 
         app.world_mut().trigger(UiInput::<TabReorderRequest> {
@@ -1278,17 +1278,17 @@ mod tests {
             .id();
         let a = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let c = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(3), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(3), ChildOf(space)))
             .id();
         let d = app
             .world_mut()
             .spawn((
                 Tab::bundle(),
-                LastActivatedAt(4),
+                LastActivatedAt::new(4),
                 vmux_ecs::Active,
                 ChildOf(space),
             ))
@@ -1338,17 +1338,17 @@ mod tests {
             .id();
         let a = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let c = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(3), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(3), ChildOf(space)))
             .id();
         let d = app
             .world_mut()
             .spawn((
                 Tab::bundle(),
-                LastActivatedAt(4),
+                LastActivatedAt::new(4),
                 vmux_ecs::Active,
                 ChildOf(space),
             ))
@@ -1398,14 +1398,14 @@ mod tests {
             .world_mut()
             .spawn((
                 Tab::bundle(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 vmux_ecs::Active,
                 ChildOf(space),
             ))
             .id();
         let tab_b = app
             .world_mut()
-            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt::new(1), ChildOf(space)))
             .id();
 
         app.world_mut()

@@ -648,7 +648,7 @@ fn project(
             .and_then(|identity| operations.archived_at(identity))
             .unwrap_or_else(|| {
                 archived_at
-                    .map(|archived_at| archived_at.0)
+                    .map(|archived_at| archived_at.milliseconds())
                     .unwrap_or_default()
             });
         next.sessions.push(SessionSummary {
@@ -668,9 +668,9 @@ fn project(
             description: description.0.clone(),
             cwd: cwd.0.to_string_lossy().into_owned(),
             stage: stage.0.0.clone(),
-            created_at: created_at.0,
-            last_activated_at: last_activated_at.0,
-            stage_changed_at: stage_changed_at.0,
+            created_at: created_at.milliseconds(),
+            last_activated_at: last_activated_at.milliseconds(),
+            stage_changed_at: stage_changed_at.milliseconds(),
             archived_at,
             agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
             agent_name,
@@ -704,7 +704,11 @@ fn project(
                         kind.clone(),
                         id.clone(),
                     ),
-                    (stage.0.0.clone(), changed_at.0, source_updated_at.0.0),
+                    (
+                        stage.0.0.clone(),
+                        changed_at.milliseconds(),
+                        source_updated_at.0.0,
+                    ),
                 )
             },
         )
@@ -722,7 +726,7 @@ fn project(
                     ),
                     (
                         source_updated_at.0.0,
-                        archived_at.map(|archived_at| archived_at.0),
+                        archived_at.map(|archived_at| archived_at.milliseconds()),
                     ),
                 )
             },
@@ -1228,7 +1232,7 @@ mod tests {
             ProviderStage,
             identity,
             Stage(StageId("done".into())),
-            StageChangedAt(200),
+            StageChangedAt::new(200),
             RemoteUpdatedAt(vmux_ecs::UnixMillis(100)),
         ));
         app.update();
@@ -1240,7 +1244,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "app")]
-    fn legacy_session_without_task_components_remains_in_catalog() {
+    fn session_without_task_components_remains_in_catalog() {
         let store = r#"(
   resources: {},
   entities: {
@@ -1248,11 +1252,11 @@ mod tests {
       components: {
         "bevy_ecs::name::Name": "Task",
         "vmux_api::Id<vmux_api::Session>": (value: "session-1"),
-        "vmux_history::CreatedAt": (1),
-        "vmux_history::LastActivatedAt": (2),
+        "vmux_history::CreatedAt": ((1)),
+        "vmux_history::LastActivatedAt": ((2)),
         "vmux_api::Session": (),
         "vmux_session::Stage": (("in_progress")),
-        "vmux_session::StageChangedAt": (1),
+        "vmux_session::StageChangedAt": ((1)),
       },
     ),
   },

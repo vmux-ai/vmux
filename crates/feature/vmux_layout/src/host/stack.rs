@@ -322,7 +322,7 @@ fn close_last_stack_in_pane(
                 closer
                     .pane_ts
                     .get(entity)
-                    .map(|(_, time)| time.0)
+                    .map(|(_, time)| time.milliseconds())
                     .unwrap_or(0)
             })
             .unwrap_or(pane_siblings[0]);
@@ -406,7 +406,7 @@ fn closes_tab(tab: Entity, stack: Entity, closer: &mut StackCloser) -> bool {
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::stack"]
-#[require(Save, LastActivatedAt)]
+#[require(Save)]
 pub struct Stack {
     pub scroll_x: f32,
     pub scroll_y: f32,
@@ -951,11 +951,11 @@ mod tests {
     }
 
     #[test]
-    fn every_stack_has_an_activation_timestamp() {
+    fn a_stack_does_not_invent_an_activation_timestamp() {
         let mut world = World::new();
         let stack = world.spawn(Stack::default()).id();
 
-        assert!(world.get::<LastActivatedAt>(stack).is_some());
+        assert!(world.get::<LastActivatedAt>(stack).is_none());
     }
 
     #[test]
@@ -972,11 +972,11 @@ mod tests {
             .id();
         let s1 = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
         let s2 = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
 
         app.world_mut()
@@ -1002,11 +1002,11 @@ mod tests {
             .id();
         let target = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
         let sibling = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
 
         let mut requests = app
@@ -1034,7 +1034,7 @@ mod tests {
             .id();
         let only = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
 
         app.world_mut()
@@ -1069,15 +1069,15 @@ mod tests {
             .id();
         let first = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
         let middle = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
         let active = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(3), ChildOf(pane)))
             .id();
 
         app.world_mut()
@@ -1091,11 +1091,20 @@ mod tests {
         );
         assert!(app.world().get_entity(first).is_ok());
         assert_eq!(
-            app.world().get::<LastActivatedAt>(active).unwrap().0,
+            app.world()
+                .get::<LastActivatedAt>(active)
+                .unwrap()
+                .milliseconds(),
             3,
             "closing an inactive stack must not re-stamp the active one"
         );
-        assert_eq!(app.world().get::<LastActivatedAt>(first).unwrap().0, 1);
+        assert_eq!(
+            app.world()
+                .get::<LastActivatedAt>(first)
+                .unwrap()
+                .milliseconds(),
+            1
+        );
     }
 
     #[test]
@@ -1112,15 +1121,15 @@ mod tests {
             .id();
         let oldest = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
         let runner_up = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
         let active = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(3), ChildOf(pane)))
             .id();
 
         app.world_mut()
@@ -1129,8 +1138,16 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(active).is_err());
-        let oldest_ts = app.world().get::<LastActivatedAt>(oldest).unwrap().0;
-        let runner_up_ts = app.world().get::<LastActivatedAt>(runner_up).unwrap().0;
+        let oldest_ts = app
+            .world()
+            .get::<LastActivatedAt>(oldest)
+            .unwrap()
+            .milliseconds();
+        let runner_up_ts = app
+            .world()
+            .get::<LastActivatedAt>(runner_up)
+            .unwrap()
+            .milliseconds();
         assert_eq!(oldest_ts, 1, "the oldest stack must not be activated");
         assert!(
             runner_up_ts > oldest_ts,
@@ -1327,29 +1344,33 @@ mod tests {
         let root = app.world_mut().spawn_empty().id();
         let remaining_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(root)))
             .id();
         let remaining_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(remaining_tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(remaining_tab)))
             .id();
         app.world_mut().spawn((
             Stack::default(),
-            LastActivatedAt(1),
+            LastActivatedAt::new(1),
             ChildOf(remaining_pane),
         ));
 
         let closing_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt::new(2), ChildOf(root)))
             .id();
         let closing_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(closing_tab)))
+            .spawn((Pane, LastActivatedAt::new(2), ChildOf(closing_tab)))
             .id();
         let closing_stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(closing_pane)))
+            .spawn((
+                Stack::default(),
+                LastActivatedAt::new(2),
+                ChildOf(closing_pane),
+            ))
             .id();
 
         app.world_mut()
@@ -1361,7 +1382,13 @@ mod tests {
         assert!(app.world().get_entity(closing_tab).is_err());
         assert!(app.world().get_entity(closing_stack).is_err());
         assert!(app.world().get_entity(remaining_tab).is_ok());
-        assert!(app.world().get::<LastActivatedAt>(remaining_tab).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(remaining_tab)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]
@@ -1378,14 +1405,14 @@ mod tests {
         let make_tab = |app: &mut App, ts: i64| -> Entity {
             let tab = app
                 .world_mut()
-                .spawn((Tab::default(), LastActivatedAt(ts), ChildOf(root)))
+                .spawn((Tab::default(), LastActivatedAt::new(ts), ChildOf(root)))
                 .id();
             let pane = app
                 .world_mut()
-                .spawn((Pane, LastActivatedAt(ts), ChildOf(tab)))
+                .spawn((Pane, LastActivatedAt::new(ts), ChildOf(tab)))
                 .id();
             app.world_mut()
-                .spawn((Stack::default(), LastActivatedAt(ts), ChildOf(pane)));
+                .spawn((Stack::default(), LastActivatedAt::new(ts), ChildOf(pane)));
             tab
         };
         let first = make_tab(&mut app, 1);
@@ -1399,8 +1426,16 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(active_rightmost).is_err());
-        let first_ts = app.world().get::<LastActivatedAt>(first).unwrap().0;
-        let middle_ts = app.world().get::<LastActivatedAt>(middle).unwrap().0;
+        let first_ts = app
+            .world()
+            .get::<LastActivatedAt>(first)
+            .unwrap()
+            .milliseconds();
+        let middle_ts = app
+            .world()
+            .get::<LastActivatedAt>(middle)
+            .unwrap()
+            .milliseconds();
         assert_eq!(first_ts, 1, "first tab must not be re-activated");
         assert!(
             middle_ts > first_ts,
@@ -1433,19 +1468,27 @@ mod tests {
             .id();
         let active_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(split)))
+            .spawn((Pane, LastActivatedAt::new(2), ChildOf(split)))
             .id();
         let other_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(split)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(split)))
             .id();
         let original_stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(active_pane)))
+            .spawn((
+                Stack::default(),
+                LastActivatedAt::new(2),
+                ChildOf(active_pane),
+            ))
             .id();
         let other_stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(other_pane)))
+            .spawn((
+                Stack::default(),
+                LastActivatedAt::new(1),
+                ChildOf(other_pane),
+            ))
             .id();
 
         app.world_mut()
@@ -1493,27 +1536,31 @@ mod tests {
             .id();
         let active_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(3), ChildOf(split)))
+            .spawn((Pane, LastActivatedAt::new(3), ChildOf(split)))
             .id();
         let p2 = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(split)))
+            .spawn((Pane, LastActivatedAt::new(2), ChildOf(split)))
             .id();
         let p3 = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(split)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(split)))
             .id();
         let active_stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(active_pane)))
+            .spawn((
+                Stack::default(),
+                LastActivatedAt::new(3),
+                ChildOf(active_pane),
+            ))
             .id();
         let s2 = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(p2)))
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(p2)))
             .id();
         let s3 = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(p3)))
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(p3)))
             .id();
 
         app.world_mut()
@@ -1574,22 +1621,22 @@ mod tests {
 
         let old_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt::new(1)))
             .id();
         let old_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(old_tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(old_tab)))
             .id();
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(old_pane)));
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(old_pane)));
 
         let active_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2)))
+            .spawn((Tab::default(), LastActivatedAt::new(2)))
             .id();
         let active_pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(active_tab)))
+            .spawn((Pane, LastActivatedAt::new(2), ChildOf(active_tab)))
             .id();
 
         app.update();
@@ -1622,19 +1669,19 @@ mod tests {
 
         let tab_e = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt::new(1)))
             .id();
         let pane_with_stack = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(tab_e)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(tab_e)))
             .id();
         app.world_mut().spawn((
             Stack::default(),
-            LastActivatedAt(1),
+            LastActivatedAt::new(1),
             ChildOf(pane_with_stack),
         ));
         app.world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(tab_e)));
+            .spawn((Pane, LastActivatedAt::new(2), ChildOf(tab_e)));
 
         app.update();
 
@@ -1658,14 +1705,14 @@ mod tests {
 
         let tab_e = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt::new(1)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(tab_e)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(tab_e)))
             .id();
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)));
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(pane)));
 
         app.update();
 
@@ -1826,7 +1873,7 @@ mod tests {
         let mut app = build_app_with_collector();
         let (_tab, pane, existing) = build_hierarchy(&mut app, "");
         app.world_mut().entity_mut(existing).insert((
-            LastActivatedAt(1),
+            LastActivatedAt::new(1),
             PageMetadata {
                 url: "vmux://services/".into(),
                 ..Default::default()
@@ -1836,7 +1883,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 PageMetadata {
                     url: "vmux://projects/".into(),
                     ..Default::default()
@@ -1862,8 +1909,15 @@ mod tests {
             2
         );
         assert!(
-            app.world().get::<LastActivatedAt>(existing).unwrap().0
-                > app.world().get::<LastActivatedAt>(active).unwrap().0
+            app.world()
+                .get::<LastActivatedAt>(existing)
+                .unwrap()
+                .milliseconds()
+                > app
+                    .world()
+                    .get::<LastActivatedAt>(active)
+                    .unwrap()
+                    .milliseconds()
         );
     }
 
@@ -1891,7 +1945,7 @@ mod tests {
         });
         let (_tab, pane, existing) = build_hierarchy(&mut app, "");
         app.world_mut().entity_mut(existing).insert((
-            LastActivatedAt(1),
+            LastActivatedAt::new(1),
             PageMetadata {
                 url: "git://repo-a?branch=feature".into(),
                 ..Default::default()
@@ -1901,7 +1955,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 PageMetadata {
                     url: "vmux://projects/".into(),
                     ..Default::default()
@@ -1920,8 +1974,15 @@ mod tests {
 
         assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
         assert!(
-            app.world().get::<LastActivatedAt>(existing).unwrap().0
-                > app.world().get::<LastActivatedAt>(active).unwrap().0
+            app.world()
+                .get::<LastActivatedAt>(existing)
+                .unwrap()
+                .milliseconds()
+                > app
+                    .world()
+                    .get::<LastActivatedAt>(active)
+                    .unwrap()
+                    .milliseconds()
         );
     }
 
@@ -1949,7 +2010,7 @@ mod tests {
         });
         let (_tab, pane, first) = build_hierarchy(&mut app, "");
         app.world_mut().entity_mut(first).insert((
-            LastActivatedAt(1),
+            LastActivatedAt::new(1),
             PageMetadata {
                 url: "git://repo-a".into(),
                 ..Default::default()
@@ -1959,7 +2020,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 PageMetadata {
                     url: "git://repo-b".into(),
                     ..Default::default()
@@ -1978,8 +2039,15 @@ mod tests {
 
         assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
         assert!(
-            app.world().get::<LastActivatedAt>(exact).unwrap().0
-                > app.world().get::<LastActivatedAt>(first).unwrap().0
+            app.world()
+                .get::<LastActivatedAt>(exact)
+                .unwrap()
+                .milliseconds()
+                > app
+                    .world()
+                    .get::<LastActivatedAt>(first)
+                    .unwrap()
+                    .milliseconds()
         );
     }
 
@@ -2113,7 +2181,7 @@ mod tests {
             .spawn((
                 Tab::default(),
                 vmux_ecs::Active,
-                LastActivatedAt(100),
+                LastActivatedAt::new(100),
                 ChildOf(space_a),
             ))
             .id();
@@ -2126,7 +2194,7 @@ mod tests {
             .spawn((
                 Tab::default(),
                 vmux_ecs::Active,
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(space_b),
             ))
             .id();
@@ -2150,7 +2218,7 @@ mod tests {
             .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)));
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(5), ChildOf(main)))
+            .spawn((Tab::default(), LastActivatedAt::new(5), ChildOf(main)))
             .id();
 
         let got = app

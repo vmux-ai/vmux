@@ -401,25 +401,38 @@ mod tests {
             .entity_mut(left)
             .insert(LastActivatedAt::now());
 
-        let previous_top = fixture.app.world().get::<LastActivatedAt>(top).unwrap().0;
+        let previous_top = fixture
+            .app
+            .world()
+            .get::<LastActivatedAt>(top)
+            .unwrap()
+            .milliseconds();
         let previous_bottom = fixture
             .app
             .world()
             .get::<LastActivatedAt>(bottom)
             .unwrap()
-            .0;
+            .milliseconds();
         assert!(previous_top > previous_bottom);
 
         fixture.select(PaneDirection::Right);
 
-        assert!(fixture.app.world().get::<LastActivatedAt>(top).unwrap().0 > previous_top);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(top)
+                .unwrap()
+                .milliseconds()
+                > previous_top
+        );
         assert_eq!(
             fixture
                 .app
                 .world()
                 .get::<LastActivatedAt>(bottom)
                 .unwrap()
-                .0,
+                .milliseconds(),
             previous_bottom
         );
     }
@@ -462,22 +475,35 @@ mod tests {
             .app
             .world_mut()
             .entity_mut(left)
-            .insert(LastActivatedAt(1));
+            .insert(LastActivatedAt::new(1));
         fixture
             .app
             .world_mut()
             .entity_mut(top)
-            .insert(LastActivatedAt(10));
+            .insert(LastActivatedAt::new(10));
         fixture
             .app
             .world_mut()
             .entity_mut(bottom)
-            .insert(LastActivatedAt(0));
-        let previous_left = fixture.app.world().get::<LastActivatedAt>(left).unwrap().0;
+            .insert(LastActivatedAt::new(1));
+        let previous_left = fixture
+            .app
+            .world()
+            .get::<LastActivatedAt>(left)
+            .unwrap()
+            .milliseconds();
 
         fixture.select(PaneDirection::Left);
 
-        assert!(fixture.app.world().get::<LastActivatedAt>(left).unwrap().0 > previous_left);
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(left)
+                .unwrap()
+                .milliseconds()
+                > previous_left
+        );
     }
 
     #[test]
@@ -511,8 +537,18 @@ mod tests {
 
         fixture.select(PaneDirection::Left);
 
-        let left_activity = fixture.app.world().get::<LastActivatedAt>(left).unwrap().0;
-        let right_activity = fixture.app.world().get::<LastActivatedAt>(right).unwrap().0;
+        let left_activity = fixture
+            .app
+            .world()
+            .get::<LastActivatedAt>(left)
+            .unwrap()
+            .milliseconds();
+        let right_activity = fixture
+            .app
+            .world()
+            .get::<LastActivatedAt>(right)
+            .unwrap()
+            .milliseconds();
         assert!(left_activity > right_activity);
     }
 
@@ -528,7 +564,7 @@ mod tests {
                 .world()
                 .get::<LastActivatedAt>(fixture.left)
                 .unwrap()
-                .0
+                .milliseconds()
                 > 10
         );
         assert!(
@@ -537,7 +573,7 @@ mod tests {
                 .world()
                 .get::<LastActivatedAt>(fixture.left_stack)
                 .unwrap()
-                .0
+                .milliseconds()
                 > 1
         );
     }
@@ -559,7 +595,7 @@ mod tests {
                 .world()
                 .get::<LastActivatedAt>(fixture.left)
                 .unwrap()
-                .0,
+                .milliseconds(),
             1
         );
         assert_eq!(
@@ -568,7 +604,7 @@ mod tests {
                 .world()
                 .get::<LastActivatedAt>(fixture.left_stack)
                 .unwrap()
-                .0,
+                .milliseconds(),
             1
         );
     }
@@ -603,7 +639,7 @@ mod tests {
             let tab = fixture
                 .app
                 .world_mut()
-                .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+                .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(root)))
                 .id();
             let row = fixture
                 .app
@@ -622,12 +658,12 @@ mod tests {
                 .app
                 .world_mut()
                 .entity_mut(left)
-                .insert(LastActivatedAt(1));
+                .insert(LastActivatedAt::new(1));
             fixture
                 .app
                 .world_mut()
                 .entity_mut(right)
-                .insert(LastActivatedAt(10));
+                .insert(LastActivatedAt::new(10));
             let left_stack = fixture
                 .app
                 .world()
@@ -640,7 +676,7 @@ mod tests {
                 .app
                 .world_mut()
                 .entity_mut(left_stack)
-                .insert(LastActivatedAt(1));
+                .insert(LastActivatedAt::new(1));
 
             Self {
                 app: fixture.app,

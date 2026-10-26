@@ -163,9 +163,7 @@ fn present(
         };
         let target_pane =
             placement.resolve_spiral(agent_pane, TerminalPlugin::URL, false, &mut split_batch);
-        let tab = commands
-            .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
-            .id();
+        let tab = commands.spawn((Stack::bundle(), ChildOf(target_pane))).id();
         commands.spawn((
             ReattachedTerminalBundle::new(request.process_id),
             RetainOnProcessExit,
@@ -748,14 +746,11 @@ fn respond_stack_spawn(
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let stack_ts = if request.activate {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
-        let stack = commands
-            .spawn((Stack::bundle(), stack_ts, ChildOf(request.pane)))
-            .id();
+        let mut stack = commands.spawn((Stack::bundle(), ChildOf(request.pane)));
+        if request.activate {
+            stack.insert(LastActivatedAt::now());
+        }
+        let stack = stack.id();
         let title = request
             .cwd
             .as_ref()
@@ -2081,7 +2076,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::bundle(),
-                LastActivatedAt(10),
+                LastActivatedAt::new(10),
                 ChildOf(pane),
                 EntityTarget::<Session>::new(session),
             ))
@@ -2095,17 +2090,20 @@ mod tests {
 
         let stack_times = {
             let world = app.world_mut();
-            let mut query = world.query_filtered::<(Entity, &LastActivatedAt), With<Stack>>();
+            let mut query =
+                world.query_filtered::<(Entity, Option<&LastActivatedAt>), With<Stack>>();
             query
                 .iter(world)
-                .map(|(entity, activated)| (entity, activated.0))
+                .map(|(entity, activated)| {
+                    (entity, activated.map(|activated| activated.milliseconds()))
+                })
                 .collect::<Vec<_>>()
         };
         assert_eq!(
             stack_times
                 .iter()
                 .find(|(entity, _)| *entity == owner)
-                .map(|(_, activated)| *activated),
+                .and_then(|(_, activated)| *activated),
             Some(10)
         );
         assert_eq!(
@@ -2113,7 +2111,7 @@ mod tests {
                 .iter()
                 .find(|(entity, _)| *entity != owner)
                 .map(|(_, activated)| *activated),
-            Some(0)
+            Some(None)
         );
     }
 
@@ -2134,7 +2132,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::bundle(),
-                LastActivatedAt(10),
+                LastActivatedAt::new(10),
                 ChildOf(pane),
                 EntityTarget::<Session>::new(session),
             ))

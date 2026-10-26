@@ -154,7 +154,13 @@ fn restore_views(layout: PersistedLayout, mut commands: Commands) {
     let mut tabs = layout
         .tabs
         .iter()
-        .map(|(entity, order, created)| (entity, order.map(|order| order.0), created.map(|v| v.0)))
+        .map(|(entity, order, created)| {
+            (
+                entity,
+                order.map(|order| order.0),
+                created.map(|value| value.milliseconds()),
+            )
+        })
         .collect::<Vec<_>>();
     tabs.sort_by_key(|(_, order, created)| (order.unwrap_or(u32::MAX), created.unwrap_or(0)));
     for (tab, _, _) in tabs {

@@ -110,8 +110,9 @@ impl ResumeCatalog<'_, '_> {
             {
                 continue;
             }
-            let age_seconds = now.saturating_sub(activated.0.max(0)).max(0) as u64 / 1_000;
-            let updated_at = chrono::DateTime::from_timestamp_millis(activated.0)
+            let activated = activated.milliseconds();
+            let age_seconds = now.saturating_sub(activated.max(0)).max(0) as u64 / 1_000;
+            let updated_at = chrono::DateTime::from_timestamp_millis(activated)
                 .map(|timestamp| {
                     timestamp
                         .with_timezone(&chrono::Local)
@@ -120,7 +121,7 @@ impl ResumeCatalog<'_, '_> {
                 })
                 .unwrap_or_default();
             sessions.push((
-                activated.0,
+                activated,
                 ResumableSessionEntry {
                     kind: "session".to_string(),
                     sid: id.as_str().to_string(),
@@ -224,7 +225,7 @@ fn prompt_history(
     let mut matching = sessions
         .iter()
         .filter(|(_, cwd, agent, _)| agent.0 == request.agent && cwd.0.as_path() == requested_cwd)
-        .map(|(entity, _, _, activated)| (activated.0, entity))
+        .map(|(entity, _, _, activated)| (activated.milliseconds(), entity))
         .collect::<Vec<_>>();
     matching.sort_by_key(|(activated, _)| *activated);
     let mut prompts = Vec::new();
@@ -354,7 +355,7 @@ mod tests {
                 Name::new("Repair resume"),
                 Description("Restore delegated session requests".into()),
                 Cwd("/work/vmux".into()),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 AgentId("codex".into()),
             ))
             .id()
@@ -377,7 +378,7 @@ mod tests {
             vmux_api::session::MemberId::local(&session_id),
             vmux_session::Sequence(1),
             vmux_session::MessageContent(vmux_api::session::Message::user("First prompt")),
-            vmux_ecs::CreatedAt(3),
+            vmux_ecs::CreatedAt::new(3),
             ChildOf(session),
         ));
 

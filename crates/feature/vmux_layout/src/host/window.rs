@@ -671,9 +671,9 @@ fn spawn_requested_tab_layouts(
             StartupDir(startup_dir),
         ));
         if !request.focus {
-            commands.entity(tab_e).insert(LastActivatedAt(0));
-            commands.entity(leaf).insert(LastActivatedAt(0));
-            commands.entity(stack).insert(LastActivatedAt(0));
+            commands.entity(tab_e).remove::<LastActivatedAt>();
+            commands.entity(leaf).remove::<LastActivatedAt>();
+            commands.entity(stack).remove::<LastActivatedAt>();
         }
         match &request.content {
             TabLayoutSpawnContent::StartupUrlOrPrompt => {

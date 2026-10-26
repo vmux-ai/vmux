@@ -751,7 +751,7 @@ impl SpaceGraph<'_, '_> {
             .tabs
             .iter()
             .filter(|(_, _, _, parent)| parent.parent() == space)
-            .max_by_key(|(_, _, timestamp, _)| timestamp.0)
+            .max_by_key(|(_, _, timestamp, _)| timestamp.milliseconds())
         {
             commands.entity(tab).insert(LastActivatedAt::now());
         }

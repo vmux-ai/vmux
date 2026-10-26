@@ -435,7 +435,7 @@ fn archive_tab(
             .get(*stack)
             .ok()
             .and_then(|(_, _, _, activated)| activated)
-            .map(|activated| activated.0)
+            .map(|activated| activated.milliseconds())
             .unwrap_or_default()
     });
     let group_id = uuid::Uuid::new_v4().to_string();
@@ -735,7 +735,6 @@ fn restore_archived_tab(
             .spawn((
                 Pane::split_bundle(PaneSplitDirection::Row),
                 PaneId(root_id.clone()),
-                LastActivatedAt(0),
                 HostWindow(primary_window),
                 ChildOf(tab),
             ))
@@ -743,12 +742,7 @@ fn restore_archived_tab(
         pane_entities.insert(root_id, root);
         let leaf_id = uuid::Uuid::new_v4().to_string();
         let leaf = commands
-            .spawn((
-                Pane::bundle(),
-                PaneId(leaf_id.clone()),
-                LastActivatedAt(0),
-                ChildOf(root),
-            ))
+            .spawn((Pane::bundle(), PaneId(leaf_id.clone()), ChildOf(root)))
             .id();
         pane_entities.insert(leaf_id.clone(), leaf);
         leaf_entities.insert(leaf_id, leaf);
@@ -775,14 +769,11 @@ fn restore_archived_tab(
             continue;
         };
         let active = entry.entity == active_entry;
-        let stack = commands
-            .spawn((
-                Stack::bundle(),
-                LastActivatedAt(if active { UnixMillis::now().0 } else { 0 }),
-                CreatedAt::now(),
-                ChildOf(leaf),
-            ))
-            .id();
+        let mut stack = commands.spawn((Stack::bundle(), CreatedAt::now(), ChildOf(leaf)));
+        if active {
+            stack.insert(LastActivatedAt::now());
+        }
+        let stack = stack.id();
         commands.entity(stack).insert(PageMetadata {
             url: entry.page.url.clone(),
             title: entry.page.title.clone(),
@@ -870,7 +861,6 @@ fn spawn_archived_split(
         .spawn((
             Pane::split_bundle(direction),
             PaneId(id.to_string()),
-            LastActivatedAt(0),
             ChildOf(parent),
         ))
         .id();
@@ -900,12 +890,7 @@ fn spawn_archived_split(
             }
             ArchivedPaneChild::Leaf(child_id) => {
                 let leaf = commands
-                    .spawn((
-                        Pane::bundle(),
-                        PaneId(child_id.clone()),
-                        LastActivatedAt(0),
-                        ChildOf(entity),
-                    ))
+                    .spawn((Pane::bundle(), PaneId(child_id.clone()), ChildOf(entity)))
                     .id();
                 commands.entity(leaf).insert(PaneSize { flex_grow });
                 pane_entities.insert(child_id.clone(), leaf);
@@ -1464,14 +1449,14 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
             .spawn((
                 Pane,
                 PaneId("leaf".to_string()),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(tab),
             ))
             .id();
@@ -1483,7 +1468,7 @@ mod tests {
                     url: "https://inactive.example".to_string(),
                     ..default()
                 },
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(pane),
             ))
             .id();
@@ -1495,7 +1480,7 @@ mod tests {
                     url: "https://active.example".to_string(),
                     ..default()
                 },
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 ChildOf(pane),
             ))
             .id();
@@ -1559,12 +1544,12 @@ mod tests {
             .spawn((Space, SpaceId("s1".to_string()), Active))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)));
+            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)));
         let tab = app
             .world_mut()
             .spawn((
                 Tab::named("Work").with_startup_dir("/tmp/work"),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 Active,
                 ChildOf(space),
             ))
@@ -1604,7 +1589,7 @@ mod tests {
                 url: "https://left.example".to_string(),
                 ..default()
             },
-            LastActivatedAt(3),
+            LastActivatedAt::new(3),
             ChildOf(left),
         ));
         app.world_mut().spawn((
@@ -1613,13 +1598,13 @@ mod tests {
                 url: "https://right.example".to_string(),
                 ..default()
             },
-            LastActivatedAt(4),
+            LastActivatedAt::new(4),
             ChildOf(right),
         ));
         app.world_mut().spawn((
             Stack::default(),
             PageMetadata::default(),
-            LastActivatedAt(2),
+            LastActivatedAt::new(2),
             ChildOf(left),
         ));
         app.world_mut()
@@ -1701,11 +1686,16 @@ mod tests {
             ))));
         let first = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), Active, ChildOf(space)))
+            .spawn((
+                Tab::default(),
+                LastActivatedAt::new(2),
+                Active,
+                ChildOf(space),
+            ))
             .id();
         let second = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
             .id();
         app.world_mut()
             .resource_mut::<Messages<CloseTabRequest>>()
@@ -1871,7 +1861,7 @@ mod tests {
         assert!(
             app.world()
                 .get::<LastActivatedAt>(root)
-                .is_some_and(|activated| activated.0 > 0)
+                .is_some_and(|activated| activated.milliseconds() > 0)
         );
         for (leaf_id, expected_urls) in [
             (
@@ -1909,7 +1899,7 @@ mod tests {
                 assert!(
                     app.world()
                         .get::<LastActivatedAt>(leaf)
-                        .is_some_and(|activated| activated.0 > 0)
+                        .is_some_and(|activated| activated.milliseconds() > 0)
                 );
                 let active_stack = app
                     .world()
@@ -1925,7 +1915,7 @@ mod tests {
                 assert!(
                     app.world()
                         .get::<LastActivatedAt>(active_stack)
-                        .is_some_and(|activated| activated.0 > 0)
+                        .is_some_and(|activated| activated.milliseconds() > 0)
                 );
             }
         }
@@ -1933,7 +1923,7 @@ mod tests {
             app.world_mut()
                 .query::<(&Stack, &LastActivatedAt)>()
                 .iter(app.world())
-                .filter(|(_, activated)| activated.0 > 0)
+                .filter(|(_, activated)| activated.milliseconds() > 0)
                 .count(),
             1
         );

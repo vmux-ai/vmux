@@ -139,6 +139,7 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins((ToolRegistryPlugin, CommandToolPlugin));
+            app.finish();
             app.update();
             app
         }

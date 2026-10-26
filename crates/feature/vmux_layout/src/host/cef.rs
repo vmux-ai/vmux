@@ -447,8 +447,8 @@ mod url_mirror_tests {
                 ..default()
             },
             VisitCount(1),
-            LastVisitedAt(0),
-            CreatedAt(0),
+            LastVisitedAt::new(1),
+            CreatedAt::new(1),
         ));
 
         app.world_mut().spawn(PageMetadata {
@@ -488,8 +488,8 @@ mod url_mirror_tests {
                 ..default()
             },
             VisitCount(1),
-            LastVisitedAt(0),
-            CreatedAt(0),
+            LastVisitedAt::new(1),
+            CreatedAt::new(1),
         ));
 
         app.world_mut().spawn(PageMetadata {

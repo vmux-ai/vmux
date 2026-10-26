@@ -100,21 +100,39 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(PrimitivesPlugin);
 
-        let root = app.world_mut().spawn(LastActivatedAt(1)).id();
+        let root = app.world_mut().spawn(LastActivatedAt::new(1)).id();
         let child = app
             .world_mut()
-            .spawn((LastActivatedAt(1), ChildOf(root)))
+            .spawn((LastActivatedAt::new(1), ChildOf(root)))
             .id();
         let leaf = app
             .world_mut()
-            .spawn((LastActivatedAt(1), ChildOf(child)))
+            .spawn((LastActivatedAt::new(1), ChildOf(child)))
             .id();
 
         app.world_mut().trigger(ActivateRequest { entity: leaf });
         app.update();
 
-        assert!(app.world().get::<LastActivatedAt>(root).unwrap().0 > 1);
-        assert!(app.world().get::<LastActivatedAt>(child).unwrap().0 > 1);
-        assert!(app.world().get::<LastActivatedAt>(leaf).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(root)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(child)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(leaf)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 }

@@ -1637,7 +1637,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt::new(1)))
             .id();
         let browser_pane = app
             .world_mut()
@@ -1769,15 +1769,15 @@ mod tests {
             .add_systems(Update, focus_reused_run);
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt::new(1)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, SpawnSeq(7), LastActivatedAt(2), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(7), LastActivatedAt::new(2), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(3), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::new(3), ChildOf(pane)))
             .id();
         app.insert_resource(ReusedRunTerminalFocusInput {
             candidate: RunTerminalCandidate {
@@ -1791,9 +1791,27 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get::<LastActivatedAt>(tab).unwrap().0 > 1);
-        assert!(app.world().get::<LastActivatedAt>(pane).unwrap().0 > 2);
-        assert!(app.world().get::<LastActivatedAt>(stack).unwrap().0 > 3);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(tab)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(pane)
+                .unwrap()
+                .milliseconds()
+                > 2
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(stack)
+                .unwrap()
+                .milliseconds()
+                > 3
+        );
     }
 
     #[test]

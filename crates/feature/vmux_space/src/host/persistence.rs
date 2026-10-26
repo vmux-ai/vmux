@@ -773,8 +773,8 @@ mod tests {
                     bg_color: None,
                 },
                 vmux_ecs::VisitCount(3),
-                vmux_ecs::LastVisitedAt(1000),
-                vmux_ecs::CreatedAt(500),
+                vmux_ecs::LastVisitedAt::new(1000),
+                vmux_ecs::CreatedAt::new(500),
             ))
             .id();
 
@@ -782,7 +782,7 @@ mod tests {
             Save,
             vmux_ecs::Visit,
             vmux_ecs::VisitedUrl(url_e),
-            vmux_ecs::CreatedAt(900),
+            vmux_ecs::CreatedAt::new(900),
             vmux_ecs::TransitionType::Typed,
         ));
 
@@ -834,8 +834,8 @@ mod tests {
             .find(|(vc, _, _)| vc.0 == 3)
             .expect("Url entity fields not round-tripped");
         assert_eq!(vc.0, 3);
-        assert_eq!(lva.0, 1000);
-        assert_eq!(ca.0, 500);
+        assert_eq!(lva.milliseconds(), 1000);
+        assert_eq!(ca.milliseconds(), 500);
 
         let tt = app_load
             .world_mut()

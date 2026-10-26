@@ -155,7 +155,7 @@ mod tests {
                     url: url.into(),
                     ..default()
                 },
-                LastActivatedAt(activated),
+                LastActivatedAt::new(activated),
                 ChildOf(pane),
             ))
             .id()

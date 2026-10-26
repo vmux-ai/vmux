@@ -402,6 +402,7 @@ mod tests {
                 .init_resource::<PanelRequests>()
                 .add_observer(FindRequests::record)
                 .add_observer(PanelRequests::record);
+            app.finish();
             app
         }
 
@@ -457,6 +458,7 @@ mod tests {
                 .add_message::<FileStatusPicked>()
                 .init_resource::<Reopened>()
                 .add_observer(Reopened::record);
+            app.finish();
             app
         }
 

@@ -1654,11 +1654,16 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let old_tab = app
             .world_mut()
-            .spawn((Tab::default(), Active, LastActivatedAt(1), ChildOf(space)))
+            .spawn((
+                Tab::default(),
+                Active,
+                LastActivatedAt::new(1),
+                ChildOf(space),
+            ))
             .id();
         let active_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(10), ChildOf(space)))
+            .spawn((Tab::default(), LastActivatedAt::new(10), ChildOf(space)))
             .id();
         let file_pane = place_pane_with_url(
             &mut app,
@@ -1686,9 +1691,18 @@ mod tests {
             });
         app.update();
 
-        assert_eq!(app.world().get::<LastActivatedAt>(old_tab).unwrap().0, 1);
         assert_eq!(
-            app.world().get::<LastActivatedAt>(active_tab).unwrap().0,
+            app.world()
+                .get::<LastActivatedAt>(old_tab)
+                .unwrap()
+                .milliseconds(),
+            1
+        );
+        assert_eq!(
+            app.world()
+                .get::<LastActivatedAt>(active_tab)
+                .unwrap()
+                .milliseconds(),
             10
         );
     }
@@ -2511,7 +2525,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt::new(1)))
             .id();
         let split_root = app
             .world_mut()
@@ -2528,12 +2542,12 @@ mod tests {
             .spawn((
                 Pane,
                 Node::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 ChildOf(split_root),
             ))
             .id();
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(left)));
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(left)));
         let right_split = app
             .world_mut()
             .spawn((
@@ -2549,7 +2563,7 @@ mod tests {
             .spawn((
                 Pane,
                 Node::default(),
-                LastActivatedAt(4),
+                LastActivatedAt::new(4),
                 ChildOf(right_split),
             ))
             .id();
@@ -2558,14 +2572,20 @@ mod tests {
             .spawn((
                 Pane,
                 Node::default(),
-                LastActivatedAt(3),
+                LastActivatedAt::new(3),
                 ChildOf(right_split),
             ))
             .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(4), ChildOf(right_top)));
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(right_bot)));
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt::new(4),
+            ChildOf(right_top),
+        ));
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt::new(3),
+            ChildOf(right_bot),
+        ));
         app.world_mut()
             .resource_mut::<Messages<ToggleZoomRequest>>()
             .write(ToggleZoomRequest);
@@ -2624,7 +2644,7 @@ mod tests {
     fn build_pre_split(app: &mut App) -> (Entity, Entity, Entity, Entity) {
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt::new(1)))
             .id();
         let split = app
             .world_mut()
@@ -2644,16 +2664,16 @@ mod tests {
             .id();
         let left = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(10), ChildOf(split)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(10), ChildOf(split)))
             .id();
         let right = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(5), ChildOf(split)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(5), ChildOf(split)))
             .id();
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(10), ChildOf(left)));
+            .spawn((Stack::default(), LastActivatedAt::new(10), ChildOf(left)));
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(5), ChildOf(right)));
+            .spawn((Stack::default(), LastActivatedAt::new(5), ChildOf(right)));
         (tab, split, left, right)
     }
     #[test]
@@ -2725,11 +2745,14 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut stacks = world.query_filtered::<&LastActivatedAt, With<Stack>>();
-        let unactivated = stacks.iter(world).filter(|la| la.0 == 0).count();
+        let mut stacks = world.query_filtered::<Option<&LastActivatedAt>, With<Stack>>();
+        let unactivated = stacks
+            .iter(world)
+            .filter(|activated| activated.is_none())
+            .count();
         assert_eq!(
             unactivated, 1,
-            "focus:false leaves exactly the new stack un-activated (ts 0) so focus stays put"
+            "focus:false leaves exactly the new stack without activation so focus stays put"
         );
     }
 

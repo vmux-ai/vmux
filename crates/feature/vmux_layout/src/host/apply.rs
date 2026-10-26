@@ -293,7 +293,10 @@ impl LayoutWriter<'_, '_> {
                 Some(id) => match NodeKind::parse_id(id) {
                     Ok((_, value)) => {
                         let entity = Entity::from_bits(value);
-                        let activated_at = self.activated.get(entity).map_or(0, |value| value.0);
+                        let activated_at = self
+                            .activated
+                            .get(entity)
+                            .map_or(0, |value| value.milliseconds());
                         (entity, activated_at)
                     }
                     Err(_) => continue,
@@ -312,7 +315,7 @@ impl LayoutWriter<'_, '_> {
                             .entity(entity)
                             .insert(Name::new(tab.name.clone()));
                     }
-                    (entity, activated_at.0)
+                    (entity, activated_at.milliseconds())
                 }
             };
             self.materialize(tab_entity, true, &tab.root, &mut new_entities);
@@ -333,7 +336,7 @@ impl LayoutWriter<'_, '_> {
                 .unwrap_or(0);
             self.commands
                 .entity(*active_entity)
-                .insert(LastActivatedAt(newest + 1));
+                .insert(LastActivatedAt::new(newest + 1));
         }
         let rescued: ApplyHashSet<String> = new_entities
             .iter()
@@ -1199,7 +1202,7 @@ mod tests {
             .add_message::<PageOpenRequest>();
         let active_tab = app
             .world_mut()
-            .spawn((LayoutTab::named("A"), LastActivatedAt(1)))
+            .spawn((LayoutTab::named("A"), LastActivatedAt::new(1)))
             .id();
         let active_pane = app.world_mut().spawn((Pane, ChildOf(active_tab))).id();
 
@@ -1238,7 +1241,10 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<(Entity, &LastActivatedAt), With<LayoutTab>>();
-        let ts: Vec<(Entity, i64)> = q.iter(app.world()).map(|(e, l)| (e, l.0)).collect();
+        let ts: Vec<(Entity, i64)> = q
+            .iter(app.world())
+            .map(|(entity, activated)| (entity, activated.milliseconds()))
+            .collect();
         let active_ts = ts
             .iter()
             .find(|(e, _)| *e == active_tab)

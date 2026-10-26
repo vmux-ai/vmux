@@ -193,15 +193,23 @@ pub struct StageId(pub String);
 #[type_path = "vmux_session"]
 pub struct Stage(pub StageId);
 
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct StageChangedAt(pub i64);
+pub struct StageChangedAt(UnixMillis);
 
 impl StageChangedAt {
-    fn record_transition(&mut self, now: i64) {
-        self.0 = now.max(self.0.saturating_add(1));
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
+    }
+
+    fn record_transition(&mut self, now: UnixMillis) {
+        self.0 = now.max(UnixMillis(self.0.0.saturating_add(1)));
     }
 }
 
@@ -642,10 +650,10 @@ fn create(
             Name::new(request.name.clone()),
             Description(request.description.clone()),
             Cwd(request.cwd.clone()),
-            CreatedAt(created_at),
-            LastActivatedAt(activated_at),
+            CreatedAt::new(created_at),
+            LastActivatedAt::new(activated_at),
             Stage(configuration.default_stage.clone()),
-            StageChangedAt(activated_at),
+            StageChangedAt::new(activated_at),
         ));
         if let Some(agent) = request.agent.clone() {
             session.insert(agent);
@@ -783,7 +791,7 @@ fn change_stage(
         for (id, mut stage, mut changed_at) in &mut sessions {
             if id == &request.id && stage.0 != request.stage {
                 stage.0.clone_from(&request.stage);
-                changed_at.record_transition(UnixMillis::now().0);
+                changed_at.record_transition(UnixMillis::now());
             }
         }
     }
@@ -801,8 +809,8 @@ fn archive(
                 continue;
             }
             if let Some(archived_at) = request.archived_at.map(|value| value.max(1)) {
-                if current.is_none_or(|current| current.0 != archived_at) {
-                    commands.entity(entity).insert(ArchivedAt(archived_at));
+                if current.is_none_or(|current| current.milliseconds() != archived_at) {
+                    commands.entity(entity).insert(ArchivedAt::new(archived_at));
                 }
             } else if current.is_some() {
                 commands.entity(entity).remove::<ArchivedAt>();
@@ -859,7 +867,9 @@ fn archive_provider(
                     .insert(RemoteUpdatedAt(UnixMillis(request.source_updated_at)));
             }
             if request.archived && current_archived_at.is_none() {
-                commands.entity(entity).insert(ArchivedAt(next_archived_at));
+                commands
+                    .entity(entity)
+                    .insert(ArchivedAt::new(next_archived_at));
             } else if !request.archived && current_archived_at.is_some() {
                 commands.entity(entity).remove::<ArchivedAt>();
             }
@@ -876,7 +886,7 @@ fn archive_provider(
                 RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
             ));
             if request.archived {
-                entity.insert(ArchivedAt(next_archived_at));
+                entity.insert(ArchivedAt::new(next_archived_at));
             }
         }
         if !request.native {
@@ -1039,7 +1049,7 @@ fn change_provider_stage(
         if !definitions.iter().any(|id| id == &request.stage) {
             continue;
         }
-        let now = UnixMillis::now().0;
+        let now = UnixMillis::now();
         let mut found = false;
         for (entity, provider, scope, kind, id, mut stage, mut changed_at, source_updated_at) in
             &mut stages
@@ -1306,8 +1316,12 @@ fn canonicalize_provider_sessions(
                     Some(crate::RunState::Streaming | crate::RunState::AwaitingApproval { .. })
                 ),
                 targeted: targeted.contains(&entity),
-                activated_at: activated_at.map(|value| value.0).unwrap_or_default(),
-                stage_changed_at: stage_changed_at.map(|value| value.0).unwrap_or_default(),
+                activated_at: activated_at
+                    .map(|value| value.milliseconds())
+                    .unwrap_or_default(),
+                stage_changed_at: stage_changed_at
+                    .map(|value| value.milliseconds())
+                    .unwrap_or_default(),
             });
     }
     let mut expected = HashMap::<Entity, Entity>::new();
@@ -1442,8 +1456,8 @@ mod tests {
             .world_mut()
             .query_filtered::<(&CreatedAt, &LastActivatedAt), With<Session>>();
         let (created, activated) = sessions.single(app.world()).unwrap();
-        assert_eq!(created.0, 100);
-        assert_eq!(activated.0, 200);
+        assert_eq!(created.milliseconds(), 100);
+        assert_eq!(activated.milliseconds(), 200);
     }
 
     #[test]
@@ -1488,7 +1502,13 @@ mod tests {
                 archived_at: Some(10),
             });
         app.update();
-        assert_eq!(app.world().get::<ArchivedAt>(session).unwrap().0, 10);
+        assert_eq!(
+            app.world()
+                .get::<ArchivedAt>(session)
+                .unwrap()
+                .milliseconds(),
+            10
+        );
 
         app.world_mut()
             .resource_mut::<Messages<ArchiveRequest>>()
@@ -1510,7 +1530,7 @@ mod tests {
                 Session,
                 Id::<Session>::new("session-1"),
                 Stage(StageId("in_progress".into())),
-                StageChangedAt(1),
+                StageChangedAt::new(1),
             ))
             .id();
         app.update();
@@ -1526,7 +1546,13 @@ mod tests {
             app.world().get::<Stage>(session).unwrap().0.0,
             "in_progress"
         );
-        assert_eq!(app.world().get::<StageChangedAt>(session).unwrap().0, 1);
+        assert_eq!(
+            app.world()
+                .get::<StageChangedAt>(session)
+                .unwrap()
+                .milliseconds(),
+            1
+        );
 
         app.world_mut()
             .resource_mut::<Messages<StageChangeRequest>>()
@@ -1536,7 +1562,13 @@ mod tests {
             });
         app.update();
         assert_eq!(app.world().get::<Stage>(session).unwrap().0.0, "done");
-        assert!(app.world().get::<StageChangedAt>(session).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<StageChangedAt>(session)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]
@@ -1568,7 +1600,7 @@ mod tests {
         assert_eq!(scope.id().as_str(), "codex");
         assert_eq!(id.as_str(), "provider-session");
         assert_eq!(stage.0.0, "done");
-        assert!(changed_at.0 > 0);
+        assert!(changed_at.milliseconds() > 0);
 
         app.world_mut()
             .resource_mut::<Messages<ProviderStageChangeRequest>>()
@@ -1586,7 +1618,7 @@ mod tests {
         assert_eq!(updated, entity);
         assert_eq!(stage.0.0, "in_review");
 
-        app.world_mut().get_mut::<StageChangedAt>(entity).unwrap().0 = 1;
+        *app.world_mut().get_mut::<StageChangedAt>(entity).unwrap() = StageChangedAt::new(1);
         app.world_mut()
             .resource_mut::<Messages<ProviderStageChangeRequest>>()
             .write(ProviderStageChangeRequest {
@@ -1596,7 +1628,13 @@ mod tests {
             });
         app.update();
 
-        assert!(app.world().get::<StageChangedAt>(entity).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<StageChangedAt>(entity)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]
@@ -1662,7 +1700,7 @@ mod tests {
             .query_filtered::<(&RemoteUpdatedAt, &ArchivedAt), With<ProviderArchive>>();
         let (source_updated_at, archived_at) = overrides.single(app.world()).unwrap();
         assert_eq!(source_updated_at.0.0, 40);
-        assert_eq!(archived_at.0, 40);
+        assert_eq!(archived_at.milliseconds(), 40);
         let writes = app
             .world_mut()
             .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
@@ -1795,7 +1833,10 @@ mod tests {
     fn activating_a_session_view_updates_the_session_timestamp() {
         let mut app = App::new();
         app.add_plugins(EntityPlugin);
-        let session = app.world_mut().spawn((Session, LastActivatedAt(1))).id();
+        let session = app
+            .world_mut()
+            .spawn((Session, LastActivatedAt::new(1)))
+            .id();
         let stack = app
             .world_mut()
             .spawn(EntityTarget::<Session>::new(session))
@@ -1803,7 +1844,13 @@ mod tests {
 
         app.world_mut().trigger(ActivateRequest { entity: stack });
 
-        assert!(app.world().get::<LastActivatedAt>(session).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(session)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]

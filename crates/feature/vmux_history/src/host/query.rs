@@ -93,9 +93,9 @@ impl HistoryEntries {
                         url: metadata.url.clone(),
                         title: metadata.title.clone(),
                         favicon_url: metadata.icon.favicon_url().to_string(),
-                        visit_created_at: created.0,
+                        visit_created_at: created.milliseconds(),
                         visit_count: count.0,
-                        last_visited_at: last.0,
+                        last_visited_at: last.milliseconds(),
                     });
                 }
                 entries.sort_by_key(|entry| std::cmp::Reverse(entry.visit_created_at));
@@ -104,7 +104,7 @@ impl HistoryEntries {
             Some(query) => {
                 let mut scored = Vec::new();
                 for (entity, metadata, count, last) in urls {
-                    let score = HistoryRank::new(count.0, last.0, now).score(
+                    let score = HistoryRank::new(count.0, last.milliseconds(), now).score(
                         query,
                         &metadata.url,
                         &metadata.title,
@@ -119,9 +119,9 @@ impl HistoryEntries {
                             url: metadata.url.clone(),
                             title: metadata.title.clone(),
                             favicon_url: metadata.icon.favicon_url().to_string(),
-                            visit_created_at: last.0,
+                            visit_created_at: last.milliseconds(),
                             visit_count: count.0,
-                            last_visited_at: last.0,
+                            last_visited_at: last.milliseconds(),
                         },
                     ));
                 }
@@ -291,8 +291,8 @@ mod handler_tests {
                     ..default()
                 },
                 VisitCount(2),
-                LastVisitedAt(200),
-                CreatedAt(0),
+                LastVisitedAt::new(200),
+                CreatedAt::new(1),
             ))
             .id();
 
@@ -303,11 +303,11 @@ mod handler_tests {
                 ..default()
             },
             VisitCount(2),
-            LastVisitedAt(200),
+            LastVisitedAt::new(200),
         )];
         let visit_rows = vec![
-            (CreatedAt(100), VisitedUrl(url_e)),
-            (CreatedAt(200), VisitedUrl(url_e)),
+            (CreatedAt::new(100), VisitedUrl(url_e)),
+            (CreatedAt::new(200), VisitedUrl(url_e)),
         ];
 
         let entries = HistoryEntries::build(&None, &url_rows, &visit_rows, 1000).0;
@@ -332,8 +332,8 @@ mod handler_tests {
                     ..default()
                 },
                 VisitCount(10),
-                LastVisitedAt(1000),
-                CreatedAt(0),
+                LastVisitedAt::new(1000),
+                CreatedAt::new(1),
             ))
             .id();
 
@@ -347,8 +347,8 @@ mod handler_tests {
                     ..default()
                 },
                 VisitCount(10),
-                LastVisitedAt(1000),
-                CreatedAt(0),
+                LastVisitedAt::new(1000),
+                CreatedAt::new(1),
             ))
             .id();
 
@@ -361,7 +361,7 @@ mod handler_tests {
                     ..default()
                 },
                 VisitCount(10),
-                LastVisitedAt(1000),
+                LastVisitedAt::new(1000),
             ),
             (
                 e2,
@@ -371,7 +371,7 @@ mod handler_tests {
                     ..default()
                 },
                 VisitCount(10),
-                LastVisitedAt(1000),
+                LastVisitedAt::new(1000),
             ),
         ];
         let visit_rows = vec![];
@@ -396,8 +396,8 @@ mod handler_tests {
                     ..default()
                 },
                 VisitCount(1),
-                LastVisitedAt(0),
-                CreatedAt(0),
+                LastVisitedAt::new(1),
+                CreatedAt::new(1),
             ))
             .id();
 
@@ -408,10 +408,10 @@ mod handler_tests {
                 ..default()
             },
             VisitCount(1),
-            LastVisitedAt(0),
+            LastVisitedAt::new(1),
         )];
         let visit_rows: Vec<_> = (0..5)
-            .map(|i| (CreatedAt(i * 100), VisitedUrl(url_e)))
+            .map(|i| (CreatedAt::new((i + 1) * 100), VisitedUrl(url_e)))
             .collect();
 
         let all = HistoryEntries::build(&None, &url_rows, &visit_rows, 1000).0;
