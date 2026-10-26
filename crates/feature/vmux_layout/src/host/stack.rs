@@ -1219,8 +1219,7 @@ mod tests {
         let space = app
             .world_mut()
             .spawn((
-                crate::space::Space,
-                crate::space::SpaceId("s1".to_string()),
+                crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("s1")),
                 vmux_ecs::Active,
             ))
             .id();
@@ -1614,7 +1613,7 @@ mod tests {
             .add_systems(Update, open_startup_url_if_no_stacks);
 
         app.world_mut().spawn((
-            crate::space::Space,
+            crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("space")),
             vmux_ecs::Active,
             vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
         ));
@@ -1759,7 +1758,7 @@ mod tests {
         let space = app
             .world_mut()
             .spawn((
-                crate::space::Space,
+                crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("space")),
                 crate::space::CurrentSpace,
                 vmux_ecs::Active,
                 vmux_ecs::EffectiveStartupUrl(startup_url.to_string()),

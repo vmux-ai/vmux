@@ -1095,6 +1095,8 @@ staying flat.
 Vmux-owned stable identities use `vmux_api::Id<T>` directly; domain names do not introduce
 parallel aliases such as `SessionId`. The shared `Session` identity tag also serves as the ECS
 marker, while `vmux_session` registers its required durable composition and owns every mutation.
+Spaces and Panes likewise carry `Id<Space>` and `Id<Pane>` directly. Tabs derive Space ownership
+from `ChildOf`; they do not copy a Space identity that could drift after rename or restore.
 Stored profiles use `Id<vmux_profile::Profile>`; layout focus uses `ActivePaneScope` because local
 and agent pane ownership is runtime routing state, not profile identity.
 Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,

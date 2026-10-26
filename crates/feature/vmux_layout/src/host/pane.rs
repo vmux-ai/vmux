@@ -2900,7 +2900,7 @@ mod tests {
     fn in_pane_new_split_without_url_opens_the_start_page() {
         let mut app = build_in_pane_app();
         app.world_mut().spawn((
-            crate::space::Space,
+            crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("space")),
             vmux_ecs::Active,
             vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
         ));

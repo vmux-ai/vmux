@@ -1085,9 +1085,10 @@ mod open_in_place_flow {
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
+                vmux_layout::space::Space::bundle(vmux_api::Id::<vmux_layout::space::Space>::new(
+                    "test",
+                )),
                 vmux_layout::space::CurrentSpace,
-                vmux_layout::space::SpaceId("test".to_string()),
                 vmux_ecs::Active,
             ))
             .id();
@@ -1120,9 +1121,10 @@ mod open_in_place_flow {
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
+                vmux_layout::space::Space::bundle(vmux_api::Id::<vmux_layout::space::Space>::new(
+                    "test",
+                )),
                 vmux_layout::space::CurrentSpace,
-                vmux_layout::space::SpaceId("test".to_string()),
                 vmux_ecs::Active,
             ))
             .id();
@@ -1157,9 +1159,10 @@ mod open_in_place_flow {
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
+                vmux_layout::space::Space::bundle(vmux_api::Id::<vmux_layout::space::Space>::new(
+                    "test",
+                )),
                 vmux_layout::space::CurrentSpace,
-                vmux_layout::space::SpaceId("test".to_string()),
                 vmux_ecs::Active,
             ))
             .id();

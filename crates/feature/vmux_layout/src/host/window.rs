@@ -13,6 +13,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_api::Id;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 use vmux_ecs::page::PageEmbedSet;
 use vmux_ecs::persistence::PersistenceAppExt;
@@ -318,7 +319,7 @@ impl WindowHierarchy<'_, '_> {
 fn setup_shells(
     windows: Query<(Entity, &Window, Has<NewWindowWorkspace>)>,
     roots: Query<&HostWindow, With<VmuxWindow>>,
-    spaces: Query<&crate::space::SpaceId, With<crate::space::Space>>,
+    spaces: Query<&Id<crate::space::Space>, With<crate::space::Space>>,
     sections: Query<&crate::side_sheet::SideSheetSectionsExpanded>,
     focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
@@ -326,7 +327,7 @@ fn setup_shells(
     settings: Res<LayoutSettings>,
 ) {
     let mut existing_space_ids: std::collections::HashSet<String> =
-        spaces.iter().map(|id| id.0.clone()).collect();
+        spaces.iter().map(|id| id.as_str().to_string()).collect();
     let mut next_space_number = existing_space_ids.len() + 1;
     for (window_entity, window, new_workspace) in &windows {
         if roots.iter().any(|root| root.0 == window_entity) {
@@ -507,13 +508,12 @@ fn spawn_new_window_workspace(
     expanded_sections: Option<crate::side_sheet::SideSheetSectionsExpanded>,
 ) {
     let mut space = commands.spawn((
-        crate::space::SpaceId(id.clone()),
+        crate::space::Space::bundle(Id::<crate::space::Space>::new(id.clone())),
         Name::new(name),
         Order(0),
         Active,
         EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
         LastActivatedAt::now(),
-        crate::space::Space::bundle(),
         ChildOf(main),
     ));
     if let Some(expanded_sections) = expanded_sections {
@@ -820,7 +820,12 @@ mod tests {
     #[test]
     fn scaffold_builds_tab_pane_stack_under_space() {
         let mut app = App::new();
-        let space = app.world_mut().spawn(crate::space::Space).id();
+        let space = app
+            .world_mut()
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "space",
+            )))
+            .id();
         let window = app.world_mut().spawn_empty().id();
         let result = {
             let world = app.world_mut();
@@ -1054,7 +1059,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
@@ -1090,7 +1098,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .entity_mut(space)
@@ -1125,7 +1136,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .entity_mut(space)
@@ -1153,7 +1167,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .resource_mut::<Messages<TabLayoutSpawnRequest>>()
@@ -1189,11 +1206,18 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let requested_space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("active")),
+                vmux_ecs::Active,
+                ChildOf(main),
+            ))
             .id();
         let later_space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("inactive")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .resource_mut::<Messages<TabLayoutSpawnRequest>>()
@@ -1249,7 +1273,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
@@ -1285,7 +1312,12 @@ mod tests {
 
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);
-        let space = app.world_mut().spawn(crate::space::Space).id();
+        let space = app
+            .world_mut()
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "space",
+            )))
+            .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
             vmux_ecs::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),

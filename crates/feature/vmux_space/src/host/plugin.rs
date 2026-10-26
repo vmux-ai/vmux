@@ -1,5 +1,6 @@
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
+use vmux_api::Id;
 #[cfg(test)]
 use vmux_command::CommandManifest;
 use vmux_command::{
@@ -20,8 +21,7 @@ use vmux_layout::projection::SpacesProjection;
 #[cfg(test)]
 use vmux_layout::space::CurrentSpace;
 use vmux_layout::space::{
-    CurrentSpaceSet, EffectiveStartupDir, EffectiveStartupSet, FocusedSpace, Space, SpaceId,
-    SpaceOfPane,
+    CurrentSpaceSet, EffectiveStartupDir, EffectiveStartupSet, FocusedSpace, Space, SpaceOfPane,
 };
 use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::state::UiLayout;
@@ -365,7 +365,7 @@ fn update_effective_startup(
     startup_page: StartupPageUrl,
     mut spaces: Query<
         (
-            Ref<SpaceId>,
+            Ref<Id<Space>>,
             &mut EffectiveStartupUrl,
             &mut EffectiveStartupDir,
         ),
@@ -378,7 +378,9 @@ fn update_effective_startup(
     for (id, mut effective_url, mut effective_dir) in &mut spaces {
         let next_url = settings
             .as_deref()
-            .map(|settings| settings.startup_url(&id.0, startup_page.get().unwrap_or_default()))
+            .map(|settings| {
+                settings.startup_url(id.as_str(), startup_page.get().unwrap_or_default())
+            })
             .unwrap_or_else(|| startup_page.get().unwrap_or_default().to_string());
         if effective_url.0 != next_url {
             effective_url.0 = next_url;
@@ -392,7 +394,7 @@ fn update_effective_startup(
         }
         let next = settings
             .as_deref()
-            .and_then(|settings| settings.startup_dir(&id.0));
+            .and_then(|settings| settings.startup_dir(id.as_str()));
         if effective_dir.0 != next {
             effective_dir.0 = next;
         }
@@ -525,7 +527,7 @@ type SpaceListQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static SpaceId,
+        &'static Id<Space>,
         &'static Name,
         Has<Active>,
         Option<&'static Order>,
@@ -556,8 +558,9 @@ impl SpaceRows<'_, '_> {
                         .count()
                 })
                 .unwrap_or_default() as u32;
-            if let Some((existing_order, row)) =
-                rows.iter_mut().find(|(_, existing)| existing.id == sid.0)
+            if let Some((existing_order, row)) = rows
+                .iter_mut()
+                .find(|(_, existing)| existing.id == sid.as_str())
             {
                 *existing_order =
                     (*existing_order).min(order.map(|order| order.0).unwrap_or(u32::MAX));
@@ -570,13 +573,13 @@ impl SpaceRows<'_, '_> {
             let startup_dir = self
                 .settings
                 .as_deref()
-                .and_then(|settings| settings.startup_dir(&sid.0))
+                .and_then(|settings| settings.startup_dir(sid.as_str()))
                 .map(|path| Self::display_dir(&path))
                 .unwrap_or_default();
             rows.push((
                 order.map(|order| order.0).unwrap_or(u32::MAX),
                 SpaceRow {
-                    id: sid.0.clone(),
+                    id: sid.as_str().to_string(),
                     name: name.to_string(),
                     profile: self.profile.label().unwrap_or("Personal").to_string(),
                     is_active: local && is_active,
@@ -664,7 +667,7 @@ fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
     active: FocusedSpace,
     space_of_pane: SpaceOfPane,
-    spaces: Query<&SpaceId, With<Space>>,
+    spaces: Query<&Id<Space>, With<Space>>,
     settings: Option<ResMut<AppSettings>>,
     mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
@@ -679,7 +682,7 @@ fn project_activate(
     };
     let changed = settings
         .bypass_change_detection()
-        .activate_space_project(&space_id.0, trigger.event().payload.path.trim());
+        .activate_space_project(space_id.as_str(), trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(SettingsSaveRequest);
@@ -718,7 +721,7 @@ type SpaceQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static SpaceId,
+        &'static Id<Space>,
         Has<Active>,
         Option<&'static Order>,
         &'static ChildOf,
@@ -726,17 +729,8 @@ type SpaceQuery<'w, 's> = Query<
     With<Space>,
 >;
 
-type SpaceTabQuery<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static SpaceId,
-        &'static LastActivatedAt,
-        &'static ChildOf,
-    ),
-    With<Tab>,
->;
+type SpaceTabQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static LastActivatedAt, &'static ChildOf), With<Tab>>;
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct SpaceGraph<'w, 's> {
@@ -747,11 +741,11 @@ struct SpaceGraph<'w, 's> {
 
 impl SpaceGraph<'_, '_> {
     fn bump_tab(&self, space: Entity, commands: &mut Commands) {
-        if let Some((tab, _, _, _)) = self
+        if let Some((tab, _, _)) = self
             .tabs
             .iter()
-            .filter(|(_, _, _, parent)| parent.parent() == space)
-            .max_by_key(|(_, _, timestamp, _)| timestamp.milliseconds())
+            .filter(|(_, _, parent)| parent.parent() == space)
+            .max_by_key(|(_, timestamp, _)| timestamp.milliseconds())
         {
             commands.entity(tab).insert(LastActivatedAt::now());
         }
@@ -812,10 +806,10 @@ impl SpaceViewTemplate {
     fn find(spaces: &SpaceListQuery, id: &str) -> Option<Self> {
         spaces
             .iter()
-            .filter(|(_, candidate, _, _, _, _, _)| candidate.0 == id)
+            .filter(|(_, candidate, _, _, _, _, _)| candidate.as_str() == id)
             .min_by_key(|(_, _, _, _, order, _, _)| order.map(|order| order.0).unwrap_or(u32::MAX))
             .map(|(_, id, name, _, order, _, _)| Self {
-                id: id.0.clone(),
+                id: id.as_str().to_string(),
                 name: name.to_string(),
                 order: order.map(|order| order.0).unwrap_or(u32::MAX),
             })
@@ -824,10 +818,10 @@ impl SpaceViewTemplate {
     fn first_other(spaces: &SpaceListQuery, excluded: &str) -> Option<Self> {
         spaces
             .iter()
-            .filter(|(_, candidate, _, _, _, _, _)| candidate.0 != excluded)
+            .filter(|(_, candidate, _, _, _, _, _)| candidate.as_str() != excluded)
             .min_by_key(|(_, _, _, _, order, _, _)| order.map(|order| order.0).unwrap_or(u32::MAX))
             .map(|(_, id, name, _, order, _, _)| Self {
-                id: id.0.clone(),
+                id: id.as_str().to_string(),
                 name: name.to_string(),
                 order: order.map(|order| order.0).unwrap_or(u32::MAX),
             })
@@ -835,12 +829,11 @@ impl SpaceViewTemplate {
 
     fn bundle(&self, main: Entity) -> impl Bundle {
         (
-            SpaceId(self.id.clone()),
+            Space::bundle(Id::<Space>::new(self.id.clone())),
             Name::new(self.name.clone()),
             Order(self.order),
             Active,
             LastActivatedAt::now(),
-            Space::bundle(),
             ChildOf(main),
         )
     }
@@ -883,32 +876,27 @@ fn rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut comma
     if !graph
         .spaces
         .iter()
-        .any(|(_, id, _, _, _)| id.0 == request.space_id)
+        .any(|(_, id, _, _, _)| id.as_str() == request.space_id)
     {
         return;
     }
     let existing: std::collections::HashSet<String> = graph
         .spaces
         .iter()
-        .filter(|(_, id, _, _, _)| id.0 != request.space_id)
-        .map(|(_, id, _, _, _)| id.0.clone())
+        .filter(|(_, id, _, _, _)| id.as_str() != request.space_id)
+        .map(|(_, id, _, _, _)| id.as_str().to_string())
         .collect();
     let new_id = SpaceRecord::unique_id(&existing, name);
     for (entity, id, _, _, _) in &graph.spaces {
-        if id.0 != request.space_id {
+        if id.as_str() != request.space_id {
             continue;
         }
         commands
             .entity(entity)
-            .insert((Name::new(new_id.clone()), SpaceId(new_id.clone())));
+            .insert((Name::new(new_id.clone()), Id::<Space>::new(new_id.clone())));
     }
     if new_id == request.space_id {
         return;
-    }
-    for (tab, id, _, _) in &graph.tabs {
-        if id.0 == request.space_id {
-            commands.entity(tab).insert(SpaceId(new_id.clone()));
-        }
     }
 }
 
@@ -991,7 +979,7 @@ fn delete(
     let logical_ids: std::collections::HashSet<&str> = graph
         .spaces
         .iter()
-        .map(|(_, id, _, _, _)| id.0.as_str())
+        .map(|(_, id, _, _, _)| id.as_str())
         .collect();
     if logical_ids.len() <= 1 {
         return;
@@ -1001,7 +989,7 @@ fn delete(
     };
     let mut affected_mains = Vec::new();
     for (entity, space_id, _, _, parent) in &graph.spaces {
-        if space_id.0 != id {
+        if space_id.as_str() != id {
             continue;
         }
         if !affected_mains.contains(&parent.parent()) {
@@ -1018,7 +1006,7 @@ fn delete(
             .spaces
             .iter()
             .filter(|(_, space_id, _, _, parent)| {
-                space_id.0 != id && parent.parent() == affected_main
+                space_id.as_str() != id && parent.parent() == affected_main
             })
             .min_by_key(|(_, _, _, order, _)| order.map(|order| order.0).unwrap_or(u32::MAX))
         {
@@ -1057,7 +1045,7 @@ fn attach(
     let local = graph
         .spaces
         .iter()
-        .find(|(_, space_id, _, _, parent)| space_id.0 == id && parent.parent() == main);
+        .find(|(_, space_id, _, _, parent)| space_id.as_str() == id && parent.parent() == main);
     let Some((entity, _, is_active, _, _)) = local else {
         let Some(template) = SpaceViewTemplate::find(&graph.rows, id) else {
             return;
@@ -1096,7 +1084,7 @@ fn create(
     let existing: std::collections::HashSet<String> = graph
         .spaces
         .iter()
-        .map(|(_, id, _, _, _)| id.0.clone())
+        .map(|(_, id, _, _, _)| id.as_str().to_string())
         .collect();
     let existing_names: std::collections::HashSet<String> = graph
         .rows
@@ -1121,12 +1109,11 @@ fn create(
     graph.deactivate_in_main(main, &mut commands);
     let space = commands
         .spawn((
-            SpaceId(id.clone()),
+            Space::bundle(Id::<Space>::new(id.clone())),
             Name::new(id.clone()),
             Order(order),
             Active,
             LastActivatedAt::now(),
-            Space::bundle(),
             ChildOf(main),
         ))
         .id();
@@ -1164,7 +1151,7 @@ fn handle_open_in_new(
         let existing: std::collections::HashSet<String> = graph
             .spaces
             .iter()
-            .map(|(_, sid, _, _, _)| sid.0.clone())
+            .map(|(_, sid, _, _, _)| sid.as_str().to_string())
             .collect();
         let existing_names: std::collections::HashSet<String> = graph
             .rows
@@ -1184,12 +1171,11 @@ fn handle_open_in_new(
         graph.deactivate_in_main(main, &mut commands);
         let space = commands
             .spawn((
-                SpaceId(id.clone()),
+                Space::bundle(Id::<Space>::new(id.clone())),
                 Name::new(id.clone()),
                 Order(order),
                 Active,
                 LastActivatedAt::now(),
-                Space::bundle(),
                 ChildOf(main),
             ))
             .id();
@@ -1390,21 +1376,19 @@ mod tests {
         let first_main = app.world_mut().spawn((Main, ChildOf(first_column))).id();
         let second_main = app.world_mut().spawn((Main, ChildOf(second_column))).id();
         app.world_mut().spawn((
-            SpaceId("shared".to_string()),
+            Space::bundle(Id::<Space>::new("shared")),
             Name::new("shared"),
             Order(0),
             Active,
-            Space::bundle(),
             ChildOf(first_main),
         ));
         let previous = app
             .world_mut()
             .spawn((
-                SpaceId("second".to_string()),
+                Space::bundle(Id::<Space>::new("second")),
                 Name::new("second"),
                 Order(0),
                 Active,
-                Space::bundle(),
                 ChildOf(second_main),
             ))
             .id();
@@ -1423,8 +1407,8 @@ mod tests {
             .query_filtered::<(Entity, &ChildOf, Has<Active>), With<Space>>()
             .iter(app.world())
             .filter_map(|(entity, parent, active)| {
-                let id = app.world().get::<SpaceId>(entity)?;
-                (id.0 == "shared").then_some((entity, parent.parent(), active))
+                let id = app.world().get::<Id<Space>>(entity)?;
+                (id.as_str() == "shared").then_some((entity, parent.parent(), active))
             })
             .collect();
         assert_eq!(shared_views.len(), 2);
@@ -1456,19 +1440,17 @@ mod tests {
         let second_main = app.world_mut().spawn((Main, ChildOf(second_root))).id();
         for main in [first_main, second_main] {
             app.world_mut().spawn((
-                SpaceId("shared".to_string()),
+                Space::bundle(Id::<Space>::new("shared")),
                 Name::new("shared"),
                 Order(0),
                 Active,
-                Space::bundle(),
                 ChildOf(main),
             ));
         }
         app.world_mut().spawn((
-            SpaceId("fallback".to_string()),
+            Space::bundle(Id::<Space>::new("fallback")),
             Name::new("fallback"),
             Order(1),
-            Space::bundle(),
             ChildOf(first_main),
         ));
         let webview = app.world_mut().spawn(HostWindow(second_window)).id();
@@ -1483,9 +1465,9 @@ mod tests {
 
         let views: Vec<(String, Entity, bool)> = app
             .world_mut()
-            .query_filtered::<(&SpaceId, &ChildOf, Has<Active>), With<Space>>()
+            .query_filtered::<(&Id<Space>, &ChildOf, Has<Active>), With<Space>>()
             .iter(app.world())
-            .map(|(id, parent, active)| (id.0.clone(), parent.parent(), active))
+            .map(|(id, parent, active)| (id.as_str().to_string(), parent.parent(), active))
             .collect();
         assert!(views.iter().all(|(id, _, _)| id != "shared"));
         assert_eq!(
@@ -1576,11 +1558,11 @@ mod tests {
             .add_systems(Update, update_effective_startup);
         let inactive = app
             .world_mut()
-            .spawn((Space, SpaceId("inactive".into())))
+            .spawn(Space::bundle(Id::<Space>::new("inactive")))
             .id();
         let active = app
             .world_mut()
-            .spawn((Space, SpaceId("active".into()), Active))
+            .spawn((Space::bundle(Id::<Space>::new("active")), Active))
             .id();
 
         app.update();
@@ -1723,8 +1705,11 @@ mod tests {
             .insert_resource(settings)
             .add_observer(project_activate);
         app.world_mut()
-            .spawn((Space, SpaceId("work".into()), CurrentSpace));
-        let other = app.world_mut().spawn((Space, SpaceId("other".into()))).id();
+            .spawn((Space::bundle(Id::<Space>::new("work")), CurrentSpace));
+        let other = app
+            .world_mut()
+            .spawn(Space::bundle(Id::<Space>::new("other")))
+            .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(other))).id();
         let pane = app
             .world_mut()
@@ -1800,7 +1785,7 @@ mod tests {
             .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("work".into()), Active))
+            .spawn((Space::bundle(Id::<Space>::new("work")), Active))
             .id();
 
         app.update();
@@ -1837,7 +1822,7 @@ mod tests {
                 ),
             );
         app.world_mut()
-            .spawn((Space, SpaceId("work".into()), Active));
+            .spawn((Space::bundle(Id::<Space>::new("work")), Active));
 
         app.update();
         app.update();
@@ -1881,7 +1866,7 @@ mod tests {
                 ),
             );
         app.world_mut()
-            .spawn((Space, SpaceId("work".into()), Active));
+            .spawn((Space::bundle(Id::<Space>::new("work")), Active));
 
         app.update();
         app.update();
@@ -1913,7 +1898,7 @@ mod tests {
             .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("work".into()), Active))
+            .spawn((Space::bundle(Id::<Space>::new("work")), Active))
             .id();
 
         app.update();
@@ -1932,7 +1917,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_reslugs_space_id_and_retags_tabs() {
+    fn rename_reslugs_only_the_space_identity() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
@@ -1942,8 +1927,7 @@ mod tests {
         let space = app
             .world_mut()
             .spawn((
-                Space,
-                SpaceId("rename-src-test".to_string()),
+                Space::bundle(Id::<Space>::new("rename-src-test")),
                 Name::new("rename-src-test"),
                 Active,
                 CurrentSpace,
@@ -1952,12 +1936,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                SpaceId("rename-src-test".to_string()),
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(space)))
             .id();
 
         app.world_mut().trigger(UiInput {
@@ -1970,17 +1949,16 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<SpaceId>(space).map(|s| s.0.clone()),
+            app.world()
+                .get::<Id<Space>>(space)
+                .map(|id| id.as_str().to_string()),
             Some("vmux-ai/vmux".to_string())
         );
         assert_eq!(
             app.world().get::<Name>(space).map(|n| n.to_string()),
             Some("vmux-ai/vmux".to_string())
         );
-        assert_eq!(
-            app.world().get::<SpaceId>(tab).map(|s| s.0.clone()),
-            Some("vmux-ai/vmux".to_string())
-        );
+        assert_eq!(app.world().get::<Id<Space>>(tab), None);
         assert!(app.world().get::<CurrentSpace>(space).is_some());
     }
 }

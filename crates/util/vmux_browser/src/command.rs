@@ -924,7 +924,7 @@ mod tests {
     use vmux_ecs::page::HostHistory;
     use vmux_flex::prelude::{Node, Val};
     use vmux_layout::pane::Pane;
-    use vmux_layout::space::{Space, SpaceId};
+    use vmux_layout::space::Space;
     use vmux_layout::stack::Stack;
     use vmux_layout::tab::Tab;
     use vmux_setting::AppSettings;
@@ -1265,7 +1265,7 @@ mod tests {
 
             let space = app
                 .world_mut()
-                .spawn((Space, SpaceId("work".to_string())))
+                .spawn(Space::bundle(vmux_api::Id::<Space>::new("work")))
                 .id();
             let first_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
             let pane_in_first_tab = app.world_mut().spawn((Pane, ChildOf(first_tab))).id();
@@ -1274,7 +1274,7 @@ mod tests {
             let second_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
             let other_space = app
                 .world_mut()
-                .spawn((Space, SpaceId("play".to_string())))
+                .spawn(Space::bundle(vmux_api::Id::<Space>::new("play")))
                 .id();
             let tab_in_other_space = app
                 .world_mut()

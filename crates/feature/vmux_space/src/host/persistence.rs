@@ -28,8 +28,6 @@ use vmux_ecs::profile::{CurrentProfile, SessionEnvironment};
 use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 use vmux_layout::LayoutStartupSet;
 use vmux_layout::space::Space;
-#[cfg(test)]
-use vmux_layout::space::SpaceId;
 use vmux_layout::window::WindowHierarchy;
 #[cfg(test)]
 use vmux_layout::{
@@ -993,13 +991,13 @@ mod tests {
             .add_plugins(MinimalPlugins)
             .add_plugins(vmux_ecs::PrimitivesPlugin)
             .register_persisted::<Space>()
-            .register_persisted::<SpaceId>()
+            .register_persisted::<Id<Space>>()
             .register_persisted::<WindowGeometry>()
             .add_observer(save_on::<AtomicSaveWorld>);
         app_save.world_mut().spawn((
             Save,
             Space,
-            SpaceId("space-1".to_string()),
+            Id::<Space>::new("space-1"),
             WindowGeometry {
                 fullscreen: false,
                 position: None,
@@ -1192,15 +1190,15 @@ mod tests {
             .add_systems(PreUpdate, validate_restore);
         let first = app
             .world_mut()
-            .spawn((Save, SpaceId("duplicate".to_string())))
+            .spawn((Save, Id::<Space>::new("duplicate")))
             .id();
         let second = app
             .world_mut()
-            .spawn((Save, SpaceId("duplicate".to_string())))
+            .spawn((Save, Id::<Space>::new("duplicate")))
             .id();
         app.world_mut().spawn((
             Name::new("Space identity validator"),
-            WorkspaceRestoreValidator::unique::<SpaceId>("Space identity"),
+            WorkspaceRestoreValidator::unique::<Id<Space>>("Space identity"),
         ));
         let store = app
             .world_mut()
@@ -1341,7 +1339,7 @@ mod tests {
         app.world_mut().spawn((
             Save,
             Space,
-            SpaceId("space-1".to_string()),
+            Id::<Space>::new("space-1"),
             WindowGeometry {
                 fullscreen: false,
                 position: None,

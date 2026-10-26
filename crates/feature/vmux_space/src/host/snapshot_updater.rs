@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
+#[cfg(test)]
+use vmux_api::Id;
 use vmux_command::CommandBarContextSnapshot;
 use vmux_layout::space::Space;
-#[cfg(test)]
-use vmux_layout::space::SpaceId;
 
 pub struct SnapshotPlugin;
 
@@ -66,7 +66,7 @@ mod tests {
             let main = app.world_mut().spawn(ChildOf(root)).id();
             app.world_mut().spawn((
                 Space,
-                SpaceId("space-1".to_string()),
+                Id::<Space>::new("space-1"),
                 Name::new("Space 1"),
                 vmux_ecs::Active,
                 ChildOf(main),
@@ -149,7 +149,7 @@ mod tests {
             let main = app.world_mut().spawn(ChildOf(root)).id();
             app.world_mut().spawn((
                 Space,
-                SpaceId(id.to_string()),
+                Id::<Space>::new(id),
                 Name::new(id.to_string()),
                 vmux_ecs::Active,
                 ChildOf(main),

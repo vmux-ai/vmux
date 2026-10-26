@@ -2,12 +2,12 @@ use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
-use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentSpace, ClientMessage};
+use vmux_api::{BinEvent, Id};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::{Active, Order, ProcessAnchor};
 use vmux_feature::AppFeatureExt;
-use vmux_layout::space::{Space, SpaceId};
+use vmux_layout::space::Space;
 use vmux_layout::window::{FocusedWindow, WindowHierarchy};
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
@@ -49,7 +49,7 @@ impl Plugin for SpaceToolPlugin {
 
 fn answer_queries(
     mut queries: MessageReader<ToolQueryRequest>,
-    spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
+    spaces: Query<(Entity, &Id<Space>, &Name, Has<Active>, Option<&Order>), With<Space>>,
     profile: vmux_ecs::profile::CurrentProfile,
     focused_window: FocusedWindow,
     hierarchy: WindowHierarchy,
@@ -74,8 +74,9 @@ fn answer_queries(
                 .entity()
                 .is_some_and(|focused| hierarchy.get(entity) == Some(focused));
             let order = order.map(|order| order.0).unwrap_or(u32::MAX);
-            if let Some((existing_order, row)) =
-                rows.iter_mut().find(|(_, existing)| existing.id == id.0)
+            if let Some((existing_order, row)) = rows
+                .iter_mut()
+                .find(|(_, existing)| existing.id == id.as_str())
             {
                 *existing_order = (*existing_order).min(order);
                 if local {
@@ -86,7 +87,7 @@ fn answer_queries(
             rows.push((
                 order,
                 AgentSpace {
-                    id: id.0.clone(),
+                    id: id.as_str().to_string(),
                     name: name.to_string(),
                     profile: profile.to_string(),
                     is_active: local && is_active,
@@ -278,20 +279,20 @@ mod tests {
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         app.world_mut().spawn((
             Space,
-            SpaceId("shared".to_string()),
+            Id::<Space>::new("shared"),
             Name::new("shared"),
             Active,
             ChildOf(first_root),
         ));
         app.world_mut().spawn((
             Space,
-            SpaceId("shared".to_string()),
+            Id::<Space>::new("shared"),
             Name::new("shared"),
             ChildOf(second_root),
         ));
         app.world_mut().spawn((
             Space,
-            SpaceId("local".to_string()),
+            Id::<Space>::new("local"),
             Name::new("local"),
             Active,
             ChildOf(second_root),

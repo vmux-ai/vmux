@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
+use vmux_api::Id;
 use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
 use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
@@ -11,9 +12,7 @@ use vmux_ecs::{PageMetadata, UiStateWrite};
 use vmux_git::worktree::{CheckoutInfo, LinkedRepoRoot};
 #[cfg(test)]
 use vmux_layout::pane::Pane;
-use vmux_layout::space::{
-    EffectiveStartupSet, FocusedSpace, Space, SpaceHierarchy, SpaceId, SpaceOfPane,
-};
+use vmux_layout::space::{EffectiveStartupSet, FocusedSpace, Space, SpaceHierarchy, SpaceOfPane};
 #[cfg(test)]
 use vmux_layout::tab::Tab;
 use vmux_layout::tab::{StartupDir, TabWorkspace, TabWorktree};
@@ -515,7 +514,7 @@ pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, AppSettings>>,
     active_space: FocusedSpace<'w, 's>,
     hierarchy: SpaceHierarchy<'w, 's>,
-    space_ids: Query<'w, 's, &'static SpaceId>,
+    space_ids: Query<'w, 's, &'static Id<Space>>,
     expanded: Query<'w, 's, &'static ExpandedProjectDirs, With<Space>>,
 }
 
@@ -533,7 +532,7 @@ impl SpaceProjects<'_, '_> {
         let Ok(space_id) = self.space_ids.get(space) else {
             return self.active_rows();
         };
-        self.rows_of(&space_id.0, Some(space))
+        self.rows_of(space_id.as_str(), Some(space))
     }
 
     pub fn active_rows(&self) -> Vec<ProjectRow> {
@@ -810,7 +809,7 @@ mod tests {
                 .insert_resource(AppSettings::default());
             let space = app
                 .world_mut()
-                .spawn((Space, SpaceId(space_id.to_string())))
+                .spawn(Space::bundle(Id::<Space>::new(space_id)))
                 .id();
             let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
             let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1177,14 +1176,13 @@ mod tests {
         let expanded_space = app
             .world_mut()
             .spawn((
-                Space,
-                SpaceId("work".to_string()),
+                Space::bundle(Id::<Space>::new("work")),
                 ExpandedProjectDirs(vec![path]),
             ))
             .id();
         let fresh_space = app
             .world_mut()
-            .spawn((Space, SpaceId("work".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("work")))
             .id();
         let expanded_pane = app.world_mut().spawn(ChildOf(expanded_space)).id();
         let fresh_pane = app.world_mut().spawn(ChildOf(fresh_space)).id();

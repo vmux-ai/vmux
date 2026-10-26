@@ -889,7 +889,11 @@ mod tests {
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("space")),
+                vmux_ecs::Active,
+                ChildOf(main),
+            ))
             .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(std::env::current_dir().unwrap())),
@@ -1153,7 +1157,11 @@ mod tests {
             app.world().get::<ChildOf>(tab).map(|c| c.parent()),
             Some(space)
         );
-        assert!(app.world().get::<crate::space::SpaceId>(tab).is_none());
+        assert!(
+            app.world()
+                .get::<vmux_api::Id<crate::space::Space>>(tab)
+                .is_none()
+        );
     }
 
     #[test]
