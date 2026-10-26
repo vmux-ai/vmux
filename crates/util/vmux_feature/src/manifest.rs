@@ -1,13 +1,12 @@
-use std::any::TypeId;
-use std::marker::PhantomData;
+use std::collections::{BTreeMap, BTreeSet};
 
-use bevy::prelude::*;
+use bevy_ecs::prelude::Component;
 use ron::value::RawValue;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use vmux_api::JsonSchema;
 
-use crate::cli::CliManifest;
+use crate::CliManifest;
 
 #[derive(Component, Clone)]
 pub struct FeatureManifest {
@@ -19,6 +18,7 @@ pub struct FeatureManifest {
     pub tools: Vec<Tool>,
     pub cli: Option<CliManifest>,
     pub mcp_servers: Vec<McpServer>,
+    pub auth_providers: Vec<AuthProvider>,
     settings: Option<Box<RawValue>>,
     policy: Option<Box<RawValue>>,
     policies: Option<Box<RawValue>>,
@@ -71,6 +71,16 @@ impl FeatureManifest {
                 .validate()
                 .expect("embedded tool input schemas must be valid");
         }
+        let mut providers = BTreeSet::new();
+        for provider in &self.auth_providers {
+            provider
+                .validate()
+                .expect("embedded auth providers must be valid");
+            assert!(
+                providers.insert(provider.id.as_str()),
+                "embedded auth provider IDs must be unique"
+            );
+        }
     }
 }
 
@@ -98,6 +108,8 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             #[serde(default)]
             mcp_servers: Vec<McpServer>,
             #[serde(default)]
+            auth_providers: Vec<AuthProvider>,
+            #[serde(default)]
             settings: Option<Box<RawValue>>,
             #[serde(default)]
             policy: Option<Box<RawValue>>,
@@ -115,6 +127,7 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             tools: manifest.tools,
             cli: manifest.cli,
             mcp_servers: manifest.mcp_servers,
+            auth_providers: manifest.auth_providers,
             settings: manifest.settings,
             policy: manifest.policy,
             policies: manifest.policies,
@@ -369,51 +382,135 @@ pub struct McpServer {
     pub scopes: Vec<String>,
 }
 
-pub trait FeatureManifestSource: Send + Sync + 'static {
-    const SOURCE: &'static str;
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthProvider {
+    pub id: String,
+    pub name: String,
+    pub flow: AuthFlow,
+    #[serde(default)]
+    pub revocation_endpoint: Option<String>,
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct FeatureId(TypeId);
-
-impl FeatureId {
-    pub fn of<M: FeatureManifestSource>() -> Self {
-        Self(TypeId::of::<M>())
-    }
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum AuthFlow {
+    DeviceCode(DeviceCodeFlow),
+    AuthorizationCodePkce(AuthorizationCodePkceFlow),
+    OpenIdConnect(OpenIdConnectFlow),
 }
 
-#[derive(Component)]
-pub struct FeatureManifestOwner<M>(PhantomData<fn() -> M>);
-
-pub struct FeaturePlugin<M>(PhantomData<fn() -> M>);
-
-impl<M> Default for FeaturePlugin<M> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceCodeFlow {
+    pub client_id: String,
+    #[serde(default)]
+    pub client_id_env: String,
+    pub device_authorization_endpoint: String,
+    pub token_endpoint: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
 }
 
-impl<M: FeatureManifestSource> Plugin for FeaturePlugin<M> {
-    fn build(&self, app: &mut App) {
-        if app
-            .world()
-            .iter_entities()
-            .any(|entity| entity.contains::<FeatureManifestOwner<M>>())
-        {
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationCodePkceFlow {
+    pub client_id: String,
+    #[serde(default)]
+    pub client_id_env: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenIdConnectFlow {
+    pub client_id: String,
+    #[serde(default)]
+    pub client_id_env: String,
+    pub issuer: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
+impl AuthProvider {
+    pub fn configure_client_id(&mut self, lookup: impl Fn(&str) -> Option<String>) {
+        let (client_id, environment) = match &mut self.flow {
+            AuthFlow::DeviceCode(flow) => (&mut flow.client_id, &flow.client_id_env),
+            AuthFlow::AuthorizationCodePkce(flow) => (&mut flow.client_id, &flow.client_id_env),
+            AuthFlow::OpenIdConnect(flow) => (&mut flow.client_id, &flow.client_id_env),
+        };
+        if !client_id.trim().is_empty() || environment.trim().is_empty() {
             return;
         }
-        let manifest = FeatureManifest::of::<M>();
-        app.world_mut().spawn((
-            Name::new(std::any::type_name::<M>()),
-            FeatureId::of::<M>(),
-            FeatureManifestOwner::<M>(PhantomData),
-            manifest,
-        ));
+        if let Some(value) = lookup(environment).filter(|value| !value.trim().is_empty()) {
+            *client_id = value;
+        }
     }
 
-    fn is_unique(&self) -> bool {
-        false
+    pub fn configured(&self) -> bool {
+        match &self.flow {
+            AuthFlow::DeviceCode(flow) => !flow.client_id.trim().is_empty(),
+            AuthFlow::AuthorizationCodePkce(flow) => !flow.client_id.trim().is_empty(),
+            AuthFlow::OpenIdConnect(flow) => !flow.client_id.trim().is_empty(),
+        }
     }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.id.trim().is_empty() || self.name.trim().is_empty() {
+            return Err("auth provider ID and name are required".to_string());
+        }
+        match &self.flow {
+            AuthFlow::DeviceCode(flow) => {
+                Self::validate_client(&flow.client_id, &flow.client_id_env)?;
+                Self::validate_https(
+                    &flow.device_authorization_endpoint,
+                    "device authorization endpoint",
+                )?;
+                Self::validate_https(&flow.token_endpoint, "token endpoint")?;
+            }
+            AuthFlow::AuthorizationCodePkce(flow) => {
+                Self::validate_client(&flow.client_id, &flow.client_id_env)?;
+                Self::validate_https(&flow.authorization_endpoint, "authorization endpoint")?;
+                Self::validate_https(&flow.token_endpoint, "token endpoint")?;
+            }
+            AuthFlow::OpenIdConnect(flow) => {
+                Self::validate_client(&flow.client_id, &flow.client_id_env)?;
+                Self::validate_https(&flow.issuer, "OpenID Connect issuer")?;
+            }
+        }
+        if let Some(endpoint) = &self.revocation_endpoint {
+            Self::validate_https(endpoint, "revocation endpoint")?;
+        }
+        Ok(())
+    }
+
+    fn validate_client(client_id: &str, environment: &str) -> Result<(), String> {
+        if client_id.trim().is_empty() && environment.trim().is_empty() {
+            return Err("auth provider client ID or environment variable is required".to_string());
+        }
+        Ok(())
+    }
+
+    fn validate_https(value: &str, label: &str) -> Result<(), String> {
+        let url = url::Url::parse(value)
+            .map_err(|error| format!("invalid auth provider {label}: {error}"))?;
+        if url.scheme() != "https" {
+            return Err(format!("auth provider {label} must use https"));
+        }
+        Ok(())
+    }
+}
+
+pub trait FeatureManifestSource: Send + Sync + 'static {
+    const SOURCE: &'static str;
 }
 
 #[cfg(test)]
@@ -438,6 +535,17 @@ mod tests {
         )),
         policy: Some((enabled: true)),
         settings: Some((enabled: true)),
+        auth_providers: [(
+            id: "example",
+            name: "Example",
+            flow: DeviceCode((
+                client_id: "client-id",
+                device_authorization_endpoint: "https://example.com/device",
+                token_endpoint: "https://example.com/token",
+                scopes: ["read"],
+                headers: {"Accept": "application/json"},
+            )),
+        )],
     )"#;
 
     #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -451,38 +559,24 @@ mod tests {
     }
 
     struct Feature;
-    struct OtherFeature;
-
     impl FeatureManifestSource for Feature {
         const SOURCE: &'static str = SOURCE;
     }
 
-    impl FeatureManifestSource for OtherFeature {
-        const SOURCE: &'static str = SOURCE;
-    }
-
     #[test]
-    fn one_feature_entity_owns_all_parsed_sections() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, FeaturePlugin::<Feature>::default()));
-        app.update();
+    fn parses_all_typed_sections() {
+        let manifest = FeatureManifest::of::<Feature>();
 
-        let manifests = app
-            .world_mut()
-            .query::<&FeatureManifest>()
-            .iter(app.world())
-            .collect::<Vec<_>>();
-        assert_eq!(manifests.len(), 1);
-        assert_eq!(manifests[0].pages[0].url, "vmux://example/");
-        assert_eq!(manifests[0].pages[0].permissions, ["PageReady"]);
-        assert_eq!(manifests[0].commands[0].id, "open");
-        assert_eq!(manifests[0].tools[0].name, "open_file");
+        assert_eq!(manifest.pages[0].url, "vmux://example/");
+        assert_eq!(manifest.pages[0].permissions, ["PageReady"]);
+        assert_eq!(manifest.commands[0].id, "open");
+        assert_eq!(manifest.tools[0].name, "open_file");
         assert_eq!(
-            manifests[0].cli.as_ref().unwrap().default.as_deref(),
+            manifest.cli.as_ref().unwrap().default.as_deref(),
             Some("app.open")
         );
         assert_eq!(
-            manifests[0]
+            manifest
                 .cli
                 .as_ref()
                 .unwrap()
@@ -492,47 +586,40 @@ mod tests {
             Provider { enabled: true }
         );
         assert_eq!(
-            manifests[0].policy::<Policy>().unwrap(),
+            manifest.policy::<Policy>().unwrap(),
             Some(Policy { enabled: true })
         );
         assert_eq!(
-            manifests[0].settings::<Policy>().unwrap(),
+            manifest.settings::<Policy>().unwrap(),
             Some(Policy { enabled: true })
         );
+        assert_eq!(manifest.auth_providers[0].id, "example");
+        assert!(matches!(
+            &manifest.auth_providers[0].flow,
+            AuthFlow::DeviceCode(flow) if flow.client_id == "client-id"
+        ));
     }
 
     #[test]
-    fn identical_sources_for_distinct_features_create_distinct_entities() {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<Feature>::default(),
-            FeaturePlugin::<OtherFeature>::default(),
-        ));
-        app.update();
+    fn auth_provider_client_id_can_be_supplied_at_runtime() {
+        let mut manifest = FeatureManifest::parse(
+            r#"(
+                auth_providers: [(
+                    id: "example",
+                    name: "Example",
+                    flow: DeviceCode((
+                        client_id: "",
+                        client_id_env: "EXAMPLE_CLIENT_ID",
+                        device_authorization_endpoint: "https://example.com/device",
+                        token_endpoint: "https://example.com/token",
+                    )),
+                )],
+            )"#,
+        );
 
-        let manifests = app
-            .world_mut()
-            .query::<&FeatureManifest>()
-            .iter(app.world())
-            .count();
-        assert_eq!(manifests, 2);
-    }
+        manifest.auth_providers[0]
+            .configure_client_id(|name| (name == "EXAMPLE_CLIENT_ID").then(|| "client".into()));
 
-    #[test]
-    fn repeated_feature_registration_reuses_the_source_entity() {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<Feature>::default(),
-            FeaturePlugin::<Feature>::default(),
-        ));
-
-        let manifests = app
-            .world_mut()
-            .query_filtered::<&FeatureManifest, With<FeatureManifestOwner<Feature>>>()
-            .iter(app.world())
-            .count();
-        assert_eq!(manifests, 1);
+        assert!(manifest.auth_providers[0].configured());
     }
 }

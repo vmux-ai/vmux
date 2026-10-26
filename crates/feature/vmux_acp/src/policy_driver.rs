@@ -1,4 +1,4 @@
-use vmux_ecs::manifest::FeatureManifest;
+use vmux_feature::FeatureManifest;
 
 #[cfg(test)]
 use crate::policy::AcpWorkspacePolicy;

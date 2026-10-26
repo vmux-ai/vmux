@@ -37,6 +37,7 @@ crossbeam-channel = "0.5"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 ring = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_feature = { path = "../../util/vmux_feature" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_process = { path = "../../util/vmux_process" }

@@ -7,7 +7,7 @@ use vmux_api::protocol::{
     ProcessId, ServiceMessage,
 };
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_layout::{AgentOpenBeside, AgentPaneDirection};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_tool::{AgentWorkingDirectory, ToolCommand, ToolDispatchError, ToolDispatchSet};
@@ -19,7 +19,7 @@ pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_systems(Update, (open_file, read_file, grep).in_set(ToolDispatchSet));
     }
 }

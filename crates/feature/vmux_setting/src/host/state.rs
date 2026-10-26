@@ -5,9 +5,9 @@ use vmux_command::{
     CommandDispatch, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
 };
 use vmux_ecs::UiState;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_layout::{
     hosted_page::HostedUiPlugin,
     pane::{Pane, PaneSplit},
@@ -29,7 +29,7 @@ pub(super) struct StatePlugin;
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

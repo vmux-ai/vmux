@@ -32,9 +32,9 @@ pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
-#[cfg(test)]
 use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 #[cfg(test)]
 use vmux_flex::prelude::*;
 #[cfg(test)]
@@ -240,7 +240,7 @@ pub struct PaneCommandPlugin;
 impl Plugin for PaneCommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

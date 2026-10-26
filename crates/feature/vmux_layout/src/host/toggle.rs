@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::HostWindow;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_flex::prelude::*;
 
 use super::command::LayoutRequestSet;
@@ -19,7 +19,7 @@ pub struct TogglePlugin;
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }

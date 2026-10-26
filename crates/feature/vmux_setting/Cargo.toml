@@ -29,6 +29,7 @@ notify = { workspace = true }
 ron = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_feature = { path = "../../util/vmux_feature" }
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }

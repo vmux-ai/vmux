@@ -3,7 +3,10 @@ use vmux_api::JsonSchema;
 use vmux_api::json::JsonValue;
 use vmux_api::protocol::AgentCommandTool;
 use vmux_ecs::JsonArguments;
-use vmux_ecs::manifest::{self, FeatureManifest};
+use vmux_feature::{
+    Command as ManifestCommand, CommandMcp as ManifestCommandMcp, FeatureManifest,
+    FeatureManifestSource, Shortcut as ManifestShortcut, ShortcutKind as ManifestShortcutKind,
+};
 use vmux_ui::i18n::Locale;
 
 use super::definition::{
@@ -12,17 +15,17 @@ use super::definition::{
 };
 use super::shortcut_driver::{Binding, KeyCombo, Shortcut, Source, When};
 
-impl From<manifest::ShortcutKind> for ShortcutDefinition {
-    fn from(shortcut: manifest::ShortcutKind) -> Self {
+impl From<ManifestShortcutKind> for ShortcutDefinition {
+    fn from(shortcut: ManifestShortcutKind) -> Self {
         match shortcut {
-            manifest::ShortcutKind::Direct(value) => Self::Direct(value),
-            manifest::ShortcutKind::Chord(value) => Self::Chord(value),
+            ManifestShortcutKind::Direct(value) => Self::Direct(value),
+            ManifestShortcutKind::Chord(value) => Self::Chord(value),
         }
     }
 }
 
-impl From<manifest::Shortcut> for CommandShortcut {
-    fn from(shortcut: manifest::Shortcut) -> Self {
+impl From<ManifestShortcut> for CommandShortcut {
+    fn from(shortcut: ManifestShortcut) -> Self {
         Self {
             shortcut: shortcut.shortcut.into(),
             when: shortcut.when,
@@ -31,7 +34,7 @@ impl From<manifest::Shortcut> for CommandShortcut {
 }
 
 impl CommandManifest {
-    pub fn for_feature<M: manifest::FeatureManifestSource>() -> Self {
+    pub fn for_feature<M: FeatureManifestSource>() -> Self {
         Self(FeatureManifest::of::<M>().commands)
     }
 
@@ -44,8 +47,8 @@ impl CommandManifest {
     }
 }
 
-impl From<manifest::CommandMcp> for CommandMcp {
-    fn from(mcp: manifest::CommandMcp) -> Self {
+impl From<ManifestCommandMcp> for CommandMcp {
+    fn from(mcp: ManifestCommandMcp) -> Self {
         let definition = Self::new(
             mcp.description,
             mcp.input_schema.unwrap_or_else(JsonSchema::object),
@@ -72,8 +75,8 @@ impl CommandMcp {
     }
 }
 
-impl From<manifest::Command> for CommandDefinition {
-    fn from(command: manifest::Command) -> Self {
+impl From<ManifestCommand> for CommandDefinition {
+    fn from(command: ManifestCommand) -> Self {
         Self {
             id: command.id,
             aliases: command.aliases,

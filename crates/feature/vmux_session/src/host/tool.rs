@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_tool::{ToolCommand, ToolDispatchSet};
 
 use super::session::{AgentRequestUserChoice, AgentSetConversationTitle};
@@ -11,11 +11,10 @@ pub struct ChatToolPlugin;
 
 impl Plugin for ChatToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .add_systems(
-                Update,
-                (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
-            );
+        app.register_feature::<crate::Feature>().add_systems(
+            Update,
+            (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
+        );
     }
 }
 

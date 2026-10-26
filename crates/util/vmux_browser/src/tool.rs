@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use crate::host::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
@@ -15,7 +15,7 @@ pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_systems(Startup, register_agent_policy)
             .add_systems(
                 Update,

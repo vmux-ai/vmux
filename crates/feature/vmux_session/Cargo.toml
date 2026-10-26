@@ -58,6 +58,7 @@ unicode-segmentation = "1"
 url = { workspace = true }
 uuid = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs", default-features = false }
+vmux_feature = { path = "../../util/vmux_feature" }
 vmux_command = { path = "../vmux_command", optional = true }
 vmux_page = { path = "../../util/vmux_page", optional = true }
 vmux_ui = { path = "../../util/vmux_ui", optional = true }

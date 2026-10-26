@@ -25,9 +25,9 @@ pub use repository_provision::{
 };
 pub use runtime::{GitRuntime, GitTask};
 pub use status::FileGit;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostedPage, PrewarmPage};
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_feature::AppFeatureExt;
 pub use watch::RepoInfoCache;
 
 mod catalog;
@@ -54,7 +54,7 @@ pub struct GitPlugin;
 
 impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .init_resource::<GitRuntime>();
         #[cfg(ui)]
         app.add_plugins(GitPage::plugin());

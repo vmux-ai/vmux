@@ -6,9 +6,9 @@ use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentQueryResult, AgentRequest,
     AgentRequestId, ClientMessage,
 };
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
+use vmux_feature::AppFeatureExt;
 use vmux_layout::bookmark::{
     AddRequest, CreateFolderRequest, PinRequest, PinUrlRequest, RemoveRequest, UnpinRequest,
 };
@@ -21,7 +21,7 @@ pub struct BookmarkToolPlugin;
 
 impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_ecs::manifest::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
-use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
+use vmux_feature::{AppFeatureExt, FeatureManifestSource};
+use vmux_feature::{FeatureManifest, FeatureManifestOwner};
 
 pub(crate) fn add(app: &mut App) {
     app.configure_sets(Startup, PolicyLoaded)
@@ -64,11 +64,9 @@ mod tests {
     #[test]
     fn acp_feature_manifest_attaches_typed_sections_to_one_entity() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<crate::Feature>::default(),
-            FeaturePlugin::<ForeignFeature>::default(),
-        ));
+        app.add_plugins(MinimalPlugins)
+            .register_feature::<crate::Feature>()
+            .register_feature::<ForeignFeature>();
         add(&mut app);
         app.update();
 

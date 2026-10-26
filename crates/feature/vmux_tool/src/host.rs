@@ -11,11 +11,11 @@ use crate::state::{
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::manifest::{FeatureId, FeatureManifest};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{
     PageMetadata, PageOpenRequest, PageOpenTarget, UiState, UiStatePlugin, UiStateWrite,
 };
+use vmux_feature::{FeatureId, FeatureManifest};
 
 use crate::{
     ExternalToolOperation, ToolApplier, ToolInventoryChanged, ToolOperationFailed,

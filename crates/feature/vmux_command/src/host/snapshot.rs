@@ -4,8 +4,8 @@ use vmux_api::command_bar::{
 };
 use vmux_ecs::CommandBarContribution;
 use vmux_ecs::launcher::RendersLauncherPanel;
-use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::page::PageManifest;
+use vmux_feature::FeatureManifest;
 
 pub type CommandBarState = vmux_ecs::UiState<vmux_api::command_bar::UiCommandBar>;
 

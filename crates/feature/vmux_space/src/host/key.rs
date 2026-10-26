@@ -3,7 +3,7 @@ use bevy_cef::prelude::UiInput;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiStateWrite;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, UiSpaces};
@@ -13,7 +13,7 @@ pub(crate) struct SpaceKeyPlugin;
 impl Plugin for SpaceKeyPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

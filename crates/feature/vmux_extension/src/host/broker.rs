@@ -10,7 +10,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
@@ -25,7 +25,7 @@ pub(crate) struct ExtensionBrokerPlugin;
 impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         app.add_systems(Startup, spawn)
             .add_systems(
                 Update,
@@ -42,7 +42,7 @@ impl Plugin for ExtensionBrokerPlugin {
     }
 }
 
-fn spawn(manifests: Query<&vmux_ecs::manifest::FeatureManifest>, mut commands: Commands) {
+fn spawn(manifests: Query<&vmux_feature::FeatureManifest>, mut commands: Commands) {
     let mut matrix = None;
     for manifest in &manifests {
         let candidate = CapabilityMatrix::from_manifest(manifest)

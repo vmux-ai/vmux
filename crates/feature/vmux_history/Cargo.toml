@@ -28,6 +28,7 @@ moonshine-save = { workspace = true }
 bevy_ecs = { workspace = true }
 ron = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_feature = { path = "../../util/vmux_feature" }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]
 bevy = { workspace = true }

@@ -20,7 +20,7 @@ use vmux_api::prompt_media::InlineMediaQuery;
 use vmux_command::{CommandBinding, CommandDispatch, CommandRuntimePlugin};
 use vmux_ecs::UiState;
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 use crate::selector::SelectorMode;
@@ -1186,22 +1186,20 @@ mod tests {
     impl Echo {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins((
-                MinimalPlugins,
-                FeaturePlugin::<crate::Feature>::default(),
-                ChatKeyPlugin,
-            ))
-            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .init_resource::<ListSelections>()
-            .init_resource::<ChoiceNumbers>()
-            .init_resource::<ComposerEffects>()
-            .init_resource::<ComposerMenus>()
-            .init_resource::<BranchRequests>()
-            .add_observer(ListSelections::record)
-            .add_observer(ChoiceNumbers::record)
-            .add_observer(ComposerEffects::record)
-            .add_observer(ComposerMenus::record)
-            .add_observer(BranchRequests::record);
+            app.add_plugins(MinimalPlugins)
+                .register_feature::<crate::Feature>()
+                .add_plugins(ChatKeyPlugin)
+                .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+                .init_resource::<ListSelections>()
+                .init_resource::<ChoiceNumbers>()
+                .init_resource::<ComposerEffects>()
+                .init_resource::<ComposerMenus>()
+                .init_resource::<BranchRequests>()
+                .add_observer(ListSelections::record)
+                .add_observer(ChoiceNumbers::record)
+                .add_observer(ComposerEffects::record)
+                .add_observer(ComposerMenus::record)
+                .add_observer(BranchRequests::record);
             app.update();
             app
         }
