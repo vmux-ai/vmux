@@ -1,12 +1,14 @@
 use bevy::prelude::*;
+use vmux_api::Id;
 
 use crate::model::SpaceRecord;
 
 impl SpaceRecord {
     pub fn bundle(&self) -> impl Bundle {
         (
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId(self.id.clone()),
+            vmux_layout::space::Space::bundle(Id::<vmux_layout::space::Space>::new(
+                self.id.clone(),
+            )),
             Name::new(self.name.clone()),
         )
     }
@@ -40,7 +42,10 @@ mod tests {
 
         let mut query = app
             .world_mut()
-            .query_filtered::<(&Name, &vmux_layout::space::SpaceId), With<vmux_layout::space::Space>>();
+            .query_filtered::<
+                (&Name, &Id<vmux_layout::space::Space>),
+                With<vmux_layout::space::Space>,
+            >();
         let (name, space_id) = query.single(app.world()).unwrap();
         let profile = app
             .world()
@@ -56,6 +61,6 @@ mod tests {
 
         assert!(SpaceRecord::is_planet_name(name.as_str()));
         assert_eq!(profile.as_str(), "Personal");
-        assert_eq!(space_id.0, BOOTSTRAP_SPACE_ID);
+        assert_eq!(space_id.as_str(), BOOTSTRAP_SPACE_ID);
     }
 }

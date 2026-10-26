@@ -10,7 +10,7 @@ use vmux_ecs::{CreatedAt, Order, PageMetadata, PageNavigation, PageOpenId, PageO
 use vmux_flex::prelude::*;
 
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
-use crate::space::{Space, SpaceId};
+use crate::space::Space;
 use crate::stack::Stack;
 use crate::tab::Tab;
 use crate::window::Main;
@@ -58,7 +58,7 @@ fn spawn_store_validator(mut commands: Commands) {
     ));
     commands.spawn((
         Name::new("Space identity validator"),
-        WorkspaceRestoreValidator::unique::<SpaceId>("Space identity"),
+        WorkspaceRestoreValidator::unique::<Id<Space>>("Space identity"),
     ));
     commands.spawn((
         Name::new("Pane identity validator"),
@@ -71,9 +71,9 @@ fn spawn_store_validator(mut commands: Commands) {
 }
 
 fn validate_layout(world: &mut World) -> Result<(), String> {
-    let mut spaces = world.query_filtered::<(Entity, Option<&SpaceId>), With<Space>>();
+    let mut spaces = world.query_filtered::<(Entity, Option<&Id<Space>>), With<Space>>();
     for (entity, id) in spaces.iter(world) {
-        if id.is_none_or(|id| id.0.trim().is_empty()) {
+        if id.is_none() {
             return Err(format!("Space {entity} has no valid identity"));
         }
     }
@@ -187,7 +187,7 @@ fn restore_views(
     for space in &layout.spaces {
         commands
             .entity(space)
-            .insert((Space::bundle(), ChildOf(main)));
+            .insert((Space::restore_bundle(), ChildOf(main)));
     }
 
     let mut tabs = layout

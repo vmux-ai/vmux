@@ -25,7 +25,7 @@ use super::command::LayoutRequestSet;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::presentation::{Projection, Retiring, Transition};
 use crate::settings::LayoutSettings;
-use crate::space::{CurrentSpace, Space, SpaceHierarchy, SpaceId};
+use crate::space::{CurrentSpace, Space, SpaceHierarchy};
 #[cfg(test)]
 use crate::stack::CloseRequest;
 use crate::stack::{
@@ -582,7 +582,7 @@ struct ReopenLayout<'w, 's> {
     children_q: Query<'w, 's, &'static Children>,
     stacks_q: Query<'w, 's, (), With<Stack>>,
     tabs: Query<'w, 's, (), With<Tab>>,
-    spaces: Query<'w, 's, (Entity, &'static SpaceId), With<Space>>,
+    spaces: Query<'w, 's, (Entity, &'static Id<Space>), With<Space>>,
     any_space: Query<'w, 's, Entity, With<Space>>,
     current_space: Query<'w, 's, Entity, With<CurrentSpace>>,
     focused_window: crate::window::FocusedWindow<'w, 's>,
@@ -602,12 +602,12 @@ impl ReopenLayout<'_, '_> {
         let origin_space = self
             .spaces
             .iter()
-            .filter(|(_, id)| id.0 == space_id)
+            .filter(|(_, id)| id.as_str() == space_id)
             .find(|(space, _)| {
                 focused_window
                     .is_some_and(|focused| self.window_hierarchy.get(*space) == Some(focused))
             })
-            .or_else(|| self.spaces.iter().find(|(_, id)| id.0 == space_id))
+            .or_else(|| self.spaces.iter().find(|(_, id)| id.as_str() == space_id))
             .map(|(entity, _)| entity);
         let space = origin_space
             .or_else(|| {
@@ -1423,7 +1423,7 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let stack = app
             .world_mut()
@@ -1473,7 +1473,7 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let stack = app
             .world_mut()
@@ -1509,7 +1509,7 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         app.world_mut().spawn((Tab::default(), ChildOf(space)));
         let tab1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
@@ -1536,7 +1536,7 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let root = app
@@ -1613,7 +1613,7 @@ mod tests {
     fn spawn_inactive_and_active_stacks(app: &mut App) -> (Entity, Entity) {
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app
             .world_mut()
@@ -1722,7 +1722,7 @@ mod tests {
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string()), Active))
+            .spawn((Space::bundle(Id::<Space>::new("s1")), Active))
             .id();
         app.world_mut()
             .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)));
@@ -1873,7 +1873,7 @@ mod tests {
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string()), Active))
+            .spawn((Space::bundle(Id::<Space>::new("s1")), Active))
             .id();
         app.world_mut()
             .entity_mut(space)
@@ -1943,7 +1943,7 @@ mod tests {
     #[test]
     fn reopen_targets_materialized_stack() {
         let mut app = reopen_app();
-        app.world_mut().spawn((Space, SpaceId("s1".to_string())));
+        app.world_mut().spawn((Space, Id::<Space>::new("s1")));
         app.world_mut().spawn((
             ArchivedPage {
                 url: "vmux://terminal/".to_string(),
@@ -1973,7 +1973,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         app.world_mut()
             .spawn((Tab::named("Existing"), ChildOf(space)));
@@ -2144,7 +2144,9 @@ mod tests {
     fn reopen_web_opens_in_origin_space_and_consumes_entry() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "https://a.example".to_string(),
             title: "A".to_string(),
@@ -2185,13 +2187,15 @@ mod tests {
         let secondary_root = app.world_mut().spawn(HostWindow(secondary_window)).id();
         let primary_space = app
             .world_mut()
-            .spawn((Space, SpaceId("shared".to_string()), ChildOf(primary_root)))
+            .spawn((
+                Space::bundle(Id::<Space>::new("shared")),
+                ChildOf(primary_root),
+            ))
             .id();
         let secondary_space = app
             .world_mut()
             .spawn((
-                Space,
-                SpaceId("shared".to_string()),
+                Space::bundle(Id::<Space>::new("shared")),
                 ChildOf(secondary_root),
             ))
             .id();
@@ -2218,7 +2222,9 @@ mod tests {
     fn reopen_picks_newest_first() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "https://old.example".to_string(),
             title: String::new(),
@@ -2245,7 +2251,9 @@ mod tests {
     fn reopen_terminal_respawns_at_cwd() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "vmux://terminal/".to_string(),
             title: String::new(),
@@ -2276,7 +2284,9 @@ mod tests {
     fn reopen_empty_archive_is_noop() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         dispatch_reopen(&mut app);
         assert!(drain_opens(&mut app).is_empty());
     }
@@ -2286,10 +2296,9 @@ mod tests {
         let mut app = reopen_app();
         let active = app
             .world_mut()
-            .spawn((
-                crate::space::Space,
-                crate::space::SpaceId("active".to_string()),
-            ))
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "active",
+            )))
             .id();
         app.world_mut()
             .entity_mut(active)
@@ -2314,7 +2323,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let t0 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let t1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
@@ -2342,7 +2351,7 @@ mod tests {
         let mut app = reopen_app();
         let active = app
             .world_mut()
-            .spawn((Space, SpaceId("active".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("active")))
             .id();
         app.world_mut()
             .entity_mut(active)
@@ -2379,7 +2388,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let leaf = app
@@ -2417,7 +2426,9 @@ mod tests {
     fn reopen_without_position_recreates_tab() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "https://a.example".to_string(),
             space_id: "s1".to_string(),
@@ -2436,7 +2447,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let root = app
@@ -2498,7 +2509,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let root = app
@@ -2555,7 +2566,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let leaf = app
@@ -2585,7 +2596,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let root = app
@@ -2648,7 +2659,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let root = app
@@ -2721,7 +2732,7 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
         let root = app

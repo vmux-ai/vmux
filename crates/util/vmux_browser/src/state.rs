@@ -29,7 +29,7 @@ use vmux_layout::{
     pane::{Pane, PaneSplit, SideSheetCardCollapsed, Zoomed},
     presentation::Retiring,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetSections, SideSheetSectionsExpanded},
-    space::{CurrentSpace, Space, SpaceId},
+    space::{CurrentSpace, Space},
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::UiLayout,
     tab::Tab,
@@ -426,7 +426,7 @@ type LayoutProjectionChanged = Or<(
     Changed<SideSheetCardCollapsed>,
     Changed<Tab>,
     Changed<HostWindow>,
-    Changed<SpaceId>,
+    Changed<Id<Space>>,
     Changed<SideSheetSectionsExpanded>,
 )>;
 
@@ -580,7 +580,7 @@ struct PageStateRemovals<'w, 's> {
     pane_split: RemovedComponents<'w, 's, PaneSplit>,
     zoomed: RemovedComponents<'w, 's, Zoomed>,
     space: RemovedComponents<'w, 's, Space>,
-    space_id: RemovedComponents<'w, 's, SpaceId>,
+    space_id: RemovedComponents<'w, 's, Id<Space>>,
     current_space: RemovedComponents<'w, 's, CurrentSpace>,
     sections_expanded: RemovedComponents<'w, 's, SideSheetSectionsExpanded>,
     uuid: RemovedComponents<'w, 's, Id<BookmarkEntry>>,

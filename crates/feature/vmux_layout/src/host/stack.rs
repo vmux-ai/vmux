@@ -1950,9 +1950,8 @@ mod tests {
         let space = app
             .world_mut()
             .spawn((
-                crate::space::Space,
-                crate::space::SpaceId("s1".to_string()),
-                Active,
+                crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("s1")),
+                vmux_ecs::Active,
             ))
             .id();
         let worktree = tempfile::tempdir().unwrap();
@@ -2359,13 +2358,13 @@ mod tests {
         let active_space = app
             .world_mut()
             .spawn((
-                crate::space::Space,
+                crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("active")),
                 crate::space::CurrentSpace,
                 Active,
                 vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
             ))
             .id();
-        let old_space = app.world_mut().spawn(crate::space::Space).id();
+        let old_space = app.world_mut().spawn(crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("old"))).id();
 
         let old_tab = app
             .world_mut()
@@ -2554,7 +2553,7 @@ mod tests {
         let space = app
             .world_mut()
             .spawn((
-                crate::space::Space,
+                crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("space")),
                 crate::space::CurrentSpace,
                 Active,
                 vmux_ecs::EffectiveStartupUrl(startup_url.to_string()),
