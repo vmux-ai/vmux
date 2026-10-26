@@ -4,7 +4,7 @@ use vmux_api::protocol::AgentRequest;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet};
 
 mod bridge;
@@ -26,7 +26,7 @@ pub struct ExtensionPlugin;
 
 impl Plugin for ExtensionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
 
         let prepared = load::PreparedExtensions::load().unwrap_or_else(|error| {
             bevy::log::error!(%error, "failed to prepare extensions; starting without them");

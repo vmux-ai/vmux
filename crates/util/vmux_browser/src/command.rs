@@ -19,9 +19,6 @@ use vmux_command::{
 use vmux_command::{CommandInvocation, ReadCommandRequests, ResolvedLocale};
 use vmux_ecs::host_spawn::HostSpawnRoute;
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
-use vmux_ecs::manifest::FeatureManifest;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(test)]
 use vmux_ecs::page::HostHistoryObserve;
 use vmux_ecs::page::HostedPage;
@@ -29,6 +26,9 @@ use vmux_ecs::{
     PageMetadata, PageOpenRequest, PageOpenTarget, UiStateWrite,
     page::{HostHistoryDelta, HostHistoryStep, PageReady},
 };
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
+use vmux_feature::FeatureManifest;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::event::{
@@ -59,7 +59,7 @@ pub(crate) struct CommandPlugin;
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
@@ -1062,15 +1062,13 @@ mod tests {
     #[test]
     fn command_invocations_dispatch_to_concrete_requests() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<crate::Feature>::default(),
-            vmux_command::CommandRuntimePlugin,
-        ))
-        .add_message::<NavigationRequest>()
-        .add_message::<OpenRequest>()
-        .add_message::<ZoomRequest>()
-        .add_message::<ShowDevToolsRequest>();
+        app.add_plugins(MinimalPlugins)
+            .register_feature::<crate::Feature>()
+            .add_plugins(vmux_command::CommandRuntimePlugin)
+            .add_message::<NavigationRequest>()
+            .add_message::<OpenRequest>()
+            .add_message::<ZoomRequest>()
+            .add_message::<ShowDevToolsRequest>();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([

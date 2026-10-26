@@ -15,12 +15,12 @@ use vmux_command::CommandDefinition;
 use vmux_command::CommandInvocation;
 #[cfg(test)]
 use vmux_command::CommandManifest;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PagePlacementCatalog;
 use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -33,7 +33,7 @@ pub struct StackPlugin;
 impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }

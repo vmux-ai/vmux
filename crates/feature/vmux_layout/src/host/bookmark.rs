@@ -22,10 +22,10 @@ use vmux_api::bookmark::{
     BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageManifest;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 
 use super::{command::LayoutRequestSet, stack::OpenRequest};
 
@@ -37,7 +37,7 @@ pub struct BookmarkRequestSet;
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -1360,12 +1360,10 @@ mod tests {
     #[test]
     fn command_id_dispatches_the_typed_bookmark_request() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<crate::Feature>::default(),
-            vmux_command::CommandRuntimePlugin,
-        ))
-        .add_message::<BookmarkToggleActiveRequest>();
+        app.add_plugins(MinimalPlugins)
+            .register_feature::<crate::Feature>()
+            .add_plugins(vmux_command::CommandRuntimePlugin)
+            .add_message::<BookmarkToggleActiveRequest>();
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<vmux_command::CommandInvocation>>()

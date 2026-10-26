@@ -15,7 +15,7 @@ use vmux_ecs::launcher::{
     RendersLauncherPanel,
 };
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 
 use crate::{CommandDispatch, CommandPaletteSurface, CommandRuntimePlugin, ResolvedLocale};
 
@@ -42,7 +42,7 @@ pub(super) struct PalettePlugin;
 impl Plugin for PalettePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

@@ -7,7 +7,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
-use vmux_ecs::manifest::FeatureManifest;
+use vmux_feature::FeatureManifest;
 pub use vmux_layout::settings::LayoutSettings;
 use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]

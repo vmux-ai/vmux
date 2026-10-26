@@ -5,10 +5,10 @@ use bevy_app::{PreStartup, Startup};
 use bevy_ecs::prelude::{Commands, Name};
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::host_spawn::HostSpawnRoute;
-#[cfg(host)]
-use vmux_ecs::manifest::FeaturePlugin;
 #[cfg(all(host, not(target_os = "android")))]
 use vmux_ecs::persistence::WorkspaceStoreValidator;
+#[cfg(host)]
+use vmux_feature::AppFeatureExt;
 
 #[cfg(host)]
 pub use catalog::{ScopeProjectionRequest, SessionCatalogView, SessionManagerView};
@@ -74,8 +74,7 @@ impl Plugin for SessionPlugin {
             .add_systems(PreStartup, spawn_store_validator)
             .add_systems(Startup, register_route);
         #[cfg(host)]
-        app.add_plugins((
-            FeaturePlugin::<crate::Feature>::default(),
+        app.register_feature::<crate::Feature>().add_plugins((
             Self::MANIFEST.plugin(),
             catalog::CatalogPlugin,
             resume::Plugin,

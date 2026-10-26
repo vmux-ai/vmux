@@ -5,12 +5,12 @@ use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_api::service::*;
 use vmux_command::{CommandInvocation, ResolvedLocale};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_history::LastActivatedAt;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
@@ -34,7 +34,7 @@ impl Plugin for ProcessMonitorPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::monitor::ProcessMonitorPage::plugin());
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }

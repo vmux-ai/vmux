@@ -3,7 +3,24 @@ use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+)]
+#[type_path = "vmux_ecs"]
 pub struct UnixMillis(pub i64);
 
 impl UnixMillis {
@@ -16,6 +33,88 @@ impl UnixMillis {
         )
     }
 }
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct UpdatedAt(pub UnixMillis);
+
+impl UpdatedAt {
+    pub fn now() -> Self {
+        Self(UnixMillis::now())
+    }
+}
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct DeletedAt(pub UnixMillis);
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct RemoteUpdatedAt(pub UnixMillis);
+
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Reflect,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+#[component(immutable)]
+#[reflect(Component)]
+#[type_path = "vmux_ecs"]
+pub struct LastSyncedAt(pub UnixMillis);
 
 #[derive(
     Component,

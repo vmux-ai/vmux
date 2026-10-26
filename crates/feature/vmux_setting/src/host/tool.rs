@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, ClientMessage, JsonValue};
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_feature::AppFeatureExt;
 use vmux_tool::{
     AddedTool, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
     ToolQueryRouteSet,
@@ -15,7 +15,7 @@ pub struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

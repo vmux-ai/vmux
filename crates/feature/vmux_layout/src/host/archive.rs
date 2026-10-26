@@ -9,14 +9,14 @@ use bevy_cef::prelude::HostWindow;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_ecs::Active;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, UnixMillis,
 };
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;
@@ -53,7 +53,7 @@ pub struct ArchivePlugin;
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

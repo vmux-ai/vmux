@@ -10237,6 +10237,7 @@ dependencies = [
  "vmux_command",
  "vmux_ecs",
  "vmux_editor",
+ "vmux_feature",
  "vmux_git",
  "vmux_layout",
  "vmux_mcp",
@@ -10278,12 +10279,15 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "vmux_acp",
+ "vmux_auth",
  "vmux_bookmark",
  "vmux_browser",
  "vmux_command",
+ "vmux_connector",
  "vmux_ecs",
  "vmux_editor",
  "vmux_extension",
+ "vmux_feature",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
@@ -10309,6 +10313,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_auth"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "moonshine-save",
+ "vmux_api",
+ "vmux_connector",
+ "vmux_ecs",
+ "vmux_feature",
+ "zeroize",
+]
+
+[[package]]
 name = "vmux_bookmark"
 version = "0.0.35"
 dependencies = [
@@ -10323,6 +10340,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_layout",
  "vmux_page",
  "vmux_setting",
@@ -10354,6 +10372,7 @@ dependencies = [
  "vmux_command",
  "vmux_ecs",
  "vmux_editor",
+ "vmux_feature",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
@@ -10384,6 +10403,7 @@ dependencies = [
  "tokio",
  "vmux_app",
  "vmux_ecs",
+ "vmux_feature",
 ]
 
 [[package]]
@@ -10414,11 +10434,25 @@ dependencies = [
  "url",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_macro",
  "vmux_path",
  "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_connector"
+version = "0.0.35"
+dependencies = [
+ "bevy",
+ "moonshine-save",
+ "serde",
+ "url",
+ "vmux_api",
+ "vmux_ecs",
+ "vmux_feature",
 ]
 
 [[package]]
@@ -10504,7 +10538,6 @@ dependencies = [
  "bevy_world_serialization",
  "moonshine-save",
  "rkyv",
- "ron 0.12.1",
  "serde",
  "serde_json",
  "sha2",
@@ -10562,6 +10595,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_git",
  "vmux_knowledge",
@@ -10602,11 +10636,24 @@ dependencies = [
  "vmux_api",
  "vmux_browser",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
  "vmux_tool",
  "zip",
+]
+
+[[package]]
+name = "vmux_feature"
+version = "0.0.35"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "ron 0.12.1",
+ "serde",
+ "url",
+ "vmux_api",
 ]
 
 [[package]]
@@ -10638,6 +10685,7 @@ dependencies = [
  "url",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_page",
  "vmux_path",
  "vmux_syntax",
@@ -10660,6 +10708,7 @@ dependencies = [
  "serde",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_page",
  "vmux_ui",
 ]
@@ -10683,6 +10732,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_tool",
 ]
 
@@ -10702,6 +10752,7 @@ dependencies = [
  "toml",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_git",
  "vmux_layout",
  "vmux_page",
@@ -10736,6 +10787,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
@@ -10770,6 +10822,7 @@ dependencies = [
  "tokio",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_tool",
  "vmux_transport",
 ]
@@ -10929,6 +10982,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_path",
  "vmux_process",
  "vmux_profile",
@@ -10967,6 +11021,7 @@ dependencies = [
  "vmux_clipboard",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_git",
  "vmux_page",
  "vmux_tool",
@@ -10990,6 +11045,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
@@ -11012,6 +11068,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_input",
  "vmux_layout",
  "vmux_page",
@@ -11038,6 +11095,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_input",
  "vmux_layout",
  "vmux_page",
@@ -11066,6 +11124,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
@@ -11095,6 +11154,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
@@ -11126,6 +11186,7 @@ dependencies = [
  "vmux_api",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_layout",
  "vmux_page",
  "vmux_session",
@@ -11157,6 +11218,7 @@ dependencies = [
  "vmux_clipboard",
  "vmux_command",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
@@ -11196,6 +11258,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_macro",
  "vmux_page",
  "vmux_path",
@@ -11263,6 +11326,7 @@ dependencies = [
  "url",
  "vmux_api",
  "vmux_ecs",
+ "vmux_feature",
  "vmux_layout",
  "vmux_page",
  "vmux_path",

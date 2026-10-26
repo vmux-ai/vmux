@@ -4,9 +4,9 @@ use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentSpace, ClientMessage};
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::{Active, Order, ProcessAnchor};
+use vmux_feature::AppFeatureExt;
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::window::{FocusedWindow, WindowHierarchy};
 use vmux_tool::{
@@ -22,7 +22,7 @@ pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

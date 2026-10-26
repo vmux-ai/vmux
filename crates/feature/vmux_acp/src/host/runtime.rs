@@ -2,10 +2,10 @@ use bevy::prelude::*;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
 use vmux_ecs::ProcessId;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_ecs::team::Profile;
 use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
+use vmux_feature::AppFeatureExt;
 use vmux_git::worktree::ValidatedLinkedWorkspace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::TabWorktreeReady;
@@ -30,7 +30,7 @@ use vmux_session::{
 pub(super) struct AcpSessionConfigSet;
 
 pub(super) fn add(app: &mut App) {
-    app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+    app.register_feature::<crate::Feature>();
     crate::policy::add(app);
     crate::host::acp::add_registry(app);
     crate::host::acp::add(app);

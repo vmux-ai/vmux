@@ -16,7 +16,7 @@ use vmux_command::{
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::PageMetadata;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_ui::i18n::Locale;
 
 use crate::event::StartSelectWorkspace;
@@ -30,7 +30,7 @@ pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(

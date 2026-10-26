@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 pub use query::HistoryOpenIntent;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::HostedPage;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{LastVisitedAt, TransitionType, Url, Visit, VisitCount, VisitedUrl};
+use vmux_feature::AppFeatureExt;
 
 pub mod prune;
 pub mod query;
@@ -16,7 +16,7 @@ pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .register_persisted::<Visit>()
             .register_persisted::<Url>()
             .register_persisted::<VisitCount>()

@@ -403,21 +403,31 @@ subtrees. `state.rs` owns shared UI snapshots and patches; `event.rs` owns trans
 and host-to-UI operations. Generic `page.rs`, `page_state.rs`, `ui_state.rs`, and `view.rs` modules
 are not used because their ownership is ambiguous.
 
-Page manifests are static plugin registration data. Their registration entities exist during
-plugin construction so the browser can build the complete embedded-host allowlist before CEF
-initializes. Runtime page state and behavior still initialize through ECS schedules.
+Page manifests are static plugin registration data. A feature calls
+`app.register_feature::<Feature>()` from its standard Bevy `Plugin::build`. `vmux_feature`
+collects those typed declarations, rejects duplicate feature, page, command, tool, provider, CLI,
+search-engine, and MCP ownership, then freezes one immutable `FeatureRegistry` from
+`FeatureRegistryPlugin::finish`. Only that plugin projects manifest metadata onto ECS entities for
+query-based consumers. Startup messages are not registration authority. Runtime page state and
+behavior still initialize through ECS schedules.
 
 Each feature keeps one `src/feature.ron`. `pages`, `tools`, application `commands`, and settings
 schema contributions are owned beside the feature that implements them; `cli` is the optional
 command tree. The settings feature aggregates those contributions into the `SettingsSchema`
 component on each settings page entity. String-keyed pseudo-sections are not namespaces. A
-crate declares one `FeatureManifestSource` marker. Feature entry paths install the generic
-`FeaturePlugin`, which parses the runtime sections once and registers one ECS entity containing their
-typed metadata. Repeated composition reuses that entity. Tool, command, CLI, and MCP catalog consumers
-read only the metadata they own from it. Page attributes read the same file at compile time. Feature
+crate declares one data-only `FeatureManifestSource` marker. Repeated registration of the same
+marker is idempotent. Tool, command, CLI, and MCP catalog consumers read only the metadata they own
+from the frozen registry projection. Page attributes read the same file at compile time. Feature
 plugins bind typed behavior without reparsing a named subsection or teaching an application crate
 which features exist. The first page is the feature's default page; only additional pages need a
 `name` for an explicit `page = "..."` selection.
+
+`vmux_ecs` owns stable generic ECS primitives, identity, revision, persistence mechanics, runtime
+tasks, and UI-state transport. `vmux_feature` owns only declaration parsing, static ownership
+validation, registry freeze, and projection. Provider-neutral external links and synchronization
+belong to `vmux_connector`; credentials and leases belong to `vmux_auth`; provider adapters remain
+in their provider feature crates. Layout, page, browser, and CEF state each have one owning plugin.
+Other features submit typed requests rather than mutating those internals.
 
 `vmux_app` exposes reusable feature-plugin composition without owning executable policy. Page
 manifests, hosted-page plugins, command-bar contributions, and typed MCP tools remain in their
@@ -1013,7 +1023,9 @@ crates/
 │   └── vmux_mobile
 ├── feature/                user-facing capability and page ownership
 │   ├── vmux_acp
+│   ├── vmux_auth          OAuth/OIDC connections and credential leases
 │   ├── vmux_command
+│   ├── vmux_connector     provider-neutral scopes, links, and sync policy
 │   ├── vmux_editor
 │   ├── vmux_extension
 │   ├── vmux_git
@@ -1036,7 +1048,8 @@ crates/
     ├── vmux_app            platform-neutral application plugin facade
     ├── vmux_browser        browser runtime and native-page renderer
     ├── vmux_clipboard
-    ├── vmux_ecs
+    ├── vmux_ecs            stable ECS primitives and persistence mechanics
+    ├── vmux_feature        static feature declarations and ownership registry
     ├── vmux_flex
     ├── vmux_macro
     ├── vmux_mcp

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_ecs::ProcessAnchor;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_tool::{ToolCommand, ToolDispatchSet};
 
 use crate::host::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
@@ -11,7 +11,7 @@ pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_systems(Update, (search, read, write).in_set(ToolDispatchSet));
     }
 }

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_tool::{AddedTool, ToolCommand, ToolDispatchSet};
 
 use crate::AgentRenameProfile;
@@ -10,7 +10,7 @@ pub struct TeamToolPlugin;
 
 impl Plugin for TeamToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
     }
 }

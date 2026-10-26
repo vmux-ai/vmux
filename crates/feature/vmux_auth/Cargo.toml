@@ -1,0 +1,20 @@
+[package]
+name = "vmux_auth"
+version.workspace = true
+edition.workspace = true
+description = "Shared OAuth and OIDC connection and credential lifecycle"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy = { workspace = true }
+moonshine-save = { workspace = true }
+zeroize = "1"
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+vmux_connector = { path = "../vmux_connector" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_feature = { path = "../../util/vmux_feature" }
+
+[lints]
+workspace = true

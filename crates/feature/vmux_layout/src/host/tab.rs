@@ -13,11 +13,11 @@ use vmux_command::CommandDefinition;
 use vmux_command::CommandManifest;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 use vmux_ecs::launcher::LauncherDismissRequest;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::TabCommandSet;
 use vmux_ecs::{Active, Order};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -65,7 +65,7 @@ pub struct TabCommandPlugin;
 impl Plugin for TabCommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

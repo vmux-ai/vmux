@@ -738,7 +738,7 @@ mod projection_tests {
             .insert_resource(AppSettings::default())
             .init_resource::<Emitted>()
             .add_observer(record_settings_state);
-        let feature = vmux_ecs::manifest::FeatureManifest::parse(include_str!("../feature.ron"));
+        let feature = vmux_feature::FeatureManifest::parse(include_str!("../feature.ron"));
         let settings = feature
             .settings::<SettingsManifest>()
             .unwrap()
@@ -786,7 +786,7 @@ mod projection_tests {
             .add_systems(Update, project_schema);
         let page = app.world_mut().spawn(Settings).id();
         for source in MANIFESTS {
-            let feature = vmux_ecs::manifest::FeatureManifest::parse(source);
+            let feature = vmux_feature::FeatureManifest::parse(source);
             let settings = feature
                 .settings::<SettingsManifest>()
                 .unwrap()

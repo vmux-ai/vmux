@@ -101,6 +101,7 @@ tempfile = { version = "3", optional = true }
 uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
+vmux_feature = { path = "../../util/vmux_feature" }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }

@@ -18,11 +18,11 @@ use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServersRequest, UiMcpServers,
 };
-use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::profile::McpCredentials;
 use vmux_ecs::profile::mcp_credentials::McpOauthCredentials;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
+use vmux_feature::FeatureManifest;
 
 pub struct McpConnectionPlugin;
 

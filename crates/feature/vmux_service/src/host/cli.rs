@@ -3,7 +3,7 @@ use std::time::Duration;
 use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_ecs::cli::{CliInvocation, CliResult};
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_profile::ServicePaths;
 use vmux_transport::service::ServiceCodec;
 
@@ -17,7 +17,7 @@ pub struct ServiceCliPlugin;
 
 impl Plugin for ServiceCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_systems(Update, route)
             .add_systems(
                 Update,

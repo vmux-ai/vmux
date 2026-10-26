@@ -14,13 +14,13 @@ use bevy::{
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageEmbedSet;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{
     Active, EffectiveStartupUrl, Order, PageOpenRequest, PageOpenSet, PageOpenTarget, PendingPrompt,
 };
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -31,7 +31,7 @@ pub struct WindowLayoutPlugin;
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

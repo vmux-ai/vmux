@@ -1,8 +1,8 @@
 use crate::host::snapshot::{CommandBarWorkDirectory, CommandBarWorkSnapshot};
 use bevy::prelude::*;
 use vmux_api::command_bar::{CommandBarWorkDir, SearchEngine};
-use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::{LastActivatedAt, LastVisitedAt, PageMetadata, Url, VisitCount};
+use vmux_feature::FeatureManifest;
 
 use super::work_snapshot_driver::{RecentFile, WorkDirectories};
 

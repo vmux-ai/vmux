@@ -11,7 +11,7 @@ pub use session::AcpSessionId;
 pub(crate) struct Feature;
 
 #[cfg(all(host, feature = "app"))]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

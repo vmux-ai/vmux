@@ -53,7 +53,7 @@ impl PageNavigation {
     }
 
     fn open(url: impl Into<String>, open: OpenTarget) {
-        let _ = send(&OpenRequest {
+        send(&OpenRequest {
             value: url.into(),
             open: Some(open),
         });

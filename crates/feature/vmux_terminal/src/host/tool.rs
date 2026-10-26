@@ -6,8 +6,8 @@ use vmux_api::protocol::{
     AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript, AgentRequest,
     AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::{HostShell, ProcessAnchor};
+use vmux_feature::AppFeatureExt;
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_transport::service::ServiceConnection;
 
@@ -25,7 +25,7 @@ pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+        app.register_feature::<crate::Feature>()
             .add_systems(Update, (run, read, dispatch).in_set(ToolDispatchSet));
     }
 }

@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 
 use super::persistence::PersistenceAppExt;
-use crate::PageMetadata;
 use crate::component::{
     ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
     LastActivatedAt, Order, Revision,
 };
+use crate::{DeletedAt, LastSyncedAt, PageMetadata, RemoteUpdatedAt, UpdatedAt};
 use vmux_api::{BuiltinIcon, PageIcon};
 
 use bevy::ecs::relationship::Relationship;
@@ -15,15 +15,20 @@ pub struct PrimitivesPlugin;
 
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<PageMetadata>()
+        app.add_plugins(crate::OperationPlugin)
+            .register_persisted::<PageMetadata>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
             .register_persisted::<Cwd>()
             .register_persisted::<Description>()
             .register_persisted::<CollectionView>()
             .register_persisted::<CreatedAt>()
+            .register_persisted::<UpdatedAt>()
             .register_persisted::<LastActivatedAt>()
             .register_persisted::<ArchivedAt>()
+            .register_persisted::<DeletedAt>()
+            .register_persisted::<RemoteUpdatedAt>()
+            .register_persisted::<LastSyncedAt>()
             .register_persisted::<Order>()
             .register_persisted::<Revision>()
             .register_type::<Active>()
