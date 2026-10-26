@@ -101,12 +101,12 @@ fn poll(
             &AgentId,
             &Cwd,
             &ProcessAnchor,
-            Option<&AcpSessionId>,
             &AcpInstallWaiter,
             &mut RunState,
         ),
         With<Session>,
     >,
+    links: crate::session::AcpSessionLinks,
     mut package_changes: MessageWriter<AcpPackageChanged>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -116,7 +116,7 @@ fn poll(
         .filter_map(|request| targets.get(request.stack).ok().map(EntityTarget::entity))
         .collect();
     let mut invalid_waiters = std::collections::HashSet::new();
-    for (entity, session_id, agent_id, _, _, _, waiter, _) in &mut waiters {
+    for (entity, session_id, agent_id, _, _, waiter, _) in &mut waiters {
         if swapping.contains(&entity)
             || !waiter.matches(session_id, agent_id)
             || !jobs.contains(waiter.job)
@@ -157,7 +157,7 @@ fn poll(
         let has_waiters = related_waiters.iter().any(|entity| {
             waiters
                 .get(*entity)
-                .is_ok_and(|(_, session_id, agent_id, _, _, _, waiter, _)| {
+                .is_ok_and(|(_, session_id, agent_id, _, _, waiter, _)| {
                     !invalid_waiters.contains(entity) && waiter.matches(session_id, agent_id)
                 })
         });
@@ -166,7 +166,7 @@ fn poll(
         }
         let outcome = job.outcome.take().unwrap();
         for entity in related_waiters {
-            let Ok((_, session_id, agent_id, cwd, anchor, resume, waiter, mut state)) =
+            let Ok((_, session_id, agent_id, cwd, anchor, waiter, mut state)) =
                 waiters.get_mut(entity)
             else {
                 continue;
@@ -176,12 +176,13 @@ fn poll(
             }
             match &outcome.launch {
                 Ok(launch) => {
+                    let resume = links.get(entity);
                     let message = launch.message_for(
                         session_id,
                         agent_id,
                         cwd,
                         anchor,
-                        resume,
+                        resume.as_ref().map(|resume| resume.id()),
                         settings.as_deref(),
                     );
                     service_requests.write(ServiceRequest(message));

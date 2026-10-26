@@ -14,13 +14,13 @@ use super::handoff::PendingHandoff;
 #[cfg(test)]
 use super::runtime_driver::AcpWorkspaceState;
 use super::runtime_driver::PromptWorkspace;
-use crate::AcpSessionId;
 use crate::host::acp::AcpSpawnQueued;
 use crate::host::event::{
     AcpAgentInfo, AcpSessionConfigSelectionResult, AcpSessionConfigSnapshot, AcpSessionCreated,
     AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest,
 };
 use crate::policy::AcpWorkspacePolicy;
+use crate::session::{AcpSessionLink, AcpSessionLinks};
 use vmux_session::host::{ImportedConversation, SessionView};
 use vmux_session::{
     AgentId, ApprovalPolicy, PromptQueue, Route, RunState, Session, SessionId, TitlePending,
@@ -299,19 +299,24 @@ fn auto_allow(
 #[allow(clippy::type_complexity)]
 fn session(
     mut reader: MessageReader<AcpSessionCreated>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
+    sessions: Query<(Entity, &SessionId, &AgentId), With<Session>>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
     mut page_meta: Query<&mut PageMetadata, With<SessionView>>,
+    links: AcpSessionLinks,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
-        for (session_entity, session_id) in &sessions {
+        for (session_entity, session_id, agent_id) in &sessions {
             if session_id.0 != ev.sid {
                 continue;
             }
-            commands
-                .entity(session_entity)
-                .insert(AcpSessionId(ev.acp_session_id.clone()));
+            links.set(
+                &mut commands,
+                session_entity,
+                &AcpSessionLink::kind(&agent_id.0),
+                &ev.acp_session_id,
+                None,
+            );
             let url = Route::Session(session_id.clone()).url();
             for (target, kids) in &stacks {
                 if target.entity() != session_entity {

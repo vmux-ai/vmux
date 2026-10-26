@@ -1,5 +1,5 @@
-use crate::AcpSessionId;
 use bevy::prelude::*;
+use vmux_connector::{ExternalId, ExternalLink, ProviderKey, ResourceKind};
 use vmux_session::host::ImportedConversation;
 
 #[cfg(test)]
@@ -26,14 +26,22 @@ fn spawn(mut commands: Commands) {
 
 fn load(
     directory: Single<&HandoffDriver>,
-    sessions: Query<
-        (Entity, &vmux_session::AgentId, &AcpSessionId),
-        (Added<AcpSessionId>, Without<ImportedConversation>),
+    links: Query<
+        (&ChildOf, &ProviderKey, &ResourceKind, &ExternalId),
+        (With<ExternalLink>, Added<ExternalLink>),
     >,
+    sessions: Query<&vmux_session::AgentId, Without<ImportedConversation>>,
     mut commands: Commands,
 ) {
-    for (entity, agent_id, session_id) in &sessions {
-        let Some(imported) = directory.load(&agent_id.0, &session_id.0) else {
+    for (owner, provider, kind, session_id) in &links {
+        if provider.as_str() != "acp" || kind.as_str() != "session" {
+            continue;
+        }
+        let entity = owner.parent();
+        let Ok(agent_id) = sessions.get(entity) else {
+            continue;
+        };
+        let Some(imported) = directory.load(&agent_id.0, session_id.as_str()) else {
             continue;
         };
         commands.entity(entity).insert(imported);

@@ -14,7 +14,7 @@ use super::attach_driver::{
     PendingAcpAgentAttachment, SessionName, SessionTarget, StackTarget, WorkingDirectory,
 };
 use super::navigation::{InlineTransitionSnapshot, PreparingAgentChatView};
-use crate::AcpSessionId;
+use crate::session::{AcpSessionLink, AcpSessionLinks};
 
 pub(super) fn add(app: &mut App) {
     app.add_systems(Update, attach.after(vmux_ecs::PageOpenSet::ResolveTarget));
@@ -49,6 +49,7 @@ fn attach(
     mut workspaces: Query<&mut TabWorkspace>,
     mut queues: Query<&mut PromptQueue>,
     time: Res<Time>,
+    links: AcpSessionLinks,
     mut commands: Commands,
 ) {
     for (
@@ -159,7 +160,6 @@ fn attach(
             .or_default();
         if let Some(resume) = resume.clone() {
             let mut session = commands.entity(*session_entity);
-            session.insert(AcpSessionId(resume));
             if transcripts.read(*session_entity, |transcript| transcript.messages.is_empty()) {
                 session.insert(vmux_session::TranscriptLoading);
             } else {
@@ -168,10 +168,18 @@ fn attach(
             if !prompt_title_inserted && !titles.contains(*session_entity) {
                 session.insert((AgentConversationTitle(session_name.clone()), TitlePending));
             }
+            links.set(
+                &mut commands,
+                *session_entity,
+                &AcpSessionLink::kind(agent_id),
+                &resume,
+                None,
+            );
         } else {
+            links.remove(&mut commands, *session_entity);
             commands
                 .entity(*session_entity)
-                .remove::<(AcpSessionId, vmux_session::TranscriptLoading)>();
+                .remove::<vmux_session::TranscriptLoading>();
         }
         let view = if let Some(webview) = webview {
             webview.entity()
