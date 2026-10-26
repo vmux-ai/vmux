@@ -38,8 +38,7 @@ pub struct CurrentSpaceSet;
     SpaceId,
     vmux_ecs::CollectionView,
     EffectiveStartupDir,
-    EffectiveStartupUrl,
-    crate::profile::Profile
+    EffectiveStartupUrl
 )]
 pub struct Space;
 
@@ -92,64 +91,51 @@ pub struct FocusedSpace<'w, 's> {
             &'static SpaceId,
             &'static EffectiveStartupDir,
             &'static EffectiveStartupUrl,
-            &'static crate::profile::Profile,
             Has<CurrentSpace>,
             Has<Active>,
         ),
         With<Space>,
     >,
+    profiles: crate::profile::Profiles<'w, 's>,
 }
 
 impl FocusedSpace<'_, '_> {
-    fn selected(
-        &self,
-    ) -> Option<(
-        Entity,
-        &SpaceId,
-        &EffectiveStartupDir,
-        &EffectiveStartupUrl,
-        &crate::profile::Profile,
-    )> {
+    fn selected(&self) -> Option<(Entity, &SpaceId, &EffectiveStartupDir, &EffectiveStartupUrl)> {
         self.spaces
             .iter()
-            .find(|(_, _, _, _, _, current, _)| *current)
-            .or_else(|| {
-                self.spaces
-                    .iter()
-                    .find(|(_, _, _, _, _, _, active)| *active)
-            })
+            .find(|(_, _, _, _, current, _)| *current)
+            .or_else(|| self.spaces.iter().find(|(_, _, _, _, _, active)| *active))
             .or_else(|| self.spaces.iter().next())
-            .map(|(entity, id, startup_dir, startup_url, profile, _, _)| {
-                (entity, id, startup_dir, startup_url, profile)
+            .map(|(entity, id, startup_dir, startup_url, _, _)| {
+                (entity, id, startup_dir, startup_url)
             })
     }
 
     pub fn get(&self) -> Option<(Entity, Option<std::path::PathBuf>)> {
         self.selected()
-            .map(|(entity, _, startup_dir, _, _)| (entity, startup_dir.0.clone()))
+            .map(|(entity, _, startup_dir, _)| (entity, startup_dir.0.clone()))
     }
 
     pub fn entity(&self) -> Option<Entity> {
-        self.selected().map(|(entity, _, _, _, _)| entity)
+        self.selected().map(|(entity, _, _, _)| entity)
     }
 
     pub fn id(&self) -> Option<&str> {
-        self.selected().map(|(_, id, _, _, _)| id.0.as_str())
+        self.selected().map(|(_, id, _, _)| id.0.as_str())
     }
 
     pub fn profile(&self) -> Option<&str> {
-        self.selected()
-            .map(|(_, _, _, _, profile)| profile.name.as_str())
+        self.entity().and_then(|space| self.profiles.name(space))
     }
 
     pub fn startup_dir(&self) -> Option<&std::path::Path> {
         self.selected()
-            .and_then(|(_, _, startup_dir, _, _)| startup_dir.0.as_deref())
+            .and_then(|(_, _, startup_dir, _)| startup_dir.0.as_deref())
     }
 
     pub fn startup_url(&self) -> Option<&str> {
         self.selected()
-            .map(|(_, _, _, startup_url, _)| startup_url.0.as_str())
+            .map(|(_, _, _, startup_url)| startup_url.0.as_str())
             .filter(|url| !url.is_empty())
     }
 

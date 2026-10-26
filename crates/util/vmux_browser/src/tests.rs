@@ -1086,7 +1086,6 @@ mod open_in_place_flow {
                 vmux_layout::space::Space,
                 vmux_layout::space::CurrentSpace,
                 vmux_layout::space::SpaceId("test".to_string()),
-                vmux_layout::profile::Profile::default(),
                 vmux_ecs::Active,
             ))
             .id();
@@ -1122,7 +1121,6 @@ mod open_in_place_flow {
                 vmux_layout::space::Space,
                 vmux_layout::space::CurrentSpace,
                 vmux_layout::space::SpaceId("test".to_string()),
-                vmux_layout::profile::Profile::default(),
                 vmux_ecs::Active,
             ))
             .id();
@@ -1160,7 +1158,6 @@ mod open_in_place_flow {
                 vmux_layout::space::Space,
                 vmux_layout::space::CurrentSpace,
                 vmux_layout::space::SpaceId("test".to_string()),
-                vmux_layout::profile::Profile::default(),
                 vmux_ecs::Active,
             ))
             .id();

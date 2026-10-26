@@ -613,8 +613,11 @@ fn finish_profile_create(
 fn finish_profile_rename(
     mut tasks: Query<(Entity, &mut ProfileRenameTask)>,
     user: Query<Entity, With<User>>,
-    mut space_profiles: Query<&mut SpaceProfile, With<Space>>,
-    mut profile_labels: Query<(&Id<StoredProfile>, &mut Name), With<ProfileLabel>>,
+    mut space_profiles: Query<&mut Name, (With<SpaceProfile>, Without<ProfileLabel>)>,
+    mut profile_labels: Query<
+        (&Id<StoredProfile>, &mut Name),
+        (With<ProfileLabel>, Without<SpaceProfile>),
+    >,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -638,8 +641,8 @@ fn finish_profile_rename(
         if !record.active {
             continue;
         }
-        for mut profile in &mut space_profiles {
-            profile.name.clone_from(&record.name);
+        for mut profile_name in &mut space_profiles {
+            *profile_name = Name::new(record.name.clone());
         }
         if let Ok(entity) = user.single() {
             commands
@@ -712,13 +715,9 @@ mod tests {
             .world_mut()
             .spawn((Profile::user_named("Old".to_string()), User))
             .id();
-        app.world_mut().spawn((
-            Space,
-            CurrentSpace,
-            SpaceProfile {
-                name: String::new(),
-            },
-        ));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
+        app.world_mut()
+            .spawn(SpaceProfile::owned_by("Personal", space));
 
         app.update();
 

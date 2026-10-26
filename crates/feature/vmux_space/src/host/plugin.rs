@@ -156,7 +156,9 @@ fn ensure_bootstrap(
     if !spaces.is_empty() || restore.single().is_ok_and(PersistenceState::store_present) {
         return;
     }
-    commands.spawn(SpaceRecord::bootstrap_for(profile.label().unwrap_or("Personal")).bundle());
+    let record = SpaceRecord::bootstrap_for(profile.label().unwrap_or("Personal"));
+    let space = commands.spawn(record.bundle()).id();
+    commands.spawn(record.profile_bundle(space));
 }
 
 #[vmux_command::command(message)]

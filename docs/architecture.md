@@ -1084,6 +1084,8 @@ and agent pane ownership is runtime routing state, not profile identity.
 Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,
 `Avatar`, and `Icon`. Sessions resolve that child through `Profiles`, so agent presentation never
 overloads the Session's canonical task name.
+Each Space likewise owns a separate persisted layout-profile entity composed from its `Profile`
+marker and `Name`; the Space's own `Name` remains the workspace label.
 
 `vmux_session` owns the durable unit of work: one canonical Session entity with `Id<Session>`, task
 metadata, working directory, data-driven stage, conversation-event children, optional agent

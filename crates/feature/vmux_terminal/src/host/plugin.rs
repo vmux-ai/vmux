@@ -2046,8 +2046,11 @@ mod tests {
     use bevy::ecs::message::Messages;
 
     fn spawn_active_space(app: &mut App, record: &SpaceRecord) {
-        app.world_mut()
-            .spawn((record.bundle(), vmux_layout::space::CurrentSpace));
+        let space = app
+            .world_mut()
+            .spawn((record.bundle(), vmux_layout::space::CurrentSpace))
+            .id();
+        app.world_mut().spawn(record.profile_bundle(space));
     }
 
     #[test]
