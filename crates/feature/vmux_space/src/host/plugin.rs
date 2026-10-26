@@ -6,13 +6,14 @@ use vmux_command::{
     CommandBarDismiss, CommandBarOpenRequest, ResolvedLocale, WriteCommandBarRequests,
 };
 use vmux_command::{CommandInvocation, CommandRuntimePlugin, ReadCommandRequests};
+use vmux_ecs::UiStateWrite;
 use vmux_ecs::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
+use vmux_ecs::persistence::{PersistenceState, WorkspaceStore};
 use vmux_ecs::{
     ActivateRequest, Active, EffectiveStartupUrl, Order, PageMetadata, PageOpenRequest,
     PageOpenTarget,
 };
 use vmux_ecs::{CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged};
-use vmux_ecs::{UiStateWrite, persistence::WorkspaceRestore};
 use vmux_history::LastActivatedAt;
 use vmux_layout::hosted_page::HostedUiPlugin;
 use vmux_layout::projection::SpacesProjection;
@@ -148,11 +149,11 @@ impl Plugin for SpacePlugin {
 
 fn ensure_bootstrap(
     spaces: Query<(), With<Space>>,
-    restore: Query<&WorkspaceRestore>,
+    restore: Query<&PersistenceState, With<WorkspaceStore>>,
     profile: vmux_ecs::profile::CurrentProfile,
     mut commands: Commands,
 ) {
-    if !spaces.is_empty() || restore.single().is_ok_and(|restore| restore.store_present) {
+    if !spaces.is_empty() || restore.single().is_ok_and(PersistenceState::store_present) {
         return;
     }
     commands.spawn(SpaceRecord::bootstrap_for(profile.label().unwrap_or("Personal")).bundle());

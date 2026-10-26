@@ -8,14 +8,13 @@ use bevy_cef::prelude::HostWindow;
 use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use moonshine_save::save::EntityFilter;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use vmux_api::BuiltinIcon;
 #[cfg(test)]
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::persistence::{
-    PersistenceDirty, WorkspacePersisted, WorkspaceRestore, WorkspaceSaveRequest,
-    WorkspaceStoreValidators,
+    AtomicSaveWorld, DurableStore, PersistenceDirty, PersistenceState, StoreLoad,
+    WorkspacePersisted, WorkspaceSaveRequest, WorkspaceStore, WorkspaceStoreValidators,
 };
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
@@ -38,7 +37,7 @@ pub(crate) struct WorkspacePersistencePlugin;
 impl Plugin for WorkspacePersistencePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WorkspaceSaveRequest>()
-            .add_observer(save_on_default_event)
+            .add_observer(save_on::<AtomicSaveWorld>)
             .add_observer(load_on_default_event)
             .add_systems(
                 Startup,
@@ -82,10 +81,10 @@ fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: 
         AutoSave {
             debounce: Timer::from_seconds(0.5, TimerMode::Once),
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
             components,
         },
-        WorkspaceRestore::default(),
+        WorkspaceStore,
+        PersistenceState::new(STORE_SCHEMA_VERSION),
         WorkspaceStorePath(path),
     ));
 }
@@ -93,14 +92,17 @@ fn spawn(registry: Res<AppTypeRegistry>, profile: CurrentProfile, mut commands: 
 fn handle_save_requests(
     mut requests: MessageReader<WorkspaceSaveRequest>,
     save_entities: SpaceSaveEntities,
-    persistence: Single<&AutoSave>,
+    persistence: Single<(&AutoSave, &WorkspaceStorePath, &PersistenceState), With<WorkspaceStore>>,
     mut saver: SpaceSaver,
 ) {
     for request in requests.read() {
+        let store = DurableStore::new(request.path.clone(), STORE_NAME, STORE_SCHEMA_VERSION);
         saver.save(
-            request.path.clone(),
+            store,
+            None,
+            persistence.2.current_revision(),
             save_entities.excluded(),
-            persistence.components.clone(),
+            persistence.0.components.clone(),
         );
     }
 }
@@ -110,18 +112,17 @@ struct RestorePending;
 
 fn mark_restore_pending(
     _trigger: On<Loaded>,
-    persistence: Single<Entity, With<AutoSave>>,
-    mut commands: Commands,
+    mut state: Single<&mut PersistenceState, With<WorkspaceStore>>,
 ) {
-    commands.entity(*persistence).insert(RestorePending);
+    state.begin_resolve();
 }
 
 fn complete_restore(
-    mut restore: Single<&mut WorkspaceRestore>,
+    mut state: Single<&mut PersistenceState, With<WorkspaceStore>>,
     persistence: Single<Entity, With<RestorePending>>,
     mut commands: Commands,
 ) {
-    restore.complete = true;
+    state.ready(true);
     commands.entity(*persistence).remove::<RestorePending>();
 }
 
@@ -129,7 +130,6 @@ fn complete_restore(
 struct AutoSave {
     debounce: Timer,
     periodic: Timer,
-    dirty: bool,
     components: WorldFilter,
 }
 
@@ -149,18 +149,19 @@ struct SpaceSaver<'w, 's> {
 impl SpaceSaver<'_, '_> {
     fn save(
         &mut self,
-        path: PathBuf,
+        store: DurableStore,
+        state: Option<Entity>,
+        revision: vmux_ecs::Revision,
         excluded: impl IntoIterator<Item = Entity>,
         components: WorldFilter,
     ) {
         if SessionEnvironment::is_test() {
             return;
         }
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        WorkspaceStorePath(path.clone()).write_schema_version();
-        let mut save = SaveWorld::default_into_file(path);
+        let mut save: AtomicSaveWorld = match state {
+            Some(state) => AtomicSaveWorld::new(store, state, revision),
+            None => AtomicSaveWorld::untracked(store, revision),
+        };
         save.entities = EntityFilter::block(excluded);
         save.components = components;
         self.commands.trigger_save(save);
@@ -187,6 +188,7 @@ impl SpaceSaveEntities<'_, '_> {
 }
 
 const STORE_SCHEMA_VERSION: u32 = 4;
+const STORE_NAME: &str = "workspace";
 
 #[derive(Component)]
 struct WorkspaceStorePath(PathBuf);
@@ -199,62 +201,70 @@ impl Default for WorkspaceStorePath {
 }
 
 impl WorkspaceStorePath {
-    fn version(&self) -> PathBuf {
-        self.0
-            .parent()
-            .map(|parent| parent.join("store.version"))
-            .unwrap_or_else(|| PathBuf::from("store.version"))
+    fn store(&self) -> DurableStore {
+        DurableStore::new(&self.0, STORE_NAME, STORE_SCHEMA_VERSION)
     }
 
-    fn schema_is_current(&self) -> bool {
-        std::fs::read_to_string(self.version())
-            .ok()
-            .and_then(|value| value.trim().parse::<u32>().ok())
-            .is_some_and(|version| version >= STORE_SCHEMA_VERSION)
-    }
-
-    fn write_schema_version(&self) {
-        let _ = std::fs::write(self.version(), STORE_SCHEMA_VERSION.to_string());
+    #[cfg(test)]
+    fn load(&self) -> LoadWorld {
+        let StoreLoad::Ready(snapshot) = self.store().load().unwrap() else {
+            panic!("workspace store should be ready");
+        };
+        LoadWorld::default_from_stream(std::io::Cursor::new(snapshot.into_payload().into_bytes()))
     }
 }
 
-fn mark_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<&mut AutoSave>) {
-    auto_save.dirty = true;
+fn mark_dirty(
+    _trigger: On<PersistenceDirty>,
+    mut persistence: Single<(&mut AutoSave, &mut PersistenceState), With<WorkspaceStore>>,
+) {
+    persistence.1.advance_dirty();
+    let auto_save = &mut persistence.0;
     auto_save.debounce.reset();
 }
 
 fn auto_save(
     time: Res<Time>,
-    mut auto_save: Single<&mut AutoSave>,
-    path: Single<&WorkspaceStorePath>,
+    mut persistence: Single<
+        (
+            Entity,
+            &mut AutoSave,
+            &WorkspaceStorePath,
+            &mut PersistenceState,
+        ),
+        With<WorkspaceStore>,
+    >,
     spaces: Query<(), With<Space>>,
     save_entities: SpaceSaveEntities,
     mut saver: SpaceSaver,
 ) {
+    let (entity, auto_save, path, state) = &mut *persistence;
+    let entity = *entity;
     auto_save.periodic.tick(time.delta());
 
     if spaces.is_empty() {
         return;
     }
 
-    if auto_save.dirty {
+    if state.dirty().is_some() {
         auto_save.debounce.tick(time.delta());
-        if auto_save.debounce.is_finished() {
-            saver.save(
-                path.0.clone(),
-                save_entities.excluded(),
-                auto_save.components.clone(),
-            );
-            auto_save.dirty = false;
-        }
     }
-
-    if auto_save.periodic.just_finished() {
-        saver.save(
-            path.0.clone(),
-            save_entities.excluded(),
-            auto_save.components.clone(),
-        );
+    let due = auto_save.debounce.is_finished() || auto_save.periodic.just_finished();
+    if !due {
+        return;
+    }
+    let Some(revision) = state.start_save() else {
+        return;
+    };
+    saver.save(
+        path.store(),
+        Some(entity),
+        revision,
+        save_entities.excluded(),
+        auto_save.components.clone(),
+    );
+    if SessionEnvironment::is_test() {
+        state.save_succeeded(revision, vmux_ecs::UnixMillis::now());
     }
 }
 
@@ -267,7 +277,13 @@ fn save_space_to_path(world: &mut World, path: PathBuf) {
         .allow::<Name>();
     world
         .run_system_once(move |mut saver: SpaceSaver| {
-            saver.save(path.clone(), std::iter::empty(), components.clone());
+            saver.save(
+                DurableStore::new(path.clone(), STORE_NAME, STORE_SCHEMA_VERSION),
+                None,
+                vmux_ecs::Revision::new(1),
+                std::iter::empty(),
+                components.clone(),
+            );
         })
         .unwrap();
 }
@@ -275,179 +291,75 @@ fn save_space_to_path(world: &mut World, path: PathBuf) {
 fn load_on_startup(
     registry: Res<AppTypeRegistry>,
     validators: WorkspaceStoreValidators,
-    mut restore: Single<&mut WorkspaceRestore>,
-    path: Single<&WorkspaceStorePath>,
+    mut persistence: Single<
+        (Entity, &WorkspaceStorePath, &mut PersistenceState),
+        With<WorkspaceStore>,
+    >,
     mut commands: Commands,
 ) {
+    let (entity, path, state) = &mut *persistence;
     if SessionEnvironment::is_test() {
-        restore.complete = true;
-        restore.store_present = false;
+        state.ready(false);
         return;
     }
-    let path = &path.0;
-    normalize_workspace_resources_if_needed(path);
-    let removed_stale = remove_rejected_store_if_needed(path, &validators);
-    let removed_incompatible = {
-        let registry = registry.read();
-        remove_incompatible_store_if_needed(path, &registry)
-    };
-    let schema_outdated = path.exists() && !WorkspaceStorePath(path.clone()).schema_is_current();
-    if schema_outdated {
-        warn!("Store schema outdated; resetting {:?}", path);
-        if let Err(e) = std::fs::remove_file(path) {
-            warn!("Failed to remove outdated store {:?}: {e}", path);
+    state.begin_read();
+    let store = path.store();
+    let snapshot = match store.load() {
+        Ok(StoreLoad::Missing) => {
+            state.ready(false);
+            return;
         }
-        let _ = std::fs::remove_file(WorkspaceStorePath(path.clone()).version());
-    }
-    let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
-    restore.store_present = exists;
-    if exists {
-        info!("Loading space from {:?}", path);
-        let load = match std::fs::read_to_string(path)
-            .ok()
-            .and_then(|body| normalized_store_icons(&body))
-        {
-            Some((body, unknown)) => {
-                warn!(?unknown, "Replacing unavailable persisted page icons");
-                LoadWorld::default_from_stream(std::io::Cursor::new(body.into_bytes()))
+        Ok(StoreLoad::Reset(reset)) => {
+            warn!(
+                path = %store.path().display(),
+                old_schema = ?reset.old_schema_version(),
+                new_schema = store.schema_version(),
+                reason = %reset.reason(),
+                "workspace store hard reset"
+            );
+            state.hard_reset(reset.reason());
+            return;
+        }
+        Ok(StoreLoad::Ready(snapshot)) => snapshot,
+        Err(error) => {
+            error!(path = %store.path().display(), %error, "workspace store read failed");
+            state.restore_failed(error.to_string());
+            return;
+        }
+    };
+    state.begin_validation(snapshot.metadata().revision());
+    let rejection = validators
+        .rejected_by(snapshot.payload())
+        .map(|name| format!("rejected by {name}"))
+        .or_else(|| {
+            let registry = registry.read();
+            space_has_unregistered_types(snapshot.payload(), &registry)
+                .then(|| "unregistered component type".to_string())
+        });
+    if let Some(reason) = rejection {
+        match store.hard_reset(reason.clone()) {
+            Ok(_) => {
+                warn!(
+                    path = %store.path().display(),
+                    old_schema = snapshot.metadata().schema_version(),
+                    new_schema = store.schema_version(),
+                    %reason,
+                    "workspace store hard reset"
+                );
+                state.hard_reset(reason);
             }
-            None => LoadWorld::default_from_file(path.clone()),
-        };
-        commands.trigger_load(load);
-    } else {
-        restore.complete = true;
-    }
-}
-
-fn normalize_workspace_resources_if_needed(path: &Path) {
-    let Ok(body) = std::fs::read_to_string(path) else {
+            Err(error) => {
+                state.restore_failed(error.to_string());
+            }
+        }
         return;
-    };
-    let Some(normalized) = WorkspaceStoreSource(&body).without_resources() else {
-        return;
-    };
-    if let Err(error) = std::fs::write(path, normalized) {
-        warn!(
-            "Failed to remove legacy workspace resources from {:?}: {error}",
-            path
-        );
-    } else {
-        info!("Removed legacy workspace resources from {:?}", path);
     }
-}
-
-struct WorkspaceStoreSource<'a>(&'a str);
-
-impl WorkspaceStoreSource<'_> {
-    fn without_resources(&self) -> Option<String> {
-        let marker = self.0.find("resources:")? + "resources:".len();
-        let open = marker + self.0[marker..].find('{')?;
-        let close = self.matching_brace(open)?;
-        if self.0[open + 1..close].trim().is_empty() {
-            return None;
-        }
-        let mut normalized = self.0.to_string();
-        normalized.replace_range(open + 1..close, "");
-        Some(normalized)
-    }
-
-    fn matching_brace(&self, open: usize) -> Option<usize> {
-        let mut depth = 0usize;
-        let mut quoted = false;
-        let mut escaped = false;
-        for (offset, character) in self.0[open..].char_indices() {
-            if quoted {
-                if escaped {
-                    escaped = false;
-                } else if character == '\\' {
-                    escaped = true;
-                } else if character == '"' {
-                    quoted = false;
-                }
-                continue;
-            }
-            match character {
-                '"' => quoted = true,
-                '{' => depth += 1,
-                '}' => {
-                    depth = depth.checked_sub(1)?;
-                    if depth == 0 {
-                        return Some(open + offset);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-}
-
-fn normalized_store_icons(body: &str) -> Option<(String, Vec<String>)> {
-    let mut normalized = String::with_capacity(body.len());
-    let mut unknown = Vec::new();
-
-    for line in body.split_inclusive('\n') {
-        let (content, newline) = line
-            .strip_suffix('\n')
-            .map(|content| (content, "\n"))
-            .unwrap_or((line, ""));
-        let trimmed = content.trim();
-        let name = trimmed
-            .strip_prefix("icon: Builtin(")
-            .and_then(|value| value.strip_suffix("),"));
-        let Some(name) = name else {
-            normalized.push_str(line);
-            continue;
-        };
-        if ron::from_str::<BuiltinIcon>(name).is_ok() {
-            normalized.push_str(line);
-            continue;
-        }
-        let indent = &content[..content.len() - content.trim_start().len()];
-        normalized.push_str(indent);
-        normalized.push_str("icon: r#None,");
-        normalized.push_str(newline);
-        unknown.push(name.to_string());
-    }
-
-    if unknown.is_empty() {
-        None
-    } else {
-        Some((normalized, unknown))
-    }
-}
-
-fn remove_rejected_store_if_needed(path: &Path, validators: &WorkspaceStoreValidators) -> bool {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    let Some(validator) = validators.rejected_by(&body) else {
-        return false;
-    };
-    warn!(%validator, "Removing rejected store from {:?}", path);
-    let _ = std::fs::remove_file(path);
-    true
-}
-
-fn remove_incompatible_store_if_needed(
-    path: &Path,
-    registry: &bevy::reflect::TypeRegistry,
-) -> bool {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    if !space_has_unregistered_types(&body, registry) {
-        return false;
-    }
-    warn!(
-        "Removing incompatible store (unregistered component types) from {:?}",
-        path
-    );
-    let _ = std::fs::remove_file(path);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::remove_file(parent.join("store.version"));
-    }
-    true
+    info!(path = %store.path().display(), "loading workspace store");
+    state.begin_materialize();
+    commands.entity(*entity).insert(RestorePending);
+    commands.trigger_load(LoadWorld::default_from_stream(std::io::Cursor::new(
+        snapshot.into_payload().into_bytes(),
+    )));
 }
 
 fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {
@@ -475,73 +387,87 @@ mod tests {
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
+    struct TestStore(Entity);
+
+    impl TestStore {
+        fn spawn(app: &mut App) -> Self {
+            Self(
+                app.world_mut()
+                    .spawn((
+                        AutoSave {
+                            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                            components: WorldFilter::allow_all(),
+                        },
+                        WorkspaceStore,
+                        PersistenceState::restored(
+                            STORE_SCHEMA_VERSION,
+                            vmux_ecs::Revision::new(1),
+                        ),
+                    ))
+                    .id(),
+            )
+        }
+
+        fn clear(&self, app: &mut App) {
+            app.world_mut()
+                .get_mut::<PersistenceState>(self.0)
+                .unwrap()
+                .ready(true);
+            let revision = app
+                .world()
+                .get::<PersistenceState>(self.0)
+                .unwrap()
+                .current_revision();
+            let mut state = app.world_mut().get_mut::<PersistenceState>(self.0).unwrap();
+            state.mark_dirty(revision);
+            let revision = state.start_save().unwrap();
+            state.save_succeeded(revision, vmux_ecs::UnixMillis::now());
+        }
+
+        fn dirty(&self, app: &App) -> bool {
+            app.world()
+                .get::<PersistenceState>(self.0)
+                .unwrap()
+                .dirty()
+                .is_some()
+        }
+    }
+
     #[test]
     fn adding_archived_page_marks_store_dirty() {
         let mut app = App::new();
-        let auto_save = app
-            .world_mut()
-            .spawn(AutoSave {
-                debounce: Timer::from_seconds(0.5, TimerMode::Once),
-                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
-                components: WorldFilter::allow_all(),
-            })
-            .id();
+        let store = TestStore::spawn(&mut app);
         app.register_persisted::<ArchivedPage>()
             .add_observer(mark_dirty);
         app.update();
-        app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
-            .unwrap()
-            .dirty = false;
+        store.clear(&mut app);
         app.world_mut().spawn(ArchivedPage::default());
         app.update();
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(store.dirty(&app));
     }
 
     #[test]
     fn adding_visit_marks_store_dirty() {
         let mut app = App::new();
-        let auto_save = app
-            .world_mut()
-            .spawn(AutoSave {
-                debounce: Timer::from_seconds(0.5, TimerMode::Once),
-                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
-                components: WorldFilter::allow_all(),
-            })
-            .id();
+        let store = TestStore::spawn(&mut app);
         app.register_persisted::<vmux_history::Visit>()
             .add_observer(mark_dirty);
         app.update();
-        app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
-            .unwrap()
-            .dirty = false;
+        store.clear(&mut app);
         app.world_mut().spawn(vmux_history::Visit);
         app.update();
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(store.dirty(&app));
     }
 
     #[test]
     fn changing_tab_startup_dir_marks_store_dirty() {
         let mut app = App::new();
-        let auto_save = app
-            .world_mut()
-            .spawn(AutoSave {
-                debounce: Timer::from_seconds(0.5, TimerMode::Once),
-                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
-                components: WorldFilter::allow_all(),
-            })
-            .id();
+        let store = TestStore::spawn(&mut app);
         app.register_persisted::<Tab>().add_observer(mark_dirty);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
-        app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
-            .unwrap()
-            .dirty = false;
+        store.clear(&mut app);
         app.world_mut()
             .entity_mut(tab)
             .get_mut::<Tab>()
@@ -550,50 +476,31 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(store.dirty(&app));
     }
 
     #[test]
     fn adding_tab_workspace_marks_store_dirty() {
         let mut app = App::new();
-        let auto_save = app
-            .world_mut()
-            .spawn(AutoSave {
-                debounce: Timer::from_seconds(0.5, TimerMode::Once),
-                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
-                components: WorldFilter::allow_all(),
-            })
-            .id();
+        let store = TestStore::spawn(&mut app);
         app.register_persisted::<TabWorkspace>()
             .add_observer(mark_dirty);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
-        app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
-            .unwrap()
-            .dirty = false;
+        store.clear(&mut app);
         app.world_mut().entity_mut(tab).insert(TabWorkspace {
             project_dir: "/tmp/project".into(),
         });
 
         app.update();
 
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(store.dirty(&app));
     }
 
     #[test]
     fn removing_tab_worktree_marks_store_dirty() {
         let mut app = App::new();
-        let auto_save = app
-            .world_mut()
-            .spawn(AutoSave {
-                debounce: Timer::from_seconds(0.5, TimerMode::Once),
-                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
-                components: WorldFilter::allow_all(),
-            })
-            .id();
+        let store = TestStore::spawn(&mut app);
         app.register_persisted::<Tab>()
             .register_persisted::<TabWorktree>()
             .add_observer(mark_dirty);
@@ -610,15 +517,12 @@ mod tests {
             ))
             .id();
         app.update();
-        app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
-            .unwrap()
-            .dirty = false;
+        store.clear(&mut app);
         app.world_mut().entity_mut(tab).remove::<TabWorktree>();
 
         app.update();
 
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
+        assert!(store.dirty(&app));
     }
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -706,7 +610,7 @@ mod tests {
             .register_persisted::<vmux_ecs::LastVisitedAt>()
             .register_persisted::<vmux_ecs::VisitedUrl>()
             .register_persisted::<vmux_ecs::TransitionType>()
-            .add_observer(save_on_default_event);
+            .add_observer(save_on::<AtomicSaveWorld>);
 
         let url_e = app_save
             .world_mut()
@@ -754,7 +658,7 @@ mod tests {
         app_load
             .world_mut()
             .commands()
-            .trigger_load(LoadWorld::default_from_file(path));
+            .trigger_load(WorkspaceStorePath(path).load());
         app_load.update();
 
         let url_count = app_load
@@ -802,7 +706,7 @@ mod tests {
         app_save
             .add_plugins(MinimalPlugins)
             .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .add_observer(save_on_default_event);
+            .add_observer(save_on::<AtomicSaveWorld>);
         app_save.world_mut().spawn((
             Save,
             PageMetadata {
@@ -829,7 +733,7 @@ mod tests {
         app_load
             .world_mut()
             .commands()
-            .trigger_load(LoadWorld::default_from_file(path));
+            .trigger_load(WorkspaceStorePath(path).load());
         app_load.update();
 
         let metadata = app_load
@@ -844,50 +748,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_side_sheet_sections_load_through_store() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("store.ron");
-        std::fs::write(
-            &path,
-            r#"(
-  resources: {},
-  entities: {
-    1: (
-      components: {
-        "vmux_desktop::layout::side_sheet::SideSheetSectionsExpanded": (
-          projects: true,
-          bookmarks: true,
-          knowledge: true,
-          tools: true,
-        ),
-      },
-    ),
-  },
-)
-"#,
-        )
-        .expect("write store");
-
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .register_type::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
-            .add_observer(load_on_default_event);
-        app.update();
-        app.world_mut()
-            .commands()
-            .trigger_load(LoadWorld::default_from_file(path));
-        app.update();
-
-        let sections = app
-            .world_mut()
-            .query::<&vmux_layout::side_sheet::SideSheetSectionsExpanded>()
-            .single(app.world())
-            .expect("legacy side sheet sections loaded");
-        assert!(sections.bookmarks);
-    }
-
-    #[test]
     fn window_geometry_round_trips_through_store() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("store.ron");
@@ -899,7 +759,7 @@ mod tests {
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>();
-        app_save.add_observer(save_on_default_event);
+        app_save.add_observer(save_on::<AtomicSaveWorld>);
         app_save.world_mut().spawn((
             Save,
             WindowGeometry {
@@ -926,7 +786,7 @@ mod tests {
         app_load
             .world_mut()
             .commands()
-            .trigger_load(LoadWorld::default_from_file(path));
+            .trigger_load(WorkspaceStorePath(path).load());
         app_load.update();
 
         let geom = app_load
@@ -972,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_save_writes_schema_version_next_to_saved_store() {
+    fn custom_save_embeds_schema_version_in_saved_store() {
         let _home = HomeEnvGuard::use_temp_home("custom-save-schema-version");
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("custom-store.ron");
@@ -984,7 +844,7 @@ mod tests {
             .register_persisted::<Space>()
             .register_persisted::<SpaceId>()
             .register_persisted::<WindowGeometry>()
-            .add_observer(save_on_default_event);
+            .add_observer(save_on::<AtomicSaveWorld>);
         app_save.world_mut().spawn((
             Save,
             Space,
@@ -999,15 +859,14 @@ mod tests {
         save_space_to_path(app_save.world_mut(), path.clone());
         app_save.update();
 
-        assert!(path.exists(), "custom store should be saved");
-        assert!(
-            dir.path().join("store.version").exists(),
-            "schema version should be written next to custom store"
-        );
-        assert!(
-            !WorkspaceStorePath::default().version().exists(),
-            "custom save must not write default store.version"
-        );
+        let StoreLoad::Ready(snapshot) = DurableStore::new(&path, STORE_NAME, STORE_SCHEMA_VERSION)
+            .load()
+            .unwrap()
+        else {
+            panic!("custom store should be ready");
+        };
+        assert_eq!(snapshot.metadata().schema_version(), STORE_SCHEMA_VERSION);
+        assert!(!dir.path().join("store.version").exists());
     }
 
     #[test]
@@ -1026,7 +885,7 @@ mod tests {
             .register_type::<vmux_ecs::PaneStep>()
             .register_type::<vmux_ecs::SplitAxis>()
             .register_type::<Vec<vmux_ecs::PaneStep>>();
-        app_save.add_observer(save_on_default_event);
+        app_save.add_observer(save_on::<AtomicSaveWorld>);
         app_save
             .world_mut()
             .spawn((Save, Pane, PaneId("p-1".to_string())));
@@ -1073,7 +932,7 @@ mod tests {
         app_load
             .world_mut()
             .commands()
-            .trigger_load(LoadWorld::default_from_file(path));
+            .trigger_load(WorkspaceStorePath(path).load());
         app_load.update();
 
         let pid = app_load
@@ -1132,152 +991,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_workspace_resources_are_removed_without_touching_entities() {
-        let body = r#"(
-  resources: {
-    "vmux_bookmark::OfferedBookmarkDefaults": (
-      urls: ["vmux://sessions/{active}"],
-    ),
-  },
-  entities: {
-    1: (
-      components: {
-        "vmux_ecs::PageMetadata": (),
-      },
-    ),
-  },
-)
-"#;
-
-        let normalized = WorkspaceStoreSource(body)
-            .without_resources()
-            .expect("legacy resources");
-
-        assert!(normalized.contains("resources: {}"));
-        assert!(normalized.contains("vmux_ecs::PageMetadata"));
-        assert!(!normalized.contains("OfferedBookmarkDefaults"));
-    }
-
-    #[test]
-    fn empty_workspace_resources_need_no_migration() {
-        assert!(
-            WorkspaceStoreSource("(resources: {}, entities: {})")
-                .without_resources()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn unavailable_persisted_icons_fall_back_without_resetting_the_store() {
-        let body = r#"
-        icon: Builtin(Files),
-        icon: Builtin(LegacyProject),
-        icon: Builtin(LegacyKeyboard),
-"#;
-        let (normalized, unknown) = normalized_store_icons(body).expect("unknown icons");
-
-        assert_eq!(unknown, ["LegacyProject", "LegacyKeyboard"]);
-        assert_eq!(
-            normalized,
-            r#"
-        icon: Builtin(Files),
-        icon: r#None,
-        icon: r#None,
-"#
-        );
-    }
-
-    #[test]
-    fn available_persisted_icons_need_no_migration() {
-        let body = "        icon: Builtin(GitBranch),\n";
-        assert_eq!(normalized_store_icons(body), None);
-    }
-
-    #[test]
-    fn unavailable_persisted_icon_store_loads_after_migration() {
-        let body = r#"(
-  resources: {},
-  entities: {
-    1: (
-      components: {
-        "vmux_header::system::PageMetadata": (
-          title: "Projects",
-          url: "vmux://projects/",
-          icon: Builtin(LegacyProject),
-          bg_color: None,
-        ),
-      },
-    ),
-  },
-)
-"#;
-        let (normalized, _) = normalized_store_icons(body).expect("unknown icon");
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_ecs::PrimitivesPlugin)
-            .add_observer(load_on_default_event);
-        app.update();
-        app.world_mut()
-            .commands()
-            .trigger_load(LoadWorld::default_from_stream(std::io::Cursor::new(
-                normalized.into_bytes(),
-            )));
-        app.update();
-
-        let metadata = app
-            .world_mut()
-            .query::<&PageMetadata>()
-            .single(app.world())
-            .expect("page metadata loaded");
-        assert_eq!(metadata.icon, vmux_api::PageIcon::None);
-        assert_eq!(metadata.url, "vmux://projects/");
-    }
-
-    #[test]
-    fn incompatible_store_is_removed_before_load() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("store.ron");
-        std::fs::write(dir.path().join("store.version"), "2").expect("write version");
-        std::fs::write(
-            &path,
-            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
-        )
-        .expect("write store");
-
-        let app = registry_app();
-        let registry = app.world().resource::<AppTypeRegistry>().read();
-        assert!(remove_incompatible_store_if_needed(&path, &registry));
-        assert!(!path.exists());
-        assert!(!dir.path().join("store.version").exists());
-    }
-
-    #[test]
-    fn compatible_store_is_kept_before_load() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("store.ron");
-        let app = registry_app();
-        let registry = app.world().resource::<AppTypeRegistry>().read();
-        let key = <vmux_ecs::PageMetadata as bevy::reflect::TypePath>::type_path();
-        std::fs::write(&path, store_body_with_key(key)).expect("write store");
-
-        assert!(!remove_incompatible_store_if_needed(&path, &registry));
-        assert!(path.exists());
-    }
-
-    #[test]
-    fn incompatible_store_is_removed_on_startup() {
+    fn incompatible_component_store_is_hard_reset_on_startup() {
         let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-removed-on-startup");
         let store = WorkspaceStorePath::default();
         let path = store.0.clone();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).expect("store dir");
-        }
-        std::fs::write(
-            &path,
-            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
-        )
-        .expect("write store");
-        std::fs::write(store.version(), STORE_SCHEMA_VERSION.to_string()).expect("write version");
+        store
+            .store()
+            .write(
+                vmux_ecs::Revision::new(1),
+                store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
+            )
+            .unwrap();
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1289,23 +1013,32 @@ mod tests {
             !path.exists(),
             "incompatible store should be removed on startup"
         );
-        assert!(
-            !store.version().exists(),
-            "store.version should be removed with the incompatible store"
-        );
+        let state = app
+            .world_mut()
+            .query_filtered::<&PersistenceState, With<WorkspaceStore>>()
+            .single(app.world())
+            .unwrap();
+        assert!(matches!(
+            state.recovery(),
+            vmux_ecs::persistence::PersistenceRecovery::HardReset(_)
+        ));
     }
 
     #[test]
     fn auto_save_system_skips_save_without_space() {
         let _home = HomeEnvGuard::use_temp_home("auto-save-system-skips-without-space");
         let mut app = App::new();
+        let mut state =
+            PersistenceState::restored(STORE_SCHEMA_VERSION, vmux_ecs::Revision::new(1));
+        state.mark_dirty(vmux_ecs::Revision::new(2));
         app.world_mut().spawn((
             AutoSave {
                 debounce: Timer::from_seconds(0.0, TimerMode::Once),
                 periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
-                dirty: true,
                 components: WorldFilter::allow_all(),
             },
+            WorkspaceStore,
+            state,
             WorkspaceStorePath::default(),
         ));
         app.add_plugins(MinimalPlugins)
@@ -1313,7 +1046,7 @@ mod tests {
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
-            .add_observer(save_on_default_event)
+            .add_observer(save_on::<AtomicSaveWorld>)
             .add_systems(Update, auto_save);
         app.world_mut().spawn((
             Save,
@@ -1335,13 +1068,17 @@ mod tests {
     fn auto_save_system_saves_with_space() {
         let _home = HomeEnvGuard::use_temp_home("auto-save-system-saves-with-space");
         let mut app = App::new();
+        let mut state =
+            PersistenceState::restored(STORE_SCHEMA_VERSION, vmux_ecs::Revision::new(1));
+        state.mark_dirty(vmux_ecs::Revision::new(2));
         app.world_mut().spawn((
             AutoSave {
                 debounce: Timer::from_seconds(0.0, TimerMode::Once),
                 periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
-                dirty: true,
                 components: WorldFilter::allow_all(),
             },
+            WorkspaceStore,
+            state,
             WorkspaceStorePath::default(),
         ));
         app.add_plugins(MinimalPlugins)
@@ -1349,7 +1086,7 @@ mod tests {
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
-            .add_observer(save_on_default_event)
+            .add_observer(save_on::<AtomicSaveWorld>)
             .add_systems(Update, auto_save);
         app.world_mut().spawn((
             Save,

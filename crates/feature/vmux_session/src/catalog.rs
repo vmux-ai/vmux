@@ -353,7 +353,7 @@ struct CatalogSources<'w, 's> {
     linked_sessions: LinkedSessions<'w, 's>,
     stages: StageCatalog<'w, 's>,
     providers: Res<'w, ProviderCatalog>,
-    operations: Res<'w, ProviderArchiveOperations>,
+    operations: ProviderArchiveOperations<'w, 's>,
     provider_stages: ProviderStages<'w, 's>,
     provider_archives: ProviderArchives<'w, 's>,
     provider_tombstones: Res<'w, ProviderSessionTombstones>,

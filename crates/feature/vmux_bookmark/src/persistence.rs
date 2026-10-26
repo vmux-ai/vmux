@@ -5,7 +5,9 @@ use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
 use vmux_api::PageIcon;
 use vmux_api::bookmark::SmartBookmarkFolder;
-use vmux_ecs::persistence::{PersistenceAppExt, PersistenceDomain};
+use vmux_ecs::persistence::{
+    AtomicSaveWorld, PersistenceAppExt, PersistenceDomain, PersistenceState, StoreLoad,
+};
 use vmux_ecs::profile::SessionEnvironment;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
@@ -20,6 +22,12 @@ const RETIRED_DEFAULT_BOOKMARKS: [&str; 2] = ["vmux://spaces/", "vmux://team/"];
 enum BookmarkPersistence {}
 
 type BookmarkPersisted = PersistenceDomain<BookmarkPersistence>;
+
+pub(super) const STORE_NAME: &str = "bookmarks";
+pub(super) const STORE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Component)]
+struct BookmarkStore;
 
 #[derive(Resource, Clone)]
 struct BookmarkPersistenceTypes(WorldFilter);
@@ -44,11 +52,6 @@ impl BookmarkPersistenceTypes {
         };
         app.insert_resource(Self(filter));
     }
-
-    fn apply(&self, save: &mut SaveWorld<BookmarkFilter>) {
-        save.components = self.0.clone();
-        save.resources = self.0.clone();
-    }
 }
 
 pub(super) struct BookmarkPersistencePlugin;
@@ -57,7 +60,7 @@ impl Plugin for BookmarkPersistencePlugin {
     fn build(&self, app: &mut App) {
         BookmarkPersistenceTypes::register(app);
         app.init_resource::<OfferedBookmarkDefaults>()
-            .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
+            .add_observer(save_on::<AtomicSaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_defaults)
             .add_observer(insert_defaults)
@@ -93,41 +96,72 @@ fn spawn(profile: vmux_ecs::profile::CurrentProfile, mut commands: Commands) {
     commands.spawn((
         Name::new("Bookmark persistence"),
         BookmarkAutoSave::default(),
+        BookmarkStore,
+        PersistenceState::new(STORE_SCHEMA_VERSION),
         BookmarkPersistencePath(path),
     ));
 }
 
 fn load_bookmarks_on_startup(
-    persistence: Single<Entity, With<BookmarkAutoSave>>,
-    path: Single<&BookmarkPersistencePath>,
+    mut persistence: Single<
+        (Entity, &BookmarkPersistencePath, &mut PersistenceState),
+        With<BookmarkStore>,
+    >,
     mut commands: Commands,
 ) {
+    let (entity, path, state) = &mut *persistence;
     if SessionEnvironment::is_test() {
+        state.ready(false);
         return;
     }
-    if !path.0.exists() {
-        commands.trigger(SeedBookmarkDefaults);
-        return;
-    }
-    let load = match path.load() {
-        Ok(load) => load,
+    state.begin_read();
+    let store = path.store();
+    let snapshot = match store.load() {
+        Ok(StoreLoad::Missing) => {
+            state.ready(false);
+            commands.trigger(SeedBookmarkDefaults);
+            return;
+        }
+        Ok(StoreLoad::Reset(reset)) => {
+            warn!(
+                path = %store.path().display(),
+                old_schema = ?reset.old_schema_version(),
+                new_schema = store.schema_version(),
+                reason = %reset.reason(),
+                "bookmark store hard reset"
+            );
+            state.hard_reset(reset.reason());
+            commands.trigger(SeedBookmarkDefaults);
+            return;
+        }
+        Ok(StoreLoad::Ready(snapshot)) => snapshot,
         Err(error) => {
-            error!(path = %path.0.display(), %error, "bookmark load failed");
+            error!(path = %store.path().display(), %error, "bookmark store read failed");
+            state.restore_failed(error.to_string());
             return;
         }
     };
-    commands.entity(*persistence).insert(BookmarkLoadPending);
-    commands.trigger_load(load);
+    state.begin_validation(snapshot.metadata().revision());
+    state.begin_materialize();
+    commands.entity(*entity).insert(BookmarkLoadPending);
+    commands.trigger_load(LoadWorld::<BookmarkFilter>::from_stream(
+        std::io::Cursor::new(snapshot.into_payload().into_bytes()),
+    ));
 }
 
 fn seed_defaults(
     _trigger: On<Loaded>,
     pending: Option<Single<Entity, With<BookmarkLoadPending>>>,
+    mut states: Query<&mut PersistenceState, With<BookmarkStore>>,
     mut commands: Commands,
 ) {
     let Some(pending) = pending else {
         return;
     };
+    if let Ok(mut state) = states.get_mut(*pending) {
+        state.begin_resolve();
+        state.ready(true);
+    }
     commands.trigger(SeedBookmarkDefaults);
     commands.entity(*pending).remove::<BookmarkLoadPending>();
 }
@@ -167,7 +201,7 @@ struct BookmarkSeed<'w, 's> {
         Query<'w, 's, (Entity, &'static Name, Option<&'static SmartBookmarkFolder>), With<Folder>>,
     orders: Query<'w, 's, &'static BookmarkOrder, BookmarkFilter>,
     offered: ResMut<'w, OfferedBookmarkDefaults>,
-    auto: Single<'w, 's, &'static mut BookmarkAutoSave>,
+    state: Single<'w, 's, &'static mut PersistenceState, With<BookmarkStore>>,
     commands: Commands<'w, 's>,
 }
 
@@ -359,17 +393,15 @@ fn insert_defaults(
         }
     }
     if changed {
-        seed.auto.dirty = true;
+        seed.state.advance_dirty();
     }
 }
 
 #[derive(Component, Default)]
-struct BookmarkAutoSave {
-    dirty: bool,
-}
+struct BookmarkAutoSave;
 
 fn mark_bookmarks_dirty(
-    mut auto: Single<&mut BookmarkAutoSave>,
+    mut state: Single<&mut PersistenceState, With<BookmarkStore>>,
     changed: Query<
         (),
         (
@@ -402,28 +434,30 @@ fn mark_bookmarks_dirty(
         | removed_collapsed.read().next().is_some()
         | removed_child_of_bookmark;
     if any_removed || !changed.is_empty() {
-        auto.dirty = true;
+        state.advance_dirty();
     }
 }
 
 fn autosave_bookmarks(
-    mut auto: Single<&mut BookmarkAutoSave>,
-    path: Single<&BookmarkPersistencePath>,
+    mut persistence: Single<
+        (Entity, &BookmarkPersistencePath, &mut PersistenceState),
+        With<BookmarkStore>,
+    >,
     types: Res<BookmarkPersistenceTypes>,
     mut commands: Commands,
 ) {
-    if !auto.dirty {
+    let (entity, path, state) = &mut *persistence;
+    let Some(revision) = state.start_save() else {
         return;
-    }
+    };
     if !SessionEnvironment::is_test() {
-        if let Some(parent) = path.0.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let mut save = SaveWorld::<BookmarkFilter>::into_file(path.0.clone());
-        types.apply(&mut save);
+        let mut save = AtomicSaveWorld::<BookmarkFilter>::new(path.store(), *entity, revision);
+        save.components = types.0.clone();
+        save.resources = types.0.clone();
         commands.trigger_save(save);
+    } else {
+        state.save_succeeded(revision, vmux_ecs::UnixMillis::now());
     }
-    auto.dirty = false;
 }
 
 #[cfg(test)]
@@ -448,7 +482,7 @@ mod tests {
                 urls: vec!["vmux://start/".into()],
                 ..default()
             })
-            .add_observer(save_on::<SaveWorld<BookmarkFilter>>);
+            .add_observer(save_on::<AtomicSaveWorld<BookmarkFilter>>);
         save_app.world_mut().spawn((
             Folder,
             Uuid("f1".into()),
@@ -475,8 +509,12 @@ mod tests {
             .resource::<BookmarkPersistenceTypes>()
             .clone();
         save_app.add_systems(Update, move |mut c: Commands| {
-            let mut s = SaveWorld::<BookmarkFilter>::into_file(p.clone());
-            types.apply(&mut s);
+            let mut s = AtomicSaveWorld::<BookmarkFilter>::untracked(
+                BookmarkPersistencePath(p.clone()).store(),
+                vmux_ecs::Revision::new(1),
+            );
+            s.components = types.0.clone();
+            s.resources = types.0.clone();
             c.trigger_save(s);
         });
         save_app.update();
@@ -498,7 +536,7 @@ mod tests {
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
         let p2 = path.clone();
         load_app.add_systems(Update, move |mut c: Commands| {
-            c.trigger_load(LoadWorld::<BookmarkFilter>::from_file(p2.clone()));
+            c.trigger_load(BookmarkPersistencePath(p2.clone()).load_world());
         });
         load_app.update();
         load_app.update();
@@ -550,7 +588,7 @@ mod tests {
             .add_plugins(bevy::asset::AssetPlugin::default())
             .add_plugins(vmux_ecs::PrimitivesPlugin);
         BookmarkPersistenceTypes::register(&mut save_app);
-        save_app.add_observer(save_on::<SaveWorld<BookmarkFilter>>);
+        save_app.add_observer(save_on::<AtomicSaveWorld<BookmarkFilter>>);
         save_app.world_mut().spawn((
             Pin,
             Uuid("existing".into()),
@@ -568,8 +606,12 @@ mod tests {
             .resource::<BookmarkPersistenceTypes>()
             .clone();
         save_app.add_systems(Update, move |mut commands: Commands| {
-            let mut save = SaveWorld::<BookmarkFilter>::into_file(save_path.clone());
-            types.apply(&mut save);
+            let mut save = AtomicSaveWorld::<BookmarkFilter>::untracked(
+                BookmarkPersistencePath(save_path.clone()).store(),
+                vmux_ecs::Revision::new(1),
+            );
+            save.components = types.0.clone();
+            save.resources = types.0.clone();
             commands.trigger_save(save);
         });
         save_app.update();
@@ -588,9 +630,12 @@ mod tests {
             },
         ];
         let mut load_app = App::new();
-        load_app
-            .world_mut()
-            .spawn((BookmarkAutoSave::default(), BookmarkLoadPending));
+        load_app.world_mut().spawn((
+            BookmarkAutoSave,
+            BookmarkStore,
+            BookmarkLoadPending,
+            PersistenceState::restored(STORE_SCHEMA_VERSION, vmux_ecs::Revision::new(1)),
+        ));
         load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
@@ -605,7 +650,7 @@ mod tests {
         load_app
             .world_mut()
             .commands()
-            .trigger_load(LoadWorld::<BookmarkFilter>::from_file(path));
+            .trigger_load(BookmarkPersistencePath(path).load_world());
         load_app.update();
         load_app.update();
 

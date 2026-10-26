@@ -214,7 +214,7 @@ impl ProfileStore {
         let profile = Profile::named(&id);
         let directory = root.join(profile.id());
         std::fs::create_dir_all(&directory)?;
-        std::fs::write(directory.join("display_name"), name)?;
+        vmux_path::AtomicFile::write(directory.join("display_name"), name.as_bytes())?;
         Ok(ProfileRecord {
             profile,
             name: name.to_string(),
@@ -228,7 +228,7 @@ impl ProfileStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(path, name)?;
+        vmux_path::AtomicFile::write(path, name.as_bytes())?;
         Ok(ProfileRecord {
             profile: profile.clone(),
             name: name.to_string(),

@@ -4,7 +4,7 @@ use bevy_cef::prelude::HostWindow;
 use vmux_ecs::WindowFullscreen;
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 use vmux_ecs::WindowFullscreenSet;
-use vmux_ecs::persistence::WorkspaceRestore;
+use vmux_ecs::persistence::{PersistenceState, WorkspaceStore};
 use vmux_layout::window::{
     CloseFocusedWindowRequest, FocusedWindow, NewWindowRequest, NewWindowWorkspace, VmuxWindow,
     WindowGeometry,
@@ -173,11 +173,11 @@ fn ensure_state(
 }
 
 fn ensure_geometry_singleton(
-    restore: Single<&WorkspaceRestore>,
+    restore: Single<&PersistenceState, With<WorkspaceStore>>,
     existing: Query<(), With<WindowGeometry>>,
     mut commands: Commands,
 ) {
-    if !restore.complete || !existing.is_empty() {
+    if !restore.restore_complete() || !existing.is_empty() {
         return;
     }
     commands.spawn(WindowGeometry::default());

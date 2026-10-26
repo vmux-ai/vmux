@@ -10,6 +10,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_api::Id;
 use vmux_api::chat::ResumeSession;
 use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_api::protocol::AcpProviderSession;
@@ -21,7 +22,10 @@ use vmux_connector::{
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
-use vmux_ecs::{ArchivedAt, CreatedAt, PageOpenRequest, PageOpenTarget, RemoteUpdatedAt};
+use vmux_ecs::{
+    ArchivedAt, CreatedAt, Operation, OperationKind, OperationState, PageOpenRequest,
+    PageOpenTarget, RemoteUpdatedAt,
+};
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use vmux_session::host::{SessionManagerView, SessionView, SessionViews};
 use vmux_session::{
@@ -43,16 +47,19 @@ mod conversation;
 mod vibe;
 
 pub(super) fn add(app: &mut App) {
+    if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+        app.add_plugins(vmux_ecs::OperationPlugin);
+    }
     app.init_resource::<SourceSnapshot>()
         .init_resource::<AcpSnapshot>()
         .init_resource::<CatalogRequests>()
-        .init_resource::<PendingImports>()
         .init_resource::<ProviderCatalog>()
         .init_resource::<ArchiveQueue>()
         .init_resource::<ArchiveOverlay>()
         .init_resource::<ActivationDirty>()
         .add_message::<ToolInventoryChanged>()
         .add_message::<ProviderConversationChanged>()
+        .add_message::<ProviderImportRequest>()
         .add_service_message::<AcpCatalogReceived>()
         .add_observer(open)
         .add_observer(attach)
@@ -62,6 +69,7 @@ pub(super) fn add(app: &mut App) {
                 request_catalogs,
                 receive_catalogs.after(ServiceMessageSet),
                 mark_activation_dirty,
+                 import,
                 activate,
                 archive,
                 finish_archives,
@@ -542,61 +550,20 @@ impl<'a> ProviderSessionIndex<'a> {
     }
 }
 
-#[derive(Resource, Default)]
-struct PendingImports {
-    by_id: HashMap<SessionId, PendingImport>,
-    by_source: HashMap<(AgentFamily, String), SessionId>,
-}
-
-impl PendingImports {
-    fn reserve(&mut self, id: SessionId, import: PendingImport) -> PendingImportReservation {
-        let key = (
-            AgentFamily::of(&import.source.agent),
-            import.source.sid.clone(),
-        );
-        if let Some(existing) = self.by_source.get(&key)
-            && let Some(pending) = self.by_id.get_mut(existing)
-        {
-            pending.destination = import.destination;
-            let open_now = pending.deferred_open && !import.deferred_open;
-            pending.deferred_open = import.deferred_open;
-            return PendingImportReservation {
-                id: existing.clone(),
-                created: false,
-                open_now,
-            };
-        }
-        self.by_source.insert(key, id.clone());
-        let open_now = !import.deferred_open;
-        self.by_id.insert(id.clone(), import);
-        PendingImportReservation {
-            id,
-            created: true,
-            open_now,
-        }
-    }
-
-    fn take(&mut self, id: &SessionId) -> Option<PendingImport> {
-        let import = self.by_id.remove(id)?;
-        self.by_source.remove(&(
-            AgentFamily::of(&import.source.agent),
-            import.source.sid.clone(),
-        ));
-        Some(import)
-    }
-}
-
+#[derive(Component)]
 struct PendingImport {
+    session_id: SessionId,
     destination: ResumeDestination,
     deferred_open: bool,
     source: ProviderSession,
     agent: AgentId,
 }
 
-struct PendingImportReservation {
-    id: SessionId,
-    created: bool,
-    open_now: bool,
+#[derive(Message, Clone)]
+struct ProviderImportRequest {
+    destination: ResumeDestination,
+    source: ProviderSession,
+    agent: AgentId,
 }
 
 #[derive(Clone, Copy)]
@@ -2130,9 +2097,8 @@ fn open(
     external_index: Option<Res<ExternalLinkIndex>>,
     link_owners: Query<&ChildOf, With<ExternalLink>>,
     existing: Query<&SessionId, (With<Session>, Without<SessionDuplicate>)>,
-    mut pending: ResMut<PendingImports>,
-    mut creates: MessageWriter<CreateRequest>,
     mut opener: ResumeOpener,
+    mut imports: MessageWriter<ProviderImportRequest>,
 ) {
     let request = &trigger.event().payload;
     if !request.kind.starts_with("acp:") {
@@ -2184,41 +2150,101 @@ fn open(
     } else {
         source.name.clone()
     };
-    let create = CreateRequest::imported(
-        name,
-        source.description.clone(),
-        cwd,
-        agent.clone(),
-        source.created_at,
-        source.updated_at,
-    );
-    let deferred_open = !destination.opens_in_place();
-    let reservation = pending.reserve(
-        create.id().clone(),
-        PendingImport {
+    source.name = name;
+    imports.write(ProviderImportRequest {
+        destination,
+        source,
+        agent,
+    });
+}
+
+fn import(
+    mut requests: MessageReader<ProviderImportRequest>,
+    mut pending: Query<(&mut PendingImport, &OperationState), With<Operation>>,
+    mut creates: MessageWriter<CreateRequest>,
+    mut opener: ResumeOpener,
+    mut commands: Commands,
+) {
+    let mut latest = HashMap::<(AgentFamily, String), ProviderImportRequest>::new();
+    for request in requests.read().cloned() {
+        latest.insert(
+            (
+                AgentFamily::of(&request.source.agent),
+                request.source.sid.clone(),
+            ),
+            request,
+        );
+    }
+    for request in latest.into_values() {
+        let ProviderImportRequest {
             destination,
-            deferred_open,
             source,
             agent,
-        },
-    );
-    if reservation.open_now {
-        opener.open(destination, Route::Session(reservation.id.clone()).url());
-    }
-    if reservation.created {
+        } = request;
+        let deferred_open = !destination.opens_in_place();
+        let mut reserved = false;
+        for (mut pending, state) in &mut pending {
+            if matches!(state, OperationState::Pending | OperationState::Running)
+                && AgentFamily::of(&pending.source.agent) == AgentFamily::of(&source.agent)
+                && pending.source.sid == source.sid
+            {
+                let open_now = pending.deferred_open && !deferred_open;
+                pending.destination = destination;
+                pending.deferred_open = deferred_open;
+                if open_now {
+                    opener.open(
+                        destination,
+                        Route::Session(pending.session_id.clone()).url(),
+                    );
+                }
+                reserved = true;
+                break;
+            }
+        }
+        if reserved {
+            continue;
+        }
+        let cwd = PathBuf::from(&source.cwd);
+        let create = CreateRequest::imported(
+            source.name.clone(),
+            source.description.clone(),
+            cwd,
+            agent.clone(),
+            source.created_at,
+            source.updated_at,
+        );
+        commands.spawn((
+            Operation,
+            Id::<Operation>::new(uuid::Uuid::new_v4().to_string()),
+            OperationKind::new("provider_session_import").unwrap(),
+            OperationState::Running,
+            PendingImport {
+                session_id: create.id().clone(),
+                destination,
+                deferred_open,
+                source,
+                agent,
+            },
+        ));
+        if !deferred_open {
+            opener.open(destination, Route::Session(create.id().clone()).url());
+        }
         creates.write(create);
     }
 }
 
 fn attach(
     trigger: On<Created>,
-    mut pending: ResMut<PendingImports>,
     mut opener: ResumeOpener,
+    mut pending: Query<(Entity, &PendingImport, &mut OperationState), With<Operation>>,
     links: AcpSessionLinks,
     mut commands: Commands,
 ) {
     let event = trigger.event();
-    let Some(import) = pending.take(&event.id) else {
+    let Some((operation, import, mut state)) = pending.iter_mut().find(|(_, pending, state)| {
+        pending.session_id == event.id
+            && matches!(**state, OperationState::Pending | OperationState::Running)
+    }) else {
         return;
     };
     let title = if import.source.conversation_title.trim().is_empty() {
@@ -2228,7 +2254,7 @@ fn attach(
     };
     commands
         .entity(event.entity)
-        .insert((import.agent, AgentConversationTitle(title)));
+        .insert((import.agent.clone(), AgentConversationTitle(title)));
     links.set(
         &mut commands,
         event.entity,
@@ -2239,6 +2265,8 @@ fn attach(
     if import.deferred_open {
         opener.open(import.destination, Route::Session(event.id.clone()).url());
     }
+    *state = OperationState::Succeeded;
+    commands.entity(operation).remove::<PendingImport>();
 }
 
 #[derive(SystemParam)]
@@ -2500,16 +2528,17 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.add_plugins(vmux_connector::ConnectorPlugin)
+        app.add_plugins((vmux_ecs::OperationPlugin, vmux_connector::ConnectorPlugin))
             .init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
             .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<ProviderImportRequest>()
             .add_observer(open)
-            .add_observer(attach);
+            .add_observer(attach)
+            .add_systems(Update, import);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -2546,6 +2575,7 @@ mod tests {
                 open: None,
             },
         });
+        app.update();
 
         let created = app
             .world_mut()
@@ -2593,16 +2623,17 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.add_plugins(vmux_connector::ConnectorPlugin)
+        app.add_plugins((vmux_ecs::OperationPlugin, vmux_connector::ConnectorPlugin))
             .init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
             .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<ProviderImportRequest>()
             .add_observer(open)
-            .add_observer(attach);
+            .add_observer(attach)
+            .add_systems(Update, import);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -2708,14 +2739,14 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.add_plugins(vmux_connector::ConnectorPlugin)
+        app.add_plugins((vmux_ecs::OperationPlugin, vmux_connector::ConnectorPlugin))
             .init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
             .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<ProviderImportRequest>()
             .add_observer(open);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
@@ -2769,7 +2800,6 @@ mod tests {
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
             .insert_resource(ProviderSessionTombstones::new([
                 ProviderFixture::identity("acp:codex", "provider-session"),
             ]))
@@ -2777,6 +2807,7 @@ mod tests {
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<ProviderImportRequest>()
             .add_observer(open);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
@@ -2821,12 +2852,12 @@ mod tests {
     fn provider_resume_rejects_a_missing_working_directory() {
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
-            .init_resource::<PendingImports>()
             .init_resource::<ProviderSessionTombstones>()
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<ProviderImportRequest>()
             .add_observer(open);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()

@@ -38,6 +38,7 @@ uuid = { workspace = true }
 vmux_browser = { path = "../../util/vmux_browser" }
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_history = { path = "../vmux_history" }
+vmux_path = { path = "../../util/vmux_path" }
 vmux_tool = { path = "../vmux_tool" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 

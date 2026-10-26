@@ -1,10 +1,11 @@
 use bevy::prelude::*;
+use vmux_api::Id;
 use vmux_api::protocol::{
     AgentCommandResult, AgentFileSearch, AgentFileTouched, AgentListAgents, AgentNewChat,
     AgentTurnEnded,
 };
-use vmux_ecs::PageOpenTarget;
 use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_ecs::{Operation, OperationKind, OperationState, PageOpenTarget};
 use vmux_session::host::StartRequest;
 use vmux_session::{Created, SessionId};
 
@@ -16,38 +17,46 @@ pub(super) struct Plugin;
 
 impl bevy::prelude::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingSessionCreations>()
-            .add_observer(open_created_session)
-            .add_systems(
-                Update,
-                (
-                    acknowledge_file_touched,
-                    acknowledge_file_search,
-                    acknowledge_turn_ended,
-                    create_session,
-                    list_agents,
-                )
-                    .in_set(CommandSet::Commands),
-            );
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        app.add_observer(open_created_session).add_systems(
+            Update,
+            (
+                acknowledge_file_touched,
+                acknowledge_file_search,
+                acknowledge_turn_ended,
+                create_session,
+                list_agents,
+            )
+                .in_set(CommandSet::Commands),
+        );
     }
 }
 
-#[derive(Resource, Default)]
-struct PendingSessionCreations(std::collections::HashMap<SessionId, PendingSessionCreation>);
-
+#[derive(Component)]
 struct PendingSessionCreation {
+    session_id: SessionId,
     request_id: vmux_api::protocol::AgentRequestId,
 }
 
 fn open_created_session(
     trigger: On<Created>,
-    mut pending: ResMut<PendingSessionCreations>,
+    mut pending: Query<(Entity, &PendingSessionCreation, &mut OperationState), With<Operation>>,
     mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
 ) {
-    let Some(pending) = pending.0.remove(&trigger.event().id) else {
+    let Some((operation, pending, mut state)) = pending.iter_mut().find(|(_, pending, state)| {
+        pending.session_id == trigger.event().id
+            && matches!(**state, OperationState::Pending | OperationState::Running)
+    }) else {
         return;
     };
     responses.write(AgentReply::new(pending.request_id).ok());
+    *state = OperationState::Succeeded;
+    commands
+        .entity(operation)
+        .remove::<PendingSessionCreation>();
 }
 
 fn acknowledge_file_touched(
@@ -87,8 +96,8 @@ fn create_session(
     mut requests: MessageReader<AgentRequestInput>,
     contributed_pages: vmux_command::ContributedPages,
     mut session_requests: MessageWriter<StartRequest>,
-    mut pending: ResMut<PendingSessionCreations>,
     mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
 ) {
     for request in requests.read() {
         let Ok(Some(payload)) = request.decode::<AgentNewChat>() else {
@@ -108,12 +117,16 @@ fn create_session(
                 );
                 let id = create.id().clone();
                 session_requests.write(create);
-                pending.0.insert(
-                    id,
+                commands.spawn((
+                    Operation,
+                    Id::<Operation>::new(uuid::Uuid::new_v4().to_string()),
+                    OperationKind::new("agent_session_create").unwrap(),
+                    OperationState::Running,
                     PendingSessionCreation {
+                        session_id: id,
                         request_id: request.request_id,
                     },
-                );
+                ));
                 continue;
             }
             None => AgentCommandResult::Error("no agent is installed".to_string()),

@@ -149,10 +149,7 @@ fn open_request(
         return;
     };
     if path == store.brewfile_path() && !path.exists() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, "");
+        let _ = vmux_path::AtomicFile::write(path, b"");
     }
     let Ok(url) = url::Url::from_file_path(path) else {
         return;

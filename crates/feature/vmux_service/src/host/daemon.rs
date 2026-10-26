@@ -81,9 +81,9 @@ impl DaemonBinary {
     }
 
     pub fn record_identity(&self) -> std::io::Result<()> {
-        std::fs::write(
+        vmux_path::AtomicFile::write(
             ServicePaths::current().identity(),
-            self.identity()?.as_str(),
+            self.identity()?.as_str().as_bytes(),
         )
     }
 }

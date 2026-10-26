@@ -15,6 +15,7 @@ uuid = { workspace = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard" }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_path = { path = "../../util/vmux_path" }
 vmux_service = { path = "../vmux_service" }
 
 [lints]

@@ -41,7 +41,8 @@ impl ExtensionManifest {
         if changed {
             let output =
                 serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
-            std::fs::write(&path, output).map_err(|error| error.to_string())?;
+            vmux_path::AtomicFile::write(&path, output.as_bytes())
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
     }

@@ -11,7 +11,10 @@ use vmux_connector::{
     ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
 };
 use vmux_ecs::page::{Activity, PageReady};
-use vmux_ecs::{KeyboardOwner, PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{
+    KeyboardOwner, Operation, OperationKind, OperationState, PageMetadata, PageOpenRequest,
+    PageOpenTarget,
+};
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
@@ -36,8 +39,10 @@ pub(super) struct CatalogPlugin;
 
 impl Plugin for CatalogPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingOpens>()
-            .init_resource::<DirectoryRevision>()
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        app.init_resource::<DirectoryRevision>()
             .init_resource::<CatalogSnapshot>()
             .init_resource::<SessionRepositories>()
             .add_plugins(UiStatePlugin::<UiSessionCatalog>::default())
@@ -108,8 +113,11 @@ pub struct ScopeProjectionRequest {
     pub cwd: Option<PathBuf>,
 }
 
-#[derive(Resource, Default)]
-struct PendingOpens(HashMap<SessionId, Entity>);
+#[derive(Component)]
+struct PendingOpen {
+    session_id: SessionId,
+    stack: Entity,
+}
 
 #[derive(Resource, Default)]
 struct DirectoryRevision(u64);
@@ -292,8 +300,9 @@ fn create(
     trigger: On<UiInput<SessionsCreate>>,
     parents: Query<&ChildOf>,
     views: CatalogViews,
-    mut pending: ResMut<PendingOpens>,
+    pending: Query<(&PendingOpen, &OperationState), With<Operation>>,
     mut requests: MessageWriter<CreateRequest>,
+    mut commands: Commands,
 ) {
     if !views.manager_contains(trigger.event().webview) {
         return;
@@ -314,7 +323,22 @@ fn create(
         cwd,
         views.agent(trigger.event().webview),
     );
-    pending.0.insert(request.id().clone(), parent.parent());
+    if pending.iter().any(|(pending, state)| {
+        pending.session_id == *request.id()
+            && matches!(state, OperationState::Pending | OperationState::Running)
+    }) {
+        return;
+    }
+    commands.spawn((
+        Operation,
+        vmux_api::Id::<Operation>::new(uuid::Uuid::new_v4().to_string()),
+        OperationKind::new("session_open").unwrap(),
+        OperationState::Running,
+        PendingOpen {
+            session_id: request.id().clone(),
+            stack: parent.parent(),
+        },
+    ));
     requests.write(request);
 }
 
@@ -377,18 +401,24 @@ fn finish_directory_pickers(
 
 fn open_created(
     trigger: On<Created>,
-    mut pending: ResMut<PendingOpens>,
+    mut pending: Query<(Entity, &PendingOpen, &mut OperationState), With<Operation>>,
     mut opens: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
 ) {
     let event = trigger.event();
-    let Some(stack) = pending.0.remove(&event.id) else {
+    let Some((operation, pending, mut state)) = pending.iter_mut().find(|(_, pending, state)| {
+        pending.session_id == event.id
+            && matches!(**state, OperationState::Pending | OperationState::Running)
+    }) else {
         return;
     };
     opens.write(PageOpenRequest {
-        target: PageOpenTarget::Stack(stack),
+        target: PageOpenTarget::Stack(pending.stack),
         url: Route::Session(event.id.clone()).url(),
         request_id: None,
     });
+    *state = OperationState::Succeeded;
+    commands.entity(operation).remove::<PendingOpen>();
 }
 
 fn rename(
@@ -1018,7 +1048,7 @@ mod tests {
     #[test]
     fn create_requests_a_session_and_opens_its_canonical_route() {
         let mut app = App::new();
-        app.init_resource::<PendingOpens>()
+        app.add_plugins(vmux_ecs::OperationPlugin)
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
             .add_observer(create)
@@ -1038,6 +1068,7 @@ mod tests {
                 cwd: cwd.to_string_lossy().into_owned(),
             },
         });
+        app.world_mut().flush();
 
         let created = app
             .world_mut()
@@ -1069,7 +1100,7 @@ mod tests {
     #[test]
     fn session_view_cannot_create_sessions() {
         let mut app = App::new();
-        app.init_resource::<PendingOpens>()
+        app.add_plugins(vmux_ecs::OperationPlugin)
             .add_message::<CreateRequest>()
             .add_observer(create);
         let webview = app
@@ -1203,7 +1234,7 @@ mod tests {
     #[test]
     fn manager_creation_uses_the_requested_agent() {
         let mut app = App::new();
-        app.init_resource::<PendingOpens>()
+        app.add_plugins(vmux_ecs::OperationPlugin)
             .add_message::<CreateRequest>()
             .add_observer(create);
         let stack = app.world_mut().spawn_empty().id();

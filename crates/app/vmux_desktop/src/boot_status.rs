@@ -1,7 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_ecs::page::PageReady;
-use vmux_ecs::persistence::WorkspaceRestore;
+use vmux_ecs::persistence::{PersistenceState, WorkspaceStore};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
@@ -136,15 +136,15 @@ impl BootInputs {
 
 fn update(
     mut status: Single<&mut SplashStatus>,
-    restore: Single<&WorkspaceRestore>,
+    restore: Single<&PersistenceState, With<WorkspaceStore>>,
     layout: BootLayout,
 ) {
     let layout_ready = layout.ready();
     let (total_pages, ready_pages) = layout.page_counts();
 
     let next = BootInputs {
-        space_present: restore.store_present,
-        restore_complete: restore.complete,
+        space_present: restore.store_present(),
+        restore_complete: restore.restore_complete(),
         layout_ready,
         total_pages,
         ready_pages,
@@ -271,10 +271,9 @@ mod tests {
     fn system_reports_loading_pages_and_reveals_on_layout_ready() {
         let mut app = App::new();
         let status = app.world_mut().spawn(SplashStatus::default()).id();
-        app.world_mut().spawn(WorkspaceRestore {
-            store_present: true,
-            complete: false,
-        });
+        let mut persistence = PersistenceState::new(4);
+        persistence.begin_validation(vmux_ecs::Revision::new(1));
+        app.world_mut().spawn((WorkspaceStore, persistence));
         app.add_plugins(MinimalPlugins).add_systems(Update, update);
 
         app.world_mut().spawn((LayoutCef, PageReady {}));
@@ -292,10 +291,9 @@ mod tests {
     fn system_reports_restoring_space_before_layout_ready() {
         let mut app = App::new();
         let status = app.world_mut().spawn(SplashStatus::default()).id();
-        app.world_mut().spawn(WorkspaceRestore {
-            store_present: true,
-            complete: false,
-        });
+        let mut persistence = PersistenceState::new(4);
+        persistence.begin_validation(vmux_ecs::Revision::new(1));
+        app.world_mut().spawn((WorkspaceStore, persistence));
         app.add_plugins(MinimalPlugins).add_systems(Update, update);
 
         app.update();

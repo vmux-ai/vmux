@@ -329,13 +329,12 @@ lifecycle transitions, asynchronous task boundaries, cross-feature dispatch, and
 ordering. A miscellaneous parameter bundle or a large hidden `run`/`dispatch` workflow is not
 a capability and stays as ordinary system logic.
 
-Asynchronous work remains explicit ECS state. A finite filesystem, process, or compute operation
-is a task component on the entity whose lifecycle it advances; one system starts it and another
-consumes its result. Long-lived runtime-specific I/O, streams, retries, and timers belong to a
-transport actor that exchanges typed inputs and outputs with ECS. Coroutine runtimes with ambient
-world access are not the default because they hide scheduling and lifecycle state from queries.
-Use one only for isolated sequential UI choreography where the sequence itself is the behavior,
-never for blocking work, transport ownership, or ordinary domain transitions.
+Asynchronous work remains explicit ECS state. Accepted multi-step work gets an operation entity
+with a stable ID, kind, state, stable target identity, captured revision, runtime task, and terminal
+cleanup. New intent updates or supersedes that entity instead of entering a parallel pending map.
+Long-lived runtime-specific I/O, streams, retries, and timers belong to a transport actor that
+exchanges typed inputs and outputs with ECS. Coroutine runtimes with ambient world access are not
+the default because they hide scheduling and lifecycle state from queries.
 
 System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
 `request_definition` inside the owning module over names that repeat the feature, module,
@@ -551,13 +550,17 @@ inside that Space. Cross-space leaks are impossible by construction — the lega
 tagged tabs with a detached id and computed selection globally, which let creating a space
 corrupt another's panes.
 
-State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar hard-resets
-on an incompatible version rather than loading a broken store.
+Workspace and bookmark snapshots serialize through `moonshine-save` into one versioned store
+document, then replace the destination through `AtomicFile`. Store name, schema, canonical
+revision, save time, and payload commit in the same file. Incompatible or malformed pre-stability
+stores hard-reset only that store; no sidecar or component migration path can disagree with it.
 
 World persistence uses named type-registry domains. A persisted component or resource registers
 once with its domain; that metadata produces the component and resource allowlists used by saves.
-The workspace domain also installs ordinary change tracking, while specialized domains such as
-bookmarks keep their own entity scope, dirty policy, path, migration, and seeding lifecycle.
+Each store has an entity-owned `PersistenceState` for restore phase, loaded, dirty and saving
+revisions, last success, and recovery failure. Saves serialize per store; mutations received while
+a revision is saving remain dirty and trigger the next save. Specialized domains keep their own
+entity scope, path, validation, seeding, and one writer while sharing the durability mechanics.
 
 ---
 

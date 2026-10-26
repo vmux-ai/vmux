@@ -237,7 +237,7 @@ fn pair(
             agent.ensure_running(DaemonBinary::current()?.path())?;
             let relay_token = crate::RelayToken::wait(Duration::from_secs(5))?;
             let pairing_token = crate::RemoteAuthorizationStore::current().pairing_token()?;
-            std::fs::write(super::RemotePaths::current().state(), b"enabled\n")?;
+            vmux_path::AtomicFile::write(super::RemotePaths::current().state(), b"enabled\n")?;
             let relay = crate::pairing::Relay::from_env();
             relay.persist()?;
             let pairing_url = relay.wait_for_pairing(
