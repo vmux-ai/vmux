@@ -130,7 +130,18 @@ impl Plugin for StagePlugin {
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionDuplicate(pub Entity);
+#[relationship(relationship_target = SessionDuplicates)]
+pub struct SessionDuplicate(Entity);
+
+impl SessionDuplicate {
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = SessionDuplicate)]
+pub struct SessionDuplicates(Vec<Entity>);
 
 #[derive(
     Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
@@ -1288,7 +1299,7 @@ fn canonicalize_provider_sessions(
             .or_default()
             .push(ProviderSessionCandidate {
                 entity,
-                duplicate: duplicate.map(|duplicate| duplicate.0),
+                duplicate: duplicate.map(SessionDuplicate::entity),
                 archived,
                 active: matches!(
                     runtime,

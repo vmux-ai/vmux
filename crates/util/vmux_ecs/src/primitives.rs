@@ -15,7 +15,7 @@ pub struct PrimitivesPlugin;
 
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::OperationPlugin)
+        app.add_plugins((crate::OperationPlugin, crate::ReplicationPlugin))
             .register_persisted::<PageMetadata>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
@@ -61,6 +61,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(PrimitivesPlugin);
 
+        assert!(app.is_plugin_added::<crate::ReplicationPlugin>());
         let registry = app.world().resource::<AppTypeRegistry>().read();
         let filter = super::super::persistence::WorkspacePersisted::filter(&registry);
         assert!(
