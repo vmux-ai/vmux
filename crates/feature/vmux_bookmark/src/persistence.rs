@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 use vmux_api::bookmark::{BookmarkEntry, SmartBookmarkFolder};
 use vmux_api::{Id, PageIcon};
 use vmux_ecs::persistence::{
-    AtomicSaveWorld, PersistenceAppExt, PersistenceDomain, PersistenceState, StoreLoad,
+    AtomicSaveWorld, PersistenceAppExt, PersistenceDomain, PersistenceRecovery, PersistenceState,
+    RestorePhase, StoreLoad, TrackedLoadWorld, load_tracked_on,
 };
 use vmux_ecs::profile::SessionEnvironment;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin};
@@ -62,6 +63,7 @@ impl Plugin for BookmarkPersistencePlugin {
         app.init_resource::<OfferedBookmarkDefaults>()
             .add_observer(save_on::<AtomicSaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
+            .add_observer(load_tracked_on::<BookmarkFilter>)
             .add_observer(seed_defaults)
             .add_observer(insert_defaults)
             .add_systems(
@@ -72,7 +74,12 @@ impl Plugin for BookmarkPersistencePlugin {
             )
             .add_systems(
                 PostUpdate,
-                (mark_bookmarks_dirty, autosave_bookmarks).chain(),
+                (
+                    recover_failed_restore,
+                    mark_bookmarks_dirty,
+                    autosave_bookmarks,
+                )
+                    .chain(),
             );
     }
 }
@@ -144,9 +151,47 @@ fn load_bookmarks_on_startup(
     state.begin_validation(snapshot.metadata().revision());
     state.begin_materialize();
     commands.entity(*entity).insert(BookmarkLoadPending);
-    commands.trigger_load(LoadWorld::<BookmarkFilter>::from_stream(
+    TrackedLoadWorld::<BookmarkFilter>::from_stream(
+        *entity,
         std::io::Cursor::new(snapshot.into_payload().into_bytes()),
-    ));
+    )
+    .trigger(&mut commands);
+}
+
+fn recover_failed_restore(
+    mut persistence: Query<
+        (Entity, &BookmarkPersistencePath, &mut PersistenceState),
+        (With<BookmarkStore>, With<BookmarkLoadPending>),
+    >,
+    mut commands: Commands,
+) {
+    let Ok((entity, path, mut state)) = persistence.single_mut() else {
+        return;
+    };
+    if state.phase() != RestorePhase::Failed {
+        return;
+    }
+    let reason = match state.recovery() {
+        PersistenceRecovery::Failed(reason) => reason.clone(),
+        PersistenceRecovery::Healthy | PersistenceRecovery::HardReset(_) => {
+            "bookmark restore failed".to_string()
+        }
+    };
+    let store = path.store();
+    match store.hard_reset(reason.clone()) {
+        Ok(_) => {
+            warn!(
+                path = %store.path().display(),
+                new_schema = store.schema_version(),
+                %reason,
+                "bookmark store hard reset after restore failure"
+            );
+            state.hard_reset(reason);
+            commands.trigger(SeedBookmarkDefaults);
+        }
+        Err(error) => state.restore_failed(error.to_string()),
+    }
+    commands.entity(entity).remove::<BookmarkLoadPending>();
 }
 
 fn seed_defaults(
