@@ -734,8 +734,10 @@ fn restore_archived_tab(
         let root_id = uuid::Uuid::new_v4().to_string();
         let root = commands
             .spawn((
-                Pane::split_bundle(PaneSplitDirection::Row),
-                Id::<Pane>::new(root_id.clone()),
+                Pane::split_bundle_with_id(
+                    Id::<Pane>::new(root_id.clone()),
+                    PaneSplitDirection::Row,
+                ),
                 HostWindow(primary_window),
                 ChildOf(tab),
             ))
@@ -744,8 +746,7 @@ fn restore_archived_tab(
         let leaf_id = uuid::Uuid::new_v4().to_string();
         let leaf = commands
             .spawn((
-                Pane::bundle(),
-                Id::<Pane>::new(leaf_id.clone()),
+                Pane::bundle_with_id(Id::<Pane>::new(leaf_id.clone())),
                 ChildOf(root),
             ))
             .id();
@@ -864,8 +865,7 @@ fn spawn_archived_split(
     };
     let entity = commands
         .spawn((
-            Pane::split_bundle(direction),
-            Id::<Pane>::new(id),
+            Pane::split_bundle_with_id(Id::<Pane>::new(id), direction),
             ChildOf(parent),
         ))
         .id();
@@ -896,8 +896,7 @@ fn spawn_archived_split(
             ArchivedPaneChild::Leaf(child_id) => {
                 let leaf = commands
                     .spawn((
-                        Pane::bundle(),
-                        Id::<Pane>::new(child_id.clone()),
+                        Pane::bundle_with_id(Id::<Pane>::new(child_id.clone())),
                         ChildOf(entity),
                     ))
                     .id();
@@ -1058,8 +1057,7 @@ fn reattach_along_path(
         let new_child = if is_last {
             commands
                 .spawn((
-                    Pane::bundle(),
-                    Id::<Pane>::new(child_id),
+                    Pane::bundle_with_id(Id::<Pane>::new(child_id)),
                     LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
@@ -1071,8 +1069,7 @@ fn reattach_along_path(
             };
             commands
                 .spawn((
-                    Pane::split_bundle(axis),
-                    Id::<Pane>::new(child_id),
+                    Pane::split_bundle_with_id(Id::<Pane>::new(child_id), axis),
                     LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
@@ -1133,7 +1130,7 @@ fn promote_leaf_to_split(
     }
     commands
         .entity(parent)
-        .insert(Pane::split_bundle(direction));
+        .insert(Pane::split_state_bundle(direction));
 }
 
 #[cfg(test)]

@@ -15,7 +15,6 @@ impl Plugin for IdentityPlugin {
             .register_type::<SpawnSeq>()
             .add_systems(Update, repair_stack_parents)
             .add_systems(Update, stamp_spawn_seq)
-            .add_systems(Update, assign_ids)
             .add_systems(
                 Startup,
                 (spawn_spawn_counter, reseed_spawn_counter)
@@ -36,14 +35,6 @@ pub struct SpawnCounter(pub u64);
 
 fn spawn_spawn_counter(mut commands: Commands) {
     commands.spawn((Name::new("Pane spawn counter"), SpawnCounter::default()));
-}
-
-fn assign_ids(panes: Query<Entity, (With<Pane>, Without<Id<Pane>>)>, mut commands: Commands) {
-    for entity in &panes {
-        commands
-            .entity(entity)
-            .insert(Id::<Pane>::new(uuid::Uuid::new_v4().to_string()));
-    }
 }
 
 fn stamp_spawn_seq(
@@ -171,19 +162,5 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(counter.0, 8);
-    }
-
-    #[test]
-    fn assign_pane_ids_fills_missing_and_keeps_existing() {
-        let mut app = App::new();
-        app.add_systems(Update, assign_ids);
-        let bare = app.world_mut().spawn(Pane).id();
-        let kept = app.world_mut().spawn((Pane, Id::<Pane>::new("fixed"))).id();
-
-        app.update();
-
-        let assigned = app.world().get::<Id<Pane>>(bare).expect("id assigned");
-        assert!(!assigned.as_str().is_empty());
-        assert_eq!(app.world().get::<Id<Pane>>(kept).unwrap().as_str(), "fixed");
     }
 }
