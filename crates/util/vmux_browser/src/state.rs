@@ -1,13 +1,13 @@
 use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::bookmark::{
-    BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
-    SmartBookmarkFolder,
+    BookmarkEntry, BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow,
+    BookmarkStateEvent, SmartBookmarkFolder,
 };
-use vmux_api::{PageIcon, VmuxRoute};
+use vmux_api::{Id, PageIcon, VmuxRoute};
 use vmux_ecs::{
     Active, Bookmark, BookmarkOrder, Collapsed, Folder, PageIdentity, PageMetadata, Pin,
-    UiStateWrite, Uuid,
+    UiStateWrite,
     notify::AgentDoneUnseen,
     page::{HostHistory, PageReady},
 };
@@ -372,7 +372,7 @@ type LayoutMarkerChanged = Or<(
 )>;
 
 type BookmarkProjectionChanged = Or<(
-    Changed<Uuid>,
+    Changed<Id<BookmarkEntry>>,
     Changed<BookmarkOrder>,
     Changed<Bookmark>,
     Changed<Pin>,
@@ -435,7 +435,7 @@ struct PageStateRemovals<'w, 's> {
     space_id: RemovedComponents<'w, 's, SpaceId>,
     current_space: RemovedComponents<'w, 's, CurrentSpace>,
     sections_expanded: RemovedComponents<'w, 's, SideSheetSectionsExpanded>,
-    uuid: RemovedComponents<'w, 's, Uuid>,
+    uuid: RemovedComponents<'w, 's, Id<BookmarkEntry>>,
     bookmark_order: RemovedComponents<'w, 's, BookmarkOrder>,
     bookmark: RemovedComponents<'w, 's, Bookmark>,
     pin: RemovedComponents<'w, 's, Pin>,
@@ -940,11 +940,19 @@ fn push_projects_host_emit(
 
 fn push_bookmarks_host_emit(
     mut projection: LayoutProjection,
-    pins: Query<(&Uuid, &PageMetadata, &BookmarkOrder, Has<Bookmark>), With<Pin>>,
+    pins: Query<
+        (
+            &Id<BookmarkEntry>,
+            &PageMetadata,
+            &BookmarkOrder,
+            Has<Bookmark>,
+        ),
+        With<Pin>,
+    >,
     folders: Query<
         (
             Entity,
-            &Uuid,
+            &Id<BookmarkEntry>,
             &Name,
             Option<&Children>,
             Has<Collapsed>,
@@ -955,21 +963,26 @@ fn push_bookmarks_host_emit(
         With<Folder>,
     >,
     top_bookmarks: Query<
-        (&Uuid, &PageMetadata, &BookmarkOrder, Has<Pin>),
+        (&Id<BookmarkEntry>, &PageMetadata, &BookmarkOrder, Has<Pin>),
         (With<Bookmark>, Without<ChildOf>),
     >,
-    child_bookmarks: Query<(&Uuid, &PageMetadata, &BookmarkOrder, Has<Pin>), With<Bookmark>>,
+    child_bookmarks: Query<
+        (&Id<BookmarkEntry>, &PageMetadata, &BookmarkOrder, Has<Pin>),
+        With<Bookmark>,
+    >,
 ) {
     let Some(target) = projection.target() else {
         return;
     };
     let cef_e = target.entity;
 
-    let row = |uuid: &Uuid, meta: &PageMetadata, bookmarked: bool, pinned: bool| BookmarkRow {
-        uuid: uuid.0.clone(),
-        metadata: meta.clone(),
-        bookmarked,
-        pinned,
+    let row = |uuid: &Id<BookmarkEntry>, meta: &PageMetadata, bookmarked: bool, pinned: bool| {
+        BookmarkRow {
+            uuid: uuid.as_str().to_string(),
+            metadata: meta.clone(),
+            bookmarked,
+            pinned,
+        }
     };
 
     let mut pin_entries: Vec<(u32, BookmarkRow)> = pins
@@ -997,12 +1010,12 @@ fn push_bookmarks_host_emit(
             folders
                 .get(parent.get())
                 .ok()
-                .map(|(_, uuid, _, _, _, _, _, _)| uuid.0.clone())
+                .map(|(_, uuid, _, _, _, _, _, _)| uuid.as_str().to_string())
         });
         roots.push((
             order.0,
             BookmarkNode::Folder(BookmarkFolderRow {
-                uuid: uuid.0.clone(),
+                uuid: uuid.as_str().to_string(),
                 name: name.as_str().to_string(),
                 collapsed,
                 parent,

@@ -9,7 +9,7 @@ pub use component::{
     CreatedAt, Cwd, DeletedAt, Description, EffectiveStartupUrl, EntityTarget, Folder, HostShell,
     JsonArguments, KeyboardOwner, LastActivatedAt, LastSyncedAt, LastVisitedAt, Order,
     PagePresented, Pin, ProcessAnchor, Ready, RegistrationOrder, RemoteUpdatedAt, Revision,
-    Terminal, TransitionType, UnixMillis, UpdatedAt, Url, Uuid, Visit, VisitCount, VisitedUrl,
+    Terminal, TransitionType, UnixMillis, UpdatedAt, Url, Visit, VisitCount, VisitedUrl,
     WindowFullscreen, WindowFullscreenSet,
 };
 #[cfg(all(host, feature = "host"))]

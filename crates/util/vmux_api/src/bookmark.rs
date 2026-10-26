@@ -1,11 +1,15 @@
 use crate::PageMetadata;
-
 #[cfg(bevy_linked)]
 use bevy_ecs::component::Component;
 #[cfg(bevy_linked)]
 use bevy_ecs::reflect::ReflectComponent;
 #[cfg(bevy_linked)]
 use bevy_reflect::Reflect;
+
+#[derive(Debug)]
+#[cfg_attr(bevy_linked, derive(Reflect))]
+#[cfg_attr(bevy_linked, type_path = "vmux_api")]
+pub enum BookmarkEntry {}
 
 #[vmux_api::contract(Copy, Eq)]
 #[cfg_attr(bevy_linked, derive(Component, Reflect))]

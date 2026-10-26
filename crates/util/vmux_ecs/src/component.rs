@@ -367,11 +367,6 @@ pub struct Folder;
 #[type_path = "vmux_ecs"]
 pub struct Collapsed;
 
-#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
-#[reflect(Component, Default)]
-#[type_path = "vmux_ecs"]
-pub struct Uuid(pub String);
-
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]

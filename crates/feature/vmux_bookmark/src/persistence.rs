@@ -3,13 +3,13 @@ use bevy::prelude::*;
 use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
-use vmux_api::PageIcon;
-use vmux_api::bookmark::SmartBookmarkFolder;
+use vmux_api::bookmark::{BookmarkEntry, SmartBookmarkFolder};
+use vmux_api::{Id, PageIcon};
 use vmux_ecs::persistence::{
     AtomicSaveWorld, PersistenceAppExt, PersistenceDomain, PersistenceState, StoreLoad,
 };
 use vmux_ecs::profile::SessionEnvironment;
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin};
 use vmux_layout::LayoutStartupSet;
 use vmux_setting::AppSettings;
 use vmux_shortcut::ShortcutUrl;
@@ -43,7 +43,7 @@ impl BookmarkPersistenceTypes {
             .register_persistence_type::<BookmarkPersistence, Folder>()
             .register_persistence_type::<BookmarkPersistence, SmartBookmarkFolder>()
             .register_persistence_type::<BookmarkPersistence, Collapsed>()
-            .register_persistence_type::<BookmarkPersistence, Uuid>()
+            .register_persistence_type::<BookmarkPersistence, Id<BookmarkEntry>>()
             .register_persistence_type::<BookmarkPersistence, PageMetadata>()
             .register_persistence_type::<BookmarkPersistence, OfferedBookmarkDefaults>();
         let filter = {
@@ -340,7 +340,7 @@ fn insert_defaults(
             .unwrap_or(next_order);
         seed.commands.spawn((
             Pin,
-            Uuid(uuid::Uuid::new_v4().to_string()),
+            Id::<BookmarkEntry>::new(uuid::Uuid::new_v4().to_string()),
             PageMetadata {
                 title: url.clone(),
                 url,
@@ -368,7 +368,7 @@ fn insert_defaults(
             .find(|folder| BookmarkSeed::key(&folder.name) == key);
         let mut entity = seed.commands.spawn((
             Folder,
-            Uuid(uuid::Uuid::new_v4().to_string()),
+            Id::<BookmarkEntry>::new(uuid::Uuid::new_v4().to_string()),
             Name::new(name),
             BookmarkOrder(next_order),
         ));
@@ -485,13 +485,13 @@ mod tests {
             .add_observer(save_on::<AtomicSaveWorld<BookmarkFilter>>);
         save_app.world_mut().spawn((
             Folder,
-            Uuid("f1".into()),
+            Id::<BookmarkEntry>::new("f1"),
             Name::new("PRs"),
             BookmarkOrder(0),
         ));
         save_app.world_mut().spawn((
             Bookmark,
-            Uuid("b1".into()),
+            Id::<BookmarkEntry>::new("b1"),
             PageMetadata {
                 title: "A".into(),
                 url: "https://a.test".into(),
@@ -591,7 +591,7 @@ mod tests {
         save_app.add_observer(save_on::<AtomicSaveWorld<BookmarkFilter>>);
         save_app.world_mut().spawn((
             Pin,
-            Uuid("existing".into()),
+            Id::<BookmarkEntry>::new("existing"),
             PageMetadata {
                 title: "Existing".into(),
                 url: "https://example.com".into(),
