@@ -154,15 +154,11 @@ impl PaneTree<'_, '_> {
         already_split: bool,
     ) -> Entity {
         if already_split {
-            let activity = if activate_new {
-                LastActivatedAt::now()
-            } else {
-                LastActivatedAt(0)
-            };
-            return self
-                .commands
-                .spawn((Pane::bundle(), activity, ChildOf(anchor)))
-                .id();
+            let mut pane = self.commands.spawn((Pane::bundle(), ChildOf(anchor)));
+            if activate_new {
+                pane.insert(LastActivatedAt::now());
+            }
+            return pane.id();
         }
         self.split_leaf(anchor, direction, existing_tabs, activate_new)
     }
@@ -174,19 +170,15 @@ impl PaneTree<'_, '_> {
         existing_tabs: &[Entity],
         activate_new: bool,
     ) -> (Entity, Entity) {
-        let new_activity = if activate_new {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
         let existing = self
             .commands
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(active)))
             .id();
-        let new = self
-            .commands
-            .spawn((Pane::bundle(), new_activity, ChildOf(active)))
-            .id();
+        let mut new = self.commands.spawn((Pane::bundle(), ChildOf(active)));
+        if activate_new {
+            new.insert(LastActivatedAt::now());
+        }
+        let new = new.id();
         for tab in existing_tabs {
             self.commands.entity(*tab).insert(ChildOf(existing));
         }

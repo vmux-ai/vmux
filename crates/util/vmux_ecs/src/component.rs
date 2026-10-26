@@ -257,27 +257,43 @@ pub struct HostShell(pub String);
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RegistrationOrder(pub u32);
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
-pub struct CreatedAt(pub i64);
+pub struct CreatedAt(UnixMillis);
 
 impl CreatedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
     pub fn now() -> Self {
-        Self(UnixMillis::now().0)
+        Self(UnixMillis::now())
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
-pub struct LastActivatedAt(pub i64);
+pub struct LastActivatedAt(UnixMillis);
 
 impl LastActivatedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
     pub fn now() -> Self {
-        Self(UnixMillis::now().0)
+        Self(UnixMillis::now())
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
     }
 
     pub fn latest(entities: impl Iterator<Item = (Entity, Self)>) -> Option<Entity> {
@@ -287,11 +303,21 @@ impl LastActivatedAt {
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, Reflect, PartialEq, Eq)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_ecs"]
-pub struct ArchivedAt(pub i64);
+pub struct ArchivedAt(UnixMillis);
+
+impl ArchivedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
+    }
+}
 
 #[derive(EntityEvent, Clone, Copy, Debug)]
 pub struct ActivateRequest {
@@ -320,11 +346,21 @@ pub struct Url;
 #[type_path = "vmux_history"]
 pub struct VisitCount(pub u32);
 
-#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
-#[reflect(Component, Default)]
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+#[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
-pub struct LastVisitedAt(pub i64);
+pub struct LastVisitedAt(UnixMillis);
+
+impl LastVisitedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]

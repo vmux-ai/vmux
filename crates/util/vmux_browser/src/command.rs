@@ -1311,11 +1311,11 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let middle = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
         let active = app
             .world_mut()
-            .spawn((Stack::bundle(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::new(2), ChildOf(pane)))
             .id();
         let mut cursor = app
             .world()
@@ -1340,7 +1340,10 @@ mod tests {
             "the button closes its own stack, not whichever one is active"
         );
         assert_eq!(
-            app.world().get::<LastActivatedAt>(active).unwrap().0,
+            app.world()
+                .get::<LastActivatedAt>(active)
+                .unwrap()
+                .milliseconds(),
             2,
             "closing an inactive stack must not disturb activation"
         );

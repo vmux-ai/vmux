@@ -306,7 +306,7 @@ impl ProjectionData<'_, '_> {
             entity,
             id: id.0,
             host_window: self.host_window(entity),
-            activated_at: activated.map_or(0, |activated| activated.0),
+            activated_at: activated.map_or(0, |activated| activated.milliseconds()),
             url: metadata.url.clone(),
             title: PageCandidate::title(metadata, identity),
             status: if loading || child_loading {

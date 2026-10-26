@@ -319,7 +319,7 @@ mod tests {
             vmux_api::session::MemberId::local(&session_id),
             vmux_session::Sequence(1),
             vmux_session::MessageContent(Message::user("persisted")),
-            vmux_ecs::CreatedAt(1),
+            vmux_ecs::CreatedAt::new(1),
             ChildOf(session),
         ));
         app.world_mut()

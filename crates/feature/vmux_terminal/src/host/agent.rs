@@ -159,18 +159,12 @@ fn respond_process_stack_spawn(
     mut commands: Commands,
 ) {
     for request in requests.read() {
-        let stack_ts = if request.activate {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
-        let stack = commands
-            .spawn((
-                vmux_layout::stack::Stack::bundle(),
-                stack_ts,
-                ChildOf(request.pane),
-            ))
-            .id();
+        let mut stack =
+            commands.spawn((vmux_layout::stack::Stack::bundle(), ChildOf(request.pane)));
+        if request.activate {
+            stack.insert(LastActivatedAt::now());
+        }
+        let stack = stack.id();
         let title = std::path::Path::new(&request.command)
             .file_name()
             .and_then(|name| name.to_str())

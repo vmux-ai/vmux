@@ -86,7 +86,7 @@ fn publish(
 ) {
     let mut recent = Vec::<(String, i64)>::new();
     for (agent_id, timestamp) in &sessions {
-        let timestamp = timestamp.map_or(i64::MIN, |timestamp| timestamp.0);
+        let timestamp = timestamp.map_or(i64::MIN, |timestamp| timestamp.milliseconds());
         if let Some((_, current)) = recent
             .iter_mut()
             .find(|(candidate, _)| candidate == &agent_id.0)
@@ -178,7 +178,7 @@ mod tests {
             AgentId("codex".into()),
             Cwd::default(),
             vmux_ecs::ProcessAnchor(ProcessId::new()),
-            LastActivatedAt(20),
+            LastActivatedAt::new(20),
         ));
 
         app.update();

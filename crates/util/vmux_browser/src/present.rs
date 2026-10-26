@@ -1718,7 +1718,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Tab::default(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 PresentationLayer::Current,
                 ChildOf(glass),
             ))
@@ -1738,7 +1738,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 PresentationLayer::Current,
                 ChildOf(pane),
             ))
@@ -1788,7 +1788,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Tab::default(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 PresentationLayer::Retained,
                 ChildOf(glass),
             ))
@@ -1808,7 +1808,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 PresentationLayer::Current,
                 ChildOf(previous_pane),
             ))
@@ -1830,7 +1830,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Tab::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 PresentationLayer::Incoming,
                 vmux_layout::presentation::Transition::retain(previous_tab),
                 ChildOf(glass),
@@ -1851,7 +1851,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 PresentationLayer::Current,
                 ChildOf(incoming_pane),
             ))

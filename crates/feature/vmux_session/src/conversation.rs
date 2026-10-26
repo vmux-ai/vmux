@@ -190,7 +190,11 @@ impl Transcripts<'_, '_> {
             .flat_map(|children| children.iter())
             .filter_map(|child| {
                 let (sequence, content, created_at) = self.events.get(child).ok()?;
-                Some((sequence.0, content.0.clone(), created_at.0.max(0) as u64))
+                Some((
+                    sequence.0,
+                    content.0.clone(),
+                    created_at.milliseconds().max(0) as u64,
+                ))
             })
             .collect();
         Transcript::from_items(items)
@@ -649,7 +653,7 @@ impl EventMaterializer<'_, '_> {
                     .as_ref()
                     .and_then(|id| index.operations.get(&(session, id.clone())).copied())
             });
-        let timestamp = CreatedAt(i64::try_from(event.created_at_ms).unwrap_or(i64::MAX));
+        let timestamp = CreatedAt::new(i64::try_from(event.created_at_ms).unwrap_or(i64::MAX));
         let entity = if let Some(entity) = existing {
             if let Some((event_id, client_op_id)) = index.entity_keys.remove(&entity) {
                 index.events.remove(&(session, event_id));
@@ -852,7 +856,7 @@ mod tests {
                 MemberId::local(&session_id),
                 client_op_id.clone(),
                 Sequence(0),
-                CreatedAt(1),
+                CreatedAt::new(1),
                 MessageContent(Message::user("draft")),
                 MessageDelivery::Pending(client_op_id.clone()),
                 ChildOf(session),
@@ -1069,7 +1073,7 @@ mod tests {
             .query_filtered::<Entity, With<ConversationEvent>>()
             .single(app.world())
             .unwrap();
-        app.world_mut().entity_mut(event).insert(CreatedAt(42));
+        app.world_mut().entity_mut(event).insert(CreatedAt::new(42));
         app.world_mut()
             .resource_mut::<Messages<SnapshotReceived>>()
             .write(SnapshotReceived {
@@ -1080,7 +1084,9 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<CreatedAt>(event).map(|value| value.0),
+            app.world()
+                .get::<CreatedAt>(event)
+                .map(|value| value.milliseconds()),
             Some(42)
         );
     }

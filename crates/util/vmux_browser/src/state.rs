@@ -96,7 +96,7 @@ impl TabProjectionData<'_, '_> {
             .into_iter()
             .filter_map(|pane| self.focus.stack(pane))
             .filter_map(|stack| self.stack_timestamps.get(stack).ok())
-            .max_by_key(|(_, timestamp)| timestamp.0)
+            .max_by_key(|(_, timestamp)| timestamp.milliseconds())
             .map(|(entity, _)| entity)
     }
 

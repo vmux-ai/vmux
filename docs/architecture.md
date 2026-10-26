@@ -314,6 +314,10 @@ behavior does not need a reference back to the creator. Components are the contr
 so either side can be reused, replaced, or omitted independently. Composition changes by changing
 data and plugins, not by editing a growing call graph.
 
+Canonical values are typed and valid by construction. Timestamp components wrap `UnixMillis` and
+do not expose raw storage or use zero as a lifecycle sentinel. Component absence carries one precise
+meaning: for example, a Stack without `LastActivatedAt` has never been activated.
+
 That vocabulary also narrows the implementation search space. A new feature cannot hide
 state in an arbitrary object graph or invent a private integration mechanism: its data,
 behavior, messages, ownership, and composition point have known forms. Code remains

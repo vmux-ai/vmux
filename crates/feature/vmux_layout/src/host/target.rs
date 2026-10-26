@@ -113,7 +113,7 @@ impl BrowserTargets<'_, '_> {
                 if self.terminals.contains(entity) {
                     return None;
                 }
-                Some((entity, timestamp.0))
+                Some((entity, timestamp.milliseconds()))
             })
             .max_by_key(|&(_, timestamp)| timestamp)
             .map(|(entity, _)| entity)

@@ -1084,6 +1084,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(PalettePlugin);
+        app.finish();
         let page = app.world_mut().spawn(HostsLauncher).id();
         app.update();
 
@@ -1119,6 +1120,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(PalettePlugin);
+        app.finish();
         let page = app.world_mut().spawn(HostsLauncher).id();
         app.update();
 
@@ -1154,6 +1156,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(PalettePlugin);
+        app.finish();
         app.update();
         let page = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(page).insert(HostsLauncher);
@@ -1182,6 +1185,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(PalettePlugin);
+        app.finish();
         let page = app.world_mut().spawn(HostsLauncher).id();
         app.update();
         app.world_mut().entity_mut(page).insert((
@@ -1224,6 +1228,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_plugins(PalettePlugin);
+        app.finish();
         let page = app.world_mut().spawn(HostsLauncher).id();
         app.update();
 

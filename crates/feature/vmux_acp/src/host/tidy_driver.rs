@@ -43,7 +43,7 @@ impl TidyFiles<'_, '_> {
                 let timestamp = self
                     .last_activated
                     .get(*stack)
-                    .map(|timestamp| timestamp.0)
+                    .map(|timestamp| timestamp.milliseconds())
                     .unwrap_or(i64::MIN);
                 let changed = self
                     .diff_sources
@@ -74,7 +74,7 @@ impl TidyFiles<'_, '_> {
             .max_by_key(|(stack, _, _)| {
                 self.last_activated
                     .get(*stack)
-                    .map(|timestamp| timestamp.0)
+                    .map(|timestamp| timestamp.milliseconds())
                     .unwrap_or(i64::MIN)
             })
             .map(|(_, page, _)| *page);
