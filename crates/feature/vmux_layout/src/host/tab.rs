@@ -1142,7 +1142,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             *query.single(world).unwrap()
         };

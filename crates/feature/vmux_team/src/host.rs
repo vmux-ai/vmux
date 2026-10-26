@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use vmux_api::Id;
 use vmux_api::avatar::AvatarSpec;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
 use vmux_api::space::UiSpaces;
@@ -17,8 +18,8 @@ use vmux_ecs::event::team::{
 use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::profile::{
-    ActiveProfile, Profile as StoredProfile, ProfileCatalog, ProfileId, ProfileLabel,
-    ProfileRecord, SessionEnvironment,
+    ActiveProfile, Profile as StoredProfile, ProfileCatalog, ProfileLabel, ProfileRecord,
+    SessionEnvironment,
 };
 use vmux_ecs::team::{Agent, Profile, Tester, User};
 use vmux_ecs::{ActivateRequest, Active, EntityTarget, PageMetadata};
@@ -185,7 +186,7 @@ struct TeamProjector<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     session_views: Query<'w, 's, (Entity, &'static EntityTarget<Session>)>,
     profile_labels:
-        Query<'w, 's, (&'static ProfileId, &'static Name, Has<Active>), With<ProfileLabel>>,
+        Query<'w, 's, (&'static Id<StoredProfile>, &'static Name, Has<Active>), With<ProfileLabel>>,
 }
 
 impl TeamProjector<'_, '_> {
@@ -292,9 +293,9 @@ impl TeamProjector<'_, '_> {
         let mut profiles = Vec::new();
         for (id, name, is_active) in &self.profile_labels {
             profiles.push(ProfileRow {
-                id: id.0.clone(),
+                id: id.as_str().to_string(),
                 name: name.as_str().to_string(),
-                color: AvatarSpec::color(&id.0),
+                color: AvatarSpec::color(id.as_str()),
                 is_active,
             });
         }
@@ -464,7 +465,7 @@ fn profile_create_request(
 fn profile_switch_request(
     trigger: On<UiInput<TeamProfileSwitchRequest>>,
     active: Query<&ActiveProfile>,
-    profile_labels: Query<&ProfileId, With<ProfileLabel>>,
+    profile_labels: Query<&Id<StoredProfile>, With<ProfileLabel>>,
     mut profile_switches: MessageWriter<ProfileSwitchRequested>,
 ) {
     let profile_id = StoredProfile::named(&trigger.event().payload.profile_id).into_id();
@@ -474,7 +475,7 @@ fn profile_switch_request(
     if profile_id == active.0.id() {
         return;
     }
-    if profile_labels.iter().any(|id| id.0 == profile_id) {
+    if profile_labels.iter().any(|id| id.as_str() == profile_id) {
         profile_switches.write(ProfileSwitchRequested { profile_id });
     }
 }
@@ -593,7 +594,7 @@ fn finish_profile_create(
                 let profile_id = record.profile.into_id();
                 commands.spawn((
                     ProfileLabel,
-                    ProfileId(profile_id.clone()),
+                    Id::<StoredProfile>::new(profile_id.clone()),
                     Name::new(record.name),
                 ));
                 profile_switches.write(ProfileSwitchRequested { profile_id });
@@ -607,7 +608,7 @@ fn finish_profile_rename(
     mut tasks: Query<(Entity, &mut ProfileRenameTask)>,
     user: Query<Entity, With<User>>,
     mut space_profiles: Query<&mut SpaceProfile, With<Space>>,
-    mut profile_labels: Query<(&ProfileId, &mut Name), With<ProfileLabel>>,
+    mut profile_labels: Query<(&Id<StoredProfile>, &mut Name), With<ProfileLabel>>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -624,7 +625,7 @@ fn finish_profile_rename(
         };
         let profile_id = record.profile.id().to_string();
         for (id, mut label) in &mut profile_labels {
-            if id.0 == profile_id {
+            if id.as_str() == profile_id {
                 *label = Name::new(record.name.clone());
             }
         }
@@ -734,7 +735,7 @@ mod tests {
         ));
         app.world_mut().spawn((
             ProfileLabel,
-            ProfileId("work".to_string()),
+            Id::<StoredProfile>::new("work"),
             Name::new("Work"),
             vmux_ecs::Active,
         ));

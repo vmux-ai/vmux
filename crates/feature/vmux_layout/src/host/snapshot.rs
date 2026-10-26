@@ -222,16 +222,16 @@ mod tests {
             bg_color: None,
         });
 
-        let snap = app
-            .world_mut()
-            .run_system_once(
-                move |snapshot: LayoutSnapshotQuery,
-                      focused: Single<
-                    &ActiveStack,
-                    With<crate::active_pane::ProfileId>,
-                >| { snapshot.build(&focused, Some(stack)) },
-            )
-            .unwrap();
+        let snap =
+            app.world_mut()
+                .run_system_once(
+                    move |snapshot: LayoutSnapshotQuery,
+                          focused: Single<
+                        &ActiveStack,
+                        With<crate::active_pane::ActivePaneScope>,
+                    >| { snapshot.build(&focused, Some(stack)) },
+                )
+                .unwrap();
 
         let LayoutNode::Pane { stacks, .. } = &snap.tabs[0].root else {
             panic!("expected pane");
@@ -268,7 +268,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 |snapshot: LayoutSnapshotQuery,
-                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ActivePaneScope>>| {
                     snapshot.build(&focused, None)
                 },
             )
@@ -310,7 +310,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 |snapshot: LayoutSnapshotQuery,
-                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ActivePaneScope>>| {
                     snapshot.build(&focused, None)
                 },
             )
@@ -330,7 +330,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 |snapshot: LayoutSnapshotQuery,
-                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ActivePaneScope>>| {
                     snapshot.build(&focused, None)
                 },
             )
@@ -370,8 +370,8 @@ mod tests {
 
         {
             let world = app.world_mut();
-            let mut query =
-                world.query_filtered::<&mut ActiveStack, With<crate::active_pane::ProfileId>>();
+            let mut query = world
+                .query_filtered::<&mut ActiveStack, With<crate::active_pane::ActivePaneScope>>();
             query.single_mut(world).unwrap().tab = Some(tab);
         }
 
@@ -379,7 +379,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 |snapshot: LayoutSnapshotQuery,
-                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ActivePaneScope>>| {
                     snapshot.build(&focused, None)
                 },
             )
@@ -431,8 +431,8 @@ mod tests {
 
         {
             let world = app.world_mut();
-            let mut query =
-                world.query_filtered::<&mut ActiveStack, With<crate::active_pane::ProfileId>>();
+            let mut query = world
+                .query_filtered::<&mut ActiveStack, With<crate::active_pane::ActivePaneScope>>();
             query.single_mut(world).unwrap().tab = Some(tab);
         }
 
@@ -440,7 +440,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 |snapshot: LayoutSnapshotQuery,
-                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ActivePaneScope>>| {
                     snapshot.build(&focused, None)
                 },
             )
@@ -506,7 +506,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 |snapshot: LayoutSnapshotQuery,
-                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ActivePaneScope>>| {
                     snapshot.build(&focused, None)
                 },
             )

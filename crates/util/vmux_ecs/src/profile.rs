@@ -4,6 +4,7 @@ use crate::Active;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use vmux_api::Id;
 
 pub use vmux_profile::*;
 
@@ -74,7 +75,7 @@ fn finish(mut tasks: Query<(Entity, &mut ProfileListTask)>, mut commands: Comman
         for record in records {
             let mut profile = commands.spawn((
                 ProfileLabel,
-                ProfileId(record.profile.into_id()),
+                Id::<Profile>::new(record.profile.into_id()),
                 Name::new(record.name),
             ));
             if record.active {
@@ -162,9 +163,6 @@ impl Projects<'_, '_> {
 
 #[derive(Component)]
 struct ProfileListTask(Task<Vec<ProfileRecord>>);
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ProfileId(pub String);
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct ProfileLabel;

@@ -339,7 +339,7 @@ fn navigate(
                         .id();
                     if let Some(profile) = profile {
                         activate.write(vmux_layout::active_pane::ActivatePane {
-                            profile: vmux_layout::active_pane::ProfileId::Agent(profile),
+                            scope: vmux_layout::active_pane::ActivePaneScope::Agent(profile),
                             active: vmux_layout::active_pane::ActiveStack {
                                 tab: None,
                                 pane: Some(target),
@@ -518,6 +518,8 @@ mod command_definition_tests {
             .add_plugins(CommandRuntimePlugin)
             .add_message::<OpenHistoryRequest>()
             .add_observer(issue_open_history);
+        app.finish();
+        app.cleanup();
         app.update();
 
         let mut query = app.world_mut().query::<&CommandDefinition>();

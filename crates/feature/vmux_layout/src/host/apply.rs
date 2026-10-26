@@ -249,7 +249,7 @@ struct LayoutWriter<'w, 's> {
         'w,
         's,
         (
-            &'static crate::active_pane::ProfileId,
+            &'static crate::active_pane::ActivePaneScope,
             &'static mut crate::active_pane::ActiveStack,
         ),
     >,
@@ -594,7 +594,7 @@ impl LayoutWriter<'_, '_> {
 
     fn focus(&mut self, focus: &proto::Focus) {
         for (profile, mut active) in &mut self.profiles {
-            if *profile != crate::active_pane::ProfileId::Local {
+            if *profile != crate::active_pane::ActivePaneScope::Local {
                 continue;
             }
             if let Some(id) = focus.tab.as_deref() {
@@ -1731,7 +1731,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             *query.single(world).unwrap()
         };
@@ -1763,7 +1763,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &mut crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             let mut active = query.single_mut(world).unwrap();
             active.tab = Some(tab);
@@ -1793,7 +1793,7 @@ mod tests {
             let world = app.world_mut();
             let mut query = world.query_filtered::<
                 &crate::active_pane::ActiveStack,
-                With<crate::active_pane::ProfileId>,
+                With<crate::active_pane::ActivePaneScope>,
             >();
             *query.single(world).unwrap()
         };

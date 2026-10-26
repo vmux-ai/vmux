@@ -20,7 +20,7 @@ impl Plugin for ActivePanePlugin {
 }
 
 #[derive(Component, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum ProfileId {
+pub enum ActivePaneScope {
     Local,
     Agent(String),
 }
@@ -34,7 +34,7 @@ pub struct ActiveStack {
 
 impl ActiveStack {
     pub fn local_bundle(self) -> impl Bundle {
-        (Name::new("Local active pane"), ProfileId::Local, self)
+        (Name::new("Local active pane"), ActivePaneScope::Local, self)
     }
 }
 
@@ -46,13 +46,13 @@ const EMPTY_ACTIVE_STACK: ActiveStack = ActiveStack {
 
 #[derive(SystemParam)]
 pub struct FocusedStack<'w, 's> {
-    profiles: Query<'w, 's, (&'static ProfileId, Ref<'static, ActiveStack>)>,
+    scopes: Query<'w, 's, (&'static ActivePaneScope, Ref<'static, ActiveStack>)>,
 }
 
 impl FocusedStack<'_, '_> {
     pub fn as_ref(&self) -> Option<&ActiveStack> {
-        self.profiles.iter().find_map(|(profile, active)| {
-            (*profile == ProfileId::Local).then_some(active.into_inner())
+        self.scopes.iter().find_map(|(scope, active)| {
+            (*scope == ActivePaneScope::Local).then_some(active.into_inner())
         })
     }
 
@@ -61,10 +61,10 @@ impl FocusedStack<'_, '_> {
     }
 
     pub fn is_changed(&self) -> bool {
-        self.profiles
+        self.scopes
             .iter()
-            .find_map(|(profile, active)| {
-                (*profile == ProfileId::Local).then_some(active.is_changed())
+            .find_map(|(scope, active)| {
+                (*scope == ActivePaneScope::Local).then_some(active.is_changed())
             })
             .unwrap_or(false)
     }
@@ -80,23 +80,23 @@ impl Deref for FocusedStack<'_, '_> {
 
 #[derive(SystemParam)]
 pub struct ActivePaneQuery<'w, 's> {
-    profiles: Query<'w, 's, (&'static ProfileId, &'static ActiveStack)>,
+    scopes: Query<'w, 's, (&'static ActivePaneScope, &'static ActiveStack)>,
 }
 
 impl ActivePaneQuery<'_, '_> {
-    pub fn get(&self, profile: &ProfileId) -> Option<ActiveStack> {
-        self.profiles
+    pub fn get(&self, scope: &ActivePaneScope) -> Option<ActiveStack> {
+        self.scopes
             .iter()
-            .find_map(|(candidate, active)| (candidate == profile).then_some(*active))
+            .find_map(|(candidate, active)| (candidate == scope).then_some(*active))
     }
 
     pub fn local(&self) -> ActiveStack {
-        self.get(&ProfileId::Local).unwrap_or_default()
+        self.get(&ActivePaneScope::Local).unwrap_or_default()
     }
 
     pub fn agent_in_pane(&self, pane: Entity) -> Option<(&str, ActiveStack)> {
-        self.profiles.iter().find_map(|(profile, active)| {
-            let ProfileId::Agent(id) = profile else {
+        self.scopes.iter().find_map(|(scope, active)| {
+            let ActivePaneScope::Agent(id) = scope else {
                 return None;
             };
             (active.pane == Some(pane)).then_some((id.as_str(), *active))
@@ -106,7 +106,7 @@ impl ActivePaneQuery<'_, '_> {
 
 #[derive(Message, Clone)]
 pub struct ActivatePane {
-    pub profile: ProfileId,
+    pub scope: ActivePaneScope,
     pub active: ActiveStack,
 }
 
@@ -116,14 +116,14 @@ fn spawn_local(mut commands: Commands) {
 
 fn apply_requests(
     mut reader: MessageReader<ActivatePane>,
-    mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
+    mut scopes: Query<(&ActivePaneScope, &mut ActiveStack)>,
     mut commands: Commands,
 ) {
-    let mut pending = Vec::<(ProfileId, ActiveStack)>::new();
+    let mut pending = Vec::<(ActivePaneScope, ActiveStack)>::new();
     for request in reader.read() {
         let mut applied = false;
-        for (profile, mut active) in &mut profiles {
-            if *profile != request.profile {
+        for (scope, mut active) in &mut scopes {
+            if *scope != request.scope {
                 continue;
             }
             *active = request.active;
@@ -133,8 +133,8 @@ fn apply_requests(
         if applied {
             continue;
         }
-        for (profile, active) in &mut pending {
-            if *profile != request.profile {
+        for (scope, active) in &mut pending {
+            if *scope != request.scope {
                 continue;
             }
             *active = request.active;
@@ -142,25 +142,26 @@ fn apply_requests(
             break;
         }
         if !applied {
-            pending.push((request.profile.clone(), request.active));
+            pending.push((request.scope.clone(), request.active));
         }
     }
-    for (profile, active) in pending {
-        let name = match &profile {
-            ProfileId::Local => "Local active pane".to_string(),
-            ProfileId::Agent(id) => format!("Agent active pane: {id}"),
+    for (scope, active) in pending {
+        let name = match &scope {
+            ActivePaneScope::Local => "Local active pane".to_string(),
+            ActivePaneScope::Agent(id) => format!("Agent active pane: {id}"),
         };
-        commands.spawn((Name::new(name), profile, active));
+        commands.spawn((Name::new(name), scope, active));
     }
 }
 
 fn prune_entities(
-    profiles: Query<(Entity, &ProfileId, &ActiveStack)>,
+    scopes: Query<(Entity, &ActivePaneScope, &ActiveStack)>,
     panes: Query<(), (With<Pane>, Without<PaneSplit>)>,
     mut commands: Commands,
 ) {
-    for (entity, profile, active) in &profiles {
-        if *profile != ProfileId::Local && !active.pane.is_some_and(|pane| panes.contains(pane)) {
+    for (entity, scope, active) in &scopes {
+        if *scope != ActivePaneScope::Local && !active.pane.is_some_and(|pane| panes.contains(pane))
+        {
             commands.entity(entity).despawn();
         }
     }
@@ -180,7 +181,7 @@ mod tests {
             (world.spawn(Pane).id(), world.spawn(Pane).id())
         };
         app.world_mut().write_message(ActivatePane {
-            profile: ProfileId::Local,
+            scope: ActivePaneScope::Local,
             active: ActiveStack {
                 tab: None,
                 pane: Some(user_pane),
@@ -188,7 +189,7 @@ mod tests {
             },
         });
         app.world_mut().write_message(ActivatePane {
-            profile: ProfileId::Agent("a1".to_string()),
+            scope: ActivePaneScope::Agent("a1".to_string()),
             active: ActiveStack {
                 tab: None,
                 pane: Some(agent_pane),
@@ -197,15 +198,15 @@ mod tests {
         });
         app.update();
 
-        let mut profiles = app.world_mut().query::<(&ProfileId, &ActiveStack)>();
-        let local = profiles
+        let mut scopes = app.world_mut().query::<(&ActivePaneScope, &ActiveStack)>();
+        let local = scopes
             .iter(app.world())
-            .find_map(|(profile, active)| (*profile == ProfileId::Local).then_some(*active))
+            .find_map(|(scope, active)| (*scope == ActivePaneScope::Local).then_some(*active))
             .unwrap();
-        let agent = profiles
+        let agent = scopes
             .iter(app.world())
-            .find_map(|(profile, active)| {
-                (*profile == ProfileId::Agent("a1".to_string())).then_some(*active)
+            .find_map(|(scope, active)| {
+                (*scope == ActivePaneScope::Agent("a1".to_string())).then_some(*active)
             })
             .unwrap();
         assert_eq!(local.pane, Some(user_pane));
@@ -220,7 +221,7 @@ mod tests {
 
         let agent_pane = app.world_mut().spawn(Pane).id();
         app.world_mut().write_message(ActivatePane {
-            profile: ProfileId::Agent("a1".to_string()),
+            scope: ActivePaneScope::Agent("a1".to_string()),
             active: ActiveStack {
                 tab: None,
                 pane: Some(agent_pane),
@@ -229,15 +230,15 @@ mod tests {
         });
         app.update();
 
-        let mut profiles = app.world_mut().query::<(&ProfileId, &ActiveStack)>();
-        let local = profiles
+        let mut scopes = app.world_mut().query::<(&ActivePaneScope, &ActiveStack)>();
+        let local = scopes
             .iter(app.world())
-            .find_map(|(profile, active)| (*profile == ProfileId::Local).then_some(*active))
+            .find_map(|(scope, active)| (*scope == ActivePaneScope::Local).then_some(*active))
             .unwrap();
-        let agent = profiles
+        let agent = scopes
             .iter(app.world())
-            .find_map(|(profile, active)| {
-                (*profile == ProfileId::Agent("a1".to_string())).then_some(*active)
+            .find_map(|(scope, active)| {
+                (*scope == ActivePaneScope::Agent("a1".to_string())).then_some(*active)
             })
             .unwrap();
         assert_eq!(local.pane, None);
