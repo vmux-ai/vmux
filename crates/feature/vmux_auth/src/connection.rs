@@ -54,7 +54,7 @@ pub enum AuthSet {
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component, Default)]
-#[require(Save)]
+#[require(Save, ConnectionState)]
 #[type_path = "vmux_auth"]
 pub struct Connection;
 
@@ -62,16 +62,26 @@ pub struct Connection;
 #[reflect(Component, Default)]
 #[type_path = "vmux_auth"]
 pub enum ConnectionState {
-    #[default]
     Connecting,
     AwaitingUser {
         verification_uri: String,
         user_code: String,
-        expires_at: i64,
+        expires_at: vmux_ecs::UnixMillis,
     },
     Connected,
-    Failed(String),
+    Failed(ConnectionFailure),
+    #[default]
     Disconnected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[type_path = "vmux_auth"]
+pub enum ConnectionFailure {
+    AuthorizationDenied,
+    Expired,
+    Network,
+    ProviderUnavailable,
+    StorageUnavailable,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -225,11 +235,10 @@ mod tests {
         app.world_mut()
             .entity_mut(entity)
             .insert(ConnectionState::Connected);
-        app.world_mut().resource_mut::<CredentialVault>().install(
-            provider.clone(),
-            id.clone(),
-            "secret",
-        );
+        app.world_mut()
+            .resource_mut::<CredentialVault>()
+            .install(provider.clone(), id.clone(), "secret")
+            .unwrap();
         let lease = app
             .world()
             .resource::<CredentialVault>()
@@ -246,5 +255,17 @@ mod tests {
             Some(&ConnectionState::Disconnected)
         );
         assert!(!lease.is_active());
+    }
+
+    #[test]
+    fn restored_connection_defaults_to_disconnected() {
+        let mut app = App::new();
+        app.add_plugins(ConnectionPlugin);
+        let connection = app.world_mut().spawn(Connection).id();
+
+        assert_eq!(
+            app.world().get::<ConnectionState>(connection),
+            Some(&ConnectionState::Disconnected)
+        );
     }
 }

@@ -8,7 +8,7 @@ use vmux_api::Id;
 use vmux_connector::ProviderKey;
 use zeroize::Zeroizing;
 
-use crate::connection::{Connected, Connection, ConnectionState};
+use crate::connection::{Connected, Connection, ConnectionFailure, ConnectionState};
 
 pub struct CredentialLease {
     token: Zeroizing<String>,
@@ -50,15 +50,20 @@ impl CredentialVault {
         provider: ProviderKey,
         connection: Id<Connection>,
         token: impl Into<String>,
-    ) {
+    ) -> Result<(), String> {
+        let token = token.into();
+        if token.trim().is_empty() {
+            return Err("connection credential must not be empty".to_string());
+        }
         self.invalidate(&provider, &connection);
         self.credentials.insert(
             (provider, connection),
             Credential {
-                token: Zeroizing::new(token.into()),
+                token: Zeroizing::new(token),
                 active: Arc::new(AtomicBool::new(true)),
             },
         );
+        Ok(())
     }
 
     pub(crate) fn invalidate(&mut self, provider: &ProviderKey, connection: &Id<Connection>) {
@@ -160,7 +165,7 @@ impl CredentialIssuer<'_, '_> {
             return Err("connection belongs to another auth provider".to_string());
         }
         self.vault
-            .install(provider.clone(), connection.clone(), token);
+            .install(provider.clone(), connection.clone(), token)?;
         *state = ConnectionState::Connected;
         self.commands.trigger(Connected {
             entity,
@@ -173,7 +178,7 @@ impl CredentialIssuer<'_, '_> {
     pub fn fail(
         &mut self,
         connection: &Id<Connection>,
-        error: impl Into<String>,
+        failure: ConnectionFailure,
     ) -> Result<Entity, String> {
         let Some((entity, _, _, mut state)) = self
             .connections
@@ -182,7 +187,7 @@ impl CredentialIssuer<'_, '_> {
         else {
             return Err("connection is unavailable".to_string());
         };
-        *state = ConnectionState::Failed(error.into());
+        *state = ConnectionState::Failed(failure);
         Ok(entity)
     }
 }
@@ -196,7 +201,9 @@ mod tests {
         let provider = ProviderKey::new("github").unwrap();
         let connection = Id::<Connection>::new("connection-1");
         let mut vault = CredentialVault::default();
-        vault.install(provider.clone(), connection.clone(), "secret");
+        vault
+            .install(provider.clone(), connection.clone(), "secret")
+            .unwrap();
         let lease = vault.lease(&provider, &connection).unwrap();
 
         assert!(!format!("{lease:?}").contains("secret"));
@@ -206,5 +213,19 @@ mod tests {
 
         assert!(!lease.is_active());
         assert!(lease.token().is_err());
+    }
+
+    #[test]
+    fn empty_credentials_are_rejected() {
+        let provider = ProviderKey::new("github").unwrap();
+        let connection = Id::<Connection>::new("connection-1");
+        let mut vault = CredentialVault::default();
+
+        assert!(
+            vault
+                .install(provider.clone(), connection.clone(), " ")
+                .is_err()
+        );
+        assert!(vault.lease(&provider, &connection).is_err());
     }
 }
