@@ -9,7 +9,9 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-bevy = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 serde = { workspace = true }
 url = { workspace = true }
