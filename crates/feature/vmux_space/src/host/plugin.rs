@@ -895,9 +895,6 @@ fn rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut comma
             .entity(entity)
             .insert((Name::new(new_id.clone()), Id::<Space>::new(new_id.clone())));
     }
-    if new_id == request.space_id {
-        return;
-    }
 }
 
 fn open_page(

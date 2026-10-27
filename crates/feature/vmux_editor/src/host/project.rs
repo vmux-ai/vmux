@@ -85,6 +85,26 @@ fn rebuild_index(mut index: vmux_ecs::IdentityIndexWriter<Project>) {
 
 type ProjectIdentities<'w, 's> =
     Query<'w, 's, (Entity, &'static Id<Project>, &'static ProjectPath), With<Project>>;
+type SessionProjectSources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Id<vmux_session::Session>,
+        Ref<'static, vmux_ecs::Cwd>,
+        Option<&'static ProjectRef>,
+    ),
+    With<vmux_session::Session>,
+>;
+type SpaceProjectSources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Ref<'static, vmux_layout::space::EffectiveStartupDir>,
+        Option<&'static ProjectRef>,
+    ),
+    With<vmux_layout::space::Space>,
+>;
 
 struct ProjectMatch;
 
@@ -101,22 +121,8 @@ impl ProjectMatch {
 fn reconcile_refs(
     index: Res<vmux_ecs::IdentityIndex<Project>>,
     projects: ProjectIdentities,
-    sessions: Query<
-        (
-            &Id<vmux_session::Session>,
-            Ref<vmux_ecs::Cwd>,
-            Option<&ProjectRef>,
-        ),
-        With<vmux_session::Session>,
-    >,
-    spaces: Query<
-        (
-            Entity,
-            Ref<vmux_layout::space::EffectiveStartupDir>,
-            Option<&ProjectRef>,
-        ),
-        With<vmux_layout::space::Space>,
-    >,
+    sessions: SessionProjectSources,
+    spaces: SpaceProjectSources,
     mut session_mutations: MessageWriter<vmux_session::SessionMutationRequest>,
     mut commands: Commands,
 ) {

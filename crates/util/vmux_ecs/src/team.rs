@@ -75,18 +75,20 @@ impl ProfileView<'_> {
 #[derive(SystemParam)]
 pub struct Profiles<'w, 's> {
     children: Query<'w, 's, &'static Children>,
-    profiles: Query<
-        'w,
-        's,
-        (
-            Entity,
-            Ref<'static, Name>,
-            Ref<'static, Avatar>,
-            Ref<'static, Icon>,
-        ),
-        With<Profile>,
-    >,
+    profiles: ProfileComponents<'w, 's>,
 }
+
+type ProfileComponents<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Ref<'static, Name>,
+        Ref<'static, Avatar>,
+        Ref<'static, Icon>,
+    ),
+    With<Profile>,
+>;
 
 impl Profiles<'_, '_> {
     pub fn get(&self, owner: Entity) -> Option<ProfileView<'_>> {

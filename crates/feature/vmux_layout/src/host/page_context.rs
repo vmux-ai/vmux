@@ -298,7 +298,6 @@ fn git_page_ready(
     }
     let path = tabs
         .startup_dir(webview)
-        .map(PathBuf::from)
         .or_else(|| focused_space.startup_dir().map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())
         .map(|path| path.to_string_lossy().to_string())

@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 use vmux_api::Id;
+#[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 
 use crate::{CanonicalField, ExternalId, ExternalScope, ProviderKey, ResourceKind};
@@ -13,6 +14,7 @@ pub(crate) struct LinkPlugin;
 
 impl Plugin for LinkPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(host)]
         app.register_persisted::<ExternalLink>()
             .register_persisted::<ExternalScopeRef>()
             .register_persisted::<ExternalId>()
@@ -20,8 +22,8 @@ impl Plugin for LinkPlugin {
             .register_persisted::<SyncPolicy>()
             .register_persisted::<SynchronizedFields>()
             .register_persisted::<PrimaryWorkItem>()
-            .register_persisted::<ReviewArtifact>()
-            .init_resource::<ExternalLinkIndex>()
+            .register_persisted::<ReviewArtifact>();
+        app.init_resource::<ExternalLinkIndex>()
             .init_resource::<IndexedExternalLinks>()
             .add_systems(PreUpdate, rebuild);
     }

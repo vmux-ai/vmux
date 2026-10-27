@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use bevy_reflect::{Reflect, TypePath, std_traits::ReflectDefault};
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
@@ -115,9 +116,18 @@ pub struct CommittedOperationBundle<T: Send + Sync + 'static> {
     owner: ChildOf,
 }
 
-impl CommittedOperation {
-    pub fn bundle<T: Send + Sync + 'static>(
-        root: Entity,
+pub struct CommittedOperationSpec<T> {
+    id: Id<Operation>,
+    actor: Id<Actor>,
+    target: Id<T>,
+    base_revision: Revision,
+    committed_revision: Revision,
+    sequence: u64,
+    committed_at: UnixMillis,
+}
+
+impl<T> CommittedOperationSpec<T> {
+    pub fn new(
         id: Id<Operation>,
         actor: Id<Actor>,
         target: Id<T>,
@@ -125,24 +135,41 @@ impl CommittedOperation {
         committed_revision: Revision,
         sequence: u64,
         committed_at: UnixMillis,
-    ) -> Result<CommittedOperationBundle<T>, String> {
+    ) -> Result<Self, String> {
         if committed_revision <= base_revision {
             return Err("committed revision must advance the base revision".to_string());
         }
         if sequence == 0 {
             return Err("operation sequence must be positive".to_string());
         }
-        Ok(CommittedOperationBundle {
-            operation: Self(()),
+        Ok(Self {
             id,
             actor,
             target,
-            base_revision: OperationTargetRevision(base_revision),
-            committed_revision: CommittedRevision(committed_revision),
-            sequence: OperationSequence(sequence),
-            committed_at: CommittedAt(committed_at),
-            owner: ChildOf(root),
+            base_revision,
+            committed_revision,
+            sequence,
+            committed_at,
         })
+    }
+}
+
+impl CommittedOperation {
+    pub fn bundle<T: Send + Sync + 'static>(
+        root: Entity,
+        spec: CommittedOperationSpec<T>,
+    ) -> CommittedOperationBundle<T> {
+        CommittedOperationBundle {
+            operation: Self(()),
+            id: spec.id,
+            actor: spec.actor,
+            target: spec.target,
+            base_revision: OperationTargetRevision(spec.base_revision),
+            committed_revision: CommittedRevision(spec.committed_revision),
+            sequence: OperationSequence(spec.sequence),
+            committed_at: CommittedAt(spec.committed_at),
+            owner: ChildOf(root),
+        }
     }
 }
 
@@ -329,40 +356,57 @@ type Operations<'w, 's> = Query<
     With<CommittedOperation>,
 >;
 
+type ChangedOperations<'w, 's> = Query<
+    'w,
+    's,
+    (),
+    (
+        With<CommittedOperation>,
+        Or<(
+            Added<CommittedOperation>,
+            Added<Id<Operation>>,
+            Added<OperationTargetRevision>,
+            Added<CommittedRevision>,
+            Added<OperationSequence>,
+            Changed<ChildOf>,
+        )>,
+    ),
+>;
+
+#[derive(SystemParam)]
+struct ReplicationChanges<'w, 's> {
+    changed: ChangedOperations<'w, 's>,
+    operations: RemovedComponents<'w, 's, CommittedOperation>,
+    ids: RemovedComponents<'w, 's, Id<Operation>>,
+    bases: RemovedComponents<'w, 's, OperationTargetRevision>,
+    revisions: RemovedComponents<'w, 's, CommittedRevision>,
+    sequences: RemovedComponents<'w, 's, OperationSequence>,
+    owners: RemovedComponents<'w, 's, ChildOf>,
+}
+
+impl ReplicationChanges<'_, '_> {
+    fn dirty(&mut self, indexed: &IndexedReplicationEntities) -> bool {
+        if !self.changed.is_empty() {
+            return true;
+        }
+        self.operations
+            .read()
+            .chain(self.ids.read())
+            .chain(self.bases.read())
+            .chain(self.revisions.read())
+            .chain(self.sequences.read())
+            .chain(self.owners.read())
+            .any(|entity| indexed.0.contains(&entity))
+    }
+}
+
 fn rebuild(
     operations: Operations,
-    changed: Query<
-        (),
-        (
-            With<CommittedOperation>,
-            Or<(
-                Added<CommittedOperation>,
-                Added<Id<Operation>>,
-                Added<OperationTargetRevision>,
-                Added<CommittedRevision>,
-                Added<OperationSequence>,
-                Changed<ChildOf>,
-            )>,
-        ),
-    >,
-    mut removed_operations: RemovedComponents<CommittedOperation>,
-    mut removed_ids: RemovedComponents<Id<Operation>>,
-    mut removed_bases: RemovedComponents<OperationTargetRevision>,
-    mut removed_revisions: RemovedComponents<CommittedRevision>,
-    mut removed_sequences: RemovedComponents<OperationSequence>,
-    mut removed_owners: RemovedComponents<ChildOf>,
+    mut changes: ReplicationChanges,
     mut current: ResMut<ReplicationIndex>,
     mut indexed: ResMut<IndexedReplicationEntities>,
 ) {
-    let removed = removed_operations
-        .read()
-        .chain(removed_ids.read())
-        .chain(removed_bases.read())
-        .chain(removed_revisions.read())
-        .chain(removed_sequences.read())
-        .chain(removed_owners.read())
-        .any(|entity| indexed.0.contains(&entity));
-    if changed.is_empty() && !removed {
+    if !changes.dirty(&indexed) {
         return;
     }
 
@@ -481,9 +525,9 @@ mod tests {
         fn operation(&mut self, id: &str, revision: u64, sequence: u64) -> Entity {
             self.app
                 .world_mut()
-                .spawn(
-                    CommittedOperation::bundle(
-                        self.root,
+                .spawn(CommittedOperation::bundle(
+                    self.root,
+                    CommittedOperationSpec::new(
                         Id::new(id),
                         self.actor.clone(),
                         Id::<Issue>::new("VMX-233"),
@@ -493,7 +537,7 @@ mod tests {
                         UnixMillis(10),
                     )
                     .unwrap(),
-                )
+                ))
                 .id()
         }
     }

@@ -841,9 +841,9 @@ fn EditorWorkspace() -> Element {
                 onsearch: move |_| {
                     let search = sidebar_view() != SidebarView::Search;
                     if search && !explorer_visible() {
-                        let _ = send(&ExplorerPanelSetVisible { visible: true });
+                        send(&ExplorerPanelSetVisible { visible: true });
                     }
-                    let _ = send(&ExplorerPanelViewSet { search });
+                    send(&ExplorerPanelViewSet { search });
                 },
             }
 

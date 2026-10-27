@@ -1,14 +1,17 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 use vmux_api::Id;
+#[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 
+#[cfg(host)]
 use crate::{AccountExternalId, ExternalHost, ExternalNamespace, ProviderKey};
 
 pub(crate) struct ScopePlugin;
 
 impl Plugin for ScopePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(host)]
         app.register_persisted::<ExternalScope>()
             .register_persisted::<Id<ExternalScope>>()
             .register_persisted::<ProviderKey>()
@@ -18,6 +21,8 @@ impl Plugin for ScopePlugin {
             .register_type::<CanAccess>()
             .add_plugins(vmux_ecs::IdentityIndexPlugin::<ExternalScope>::default())
             .add_systems(PreUpdate, rebuild);
+        #[cfg(not(host))]
+        let _ = app;
     }
 }
 
@@ -48,6 +53,7 @@ impl CanAccess {
     }
 }
 
+#[cfg(host)]
 fn rebuild(mut index: vmux_ecs::IdentityIndexWriter<ExternalScope>) {
     index.rebuild();
 }

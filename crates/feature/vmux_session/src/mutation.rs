@@ -261,8 +261,7 @@ impl SessionMutations<'_, '_> {
         self.commands
             .entity(session)
             .insert((vmux_ecs::ReplicationRoot, next));
-        let bundle = CommittedOperation::bundle(
-            session,
+        let spec = vmux_ecs::CommittedOperationSpec::new(
             request.operation.clone(),
             request.actor.clone(),
             request.session.clone(),
@@ -272,6 +271,7 @@ impl SessionMutations<'_, '_> {
             UnixMillis::now(),
         )
         .map_err(SessionMutationRejection::InvalidOperation)?;
+        let bundle = CommittedOperation::bundle(session, spec);
         let operation = self.commands.spawn((bundle, request.mutation.clone())).id();
         operations.insert((session, request.operation.clone()), operation);
         *current = next;
