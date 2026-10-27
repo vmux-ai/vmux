@@ -132,7 +132,7 @@ impl AgentRemoteDriver {
     async fn sessions(&self) -> Vec<RemoteSession> {
         let mut sessions = self.sessions.remote_sessions().await;
         for session in &mut sessions {
-            if let Some(messages) = self.messages(&session.id.0).await {
+            if let Some(messages) = self.messages(session.id.as_str()).await {
                 session.title =
                     vmux_session::ConversationTitle::from_messages(&messages, &session.name);
             }
