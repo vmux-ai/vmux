@@ -6,6 +6,10 @@ pub use host::{
 };
 #[cfg(host)]
 pub use project::ProjectRoute;
+pub use project::{
+    OwnedProjects, Project, ProjectBranch, ProjectIndex, ProjectLookupError, ProjectOwner,
+    ProjectPath, ProjectSource,
+};
 
 #[cfg(host)]
 pub(crate) struct Feature;

@@ -141,13 +141,13 @@ struct ProjectsRootFailure(String);
 
 #[derive(SystemParam)]
 pub struct Projects<'w, 's> {
-    roots: Query<'w, 's, &'static ProjectsRoot>,
+    roots: Query<'w, 's, (Entity, &'static ProjectsRoot)>,
     failures: Query<'w, 's, &'static ProjectsRootFailure>,
 }
 
 impl Projects<'_, '_> {
     pub fn path(&self) -> Result<&Path, String> {
-        if let Ok(root) = self.roots.single() {
+        if let Ok((_, root)) = self.roots.single() {
             return Ok(root.0.path());
         }
         if let Ok(failure) = self.failures.single() {
@@ -158,6 +158,10 @@ impl Projects<'_, '_> {
 
     pub fn contains(&self, path: &Path) -> bool {
         self.path().is_ok_and(|root| path.starts_with(root))
+    }
+
+    pub fn entity(&self) -> Option<Entity> {
+        self.roots.single().ok().map(|(entity, _)| entity)
     }
 }
 
