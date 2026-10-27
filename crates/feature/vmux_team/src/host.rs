@@ -835,7 +835,7 @@ mod tests {
     fn command_app() -> App {
         let mut app = App::new();
         app.add_message::<vmux_layout::stack::OpenRequest>()
-            .add_plugins(IntentPlugin);
+            .add_plugins((vmux_ecs::PrimitivesPlugin, IntentPlugin));
         app
     }
 
