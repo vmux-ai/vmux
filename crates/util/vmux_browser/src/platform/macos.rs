@@ -200,7 +200,7 @@ fn apply_lifecycle(
                     continue;
                 };
                 commands.trigger(
-                    vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                    vmux_ecs::UiStateWrite::<vmux_layout::state::UiLayout>::from_event(
                         layout,
                         &revision.next_effect(),
                     ),

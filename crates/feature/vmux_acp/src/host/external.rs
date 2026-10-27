@@ -14,11 +14,11 @@ use vmux_api::Id;
 use vmux_api::chat::ResumeSession;
 use vmux_api::open_target::{OpenTarget, PaneOpenMode};
 use vmux_api::protocol::AcpProviderSession;
-use vmux_ecs::page::{Activity, PageReady};
 use vmux_connector::{
     ExternalId, ExternalLink, ExternalLinkIdentity, ExternalLinkIndex, ExternalScopeRef,
     ProviderKey, ResourceKind,
 };
+use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
@@ -31,8 +31,8 @@ use vmux_session::host::{SessionManagerView, SessionView, SessionViews};
 use vmux_session::{
     AgentConversationTitle, AgentFamily, AgentRef, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
-    ProviderArchiveWriteRequest, ProviderCatalog, ProviderSession, Route, Session,
-    ProviderSessionTombstones, SessionDuplicate, SnapshotReceived, TranscriptLoading, Transcripts,
+    ProviderArchiveWriteRequest, ProviderCatalog, ProviderSession, ProviderSessionTombstones,
+    Route, Session, SessionDuplicate, SnapshotReceived, TranscriptLoading, Transcripts,
 };
 use vmux_setting::AppSettings;
 use vmux_tool::ToolInventoryChanged;
@@ -65,23 +65,29 @@ pub(super) fn add(app: &mut App) {
         .add_systems(
             Update,
             (
-                request_catalogs,
-                receive_catalogs.after(ServiceMessageSet),
-                mark_activation_dirty,
-                 import,
-                activate,
-                archive,
-                finish_archives,
-                watch,
-                request_changed_conversations,
-                scan,
-                finish,
-                project,
-                associate,
-                request_conversation_refreshes,
-                queue_initial_conversations,
-                queue_conversation_refreshes,
-                finish_conversations,
+                (
+                    request_catalogs,
+                    receive_catalogs.after(ServiceMessageSet),
+                    mark_activation_dirty,
+                    import,
+                    activate,
+                    archive,
+                    finish_archives,
+                    watch,
+                    request_changed_conversations,
+                )
+                    .chain(),
+                (
+                    scan,
+                    finish,
+                    project,
+                    associate,
+                    request_conversation_refreshes,
+                    queue_initial_conversations,
+                    queue_conversation_refreshes,
+                    finish_conversations,
+                )
+                    .chain(),
             )
                 .chain(),
         );
@@ -1343,9 +1349,12 @@ fn activate(
     }
 }
 
-fn mark_activation_dirty(
-    acp: Res<AcpSnapshot>,
+#[derive(SystemParam)]
+struct ActivationChanges<'w, 's> {
+    acp: Res<'w, AcpSnapshot>,
     managers: Query<
+        'w,
+        's,
         (),
         (
             With<SessionManagerView>,
@@ -1353,17 +1362,18 @@ fn mark_activation_dirty(
         ),
     >,
     views: Query<
+        'w,
+        's,
         (),
         (
             With<SessionView>,
             Or<(Added<SessionView>, Added<PageReady>, Changed<ChildOf>)>,
         ),
     >,
-    sessions: Query<
-        (),
-        (With<Session>, Added<Session>),
-    >,
+    sessions: Query<'w, 's, (), (With<Session>, Added<Session>)>,
     links: Query<
+        'w,
+        's,
         (),
         (
             With<ExternalLink>,
@@ -1377,38 +1387,44 @@ fn mark_activation_dirty(
             )>,
         ),
     >,
-    targets: Query<(), Changed<vmux_ecs::EntityTarget<Session>>>,
-    mut removed_managers: RemovedComponents<SessionManagerView>,
-    mut removed_views: RemovedComponents<SessionView>,
-    mut removed_ready: RemovedComponents<PageReady>,
-    mut removed_sessions: RemovedComponents<Session>,
-    mut removed_links: RemovedComponents<ExternalLink>,
-    mut removed_providers: RemovedComponents<ProviderKey>,
-    mut removed_scopes: RemovedComponents<ExternalScopeRef>,
-    mut removed_kinds: RemovedComponents<ResourceKind>,
-    mut removed_ids: RemovedComponents<ExternalId>,
-    mut removed_owners: RemovedComponents<ChildOf>,
-    mut removed_targets: RemovedComponents<vmux_ecs::EntityTarget<Session>>,
-    mut dirty: ResMut<ActivationDirty>,
-) {
-    let changed = acp.is_changed()
-        || !managers.is_empty()
-        || !views.is_empty()
-        || !sessions.is_empty()
-        || !links.is_empty()
-        || !targets.is_empty()
-        || removed_managers.read().next().is_some()
-        || removed_views.read().next().is_some()
-        || removed_ready.read().next().is_some()
-        || removed_sessions.read().next().is_some()
-        || removed_links.read().next().is_some()
-        || removed_providers.read().next().is_some()
-        || removed_scopes.read().next().is_some()
-        || removed_kinds.read().next().is_some()
-        || removed_ids.read().next().is_some()
-        || removed_owners.read().next().is_some()
-        || removed_targets.read().next().is_some();
-    if changed {
+    targets: Query<'w, 's, (), Changed<vmux_ecs::EntityTarget<Session>>>,
+    removed_managers: RemovedComponents<'w, 's, SessionManagerView>,
+    removed_views: RemovedComponents<'w, 's, SessionView>,
+    removed_ready: RemovedComponents<'w, 's, PageReady>,
+    removed_sessions: RemovedComponents<'w, 's, Session>,
+    removed_links: RemovedComponents<'w, 's, ExternalLink>,
+    removed_providers: RemovedComponents<'w, 's, ProviderKey>,
+    removed_scopes: RemovedComponents<'w, 's, ExternalScopeRef>,
+    removed_kinds: RemovedComponents<'w, 's, ResourceKind>,
+    removed_ids: RemovedComponents<'w, 's, ExternalId>,
+    removed_owners: RemovedComponents<'w, 's, ChildOf>,
+    removed_targets: RemovedComponents<'w, 's, vmux_ecs::EntityTarget<Session>>,
+}
+
+impl ActivationChanges<'_, '_> {
+    fn any(&mut self) -> bool {
+        self.acp.is_changed()
+            || !self.managers.is_empty()
+            || !self.views.is_empty()
+            || !self.sessions.is_empty()
+            || !self.links.is_empty()
+            || !self.targets.is_empty()
+            || self.removed_managers.read().next().is_some()
+            || self.removed_views.read().next().is_some()
+            || self.removed_ready.read().next().is_some()
+            || self.removed_sessions.read().next().is_some()
+            || self.removed_links.read().next().is_some()
+            || self.removed_providers.read().next().is_some()
+            || self.removed_scopes.read().next().is_some()
+            || self.removed_kinds.read().next().is_some()
+            || self.removed_ids.read().next().is_some()
+            || self.removed_owners.read().next().is_some()
+            || self.removed_targets.read().next().is_some()
+    }
+}
+
+fn mark_activation_dirty(mut changes: ActivationChanges, mut dirty: ResMut<ActivationDirty>) {
+    if changes.any() {
         dirty.0 = true;
     }
 }
@@ -1509,7 +1525,8 @@ fn request_changed_conversations(
         let Ok((mut activated_at, revision, requested)) = sessions.get_mut(session) else {
             continue;
         };
-        activated_at.0 = activated_at.0.max(changed.updated_at);
+        *activated_at =
+            vmux_ecs::LastActivatedAt::new(activated_at.milliseconds().max(changed.updated_at));
         if revision.is_some_and(|revision| revision.0 >= changed.updated_at) {
             continue;
         }
@@ -2660,6 +2677,7 @@ mod tests {
                 open: Some(OpenTarget::InNewStack),
             },
         });
+        app.update();
 
         assert!(
             app.world_mut()
@@ -2803,9 +2821,10 @@ mod tests {
         let cwd = cwd.path().canonicalize().unwrap();
         let mut app = App::new();
         app.init_resource::<ProviderCatalog>()
-            .insert_resource(ProviderSessionTombstones::new([
-                ProviderFixture::identity("acp:codex", "provider-session"),
-            ]))
+            .insert_resource(ProviderSessionTombstones::new([ProviderFixture::identity(
+                "acp:codex",
+                "provider-session",
+            )]))
             .init_resource::<AppSettings>()
             .add_message::<CreateRequest>()
             .add_message::<PageOpenRequest>()
@@ -3010,7 +3029,7 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("local-session"),
-                vmux_ecs::LastActivatedAt(200),
+                vmux_ecs::LastActivatedAt::new(200),
                 ConversationRevision(200),
             ))
             .id();
@@ -3034,7 +3053,7 @@ mod tests {
             app.world()
                 .get::<vmux_ecs::LastActivatedAt>(session)
                 .unwrap()
-                .0,
+                .milliseconds(),
             300
         );
     }

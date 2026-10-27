@@ -565,8 +565,8 @@ impl SpaceProjects<'_, '_> {
             let source = self.active_projects();
             return catalog.selector_rows(self.active_space.id(), &source);
         };
-        let source = self.projects_of(&space_id.0);
-        catalog.selector_rows(Some(&space_id.0), &source)
+        let source = self.projects_of(space_id.as_str());
+        catalog.selector_rows(Some(space_id.as_str()), &source)
     }
 
     fn projects_of(&self, space_id: &str) -> Vec<ProjectRow> {

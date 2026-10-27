@@ -103,9 +103,9 @@ fn SessionDetail(session_id: String) -> Element {
                         details_open: details_open(),
                         on_details_toggle: move |_| details_open.set(!details_open()),
                     }
-                    ChatTranscript { chat }
-                    ChatApprovalDock { chat }
-                    ChatDock { chat }
+                    ChatTranscript {}
+                    ChatApprovalDock {}
+                    ChatDock {}
                 }
                 if let Some((session, repository, stages)) = details {
                     div {

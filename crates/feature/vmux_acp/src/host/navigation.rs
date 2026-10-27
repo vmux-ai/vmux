@@ -17,7 +17,7 @@ use vmux_layout::tab::{
 use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
 use vmux_session::event::{ChatSnapshot, ChatTranscriptState};
 use vmux_session::host::{ImportedConversation, SessionManagerView, SessionView};
-use vmux_session::state::{ChatUiState, SessionDetailUiState};
+use vmux_session::state::{UiChat, UiSessionDetail};
 use vmux_session::{AgentRef, Cleanup, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
@@ -201,20 +201,20 @@ fn prepare(
                     vmux_ecs::launcher::HostsLauncher,
                     vmux_ecs::page::PageReady,
                 )>();
-            commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiChat>::from_event(
                 view,
                 &ChatSnapshot {
                     transcript_loading: true,
                     ..Default::default()
                 },
             ));
-            commands.trigger(vmux_ecs::UiStateWrite::<ChatUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiChat>::from_event(
                 view,
                 &ChatTranscriptState::default(),
             ));
-            commands.trigger(vmux_ecs::UiStateWrite::<SessionDetailUiState>::from_event(
+            commands.trigger(vmux_ecs::UiStateWrite::<UiSessionDetail>::from_event(
                 view,
-                &SessionDetailUiState::default(),
+                &UiSessionDetail::default(),
             ));
             commands
                 .entity(task.stack)

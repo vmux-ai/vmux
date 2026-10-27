@@ -576,6 +576,10 @@ impl ProviderSessionTombstones {
         self.entries.contains_key(identity)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     fn insert(&mut self, identity: ExternalLinkIdentity, entity: Entity) {
         self.entries.insert(identity, Some(entity));
     }
@@ -1966,7 +1970,11 @@ mod tests {
     #[test]
     fn cleanup_removes_linked_provider_copies_and_can_restore_visibility() {
         let mut app = App::new();
-        app.add_plugins((vmux_connector::ConnectorPlugin, EntityPlugin, StagePlugin));
+        app.add_plugins((
+            vmux_connector::ConnectorPlugin,
+            EntityPlugin,
+            WorkflowStatePlugin,
+        ));
         let identity = ProviderFixture::identity("acp:codex", "provider-session");
         for id in ["canonical", "duplicate"] {
             let session = app

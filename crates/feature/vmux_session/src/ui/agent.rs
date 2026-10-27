@@ -228,7 +228,8 @@ fn AgentAvatar(chat: Chat, size_class: String) -> Element {
 }
 
 #[component]
-pub(super) fn AgentBanner(chat: Chat) -> Element {
+pub(super) fn AgentBanner() -> Element {
+    let chat = use_context::<Chat>();
     let name = chat.header_name();
     let user_name = chat.user.name();
     let user_color = chat.user.color();

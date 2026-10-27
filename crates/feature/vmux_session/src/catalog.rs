@@ -78,18 +78,34 @@ impl ProviderSession {
     }
 
     #[cfg(host)]
-    pub fn identity(&self) -> Option<ExternalLinkIdentity> {
-        let provider = self
-            .kind
-            .split_once(':')
-            .map(|(provider, _)| provider)
-            .unwrap_or(self.kind.as_str());
+    pub fn has_valid_identity(&self) -> bool {
+        let provider = Self::provider(&self.kind);
+        ProviderKey::is_valid(provider) && ExternalId::is_valid(&self.sid)
+    }
+
+    #[cfg(host)]
+    pub fn external_identity(
+        provider: &str,
+        kind: &str,
+        sid: &str,
+    ) -> Option<ExternalLinkIdentity> {
         Some(ExternalLinkIdentity::new(
             ProviderKey::new(provider).ok()?,
-            Id::<ExternalScope>::new(self.kind.clone()),
+            Id::<ExternalScope>::new(kind),
             ResourceKind::session(),
-            ExternalId::new(self.sid.clone()).ok()?,
+            ExternalId::new(sid).ok()?,
         ))
+    }
+
+    #[cfg(host)]
+    pub fn identity(&self) -> Option<ExternalLinkIdentity> {
+        Self::external_identity(Self::provider(&self.kind), &self.kind, &self.sid)
+    }
+
+    fn provider(kind: &str) -> &str {
+        kind.split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or(kind)
     }
 }
 
@@ -1026,7 +1042,7 @@ mod tests {
     #[test]
     fn provider_removal_hides_the_session_across_source_updates() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions

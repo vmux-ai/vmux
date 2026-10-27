@@ -2,7 +2,7 @@ use crate::{
     ShortcutBinding, ShortcutCatalog, ShortcutCloseRequest, ShortcutCollectionViewRequest,
     ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest, ShortcutProbePress,
     ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView, ShortcutStroke,
-    UiShortcuts, UiShortcutsUpdates, ShortcutUrl,
+    ShortcutUiStateUpdates, ShortcutUrl, UiShortcuts,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -61,7 +61,7 @@ impl Plugin for ShortcutPlugin {
 }
 
 #[derive(Component, Default)]
-#[require(UiShortcutsUpdates, ShortcutCapture)]
+#[require(ShortcutUiStateUpdates, ShortcutCapture)]
 struct Shortcuts {
     catalog: ShortcutCatalog,
     probe: ShortcutProbe,

@@ -7,6 +7,8 @@ use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
+#[cfg(test)]
+use vmux_connector::ExternalScope;
 use vmux_connector::{
     ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
 };
@@ -1130,6 +1132,7 @@ mod tests {
     fn cleanup_forwards_one_authorized_model_request() {
         let mut app = App::new();
         app.init_resource::<CatalogSnapshot>()
+            .init_resource::<ProviderCatalog>()
             .add_message::<CleanupRequest>()
             .add_observer(cleanup);
         app.world_mut().resource_mut::<CatalogSnapshot>().sessions = vec![SessionSummary {
@@ -1163,6 +1166,7 @@ mod tests {
     fn scoped_cleanup_cannot_remove_sessions_outside_its_project() {
         let mut app = App::new();
         app.init_resource::<CatalogSnapshot>()
+            .init_resource::<ProviderCatalog>()
             .add_message::<CleanupRequest>()
             .add_observer(cleanup);
         app.world_mut().resource_mut::<CatalogSnapshot>().sessions = vec![
@@ -1206,8 +1210,17 @@ mod tests {
     #[test]
     fn manager_can_restore_deleted_provider_sessions() {
         let mut app = App::new();
-        app.add_message::<ProviderSessionRestoreRequest>()
+        app.init_resource::<ProviderCatalog>()
+            .add_message::<ProviderSessionRestoreRequest>()
             .add_observer(restore_deleted);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .push(vmux_session::ProviderSession {
+                kind: "acp:codex".into(),
+                sid: "provider-session".into(),
+                ..Default::default()
+            });
         let webview = app.world_mut().spawn(SessionManagerView).id();
         let target = crate::event::ProviderSessionTarget {
             kind: "acp:codex".into(),
@@ -1226,9 +1239,15 @@ mod tests {
             .resource_mut::<Messages<ProviderSessionRestoreRequest>>()
             .drain()
             .collect::<Vec<_>>();
+        let expected = ExternalLinkIdentity::new(
+            ProviderKey::new("acp").unwrap(),
+            Id::<ExternalScope>::new("acp:codex"),
+            ResourceKind::session(),
+            ExternalId::new("provider-session").unwrap(),
+        );
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].keys.len(), 1);
-        assert!(requests[0].keys[0].matches("acp:codex", "provider-session"));
+        assert_eq!(requests[0].identities.len(), 1);
+        assert_eq!(requests[0].identities[0], expected);
     }
 
     #[test]

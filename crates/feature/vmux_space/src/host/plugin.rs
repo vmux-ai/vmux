@@ -30,14 +30,14 @@ use vmux_layout::tab::StartupDir as TabStartupDir;
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, Main, WindowHierarchy};
 use vmux_layout::{
-    LayoutCef, LayoutContractPlugin, LayoutStartupSet, UiLayoutUpdates, TabLayoutSpawnContent,
+    LayoutCef, LayoutContractPlugin, LayoutStartupSet, LayoutUiStateUpdates, TabLayoutSpawnContent,
     TabLayoutSpawnRequest,
 };
 #[cfg(test)]
 use vmux_setting::{AgentSettings, SpaceOverrides, SpaceProject, TerminalSettings};
 use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 
-use super::UiSpacesUpdates;
+use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
@@ -615,8 +615,8 @@ fn broadcast_spaces_to_views(
     >,
     browsers: NonSend<Browsers>,
     space_window: SpaceWindow,
-    layout_ui: Query<(), With<UiLayoutUpdates>>,
-    spaces_ui: Query<(), With<UiSpacesUpdates>>,
+    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
+    spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
     mut commands: Commands,
 ) {
     for (entity, selection, snapshot, sent) in &mut views {

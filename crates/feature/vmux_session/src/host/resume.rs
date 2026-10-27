@@ -16,8 +16,6 @@ use vmux_session::{
     AgentFamily, AgentRef, Id, ProviderCatalog, ProviderSessionTombstones, Route, Session,
     SessionDuplicate, Transcripts,
 };
-#[cfg(test)]
-use vmux_session::{ProviderKind, ProviderSessionId, ProviderSessionKey};
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, SessionView};
@@ -140,8 +138,16 @@ impl ResumeCatalog<'_, '_> {
             ));
         }
         for session in &self.providers.sessions {
-            if self.tombstones.contains(&session.kind, &session.sid) {
+            if !session.has_valid_identity() {
                 continue;
+            }
+            if !self.tombstones.is_empty() {
+                let Some(identity) = session.identity() else {
+                    continue;
+                };
+                if self.tombstones.contains(&identity) {
+                    continue;
+                }
             }
             let path = Path::new(&session.cwd);
             let subtitle = path
@@ -449,16 +455,60 @@ mod tests {
                 updated_at: 2,
                 ..Default::default()
             });
-        app.insert_resource(ProviderSessionTombstones::new([ProviderSessionKey::new(
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-        )]));
+        let identity = vmux_connector::ExternalLinkIdentity::new(
+            vmux_connector::ProviderKey::new("acp").unwrap(),
+            Id::<vmux_connector::ExternalScope>::new("acp:codex"),
+            vmux_connector::ResourceKind::session(),
+            vmux_connector::ExternalId::new("provider-session").unwrap(),
+        );
+        app.insert_resource(ProviderSessionTombstones::new([identity]));
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(UiInput {
             webview,
             payload: ResumeListRequest {
                 request_id: 11,
+                query: String::new(),
+                offset: 0,
+            },
+        });
+        app.world_mut().flush();
+
+        let responses = app.world().resource::<Responses>();
+        assert_eq!(responses.resumes.len(), 1);
+        assert_eq!(responses.resumes[0].total, 0);
+        assert!(responses.resumes[0].sessions.is_empty());
+    }
+
+    #[test]
+    fn invalid_provider_identities_stay_out_of_resume_results() {
+        let mut app = App::new();
+        app.init_resource::<Responses>()
+            .add_plugins(Plugin)
+            .add_observer(Responses::command_bar);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .extend([
+                vmux_session::ProviderSession {
+                    kind: " ".into(),
+                    sid: "provider-session".into(),
+                    cwd: "/work/vmux".into(),
+                    ..Default::default()
+                },
+                vmux_session::ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: " ".into(),
+                    cwd: "/work/vmux".into(),
+                    ..Default::default()
+                },
+            ]);
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeListRequest {
+                request_id: 12,
                 query: String::new(),
                 offset: 0,
             },

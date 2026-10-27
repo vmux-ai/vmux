@@ -1,11 +1,10 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use vmux_api::Id;
 use vmux_connector::{
-    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScope, ExternalScopeRef, ProviderKey,
-    ResourceKind,
+    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
 };
 use vmux_ecs::{RemoteUpdatedAt, UnixMillis};
+use vmux_session::ProviderSession;
 
 pub(crate) struct AcpSessionLink;
 
@@ -15,12 +14,7 @@ impl AcpSessionLink {
     }
 
     pub(crate) fn identity(kind: &str, id: &str) -> Option<ExternalLinkIdentity> {
-        Some(ExternalLinkIdentity::new(
-            ProviderKey::new("acp").ok()?,
-            Id::<ExternalScope>::new(kind),
-            ResourceKind::session(),
-            ExternalId::new(id).ok()?,
-        ))
+        ProviderSession::external_identity("acp", kind, id)
     }
 }
 
