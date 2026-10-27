@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::ecs::system::SystemParam;
@@ -6,10 +6,10 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use serde::{Deserialize, Serialize};
 use vmux_api::Id;
 use vmux_api::avatar::IdenticonSpec;
 use vmux_ecs::page::PrewarmPage;
+use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_git::worktree::RepoLabel;
 use vmux_git::{
     RepositoryProvisionCompleted, RepositoryProvisionOperation, RepositoryProvisionRequest,
@@ -18,16 +18,23 @@ use vmux_session::host::ScopeProjectionRequest;
 use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
-    Project, ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest,
+    Project, ProjectArchiveRequest, ProjectBranch, ProjectCatalogView, ProjectCloneRequest,
     ProjectCollectionViewRequest, ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView,
-    ProjectEntry, ProjectImportRequest, ProjectRoute, ProjectView, UiProject,
+    ProjectEntry, ProjectImportRequest, ProjectIndex, ProjectOwner, ProjectPath, ProjectRoute,
+    ProjectSource, ProjectView, UiProject,
 };
 
 pub(super) struct ProjectPagePlugin;
 
 impl Plugin for ProjectPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_ecs::UiStatePlugin::<UiProject>::default())
+        app.register_persisted::<Project>()
+            .register_persisted::<Id<Project>>()
+            .register_persisted::<ProjectPath>()
+            .register_persisted::<ProjectSource>()
+            .init_resource::<ProjectIndex>()
+            .init_resource::<IndexedProjects>()
+            .add_plugins(vmux_ecs::UiStatePlugin::<UiProject>::default())
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
                 ProjectImportRequest,
@@ -43,12 +50,16 @@ impl Plugin for ProjectPagePlugin {
             .add_observer(delete)
             .add_observer(collection_view)
             .add_systems(PreStartup, prewarm)
+            .add_systems(PreUpdate, rebuild_project_index)
             .add_systems(
                 Update,
                 (
+                    resolve_project_owners,
                     queue,
                     sync_icons,
                     finish_catalogs,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    rebuild_project_index,
                     finish_imports,
                     finish_deletes,
                 )
@@ -58,6 +69,48 @@ impl Plugin for ProjectPagePlugin {
                 PostUpdate,
                 (finish_repository_operations, sync_session_counts).chain(),
             );
+    }
+}
+
+#[derive(Resource, Default)]
+struct IndexedProjects(HashSet<Entity>);
+
+fn rebuild_project_index(
+    projects: Query<(Entity, &Id<Project>), With<Project>>,
+    changed: Query<(), (With<Project>, Or<(Added<Project>, Changed<Id<Project>>)>)>,
+    mut removed_projects: RemovedComponents<Project>,
+    mut removed_ids: RemovedComponents<Id<Project>>,
+    mut current: ResMut<ProjectIndex>,
+    mut indexed: ResMut<IndexedProjects>,
+) {
+    let removed_project = removed_projects
+        .read()
+        .any(|entity| indexed.0.contains(&entity));
+    let removed_id = removed_ids.read().any(|entity| indexed.0.contains(&entity));
+    if changed.is_empty() && !removed_project && !removed_id {
+        return;
+    }
+
+    let mut next = ProjectIndex::default();
+    let mut next_indexed = HashSet::new();
+    for (entity, id) in &projects {
+        next_indexed.insert(entity);
+        next.include(id.clone(), entity);
+    }
+    *current = next;
+    indexed.0 = next_indexed;
+}
+
+fn resolve_project_owners(
+    projects: Query<Entity, (With<Project>, Without<ProjectOwner>)>,
+    owner: vmux_ecs::profile::Projects,
+    mut commands: Commands,
+) {
+    let Some(owner) = owner.entity() else {
+        return;
+    };
+    for project in &projects {
+        commands.entity(project).insert(ProjectOwner::new(owner));
     }
 }
 
@@ -83,7 +136,7 @@ impl ProjectCatalogTask {
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
     ) -> Self {
         let task = IoTaskPool::get().spawn(async move {
-            let state = ProjectCatalog::read(&root, &ProjectArchive::load(&root));
+            let state = ProjectCatalog::read(&root);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -205,42 +258,6 @@ struct ProjectImportTask(Task<Result<(), String>>);
 
 #[derive(Component)]
 struct ProjectDeleteTask(Task<Result<(), String>>);
-
-#[derive(Default, Serialize, Deserialize)]
-struct ProjectArchive {
-    projects: BTreeSet<String>,
-}
-
-impl ProjectArchive {
-    fn path(root: &Path) -> PathBuf {
-        root.join(".archive.ron")
-    }
-
-    fn load(root: &Path) -> Self {
-        let Ok(source) = std::fs::read_to_string(Self::path(root)) else {
-            return Self::default();
-        };
-        ron::from_str(&source).unwrap_or_default()
-    }
-
-    fn contains(&self, url: &str) -> bool {
-        self.projects.contains(url)
-    }
-
-    fn set(&mut self, url: &str, archived: bool) {
-        if archived {
-            self.projects.insert(url.to_string());
-        } else {
-            self.projects.remove(url);
-        }
-    }
-
-    fn save(&self, root: &Path) -> Result<(), String> {
-        let source = ron::ser::to_string(self).map_err(|error| error.to_string())?;
-        vmux_path::AtomicFile::write(Self::path(root), source.as_bytes())
-            .map_err(|error| error.to_string())
-    }
-}
 
 struct ProjectName(String);
 
@@ -528,6 +545,7 @@ fn clone(
 fn archive(
     trigger: On<UiInput<ProjectArchiveRequest>>,
     projects: vmux_ecs::profile::Projects,
+    index: Res<ProjectIndex>,
     states: Query<(
         Entity,
         &vmux_ecs::PageMetadata,
@@ -542,17 +560,14 @@ fn archive(
     let Some(Ok(_)) = ProjectRoute::resolve(&request.url, root) else {
         return;
     };
-    let mut archive = ProjectArchive::load(root);
-    archive.set(&request.url, request.archived);
-    if let Err(error) = archive.save(root) {
-        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
-            trigger.event().webview,
-            &UiProject {
-                view: ProjectView::Error(error),
-                ..Default::default()
-            },
-        ));
+    let id = Id::<Project>::new(request.url.clone());
+    let Ok(Some(project)) = index.entity(&id) else {
         return;
+    };
+    if request.archived {
+        commands.entity(project).insert(vmux_ecs::ArchivedAt::now());
+    } else {
+        commands.entity(project).remove::<vmux_ecs::ArchivedAt>();
     }
     for (entity, page, state) in &states {
         if !ProjectRoute::is_root(&page.url) {
@@ -845,6 +860,152 @@ fn finish_deletes(
     }
 }
 
+type CanonicalProjects<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Id<Project>,
+        &'static Name,
+        &'static ProjectPath,
+        &'static ProjectSource,
+        Option<&'static ProjectBranch>,
+        Has<vmux_ecs::ArchivedAt>,
+        Option<&'static ProjectOwner>,
+    ),
+    With<Project>,
+>;
+
+struct ProjectEntityState {
+    entity: Entity,
+    name: String,
+    path: PathBuf,
+    source: String,
+    branch: String,
+    archived: bool,
+    owner: Option<Entity>,
+}
+
+struct ProjectEntities {
+    by_id: HashMap<Id<Project>, ProjectEntityState>,
+}
+
+impl ProjectEntities {
+    fn collect(projects: &CanonicalProjects, commands: &mut Commands) -> Self {
+        let mut by_id = HashMap::<Id<Project>, ProjectEntityState>::new();
+        for (entity, id, name, path, source, branch, archived, owner) in projects {
+            let next = ProjectEntityState {
+                entity,
+                name: name.as_str().to_string(),
+                path: path.path().to_path_buf(),
+                source: source.as_str().to_string(),
+                branch: branch
+                    .map(ProjectBranch::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                archived,
+                owner: owner.map(ProjectOwner::entity),
+            };
+            if let Some(existing) = by_id.get(id) {
+                if existing.entity.to_bits() <= entity.to_bits() {
+                    commands.entity(entity).despawn();
+                    continue;
+                }
+                commands.entity(existing.entity).despawn();
+            }
+            by_id.insert(id.clone(), next);
+        }
+        Self { by_id }
+    }
+
+    fn reconcile(&mut self, state: &mut UiProject, owner: Option<Entity>, commands: &mut Commands) {
+        let ProjectView::Catalog(catalog) = &mut state.view else {
+            return;
+        };
+        let mut seen = HashSet::new();
+        for entry in &mut catalog.entries {
+            let id = entry.id.clone();
+            seen.insert(id.clone());
+            if let Some(current) = self.by_id.get_mut(&id) {
+                entry.archived = current.archived;
+                let path = PathBuf::from(&entry.path);
+                if current.name != entry.name {
+                    commands
+                        .entity(current.entity)
+                        .insert(Name::new(entry.name.clone()));
+                    current.name.clone_from(&entry.name);
+                }
+                if current.path != path
+                    && let Ok(path) = ProjectPath::new(path)
+                {
+                    commands.entity(current.entity).insert(path.clone());
+                    current.path = path.path().to_path_buf();
+                }
+                if current.source != entry.source {
+                    commands
+                        .entity(current.entity)
+                        .insert(ProjectSource::new(entry.source.clone()));
+                    current.source.clone_from(&entry.source);
+                }
+                if current.branch != entry.branch {
+                    commands
+                        .entity(current.entity)
+                        .insert(ProjectBranch::new(entry.branch.clone()));
+                    current.branch.clone_from(&entry.branch);
+                }
+                if let Some(owner) = owner
+                    && current.owner != Some(owner)
+                {
+                    commands
+                        .entity(current.entity)
+                        .insert(ProjectOwner::new(owner));
+                    current.owner = Some(owner);
+                }
+                continue;
+            }
+
+            let Ok(bundle) = Project::bundle(
+                id.clone(),
+                entry.name.clone(),
+                PathBuf::from(&entry.path),
+                entry.source.clone(),
+                entry.branch.clone(),
+            ) else {
+                continue;
+            };
+            let mut project = commands.spawn(bundle);
+            if let Some(owner) = owner {
+                project.insert(ProjectOwner::new(owner));
+            }
+            let entity = project.id();
+            self.by_id.insert(
+                id,
+                ProjectEntityState {
+                    entity,
+                    name: entry.name.clone(),
+                    path: PathBuf::from(&entry.path),
+                    source: entry.source.clone(),
+                    branch: entry.branch.clone(),
+                    archived: false,
+                    owner,
+                },
+            );
+        }
+
+        let stale = self
+            .by_id
+            .keys()
+            .filter(|id| !seen.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in stale {
+            if let Some(project) = self.by_id.remove(&id) {
+                commands.entity(project.entity).despawn();
+            }
+        }
+    }
+}
+
 fn finish_catalogs(
     mut tasks: Query<(
         Entity,
@@ -853,9 +1014,13 @@ fn finish_catalogs(
         &ProjectPageRevision,
     )>,
     catalog: Res<CatalogSnapshot>,
+    projects: CanonicalProjects,
+    owner: vmux_ecs::profile::Projects,
     states: Query<&vmux_ecs::UiState<UiProject>>,
     mut commands: Commands,
 ) {
+    let mut projects = ProjectEntities::collect(&projects, &mut commands);
+    let owner = owner.entity();
     for (entity, mut task, page, revision) in &mut tasks {
         let Some(state) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
@@ -865,6 +1030,7 @@ fn finish_catalogs(
             continue;
         }
         let mut state = ProjectCatalog::with_session_counts(state, &catalog);
+        projects.reconcile(&mut state, owner, &mut commands);
         if let Ok(current) = states.get(entity)
             && let Some(current) = current.current()
         {
@@ -991,9 +1157,9 @@ struct ProjectCatalog;
 impl ProjectCatalog {
     const MAX_DEPTH: usize = 6;
 
-    fn read(root: &Path, archive: &ProjectArchive) -> UiProject {
+    fn read(root: &Path) -> UiProject {
         let mut entries = Vec::new();
-        Self::walk(root, root, 0, archive, &mut entries);
+        Self::walk(root, root, 0, &mut entries);
         entries.sort_by(|left, right| {
             left.name
                 .to_lowercase()
@@ -1033,13 +1199,7 @@ impl ProjectCatalog {
         state
     }
 
-    fn walk(
-        root: &Path,
-        directory: &Path,
-        depth: usize,
-        archive: &ProjectArchive,
-        entries: &mut Vec<ProjectEntry>,
-    ) {
+    fn walk(root: &Path, directory: &Path, depth: usize, entries: &mut Vec<ProjectEntry>) {
         if depth > 0 && directory.join(".git").exists() {
             let Some(url) = ProjectRoute::from_path(root, directory) else {
                 return;
@@ -1059,7 +1219,6 @@ impl ProjectCatalog {
             let branch = RepoLabel::read(&path)
                 .map(|label| label.branch)
                 .unwrap_or_default();
-            let archived = archive.contains(&url);
             let id = Id::<Project>::new(url.clone());
             entries.push(ProjectEntry {
                 id,
@@ -1074,7 +1233,7 @@ impl ProjectCatalog {
                 ahead: 0,
                 ongoing_sessions: 0,
                 stale_sessions: 0,
-                archived,
+                archived: false,
             });
             return;
         }
@@ -1090,7 +1249,7 @@ impl ProjectCatalog {
                 continue;
             }
             if entry.path().is_dir() {
-                Self::walk(root, &entry.path(), depth + 1, archive, entries);
+                Self::walk(root, &entry.path(), depth + 1, entries);
             }
         }
     }
@@ -1099,6 +1258,7 @@ impl ProjectCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_session::{SessionSummary, StageSummary};
 
     #[test]
@@ -1110,7 +1270,7 @@ mod tests {
         std::fs::create_dir_all(vmux.join("client/.git")).unwrap();
         std::fs::create_dir_all(dashboard.join(".git")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let state = ProjectCatalog::read(root.path());
 
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
@@ -1131,21 +1291,18 @@ mod tests {
     }
 
     #[test]
-    fn catalog_marks_archived_projects_without_removing_their_files() {
+    fn catalog_discovers_projects_without_embedding_archive_state() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("github.com/vmux-ai/vmux");
         std::fs::create_dir_all(project.join(".git")).unwrap();
-        let url = "vmux://projects/github.com/vmux-ai/vmux";
-        let mut archive = ProjectArchive::default();
-        archive.set(url, true);
 
-        let state = ProjectCatalog::read(root.path(), &archive);
+        let state = ProjectCatalog::read(root.path());
 
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };
         assert_eq!(catalog.entries.len(), 1);
-        assert!(catalog.entries[0].archived);
+        assert!(!catalog.entries[0].archived);
         assert!(project.exists());
     }
 
@@ -1155,7 +1312,7 @@ mod tests {
         let local = root.path().join("local/vmux");
         std::fs::create_dir_all(local.join(".git")).unwrap();
 
-        let initial = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let initial = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(initial) = initial.view else {
             panic!("expected project catalog");
         };
@@ -1165,7 +1322,7 @@ mod tests {
         std::fs::create_dir_all(linked.parent().unwrap()).unwrap();
         std::fs::rename(local, &linked).unwrap();
 
-        let moved = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let moved = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(moved) = moved.view else {
             panic!("expected project catalog");
         };
@@ -1173,6 +1330,89 @@ mod tests {
         assert_eq!(
             moved.entries[0].url,
             "vmux://projects/github.com/vmux-ai/vmux"
+        );
+    }
+
+    #[test]
+    fn project_catalog_materializes_owned_entities_and_preserves_archive_state() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("github.com/vmux-ai/vmux");
+        std::fs::create_dir_all(path.join(".git")).unwrap();
+        let mut app = App::new();
+        let owner = app.world_mut().spawn_empty().id();
+        let state = ProjectCatalog::read(root.path());
+        let state = app
+            .world_mut()
+            .run_system_once_with(
+                move |In(mut state): In<UiProject>,
+                      projects: CanonicalProjects,
+                      mut commands: Commands| {
+                    let mut entities = ProjectEntities::collect(&projects, &mut commands);
+                    entities.reconcile(&mut state, Some(owner), &mut commands);
+                    state
+                },
+                state,
+            )
+            .unwrap();
+
+        let entity = {
+            let world = app.world_mut();
+            let mut projects = world.query_filtered::<
+                (Entity, &Id<Project>, &ProjectPath, &ProjectOwner),
+                With<Project>,
+            >();
+            let (entity, id, project_path, project_owner) = projects.single(world).unwrap();
+            assert_eq!(id.as_str(), "vmux://projects/github.com/vmux-ai/vmux");
+            assert_eq!(project_path.path(), path.canonicalize().unwrap());
+            assert_eq!(project_owner.entity(), owner);
+            entity
+        };
+        let ProjectView::Catalog(catalog) = state.view else {
+            panic!("expected project catalog");
+        };
+        assert!(!catalog.entries[0].archived);
+
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(vmux_ecs::ArchivedAt::new(1));
+        let state = ProjectCatalog::read(root.path());
+        let state = app
+            .world_mut()
+            .run_system_once_with(
+                move |In(mut state): In<UiProject>,
+                      projects: CanonicalProjects,
+                      mut commands: Commands| {
+                    let mut entities = ProjectEntities::collect(&projects, &mut commands);
+                    entities.reconcile(&mut state, Some(owner), &mut commands);
+                    state
+                },
+                state,
+            )
+            .unwrap();
+        let ProjectView::Catalog(catalog) = state.view else {
+            panic!("expected project catalog");
+        };
+        assert!(catalog.entries[0].archived);
+    }
+
+    #[test]
+    fn duplicate_project_ids_are_explicit() {
+        let mut app = App::new();
+        app.init_resource::<ProjectIndex>()
+            .init_resource::<IndexedProjects>()
+            .add_systems(Update, rebuild_project_index);
+        let id = Id::<Project>::new("vmux://projects/duplicate");
+        let path = PathBuf::from("/tmp/duplicate");
+        app.world_mut()
+            .spawn(Project::bundle(id.clone(), "one", path.clone(), "", "").unwrap());
+        app.world_mut()
+            .spawn(Project::bundle(id.clone(), "two", path, "", "").unwrap());
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ProjectIndex>().entity(&id),
+            Err(crate::ProjectLookupError::Duplicate(id))
         );
     }
 
@@ -1257,7 +1497,7 @@ mod tests {
         std::fs::create_dir(&imports).unwrap();
         std::os::unix::fs::symlink(external.path(), imports.join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let state = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };
@@ -1286,7 +1526,7 @@ mod tests {
         std::fs::create_dir(external.path().join(".git")).unwrap();
         std::os::unix::fs::symlink(external.path(), root.path().join("external")).unwrap();
 
-        let state = ProjectCatalog::read(root.path(), &ProjectArchive::default());
+        let state = ProjectCatalog::read(root.path());
         let ProjectView::Catalog(catalog) = state.view else {
             panic!("expected project catalog");
         };

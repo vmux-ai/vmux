@@ -16,6 +16,7 @@ path = "src/lib.rs"
 regex.workspace = true
 serde = { workspace = true }
 rkyv = { workspace = true }
+moonshine-save = { workspace = true }
 unicode-width = "0.2"
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_feature = { path = "../../util/vmux_feature" }

@@ -1,11 +1,152 @@
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
 use bevy::prelude::*;
+use moonshine_save::prelude::Save;
+use serde::{Deserialize, Serialize};
 use vmux_api::Id;
 
 #[vmux_api::contract(Copy, Default, Eq)]
 #[derive(Component, Reflect)]
 #[reflect(Component)]
+#[require(Save)]
 #[type_path = "vmux_editor"]
 pub struct Project;
+
+impl Project {
+    pub fn bundle(
+        id: Id<Self>,
+        name: impl Into<String>,
+        path: PathBuf,
+        source: impl Into<String>,
+        branch: impl Into<String>,
+    ) -> Result<ProjectBundle, String> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err("project name must not be empty".to_string());
+        }
+        Ok(ProjectBundle {
+            project: Self,
+            id,
+            name: Name::new(name),
+            path: ProjectPath::new(path)?,
+            source: ProjectSource(source.into()),
+            branch: ProjectBranch(branch.into()),
+        })
+    }
+}
+
+#[derive(Bundle)]
+pub struct ProjectBundle {
+    project: Project,
+    id: Id<Project>,
+    name: Name,
+    path: ProjectPath,
+    source: ProjectSource,
+    branch: ProjectBranch,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_editor"]
+pub struct ProjectPath(PathBuf);
+
+impl ProjectPath {
+    pub fn new(path: PathBuf) -> Result<Self, String> {
+        if !path.is_absolute() {
+            return Err("project path must be absolute".to_string());
+        }
+        Ok(Self(path))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_editor"]
+pub struct ProjectSource(String);
+
+impl ProjectSource {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProjectBranch(String);
+
+impl ProjectBranch {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = OwnedProjects)]
+pub struct ProjectOwner(Entity);
+
+impl ProjectOwner {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = ProjectOwner, linked_spawn)]
+pub struct OwnedProjects(Vec<Entity>);
+
+#[derive(Resource, Default)]
+pub struct ProjectIndex {
+    entities: HashMap<Id<Project>, Entity>,
+    duplicates: HashSet<Id<Project>>,
+}
+
+impl ProjectIndex {
+    pub fn entity(&self, id: &Id<Project>) -> Result<Option<Entity>, ProjectLookupError> {
+        if self.duplicates.contains(id) {
+            return Err(ProjectLookupError::Duplicate(id.clone()));
+        }
+        Ok(self.entities.get(id).copied())
+    }
+
+    pub(crate) fn include(&mut self, id: Id<Project>, entity: Entity) {
+        if self.entities.insert(id.clone(), entity).is_some() {
+            self.duplicates.insert(id);
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectLookupError {
+    Duplicate(Id<Project>),
+}
+
+impl std::fmt::Display for ProjectLookupError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Duplicate(id) => write!(formatter, "duplicate project ID `{id}`"),
+        }
+    }
+}
 
 #[vmux_api::contract(Eq)]
 pub struct ProjectEntry {

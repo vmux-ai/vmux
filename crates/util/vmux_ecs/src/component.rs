@@ -314,6 +314,10 @@ impl ArchivedAt {
         Self(UnixMillis(milliseconds))
     }
 
+    pub fn now() -> Self {
+        Self(UnixMillis::now())
+    }
+
     pub const fn milliseconds(self) -> i64 {
         self.0.0
     }

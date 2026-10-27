@@ -1105,6 +1105,11 @@ contracts. Client deduplication uses `Id<ClientOperation>`; correlation identity
 a parallel string-ID type.
 Sessions reference agents through `AgentRef(Id<Agent>)`, and project contracts use `Id<Project>`;
 neither domain introduces a parallel `*Id` string wrapper.
+The Projects page reconciles repository discovery into profile-owned durable Project entities
+composed from `Project`, `Id<Project>`, `Name`, canonical `ProjectPath`, and `ProjectSource`.
+Branch data remains a rebuildable cache, archive state is the shared `ArchivedAt` component, and a
+duplicate-detecting `ProjectIndex` serves lookup. UI catalog rows are projections of those entities,
+not a second archive store.
 Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,
 `Avatar`, and `Icon`. Sessions resolve that child through `Profiles`, so agent presentation never
 overloads the Session's canonical task name.
