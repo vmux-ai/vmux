@@ -205,17 +205,6 @@ pub enum GitBranchPrompt {
     Delete { branch: String },
 }
 
-#[derive(Component)]
-#[vmux_api::contract(Copy, Default, Eq)]
-pub enum HeaderDropdown {
-    #[default]
-    Closed,
-    Repository,
-    Branch,
-    View,
-    Commit,
-}
-
 #[vmux_api::contract(Default, Eq)]
 pub struct GitOperationEligibility {
     pub stage_all: bool,
@@ -578,7 +567,6 @@ pub struct GitUiStatePatch {
     pub diff_append: Option<Box<GitDiffAppend>>,
     pub directory: Option<Box<GitDirectoryState>>,
     pub controller: Option<Box<GitPageControllerState>>,
-    pub header_dropdown: Option<HeaderDropdown>,
     pub selection_reveal: Option<GitSelectionReveal>,
 }
 
@@ -591,7 +579,6 @@ pub struct GitUiState {
     pub snapshot: GitPageSnapshot,
     pub directory: GitDirectoryState,
     pub controller: GitPageControllerState,
-    pub header_dropdown: HeaderDropdown,
     pub selection_reveal: Option<GitSelectionReveal>,
     pub diff_update: Option<GitDiffAppend>,
     pub diff_update_revision: u64,
@@ -623,9 +610,6 @@ impl vmux_api::UiStateProjection<GitUiStatePatch> for GitUiState {
         }
         if let Some(controller) = patch.controller {
             self.controller = *controller;
-        }
-        if let Some(header_dropdown) = patch.header_dropdown {
-            self.header_dropdown = header_dropdown;
         }
         if let Some(selection_reveal) = patch.selection_reveal {
             self.selection_reveal = Some(selection_reveal);

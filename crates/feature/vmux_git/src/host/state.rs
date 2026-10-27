@@ -16,7 +16,7 @@ use crate::event::{
 use crate::state::GitCatalogProgress;
 use crate::state::{
     CheckedOutBranch, GitCommandLogEntry, GitPageControllerState, GitPageSnapshot, GitUiState,
-    HeaderDropdown, RepositoryName, RepositoryPath,
+    RepositoryName, RepositoryPath,
 };
 
 use super::controller::{GitCommitResultSequence, PendingBranchCheckout, SelectionRevealRevision};
@@ -53,7 +53,6 @@ impl Plugin for StatePlugin {
 #[require(
     GitUiStateUpdates,
     GitPageControllerState,
-    HeaderDropdown,
     GitDirectoryNavigation,
     PendingBranchCheckout,
     SelectionRevealRevision,
@@ -468,13 +467,12 @@ type GitStateQuery<'w, 's> = Query<
         Entity,
         Ref<'static, GitState>,
         Ref<'static, GitPageControllerState>,
-        Ref<'static, HeaderDropdown>,
         Ref<'static, GitDirectoryNavigation>,
     ),
 >;
 
 fn publish(views: GitStateQuery, mut commands: Commands) {
-    for (entity, view, controller, header_dropdown, directory) in &views {
+    for (entity, view, controller, directory) in &views {
         if view.is_changed() {
             commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                 entity,
@@ -485,12 +483,6 @@ fn publish(views: GitStateQuery, mut commands: Commands) {
             commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
                 entity,
                 &*controller,
-            ));
-        }
-        if header_dropdown.is_changed() {
-            commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
-                entity,
-                &*header_dropdown,
             ));
         }
         if directory.is_changed() {

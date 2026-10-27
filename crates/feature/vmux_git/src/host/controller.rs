@@ -16,12 +16,12 @@ use crate::event::{
     GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest, GitRepositoryRequest,
     GitRepositorySnapshot, GitRevertRequest, GitShortcutHelpRequest, GitStageAllRequest,
     GitStageRequest, GitStashDropRequest, GitStashPopRequest, GitStashPushRequest,
-    GitStashSelectRequest, GitUnstageRequest, HeaderDropdownRequest,
+    GitStashSelectRequest, GitUnstageRequest,
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPageContext,
     GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal, GitUiState,
-    GitWorkspaceChanged, HeaderDropdown,
+    GitWorkspaceChanged,
 };
 
 use super::directory::GitDirectoryNavigation;
@@ -35,7 +35,6 @@ impl Plugin for ControllerPlugin {
             GitKeyRequest,
             GitPanelSelectRequest,
             GitShortcutHelpRequest,
-            HeaderDropdownRequest,
             GitFileSelectRequest,
             GitBranchFileSelectRequest,
             GitBranchCollectionSelectRequest,
@@ -49,7 +48,6 @@ impl Plugin for ControllerPlugin {
             .add_observer(key_request)
             .add_observer(panel_select_request)
             .add_observer(shortcut_help_request)
-            .add_observer(header_dropdown_request)
             .add_observer(file_select_request)
             .add_observer(branch_file_select_request)
             .add_observer(select_branch_collection)
@@ -953,16 +951,6 @@ fn shortcut_help_request(
     controller.shortcut_help_visible = trigger.event().payload.visible;
 }
 
-fn header_dropdown_request(
-    trigger: On<UiInput<HeaderDropdownRequest>>,
-    mut pages: Query<&mut HeaderDropdown>,
-) {
-    let Ok(mut dropdown) = pages.get_mut(trigger.event().webview) else {
-        return;
-    };
-    dropdown.set_if_neq(trigger.event().payload.open);
-}
-
 fn file_select_request(
     trigger: On<UiInput<GitFileSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitPageControllerState)>,
@@ -1291,26 +1279,6 @@ mod tests {
         assert_eq!(
             controller.selected_branch_collection,
             GitBranchCollection::Local
-        );
-    }
-
-    #[test]
-    fn header_dropdown_selection_keeps_only_one_open() {
-        let mut app = App::new();
-        app.add_plugins(ControllerPlugin);
-        let page = app.world_mut().spawn(HeaderDropdown::Repository).id();
-
-        app.world_mut().trigger(UiInput {
-            webview: page,
-            payload: HeaderDropdownRequest {
-                open: HeaderDropdown::Branch,
-            },
-        });
-        app.update();
-
-        assert_eq!(
-            app.world().get::<HeaderDropdown>(page),
-            Some(&HeaderDropdown::Branch)
         );
     }
 

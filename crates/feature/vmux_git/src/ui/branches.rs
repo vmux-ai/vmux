@@ -446,7 +446,10 @@ impl BranchDirectoryBuilder {
 }
 
 #[component]
-pub(super) fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
+pub(super) fn BranchCollectionTabs(
+    branch_collection: GitBranchCollection,
+    onselect: EventHandler<GitBranchCollection>,
+) -> Element {
     let active = match branch_collection {
         GitBranchCollection::Local => "local",
         GitBranchCollection::Remote => "remote",
@@ -476,7 +479,7 @@ pub(super) fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> El
                     "tags" => GitBranchCollection::Tags,
                     _ => GitBranchCollection::Local,
                 };
-                let _ = send(&GitBranchCollectionSelectRequest { collection });
+                onselect.call(collection);
             },
         }
     }
