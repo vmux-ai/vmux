@@ -8,7 +8,7 @@ pub(super) fn add(app: &mut App) {
 
 fn start(
     mut commands: Commands,
-    sessions: Query<(Entity, &Id<Session>, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
+    sessions: Query<(Entity, &Id<Session>, &AgentRef), (With<Session>, Without<AcpLaunchStarted>)>,
     targets: Query<&EntityTarget<Session>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
     profile: CurrentProfile,
@@ -43,10 +43,10 @@ fn start(
             .agent
             .acp
             .iter()
-            .find(|config| config.id == agent_id.0)
+            .find(|config| config.id == agent_id.as_str())
             .cloned();
         let request = AcpInstallRequest {
-            agent_id: agent_id.0.clone(),
+            agent_id: agent_id.as_str().to_string(),
             fallback,
             shell: shell.clone(),
         };
@@ -76,7 +76,7 @@ fn start(
             AcpInstallWaiter {
                 job,
                 sid: session_id.as_str().to_string(),
-                agent_id: agent_id.0.clone(),
+                agent_id: agent_id.as_str().to_string(),
             },
         ));
     }
@@ -98,7 +98,7 @@ fn poll(
         (
             Entity,
             &Id<Session>,
-            &AgentId,
+            &AgentRef,
             &Cwd,
             &ProcessAnchor,
             &AcpInstallWaiter,

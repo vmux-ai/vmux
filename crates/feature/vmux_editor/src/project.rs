@@ -1,9 +1,15 @@
-#[vmux_api::contract(Default, Eq)]
-pub struct ProjectId(pub String);
+use bevy::prelude::*;
+use vmux_api::Id;
 
-#[vmux_api::contract(Default, Eq)]
+#[vmux_api::contract(Copy, Default, Eq)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
+#[type_path = "vmux_editor"]
+pub struct Project;
+
+#[vmux_api::contract(Eq)]
 pub struct ProjectEntry {
-    pub id: ProjectId,
+    pub id: Id<Project>,
     pub name: String,
     pub source: String,
     pub path: String,
@@ -20,16 +26,7 @@ pub struct ProjectEntry {
 
 impl ProjectEntry {
     pub fn identity_seed(&self) -> &str {
-        if !self.id.0.trim().is_empty() {
-            return &self.id.0;
-        }
-        if !self.url.trim().is_empty() {
-            return &self.url;
-        }
-        if !self.path.trim().is_empty() {
-            return &self.path;
-        }
-        &self.name
+        self.id.as_str()
     }
 }
 
@@ -48,9 +45,9 @@ pub enum ProjectView {
     Error(String),
 }
 
-#[vmux_api::contract(Default, Eq)]
+#[vmux_api::contract(Eq)]
 pub struct ProjectDetailView {
-    pub id: ProjectId,
+    pub id: Id<Project>,
     pub name: String,
     pub path: String,
 }

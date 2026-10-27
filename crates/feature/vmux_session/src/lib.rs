@@ -21,7 +21,8 @@ pub use host::SessionPlugin;
 #[cfg(host)]
 pub use model::ProviderSessionTombstones;
 pub use model::{
-    AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CleanupTarget, CreateRequest,
+    Agent, AgentFamily, AgentRef, ArchiveRequest, Cleanup, CleanupRequest, CleanupTarget,
+    CreateRequest,
     Created, DescriptionUpdateRequest, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderSessionRestoreRequest,
     ProviderSessionTombstone, ProviderWorkflowState, ProviderWorkflowStateChangeRequest,

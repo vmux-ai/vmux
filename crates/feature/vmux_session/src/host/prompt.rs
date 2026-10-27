@@ -499,7 +499,7 @@ mod tests {
             (
                 vmux_session::Session,
                 Id::<Session>::new("session"),
-                vmux_session::AgentId("mock".into()),
+                vmux_session::AgentRef::new("mock"),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
             )

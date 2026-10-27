@@ -152,7 +152,9 @@ fn list_agents(
             agents.push(vmux_api::session::RemoteAgent {
                 id: agent.id.clone(),
                 name: agent.name.clone(),
-                url: SessionRoute::manager_for_agent(&vmux_session::AgentId(agent.id.clone())),
+                url: SessionRoute::manager_for_agent(&vmux_session::AgentRef::new(
+                    agent.id.clone(),
+                )),
                 icon: agent.icon.clone().unwrap_or_default(),
             });
         }

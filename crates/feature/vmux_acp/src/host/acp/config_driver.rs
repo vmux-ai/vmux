@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Entity, Query};
 use vmux_api::protocol::{AcpModeOption, AcpSessionConfig};
 use vmux_session::event::{ModeState, ModelOptionEntry, ModelState};
-use vmux_session::{AgentId, Session};
+use vmux_session::{AgentRef, Session};
 
 use crate::host::runtime::AcpSessionConfigState;
 
@@ -11,7 +11,7 @@ pub(super) struct AcpConfigProjection<'w, 's> {
     sessions: Query<
         'w,
         's,
-        (&'static AgentId, Option<&'static AcpSessionConfigState>),
+        (&'static AgentRef, Option<&'static AcpSessionConfigState>),
         bevy::prelude::With<Session>,
     >,
 }
@@ -53,7 +53,7 @@ impl AcpSessionConfigState {
 impl AcpConfigProjection<'_, '_> {
     pub(super) fn get(&self, entity: Entity) -> Option<(ModelState, ModeState)> {
         let (agent_id, configs) = self.sessions.get(entity).ok()?;
-        let agent_key = agent_id.0.as_str();
+        let agent_key = agent_id.as_str();
         let model = match configs {
             None => ModelState {
                 agent_key: agent_key.to_string(),

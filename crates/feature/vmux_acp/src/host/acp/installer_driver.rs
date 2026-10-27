@@ -10,7 +10,7 @@ use vmux_editor::lsp::archive::ArchiveKind;
 use vmux_editor::lsp::download::{self, RemoteArtifact};
 use vmux_editor::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
 use vmux_editor::lsp::store::{PackageStore, Receipt};
-use vmux_session::{AgentId, Id, Session};
+use vmux_session::{AgentRef, Id, Session};
 use vmux_setting::AppSettings;
 
 use super::environment_driver::AcpEnvironment;
@@ -182,8 +182,8 @@ impl AcpInstallRequest {
 }
 
 impl AcpInstallWaiter {
-    pub(super) fn matches(&self, session_id: &Id<Session>, agent_id: &AgentId) -> bool {
-        self.sid == session_id.as_str() && self.agent_id == agent_id.0
+    pub(super) fn matches(&self, session_id: &Id<Session>, agent_id: &AgentRef) -> bool {
+        self.sid == session_id.as_str() && self.agent_id == agent_id.as_str()
     }
 }
 
@@ -191,7 +191,7 @@ impl AcpLaunch {
     pub(super) fn message_for(
         &self,
         session_id: &Id<Session>,
-        agent_id: &AgentId,
+        agent_id: &AgentRef,
         cwd: &Cwd,
         anchor: &ProcessAnchor,
         resume: Option<&ExternalId>,
@@ -210,7 +210,7 @@ impl AcpLaunch {
             .ok();
         ClientMessage::SpawnAcpAgent {
             sid: session_id.as_str().to_string(),
-            agent_id: agent_id.0.clone(),
+            agent_id: agent_id.as_str().to_string(),
             command: self.command.clone(),
             args: self.args.clone(),
             env: self.env.clone(),

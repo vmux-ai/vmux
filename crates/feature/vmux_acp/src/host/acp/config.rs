@@ -20,7 +20,7 @@ use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::event::{ModelOptionEntry, SelectMode, SelectModel, SetAgentEffort};
 use vmux_session::host::{ChatModeStateChanged, ChatModelStateChanged, SessionView, SessionViews};
-use vmux_session::{AgentId, Id, Session};
+use vmux_session::{AgentRef, Id, Session};
 
 use super::config_driver::AcpConfigProjection;
 use vmux_session::Route as SessionRoute;
@@ -157,7 +157,7 @@ fn remote_model_state(
 
 fn apply_session_selection(
     mut reader: MessageReader<SessionConfigSelectRequest>,
-    mut sessions: Query<(&Id<Session>, &AgentId, &mut AcpSessionConfigState), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &AgentRef, &mut AcpSessionConfigState), With<Session>>,
     mut counter: Single<&mut AcpSessionConfigRequestCounter>,
     mut remembered_models: MessageWriter<RememberModel>,
     mut remembered_modes: MessageWriter<RememberMode>,
@@ -185,12 +185,12 @@ fn apply_session_selection(
         let request_id = counter.0;
         if request.category == "model" {
             remembered_models.write(RememberModel {
-                agent_id: agent_id.0.clone(),
+                agent_id: agent_id.as_str().to_string(),
                 model_id: request.value.clone(),
             });
         } else if request.category == "mode" {
             remembered_modes.write(RememberMode {
-                agent_id: agent_id.0.clone(),
+                agent_id: agent_id.as_str().to_string(),
                 mode_id: request.value.clone(),
             });
         }
@@ -249,7 +249,7 @@ fn start_select_mode(
 
 fn remember_model_lists(
     sessions: Query<
-        (&AgentId, &AcpSessionConfigState),
+        (&AgentRef, &AcpSessionConfigState),
         (With<Session>, Changed<AcpSessionConfigState>),
     >,
     mut remembered: MessageWriter<RememberModels>,
@@ -270,7 +270,7 @@ fn remember_model_lists(
         let current = state.display_value(model).to_string();
         let url = SessionRoute::manager_for_agent(agent_id);
         remembered.write(RememberModels {
-            agent_id: agent_id.0.clone(),
+            agent_id: agent_id.as_str().to_string(),
             url,
             selected: current,
             models: listed,
@@ -280,7 +280,7 @@ fn remember_model_lists(
 
 fn remember_mode_lists(
     sessions: Query<
-        (&AgentId, &AcpSessionConfigState),
+        (&AgentRef, &AcpSessionConfigState),
         (With<Session>, Changed<AcpSessionConfigState>),
     >,
     mut remembered: MessageWriter<RememberModes>,
@@ -300,7 +300,7 @@ fn remember_mode_lists(
             .collect::<Vec<_>>();
         let url = SessionRoute::manager_for_agent(agent_id);
         remembered.write(RememberModes {
-            agent_id: agent_id.0.clone(),
+            agent_id: agent_id.as_str().to_string(),
             url,
             selected: state.display_value(mode).to_string(),
             modes,
@@ -498,7 +498,7 @@ fn set_effort(
 
 fn apply_last_used_model(
     mut sessions: Query<
-        (&Id<Session>, &AgentId, &mut AcpSessionConfigState),
+        (&Id<Session>, &AgentRef, &mut AcpSessionConfigState),
         (With<Session>, Added<AcpSessionConfigState>),
     >,
     last_used: Single<&AgentModelSelections>,
@@ -506,7 +506,7 @@ fn apply_last_used_model(
     mut requests: MessageWriter<AcpSetSessionConfigRequest>,
 ) {
     for (session_id, agent_id, mut state) in &mut sessions {
-        let Some(remembered) = last_used.by_agent.get(&agent_id.0) else {
+        let Some(remembered) = last_used.by_agent.get(agent_id.as_str()) else {
             continue;
         };
         let model_id = &remembered.selected;
@@ -572,7 +572,7 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("s1"),
-                AgentId("claude".into()),
+                AgentRef::new("claude"),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
                 AcpSessionConfigState {
@@ -685,7 +685,7 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("s1"),
-                AgentId("claude".into()),
+                AgentRef::new("claude"),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
                 AcpSessionConfigState {
@@ -756,7 +756,7 @@ mod tests {
         app.world_mut().spawn((
             Session,
             Id::<Session>::new("s1"),
-            AgentId("codex-acp".into()),
+            AgentRef::new("codex-acp"),
             vmux_ecs::Cwd("/tmp".into()),
             vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
             AcpSessionConfigState {
@@ -825,7 +825,7 @@ mod tests {
             .spawn((
                 Session,
                 Id::<Session>::new("s2"),
-                AgentId("claude".into()),
+                AgentRef::new("claude"),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
                 AcpSessionConfigState {
