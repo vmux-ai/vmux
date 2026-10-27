@@ -13,6 +13,8 @@ default = []
 path = "src/lib.rs"
 
 [dependencies]
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
 regex.workspace = true
 serde = { workspace = true }
 rkyv = { workspace = true }
@@ -24,7 +26,7 @@ vmux_page = { path = "../../util/vmux_page" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_git = { path = "../vmux_git" }
 vmux_knowledge = { path = "../vmux_knowledge" }
-vmux_api = { path = "../../util/vmux_api" }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 vmux_setting = { path = "../vmux_setting" }
 vmux_session = { path = "../vmux_session" }
@@ -34,8 +36,6 @@ arboard = "3"
 base64 = "0.22"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
-bevy_ecs = { workspace = true }
-bevy_reflect = { workspace = true }
 chardetng = "1"
 crossbeam-channel = { workspace = true }
 encoding_rs = "0.8"

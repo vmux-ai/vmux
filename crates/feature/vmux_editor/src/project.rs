@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_reflect::Reflect;
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 use vmux_api::Id;
