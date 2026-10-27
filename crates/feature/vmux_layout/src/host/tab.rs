@@ -759,18 +759,9 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         let space_a = app.world_mut().spawn(crate::space::Space).id();
         let space_b = app.world_mut().spawn(crate::space::Space).id();
-        let a1 = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(space_a)))
-            .id();
-        let a2 = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(space_a)))
-            .id();
-        let b1 = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(space_b)))
-            .id();
+        let a1 = app.world_mut().spawn((Tab, ChildOf(space_a))).id();
+        let a2 = app.world_mut().spawn((Tab, ChildOf(space_a))).id();
+        let b1 = app.world_mut().spawn((Tab, ChildOf(space_b))).id();
         let siblings = app
             .world_mut()
             .run_system_once(move |hierarchy: TabHierarchy| hierarchy.siblings(a1))

@@ -300,7 +300,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), ChildOf(space)))
+            .spawn((crate::tab::Tab, ChildOf(space)))
             .id();
         let stack = app.world_mut().spawn(ChildOf(tab)).id();
         let found = app

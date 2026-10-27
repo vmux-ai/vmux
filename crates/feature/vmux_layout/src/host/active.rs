@@ -131,11 +131,11 @@ mod tests {
         let space = app.world_mut().spawn(Space).id();
         let older = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let newer = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(5), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(5), ChildOf(space)))
             .id();
         app.update();
         assert!(app.world().entity(newer).contains::<Active>());
@@ -156,16 +156,11 @@ mod tests {
         let space = app.world_mut().spawn(Space).id();
         let stale = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                LastActivatedAt::new(1),
-                Active,
-                ChildOf(space),
-            ))
+            .spawn((Tab, LastActivatedAt::new(1), Active, ChildOf(space)))
             .id();
         let newer = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(5), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(5), ChildOf(space)))
             .id();
         app.update();
         assert!(app.world().entity(newer).contains::<Active>());

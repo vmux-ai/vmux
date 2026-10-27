@@ -355,7 +355,7 @@ mod tests {
         let tab = fixture
             .app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Tab, LastActivatedAt::now()))
             .id();
         let row = fixture
             .app
@@ -443,7 +443,7 @@ mod tests {
         let tab = fixture
             .app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Tab, LastActivatedAt::now()))
             .id();
         let row = fixture
             .app
@@ -512,7 +512,7 @@ mod tests {
         let tab = fixture
             .app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Tab, LastActivatedAt::now()))
             .id();
         let row = fixture
             .app
@@ -639,7 +639,7 @@ mod tests {
             let tab = fixture
                 .app
                 .world_mut()
-                .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(root)))
+                .spawn((Tab, LastActivatedAt::new(1), ChildOf(root)))
                 .id();
             let row = fixture
                 .app

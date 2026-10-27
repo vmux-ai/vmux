@@ -1094,7 +1094,7 @@ mod open_in_place_flow {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
@@ -1130,7 +1130,7 @@ mod open_in_place_flow {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
@@ -1168,7 +1168,7 @@ mod open_in_place_flow {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()

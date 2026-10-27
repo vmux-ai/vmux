@@ -1261,7 +1261,7 @@ mod tests {
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_candidates);
 
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let terminal_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(7), ChildOf(tab)))
@@ -1306,7 +1306,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_candidates);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let agent_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
@@ -1367,7 +1367,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_candidates);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let agent_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
@@ -1455,7 +1455,7 @@ mod tests {
             .add_systems(Update, collect_run_bucket_panes);
         app.world_mut().spawn(crate::TerminalPlugin::MANIFEST);
 
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let agent_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
@@ -1635,10 +1635,7 @@ mod tests {
             .init_resource::<SplitRunPaneOutput>()
             .add_systems(Update, split_run_pane);
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1)))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let browser_pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(10), ChildOf(tab)))
@@ -1767,10 +1764,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, focus_reused_run);
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1)))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let pane = app
             .world_mut()
             .spawn((Pane, SpawnSeq(7), LastActivatedAt::new(2), ChildOf(tab)))

@@ -679,12 +679,12 @@ mod tests {
         let space_b = app.world_mut().spawn(crate::space::Space).id();
         let tab_a = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), ChildOf(space_a)))
+            .spawn((crate::tab::Tab, ChildOf(space_a)))
             .id();
         let pane_a = app.world_mut().spawn((Pane, ChildOf(tab_a))).id();
         let tab_b = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), ChildOf(space_b)))
+            .spawn((crate::tab::Tab, ChildOf(space_b)))
             .id();
         let pane_b = app.world_mut().spawn((Pane, ChildOf(tab_b))).id();
         let snapshot = LayoutSnapshot {

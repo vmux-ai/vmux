@@ -1000,10 +1000,7 @@ mod tests {
             .init_resource::<CefNavigations>()
             .add_observer(CefNavigations::record_back);
 
-            let tab = app
-                .world_mut()
-                .spawn((Tab::default(), LastActivatedAt::now()))
-                .id();
+            let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
             let pane = app
                 .world_mut()
                 .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1267,19 +1264,16 @@ mod tests {
                 .world_mut()
                 .spawn(Space::bundle(vmux_api::Id::<Space>::new("work")))
                 .id();
-            let first_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let first_tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
             let pane_in_first_tab = app.world_mut().spawn((Pane, ChildOf(first_tab))).id();
             app.world_mut()
                 .spawn((Stack::bundle(), ChildOf(pane_in_first_tab)));
-            let second_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let second_tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
             let other_space = app
                 .world_mut()
                 .spawn(Space::bundle(vmux_api::Id::<Space>::new("play")))
                 .id();
-            let tab_in_other_space = app
-                .world_mut()
-                .spawn((Tab::default(), ChildOf(other_space)))
-                .id();
+            let tab_in_other_space = app.world_mut().spawn((Tab, ChildOf(other_space))).id();
 
             Self {
                 app,

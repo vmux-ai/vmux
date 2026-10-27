@@ -962,10 +962,7 @@ mod tests {
     fn close_stack_request_despawns_target_keeps_siblings() {
         let mut app = close_request_app();
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -992,10 +989,7 @@ mod tests {
     fn duplicate_close_requests_despawn_a_stack_once() {
         let mut app = close_request_app();
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1024,10 +1018,7 @@ mod tests {
     fn tidying_the_last_stack_in_a_pane_leaves_the_pane_alone() {
         let mut app = close_request_app();
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1059,10 +1050,7 @@ mod tests {
     fn closing_an_inactive_stack_by_id_leaves_activation_where_it_was() {
         let mut app = close_request_app();
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1111,10 +1099,7 @@ mod tests {
     fn closing_the_active_stack_by_id_activates_the_most_recent_survivor() {
         let mut app = close_request_app();
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1170,10 +1155,7 @@ mod tests {
             .add_systems(Update, (compute_focused, probe).chain());
         app.world_mut().spawn(ActiveStack::default().local_bundle());
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
@@ -1343,7 +1325,7 @@ mod tests {
         let root = app.world_mut().spawn_empty().id();
         let remaining_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(root)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(root)))
             .id();
         let remaining_pane = app
             .world_mut()
@@ -1357,7 +1339,7 @@ mod tests {
 
         let closing_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(2), ChildOf(root)))
+            .spawn((Tab, LastActivatedAt::new(2), ChildOf(root)))
             .id();
         let closing_pane = app
             .world_mut()
@@ -1404,7 +1386,7 @@ mod tests {
         let make_tab = |app: &mut App, ts: i64| -> Entity {
             let tab = app
                 .world_mut()
-                .spawn((Tab::default(), LastActivatedAt::new(ts), ChildOf(root)))
+                .spawn((Tab, LastActivatedAt::new(ts), ChildOf(root)))
                 .id();
             let pane = app
                 .world_mut()
@@ -1454,10 +1436,7 @@ mod tests {
             .insert_resource(test_settings())
             .add_systems(Update, (close, close_pending).chain());
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let split = app
             .world_mut()
             .spawn((
@@ -1522,10 +1501,7 @@ mod tests {
             .insert_resource(test_settings())
             .add_systems(Update, (close, close_pending).chain());
 
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let split = app
             .world_mut()
             .spawn((
@@ -1618,10 +1594,7 @@ mod tests {
             vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
         ));
 
-        let old_tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1)))
-            .id();
+        let old_tab = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let old_pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::new(1), ChildOf(old_tab)))
@@ -1629,10 +1602,7 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(old_pane)));
 
-        let active_tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(2)))
-            .id();
+        let active_tab = app.world_mut().spawn((Tab, LastActivatedAt::new(2))).id();
         let active_pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::new(2), ChildOf(active_tab)))
@@ -1666,10 +1636,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
-        let tab_e = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1)))
-            .id();
+        let tab_e = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let pane_with_stack = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::new(1), ChildOf(tab_e)))
@@ -1702,10 +1669,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
-        let tab_e = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1)))
-            .id();
+        let tab_e = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::new(1), ChildOf(tab_e)))
@@ -1766,7 +1730,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
@@ -2178,7 +2142,7 @@ mod tests {
         let _tab_a = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 vmux_ecs::Active,
                 LastActivatedAt::new(100),
                 ChildOf(space_a),
@@ -2191,7 +2155,7 @@ mod tests {
         let tab_b = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 vmux_ecs::Active,
                 LastActivatedAt::new(1),
                 ChildOf(space_b),
@@ -2217,7 +2181,7 @@ mod tests {
             .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)));
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(5), ChildOf(main)))
+            .spawn((Tab, LastActivatedAt::new(5), ChildOf(main)))
             .id();
 
         let got = app

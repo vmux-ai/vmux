@@ -436,7 +436,7 @@ mod tests {
             .add_systems(Update, (process_force_closes, apply_dialog_results).chain());
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -465,7 +465,7 @@ mod tests {
             .add_systems(Update, apply_dialog_results);
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -495,7 +495,7 @@ mod tests {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -524,7 +524,7 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let root = app
             .world_mut()
@@ -599,7 +599,7 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         let tab = app
             .world_mut()
-            .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
+            .spawn((crate::tab::Tab, LastActivatedAt::now()))
             .id();
         let root = app
             .world_mut()

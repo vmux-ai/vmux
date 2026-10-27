@@ -1354,8 +1354,8 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        app.world_mut().spawn((Tab::default(), ChildOf(space)));
-        let tab1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        app.world_mut().spawn((Tab, ChildOf(space)));
+        let tab1 = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let pane = app.world_mut().spawn(ChildOf(tab1)).id();
         let stack = app
             .world_mut()
@@ -1381,7 +1381,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -1455,7 +1455,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
@@ -1550,7 +1550,7 @@ mod tests {
             .spawn((Space::bundle(Id::<Space>::new("s1")), Active))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)));
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)));
         let tab = app
             .world_mut()
             .spawn((
@@ -1692,16 +1692,11 @@ mod tests {
             ))));
         let first = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                LastActivatedAt::new(2),
-                Active,
-                ChildOf(space),
-            ))
+            .spawn((Tab, LastActivatedAt::new(2), Active, ChildOf(space)))
             .id();
         let second = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         app.world_mut()
             .resource_mut::<Messages<CloseTabRequest>>()
@@ -2128,8 +2123,8 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let t0 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
-        let t1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let t0 = app.world_mut().spawn((Tab, ChildOf(space))).id();
+        let t1 = app.world_mut().spawn((Tab, ChildOf(space))).id();
         app.world_mut().spawn(ArchivedPage {
             url: "https://z.example".to_string(),
             title: String::new(),
@@ -2159,14 +2154,8 @@ mod tests {
         app.world_mut()
             .entity_mut(active)
             .insert(crate::space::CurrentSpace);
-        let t0 = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(active)))
-            .id();
-        let t1 = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(active)))
-            .id();
+        let t0 = app.world_mut().spawn((Tab, ChildOf(active))).id();
+        let t1 = app.world_mut().spawn((Tab, ChildOf(active))).id();
         app.world_mut().spawn(ArchivedPage {
             url: "https://z.example".to_string(),
             title: String::new(),
@@ -2193,7 +2182,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let leaf = app
             .world_mut()
             .spawn((Pane, Id::<Pane>::new("leaf-A"), ChildOf(tab)))
@@ -2252,7 +2241,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2314,7 +2303,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2371,7 +2360,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let leaf = app
             .world_mut()
             .spawn((Pane, Id::<Pane>::new("leaf-A"), ChildOf(tab)))
@@ -2401,7 +2390,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2464,7 +2453,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2537,7 +2526,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((Pane, Id::<Pane>::new("root"), ChildOf(tab)))

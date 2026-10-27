@@ -613,7 +613,7 @@ mod tests {
         let store = TestStore::spawn(&mut app);
         app.register_persisted::<StartupDir>()
             .add_observer(mark_dirty);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         app.update();
         store.clear(&mut app);
         app.world_mut()
@@ -633,7 +633,7 @@ mod tests {
         let store = TestStore::spawn(&mut app);
         app.register_persisted::<TabWorkspace>()
             .add_observer(mark_dirty);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         app.update();
         store.clear(&mut app);
         app.world_mut().entity_mut(tab).insert(TabWorkspace {
@@ -655,7 +655,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 TabWorktree {
                     repo_root: "/tmp/repo".into(),
                     checkout_dir: "/tmp/worktree".into(),

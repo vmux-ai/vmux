@@ -811,7 +811,7 @@ mod tests {
                 .world_mut()
                 .spawn(Space::bundle(Id::<Space>::new(space_id)))
                 .id();
-            let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
             let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
             app.update();
             Self {

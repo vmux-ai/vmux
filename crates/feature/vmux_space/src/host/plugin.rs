@@ -1505,7 +1505,7 @@ mod tests {
             .world_mut()
             .spawn((work_space_record().bundle(), CurrentSpace))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
 
         app.update();
 
@@ -1707,7 +1707,7 @@ mod tests {
             .world_mut()
             .spawn(Space::bundle(Id::<Space>::new("other")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(other))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(other))).id();
         let pane = app
             .world_mut()
             .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
@@ -1933,7 +1933,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::now(), ChildOf(space)))
             .id();
 
         app.world_mut().trigger(UiInput {

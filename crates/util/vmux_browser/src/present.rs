@@ -1540,7 +1540,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::new(1), ChildOf(glass)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(glass)))
             .id();
         let pane = app
             .world_mut()
