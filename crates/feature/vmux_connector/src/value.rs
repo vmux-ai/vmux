@@ -7,10 +7,14 @@ struct Text(String);
 impl Text {
     fn new(value: impl Into<String>) -> Result<Self, String> {
         let value = value.into();
-        if value.trim().is_empty() {
+        if !Self::is_valid(&value) {
             return Err("value must not be empty".to_string());
         }
         Ok(Self(value))
+    }
+
+    fn is_valid(value: &str) -> bool {
+        !value.trim().is_empty()
     }
 
     fn as_str(&self) -> &str {
@@ -42,6 +46,10 @@ impl ProviderKey {
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    pub fn is_valid(value: &str) -> bool {
+        Text::is_valid(value)
     }
 }
 
@@ -116,6 +124,10 @@ impl ExternalId {
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    pub fn is_valid(value: &str) -> bool {
+        Text::is_valid(value)
     }
 }
 
@@ -237,6 +249,8 @@ mod tests {
         assert!(ProviderKey::new(" ").is_err());
         assert!(ExternalId::new("").is_err());
         assert!(ResourceKind::new("\n").is_err());
+        assert!(!ProviderKey::is_valid("\t"));
+        assert!(!ExternalId::is_valid(" "));
     }
 
     #[test]

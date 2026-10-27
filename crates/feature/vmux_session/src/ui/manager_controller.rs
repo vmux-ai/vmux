@@ -102,7 +102,7 @@ impl SessionMutations {
         self.stages
             .set(target.id.clone(), target.stage.clone(), stage.clone());
         let id = target.id.clone();
-        if send(&SessionsStageChange {
+        if try_send(&SessionsStageChange {
             id: target.id,
             kind: target.kind,
             sid: target.sid,
@@ -132,7 +132,7 @@ impl SessionMutations {
                 .iter()
                 .map(|target| (target.id.clone(), target.archived, archived)),
         );
-        if send(&SessionsArchive {
+        if try_send(&SessionsArchive {
             ids: targets.iter().map(|target| target.id.clone()).collect(),
             archived,
         })

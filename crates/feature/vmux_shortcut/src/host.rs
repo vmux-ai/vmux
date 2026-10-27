@@ -59,7 +59,7 @@ impl Plugin for ShortcutPlugin {
 }
 
 #[derive(Component, Default)]
-#[require(UiShortcutsUpdates, ShortcutCapture)]
+#[require(ShortcutUiStateUpdates, ShortcutCapture)]
 struct Shortcuts {
     catalog: ShortcutCatalog,
     probe: ShortcutProbe,

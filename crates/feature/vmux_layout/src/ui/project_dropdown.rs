@@ -5,8 +5,8 @@ use vmux_ui::components::project_picker::ProjectSelectPopupContent;
 use vmux_ui::hooks::{send, use_theme};
 
 use crate::event::{
-    ProjectDropdownAddRequest, ProjectDropdownCloseRequest, ProjectDropdownPickRequest,
-    ProjectDropdownOpenSelectedRequest, ProjectDropdownSizeRequest, ProjectDropdownState,
+    ProjectDropdownAddRequest, ProjectDropdownCloseRequest, ProjectDropdownOpenSelectedRequest,
+    ProjectDropdownPickRequest, ProjectDropdownSizeRequest, ProjectDropdownState,
 };
 
 const ROOT_ID: &str = "project-dropdown-surface";
