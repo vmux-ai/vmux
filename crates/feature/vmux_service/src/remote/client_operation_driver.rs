@@ -1,6 +1,7 @@
 use bevy::prelude::{Bundle, Component};
 use tokio::sync::{mpsc, oneshot};
-use vmux_api::session::ClientOpId;
+use vmux_api::Id;
+use vmux_api::session::ClientOperation;
 use vmux_transport::service::{RemoteFuture, RemoteOperationStore};
 
 #[derive(Clone)]
@@ -27,7 +28,7 @@ impl ClientOperations {
         )
     }
 
-    pub(crate) async fn claim(&self, id: ClientOpId) -> bool {
+    pub(crate) async fn claim(&self, id: Id<ClientOperation>) -> bool {
         let (response, receiver) = oneshot::channel();
         if self
             .claims
@@ -45,7 +46,7 @@ impl ClientOperations {
         receiver.await.unwrap_or(false)
     }
 
-    pub(crate) async fn release(&self, id: ClientOpId) {
+    pub(crate) async fn release(&self, id: Id<ClientOperation>) {
         let (response, receiver) = oneshot::channel();
         if self
             .releases
@@ -65,11 +66,11 @@ impl ClientOperations {
 }
 
 impl RemoteOperationStore for ClientOperations {
-    fn claim(&self, id: ClientOpId) -> RemoteFuture<'_, bool> {
+    fn claim(&self, id: Id<ClientOperation>) -> RemoteFuture<'_, bool> {
         Box::pin(ClientOperations::claim(self, id))
     }
 
-    fn release(&self, id: ClientOpId) -> RemoteFuture<'_, ()> {
+    fn release(&self, id: Id<ClientOperation>) -> RemoteFuture<'_, ()> {
         Box::pin(ClientOperations::release(self, id))
     }
 }
@@ -84,12 +85,12 @@ pub(super) struct ClientOperationInbox(pub(super) ClientOperationReceivers);
 
 #[derive(Component)]
 pub(super) struct ClaimClientOperation {
-    pub(super) id: ClientOpId,
+    pub(super) id: Id<ClientOperation>,
     pub(super) response: Option<oneshot::Sender<bool>>,
 }
 
 #[derive(Component)]
 pub(super) struct ReleaseClientOperation {
-    pub(super) id: ClientOpId,
+    pub(super) id: Id<ClientOperation>,
     pub(super) response: Option<oneshot::Sender<()>>,
 }

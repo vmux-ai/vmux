@@ -2,12 +2,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine;
+use vmux_api::Id;
 use vmux_api::protocol::{
     AgentAttachment, AgentCommandResult, AgentListAgents, AgentListModels, AgentListTeam,
     AgentNewChat, AgentRequest, AgentRequestId, AgentSelectModel, AgentSetEffort, ServiceMessage,
     SharedEvent, SharedFailure, SharedMessage, SharedResponse,
 };
-use vmux_api::session::{ClientOpId, Message, RemoteMediaEntry, RemoteSession};
+use vmux_api::session::{ClientOperation, Message, RemoteMediaEntry, RemoteSession};
 use vmux_transport::service::{RemoteDriver, RemoteFuture, RemoteOperationStore};
 
 use crate::acp::{AcpInput, AcpSessions};
@@ -68,7 +69,7 @@ impl AgentRemoteDriver {
                 prompt,
                 agent_url,
             } => {
-                if !RemoteClientOpId(&client_op_id).valid() {
+                if !RemoteClientOperationId(&client_op_id).valid() {
                     return SharedResponse::Failed(SharedFailure::Invalid);
                 }
                 if !self.operations.claim(client_op_id.clone()).await {
@@ -273,9 +274,9 @@ impl RemoteDriver for AgentRemoteDriver {
     }
 }
 
-struct RemoteClientOpId<'a>(&'a ClientOpId);
+struct RemoteClientOperationId<'a>(&'a Id<ClientOperation>);
 
-impl RemoteClientOpId<'_> {
+impl RemoteClientOperationId<'_> {
     fn valid(&self) -> bool {
         let value = self.0.as_str();
         !value.trim().is_empty() && value.len() <= MAX_CLIENT_OP_ID_BYTES
@@ -536,11 +537,11 @@ mod tests {
     struct ClosedOperations;
 
     impl RemoteOperationStore for ClosedOperations {
-        fn claim(&self, _id: ClientOpId) -> RemoteFuture<'_, bool> {
+        fn claim(&self, _id: Id<ClientOperation>) -> RemoteFuture<'_, bool> {
             Box::pin(async { false })
         }
 
-        fn release(&self, _id: ClientOpId) -> RemoteFuture<'_, ()> {
+        fn release(&self, _id: Id<ClientOperation>) -> RemoteFuture<'_, ()> {
             Box::pin(async {})
         }
     }

@@ -1100,6 +1100,9 @@ install identity before deferred commands can expose the entity. Tabs derive Spa
 `ChildOf`; they do not copy a Space identity that could drift after rename or restore.
 Stored profiles use `Id<vmux_profile::Profile>`; layout focus uses `ActivePaneScope` because local
 and agent pane ownership is runtime routing state, not profile identity.
+Conversation members and events use `Id<Member>` and `Id<ConversationEvent>` across ECS and wire
+contracts. Client deduplication uses `Id<ClientOperation>`; correlation identity does not introduce
+a parallel string-ID type.
 Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,
 `Avatar`, and `Icon`. Sessions resolve that child through `Profiles`, so agent presentation never
 overloads the Session's canonical task name.

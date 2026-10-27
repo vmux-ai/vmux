@@ -1,6 +1,7 @@
 use super::{AgentAttachment, AgentRunStatus, ApprovalDecision, ClientMessage, ServiceMessage};
+use crate::Id;
 use crate::json::JsonValue;
-use crate::session::{ClientOpId, Message, RemoteAgent, RemoteMediaEntry, RemoteSession};
+use crate::session::{ClientOperation, Message, RemoteAgent, RemoteMediaEntry, RemoteSession};
 #[vmux_macro::variant_names]
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum SharedMessage {
@@ -28,7 +29,7 @@ pub enum SharedMessage {
     },
     ListSessions,
     AgentNewChat {
-        client_op_id: ClientOpId,
+        client_op_id: Id<ClientOperation>,
         prompt: String,
         agent_url: Option<String>,
     },
