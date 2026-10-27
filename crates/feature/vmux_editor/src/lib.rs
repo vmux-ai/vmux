@@ -7,8 +7,8 @@ pub use host::{
 #[cfg(host)]
 pub use project::ProjectRoute;
 pub use project::{
-    OwnedProjects, Project, ProjectBranch, ProjectIndex, ProjectLookupError, ProjectOwner,
-    ProjectPath, ProjectSource,
+    OwnedProjects, Project, ProjectBranch, ProjectOwner, ProjectPath, ProjectSource,
+    ProjectSources, ProjectTarget,
 };
 
 #[cfg(host)]

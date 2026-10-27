@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 use vmux_api::Id;
@@ -18,8 +16,7 @@ impl Plugin for ScopePlugin {
             .register_persisted::<ExternalNamespace>()
             .register_type::<AccountExternalId>()
             .register_type::<CanAccess>()
-            .init_resource::<ExternalScopeIndex>()
-            .init_resource::<IndexedScopes>()
+            .add_plugins(vmux_ecs::IdentityIndexPlugin::<ExternalScope>::default())
             .add_systems(PreUpdate, rebuild);
     }
 }
@@ -51,66 +48,8 @@ impl CanAccess {
     }
 }
 
-#[derive(Resource, Default)]
-pub struct ExternalScopeIndex {
-    entities: HashMap<Id<ExternalScope>, Entity>,
-    duplicates: HashSet<Id<ExternalScope>>,
-}
-
-impl ExternalScopeIndex {
-    pub fn entity(
-        &self,
-        id: &Id<ExternalScope>,
-    ) -> Result<Option<Entity>, ExternalScopeLookupError> {
-        if self.duplicates.contains(id) {
-            return Err(ExternalScopeLookupError::Duplicate(id.clone()));
-        }
-        Ok(self.entities.get(id).copied())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ExternalScopeLookupError {
-    Duplicate(Id<ExternalScope>),
-}
-
-impl std::fmt::Display for ExternalScopeLookupError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Duplicate(id) => write!(formatter, "duplicate external scope ID `{id}`"),
-        }
-    }
-}
-
-#[derive(Resource, Default)]
-struct IndexedScopes(HashSet<Entity>);
-
-fn rebuild(
-    scopes: Query<(Entity, &Id<ExternalScope>), With<ExternalScope>>,
-    changed: Query<(), (With<ExternalScope>, Added<Id<ExternalScope>>)>,
-    mut removed_scopes: RemovedComponents<ExternalScope>,
-    mut removed_ids: RemovedComponents<Id<ExternalScope>>,
-    mut current: ResMut<ExternalScopeIndex>,
-    mut indexed: ResMut<IndexedScopes>,
-) {
-    let removed_scope = removed_scopes
-        .read()
-        .any(|entity| indexed.0.contains(&entity));
-    let removed_id = removed_ids.read().any(|entity| indexed.0.contains(&entity));
-    if changed.is_empty() && !removed_scope && !removed_id {
-        return;
-    }
-
-    let mut next = ExternalScopeIndex::default();
-    let mut next_indexed = HashSet::new();
-    for (entity, id) in &scopes {
-        next_indexed.insert(entity);
-        if next.entities.insert(id.clone(), entity).is_some() {
-            next.duplicates.insert(id.clone());
-        }
-    }
-    *current = next;
-    indexed.0 = next_indexed;
+fn rebuild(mut index: vmux_ecs::IdentityIndexWriter<ExternalScope>) {
+    index.rebuild();
 }
 
 #[cfg(test)]
@@ -128,8 +67,10 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<ExternalScopeIndex>().entity(&id),
-            Err(ExternalScopeLookupError::Duplicate(id))
+            app.world()
+                .resource::<vmux_ecs::IdentityIndex<ExternalScope>>()
+                .entity(&id),
+            Err(vmux_ecs::IdentityLookupError::Duplicate(id))
         );
     }
 }

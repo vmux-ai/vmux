@@ -876,7 +876,7 @@ impl ConversationPreview {
 #[cfg(all(test, host))]
 mod tests {
     use super::*;
-    use crate::{CreateRequest, DomainPlugin, RenameRequest, SnapshotReceived};
+    use crate::{CreateRequest, RenameRequest, SessionDomainPlugin, SnapshotReceived};
     #[cfg(feature = "app")]
     use bevy::MinimalPlugins;
     #[cfg(feature = "app")]
@@ -916,7 +916,7 @@ mod tests {
     #[test]
     fn catalog_tracks_session_metadata() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         let request = CreateRequest::new("Task", "Description", "/tmp/project".into(), None);
         let id = request.id().clone();
         app.world_mut()
@@ -986,7 +986,7 @@ mod tests {
     #[test]
     fn catalog_applies_provider_stage_override_without_importing_the_session() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -1077,7 +1077,7 @@ mod tests {
     #[test]
     fn provider_archive_state_is_independent_from_stage_state() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.update();
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
@@ -1128,7 +1128,7 @@ mod tests {
     #[test]
     fn provider_archive_override_is_fallback_until_native_state_catches_up() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -1170,7 +1170,7 @@ mod tests {
     #[test]
     fn provider_activity_after_archive_returns_to_the_default_stage() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -1217,7 +1217,7 @@ mod tests {
     #[test]
     fn provider_source_timestamp_remains_authoritative() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -1266,7 +1266,7 @@ mod tests {
 )"#;
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins((vmux_ecs::PrimitivesPlugin, DomainPlugin))
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SessionDomainPlugin))
             .add_observer(load_on_default_event);
         app.update();
         app.world_mut()

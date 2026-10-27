@@ -48,6 +48,8 @@ pub enum MemberKind {
 }
 
 #[vmux_api::contract(Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy_reflect::TypePath))]
+#[cfg_attr(feature = "bevy", type_path = "vmux_api")]
 pub struct Member {
     pub session_id: Id<Session>,
     pub member_id: Id<Member>,

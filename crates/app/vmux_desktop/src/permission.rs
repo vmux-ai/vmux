@@ -202,17 +202,10 @@ fn persist_media_permissions(
     mut commands: Commands,
 ) {
     for (entity, store) in &stores {
-        let path = store_path();
-        let Some(parent) = path.parent() else {
-            continue;
-        };
-        if std::fs::create_dir_all(parent).is_err() {
-            continue;
-        }
         let Ok(text) = ron::ser::to_string_pretty(store, ron::ser::PrettyConfig::default()) else {
             continue;
         };
-        if std::fs::write(path, text).is_ok() {
+        if vmux_path::AtomicFile::write(store_path(), text.as_bytes()).is_ok() {
             commands.entity(entity).remove::<MediaPermissionDirty>();
         }
     }

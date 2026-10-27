@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use vmux_feature::AppFeatureExt;
 
 pub use connection::{
-    AuthSet, ConnectRequest, Connected, Connection, ConnectionIndex, ConnectionState,
-    DisconnectRequest, Disconnected, ProfilePersistence,
+    AuthSet, ConnectRequest, Connected, Connection, ConnectionState, DisconnectRequest,
+    Disconnected, ProfilePersistence,
 };
 pub use credential::{CredentialBroker, CredentialIssuer, CredentialLease};
 pub use provider::AuthProviderDefinition;

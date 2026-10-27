@@ -72,7 +72,7 @@ impl Plugin for SessionPlugin {
             conversation::ChatConversationPlugin,
         ));
         #[cfg(all(host, not(target_os = "android")))]
-        app.add_plugins(crate::DomainPlugin)
+        app.add_plugins(crate::SessionDomainPlugin)
             .add_systems(PreStartup, (spawn_store_validator, prewarm))
             .add_systems(Startup, register_route);
         #[cfg(host)]
