@@ -377,7 +377,7 @@ mod tests {
         app.world_mut().spawn((
             vmux_session::ConversationEvent,
             Id::<vmux_api::session::ConversationEvent>::new("event-1"),
-            vmux_api::session::Member::local_id(&session_id),
+            vmux_session::ActorRef::new(vmux_api::session::Member::local_id(&session_id)),
             vmux_session::Sequence(1),
             vmux_session::MessageContent(vmux_api::session::Message::user("First prompt")),
             vmux_ecs::CreatedAt::new(3),

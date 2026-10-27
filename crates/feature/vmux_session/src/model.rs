@@ -32,8 +32,14 @@ pub(crate) struct EntityPlugin;
 #[cfg(host)]
 impl Plugin for EntityPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
             app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        if !app.is_plugin_added::<vmux_ecs::ReplicationPlugin>() {
+            app.add_plugins(vmux_ecs::ReplicationPlugin);
         }
         app.world_mut()
             .register_required_components::<Session, Save>();
@@ -41,6 +47,8 @@ impl Plugin for EntityPlugin {
             .register_required_components::<Session, Cwd>();
         app.world_mut()
             .register_required_components::<Session, Description>();
+        app.world_mut()
+            .register_required_components::<Session, vmux_ecs::ReplicationRoot>();
         app.register_persisted::<Session>()
             .register_persisted::<Id<Session>>()
             .register_persisted::<AgentRef>()
@@ -63,7 +71,16 @@ impl Plugin for EntityPlugin {
                 Update,
                 (
                     create,
-                    archive,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    rebuild_session_index,
+                )
+                    .chain()
+                    .in_set(crate::SessionMutationReceiveSet),
+            )
+            .add_systems(Update, archive.in_set(crate::SessionMutationReceiveSet))
+            .add_systems(
+                Update,
+                (
                     archive_provider,
                     finish_provider_archives,
                     sync_tombstones,
@@ -94,18 +111,39 @@ pub(crate) struct MutationSet;
 pub(crate) struct CanonicalizeSet;
 
 #[cfg(host)]
+fn rebuild_session_index(mut index: vmux_ecs::IdentityIndexWriter<Session>) {
+    index.rebuild();
+}
+
+#[cfg(host)]
+pub(crate) struct SessionIdentityPlugin;
+
+#[cfg(host)]
+impl Plugin for SessionIdentityPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_ecs::IdentityIndexPlugin::<Session>::default())
+            .add_systems(PreUpdate, rebuild_session_index)
+            .add_systems(PostUpdate, rebuild_session_index);
+    }
+}
+
+#[cfg(host)]
 pub(crate) struct MetadataPlugin;
 
 #[cfg(host)]
 impl Plugin for MetadataPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         app.add_message::<RenameRequest>()
             .add_message::<DescriptionUpdateRequest>()
             .add_systems(
                 Update,
-                (rename, update_description, sync_conversation_title).in_set(MutationSet),
+                (rename, update_description, sync_conversation_title)
+                    .in_set(crate::SessionMutationReceiveSet),
             )
-            .add_systems(Update, project_views.after(MutationSet));
+            .add_systems(Update, project_views.after(crate::SessionMutationCommitSet));
     }
 }
 
@@ -115,14 +153,16 @@ pub(crate) struct WorkflowStatePlugin;
 #[cfg(host)]
 impl Plugin for WorkflowStatePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         app.insert_resource(Configuration::load())
             .register_persisted::<WorkflowState>()
             .register_persisted::<Id<WorkflowState>>()
             .register_persisted::<WorkflowStateRef>()
             .register_persisted::<WorkflowStateChangedAt>()
             .register_persisted::<TerminalWorkflowState>()
-            .init_resource::<WorkflowStateIndex>()
-            .init_resource::<IndexedWorkflowStates>()
+            .add_plugins(vmux_ecs::IdentityIndexPlugin::<WorkflowState>::default())
             .add_message::<WorkflowStateChangeRequest>()
             .add_message::<ProviderWorkflowStateChangeRequest>()
             .add_systems(
@@ -136,8 +176,9 @@ impl Plugin for WorkflowStatePlugin {
             )
             .add_systems(
                 Update,
-                (change_workflow_state, change_provider_workflow_state).in_set(MutationSet),
+                change_workflow_state.in_set(crate::SessionMutationReceiveSet),
             )
+            .add_systems(Update, change_provider_workflow_state.in_set(MutationSet))
             .add_systems(
                 PostUpdate,
                 (
@@ -665,82 +706,13 @@ struct StageSeed {
 }
 
 #[cfg(host)]
-#[derive(Resource, Default)]
-pub struct WorkflowStateIndex {
-    entities: HashMap<Id<WorkflowState>, Entity>,
-    duplicates: HashSet<Id<WorkflowState>>,
-}
-
-#[cfg(host)]
-impl WorkflowStateIndex {
-    pub fn entity(
-        &self,
-        id: &Id<WorkflowState>,
-    ) -> Result<Option<Entity>, WorkflowStateLookupError> {
-        if self.duplicates.contains(id) {
-            return Err(WorkflowStateLookupError::Duplicate(id.clone()));
-        }
-        Ok(self.entities.get(id).copied())
-    }
-}
-
-#[cfg(host)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorkflowStateLookupError {
-    Duplicate(Id<WorkflowState>),
-}
-
-#[cfg(host)]
-impl std::fmt::Display for WorkflowStateLookupError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Duplicate(id) => write!(formatter, "duplicate workflow state ID `{id}`"),
-        }
-    }
-}
-
-#[cfg(host)]
-#[derive(Resource, Default)]
-struct IndexedWorkflowStates(HashSet<Entity>);
-
-#[cfg(host)]
-fn rebuild_workflow_state_index(
-    states: Query<(Entity, &Id<WorkflowState>), With<WorkflowState>>,
-    changed: Query<
-        (),
-        (
-            With<WorkflowState>,
-            Or<(Added<WorkflowState>, Changed<Id<WorkflowState>>)>,
-        ),
-    >,
-    mut removed_states: RemovedComponents<WorkflowState>,
-    mut removed_ids: RemovedComponents<Id<WorkflowState>>,
-    mut current: ResMut<WorkflowStateIndex>,
-    mut indexed: ResMut<IndexedWorkflowStates>,
-) {
-    let removed_state = removed_states
-        .read()
-        .any(|entity| indexed.0.contains(&entity));
-    let removed_id = removed_ids.read().any(|entity| indexed.0.contains(&entity));
-    if changed.is_empty() && !removed_state && !removed_id {
-        return;
-    }
-
-    let mut next = WorkflowStateIndex::default();
-    let mut next_indexed = HashSet::new();
-    for (entity, id) in &states {
-        next_indexed.insert(entity);
-        if next.entities.insert(id.clone(), entity).is_some() {
-            next.duplicates.insert(id.clone());
-        }
-    }
-    *current = next;
-    indexed.0 = next_indexed;
+fn rebuild_workflow_state_index(mut index: vmux_ecs::IdentityIndexWriter<WorkflowState>) {
+    index.rebuild();
 }
 
 #[cfg(host)]
 fn resolve_workflow_state_targets(
-    index: Res<WorkflowStateIndex>,
+    index: Res<vmux_ecs::IdentityIndex<WorkflowState>>,
     references: Query<(Entity, Ref<WorkflowStateRef>, Option<&WorkflowStateTarget>)>,
     mut commands: Commands,
 ) {
@@ -826,11 +798,33 @@ fn create(
             LastActivatedAt::new(activated_at),
             WorkflowStateRef::new(configuration.default_workflow_state.clone()),
             WorkflowStateChangedAt::new(activated_at),
+            Revision::new(1),
         ));
         if let Some(agent) = request.agent.clone() {
             session.insert(agent);
         }
         let entity = session.id();
+        let mutation = crate::SessionMutation::Created(crate::CreatedMutation {
+            name: request.name.clone(),
+            description: request.description.clone(),
+            cwd: request.cwd.clone(),
+            agent: request.agent.clone(),
+            workflow_state: configuration.default_workflow_state.clone(),
+            created_at,
+            activated_at,
+        });
+        if let Ok(bundle) = vmux_ecs::CommittedOperation::bundle(
+            entity,
+            Id::new(uuid::Uuid::new_v4().to_string()),
+            crate::SessionMutationRequest::local_actor(),
+            request.id.clone(),
+            Revision::new(0),
+            Revision::new(1),
+            1,
+            UnixMillis::now(),
+        ) {
+            commands.spawn((bundle, mutation));
+        }
         commands.trigger(Created {
             entity,
             id: request.id.clone(),
@@ -892,15 +886,19 @@ fn project_views(
 
 #[cfg(host)]
 fn sync_conversation_title(
-    mut sessions: Query<
-        (&AgentConversationTitle, &mut Name),
+    sessions: Query<
+        (&Id<Session>, &AgentConversationTitle, &Name),
         (With<Session>, Changed<AgentConversationTitle>),
     >,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
-    for (title, mut name) in &mut sessions {
+    for (id, title, name) in &sessions {
         let title = title.0.trim();
         if !title.is_empty() && name.as_str() != title {
-            *name = Name::new(title.to_string());
+            commits.write(crate::SessionMutationRequest::local(
+                id.clone(),
+                crate::SessionMutation::Rename(title.to_string()),
+            ));
         }
     }
 }
@@ -908,98 +906,52 @@ fn sync_conversation_title(
 #[cfg(host)]
 fn rename(
     mut requests: MessageReader<RenameRequest>,
-    mut sessions: Query<
-        (
-            Entity,
-            &Id<Session>,
-            &mut Name,
-            Option<&mut AgentConversationTitle>,
-        ),
-        With<Session>,
-    >,
-    mut commands: Commands,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        for (entity, id, mut name, title) in &mut sessions {
-            if id == &request.id {
-                *name = Name::new(request.name.clone());
-                if let Some(mut title) = title {
-                    title.0.clone_from(&request.name);
-                } else {
-                    commands
-                        .entity(entity)
-                        .insert(AgentConversationTitle(request.name.clone()));
-                }
-                commands.entity(entity).remove::<TitlePending>();
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::Rename(request.name.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn update_description(
     mut requests: MessageReader<DescriptionUpdateRequest>,
-    mut sessions: Query<(&Id<Session>, &mut Description), With<Session>>,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        for (id, mut description) in &mut sessions {
-            if id == &request.id {
-                description.0.clone_from(&request.description);
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::Describe(request.description.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn change_workflow_state(
     mut requests: MessageReader<WorkflowStateChangeRequest>,
-    index: Res<WorkflowStateIndex>,
-    mut sessions: Query<
-        (
-            Entity,
-            &Id<Session>,
-            &WorkflowStateRef,
-            &mut WorkflowStateChangedAt,
-        ),
-        With<Session>,
-    >,
-    mut commands: Commands,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        let Ok(Some(target)) = index.entity(&request.workflow_state) else {
-            continue;
-        };
-        for (entity, id, current, mut changed_at) in &mut sessions {
-            if id == &request.id && current.id() != &request.workflow_state {
-                commands.entity(entity).insert((
-                    WorkflowStateRef::new(request.workflow_state.clone()),
-                    WorkflowStateTarget::new(target),
-                ));
-                changed_at.record_transition(UnixMillis::now());
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::ChangeWorkflowState(request.workflow_state.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn archive(
     mut requests: MessageReader<ArchiveRequest>,
-    sessions: Query<(Entity, &Id<Session>, Option<&ArchivedAt>), With<Session>>,
-    mut commands: Commands,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        for (entity, id, current) in &sessions {
-            if id != &request.id {
-                continue;
-            }
-            if let Some(archived_at) = request.archived_at.map(|value| value.max(1)) {
-                if current.is_none_or(|current| current.milliseconds() != archived_at) {
-                    commands.entity(entity).insert(ArchivedAt::new(archived_at));
-                }
-            } else if current.is_some() {
-                commands.entity(entity).remove::<ArchivedAt>();
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::Archive(request.archived_at),
+        ));
     }
 }
 
@@ -1213,7 +1165,7 @@ fn restore_tombstones(
 #[cfg(host)]
 fn change_provider_workflow_state(
     mut requests: MessageReader<ProviderWorkflowStateChangeRequest>,
-    index: Res<WorkflowStateIndex>,
+    index: Res<vmux_ecs::IdentityIndex<WorkflowState>>,
     mut stages: Query<
         (
             Entity,
@@ -1729,8 +1681,10 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<WorkflowStateIndex>().entity(&id),
-            Err(WorkflowStateLookupError::Duplicate(id))
+            app.world()
+                .resource::<vmux_ecs::IdentityIndex<WorkflowState>>()
+                .entity(&id),
+            Err(vmux_ecs::IdentityLookupError::Duplicate(id))
         );
     }
 
@@ -2075,7 +2029,7 @@ mod tests {
     #[test]
     fn domain_plugin_registers_its_durable_components() {
         let mut app = App::new();
-        app.add_plugins(crate::DomainPlugin);
+        app.add_plugins(crate::SessionDomainPlugin);
         let registry = app.world().resource::<AppTypeRegistry>().read();
         let filter = vmux_ecs::persistence::WorkspacePersisted::filter(&registry);
 

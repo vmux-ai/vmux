@@ -8,6 +8,7 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::Id;
 use vmux_api::avatar::IdenticonSpec;
+use vmux_api::project::ProjectRef;
 use vmux_ecs::page::PrewarmPage;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_git::worktree::RepoLabel;
@@ -18,10 +19,10 @@ use vmux_session::host::ScopeProjectionRequest;
 use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
-    Project, ProjectArchiveRequest, ProjectBranch, ProjectCatalogView, ProjectCloneRequest,
-    ProjectCollectionViewRequest, ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView,
-    ProjectEntry, ProjectImportRequest, ProjectIndex, ProjectOwner, ProjectPath, ProjectRoute,
-    ProjectSource, ProjectView, UiProject,
+    Project, ProjectArchiveRequest, ProjectBranch, ProjectBundle, ProjectCatalogView,
+    ProjectCloneRequest, ProjectCollectionViewRequest, ProjectCreateRequest, ProjectDeleteRequest,
+    ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectOwner, ProjectPath, ProjectRoute,
+    ProjectSource, ProjectTarget, ProjectView, UiProject,
 };
 
 pub(super) struct ProjectPagePlugin;
@@ -32,8 +33,8 @@ impl Plugin for ProjectPagePlugin {
             .register_persisted::<Id<Project>>()
             .register_persisted::<ProjectPath>()
             .register_persisted::<ProjectSource>()
-            .init_resource::<ProjectIndex>()
-            .init_resource::<IndexedProjects>()
+            .register_persisted::<ProjectRef>()
+            .add_plugins(vmux_ecs::IdentityIndexPlugin::<Project>::default())
             .add_plugins(vmux_ecs::UiStatePlugin::<UiProject>::default())
             .add_plugins(UiEventPlugin::<(
                 ProjectCreateRequest,
@@ -60,6 +61,7 @@ impl Plugin for ProjectPagePlugin {
                     finish_catalogs,
                     bevy::ecs::schedule::ApplyDeferred,
                     rebuild_project_index,
+                    reconcile_project_refs.in_set(vmux_session::SessionMutationReceiveSet),
                     finish_imports,
                     finish_deletes,
                 )
@@ -67,38 +69,124 @@ impl Plugin for ProjectPagePlugin {
             )
             .add_systems(
                 PostUpdate,
-                (finish_repository_operations, sync_session_counts).chain(),
+                (
+                    resolve_project_targets,
+                    finish_repository_operations,
+                    sync_session_counts,
+                )
+                    .chain(),
             );
     }
 }
 
-#[derive(Resource, Default)]
-struct IndexedProjects(HashSet<Entity>);
+fn rebuild_project_index(mut index: vmux_ecs::IdentityIndexWriter<Project>) {
+    index.rebuild();
+}
 
-fn rebuild_project_index(
-    projects: Query<(Entity, &Id<Project>), With<Project>>,
-    changed: Query<(), (With<Project>, Or<(Added<Project>, Changed<Id<Project>>)>)>,
-    mut removed_projects: RemovedComponents<Project>,
-    mut removed_ids: RemovedComponents<Id<Project>>,
-    mut current: ResMut<ProjectIndex>,
-    mut indexed: ResMut<IndexedProjects>,
+type ProjectIdentities<'w, 's> =
+    Query<'w, 's, (Entity, &'static Id<Project>, &'static ProjectPath), With<Project>>;
+
+struct ProjectMatch;
+
+impl ProjectMatch {
+    fn find(path: &Path, projects: &ProjectIdentities) -> Option<Id<Project>> {
+        projects
+            .iter()
+            .filter(|(_, _, project_path)| path.starts_with(project_path.path()))
+            .max_by_key(|(_, _, project_path)| project_path.path().components().count())
+            .map(|(_, id, _)| id.clone())
+    }
+}
+
+fn reconcile_project_refs(
+    index: Res<vmux_ecs::IdentityIndex<Project>>,
+    projects: ProjectIdentities,
+    sessions: Query<
+        (
+            &Id<vmux_session::Session>,
+            Ref<vmux_ecs::Cwd>,
+            Option<&ProjectRef>,
+        ),
+        With<vmux_session::Session>,
+    >,
+    spaces: Query<
+        (
+            Entity,
+            Ref<vmux_layout::space::EffectiveStartupDir>,
+            Option<&ProjectRef>,
+        ),
+        With<vmux_layout::space::Space>,
+    >,
+    mut session_mutations: MessageWriter<vmux_session::SessionMutationRequest>,
+    mut commands: Commands,
 ) {
-    let removed_project = removed_projects
-        .read()
-        .any(|entity| indexed.0.contains(&entity));
-    let removed_id = removed_ids.read().any(|entity| indexed.0.contains(&entity));
-    if changed.is_empty() && !removed_project && !removed_id {
-        return;
+    let projects_changed = index.is_changed();
+    for (session, cwd, current) in &sessions {
+        if !projects_changed && !cwd.is_changed() && current.is_some() {
+            continue;
+        }
+        let next = ProjectMatch::find(&cwd.0, &projects);
+        if current.map(ProjectRef::id) == next.as_ref() {
+            continue;
+        }
+        session_mutations.write(vmux_session::SessionMutationRequest::local(
+            session.clone(),
+            vmux_session::SessionMutation::ChangeProject(next),
+        ));
     }
+    for (entity, startup_dir, current) in &spaces {
+        if !projects_changed && !startup_dir.is_changed() && current.is_some() {
+            continue;
+        }
+        let path = startup_dir.0.as_deref().unwrap_or_else(|| Path::new(""));
+        reconcile_project_ref(entity, path, current, &projects, &mut commands);
+    }
+}
 
-    let mut next = ProjectIndex::default();
-    let mut next_indexed = HashSet::new();
-    for (entity, id) in &projects {
-        next_indexed.insert(entity);
-        next.include(id.clone(), entity);
+fn reconcile_project_ref(
+    entity: Entity,
+    path: &Path,
+    current: Option<&ProjectRef>,
+    projects: &ProjectIdentities,
+    commands: &mut Commands,
+) {
+    let next = path
+        .is_absolute()
+        .then(|| ProjectMatch::find(path, projects))
+        .flatten();
+    match (next, current) {
+        (Some(next), Some(current)) if current.id() == &next => {}
+        (Some(next), _) => {
+            commands.entity(entity).insert(ProjectRef::new(next));
+        }
+        (None, Some(_)) => {
+            commands.entity(entity).remove::<ProjectRef>();
+        }
+        (None, None) => {}
     }
-    *current = next;
-    indexed.0 = next_indexed;
+}
+
+fn resolve_project_targets(
+    index: Res<vmux_ecs::IdentityIndex<Project>>,
+    references: Query<(Entity, Ref<ProjectRef>, Option<&ProjectTarget>)>,
+    mut commands: Commands,
+) {
+    for (entity, reference, current) in &references {
+        if !index.is_changed() && !reference.is_changed() {
+            continue;
+        }
+        let target = index.entity(reference.id()).ok().flatten();
+        match (target, current.map(ProjectTarget::entity)) {
+            (Some(target), Some(current)) if target == current => {}
+            (Some(target), _) => {
+                commands.entity(entity).insert(ProjectTarget::new(target));
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<ProjectTarget>();
+            }
+            (None, None) => {}
+        }
+    }
 }
 
 fn resolve_project_owners(
@@ -545,7 +633,7 @@ fn clone(
 fn archive(
     trigger: On<UiInput<ProjectArchiveRequest>>,
     projects: vmux_ecs::profile::Projects,
-    index: Res<ProjectIndex>,
+    index: Res<vmux_ecs::IdentityIndex<Project>>,
     states: Query<(
         Entity,
         &vmux_ecs::PageMetadata,
@@ -964,7 +1052,7 @@ impl ProjectEntities {
                 continue;
             }
 
-            let Ok(bundle) = Project::bundle(
+            let Ok(bundle) = ProjectBundle::new(
                 id.clone(),
                 entry.name.clone(),
                 PathBuf::from(&entry.path),
@@ -1398,21 +1486,70 @@ mod tests {
     #[test]
     fn duplicate_project_ids_are_explicit() {
         let mut app = App::new();
-        app.init_resource::<ProjectIndex>()
-            .init_resource::<IndexedProjects>()
+        app.add_plugins(vmux_ecs::IdentityIndexPlugin::<Project>::default())
             .add_systems(Update, rebuild_project_index);
         let id = Id::<Project>::new("vmux://projects/duplicate");
         let path = PathBuf::from("/tmp/duplicate");
         app.world_mut()
-            .spawn(Project::bundle(id.clone(), "one", path.clone(), "", "").unwrap());
+            .spawn(ProjectBundle::new(id.clone(), "one", path.clone(), "", "").unwrap());
         app.world_mut()
-            .spawn(Project::bundle(id.clone(), "two", path, "", "").unwrap());
+            .spawn(ProjectBundle::new(id.clone(), "two", path, "", "").unwrap());
 
         app.update();
 
         assert_eq!(
-            app.world().resource::<ProjectIndex>().entity(&id),
-            Err(crate::ProjectLookupError::Duplicate(id))
+            app.world()
+                .resource::<vmux_ecs::IdentityIndex<Project>>()
+                .entity(&id),
+            Err(vmux_ecs::IdentityLookupError::Duplicate(id))
+        );
+    }
+
+    #[test]
+    fn project_refs_link_sessions_and_spaces_by_stable_identity() {
+        let mut app = App::new();
+        app.add_plugins((
+            vmux_session::SessionDomainPlugin,
+            vmux_ecs::IdentityIndexPlugin::<Project>::default(),
+        ))
+        .add_systems(
+            Update,
+            (rebuild_project_index, reconcile_project_refs).chain(),
+        )
+        .add_systems(PostUpdate, resolve_project_targets);
+        let id = Id::<Project>::new("vmux://projects/github.com/vmux-ai/vmux");
+        let root = PathBuf::from("/projects/vmux");
+        let project = app
+            .world_mut()
+            .spawn(ProjectBundle::new(id.clone(), "vmux", root.clone(), "", "").unwrap())
+            .id();
+        let session = app
+            .world_mut()
+            .spawn((
+                vmux_session::Session,
+                Id::<vmux_session::Session>::new("session-1"),
+                vmux_ecs::Cwd(root.join(".worktrees/vmx-233")),
+            ))
+            .id();
+        let space = app
+            .world_mut()
+            .spawn(vmux_layout::space::Space::bundle(Id::new("space-1")))
+            .insert(vmux_layout::space::EffectiveStartupDir(Some(
+                root.join("client"),
+            )))
+            .id();
+
+        app.update();
+
+        assert_eq!(app.world().get::<ProjectRef>(session).unwrap().id(), &id);
+        assert_eq!(app.world().get::<ProjectRef>(space).unwrap().id(), &id);
+        assert_eq!(
+            app.world().get::<ProjectTarget>(session).unwrap().entity(),
+            project
+        );
+        assert_eq!(
+            app.world().get::<ProjectTarget>(space).unwrap().entity(),
+            project
         );
     }
 

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use bevy::prelude::*;
 use moonshine_save::prelude::Save;
@@ -20,8 +20,7 @@ impl Plugin for ConnectionPlugin {
             .register_persistence_type::<ProfilePersistence, CanAccess>()
             .register_type::<ConnectionState>()
             .init_resource::<CredentialVault>()
-            .init_resource::<ConnectionIndex>()
-            .init_resource::<IndexedConnections>()
+            .add_plugins(vmux_ecs::IdentityIndexPlugin::<Connection>::default())
             .add_message::<ConnectRequest>()
             .add_message::<DisconnectRequest>()
             .configure_sets(
@@ -123,27 +122,9 @@ pub struct Disconnected {
     pub provider: ProviderKey,
 }
 
-#[derive(Resource, Default)]
-pub struct ConnectionIndex {
-    entities: HashMap<Id<Connection>, Entity>,
-    duplicates: HashSet<Id<Connection>>,
-}
-
-impl ConnectionIndex {
-    pub fn entity(&self, id: &Id<Connection>) -> Result<Option<Entity>, String> {
-        if self.duplicates.contains(id) {
-            return Err(format!("duplicate connection ID `{id}`"));
-        }
-        Ok(self.entities.get(id).copied())
-    }
-}
-
-#[derive(Resource, Default)]
-struct IndexedConnections(HashSet<Entity>);
-
 fn connect(
     mut requests: MessageReader<ConnectRequest>,
-    index: Res<ConnectionIndex>,
+    index: Res<vmux_ecs::IdentityIndex<Connection>>,
     providers: Query<&ProviderKey, With<AuthProviderDefinition>>,
     mut commands: Commands,
 ) {
@@ -170,37 +151,13 @@ fn connect(
     }
 }
 
-fn rebuild(
-    connections: Query<(Entity, &Id<Connection>), With<Connection>>,
-    changed: Query<(), (With<Connection>, Added<Id<Connection>>)>,
-    mut removed_connections: RemovedComponents<Connection>,
-    mut removed_ids: RemovedComponents<Id<Connection>>,
-    mut current: ResMut<ConnectionIndex>,
-    mut indexed: ResMut<IndexedConnections>,
-) {
-    let removed_connection = removed_connections
-        .read()
-        .any(|entity| indexed.0.contains(&entity));
-    let removed_id = removed_ids.read().any(|entity| indexed.0.contains(&entity));
-    if changed.is_empty() && !removed_connection && !removed_id {
-        return;
-    }
-
-    let mut next = ConnectionIndex::default();
-    let mut next_indexed = HashSet::new();
-    for (entity, id) in &connections {
-        next_indexed.insert(entity);
-        if next.entities.insert(id.clone(), entity).is_some() {
-            next.duplicates.insert(id.clone());
-        }
-    }
-    *current = next;
-    indexed.0 = next_indexed;
+fn rebuild(mut index: vmux_ecs::IdentityIndexWriter<Connection>) {
+    index.rebuild();
 }
 
 fn disconnect(
     mut requests: MessageReader<DisconnectRequest>,
-    index: Res<ConnectionIndex>,
+    index: Res<vmux_ecs::IdentityIndex<Connection>>,
     mut connections: Query<(&Id<Connection>, &ProviderKey, &mut ConnectionState), With<Connection>>,
     mut vault: ResMut<CredentialVault>,
     mut commands: Commands,
@@ -261,7 +218,7 @@ mod tests {
 
         let entity = app
             .world()
-            .resource::<ConnectionIndex>()
+            .resource::<vmux_ecs::IdentityIndex<Connection>>()
             .entity(&id)
             .unwrap()
             .unwrap();

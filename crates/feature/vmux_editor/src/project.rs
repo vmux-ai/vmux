@@ -1,21 +1,14 @@
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 use vmux_api::Id;
+pub use vmux_api::project::Project;
 
-#[vmux_api::contract(Copy, Default, Eq)]
-#[derive(Component, Reflect)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_editor"]
-pub struct Project;
-
-impl Project {
-    pub fn bundle(
-        id: Id<Self>,
+impl ProjectBundle {
+    pub fn new(
+        id: Id<Project>,
         name: impl Into<String>,
         path: PathBuf,
         source: impl Into<String>,
@@ -25,8 +18,9 @@ impl Project {
         if name.trim().is_empty() {
             return Err("project name must not be empty".to_string());
         }
-        Ok(ProjectBundle {
-            project: Self,
+        Ok(Self {
+            save: Save,
+            project: Project,
             id,
             name: Name::new(name),
             path: ProjectPath::new(path)?,
@@ -38,6 +32,7 @@ impl Project {
 
 #[derive(Bundle)]
 pub struct ProjectBundle {
+    save: Save,
     project: Project,
     id: Id<Project>,
     name: Name,
@@ -114,39 +109,23 @@ impl ProjectOwner {
 #[relationship_target(relationship = ProjectOwner, linked_spawn)]
 pub struct OwnedProjects(Vec<Entity>);
 
-#[derive(Resource, Default)]
-pub struct ProjectIndex {
-    entities: HashMap<Id<Project>, Entity>,
-    duplicates: HashSet<Id<Project>>,
-}
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = ProjectSources)]
+pub struct ProjectTarget(Entity);
 
-impl ProjectIndex {
-    pub fn entity(&self, id: &Id<Project>) -> Result<Option<Entity>, ProjectLookupError> {
-        if self.duplicates.contains(id) {
-            return Err(ProjectLookupError::Duplicate(id.clone()));
-        }
-        Ok(self.entities.get(id).copied())
+impl ProjectTarget {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
     }
 
-    pub(crate) fn include(&mut self, id: Id<Project>, entity: Entity) {
-        if self.entities.insert(id.clone(), entity).is_some() {
-            self.duplicates.insert(id);
-        }
+    pub const fn entity(&self) -> Entity {
+        self.0
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProjectLookupError {
-    Duplicate(Id<Project>),
-}
-
-impl std::fmt::Display for ProjectLookupError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Duplicate(id) => write!(formatter, "duplicate project ID `{id}`"),
-        }
-    }
-}
+#[derive(Component, Debug)]
+#[relationship_target(relationship = ProjectTarget)]
+pub struct ProjectSources(Vec<Entity>);
 
 #[vmux_api::contract(Eq)]
 pub struct ProjectEntry {

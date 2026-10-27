@@ -12,6 +12,8 @@ pub use component::{
     TransitionType, UnixMillis, UpdatedAt, Url, Visit, VisitCount, VisitedUrl, WindowFullscreen,
     WindowFullscreenSet,
 };
+#[cfg(host)]
+pub use identity::{IdentityIndex, IdentityIndexPlugin, IdentityIndexWriter, IdentityLookupError};
 #[cfg(all(host, feature = "host"))]
 pub use launcher::{
     CommandBarContribution, CommandBarContributionActivated, CommandBarQueryChanged,
@@ -66,6 +68,8 @@ mod component;
 pub mod event;
 #[cfg(all(host, feature = "host"))]
 pub mod host_spawn;
+#[cfg(host)]
+mod identity;
 #[cfg(all(host, feature = "host"))]
 pub mod launcher;
 #[cfg(all(host, feature = "host"))]

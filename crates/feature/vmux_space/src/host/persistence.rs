@@ -330,7 +330,7 @@ impl SpaceSaveEntities<'_, '_> {
     }
 }
 
-const STORE_SCHEMA_VERSION: u32 = 4;
+const STORE_SCHEMA_VERSION: u32 = 5;
 const STORE_NAME: &str = "workspace";
 
 #[derive(Component)]

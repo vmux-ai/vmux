@@ -19,23 +19,78 @@ pub(crate) struct ConversationPlugin;
 
 impl Plugin for ConversationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<SnapshotReceived>()
+        app.add_plugins(vmux_ecs::IdentityIndexPlugin::<SerializedMember, Member>::default())
+            .add_message::<SnapshotReceived>()
             .add_message::<ConversationAppendReceived>()
             .add_message::<OperationReceived>()
             .add_message::<OperationCommitted>()
+            .register_persisted::<Member>()
+            .register_persisted::<Id<SerializedMember>>()
+            .register_persisted::<MemberRole>()
+            .register_persisted::<MemberKind>()
+            .register_persisted::<ActorRef>()
             .register_persisted::<Document>()
             .register_persisted::<DocumentKind>()
-            .add_systems(Update, (ensure, sync_agent, materialize));
+            .add_systems(
+                Update,
+                (
+                    ensure,
+                    sync_agent,
+                    materialize,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    rebuild_member_index,
+                    resolve_event_actors,
+                )
+                    .chain(),
+            );
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
 pub struct Member;
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 #[type_path = "vmux_session"]
 pub struct ConversationEvent;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct ActorRef(Id<SerializedMember>);
+
+impl ActorRef {
+    pub fn new(id: Id<SerializedMember>) -> Self {
+        Self(id)
+    }
+
+    pub fn id(&self) -> &Id<SerializedMember> {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = AuthoredEvents)]
+pub struct ActorTarget(Entity);
+
+impl ActorTarget {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = ActorTarget)]
+pub struct AuthoredEvents(Vec<Entity>);
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 #[component(immutable)]
@@ -251,6 +306,33 @@ fn sync_agent(
     }
 }
 
+fn rebuild_member_index(mut index: vmux_ecs::IdentityIndexWriter<SerializedMember, Member>) {
+    index.rebuild();
+}
+
+fn resolve_event_actors(
+    index: Res<vmux_ecs::IdentityIndex<SerializedMember>>,
+    events: Query<(Entity, Ref<ActorRef>, Option<&ActorTarget>), With<ConversationEvent>>,
+    mut commands: Commands,
+) {
+    for (entity, actor, current) in &events {
+        if !index.is_changed() && !actor.is_changed() {
+            continue;
+        }
+        let target = index.entity(actor.id()).ok().flatten();
+        match (target, current.map(ActorTarget::entity)) {
+            (Some(target), Some(current)) if target == current => {}
+            (Some(target), _) => {
+                commands.entity(entity).insert(ActorTarget::new(target));
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<ActorTarget>();
+            }
+            (None, None) => {}
+        }
+    }
+}
+
 fn materialize(
     mut snapshots: MessageReader<SnapshotReceived>,
     mut appended: MessageReader<ConversationAppendReceived>,
@@ -261,7 +343,7 @@ fn materialize(
         (
             Entity,
             &Id<SerializedEvent>,
-            &Id<SerializedMember>,
+            &ActorRef,
             Option<&Id<ClientOperation>>,
             &Sequence,
             Option<&ReplyToId>,
@@ -308,7 +390,7 @@ fn materialize(
             let Ok((
                 entity,
                 event_id,
-                _actor_id,
+                _actor,
                 client_op_id,
                 sequence,
                 reply_to,
@@ -534,7 +616,7 @@ impl EventMaterializer<'_, '_> {
             let mut entity_commands = self.commands.entity(entity);
             entity_commands.insert((
                 event.event_id.clone(),
-                event.actor_id.clone(),
+                ActorRef::new(event.actor_id.clone()),
                 Sequence(event.server_seq),
                 timestamp,
                 MessageContent(event.message.clone()),
@@ -568,7 +650,7 @@ impl EventMaterializer<'_, '_> {
                 ConversationEvent,
                 MaterializedEvent,
                 event.event_id.clone(),
-                event.actor_id.clone(),
+                ActorRef::new(event.actor_id.clone()),
                 Sequence(event.server_seq),
                 timestamp,
                 MessageContent(event.message.clone()),
@@ -718,7 +800,7 @@ mod tests {
                 ConversationEvent,
                 MaterializedEvent,
                 Id::<SerializedEvent>::new("pending-1"),
-                SerializedMember::local_id(&session_id),
+                ActorRef::new(SerializedMember::local_id(&session_id)),
                 client_op_id.clone(),
                 Sequence(0),
                 CreatedAt::new(1),

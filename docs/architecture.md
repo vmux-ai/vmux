@@ -577,6 +577,12 @@ entities. Replay orders operations by sequence and rejects duplicate identities,
 sequences, and non-monotonic revisions. Compaction removes only entries covered by a snapshot and
 every replica acknowledgement; tombstones additionally remain until their retention window ends.
 Provider synchronization stays outside this replication log.
+Session roots use that log for creation, metadata, workflow, project, archive, and taxonomy
+mutations. Each accepted operation carries an operation ID, actor, target, captured revision,
+committed revision, sequence, timestamp, and typed payload. Duplicate operation IDs are idempotent;
+stale captured revisions are rejected before canonical state changes. A `Created` operation can
+materialize a missing Session root, so a snapshot plus later operations and a full operation replay
+share one mutation path.
 
 ---
 
@@ -1108,8 +1114,9 @@ neither domain introduces a parallel `*Id` string wrapper.
 The Projects page reconciles repository discovery into profile-owned durable Project entities
 composed from `Project`, `Id<Project>`, `Name`, canonical `ProjectPath`, and `ProjectSource`.
 Branch data remains a rebuildable cache, archive state is the shared `ArchivedAt` component, and a
-duplicate-detecting `ProjectIndex` serves lookup. UI catalog rows are projections of those entities,
-not a second archive store.
+duplicate-detecting `IdentityIndex<Project>` serves lookup. Session and Space roots persist
+`ProjectRef(Id<Project>)`; the project owner resolves local `ProjectTarget` relationships from
+canonical paths. UI catalog rows are projections of those entities, not a second archive store.
 Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,
 `Avatar`, and `Icon`. Sessions resolve that child through `Profiles`, so agent presentation never
 overloads the Session's canonical task name.
@@ -1128,6 +1135,12 @@ inside the typed request and emits a typed creation event before navigation. Lay
 the Session entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
+Labels and cycles are durable editable entities with `Id<Label>` and `Id<Cycle>`. Session task
+properties remain split into project, assignee, cycle, label-assignment, priority, estimate, and due
+date components. Stable references persist; duplicate-detecting shared identity indexes rebuild
+local assignee, cycle, label, workflow-state, and project relationships after restore. Conversation
+members are durable owned entities, while events keep `ActorRef(Id<Member>)` separate from the
+resolved local actor relationship.
 
 `vmux_acp` attaches transient runtime and ACP capability state to Session entities. Provider
 session identity lives on a persisted `ExternalLink` child as `ProviderKey`, `ExternalScopeRef`,

@@ -45,6 +45,7 @@ pub mod open_target;
 pub mod page;
 pub mod page_metadata;
 pub mod process_id;
+pub mod project;
 pub mod prompt_media;
 pub mod protocol;
 pub mod route;

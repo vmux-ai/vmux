@@ -12,9 +12,10 @@ pub use catalog::{
 };
 #[cfg(host)]
 pub use conversation::{
-    ConversationAppendReceived, ConversationEvent, Document, DocumentKind, MaterializedEvent,
-    Member, MessageContent, MessageDelivery, OperationCommitted, OperationReceived, Replies,
-    ReplyTo, ReplyToId, Sequence, SnapshotReceived, Transcript, Transcripts,
+    ActorRef, ActorTarget, AuthoredEvents, ConversationAppendReceived, ConversationEvent, Document,
+    DocumentKind, MaterializedEvent, Member, MessageContent, MessageDelivery, OperationCommitted,
+    OperationReceived, Replies, ReplyTo, ReplyToId, Sequence, SnapshotReceived, Transcript,
+    Transcripts,
 };
 #[cfg(feature = "app")]
 pub use host::SessionPlugin;
@@ -31,13 +32,24 @@ pub use model::{
     WorkflowStateTarget,
 };
 #[cfg(host)]
-pub use model::{WorkflowStateIndex, WorkflowStateLookupError};
+pub use mutation::{
+    CreatedMutation, SessionMutation, SessionMutationCommitSet, SessionMutationCommitted,
+    SessionMutationReceiveSet, SessionMutationRejected, SessionMutationRejection,
+    SessionMutationRequest,
+};
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};
 pub use session::{
     AgentConversationTitle, ApprovalPolicy, PromptQueue, QueuedPrompt, TitlePending,
     TranscriptLoading,
 };
+pub use taxonomy::{
+    AssignedSessions, AssigneeRef, AssigneeTarget, Cycle, CycleBundle, CycleEndsAt, CycleRef,
+    CycleSessions, CycleStartsAt, CycleTarget, DueAt, Estimate, Label, LabelAssignment,
+    LabelAssignments, LabelBundle, LabelColor, LabelRef, LabelTarget, Priority,
+};
+#[cfg(host)]
+pub use taxonomy::{CycleSaveRequest, LabelSaveRequest, TaxonomyUpdateRequest};
 pub use title::ConversationTitle;
 pub use vmux_api::{Id, session::Session};
 
@@ -71,14 +83,17 @@ mod catalog;
 #[cfg(host)]
 mod conversation;
 mod model;
+#[cfg(host)]
+mod mutation;
 mod route;
+mod taxonomy;
 mod title;
 
 #[cfg(host)]
-pub(crate) struct DomainPlugin;
+pub struct SessionDomainPlugin;
 
 #[cfg(host)]
-impl Plugin for DomainPlugin {
+impl Plugin for SessionDomainPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             model::EntityPlugin,
@@ -86,6 +101,7 @@ impl Plugin for DomainPlugin {
             model::WorkflowStatePlugin,
             catalog::CatalogPlugin,
             conversation::ConversationPlugin,
+            taxonomy::TaxonomyPlugin,
         ));
     }
 }

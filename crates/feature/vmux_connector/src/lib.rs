@@ -5,7 +5,7 @@ pub use link::{
     ExternalLink, ExternalLinkConflict, ExternalLinkIdentity, ExternalLinkIndex, ExternalLinkSpec,
     ExternalScopeRef, PrimaryWorkItem, ReviewArtifact, SyncPolicy, SynchronizedFields,
 };
-pub use scope::{CanAccess, ExternalScope, ExternalScopeIndex, ExternalScopeLookupError};
+pub use scope::{CanAccess, ExternalScope};
 pub use value::{
     AccountExternalId, CanonicalField, ExternalHost, ExternalId, ExternalKey, ExternalNamespace,
     ExternalUrl, ProviderKey, ResourceKind,
