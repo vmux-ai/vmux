@@ -1,7 +1,10 @@
 use crate::cn::cn;
+use crate::favicon::FaviconSource;
 use dioxus::prelude::*;
+use vmux_api::avatar::IdenticonSpec;
 
 const AVATAR: &str = "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--avatar-background)] font-semibold text-white";
+const AGENT_THUMBNAIL: &str = "[&_img]:size-3/4 [&_img]:object-contain";
 const GENERATED_AVATAR_COLORS: [&str; 6] = [
     "#fda4af", "#fdba74", "#fde68a", "#86efac", "#67e8f9", "#c4b5fd",
 ];
@@ -16,6 +19,13 @@ pub fn Avatar(
 ) -> Element {
     let class = cn([AVATAR, class.as_str()]);
     let avatar_seed = if seed.trim().is_empty() { &alt } else { &seed };
+    let background = if src.is_some() && background.trim().is_empty() {
+        "transparent".to_string()
+    } else if background.trim().is_empty() {
+        GeneratedAvatar::profile_color(avatar_seed).to_string()
+    } else {
+        background
+    };
     let generated = GeneratedAvatar::generate(avatar_seed, &background);
     rsx! {
         div {
@@ -72,6 +82,79 @@ pub fn Avatar(
     }
 }
 
+#[component]
+pub fn AgentThumbnail(
+    src: Option<String>,
+    seed: String,
+    background: String,
+    #[props(default)] alt: String,
+    #[props(default)] class: String,
+) -> Element {
+    let src = AgentThumbnailSource::resolve(src, &seed);
+    if let Some(src) = src.as_ref() {
+        return rsx! {
+            img {
+                class: cn(["shrink-0 object-contain", class.as_str()]),
+                src: src.clone(),
+                alt,
+            }
+        };
+    }
+    let background = AgentThumbnailBackground::resolve(&background, &seed, src.as_deref());
+    let class = cn([AGENT_THUMBNAIL, class.as_str()]);
+    rsx! {
+        Avatar { src, seed, background, alt, class }
+    }
+}
+
+struct AgentThumbnailSource;
+
+impl AgentThumbnailSource {
+    fn resolve(src: Option<String>, seed: &str) -> Option<String> {
+        FaviconSource::agent(seed).or(src)
+    }
+}
+
+#[component]
+pub fn Identicon(seed: String, #[props(default)] alt: String, class: String) -> Element {
+    let variant = try_consume_context::<crate::hooks::UiStateBinding<crate::theme::ThemeUiState>>()
+        .map(|theme| (theme.state)().project_icon)
+        .unwrap_or_default();
+    let src = IdenticonSpec::favicon_with_variant(&seed, variant);
+    rsx! {
+        img {
+            class,
+            src,
+            alt,
+        }
+    }
+}
+
+#[component]
+pub fn IdentityOrb(seed: String, #[props(default)] alt: String, class: String) -> Element {
+    rsx! {
+        Identicon {
+            seed,
+            alt,
+            class: cn([class.as_str(), "shrink-0 rounded-full"]),
+        }
+    }
+}
+
+struct AgentThumbnailBackground;
+
+impl AgentThumbnailBackground {
+    fn resolve(background: &str, seed: &str, src: Option<&str>) -> String {
+        if src.is_some() {
+            return "transparent".to_string();
+        }
+        if !background.trim().is_empty() {
+            return background.to_string();
+        }
+        vmux_api::avatar::AvatarSpec::agent_color(seed)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct GeneratedAvatar {
     background_color: &'static str,
@@ -87,6 +170,11 @@ struct GeneratedAvatar {
 }
 
 impl GeneratedAvatar {
+    fn profile_color(seed: &str) -> &'static str {
+        let mut random = AvatarRandom::from(seed);
+        GENERATED_AVATAR_COLORS[random.below(GENERATED_AVATAR_COLORS.len())]
+    }
+
     fn generate(seed: &str, shape_color: &str) -> Self {
         let mut random = AvatarRandom::from(seed);
         let background_color = GENERATED_AVATAR_COLORS[random.below(GENERATED_AVATAR_COLORS.len())];
@@ -191,7 +279,38 @@ impl AvatarRandom {
 
 #[cfg(test)]
 mod tests {
-    use super::GeneratedAvatar;
+    use super::{AgentThumbnailBackground, AgentThumbnailSource, GeneratedAvatar};
+
+    #[test]
+    fn known_agent_brand_overrides_a_generic_profile_icon() {
+        assert_eq!(
+            AgentThumbnailSource::resolve(
+                Some("vmux://acp/assets/favicons/acp.svg".into()),
+                "codex"
+            ),
+            Some("assets/agent-logos/codex.png".into())
+        );
+        assert_eq!(
+            AgentThumbnailSource::resolve(Some("custom.svg".into()), "custom-agent"),
+            Some("custom.svg".into())
+        );
+    }
+
+    #[test]
+    fn agent_thumbnail_does_not_add_a_surface_behind_logos() {
+        assert_eq!(
+            AgentThumbnailBackground::resolve(
+                "",
+                "hey",
+                Some("https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg")
+            ),
+            "transparent"
+        );
+        assert_eq!(
+            AgentThumbnailBackground::resolve("#123456", "hey", Some("mistral-vibe.svg")),
+            "transparent"
+        );
+    }
 
     #[test]
     fn generated_avatar_is_stable_for_a_profile() {

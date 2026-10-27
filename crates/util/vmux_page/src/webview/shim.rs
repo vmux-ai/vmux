@@ -141,13 +141,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         );
         return;
       case 'revealElement':
-        for (const id of request.elements) {
-          const target = document.getElementById(id);
-          if (target) {
-            target.scrollIntoView({ block: request.block, inline: 'nearest' });
-            break;
+        requestAnimationFrame(() => {
+          for (const id of request.elements) {
+            const target = document.getElementById(id);
+            if (target) {
+              target.scrollIntoView({ block: request.block, inline: 'nearest', behavior: 'instant' });
+              break;
+            }
           }
-        }
+        });
         return;
       case 'textOffsetAtPoint':
         window.ipc.postMessage(
@@ -178,6 +180,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       case 'scrollIntoView':
         el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         break;
+      case 'scrollIntoViewVertical': {
+        const horizontal = [];
+        for (let node = el.parentElement; node; node = node.parentElement) {
+          if (node.scrollWidth > node.clientWidth) horizontal.push([node, node.scrollLeft]);
+        }
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        for (const [node, left] of horizontal) node.scrollLeft = left;
+        break;
+      }
       case 'scrollTo':
         el.scrollTo({ top: request.top, behavior: 'instant' });
         break;
@@ -217,6 +228,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const carriesImage = items.some((item) => item.type.startsWith('image/'))
       || (data.files && data.files.length > 0);
     if (carriesImage) event.preventDefault();
+  }, true);
+  document.addEventListener('contextmenu', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      event.preventDefault();
+      return;
+    }
+    const editable = target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])');
+    if (!editable) event.preventDefault();
   }, true);
   const pumpEdits = async () => {
     let applied = false;
@@ -289,6 +309,11 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       window.ipc.postMessage('link:' + href);
     });
   };
+  const reportInteractions = () => {
+    document.addEventListener('pointerdown', () => {
+      window.ipc.postMessage('interaction:');
+    }, true);
+  };
   const reportFavicon = () => {
     const icon = document.querySelector('link[rel~="icon"][href]');
     window.ipc.postMessage('favicon:' + (icon ? icon.href : ''));
@@ -302,8 +327,16 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       subtree: true,
     });
   };
+  let started = false;
   window.vmuxWry = {
-    start() { holdLinks(); watchFavicon(); pumpEdits(); },
+    start() {
+      if (started) return;
+      started = true;
+      holdLinks();
+      reportInteractions();
+      watchFavicon();
+      pumpEdits();
+    },
     binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
     binListen(id, callback) {
       const existing = listeners.get(id) || [];

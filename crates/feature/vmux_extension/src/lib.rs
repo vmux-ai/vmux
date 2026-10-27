@@ -33,7 +33,5 @@ pub mod match_pattern;
 pub mod protocol;
 #[cfg(host)]
 pub mod store;
-#[cfg(ui)]
-mod ui;
 #[cfg(host)]
 pub mod webstore;

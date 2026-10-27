@@ -13,6 +13,7 @@ use std::sync::atomic::Ordering;
 use vmux_ecs::overlay::Overlay;
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
+use vmux_layout::overlay::{LayoutOverlayActive, LayoutOverlayDismissRevision};
 
 use crate::host::{CefPointerRegions, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE};
 
@@ -24,6 +25,8 @@ impl Plugin for InputPlugin {
             PreUpdate,
             (
                 publish_layout_pointer_inside,
+                #[cfg(target_os = "macos")]
+                dismiss_layout_overlay_from_native_pointer,
                 forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
                 forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
             )
@@ -32,6 +35,53 @@ impl Plugin for InputPlugin {
         )
         .add_systems(PreUpdate, log_command_bar_keyboard)
         .add_systems(Update, track_interaction);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn dismiss_layout_overlay_from_native_pointer(
+    windows: Query<&Window>,
+    mut layouts: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    active_overlays: Query<(), With<LayoutOverlayActive>>,
+    cef_regions: CefPointerRegions,
+    mut previous_sequence: Local<u64>,
+    mut previous_pressed: Local<bool>,
+    mut commands: Commands,
+) {
+    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
+        return;
+    };
+    if pointer.sequence == *previous_sequence {
+        return;
+    }
+    *previous_sequence = pointer.sequence;
+    let pressed = pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle;
+    let began = pressed && !*previous_pressed;
+    *previous_pressed = pressed;
+    if !began {
+        return;
+    }
+    for (layout, host, mut revision) in &mut layouts {
+        if !active_overlays.contains(layout) {
+            continue;
+        }
+        let Ok(window) = windows.get(host.0) else {
+            continue;
+        };
+        let scale = window.resolution.scale_factor();
+        if !scale.is_finite() || scale <= 0.0 {
+            continue;
+        }
+        let position = pointer.position_px / scale;
+        if cef_regions.contains(position) {
+            continue;
+        }
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                layout,
+                &revision.next_effect(),
+            ),
+        );
     }
 }
 
@@ -144,10 +194,12 @@ fn forward_layout_cef_mouse_button(
     windows: Query<&Window>,
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
-    layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
+    mut layout_q: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    active_overlays: Query<(), With<LayoutOverlayActive>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegions,
     mut captured: Local<Option<Entity>>,
+    mut commands: Commands,
 ) {
     if suppress.0 {
         for _ in events.read() {}
@@ -161,9 +213,10 @@ fn forward_layout_cef_mouse_button(
         let Ok(window) = windows.get(event.window) else {
             continue;
         };
-        let Some(layout) = layout_q
-            .iter()
-            .find_map(|(entity, host)| (host.0 == event.window).then_some(entity))
+        let Some((layout, mut dismiss_revision)) =
+            layout_q.iter_mut().find_map(|(entity, host, revision)| {
+                (host.0 == event.window).then_some((entity, revision))
+            })
         else {
             continue;
         };
@@ -178,7 +231,16 @@ fn forward_layout_cef_mouse_button(
         let Some(position) = position else {
             continue;
         };
-        let inside = pointer_capture_q.contains(layout) || cef_regions.contains(position);
+        let in_region = cef_regions.contains(position);
+        if event.state == ButtonState::Pressed && active_overlays.contains(layout) && !in_region {
+            commands.trigger(
+                vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                    layout,
+                    &dismiss_revision.next_effect(),
+                ),
+            );
+        }
+        let inside = pointer_capture_q.contains(layout) || in_region;
         if event.state == ButtonState::Pressed && inside {
             *captured = Some(layout);
         }

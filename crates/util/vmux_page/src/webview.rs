@@ -33,6 +33,18 @@ pub enum Appearance {
     System,
 }
 
+impl Appearance {
+    fn surface_rgba(self, transparent: bool) -> (u8, u8, u8, u8) {
+        if transparent {
+            return (0, 0, 0, 0);
+        }
+        match self {
+            Self::Light => (240, 240, 240, 255),
+            Self::Dark | Self::System => (20, 20, 20, 255),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SiblingOrder {
     Front,
@@ -53,8 +65,10 @@ impl WebView {
         bounds: wry::Rect,
         embed: Embedding,
         instance: crate::Instance,
+        appearance: Appearance,
     ) -> Result<Self, wry::Error> {
         let dom = Dom::mount(page.component, instance, &embed);
+        let lifecycle = embed.lifecycle.clone();
         let current_page = Rc::new(Cell::new(page));
         let outbox = embed.outbox.clone();
         let message = PageMessage::new(
@@ -62,6 +76,7 @@ impl WebView {
             outbox.clone(),
             dom.reads(),
             embed.waker,
+            lifecycle,
         );
         let routes = PageRoutes::new(current_page.clone(), dom.clone(), embed.assets);
         let title_outbox = outbox.clone();
@@ -74,6 +89,8 @@ impl WebView {
         };
         let webview = builder
             .with_transparent(page.transparent)
+            .with_background_color(appearance.surface_rgba(page.transparent))
+            .with_visible(false)
             .with_initialization_script(WRY_HOST_SHIM)
             .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
                 routes.serve(request, responder);
@@ -89,12 +106,14 @@ impl WebView {
             .build_as_child(window)?;
         #[cfg(target_os = "macos")]
         macos::LinkPreviewPolicy::forbid(&webview);
-        Ok(Self {
+        let surface = Self {
             webview,
             dom,
             page: current_page,
             outbox,
-        })
+        };
+        surface.set_appearance(appearance);
+        Ok(surface)
     }
 
     pub fn navigate(&self, page: &'static Page, instance: crate::Instance) -> bool {
@@ -105,6 +124,8 @@ impl WebView {
         self.outbox.set_page(page.url);
         if remounted {
             self.dom.remount(page.component, instance);
+        } else {
+            self.dom.update_instance(instance);
         }
         if document_changed && let Err(error) = self.webview.load_url(page.document_url()) {
             error!("vmux_page: navigation failed for {}: {error}", page.url);
@@ -131,6 +152,12 @@ impl WebView {
 
     pub fn render(&self) {
         self.dom.flush_to_page();
+    }
+
+    pub fn evaluate_script(&self, script: &str) {
+        if let Err(error) = self.webview.evaluate_script(script) {
+            error!("vmux_page: script evaluation failed: {error}");
+        }
     }
 
     pub fn deliver(&self, id: &str, payload: &[u8]) {

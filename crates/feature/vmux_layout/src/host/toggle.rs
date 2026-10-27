@@ -1,9 +1,11 @@
 use super::Header;
 use crate::Open;
+use crate::event::CEF_RESERVED_HEIGHT_PX;
 use crate::settings::LayoutSettings;
-use crate::side_sheet::SideSheet;
+use crate::side_sheet::{SideSheet, SideSheetPosition};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::HostWindow;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
@@ -23,7 +25,11 @@ impl Plugin for TogglePlugin {
         app.add_message::<ToggleLayoutRequest>()
             .add_systems(
                 Update,
-                handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+                (
+                    handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+                    animate,
+                )
+                    .chain(),
             )
             .add_systems(
                 PostUpdate,
@@ -47,12 +53,44 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
 #[derive(Component, Default, Debug)]
 pub struct LayoutHidden;
 
+#[derive(Component)]
+struct LayoutTransition {
+    hide: bool,
+    elapsed: f32,
+    header_start: f32,
+    side_sheet_start: f32,
+    pad_top_start: f32,
+    pad_left_start: f32,
+}
+
+impl LayoutTransition {
+    const DURATION: f32 = 0.2;
+
+    fn progress(&mut self, delta: f32) -> f32 {
+        self.elapsed = (self.elapsed + delta).min(Self::DURATION);
+        let linear = self.elapsed / Self::DURATION;
+        1.0 - (1.0 - linear).powi(3)
+    }
+
+    fn complete(&self) -> bool {
+        self.elapsed >= Self::DURATION
+    }
+
+    fn value(start: f32, end: f32, progress: f32) -> f32 {
+        start + (end - start) * progress
+    }
+}
+
 fn sync_window_padding(
     settings: Res<LayoutSettings>,
     hidden_windows: Query<(), With<LayoutHidden>>,
+    transitions: Query<(), With<LayoutTransition>>,
     mut window_q: Query<(&HostWindow, &mut Node), With<VmuxWindow>>,
 ) {
     for (host, mut node) in &mut window_q {
+        if transitions.contains(host.0) {
+            continue;
+        }
         let (top, left) = if hidden_windows.contains(host.0) {
             (settings.window.pad_top(), settings.window.pad_left())
         } else {
@@ -71,8 +109,9 @@ fn handle_visibility_requests(
     mut reader: MessageReader<ToggleLayoutRequest>,
     focused_window: crate::window::FocusedWindow,
     hidden_windows: Query<(), With<LayoutHidden>>,
-    header_q: Query<Entity, With<Header>>,
-    sidesheet_q: Query<Entity, With<SideSheet>>,
+    header_q: Query<(Entity, &Node), With<Header>>,
+    sidesheet_q: Query<(Entity, &SideSheetPosition, &Node), With<SideSheet>>,
+    roots: Query<(&HostWindow, &Node), With<VmuxWindow>>,
     hierarchy: crate::window::WindowHierarchy,
     mut commands: Commands,
 ) {
@@ -80,29 +119,168 @@ fn handle_visibility_requests(
         let Some(window) = focused_window.entity() else {
             continue;
         };
-        let is_hidden = !hidden_windows.contains(window);
-        if is_hidden {
+        let hide = !hidden_windows.contains(window);
+        if hide {
             commands.entity(window).insert(LayoutHidden);
         } else {
             commands.entity(window).remove::<LayoutHidden>();
         }
+        let header_start = header_q
+            .iter()
+            .find(|(entity, _)| hierarchy.get(*entity) == Some(window))
+            .and_then(|(_, node)| match node.height {
+                Val::Px(height) => Some(height),
+                _ => None,
+            })
+            .unwrap_or(if hide { CEF_RESERVED_HEIGHT_PX } else { 0.0 });
+        let side_sheet_start = sidesheet_q
+            .iter()
+            .find(|(entity, position, _)| {
+                **position == SideSheetPosition::Left && hierarchy.get(*entity) == Some(window)
+            })
+            .and_then(|(_, _, node)| match node.width {
+                Val::Px(width) => Some(width),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let (pad_top_start, pad_left_start) = roots
+            .iter()
+            .find(|(host, _)| host.0 == window)
+            .map(|(_, node)| {
+                let top = match node.padding.top {
+                    Val::Px(value) => value,
+                    _ => 0.0,
+                };
+                let left = match node.padding.left {
+                    Val::Px(value) => value,
+                    _ => 0.0,
+                };
+                (top, left)
+            })
+            .unwrap_or_default();
+        commands.entity(window).insert(LayoutTransition {
+            hide,
+            elapsed: 0.0,
+            header_start,
+            side_sheet_start,
+            pad_top_start,
+            pad_left_start,
+        });
+        if !hide {
+            for (entity, _) in &header_q {
+                if hierarchy.get(entity) == Some(window) {
+                    commands.entity(entity).insert(Open);
+                }
+            }
+            for (entity, position, _) in &sidesheet_q {
+                if *position == SideSheetPosition::Left && hierarchy.get(entity) == Some(window) {
+                    commands.entity(entity).insert(Open);
+                }
+            }
+        }
+    }
+}
 
-        if is_hidden {
-            for entity in header_q
-                .iter()
-                .chain(sidesheet_q.iter())
-                .filter(|entity| hierarchy.get(*entity) == Some(window))
-            {
-                commands.entity(entity).remove::<Open>();
-            }
+fn animate(
+    time: Res<Time>,
+    settings: Res<LayoutSettings>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut transitions: Query<(Entity, &mut LayoutTransition), With<Window>>,
+    mut layout: ParamSet<(
+        Query<(Entity, &mut Node), With<Header>>,
+        Query<(Entity, &SideSheetPosition, &mut Node), With<SideSheet>>,
+        Query<(&HostWindow, &mut Node), With<VmuxWindow>>,
+    )>,
+    hierarchy: crate::window::WindowHierarchy,
+    mut commands: Commands,
+) {
+    for (window, mut transition) in &mut transitions {
+        let progress = transition.progress(time.delta_secs());
+        let header_end = if transition.hide {
+            0.0
         } else {
-            for entity in header_q
-                .iter()
-                .chain(sidesheet_q.iter())
-                .filter(|entity| hierarchy.get(*entity) == Some(window))
-            {
-                commands.entity(entity).insert(Open);
+            CEF_RESERVED_HEIGHT_PX
+        };
+        let side_sheet_end = if transition.hide {
+            0.0
+        } else {
+            crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped()
+        };
+        let pad_top_end = if transition.hide {
+            settings.window.pad_top()
+        } else {
+            0.0
+        };
+        let pad_left_end = if transition.hide {
+            settings.window.pad_left()
+        } else {
+            0.0
+        };
+        {
+            let mut headers = layout.p0();
+            for (entity, mut node) in &mut headers {
+                if hierarchy.get(entity) == Some(window) {
+                    node.height = Val::Px(LayoutTransition::value(
+                        transition.header_start,
+                        header_end,
+                        progress,
+                    ));
+                }
             }
+        }
+        {
+            let mut side_sheets = layout.p1();
+            for (entity, position, mut node) in &mut side_sheets {
+                if *position == SideSheetPosition::Left && hierarchy.get(entity) == Some(window) {
+                    node.width = Val::Px(LayoutTransition::value(
+                        transition.side_sheet_start,
+                        side_sheet_end,
+                        progress,
+                    ));
+                }
+            }
+        }
+        {
+            let mut roots = layout.p2();
+            for (host, mut node) in &mut roots {
+                if host.0 == window {
+                    node.padding.top = Val::Px(LayoutTransition::value(
+                        transition.pad_top_start,
+                        pad_top_end,
+                        progress,
+                    ));
+                    node.padding.left = Val::Px(LayoutTransition::value(
+                        transition.pad_left_start,
+                        pad_left_end,
+                        progress,
+                    ));
+                }
+            }
+        }
+        if transition.complete() {
+            if transition.hide {
+                {
+                    let mut headers = layout.p0();
+                    for (entity, _) in &mut headers {
+                        if hierarchy.get(entity) == Some(window) {
+                            commands.entity(entity).remove::<Open>();
+                        }
+                    }
+                }
+                {
+                    let mut side_sheets = layout.p1();
+                    for (entity, position, _) in &mut side_sheets {
+                        if *position == SideSheetPosition::Left
+                            && hierarchy.get(entity) == Some(window)
+                        {
+                            commands.entity(entity).remove::<Open>();
+                        }
+                    }
+                }
+            }
+            commands.entity(window).remove::<LayoutTransition>();
+        } else if let Some(proxy) = proxy.as_deref() {
+            let _ = proxy.send_event(WinitUserEvent::WakeUp);
         }
     }
 }
@@ -235,7 +413,14 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ToggleLayoutRequest>()
-            .add_systems(Update, handle_visibility_requests);
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings { padding: 16.0 },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            })
+            .add_systems(Update, (handle_visibility_requests, animate).chain());
         let first_window = app.world_mut().spawn(Window::default()).id();
         let second_window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
@@ -245,19 +430,31 @@ mod tests {
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         let first_header = app
             .world_mut()
-            .spawn((Header, Open, ChildOf(first_root)))
+            .spawn((Header, Open, Node::default(), ChildOf(first_root)))
             .id();
         let first_sheet = app
             .world_mut()
-            .spawn((SideSheet, Open, ChildOf(first_root)))
+            .spawn((
+                SideSheet,
+                SideSheetPosition::Left,
+                Open,
+                Node::default(),
+                ChildOf(first_root),
+            ))
             .id();
         let second_header = app
             .world_mut()
-            .spawn((Header, Open, ChildOf(second_root)))
+            .spawn((Header, Open, Node::default(), ChildOf(second_root)))
             .id();
         let second_sheet = app
             .world_mut()
-            .spawn((SideSheet, Open, ChildOf(second_root)))
+            .spawn((
+                SideSheet,
+                SideSheetPosition::Left,
+                Open,
+                Node::default(),
+                ChildOf(second_root),
+            ))
             .id();
         app.world_mut()
             .resource_mut::<Messages<ToggleLayoutRequest>>()
@@ -266,9 +463,14 @@ mod tests {
         app.update();
 
         assert!(app.world().entity(first_window).contains::<LayoutHidden>());
+        assert!(
+            app.world()
+                .entity(first_window)
+                .contains::<LayoutTransition>()
+        );
         assert!(!app.world().entity(second_window).contains::<LayoutHidden>());
-        assert!(!app.world().entity(first_header).contains::<Open>());
-        assert!(!app.world().entity(first_sheet).contains::<Open>());
+        assert!(app.world().entity(first_header).contains::<Open>());
+        assert!(app.world().entity(first_sheet).contains::<Open>());
         assert!(app.world().entity(second_header).contains::<Open>());
         assert!(app.world().entity(second_sheet).contains::<Open>());
     }

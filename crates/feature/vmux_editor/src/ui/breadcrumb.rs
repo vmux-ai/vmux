@@ -1,11 +1,15 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use std::path::Path;
 use vmux_ecs::event::*;
-use vmux_ui::components::icon::Icon;
+use vmux_ui::components::avatar::IdentityOrb;
+use vmux_ui::components::breadcrumb::{BreadcrumbItem, BreadcrumbOption, BreadcrumbSeparator};
+use vmux_ui::components::manager::{ManagerIconButton, WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 use super::explorer::OutlineGlyph;
 use super::state::FileUi;
@@ -16,9 +20,13 @@ const PATH_CRUMBS_MAX: usize = 4;
 pub fn EditorBreadcrumbs(
     display_path: String,
     abs_path: String,
+    repo_root: String,
+    branch: String,
     leaf_is_dir: bool,
     outline: Vec<OutlineRow>,
     caret_line: u32,
+    search_active: bool,
+    onsearch: EventHandler<()>,
 ) -> Element {
     let menus = CrumbMenus {
         open: use_signal(|| None::<CrumbMenu>),
@@ -30,13 +38,75 @@ pub fn EditorBreadcrumbs(
         return rsx! {};
     }
     let symbols = SymbolTrail::at(&outline, caret_line);
+    let project_name = Path::new(&repo_root)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let git_url = vmux_git::GitUrl::from_path(Path::new(&repo_root));
+    let editor_url = vmux_path::FileUrl::from_path(Path::new(&abs_path), None, None, None);
+    let current_page = BreadcrumbOption {
+        label: translate("editor-editor"),
+        value: editor_url.clone(),
+        identity_seed: String::new(),
+        icon_url: "assets/favicons/editor.svg".to_string(),
+        icon: Some(vmux_api::BuiltinIcon::Code),
+    };
+    let mut contextual = vec![current_page.clone()];
+    if let Some(git_url) = git_url.clone() {
+        contextual.push(BreadcrumbOption {
+            label: translate("git-title"),
+            value: git_url,
+            identity_seed: String::new(),
+            icon_url: "assets/favicons/git.svg".to_string(),
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+        });
+    }
+    let page_options = WorkspacePage::options_with(contextual);
 
     rsx! {
-        div {
-            class: "relative z-20 flex h-7 shrink-0 items-center overflow-hidden border-b border-foreground/[0.07] bg-background/40 px-4 font-sans text-ui text-muted-foreground",
-            "aria-label": translate("editor-breadcrumb"),
-
-            div { class: "flex min-w-0 shrink items-center overflow-hidden",
+        WorkspaceBreadcrumbHeader {
+            current: current_page,
+            options: page_options,
+            actions: rsx! {
+                ManagerIconButton {
+                    label: translate("editor-show-search"),
+                    active: search_active,
+                    onclick: move |_| onsearch.call(()),
+                    LineIconView { icon: LineIcon::Search, class: "size-3.5" }
+                }
+            },
+            if !project_name.is_empty() {
+                BreadcrumbSeparator {}
+                BreadcrumbItem {
+                    label: project_name.clone(),
+                    title: repo_root.clone(),
+                    leading: rsx! {
+                        IdentityOrb {
+                            seed: repo_root.clone(),
+                            alt: project_name,
+                            class: "size-5".to_string(),
+                        }
+                    },
+                }
+            }
+            BreadcrumbSeparator {}
+            if !branch.is_empty() {
+                BreadcrumbItem {
+                    label: branch.clone(),
+                    title: repo_root.clone(),
+                    leading: rsx! {
+                        IdentityOrb {
+                            seed: branch.clone(),
+                            alt: branch,
+                            class: "size-5".to_string(),
+                        }
+                    },
+                    onclick: git_url.map(|url| EventHandler::new(move |_| vmux_ui::navigation::PageNavigation::replace(url.clone()))),
+                }
+                BreadcrumbSeparator {}
+            }
+            div { class: "flex min-w-0 shrink items-center overflow-hidden text-xs",
                 if !trail.hidden.is_empty() {
                     {
                         let hidden = trail.hidden.clone();
@@ -106,7 +176,7 @@ pub fn EditorBreadcrumbs(
                 }
             }
 
-            div { class: "flex min-w-0 shrink items-center overflow-hidden",
+            div { class: "flex min-w-0 shrink items-center overflow-hidden text-xs",
                 for (index, crumb) in symbols.crumbs.iter().enumerate() {
                     {
                         let last = index + 1 == symbols.crumbs.len();
@@ -144,6 +214,7 @@ pub fn EditorBreadcrumbs(
                     }
                 }
             }
+            }
 
             if let Some(current) = menus.current() {
                 div {
@@ -160,19 +231,13 @@ pub fn EditorBreadcrumbs(
                     pending: menus.waiting(),
                     on_close: EventHandler::new(move |()| menus.hide()),
                 }
-            }
         }
     }
 }
 
 #[component]
 fn CrumbChevron() -> Element {
-    rsx! {
-        Icon {
-            class: "h-3 w-3 shrink-0 text-foreground/25",
-            path { d: "m9 18 6-6-6-6" }
-        }
-    }
+    rsx! { BreadcrumbSeparator {} }
 }
 
 #[component]

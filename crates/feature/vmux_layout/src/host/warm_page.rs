@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::CefSystems;
-use bevy_cef::prelude::HostWindow;
+use bevy_cef::prelude::{CefSystems, HostWindow, UiInput};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::page::{PageReady, PrewarmPage};
 use vmux_ecs::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -42,9 +41,10 @@ fn handle_registered_page_open(
     pages: Query<&PrewarmPage>,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     spares: Query<(Entity, &WarmPageSpare), With<PageReady>>,
+    mut metadata: Query<&mut PageMetadata>,
     mut commands: Commands,
 ) {
-    let pages: HashMap<&str, &PrewarmPage> = pages.iter().map(|page| (page.url, page)).collect();
+    let pages = pages.iter().collect::<Vec<_>>();
     let mut available: HashMap<&str, Vec<Entity>> = HashMap::new();
     for (entity, spare) in &spares {
         available.entry(spare.url).or_default().push(entity);
@@ -52,24 +52,36 @@ fn handle_registered_page_open(
     let mut handled_stacks = HashSet::new();
 
     for (entity, task) in &tasks {
-        let Some(page) = pages.get(task.url.as_str()).copied() else {
+        let Some(page) = pages
+            .iter()
+            .copied()
+            .find(|page| page.answers_for(&task.url))
+        else {
             continue;
         };
         if handled_stacks.insert((task.stack, page.url)) {
             commands.entity(task.stack).despawn_children();
             commands.entity(task.stack).insert(PageMetadata {
-                url: page.url.to_string(),
+                url: task.url.clone(),
                 title: page.title.to_string(),
                 ..default()
             });
             if let Some(spare) = available.get_mut(page.url).and_then(Vec::pop) {
+                if let Ok(mut page_metadata) = metadata.get_mut(spare) {
+                    page_metadata.url.clone_from(&task.url);
+                    page_metadata.title = page.title.to_string();
+                }
                 commands
                     .entity(spare)
                     .insert((ChildOf(task.stack), KeyboardOwner))
                     .remove::<WarmPageSpare>();
+                commands.trigger(UiInput {
+                    webview: spare,
+                    payload: PageReady {},
+                });
             } else {
                 let webview = commands
-                    .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
+                    .spawn(crate::cef::Browser::hosted_page(&task.url, page.title))
                     .id();
                 commands
                     .entity(webview)
@@ -116,7 +128,7 @@ fn maintain_registered_page_pools(
             }
             remaining -= 1;
             let webview = commands
-                .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
+                .spawn(crate::cef::Browser::hosted_page(page.url, page.title))
                 .id();
             commands
                 .entity(webview)
@@ -154,14 +166,24 @@ fn pool_node_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_ecs::page::HostsPage;
     use vmux_ecs::{PageOpenId, PageOpenTask};
 
     use crate::cef::Browser;
 
+    #[derive(Resource, Default)]
+    struct ReadyEvents(Vec<Entity>);
+
+    fn record_ready(trigger: On<UiInput<PageReady>>, mut events: ResMut<ReadyEvents>) {
+        events.0.push(trigger.event().webview);
+    }
+
     #[test]
     fn registered_page_claims_ready_spare() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.init_resource::<ReadyEvents>()
+            .add_plugins(MinimalPlugins)
+            .add_observer(record_ready)
             .add_systems(Update, handle_registered_page_open);
         app.world_mut().spawn(PrewarmPage {
             host: "history",
@@ -177,6 +199,10 @@ mod tests {
                     url: "vmux://history/",
                 },
                 PageReady {},
+                PageMetadata {
+                    url: "vmux://history/".to_string(),
+                    ..default()
+                },
             ))
             .id();
         let task = app
@@ -184,7 +210,7 @@ mod tests {
             .spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: "vmux://history/".to_string(),
+                url: "vmux://history/2026-10-23".to_string(),
                 request_id: None,
             })
             .id();
@@ -198,6 +224,15 @@ mod tests {
             Some(stack)
         );
         assert!(app.world().get::<WarmPageSpare>(spare).is_none());
+        assert_eq!(
+            app.world().get::<PageMetadata>(spare).unwrap().url,
+            "vmux://history/2026-10-23"
+        );
+        assert_eq!(
+            app.world().get::<PageMetadata>(stack).unwrap().url,
+            "vmux://history/2026-10-23"
+        );
+        assert_eq!(app.world().resource::<ReadyEvents>().0, [spare]);
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
     }
 
@@ -218,7 +253,7 @@ mod tests {
             .spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: "vmux://history/".to_string(),
+                url: "vmux://history/2026-10-23".to_string(),
                 request_id: None,
             })
             .id();
@@ -228,11 +263,12 @@ mod tests {
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
         let pages = app
             .world_mut()
-            .query_filtered::<&ChildOf, With<Browser>>()
+            .query_filtered::<(&ChildOf, &PageMetadata), (With<Browser>, With<HostsPage>)>()
             .iter(app.world())
-            .filter(|child| child.parent() == stack)
-            .count();
-        assert_eq!(pages, 1);
+            .filter(|(child, _)| child.parent() == stack)
+            .map(|(_, page)| page.url.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(pages, ["vmux://history/2026-10-23"]);
     }
 
     #[test]
@@ -261,7 +297,7 @@ mod tests {
 
         assert_eq!(
             app.world_mut()
-                .query_filtered::<(), With<WarmPageSpare>>()
+                .query_filtered::<(), (With<WarmPageSpare>, With<HostsPage>)>()
                 .iter(app.world())
                 .count(),
             2

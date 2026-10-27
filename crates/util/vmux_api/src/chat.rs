@@ -118,6 +118,58 @@ pub struct ChatToolCall {
     pub live: bool,
 }
 
+impl ChatToolCall {
+    pub fn command(&self) -> Option<ChatCommand> {
+        ChatCommand::from_arguments(self.kind, &self.arguments)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatCommand {
+    pub source: String,
+    pub preview: String,
+    pub metadata: ChatToolArguments,
+}
+
+impl ChatCommand {
+    fn from_arguments(kind: ChatToolKind, arguments: &ChatToolArguments) -> Option<Self> {
+        if kind != ChatToolKind::Command {
+            return None;
+        }
+        let (source, metadata) = match arguments {
+            ChatToolArguments::None => return None,
+            ChatToolArguments::Fields(arguments) => {
+                let source = arguments
+                    .iter()
+                    .find(|argument| matches!(argument.name.as_str(), "cmd" | "command" | "script"))
+                    .and_then(|argument| argument.value.text())?
+                    .to_string();
+                let metadata = arguments
+                    .iter()
+                    .filter(|argument| {
+                        !matches!(argument.name.as_str(), "cmd" | "command" | "script")
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let metadata = if metadata.is_empty() {
+                    ChatToolArguments::None
+                } else {
+                    ChatToolArguments::Fields(metadata)
+                };
+                (source, metadata)
+            }
+            ChatToolArguments::Value(value) => (value.text()?.to_string(), ChatToolArguments::None),
+            ChatToolArguments::Raw(raw) => (CommandSource::from_raw(raw)?, ChatToolArguments::None),
+        };
+        let preview = CommandPreview::from(&source)?;
+        Some(Self {
+            source,
+            preview,
+            metadata,
+        })
+    }
+}
+
 #[vmux_api::contract(Eq)]
 pub enum ChatToolChild {
     Tool(ChatToolChildCall),
@@ -148,6 +200,12 @@ pub struct ChatToolChildCall {
     pub fallback_label: String,
     pub file_path: Option<String>,
     pub arguments: ChatToolArguments,
+}
+
+impl ChatToolChildCall {
+    pub fn command(&self) -> Option<ChatCommand> {
+        ChatCommand::from_arguments(self.kind, &self.arguments)
+    }
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -278,6 +336,195 @@ pub enum ChatToolArguments {
     Raw(String),
 }
 
+struct CommandPreview;
+
+struct CommandSource;
+
+impl CommandSource {
+    fn from_raw(raw: &str) -> Option<String> {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        if let Some(value) = Self::structured(raw) {
+            return Some(value);
+        }
+        Some(raw.to_string())
+    }
+
+    fn structured(raw: &str) -> Option<String> {
+        let candidate = if raw.starts_with('{') {
+            raw
+        } else {
+            raw.split_once("tools.exec_command(")?.1.trim_start()
+        };
+        let value = serde_json::Deserializer::from_str(candidate)
+            .into_iter::<serde_json::Value>()
+            .next()?
+            .ok()?;
+        let object = value.as_object()?;
+        for name in ["cmd", "command", "script"] {
+            if let Some(value) = object.get(name).and_then(serde_json::Value::as_str) {
+                return Some(value.to_string());
+            }
+        }
+        None
+    }
+}
+
+impl CommandPreview {
+    fn from(command: &str) -> Option<String> {
+        let command = command.lines().next()?.trim();
+        if command.is_empty() {
+            return None;
+        }
+        let mut preview = String::new();
+        let mut redact_rest = false;
+        for token in command.split_whitespace() {
+            let rendered = Self::token(token, &mut redact_rest);
+            if !preview.is_empty() {
+                preview.push(' ');
+            }
+            preview.push_str(&rendered);
+            if redact_rest {
+                preview.push_str(" •••");
+                break;
+            }
+            if preview.chars().count() > 160 {
+                preview = preview.chars().take(159).collect();
+                preview.push('…');
+                break;
+            }
+        }
+        Some(preview)
+    }
+
+    fn token(token: &str, redact_rest: &mut bool) -> String {
+        if Self::redacts_following(token) {
+            *redact_rest = true;
+            return token.to_string();
+        }
+        if let Some(url) = Self::url(token) {
+            return url;
+        }
+        if let Some((name, _)) = token.split_once('=')
+            && (Self::sensitive(name) || Self::redacts_value(name))
+        {
+            return format!("{name}=•••");
+        }
+        if Self::sensitive(token) {
+            *redact_rest = true;
+            return token.to_string();
+        }
+        if matches!(token.to_ascii_lowercase().as_str(), "bearer" | "basic") {
+            *redact_rest = true;
+            return token.to_string();
+        }
+        if Self::opaque(token) {
+            return "•••".to_string();
+        }
+        token.to_string()
+    }
+
+    fn redacts_following(value: &str) -> bool {
+        value == "-H"
+            || matches!(
+                value.to_ascii_lowercase().as_str(),
+                "-u" | "--user"
+                    | "--proxy-user"
+                    | "--header"
+                    | "--cookie"
+                    | "--cookie-jar"
+                    | "--cert"
+                    | "--key"
+            )
+    }
+
+    fn redacts_value(value: &str) -> bool {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "--user"
+                | "--proxy-user"
+                | "--header"
+                | "--cookie"
+                | "--cookie-jar"
+                | "--cert"
+                | "--key"
+        )
+    }
+
+    fn url(value: &str) -> Option<String> {
+        let quote = value
+            .chars()
+            .next()
+            .filter(|character| matches!(character, '\'' | '"'));
+        let unquoted = quote.map_or(value, |quote| value.trim_matches(quote));
+        let scheme_end = unquoted
+            .strip_prefix("http://")
+            .map(|_| "http://".len())
+            .or_else(|| unquoted.strip_prefix("https://").map(|_| "https://".len()))?;
+        let authority_end = unquoted[scheme_end..]
+            .find(['/', '?', '#'])
+            .map(|offset| scheme_end + offset)
+            .unwrap_or(unquoted.len());
+        let authority = &unquoted[scheme_end..authority_end];
+        let mut rendered = if let Some((_, host)) = authority.rsplit_once('@') {
+            format!(
+                "{}•••@{}{}",
+                &unquoted[..scheme_end],
+                host,
+                &unquoted[authority_end..]
+            )
+        } else {
+            unquoted.to_string()
+        };
+        if let Some(query) = rendered.find('?') {
+            rendered.truncate(query + 1);
+            rendered.push('…');
+        }
+        if let Some(quote) = quote {
+            rendered.insert(0, quote);
+            rendered.push(quote);
+        }
+        Some(rendered)
+    }
+
+    fn sensitive(value: &str) -> bool {
+        let value = value
+            .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .to_ascii_lowercase();
+        [
+            "token",
+            "password",
+            "passwd",
+            "secret",
+            "credential",
+            "authorization",
+            "cookie",
+            "api_key",
+            "apikey",
+            "api-key",
+            "auth-token",
+            "access-token",
+            "access_key",
+            "private_key",
+            "signature",
+        ]
+        .iter()
+        .any(|needle| value.contains(needle))
+    }
+
+    fn opaque(value: &str) -> bool {
+        let value = value.trim_matches(['\'', '"']);
+        value.len() >= 32
+            && !value.contains('/')
+            && value.chars().all(|character| {
+                character.is_ascii_alphanumeric()
+                    || matches!(character, '-' | '_' | '.' | '+' | '=' | '/')
+            })
+    }
+}
+
 #[vmux_api::contract(recursive, Eq)]
 pub struct ChatToolArgument {
     pub name: String,
@@ -295,6 +542,156 @@ pub enum ChatToolArgumentValue {
     List(Vec<ChatToolArgument>),
     Object(Vec<ChatToolArgument>),
     Null,
+}
+
+impl ChatToolArgumentValue {
+    fn text(&self) -> Option<&str> {
+        match self {
+            Self::Path(value) | Self::Code(value) | Self::Text(value) => Some(value),
+            Self::Bool(_) | Self::Number(_) | Self::List(_) | Self::Object(_) | Self::Null => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod command_preview_tests {
+    use super::*;
+
+    #[test]
+    fn command_call_accepts_path_arguments() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Value(ChatToolArgumentValue::Path(
+                "/usr/bin/git status".into(),
+            )),
+            ..Default::default()
+        };
+
+        let command = call.command().unwrap();
+        assert_eq!(command.preview, "/usr/bin/git status");
+    }
+
+    #[test]
+    fn command_call_redacts_secrets_and_ignores_later_lines() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(
+                "token=secret curl https://example.com/file?signature=secret --password hunter2\necho leaked"
+                    .into(),
+            ),
+            ..Default::default()
+        };
+
+        let command = call.command().unwrap();
+        assert_eq!(
+            command.preview,
+            "token=••• curl https://example.com/file?… --password •••"
+        );
+    }
+
+    #[test]
+    fn command_call_does_not_expose_authorization_credentials() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(
+                "curl -H 'Authorization: Bearer exposed' https://example.com".into(),
+            ),
+            ..Default::default()
+        };
+
+        let command = call.command().unwrap();
+        assert_eq!(command.preview, "curl -H •••");
+    }
+
+    #[test]
+    fn command_call_extracts_the_shell_command_from_a_codex_wrapper() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(
+                r#"const result = await tools.exec_command({"cmd":"git status && cargo test","workdir":"/work"});"#
+                    .into(),
+            ),
+            ..Default::default()
+        };
+
+        let command = call.command().unwrap();
+        assert_eq!(command.source, "git status && cargo test");
+        assert_eq!(command.preview, "git status && cargo test");
+        assert_eq!(command.metadata, ChatToolArguments::None);
+    }
+
+    #[test]
+    fn command_call_keeps_embedded_command_json_in_a_shell_command() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(
+                r#"curl -d '{"cmd":"status"}' https://example.com"#.into(),
+            ),
+            ..Default::default()
+        };
+
+        let command = call.command().unwrap();
+        assert_eq!(
+            command.source,
+            r#"curl -d '{"cmd":"status"}' https://example.com"#
+        );
+    }
+
+    #[test]
+    fn command_call_redacts_credentials_in_flags_headers_and_urls() {
+        let user = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw("curl -u user:password https://example.com".into()),
+            ..Default::default()
+        };
+        let header = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(
+                "curl -H 'X-Api-Key: exposed' https://example.com".into(),
+            ),
+            ..Default::default()
+        };
+        let url = ChatToolCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Raw(
+                "curl https://user:password@example.com/path?token=exposed".into(),
+            ),
+            ..Default::default()
+        };
+
+        assert_eq!(user.command().unwrap().preview, "curl -u •••");
+        assert_eq!(header.command().unwrap().preview, "curl -H •••");
+        assert_eq!(
+            url.command().unwrap().preview,
+            "curl https://•••@example.com/path?…"
+        );
+    }
+
+    #[test]
+    fn child_command_calls_share_command_extraction() {
+        let call = ChatToolChildCall {
+            kind: ChatToolKind::Command,
+            arguments: ChatToolArguments::Fields(vec![ChatToolArgument {
+                name: "cmd".into(),
+                label: "Command".into(),
+                value: ChatToolArgumentValue::Code("cargo test".into()),
+            }]),
+            ..Default::default()
+        };
+
+        assert_eq!(call.command().unwrap().source, "cargo test");
+    }
+
+    #[test]
+    fn non_command_call_has_no_command_preview() {
+        let call = ChatToolCall {
+            kind: ChatToolKind::Other,
+            arguments: ChatToolArguments::Raw("echo visible".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(call.command(), None);
+    }
 }
 
 #[vmux_api::contract(Eq)]
@@ -405,6 +802,11 @@ pub struct ResumableSessions {
     pub offset: u32,
     pub total: u32,
 }
+
+impl ResumableSessions {
+    pub const PAGE: u32 = 50;
+}
+
 #[vmux_api::contract(Copy, Default, Eq)]
 pub enum SlashCommand {
     #[default]
@@ -446,4 +848,5 @@ pub struct ResumeSession {
     pub kind: String,
     pub sid: String,
     pub cwd: String,
+    pub open: Option<crate::open_target::OpenTarget>,
 }

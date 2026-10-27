@@ -2,23 +2,26 @@
 
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
-use vmux_ui::components::card::{Card, CardVariant};
+use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::ScrollPreload;
 
 use crate::event::*;
-use crate::state::{GitOperationEligibility, GitPanel};
+use crate::state::{GitCatalogProgress, GitOperationEligibility};
 
-use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
+use super::operation::HeaderOperationButton;
 
 #[component]
 pub(super) fn HistoryCard(
     repository: GitRepositorySnapshot,
     selected_commit: String,
-    focused_panel: GitPanel,
     operations: GitOperationEligibility,
+    progress: GitCatalogProgress,
 ) -> Element {
+    let commits_empty = repository.commits.is_empty();
+    let commit_count = repository.commits.len();
     let selected = repository
         .commits
         .iter()
@@ -68,28 +71,26 @@ pub(super) fn HistoryCard(
     });
 
     rsx! {
-        Card {
-            variant: CardVariant::Panel,
-            class: if focused_panel == GitPanel::Commits {
-                "order-6 min-h-48 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-4 sm:row-span-2 sm:min-h-0 sm:order-none"
-            } else {
-                "order-6 min-h-48 border-t-sky-400/30 sm:col-start-1 sm:row-start-4 sm:row-span-2 sm:min-h-0 sm:order-none"
-            },
-            onclick: move |_| {
-                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Commits });
-            },
-            PanelHeader {
-                index: 4,
-                title: translate("git-commits"),
-                count: Some(repository.commits.len()),
-                icon: PanelIcon::Line(LineIcon::Clock),
-                icon_class: "bg-sky-400/10 text-sky-400 ring-1 ring-inset ring-sky-400/15",
-                badge_class: "border-sky-400/20 bg-sky-400/[0.08] text-sky-400",
-                focused: focused_panel == GitPanel::Commits,
-                operations: commit_operations,
+        section { class: "flex h-full min-h-0 flex-col",
+            div { class: "flex h-10 shrink-0 items-center justify-end px-3",
+                {commit_operations}
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
-                if repository.commits.is_empty() {
+            div {
+                class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                onscroll: move |event: Event<ScrollData>| {
+                    if ScrollPreload::LIST.reached(&event) && progress.has_more && !progress.loading {
+                        let _ = send(&GitCatalogNextRequest {
+                            catalog: GitCatalog::Commits,
+                        });
+                    }
+                },
+                if progress.loading && commits_empty {
+                    div { class: "flex flex-col gap-2 px-2.5 py-2",
+                        for width in ["w-10/12", "w-full", "w-8/12", "w-11/12"] {
+                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                        }
+                    }
+                } else if commits_empty {
                     div { class: "flex h-full min-h-32 items-center justify-center p-4 text-center text-xs text-muted-foreground", {translate("git-no-commits")} }
                 }
                 for (index, commit) in repository.commits.into_iter().enumerate() {
@@ -99,9 +100,9 @@ pub(super) fn HistoryCard(
                         key: "{commit.sha}",
                         title: "{commit.summary} — {commit.author} — {commit.date}",
                         class: if selected_commit == commit.sha {
-                            "h-6 w-full justify-start gap-1.5 rounded-md bg-primary/[0.10] px-1.5 py-0 text-left text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                            "h-9 w-full justify-start gap-2 rounded-md bg-foreground/[0.075] px-2.5 py-0 text-left text-foreground"
                         } else {
-                            "h-6 w-full justify-start gap-1.5 rounded-md px-1.5 py-0 text-left text-foreground hover:bg-foreground/[0.045]"
+                            "h-9 w-full justify-start gap-2 rounded-md px-2.5 py-0 text-left text-foreground hover:bg-foreground/[0.04]"
                         },
                         onclick: {
                             let sha = commit.sha.clone();
@@ -111,10 +112,26 @@ pub(super) fn HistoryCard(
                                 });
                             }
                         },
-                        LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3 shrink-0 text-sky-400/70" }
-                        code { class: "shrink-0 font-mono text-[9px] text-sky-400", "{commit.short_sha}" }
-                        span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{commit.summary}" }
-                        span { class: "shrink-0 text-[8px] text-muted-foreground", "{commit.date}" }
+                        LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3 shrink-0 text-git-reference/70" }
+                        code { class: "shrink-0 font-mono text-[9px] text-git-reference", "{commit.short_sha}" }
+                        span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{commit.summary}" }
+                        span { class: "shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
+                    }
+                }
+                if (progress.loading || progress.has_more) && !commits_empty {
+                    div {
+                        key: "commit-next-{commit_count}",
+                        class: "flex flex-col gap-2 px-2.5 py-2",
+                        onvisible: move |_| {
+                            if progress.has_more && !progress.loading {
+                                let _ = send(&GitCatalogNextRequest {
+                                    catalog: GitCatalog::Commits,
+                                });
+                            }
+                        },
+                        for width in ["w-10/12", "w-8/12"] {
+                            Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                        }
                     }
                 }
             }
@@ -126,8 +143,8 @@ pub(super) fn HistoryCard(
 pub(super) fn StashCard(
     repository: GitRepositorySnapshot,
     selected_stash: String,
-    focused_panel: GitPanel,
     operations: GitOperationEligibility,
+    progress: GitCatalogProgress,
 ) -> Element {
     let selected = repository
         .stashes
@@ -135,6 +152,7 @@ pub(super) fn StashCard(
         .find(|entry| entry.reference == selected_stash)
         .cloned();
     let stashes = repository.stashes.clone();
+    let stash_count = stashes.len();
     let stash_operations = selected.clone().map(|stash| {
         rsx! {
             div { class: "flex shrink-0 items-center gap-0.5",
@@ -167,28 +185,20 @@ pub(super) fn StashCard(
     });
 
     rsx! {
-        Card {
-            variant: CardVariant::Panel,
-            class: if focused_panel == GitPanel::Stash {
-                "order-7 min-h-28 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-6 sm:min-h-0 sm:order-none"
-            } else {
-                "order-7 min-h-28 border-t-rose-400/30 sm:col-start-1 sm:row-start-6 sm:min-h-0 sm:order-none"
-            },
-            onclick: move |_| {
-                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Stash });
-            },
-            PanelHeader {
-                index: 5,
-                title: translate("git-stashes"),
-                count: Some(stashes.len()),
-                icon: PanelIcon::Line(LineIcon::Package),
-                icon_class: "bg-rose-400/10 text-rose-400 ring-1 ring-inset ring-rose-400/15",
-                badge_class: "border-rose-400/20 bg-rose-400/[0.08] text-rose-400",
-                focused: focused_panel == GitPanel::Stash,
-                operations: stash_operations,
+        section { class: "flex h-full min-h-0 flex-col",
+            div { class: "flex h-10 shrink-0 items-center justify-end px-3",
+                {stash_operations}
             }
-            if !stashes.is_empty() {
-                div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
+            if !stashes.is_empty() || progress.loading {
+                div {
+                    class: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5",
+                    onscroll: move |event: Event<ScrollData>| {
+                        if ScrollPreload::LIST.reached(&event) && progress.has_more && !progress.loading {
+                            let _ = send(&GitCatalogNextRequest {
+                                catalog: GitCatalog::Stashes,
+                            });
+                        }
+                    },
                     for (index, stash) in stashes.into_iter().enumerate() {
                         Button {
                             id: "git-stash-row-{index}",
@@ -196,9 +206,9 @@ pub(super) fn StashCard(
                             key: "{stash.reference}",
                             title: "{stash.message}",
                             class: if selected_stash == stash.reference {
-                                "h-6 w-full justify-start gap-1.5 rounded-md bg-primary/[0.10] px-1.5 py-0 text-left text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                                "h-9 w-full justify-start gap-2 rounded-md bg-foreground/[0.075] px-2.5 py-0 text-left text-foreground"
                             } else {
-                                "h-6 w-full justify-start gap-1.5 rounded-md px-1.5 py-0 text-left text-foreground hover:bg-foreground/[0.045]"
+                                "h-9 w-full justify-start gap-2 rounded-md px-2.5 py-0 text-left text-foreground hover:bg-foreground/[0.04]"
                             },
                             onclick: {
                                 let reference = stash.reference.clone();
@@ -209,8 +219,24 @@ pub(super) fn StashCard(
                                 }
                             },
                             span { class: "shrink-0 rounded bg-rose-400/[0.08] px-1 font-mono text-[8px] text-rose-400", "{stash.index}" }
-                            span { class: "min-w-0 flex-1 truncate text-[11px] font-medium", "{stash.message}" }
+                            span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{stash.message}" }
                             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{stash.reference}" }
+                        }
+                    }
+                    if progress.loading || progress.has_more {
+                        div {
+                            key: "stash-next-{stash_count}",
+                            class: "flex flex-col gap-2 px-2.5 py-2",
+                            onvisible: move |_| {
+                                if progress.has_more && !progress.loading {
+                                    let _ = send(&GitCatalogNextRequest {
+                                        catalog: GitCatalog::Stashes,
+                                    });
+                                }
+                            },
+                            for width in ["w-10/12", "w-8/12"] {
+                                Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                            }
                         }
                     }
                 }

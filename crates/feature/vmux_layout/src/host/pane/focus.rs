@@ -139,7 +139,7 @@ fn poll_cursor(
     keys: Res<ButtonInput<KeyCode>>,
     active_drags: Query<(), With<PaneDrag>>,
 ) {
-    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
+    if HoverFocusLock::active(&keys) {
         return;
     }
     if !active_drags.is_empty() {
@@ -202,8 +202,12 @@ fn apply_pending_hover(
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
     focus: LayoutFocus,
     mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
     mut last_motion_sequence: Local<u64>,
 ) {
+    if HoverFocusLock::active(&keys) {
+        return;
+    }
     let Some(pointer) = vmux_input::NativePointer::snapshot() else {
         return;
     };
@@ -247,6 +251,17 @@ fn apply_pending_hover(
     commands.entity(target).insert(LastActivatedAt::now());
     if let Some(stack) = focus.stack(target) {
         commands.entity(stack).insert(LastActivatedAt::now());
+    }
+}
+
+struct HoverFocusLock;
+
+impl HoverFocusLock {
+    fn active(keys: &ButtonInput<KeyCode>) -> bool {
+        keys.pressed(KeyCode::ControlLeft)
+            || keys.pressed(KeyCode::ControlRight)
+            || keys.pressed(KeyCode::ShiftLeft)
+            || keys.pressed(KeyCode::ShiftRight)
     }
 }
 
@@ -503,78 +518,135 @@ mod tests {
 
     #[test]
     fn pane_hover_activates_hovered_pane_in_single_update() {
-        let mut fixture = FocusFixture::hover();
-        let window = fixture
-            .app
-            .world_mut()
-            .spawn((Window::default(), PrimaryWindow))
-            .id();
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(window)
-            .insert(vmux_ecs::Active);
-        let root = fixture.app.world_mut().spawn(HostWindow(window)).id();
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(window)
-            .get_mut::<Window>()
-            .unwrap()
-            .set_physical_cursor_position(Some(bevy::math::DVec2::new(400.0, 450.0)));
-        let tab = fixture
-            .app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
-            .id();
-        let row = fixture
-            .app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                ChildOf(tab),
-            ))
-            .id();
-        let left = fixture.pane(row, Vec2::new(400.0, 450.0), Vec2::new(800.0, 900.0));
-        let right = fixture.pane(row, Vec2::new(1200.0, 450.0), Vec2::new(800.0, 900.0));
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(left)
-            .insert(LastActivatedAt(1));
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(right)
-            .insert(LastActivatedAt(10));
-        let left_stack = fixture
-            .app
-            .world()
-            .get::<Children>(left)
-            .unwrap()
-            .iter()
-            .find(|&entity| fixture.app.world().get::<Stack>(entity).is_some())
-            .unwrap();
-        fixture
-            .app
-            .world_mut()
-            .entity_mut(left_stack)
-            .insert(LastActivatedAt(1));
+        let mut fixture = HoverFixture::new();
 
         fixture.app.update();
 
-        assert!(fixture.app.world().get::<LastActivatedAt>(left).unwrap().0 > 10);
         assert!(
             fixture
                 .app
                 .world()
-                .get::<LastActivatedAt>(left_stack)
+                .get::<LastActivatedAt>(fixture.left)
+                .unwrap()
+                .0
+                > 10
+        );
+        assert!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(fixture.left_stack)
                 .unwrap()
                 .0
                 > 1
         );
+    }
+
+    #[test]
+    fn shift_prevents_hover_from_activating_another_pane() {
+        let mut fixture = HoverFixture::new();
+        fixture
+            .app
+            .world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+
+        fixture.app.update();
+
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(fixture.left)
+                .unwrap()
+                .0,
+            1
+        );
+        assert_eq!(
+            fixture
+                .app
+                .world()
+                .get::<LastActivatedAt>(fixture.left_stack)
+                .unwrap()
+                .0,
+            1
+        );
+    }
+
+    struct HoverFixture {
+        app: App,
+        left: Entity,
+        left_stack: Entity,
+    }
+
+    impl HoverFixture {
+        fn new() -> Self {
+            let mut fixture = FocusFixture::hover();
+            let window = fixture
+                .app
+                .world_mut()
+                .spawn((Window::default(), PrimaryWindow))
+                .id();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(window)
+                .insert(vmux_ecs::Active);
+            let root = fixture.app.world_mut().spawn(HostWindow(window)).id();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(window)
+                .get_mut::<Window>()
+                .unwrap()
+                .set_physical_cursor_position(Some(bevy::math::DVec2::new(400.0, 450.0)));
+            let tab = fixture
+                .app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+                .id();
+            let row = fixture
+                .app
+                .world_mut()
+                .spawn((
+                    Pane,
+                    PaneSplit {
+                        direction: PaneSplitDirection::Row,
+                    },
+                    ChildOf(tab),
+                ))
+                .id();
+            let left = fixture.pane(row, Vec2::new(400.0, 450.0), Vec2::new(800.0, 900.0));
+            let right = fixture.pane(row, Vec2::new(1200.0, 450.0), Vec2::new(800.0, 900.0));
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(left)
+                .insert(LastActivatedAt(1));
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(right)
+                .insert(LastActivatedAt(10));
+            let left_stack = fixture
+                .app
+                .world()
+                .get::<Children>(left)
+                .unwrap()
+                .iter()
+                .find(|&entity| fixture.app.world().get::<Stack>(entity).is_some())
+                .unwrap();
+            fixture
+                .app
+                .world_mut()
+                .entity_mut(left_stack)
+                .insert(LastActivatedAt(1));
+
+            Self {
+                app: fixture.app,
+                left,
+                left_stack,
+            }
+        }
     }
 }

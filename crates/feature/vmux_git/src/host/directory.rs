@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::event::FileDirEntry;
-use vmux_ecs::event::space::ProjectActivateRequest;
 
 use crate::event::{
     GitDirectoryActivateRequest, GitDirectoryAscendRequest, GitDirectoryDescendRequest,
@@ -13,21 +13,24 @@ use crate::event::{
 };
 use crate::state::GitDirectoryState;
 
+use super::runtime::{GitRuntime, GitTask};
+
 pub(super) struct DirectoryPlugin;
 
 impl Plugin for DirectoryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            GitDirectoryOpenRequest,
-            GitDirectorySelectRequest,
-            GitDirectoryNextRequest,
-            GitDirectoryPreviousRequest,
-            GitDirectoryAscendRequest,
-            GitDirectoryDescendRequest,
-            GitDirectoryActivateRequest,
-            GitDirectoryParentRequest,
-            GitDirectoryToggleHiddenRequest,
-        )>::default())
+        app.init_resource::<GitRuntime>()
+            .add_plugins(UiEventPlugin::<(
+                GitDirectoryOpenRequest,
+                GitDirectorySelectRequest,
+                GitDirectoryNextRequest,
+                GitDirectoryPreviousRequest,
+                GitDirectoryAscendRequest,
+                GitDirectoryDescendRequest,
+                GitDirectoryActivateRequest,
+                GitDirectoryParentRequest,
+                GitDirectoryToggleHiddenRequest,
+            )>::default())
             .add_observer(open_request)
             .add_observer(select_request)
             .add_observer(next_request)
@@ -37,7 +40,40 @@ impl Plugin for DirectoryPlugin {
             .add_observer(activate_request)
             .add_observer(parent_request)
             .add_observer(toggle_hidden)
-            .add_observer(load);
+            .add_observer(load)
+            .add_systems(
+                Update,
+                (
+                    cleanup_inactive,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    start_loads,
+                    poll_loads,
+                    start_previews,
+                    poll_previews,
+                )
+                    .chain(),
+            );
+    }
+}
+
+type InactiveDirectoryTaskFilter = (
+    Or<(
+        With<PendingDirectoryLoad>,
+        With<DirectoryLoadTask>,
+        With<PendingDirectoryPreview>,
+        With<DirectoryPreviewTask>,
+    )>,
+    Without<super::state::GitState>,
+);
+
+fn cleanup_inactive(inactive: Query<Entity, InactiveDirectoryTaskFilter>, mut commands: Commands) {
+    for entity in &inactive {
+        commands.entity(entity).remove::<(
+            PendingDirectoryLoad,
+            DirectoryLoadTask,
+            PendingDirectoryPreview,
+            DirectoryPreviewTask,
+        )>();
     }
 }
 
@@ -47,6 +83,8 @@ pub(super) struct GitDirectoryNavigation {
     preview: Option<DirectoryListing>,
     selected: usize,
     show_hidden: bool,
+    load_revision: u64,
+    preview_revision: u64,
 }
 
 impl Default for GitDirectoryNavigation {
@@ -56,6 +94,8 @@ impl Default for GitDirectoryNavigation {
             preview: None,
             selected: 0,
             show_hidden: true,
+            load_revision: 0,
+            preview_revision: 0,
         }
     }
 }
@@ -84,18 +124,80 @@ impl GitDirectoryNavigation {
             .visible_entry(self.show_hidden, self.selected)
     }
 
-    fn select(&mut self, index: usize) {
+    fn select(&mut self, index: usize) -> Option<PendingDirectoryPreview> {
         let entries = self
             .current
             .as_ref()
             .map(|current| current.visible_entries(self.show_hidden))
             .unwrap_or_default();
         self.selected = index.min(entries.len().saturating_sub(1));
-        self.preview = entries
+        self.preview = None;
+        self.preview_revision = self.preview_revision.wrapping_add(1).max(1);
+        entries
             .get(self.selected)
             .filter(|entry| entry.is_dir)
-            .map(|entry| DirectoryListing::read(Path::new(&entry.path)));
+            .map(|entry| PendingDirectoryPreview {
+                revision: self.preview_revision,
+                path: PathBuf::from(&entry.path),
+            })
     }
+
+    fn next_load_revision(&mut self) -> u64 {
+        self.load_revision = self.load_revision.wrapping_add(1).max(1);
+        self.load_revision
+    }
+}
+
+#[derive(Component, Clone)]
+struct PendingDirectoryLoad {
+    revision: u64,
+    path: PathBuf,
+    came_from: String,
+    show_hidden: bool,
+}
+
+#[derive(Component)]
+struct DirectoryLoadTask {
+    revision: u64,
+    task: GitTask<DirectoryLoadOutput>,
+}
+
+struct DirectoryLoadOutput {
+    listing: DirectoryListing,
+    selected: usize,
+    preview: Option<DirectoryListing>,
+}
+
+impl DirectoryLoadOutput {
+    fn read(path: &Path, came_from: &str, show_hidden: bool) -> Self {
+        let listing = DirectoryListing::read(path);
+        let entries = listing.visible_entries(show_hidden);
+        let selected = entries
+            .iter()
+            .position(|entry| entry.path == came_from)
+            .unwrap_or(0);
+        let preview = listing
+            .visible_entry(show_hidden, selected)
+            .filter(|entry| entry.is_dir)
+            .map(|entry| DirectoryListing::read(Path::new(&entry.path)));
+        Self {
+            listing,
+            selected,
+            preview,
+        }
+    }
+}
+
+#[derive(Component, Clone)]
+struct PendingDirectoryPreview {
+    revision: u64,
+    path: PathBuf,
+}
+
+#[derive(Component)]
+struct DirectoryPreviewTask {
+    revision: u64,
+    task: GitTask<DirectoryListing>,
 }
 
 #[derive(Clone)]
@@ -220,6 +322,7 @@ fn open_request(trigger: On<UiInput<GitDirectoryOpenRequest>>, mut commands: Com
 fn select_request(
     trigger: On<UiInput<GitDirectorySelectRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
+    mut commands: Commands,
 ) {
     let Ok(mut navigation) = navigation.get_mut(trigger.event().webview) else {
         return;
@@ -227,29 +330,46 @@ fn select_request(
     let Ok(index) = usize::try_from(trigger.event().payload.index) else {
         return;
     };
-    navigation.select(index);
+    let preview = navigation.select(index);
+    let mut entity = commands.entity(trigger.event().webview);
+    entity.remove::<(PendingDirectoryPreview, DirectoryPreviewTask)>();
+    if let Some(preview) = preview {
+        entity.insert(preview);
+    }
 }
 
 fn next_request(
     trigger: On<UiInput<GitDirectoryNextRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
+    mut commands: Commands,
 ) {
     let Ok(mut navigation) = navigation.get_mut(trigger.event().webview) else {
         return;
     };
     let next = navigation.selected.saturating_add(1);
-    navigation.select(next);
+    let preview = navigation.select(next);
+    let mut entity = commands.entity(trigger.event().webview);
+    entity.remove::<(PendingDirectoryPreview, DirectoryPreviewTask)>();
+    if let Some(preview) = preview {
+        entity.insert(preview);
+    }
 }
 
 fn previous_request(
     trigger: On<UiInput<GitDirectoryPreviousRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
+    mut commands: Commands,
 ) {
     let Ok(mut navigation) = navigation.get_mut(trigger.event().webview) else {
         return;
     };
     let previous = navigation.selected.saturating_sub(1);
-    navigation.select(previous);
+    let preview = navigation.select(previous);
+    let mut entity = commands.entity(trigger.event().webview);
+    entity.remove::<(PendingDirectoryPreview, DirectoryPreviewTask)>();
+    if let Some(preview) = preview {
+        entity.insert(preview);
+    }
 }
 
 fn ascend_request(
@@ -334,18 +454,23 @@ fn parent_request(
 fn toggle_hidden(
     trigger: On<UiInput<GitDirectoryToggleHiddenRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
+    mut commands: Commands,
 ) {
     let Ok(mut navigation) = navigation.get_mut(trigger.event().webview) else {
         return;
     };
     navigation.show_hidden = !navigation.show_hidden;
     let selected = navigation.selected;
-    navigation.select(selected);
+    let preview = navigation.select(selected);
+    let mut entity = commands.entity(trigger.event().webview);
+    entity.remove::<(PendingDirectoryPreview, DirectoryPreviewTask)>();
+    if let Some(preview) = preview {
+        entity.insert(preview);
+    }
 }
 
 fn load(
     trigger: On<DirectoryLoad>,
-    mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
     mut states: super::state::GitStates,
     mut commands: Commands,
@@ -357,55 +482,137 @@ fn load(
     let Ok(mut navigation) = navigation.get_mut(entity) else {
         return;
     };
-    let listing = DirectoryListing::read(Path::new(&trigger.event().path));
-    states.start_directory(entity, &listing.path);
-    let path_changed = navigation
-        .current
-        .as_ref()
-        .is_none_or(|current| current.path != listing.path);
-    if path_changed {
-        let entries = listing.visible_entries(navigation.show_hidden);
-        navigation.selected = entries
-            .iter()
-            .position(|entry| entry.path == trigger.event().came_from)
-            .unwrap_or(0);
-    }
-    navigation.preview = listing
-        .visible_entry(navigation.show_hidden, navigation.selected)
-        .filter(|entry| entry.is_dir)
-        .map(|entry| DirectoryListing::read(Path::new(&entry.path)));
-    if let Ok(mut page) = pages.get_mut(entity) {
-        if let Some(url) = crate::GitUrl::from_path(&listing.path) {
-            page.url = url;
-        }
-        let name = listing
-            .path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "Git".to_string());
-        page.title = format!("{name} · Git");
-    }
-    let repo_root = listing.repo_root.clone();
-    navigation.current = Some(listing);
-    let Some(repo_root) = repo_root else {
-        states.finish_directory(entity);
-        return;
+    let path = PathBuf::from(&trigger.event().path);
+    states.start_directory(entity, &path);
+    let revision = navigation.next_load_revision();
+    let pending = PendingDirectoryLoad {
+        revision,
+        path,
+        came_from: trigger.event().came_from.clone(),
+        show_hidden: navigation.show_hidden,
     };
-    let repo_root = repo_root.to_string_lossy().into_owned();
-    commands.trigger(UiInput {
-        webview: entity,
-        payload: ProjectActivateRequest {
-            path: repo_root.clone(),
-            branch: String::new(),
-            checkout: String::new(),
-            pane_id: None,
-        },
-    });
-    commands.trigger(UiInput {
-        webview: entity,
-        payload: GitRepositoryRequest { path: repo_root },
-    });
+    commands
+        .entity(entity)
+        .remove::<(
+            DirectoryLoadTask,
+            PendingDirectoryPreview,
+            DirectoryPreviewTask,
+        )>()
+        .insert(pending);
+}
+
+fn start_loads(
+    pending: Query<(Entity, &PendingDirectoryLoad), Without<DirectoryLoadTask>>,
+    runtime: Res<GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (entity, pending) in &pending {
+        let request = pending.clone();
+        let revision = request.revision;
+        let Some(task) = runtime.spawn(wake.clone(), move || {
+            DirectoryLoadOutput::read(&request.path, &request.came_from, request.show_hidden)
+        }) else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .remove::<PendingDirectoryLoad>()
+            .insert(DirectoryLoadTask { revision, task });
+    }
+}
+
+fn poll_loads(
+    mut tasks: Query<(Entity, &mut DirectoryLoadTask, &mut GitDirectoryNavigation)>,
+    mut pages: Query<&mut vmux_ecs::PageMetadata>,
+    mut states: super::state::GitStates,
+    mut commands: Commands,
+) {
+    for (entity, mut task, mut navigation) in &mut tasks {
+        let Some(output) = task.task.poll() else {
+            continue;
+        };
+        commands.entity(entity).remove::<DirectoryLoadTask>();
+        let Ok(output) = output else {
+            states.finish_directory(entity);
+            continue;
+        };
+        if navigation.load_revision != task.revision {
+            continue;
+        }
+        let listing = output.listing;
+        states.start_directory(entity, &listing.path);
+        navigation.selected = output.selected;
+        navigation.preview = output.preview;
+        if let Ok(mut page) = pages.get_mut(entity)
+            && crate::GitUrl::is_page(&page.url)
+        {
+            if let Some(url) = crate::GitUrl::from_path(&listing.path) {
+                page.url = url;
+            }
+            let name = listing
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "Git".to_string());
+            page.title = format!("Git · {name}");
+        }
+        let repo_root = listing.repo_root.clone();
+        navigation.current = Some(listing);
+        let Some(repo_root) = repo_root else {
+            states.finish_directory(entity);
+            continue;
+        };
+        let repo_root = repo_root.to_string_lossy().into_owned();
+        commands.trigger(UiInput {
+            webview: entity,
+            payload: GitRepositoryRequest { path: repo_root },
+        });
+    }
+}
+
+fn start_previews(
+    pending: Query<(Entity, &PendingDirectoryPreview), Without<DirectoryPreviewTask>>,
+    runtime: Res<GitRuntime>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
+    for (entity, pending) in &pending {
+        let path = pending.path.clone();
+        let revision = pending.revision;
+        let Some(task) = runtime.spawn(wake.clone(), move || DirectoryListing::read(&path)) else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .remove::<PendingDirectoryPreview>()
+            .insert(DirectoryPreviewTask { revision, task });
+    }
+}
+
+fn poll_previews(
+    mut tasks: Query<(
+        Entity,
+        &mut DirectoryPreviewTask,
+        &mut GitDirectoryNavigation,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, mut task, mut navigation) in &mut tasks {
+        let Some(output) = task.task.poll() else {
+            continue;
+        };
+        commands.entity(entity).remove::<DirectoryPreviewTask>();
+        let Ok(preview) = output else {
+            continue;
+        };
+        if navigation.preview_revision == task.revision {
+            navigation.preview = Some(preview);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -439,6 +646,8 @@ mod tests {
             }),
             selected: 0,
             show_hidden: false,
+            load_revision: 0,
+            preview_revision: 0,
         };
 
         let state = navigation.state();

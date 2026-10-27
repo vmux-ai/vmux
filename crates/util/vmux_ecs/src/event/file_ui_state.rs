@@ -48,7 +48,7 @@ pub struct FileUiStatePatch {
     pub find: Option<FileFindEvent>,
 }
 
-#[vmux_api::ui_state(Default, patch = FileUiStatePatch, version = 3)]
+#[vmux_api::ui_state(Default, patch = FileUiStatePatch, version = 4)]
 pub struct FileUiState {
     pub document: FileDocumentUiState,
     pub viewport: FileViewportUiState,

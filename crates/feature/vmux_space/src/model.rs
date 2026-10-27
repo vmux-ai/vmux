@@ -1,5 +1,9 @@
 pub const BOOTSTRAP_SPACE_ID: &str = "space-1";
-pub const BOOTSTRAP_SPACE_NAME: &str = "space-1";
+
+const PLANET_NAMES: &[&str] = &[
+    "mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune", "ceres",
+    "pluto", "haumea", "makemake", "eris",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SpaceRecord {
@@ -22,9 +26,28 @@ impl SpaceRecord {
     pub fn bootstrap_for(profile: impl Into<String>) -> Self {
         Self {
             id: BOOTSTRAP_SPACE_ID.to_string(),
-            name: BOOTSTRAP_SPACE_NAME.to_string(),
+            name: Self::suggested_planet_name(&std::collections::HashSet::new()),
             profile: profile.into(),
         }
+    }
+
+    pub fn suggested_planet_name(existing: &std::collections::HashSet<String>) -> String {
+        let start = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.subsec_nanos() as usize)
+            .unwrap_or_default()
+            % PLANET_NAMES.len();
+        for offset in 0..PLANET_NAMES.len() {
+            let name = PLANET_NAMES[(start + offset) % PLANET_NAMES.len()];
+            if !existing.contains(name) {
+                return name.to_string();
+            }
+        }
+        Self::unique_id(existing, PLANET_NAMES[start])
+    }
+
+    pub fn is_planet_name(name: &str) -> bool {
+        PLANET_NAMES.contains(&name)
     }
 
     pub fn normalized_id(input: &str) -> String {
@@ -99,5 +122,26 @@ mod tests {
                 .into_iter()
                 .collect();
         assert_eq!(SpaceRecord::unique_id(&existing, "Work"), "work-3");
+    }
+
+    #[test]
+    fn suggested_name_is_a_filesystem_safe_planet() {
+        let name = SpaceRecord::suggested_planet_name(&std::collections::HashSet::new());
+
+        assert!(SpaceRecord::is_planet_name(&name));
+        assert_eq!(SpaceRecord::normalized_id(&name), name);
+    }
+
+    #[test]
+    fn suggested_name_skips_existing_planets() {
+        let existing = PLANET_NAMES
+            .iter()
+            .map(|name| name.to_string())
+            .collect::<std::collections::HashSet<_>>();
+
+        let name = SpaceRecord::suggested_planet_name(&existing);
+
+        assert!(name.contains('-'));
+        assert!(!existing.contains(&name));
     }
 }

@@ -4,12 +4,11 @@ use dioxus::prelude::*;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
-use vmux_ecs::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
+use vmux_ecs::event::team::{TeamMemberRow, TeamOpenRequest};
 use vmux_ui::cn::cn;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -41,10 +40,9 @@ pub(crate) fn HeaderView() -> Element {
         state.header_height,
         state.tab_row_pad_left(),
     );
-
     rsx! {
         div {
-            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden",
             style: "{header_vars}",
             HeaderContent {}
         }
@@ -63,7 +61,7 @@ fn HeaderContent() -> Element {
         bookmarked: is_bookmarked,
         pinned_uuid,
         user,
-        agents,
+        agents: _,
     } = ui.header;
     let extensions = ui.extensions.extensions;
     let remote = ui.remote;
@@ -103,7 +101,7 @@ fn HeaderContent() -> Element {
                 WindowDragRegion {
                     id: "leading",
                     revision: tab_drag_region_revision.clone(),
-                    class: "h-10 shrink-0 self-stretch",
+                    class: "h-9 shrink-0 self-stretch",
                     style: "margin-left:min(56px,var(--vmux-tab-row-pad-left));width:max(0px,calc(var(--vmux-tab-row-pad-left) - 56px));",
                 }
                 if let Some(err) = tabs_error {
@@ -124,7 +122,7 @@ fn HeaderContent() -> Element {
                         WindowDragRegion {
                             id: "trailing",
                             revision: tab_drag_region_revision.clone(),
-                            class: "h-10 min-w-0 flex-1 self-stretch",
+                            class: "h-9 min-w-0 flex-1 self-stretch",
                             style: "",
                         }
                     }
@@ -209,10 +207,7 @@ fn HeaderContent() -> Element {
                             }
                         }
                     }
-                    TeamFacepile {
-                        user,
-                        agents,
-                    }
+                    TeamFacepile { user }
                     ExtensionBar { extensions }
                     RemoteControl { remote }
                 }
@@ -224,7 +219,7 @@ fn HeaderContent() -> Element {
 fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
     (
         String::new(),
-        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] bg-card px-2 text-foreground".to_string(),
     )
 }
 
@@ -256,23 +251,23 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         "cursor-pointer"
     };
     let tab_box_classes = cn([
-        "group relative flex h-10 w-[var(--tab-width)] min-w-[var(--tab-width)] max-w-[var(--tab-width)] basis-[var(--tab-width)] shrink-0 grow-0 select-none items-start",
+        "group relative flex h-9 w-[var(--tab-width)] min-w-[var(--tab-width)] max-w-[var(--tab-width)] basis-[var(--tab-width)] shrink-0 grow-0 select-none items-start",
         cursor_classes,
     ]);
     let inactive_hover_classes = if visual.active() {
         ""
     } else {
-        "hover:bg-glass-hover hover:text-foreground"
+        "bg-card/75 hover:bg-card hover:text-foreground"
     };
 
     let trunc = StackTitle::truncate_class(&display_title);
     let (surface_style, surface_class, title_class, close_class) = if is_active {
         (
-            "--tab-bg:var(--glass);background-color:var(--glass);border-bottom-width:0;"
+            "--tab-bg:var(--card);background-color:var(--card);border-bottom-width:0;"
                 .to_string(),
             cn([
                 skirt_classes,
-                "glass mt-1 flex h-10 w-full items-center gap-2 rounded-t-md border-b-0 px-3.5 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "mt-1 flex h-8 w-full items-center gap-2 rounded-t-md border-b-0 px-3 transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
             ]),
             cn([
                 "min-w-0 flex-1",
@@ -283,9 +278,9 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
         )
     } else {
         (
-            "background-color:color-mix(in oklab,var(--glass) 58%,transparent);".to_string(),
+            String::new(),
             cn([
-                "my-1 flex h-8 w-full items-center gap-2 rounded-lg border border-glass-border/65 px-3.5 text-muted-foreground shadow-sm transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
+                "my-1 flex h-7 w-full items-center gap-2 rounded-lg px-3 text-muted-foreground transition-[height,margin,background-color,border-color,border-radius,color,box-shadow] duration-150 ease-out",
                 inactive_hover_classes,
             ]),
             cn([
@@ -414,11 +409,11 @@ fn NewTabButton() -> Element {
                 r#type: "button",
                 aria_label: translate("layout-new-tab"),
                 title: translate("layout-new-tab"),
-                class: "absolute inset-0 flex cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
+                class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-foreground/[0.04] text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.09] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.09] focus-visible:text-foreground",
                 onclick: move |_| {
                     let _ = send(&TabCreateRequest);
                 },
-                Icon { class: "h-3.5 w-3.5",
+                Icon { class: "h-4 w-4",
                     path { d: "M12 5v14" }
                     path { d: "M5 12h14" }
                 }
@@ -488,15 +483,13 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
 }
 
 #[component]
-fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Element {
-    if user.is_none() && agents.is_empty() {
+fn TeamFacepile(user: Option<TeamMemberRow>) -> Element {
+    if user.is_none() {
         return rsx! {};
     }
-    let max = 5usize;
-    let overflow = agents.len().saturating_sub(max);
     rsx! {
         div {
-            class: "flex shrink-0 items-center gap-2 pl-3 pr-3",
+            class: "flex shrink-0 items-center pl-3 pr-3",
             if let Some(user) = user {
                 div {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
@@ -512,50 +505,6 @@ fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Elem
                         class: "size-5 text-[9px]",
                     }
                     span { class: "whitespace-nowrap text-xs font-medium text-foreground", "{user.name}" }
-                }
-            }
-            if !agents.is_empty() {
-                div { class: "flex items-center -space-x-1.5",
-                    for m in agents.iter().take(max) {
-                        {
-                            let src = FaviconSource::resolve(&m.icon, &m.url);
-                            let id = m.id.clone();
-                            rsx! {
-                                div {
-                                    key: "{m.id}",
-                                    title: "{m.name}",
-                                    class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
-                                    onclick: move |_| {
-                                        let _ = send(&TeamMemberFocusRequest {
-                                            member_id: id.clone(),
-                                        });
-                                    },
-                                    Avatar {
-                                        src,
-                                        seed: m.name.clone(),
-                                        background: m.color.clone(),
-                                        alt: m.name.clone(),
-                                        class: "size-5 text-[9px] ring-2 ring-background",
-                                    }
-                                    if m.is_running {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-2 ring-background" }
-                                    } else if m.is_done_unseen {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if overflow > 0 {
-                        div {
-                            class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
-                            title: translate("team-profiles"),
-                            onclick: move |_| {
-                                let _ = send(&TeamOpenRequest);
-                            },
-                            "+{overflow}"
-                        }
-                    }
                 }
             }
         }

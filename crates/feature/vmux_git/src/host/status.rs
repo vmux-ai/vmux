@@ -1,34 +1,37 @@
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::thread::JoinHandle;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
 use vmux_ecs::{FileUiStateUpdates, FileUiStateWrite};
 
 use crate::event::{
     DiffKind, FileGitState, FileStatus, GitCommitDraftRequest, GitCommitRequest,
-    GitCommitSubmitRequest, GitDiffRow, GitDiffViewport, GitFileStatus, GitOperationResult,
+    GitCommitSubmitRequest, GitDiffRevealRequest, GitDiffRow, GitDiffViewport, GitFileStatus,
+    GitOperationResult,
 };
 
 use super::GitDiffSource;
 use super::GitUpdateSet;
 use super::repository::GitRepository;
+use super::runtime::{GitRuntime, GitTask};
 use super::watch::GitWatch;
 
 const STATUS_DEBOUNCE: Duration = Duration::from_millis(120);
 const DIFF_CONTEXT_LINES: usize = 3;
-const DIFF_REVEAL_LINES: usize = 20;
 
 pub(super) struct StatusPlugin;
 
 impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(file_added)
+        app.init_resource::<GitRuntime>()
+            .init_resource::<GitStatusScheduler>()
+            .add_observer(file_added)
             .add_observer(edit_commit)
             .add_observer(submit_commit)
             .add_systems(
@@ -37,6 +40,8 @@ impl Plugin for StatusPlugin {
                     refresh_changed_sources,
                     start_refreshes,
                     poll_refreshes,
+                    cancel_stale_tasks,
+                    bevy::ecs::schedule::ApplyDeferred,
                     poll_tasks,
                     dispatch_requests,
                     publish_file_state,
@@ -51,6 +56,7 @@ impl Plugin for StatusPlugin {
 pub struct FileGit {
     document: u64,
     generation: u64,
+    status_applied: bool,
     revealed_diff: Vec<(usize, usize)>,
     state: FileGitState,
 }
@@ -60,6 +66,7 @@ impl FileGit {
         Self {
             document,
             generation: 0,
+            status_applied: false,
             revealed_diff: Vec::new(),
             state: FileGitState {
                 path: path.as_ref().to_string_lossy().into_owned(),
@@ -70,6 +77,10 @@ impl FileGit {
 
     pub(super) fn path(&self) -> &Path {
         Path::new(&self.state.path)
+    }
+
+    pub fn has_changes(&self) -> Option<bool> {
+        self.status_applied.then_some(self.state.has_diff)
     }
 
     pub(super) fn repo_root(&self) -> Option<PathBuf> {
@@ -117,11 +128,17 @@ impl FileGitStates<'_, '_> {
         entity: Entity,
         delay: Duration,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
+        discover_repository: bool,
     ) -> Option<GitStatusRefresh> {
         let Ok(mut file) = self.files.get_mut(entity) else {
             return None;
         };
-        Some(Self::refresh(file.bypass_change_detection(), delay, wake))
+        Some(Self::refresh(
+            file.bypass_change_detection(),
+            delay,
+            wake,
+            discover_repository,
+        ))
     }
 
     pub(super) fn schedule_changed(
@@ -129,7 +146,7 @@ impl FileGitStates<'_, '_> {
         entity: Entity,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
     ) -> Option<GitStatusRefresh> {
-        self.schedule(entity, STATUS_DEBOUNCE, wake)
+        self.schedule(entity, STATUS_DEBOUNCE, wake, true)
     }
 
     pub(super) fn apply_status(&mut self, entity: Entity, event: GitFileStatus) {
@@ -139,6 +156,7 @@ impl FileGitStates<'_, '_> {
         if event.path != file.state.path {
             return;
         }
+        file.status_applied = true;
         file.state.repo_root = event.repo_root;
         file.state.has_diff = matches!(
             event.file_status,
@@ -180,7 +198,7 @@ impl FileGitStates<'_, '_> {
         };
         file.state.result = Some(event);
         file.state.result_sequence = file.state.result_sequence.wrapping_add(1).max(1);
-        Some(Self::refresh(&mut file, Duration::ZERO, wake))
+        Some(Self::refresh(&mut file, Duration::ZERO, wake, true))
     }
 
     pub(super) fn apply_error(&mut self, entity: Entity, message: String) {
@@ -224,7 +242,12 @@ impl FileGitStates<'_, '_> {
         true
     }
 
-    pub(super) fn settle(&mut self, entity: Entity, revision: u64) -> Option<(PathBuf, u64)> {
+    pub(super) fn settle(
+        &mut self,
+        entity: Entity,
+        revision: u64,
+        discover_repository: bool,
+    ) -> Option<(PathBuf, u64, Option<PathBuf>)> {
         let Ok(mut file) = self.files.get_mut(entity) else {
             return None;
         };
@@ -232,26 +255,25 @@ impl FileGitStates<'_, '_> {
             return None;
         }
         file.state.refresh_revision = file.state.refresh_revision.wrapping_add(1).max(1);
-        Some((PathBuf::from(&file.state.path), file.document))
-    }
-
-    pub(super) fn set_repo_root(&mut self, entity: Entity, repo_root: &Path) {
-        let Ok(mut file) = self.files.get_mut(entity) else {
-            return;
-        };
-        file.state.repo_root = repo_root.to_string_lossy().into_owned();
+        Some((
+            PathBuf::from(&file.state.path),
+            file.document,
+            (!discover_repository).then(|| file.repo_root()).flatten(),
+        ))
     }
 
     fn refresh(
         file: &mut FileGit,
         delay: Duration,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
+        discover_repository: bool,
     ) -> GitStatusRefresh {
         file.generation = file.generation.wrapping_add(1).max(1);
         GitStatusRefresh {
             revision: file.generation,
-            delay,
+            due: Instant::now() + delay,
             wake,
+            discover_repository,
         }
     }
 
@@ -298,12 +320,13 @@ impl FileGitStates<'_, '_> {
                 index += 1;
             }
             let hidden = index - start;
-            let (reveal_start, reveal_end) = if hidden <= DIFF_REVEAL_LINES {
+            let chunk = GitDiffRevealRequest::CHUNK as usize;
+            let (reveal_start, reveal_end) = if hidden <= chunk {
                 (start, index)
             } else if start == 0 {
-                (index - DIFF_REVEAL_LINES, index)
+                (index - chunk, index)
             } else {
-                (start, start + DIFF_REVEAL_LINES)
+                (start, start + chunk)
             };
             rows.push(GitDiffRow::Gap {
                 start: start as u32,
@@ -352,23 +375,120 @@ fn submit_commit(
 #[derive(Component)]
 pub(super) struct GitStatusRefresh {
     revision: u64,
-    delay: Duration,
+    due: Instant,
+    wake: Option<EventLoopProxy<WinitUserEvent>>,
+    discover_repository: bool,
+}
+
+#[derive(Resource)]
+struct GitStatusScheduler {
+    sender: mpsc::Sender<ScheduledGitStatusWake>,
+}
+
+struct ScheduledGitStatusWake {
+    target: Entity,
+    revision: u64,
+    due: Instant,
     wake: Option<EventLoopProxy<WinitUserEvent>>,
 }
 
-#[derive(Component)]
-struct GitStatusRefreshTask {
-    revision: u64,
-    task: Task<()>,
+impl PartialEq for ScheduledGitStatusWake {
+    fn eq(&self, other: &Self) -> bool {
+        self.due == other.due && self.target == other.target && self.revision == other.revision
+    }
+}
+
+impl Eq for ScheduledGitStatusWake {}
+
+impl PartialOrd for ScheduledGitStatusWake {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScheduledGitStatusWake {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.due
+            .cmp(&other.due)
+            .then(self.target.cmp(&other.target))
+            .then(self.revision.cmp(&other.revision))
+    }
+}
+
+impl Default for GitStatusScheduler {
+    fn default() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        let _ = std::thread::Builder::new()
+            .name("vmux-git-status-debounce".to_string())
+            .spawn(move || Self::run(receiver));
+        Self { sender }
+    }
+}
+
+impl GitStatusScheduler {
+    fn schedule(&self, target: Entity, refresh: &GitStatusRefresh) {
+        let _ = self.sender.send(ScheduledGitStatusWake {
+            target,
+            revision: refresh.revision,
+            due: refresh.due,
+            wake: refresh.wake.clone(),
+        });
+    }
+
+    fn run(receiver: mpsc::Receiver<ScheduledGitStatusWake>) {
+        let mut pending = BinaryHeap::<Reverse<ScheduledGitStatusWake>>::new();
+        let mut latest = HashMap::<Entity, u64>::new();
+        loop {
+            let received = match pending.peek() {
+                Some(Reverse(next)) => {
+                    let timeout = next.due.saturating_duration_since(Instant::now());
+                    receiver.recv_timeout(timeout)
+                }
+                None => match receiver.recv() {
+                    Ok(value) => {
+                        latest.insert(value.target, value.revision);
+                        pending.push(Reverse(value));
+                        continue;
+                    }
+                    Err(_) => return,
+                },
+            };
+            match received {
+                Ok(value) => {
+                    latest.insert(value.target, value.revision);
+                    pending.push(Reverse(value));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let now = Instant::now();
+                    let mut wake = None;
+                    while pending.peek().is_some_and(|next| next.0.due <= now) {
+                        let Some(Reverse(next)) = pending.pop() else {
+                            break;
+                        };
+                        if latest.get(&next.target) != Some(&next.revision) {
+                            continue;
+                        }
+                        latest.remove(&next.target);
+                        wake = wake.or(next.wake);
+                    }
+                    if let Some(wake) = wake {
+                        let _ = wake.send_event(WinitUserEvent::WakeUp);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Component, Clone, Debug)]
 struct PendingGitStatus {
-    repo_root: PathBuf,
+    repo_root: Option<PathBuf>,
     path: PathBuf,
     document: u64,
     revision: u64,
     dirty: bool,
+    prepare_watch: bool,
 }
 
 struct GitStatusRequestInput {
@@ -377,13 +497,48 @@ struct GitStatusRequestInput {
     document: u64,
     revision: u64,
     dirty: bool,
+    repo_root: Option<PathBuf>,
+    prepare_watch: bool,
+}
+
+impl GitStatusRequestInput {
+    fn identity(&self) -> GitStatusRequestIdentity {
+        GitStatusRequestIdentity {
+            webview: self.webview,
+            document: self.document,
+            revision: self.revision,
+        }
+    }
+
+    fn non_repository(self) -> GitStatusResult {
+        let status = GitRepository::non_repository_status(&self.path);
+        GitStatusResult {
+            identity: self.identity(),
+            status: Ok(status),
+            watch: Ok(None),
+        }
+    }
+
+    fn failed(self, message: String) -> GitStatusResult {
+        GitStatusResult {
+            identity: self.identity(),
+            status: Err(message),
+            watch: Ok(None),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum GitStatusBatchKey {
+    Repository(PathBuf),
+    Discover,
 }
 
 #[derive(Component)]
 struct GitStatusTask {
-    repo_root: PathBuf,
+    key: GitStatusBatchKey,
     requests: Vec<GitStatusRequestIdentity>,
-    thread: Option<JoinHandle<GitStatusResults>>,
+    task: GitTask<GitStatusResults>,
 }
 
 #[derive(Clone, Copy)]
@@ -396,9 +551,90 @@ struct GitStatusRequestIdentity {
 struct GitStatusResult {
     identity: GitStatusRequestIdentity,
     status: Result<GitFileStatus, String>,
+    watch: Result<Option<super::watch::GitWatchSubscription>, String>,
 }
 
-struct GitStatusResults(Vec<GitStatusResult>);
+struct GitStatusResults {
+    values: Vec<GitStatusResult>,
+}
+
+impl GitStatusResults {
+    fn read(requests: Vec<GitStatusRequestInput>) -> Self {
+        let mut values = Vec::new();
+        let mut repositories =
+            HashMap::<PathBuf, (GitRepository, Vec<GitStatusRequestInput>)>::new();
+        for request in requests {
+            let repository = match request.repo_root.as_ref() {
+                Some(root) => Ok(GitRepository::at(root.clone())),
+                None => GitRepository::discover(&request.path),
+            };
+            match repository {
+                Ok(repository) => {
+                    let key = vmux_path::PathIdentity::resolve(repository.path()).into_path_buf();
+                    repositories
+                        .entry(key)
+                        .or_insert_with(|| (repository, Vec::new()))
+                        .1
+                        .push(request);
+                }
+                Err(error) if GitRepository::has_repository(&request.path) => {
+                    values.push(request.failed(error.0));
+                }
+                Err(_) => values.push(request.non_repository()),
+            }
+        }
+        for (_, (repository, requests)) in repositories {
+            values.extend(Self::read_repository(repository, requests));
+        }
+        Self { values }
+    }
+
+    fn read_repository(
+        repository: GitRepository,
+        requests: Vec<GitStatusRequestInput>,
+    ) -> Vec<GitStatusResult> {
+        let prepare_watch = requests.iter().any(|request| request.prepare_watch);
+        let watch = if prepare_watch {
+            super::watch::GitWatchSubscription::read(repository.path())
+                .map(Some)
+                .map_err(|error| error.0)
+        } else {
+            Ok(None)
+        };
+        let paths = requests
+            .iter()
+            .map(|request| request.path.clone())
+            .collect::<Vec<_>>();
+        match repository.statuses(&paths) {
+            Ok(events) => requests
+                .into_iter()
+                .zip(events)
+                .map(|(request, mut status)| {
+                    if request.dirty {
+                        status.file_status = match status.file_status {
+                            FileStatus::Clean => FileStatus::Modified,
+                            FileStatus::Staged => FileStatus::StagedModified,
+                            value => value,
+                        };
+                    }
+                    GitStatusResult {
+                        identity: request.identity(),
+                        status: Ok(status),
+                        watch: watch.clone(),
+                    }
+                })
+                .collect(),
+            Err(error) => requests
+                .into_iter()
+                .map(|request| GitStatusResult {
+                    identity: request.identity(),
+                    status: Err(error.0.clone()),
+                    watch: watch.clone(),
+                })
+                .collect(),
+        }
+    }
+}
 
 type ChangedDiffSource<'a> = (Entity, Ref<'a, GitDiffSource>);
 type ChangedDiffSourceFilter = (Changed<GitDiffSource>, With<FileGit>);
@@ -418,6 +654,7 @@ fn file_added(
         trigger.entity,
         Duration::ZERO,
         wake.as_deref().map(|wake| (**wake).clone()),
+        true,
     ) else {
         return;
     };
@@ -435,105 +672,74 @@ fn refresh_changed_sources(
         if source.is_added() {
             continue;
         }
-        if let Some(refresh) = files.schedule(entity, STATUS_DEBOUNCE, wake.clone()) {
+        if let Some(refresh) = files.schedule(entity, STATUS_DEBOUNCE, wake.clone(), false) {
             commands.entity(entity).insert(refresh);
         }
     }
 }
 
 fn start_refreshes(
-    refreshes: Query<(Entity, &GitStatusRefresh), Added<GitStatusRefresh>>,
-    mut commands: Commands,
+    refreshes: Query<(Entity, &GitStatusRefresh), Changed<GitStatusRefresh>>,
+    scheduler: Res<GitStatusScheduler>,
 ) {
     for (entity, refresh) in &refreshes {
-        let revision = refresh.revision;
-        let delay = refresh.delay;
-        let wake = refresh.wake.clone();
-        let task = IoTaskPool::get().spawn(async move {
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
-            }
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-        });
-        commands
-            .entity(entity)
-            .remove::<GitStatusRefresh>()
-            .insert(GitStatusRefreshTask { revision, task });
+        scheduler.schedule(entity, refresh);
     }
 }
 
 fn poll_refreshes(
-    mut refreshes: Query<
-        (Entity, &mut GitStatusRefreshTask, Option<&GitDiffSource>),
-        With<FileGit>,
-    >,
+    refreshes: Query<(Entity, &GitStatusRefresh, Option<&GitDiffSource>), With<FileGit>>,
     mut files: FileGitStates,
-    mut watch: Option<NonSendMut<GitWatch>>,
     mut commands: Commands,
 ) {
-    for (entity, mut refresh, source) in &mut refreshes {
-        if future::block_on(future::poll_once(&mut refresh.task)).is_none() {
+    for (entity, refresh, source) in &refreshes {
+        if Instant::now() < refresh.due {
             continue;
         }
-        commands.entity(entity).remove::<GitStatusRefreshTask>();
-        let Some((path, document)) = files.settle(entity, refresh.revision) else {
+        commands.entity(entity).remove::<GitStatusRefresh>();
+        let Some((path, document, repo_root)) =
+            files.settle(entity, refresh.revision, refresh.discover_repository)
+        else {
             continue;
         };
-        if !GitRepository::has_repository(&path) {
-            files.apply_status(entity, GitRepository::non_repository_status(&path));
-            commands.entity(entity).remove::<PendingGitStatus>();
-            continue;
-        }
-        let repo_root = if let Some(watch) = watch.as_deref_mut() {
-            watch.subscribe(entity, &path)
-        } else {
-            GitRepository::discover(&path).map(|repository| repository.path().to_path_buf())
-        };
-        match repo_root {
-            Ok(repo_root) => {
-                files.set_repo_root(entity, &repo_root);
-                commands.entity(entity).insert(PendingGitStatus {
-                    repo_root,
-                    path,
-                    document,
-                    revision: refresh.revision,
-                    dirty: source.is_some_and(|source| source.dirty),
-                });
-                commands.trigger(super::diff::FileDiffRefresh { entity });
-            }
-            Err(error) => {
-                commands.entity(entity).remove::<PendingGitStatus>();
-                files.apply_error(entity, error.0);
-            }
-        }
+        let prepare_watch = refresh.discover_repository || repo_root.is_none();
+        commands.entity(entity).insert(PendingGitStatus {
+            repo_root,
+            path,
+            document,
+            revision: refresh.revision,
+            dirty: source.is_some_and(|source| source.dirty),
+            prepare_watch,
+        });
     }
 }
 
 fn poll_tasks(
     mut tasks: Query<(Entity, &mut GitStatusTask)>,
     mut files: FileGitStates,
+    mut watch: Option<NonSendMut<GitWatch>>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
-        if !task.thread.as_ref().is_some_and(JoinHandle::is_finished) {
+        let Some(output) = task.task.poll() else {
             continue;
-        }
-        let results = match task.thread.take().unwrap().join() {
+        };
+        let results = match output {
             Ok(results) => results,
-            Err(_) => GitStatusResults(
-                task.requests
+            Err(_) => GitStatusResults {
+                values: task
+                    .requests
                     .iter()
                     .copied()
                     .map(|identity| GitStatusResult {
                         identity,
                         status: Err("Git status worker panicked".to_string()),
+                        watch: Ok(None),
                     })
                     .collect(),
-            ),
+            },
         };
-        for result in results.0 {
+        for result in results.values {
             if !files.accepts(
                 result.identity.webview,
                 result.identity.document,
@@ -542,7 +748,30 @@ fn poll_tasks(
                 continue;
             }
             match result.status {
-                Ok(status) => files.apply_status(result.identity.webview, status),
+                Ok(status) => {
+                    let path = status.path.clone();
+                    files.apply_status(result.identity.webview, status);
+                    let watch_error = match result.watch {
+                        Ok(Some(subscription)) => watch.as_deref_mut().and_then(|watch| {
+                            watch
+                                .subscribe_file(
+                                    result.identity.webview,
+                                    Path::new(&path),
+                                    subscription,
+                                )
+                                .err()
+                                .map(|error| error.0)
+                        }),
+                        Ok(None) => None,
+                        Err(message) => Some(message),
+                    };
+                    if let Some(message) = watch_error {
+                        files.apply_error(result.identity.webview, message);
+                    }
+                    commands.trigger(super::diff::FileDiffRefresh {
+                        entity: result.identity.webview,
+                    });
+                }
                 Err(message) => files.apply_error(result.identity.webview, message),
             }
         }
@@ -550,90 +779,84 @@ fn poll_tasks(
     }
 }
 
+type OrphanedGitStatusFilter = (
+    Or<(With<GitStatusRefresh>, With<PendingGitStatus>)>,
+    Without<FileGit>,
+);
+
+fn cancel_stale_tasks(
+    refreshes: Query<Entity, OrphanedGitStatusFilter>,
+    tasks: Query<(Entity, &GitStatusTask)>,
+    files: Query<&FileGit>,
+    mut commands: Commands,
+) {
+    for entity in &refreshes {
+        commands
+            .entity(entity)
+            .remove::<(GitStatusRefresh, PendingGitStatus)>();
+    }
+    for (entity, task) in &tasks {
+        let current = task.requests.iter().any(|identity| {
+            files
+                .get(identity.webview)
+                .is_ok_and(|file| file.accepts(identity.document, identity.revision))
+        });
+        if !current {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 fn dispatch_requests(
     pending: Query<(Entity, &PendingGitStatus)>,
     tasks: Query<&GitStatusTask>,
     wake: Option<Res<EventLoopProxyWrapper>>,
+    runtime: Res<GitRuntime>,
     mut commands: Commands,
 ) {
-    let active: HashSet<PathBuf> = tasks.iter().map(|task| task.repo_root.clone()).collect();
-    let mut batches: HashMap<PathBuf, Vec<GitStatusRequestInput>> = HashMap::new();
+    let active: HashSet<GitStatusBatchKey> = tasks.iter().map(|task| task.key.clone()).collect();
+    let mut batches: HashMap<GitStatusBatchKey, Vec<GitStatusRequestInput>> = HashMap::new();
     for (webview, request) in &pending {
-        if active.contains(&request.repo_root) {
+        let key = match request.repo_root.as_ref() {
+            Some(root) => GitStatusBatchKey::Repository(
+                vmux_path::PathIdentity::lexical(root).into_path_buf(),
+            ),
+            None => GitStatusBatchKey::Discover,
+        };
+        if active.contains(&key) {
             continue;
         }
-        batches
-            .entry(request.repo_root.clone())
-            .or_default()
-            .push(GitStatusRequestInput {
-                webview,
-                path: request.path.clone(),
-                document: request.document,
-                revision: request.revision,
-                dirty: request.dirty,
-            });
-        commands.entity(webview).remove::<PendingGitStatus>();
+        batches.entry(key).or_default().push(GitStatusRequestInput {
+            webview,
+            path: request.path.clone(),
+            document: request.document,
+            revision: request.revision,
+            dirty: request.dirty,
+            repo_root: request.repo_root.clone(),
+            prepare_watch: request.prepare_watch,
+        });
     }
     let wake = wake.as_deref().map(|wake| (**wake).clone());
-    for (repo_root, requests) in batches {
-        let task_root = repo_root.clone();
+    for (key, requests) in batches {
         let identities = requests
             .iter()
-            .map(|request| GitStatusRequestIdentity {
-                webview: request.webview,
-                document: request.document,
-                revision: request.revision,
-            })
-            .collect();
-        let wake = wake.clone();
-        let thread = std::thread::spawn(move || {
-            let paths = requests
-                .iter()
-                .map(|request| request.path.clone())
-                .collect::<Vec<_>>();
-            let results = match GitRepository::at(task_root).statuses(&paths) {
-                Ok(events) => requests
-                    .into_iter()
-                    .zip(events)
-                    .map(|(request, mut event)| {
-                        if request.dirty {
-                            event.file_status = match event.file_status {
-                                FileStatus::Clean => FileStatus::Modified,
-                                FileStatus::Staged => FileStatus::StagedModified,
-                                status => status,
-                            };
-                        }
-                        GitStatusResult {
-                            identity: GitStatusRequestIdentity {
-                                webview: request.webview,
-                                document: request.document,
-                                revision: request.revision,
-                            },
-                            status: Ok(event),
-                        }
-                    })
-                    .collect(),
-                Err(error) => requests
-                    .into_iter()
-                    .map(|request| GitStatusResult {
-                        identity: GitStatusRequestIdentity {
-                            webview: request.webview,
-                            document: request.document,
-                            revision: request.revision,
-                        },
-                        status: Err(error.0.clone()),
-                    })
-                    .collect(),
-            };
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            GitStatusResults(results)
-        });
+            .map(GitStatusRequestInput::identity)
+            .collect::<Vec<_>>();
+        let pending = identities
+            .iter()
+            .map(|identity| identity.webview)
+            .collect::<Vec<_>>();
+        let Some(task) = runtime.spawn(wake.clone(), move || GitStatusResults::read(requests))
+        else {
+            continue;
+        };
+        for webview in pending {
+            commands.entity(webview).remove::<PendingGitStatus>();
+        }
         commands.spawn(GitStatusTask {
-            repo_root,
+            key,
             requests: identities,
-            thread: Some(thread),
+            task,
         });
     }
 }
@@ -771,6 +994,7 @@ mod tests {
             generation: 1,
             first_line: 0,
             total_lines: 20,
+            has_more: false,
             lines,
             markers: Vec::new(),
             error: String::new(),

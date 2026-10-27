@@ -76,6 +76,7 @@ unic-langid = "0.9"
 sys-locale = "0.3"
 regex = "1"
 smallvec = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 alacritty_terminal = "0.26"
 portable-pty = "0.9"

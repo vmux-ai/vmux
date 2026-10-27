@@ -202,10 +202,10 @@ fn EditorTab(tab: OpenEditorItem) -> Element {
     let element_id = format!("editor-tab-{}", tab.path);
     let class = match tab.active {
         true => {
-            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.10] px-2.5 text-ui text-foreground"
+            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.07] px-2 text-ui text-foreground"
         }
         false => {
-            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md px-2.5 text-ui text-foreground/60 hover:bg-foreground/[0.05] hover:text-foreground/90"
+            "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md px-2 text-ui text-foreground/55 hover:bg-foreground/[0.035] hover:text-foreground/90"
         }
     };
     let close_title = match tab.dirty {

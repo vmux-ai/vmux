@@ -420,7 +420,7 @@ fn mark_document(views: Query<Entity, Changed<FileView>>, mut commands: Commands
     for entity in &views {
         commands
             .entity(entity)
-            .insert((ExplorerPanelAutoShow, ExplorerPanelReflow))
+            .insert(ExplorerPanelReflow)
             .remove::<ExplorerPanelSent>();
     }
 }

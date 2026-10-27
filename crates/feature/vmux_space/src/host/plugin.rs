@@ -20,6 +20,7 @@ use vmux_layout::projection::SpacesProjection;
 use vmux_layout::space::CurrentSpace;
 use vmux_layout::space::{
     CurrentSpaceSet, EffectiveStartupDir, EffectiveStartupSet, FocusedSpace, Space, SpaceId,
+    SpaceOfPane,
 };
 use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::state::LayoutUiState;
@@ -37,10 +38,10 @@ use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
-    ProjectActivateRequest, ProjectForgetRequest, SpaceAttachRequest, SpaceCreateRequest,
-    SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest, SpaceFormOpenRequest,
-    SpaceFormState, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
-    SpacesUiState,
+    ProjectActivateRequest, ProjectForgetRequest, ProjectPickerRequest, SpaceAttachRequest,
+    SpaceCreateRequest, SpaceDeleteRequest, SpaceFormCloseRequest, SpaceFormInputRequest,
+    SpaceFormOpenRequest, SpaceFormRegenerateRequest, SpaceFormState, SpaceOpenPageRequest,
+    SpaceRenameRequest, SpaceRow, SpacesListEvent, SpacesUiState,
 };
 use crate::model::SpaceRecord;
 use vmux_api::command_bar::{CommandBarPicker, OpenRequest as CommandBarOpenUrlRequest};
@@ -92,7 +93,6 @@ impl Plugin for SpacePlugin {
                 .after(CurrentSpaceSet)
                 .before(ReadCommandRequests),
         )
-        .add_systems(Update, sync_name_to_id)
         .add_systems(
             Startup,
             (ensure_bootstrap, ApplyDeferred, update_effective_startup)
@@ -116,9 +116,13 @@ impl Plugin for SpacePlugin {
                 SpaceRenameRequest,
                 SpaceFormOpenRequest,
                 SpaceFormInputRequest,
+                SpaceFormRegenerateRequest,
                 SpaceFormCloseRequest,
+            )>::default(),
+            UiEventPlugin::<(
                 ProjectActivateRequest,
                 ProjectForgetRequest,
+                ProjectPickerRequest,
                 vmux_ecs::event::ProjectTreeToggle,
             )>::default(),
         ))
@@ -129,6 +133,7 @@ impl Plugin for SpacePlugin {
         .add_observer(rename)
         .add_observer(open_form)
         .add_observer(edit_form)
+        .add_observer(regenerate_form)
         .add_observer(close_form)
         .add_observer(project_activate)
         .add_observer(project_forget)
@@ -136,6 +141,7 @@ impl Plugin for SpacePlugin {
         .add_observer(activate_contribution)
         .add_observer(reset_sent)
         .add_systems(Update, handle_open_in_new.in_set(ReadCommandRequests))
+        .add_systems(Update, open_requested_form)
         .add_systems(Update, broadcast_spaces_to_views);
     }
 }
@@ -390,6 +396,9 @@ struct SpacesListSent;
 #[derive(Component)]
 struct SpaceForm(SpaceFormState);
 
+#[derive(Component)]
+struct OpenSpaceForm;
+
 fn reset_sent(
     trigger: On<UiInput<PageReady>>,
     spaces_views: Query<(), With<Spaces>>,
@@ -403,11 +412,30 @@ fn reset_sent(
     commands.entity(entity).remove::<SpacesListSent>();
 }
 
-fn open_form(trigger: On<UiInput<SpaceFormOpenRequest>>, mut commands: Commands) {
+fn open_form(
+    trigger: On<UiInput<SpaceFormOpenRequest>>,
+    spaces: Query<&Name, With<Space>>,
+    mut commands: Commands,
+) {
+    let suggestion = if trigger.event().payload.space_id.is_none() {
+        let existing = spaces
+            .iter()
+            .map(|name| name.as_str().to_string())
+            .collect::<std::collections::HashSet<_>>();
+        SpaceRecord::suggested_planet_name(&existing)
+    } else {
+        String::new()
+    };
+    let draft = if trigger.event().payload.draft.trim().is_empty() {
+        suggestion.clone()
+    } else {
+        trigger.event().payload.draft.clone()
+    };
     let form = SpaceFormState {
         open: true,
         space_id: trigger.event().payload.space_id.clone(),
-        draft: trigger.event().payload.draft.clone(),
+        draft,
+        suggestion,
     };
     commands
         .entity(trigger.event().webview)
@@ -431,6 +459,34 @@ fn edit_form(
         return;
     };
     form.0.draft.clone_from(&trigger.event().payload.draft);
+    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        trigger.event().webview,
+        &form.0,
+    ));
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+        trigger.event().webview,
+        &form.0,
+    ));
+}
+
+fn regenerate_form(
+    trigger: On<UiInput<SpaceFormRegenerateRequest>>,
+    spaces: Query<&Name, With<Space>>,
+    mut forms: Query<&mut SpaceForm>,
+    mut commands: Commands,
+) {
+    let Ok(mut form) = forms.get_mut(trigger.event().webview) else {
+        return;
+    };
+    let mut existing = spaces
+        .iter()
+        .map(|name| name.as_str().to_string())
+        .collect::<std::collections::HashSet<_>>();
+    existing.insert(form.0.draft.clone());
+    existing.insert(form.0.suggestion.clone());
+    let suggestion = SpaceRecord::suggested_planet_name(&existing);
+    form.0.draft.clone_from(&suggestion);
+    form.0.suggestion = suggestion;
     commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
         trigger.event().webview,
         &form.0,
@@ -598,15 +654,23 @@ fn broadcast_spaces_to_views(
 fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
     active: FocusedSpace,
+    space_of_pane: SpaceOfPane,
+    spaces: Query<&SpaceId, With<Space>>,
     settings: Option<ResMut<AppSettings>>,
     mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
-    let (Some(space_id), Some(mut settings)) = (active.id(), settings) else {
+    let pane_id = trigger.event().payload.pane_id;
+    let space = match pane_id {
+        Some(pane_id) => space_of_pane.resolve(&pane_id.to_string()),
+        None => active.entity(),
+    };
+    let space_id = space.and_then(|space| spaces.get(space).ok());
+    let (Some(space_id), Some(mut settings)) = (space_id, settings) else {
         return;
     };
     let changed = settings
         .bypass_change_detection()
-        .activate_space_project(space_id, trigger.event().payload.path.trim());
+        .activate_space_project(&space_id.0, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(SettingsSaveRequest);
@@ -801,14 +865,6 @@ impl SpaceViewTemplate {
     }
 }
 
-fn sync_name_to_id(mut spaces: Query<(&SpaceId, &mut Name), (With<Space>, Changed<SpaceId>)>) {
-    for (id, mut name) in &mut spaces {
-        if name.as_str() != id.0 {
-            *name = Name::new(id.0.clone());
-        }
-    }
-}
-
 fn rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut commands: Commands) {
     let request = &trigger.event().payload;
     let name = request.name.trim();
@@ -861,6 +917,9 @@ fn open_page(
     if let Some((existing, _)) = stacks.iter().find(|(stack, metadata)| {
         metadata.url == SpacePlugin::MANIFEST.url && space_window.window_of(*stack) == Some(window)
     }) {
+        if trigger.event().payload.create {
+            commands.entity(existing).insert(OpenSpaceForm);
+        }
         commands.trigger(ActivateRequest { entity: existing });
         return;
     }
@@ -870,14 +929,41 @@ fn open_page(
     let Some(spawn_requests) = spawn_requests.as_mut() else {
         return;
     };
-    let stack = commands
-        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
-        .id();
+    let mut stack = commands.spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)));
+    if trigger.event().payload.create {
+        stack.insert(OpenSpaceForm);
+    }
+    let stack = stack.id();
     spawn_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
         url: SpacePlugin::MANIFEST.url.to_string(),
         request_id: None,
     });
+}
+
+fn open_requested_form(
+    views: Query<Entity, (With<Spaces>, With<PageReady>)>,
+    pending: Query<(), With<OpenSpaceForm>>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    for view in &views {
+        let mut current = view;
+        loop {
+            if pending.contains(current) {
+                commands.entity(current).remove::<OpenSpaceForm>();
+                commands.trigger(UiInput {
+                    webview: view,
+                    payload: SpaceFormOpenRequest::default(),
+                });
+                break;
+            }
+            let Ok(parent) = parents.get(current) else {
+                break;
+            };
+            current = parent.parent();
+        }
+    }
 }
 
 fn delete(
@@ -998,22 +1084,22 @@ fn create(
     let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
         return;
     };
-    let count = graph
-        .spaces
-        .iter()
-        .filter(|(_, _, _, _, parent)| parent.parent() == main)
-        .count();
-    let requested_name = trigger.event().payload.name.trim();
-    let name = if requested_name.is_empty() {
-        format!("Space {}", count + 1)
-    } else {
-        requested_name.to_string()
-    };
     let existing: std::collections::HashSet<String> = graph
         .spaces
         .iter()
         .map(|(_, id, _, _, _)| id.0.clone())
         .collect();
+    let existing_names: std::collections::HashSet<String> = graph
+        .rows
+        .iter()
+        .map(|(_, _, name, _, _, _, _)| name.as_str().to_string())
+        .collect();
+    let requested_name = trigger.event().payload.name.trim();
+    let name = if requested_name.is_empty() {
+        SpaceRecord::suggested_planet_name(&existing_names)
+    } else {
+        requested_name.to_string()
+    };
     let id = SpaceRecord::unique_id(&existing, &name);
     let order = graph
         .spaces
@@ -1066,17 +1152,17 @@ fn handle_open_in_new(
             continue;
         };
 
-        let count = graph
-            .spaces
-            .iter()
-            .filter(|(_, _, _, _, parent)| parent.parent() == main)
-            .count();
-        let name = format!("Space {}", count + 1);
         let existing: std::collections::HashSet<String> = graph
             .spaces
             .iter()
             .map(|(_, sid, _, _, _)| sid.0.clone())
             .collect();
+        let existing_names: std::collections::HashSet<String> = graph
+            .rows
+            .iter()
+            .map(|(_, _, name, _, _, _, _)| name.as_str().to_string())
+            .collect();
+        let name = SpaceRecord::suggested_planet_name(&existing_names);
         let id = SpaceRecord::unique_id(&existing, &name);
         let order = graph
             .spaces
@@ -1600,6 +1686,63 @@ mod tests {
         assert_eq!(
             before, after,
             "choosing the space's default must leave every open tab where it was"
+        );
+    }
+
+    #[test]
+    fn project_activation_targets_the_space_that_owns_the_pane() {
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                projects: vec![SpaceProject::at("/repo/work")],
+                active_project: Some("/repo/work".into()),
+                ..Default::default()
+            },
+        );
+        settings.spaces.insert(
+            "other".into(),
+            SpaceOverrides {
+                projects: vec![
+                    SpaceProject::at("/repo/other-a"),
+                    SpaceProject::at("/repo/other-b"),
+                ],
+                active_project: Some("/repo/other-a".into()),
+                ..Default::default()
+            },
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SettingsSaveRequest>()
+            .insert_resource(settings)
+            .add_observer(project_activate);
+        app.world_mut()
+            .spawn((Space, SpaceId("work".into()), CurrentSpace));
+        let other = app.world_mut().spawn((Space, SpaceId("other".into()))).id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(other))).id();
+        let pane = app
+            .world_mut()
+            .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
+            .id();
+
+        run_project_request(
+            &mut app,
+            ProjectActivateRequest {
+                path: "/repo/other-b".into(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: Some(pane.to_bits()),
+            },
+        );
+
+        let settings = app.world().resource::<AppSettings>();
+        assert_eq!(
+            settings.space("work").unwrap().active_project.as_deref(),
+            Some("/repo/work")
+        );
+        assert_eq!(
+            settings.space("other").unwrap().active_project.as_deref(),
+            Some("/repo/other-b")
         );
     }
 

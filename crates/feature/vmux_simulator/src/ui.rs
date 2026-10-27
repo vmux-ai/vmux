@@ -12,14 +12,16 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
+use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::Platform;
 use vmux_ui::script::PageScript;
 
 #[vmux_page::page(
     component = Page,
+    states = ["ThemeUiState", "SimulatorUiState"],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]
@@ -34,17 +36,27 @@ pub fn Page() -> Element {
 
     let announced = ready();
     rsx! {
-        div { class: "flex h-screen w-screen items-center justify-center overflow-hidden bg-background",
-            if announced.port == 0 {
-                Waiting { route }
-            } else {
-                Mirror {
-                    key: "{announced.port}-{announced.capability}",
-                    port: announced.port,
-                    capability: announced.capability.clone(),
-                    device_name: announced.device_name.clone(),
-                    frame_width: announced.frame_width,
-                    frame_height: announced.frame_height,
+        div { class: "flex h-screen w-screen flex-col overflow-hidden bg-background",
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Simulator.option(),
+                options: WorkspacePage::options(),
+            }
+            div { class: "flex min-h-0 flex-1 items-center justify-center overflow-hidden",
+                if announced.port == 0 {
+                    Waiting {
+                        route,
+                        status: announced.status,
+                        error: announced.error,
+                    }
+                } else {
+                    Mirror {
+                        key: "{announced.port}-{announced.capability}",
+                        port: announced.port,
+                        capability: announced.capability.clone(),
+                        device_name: announced.device_name.clone(),
+                        frame_width: announced.frame_width,
+                        frame_height: announced.frame_height,
+                    }
                 }
             }
         }
@@ -89,7 +101,7 @@ fn Mirror(
     });
     rsx! {
         div {
-            class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8 outline-none",
+            class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background p-8 outline-none",
             tabindex: 0,
             onmounted: move |event: Event<MountedData>| {
                 let target = event.data();
@@ -173,7 +185,7 @@ fn Mirror(
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
                 div {
-                    class: "relative overflow-hidden bg-black ring-1 ring-black",
+                    class: "relative overflow-hidden bg-zinc-950 ring-1 ring-foreground/10",
                     style: screen_style,
                     SimulatorScreenSkeleton { id: stream.loader_id.clone() }
                     canvas {
@@ -263,6 +275,16 @@ const reveal = () => {{
   label?.classList.remove("opacity-0");
   label?.classList.add("opacity-100");
 }};
+const decodeFrame = bytes => new Promise((resolve, reject) => {{
+  const url = URL.createObjectURL(new Blob([bytes], {{ type: "image/jpeg" }}));
+  const image = new Image();
+  image.onload = () => resolve({{ image, url }});
+  image.onerror = () => {{
+    URL.revokeObjectURL(url);
+    reject(new Error("simulator frame could not be decoded"));
+  }};
+  image.src = url;
+}});
 (async () => {{
 try {{
   const canvas = document.getElementById(key);
@@ -278,14 +300,14 @@ try {{
     if (payload.length < 9) throw new Error("simulator frame was empty");
     const generationView = new DataView(payload.buffer, payload.byteOffset, 8);
     generation = generationView.getUint32(0, true) + generationView.getUint32(4, true) * 4294967296;
-    const bitmap = await createImageBitmap(new Blob([payload.subarray(8)], {{ type: "image/jpeg" }}));
+    const decoded = await decodeFrame(payload.subarray(8));
     if (!canvas.isConnected) {{
-      bitmap.close();
+      URL.revokeObjectURL(decoded.url);
       controller.abort();
       break;
     }}
-    context.drawImage(bitmap, 0, 0, {width}, {height});
-    bitmap.close();
+    context.drawImage(decoded.image, 0, 0, {width}, {height});
+    URL.revokeObjectURL(decoded.url);
     if (first) {{
       first = false;
       reveal();
@@ -532,11 +554,54 @@ impl BrowserCode {
 }
 
 #[component]
-fn Waiting(route: Option<SimulatorRoute>) -> Element {
-    let _ = route;
+fn Waiting(route: Option<SimulatorRoute>, status: String, error: String) -> Element {
     let frame = SimulatorFrame::fallback();
+    let target = match route {
+        Some(SimulatorRoute::Pinned {
+            version,
+            device_name: Some(device),
+        }) => translate_with(
+            "simulator-waiting-device",
+            &[
+                ("device", TranslationValue::String(&device)),
+                ("version", TranslationValue::String(version.as_str())),
+            ],
+        ),
+        Some(SimulatorRoute::Pinned { version, .. }) => translate_with(
+            "simulator-waiting-version",
+            &[("version", TranslationValue::String(version.as_str()))],
+        ),
+        _ => translate("simulator-title"),
+    };
+    let failed = status == "errored";
+    let progress = match status.as_str() {
+        "booting" => 2,
+        "connecting" => 3,
+        "streaming" => 4,
+        _ => 1,
+    };
+    let phase = if failed {
+        translate("common-error")
+    } else {
+        translate("composer-status-starting")
+    };
     rsx! {
-        div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-zinc-950/70 p-8",
+        div { class: "relative flex h-full w-full items-center justify-center overflow-hidden bg-background p-8",
+            div { class: "absolute left-5 top-5 z-20 flex max-w-[calc(100%-2.5rem)] items-center gap-2 rounded-full bg-foreground/[0.055] px-3 py-1.5 text-xs text-muted-foreground",
+                span { class: if failed { "size-2 shrink-0 rounded-full bg-destructive" } else { "size-2 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" } }
+                span { class: "truncate font-medium text-foreground", "{target}" }
+                span { class: "shrink-0", "· {phase}" }
+                if !failed {
+                    span { class: "shrink-0 tabular-nums text-muted-foreground/75", "· {progress}/4" }
+                }
+            }
+            if failed && !error.is_empty() {
+                div {
+                    class: "absolute bottom-5 left-1/2 z-20 max-w-[min(36rem,calc(100%-2.5rem))] -translate-x-1/2 truncate rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive",
+                    title: "{error}",
+                    "{error}"
+                }
+            }
             div {
                 class: "relative bg-gradient-to-b from-zinc-700 via-zinc-950 to-black p-[7px] shadow-[0_28px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/20",
                 style: frame.phone_style(),
@@ -544,9 +609,9 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
                 div { class: "absolute -left-[3px] top-48 h-24 w-[3px] rounded-l bg-zinc-700" }
                 div { class: "absolute -right-[3px] top-36 h-24 w-[3px] rounded-r bg-zinc-700" }
                 div {
-                    class: "relative overflow-hidden bg-black ring-1 ring-black",
+                    class: "relative overflow-hidden bg-zinc-950 ring-1 ring-foreground/10",
                     style: frame.screen_style(),
-                    SimulatorScreenSkeleton {}
+                    SimulatorScreenSkeleton { progress }
                 }
             }
         }
@@ -554,7 +619,10 @@ fn Waiting(route: Option<SimulatorRoute>) -> Element {
 }
 
 #[component]
-fn SimulatorScreenSkeleton(#[props(default)] id: String) -> Element {
+fn SimulatorScreenSkeleton(
+    #[props(default)] id: String,
+    #[props(default = 0)] progress: u8,
+) -> Element {
     rsx! {
         div {
             id,
@@ -579,6 +647,19 @@ fn SimulatorScreenSkeleton(#[props(default)] id: String) -> Element {
                 Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
                 Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
                 Skeleton { class: "h-10 w-full rounded-xl bg-white/[0.045]" }
+            }
+            if progress > 0 {
+                div { class: "mt-auto flex gap-1.5 pb-[2%]",
+                    for step in 1..=4 {
+                        div {
+                            class: if step <= progress {
+                                "h-1 flex-1 rounded-full bg-primary transition-colors"
+                            } else {
+                                "h-1 flex-1 rounded-full bg-white/[0.09] transition-colors"
+                            }
+                        }
+                    }
+                }
             }
         }
     }

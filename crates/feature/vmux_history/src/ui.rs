@@ -10,12 +10,21 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
+use vmux_ui::components::manager::{
+    ManagerIconButton, ManagerSearchAction, WorkspaceBreadcrumbHeader, WorkspacePage,
+};
+use vmux_ui::components::page::{PageContent, PageShell};
+use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_ui::platform::Platform;
 
-#[vmux_page::page(component = Page)]
+#[vmux_page::page(
+    component = Page,
+    states = ["ThemeUiState", "HistoryUiState"]
+)]
 pub(crate) struct HistoryPage;
 
 #[component]
@@ -37,50 +46,40 @@ pub fn Page() -> Element {
         let _ = send(&HistoryLoadMoreRequest);
     };
 
-    let on_input = move |e: Event<FormData>| {
-        let query_value = e.value();
-        let _ = send(&HistoryQueryRequest { query: query_value });
-    };
-
     let groups = group_by_day(&snapshot.entries, Platform::now());
     let entry_count = snapshot.entries.len();
 
     rsx! {
-        div { class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            header { class: "flex items-center justify-between border-b border-border px-5 py-4",
-                h1 { class: "text-lg font-semibold tracking-tight", {translate("history-title")} }
-                if entry_count > 0 {
-                    span { class: "flex min-w-7 items-center justify-center rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground",
-                        "{entry_count}"
+        PageShell {
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::History.option(),
+                options: WorkspacePage::options(),
+                actions: rsx! {
+                    ManagerSearchAction {
+                        value: query,
+                        placeholder: translate("history-search"),
+                        onsearch: move |query| {
+                            let _ = send(&HistoryQueryRequest { query });
+                        },
                     }
-                }
+                    ManagerIconButton {
+                        label: translate("history-clear-all"),
+                        disabled: entry_count == 0,
+                        onclick: move |_| {
+                            let _ = send(&HistoryClearConfirmRequest { open: true });
+                        },
+                        LineIconView { icon: LineIcon::Trash, class: "size-3.5".to_string() }
+                    }
+                },
             }
-            main { class: "min-h-0 flex-1 overflow-y-auto px-5 py-5 text-sm",
-                div { class: "mx-auto w-full max-w-4xl",
-                    div { class: "glass mb-6 flex items-center gap-2 rounded-xl border border-border/70 p-2",
-                        svg { class: "ml-1 size-4 shrink-0 text-muted-foreground", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
-                            circle { cx: "11", cy: "11", r: "7" }
-                            path { d: "m20 20-3.5-3.5" }
-                        }
-                        input {
-                            class: "min-w-0 flex-1 bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
-                            placeholder: translate("history-search"),
-                            value: "{query}",
-                            oninput: on_input,
-                        }
-                        button {
-                            class: "rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40",
-                            disabled: entry_count == 0,
-                            onclick: move |_| {
-                                let _ = send(&HistoryClearConfirmRequest { open: true });
-                            },
-                            {translate("history-clear-all")}
-                        }
-                    }
+            PageContent {
                     for (label, group) in groups {
                         section { class: "mb-6",
-                            h2 { class: "mb-2 px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", "{label}" }
-                            div { class: "overflow-hidden rounded-xl border border-border bg-card/30",
+                            header { class: "mb-2 flex items-center gap-2 px-1",
+                                h2 { class: "text-xs font-semibold text-foreground/80", "{label}" }
+                                span { class: "text-[10px] tabular-nums text-muted-foreground/55", "{group.len()}" }
+                            }
+                            div { class: "overflow-hidden rounded-lg bg-foreground/[0.025]",
                                 for entry in group {
                                     div {
                                         class: "group flex cursor-pointer items-center gap-3 border-b border-border/70 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-foreground/[0.04]",
@@ -110,22 +109,24 @@ pub fn Page() -> Element {
                                             }
                                         }
                                         span { class: "shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70", "{format_time(entry.visit_created_at)}" }
-                                        button {
-                                            class: "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive",
-                                            aria_label: format!(
-                                                "{}: {}",
-                                                translate("common-remove"),
-                                                if entry.title.is_empty() { entry.url.as_str() } else { entry.title.as_str() },
-                                            ),
-                                            onclick: {
-                                                let url_bits = entry.url_entity_bits;
-                                                move |e: Event<MouseData>| {
-                                                    e.stop_propagation();
-                                                    let _ = send(&HistoryDeleteRequest { url_entity_bits: url_bits });
+                                        Tooltip { label: translate("common-remove"),
+                                            button {
+                                                class: "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive",
+                                                aria_label: format!(
+                                                    "{}: {}",
+                                                    translate("common-remove"),
+                                                    if entry.title.is_empty() { entry.url.as_str() } else { entry.title.as_str() },
+                                                ),
+                                                onclick: {
+                                                    let url_bits = entry.url_entity_bits;
+                                                    move |e: Event<MouseData>| {
+                                                        e.stop_propagation();
+                                                        let _ = send(&HistoryDeleteRequest { url_entity_bits: url_bits });
+                                                    }
+                                                },
+                                                svg { class: "size-3.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
+                                                    path { d: "M18 6 6 18M6 6l12 12" }
                                                 }
-                                            },
-                                            svg { class: "size-3.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
-                                                path { d: "M18 6 6 18M6 6l12 12" }
                                             }
                                         }
                                     }
@@ -134,7 +135,6 @@ pub fn Page() -> Element {
                         }
                     }
                     div { class: "h-4", onvisible: load_more }
-                }
             }
         }
         AlertDialogRoot {

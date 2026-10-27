@@ -3,7 +3,7 @@
         (
             url: "vmux://knowledge/",
             title: "Knowledge",
-            bookmark: Some(40),
+            bookmark: Some(70),
             owns_subtree: true,
             title_message_id: "layout-knowledge",
             keywords: ["knowledge", "notes", "markdown"],
@@ -11,10 +11,11 @@
             command_bar: true,
             permissions: [
                 "PageReady",
-                "ThemeEvent",
-                "UiKeyContext",
+                "ThemeUiState",
+                "FileUiState",
+                "KeyContextRequest",
                 "KeyStroke",
-                "KeyClaims",
+                "KeyClaimsUiState",
             ],
         ),
     ],

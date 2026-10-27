@@ -26,8 +26,9 @@ impl Plugin for GlassPlugin {
                 Update,
                 (
                     sync_window_visibility.in_set(vmux_ecs::WindowFullscreenSet),
-                    keep_surface_transparent,
-                ),
+                    keep_surface_background,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -287,6 +288,7 @@ fn toggle_fullscreen(
 fn sync_window_visibility(
     mut state: NonSendMut<GlassState>,
     mut clear_color: ResMut<vmux_layout::window::WindowBackground>,
+    appearance: Single<&vmux_setting::ResolvedColorScheme>,
     mut window_q: Query<(
         Entity,
         &mut bevy::window::Window,
@@ -357,7 +359,7 @@ fn sync_window_visibility(
         glass.visible = visible;
     }
 
-    let [r, g, b] = vmux_layout::window::WINDOW_BACKGROUND_SRGB;
+    let [r, g, b] = fullscreen_background(appearance.0);
     let want_clear = if focused_fullscreen {
         Color::srgb(r, g, b)
     } else {
@@ -384,11 +386,21 @@ fn content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
     })
 }
 
-fn keep_surface_transparent(windows: Query<Entity, With<Window>>) {
+fn fullscreen_background(appearance: vmux_setting::ResolvedScheme) -> [f32; 3] {
+    match appearance {
+        vmux_setting::ResolvedScheme::Light => vmux_layout::window::WINDOW_BACKGROUND_LIGHT_SRGB,
+        vmux_setting::ResolvedScheme::Dark => vmux_layout::window::WINDOW_BACKGROUND_DARK_SRGB,
+    }
+}
+
+fn keep_surface_background(
+    windows: Query<(Entity, &vmux_ecs::WindowFullscreen), With<Window>>,
+    appearance: Single<&vmux_setting::ResolvedColorScheme>,
+) {
     if MainThreadMarker::new().is_none() {
         return;
     }
-    for entity in &windows {
+    for (entity, fullscreen) in &windows {
         let Some(ns_view) = content_view_ptr(entity) else {
             continue;
         };
@@ -397,9 +409,18 @@ fn keep_surface_transparent(windows: Query<Entity, With<Window>>) {
         let Some(layer) = content.layer() else {
             continue;
         };
-        let clear_color = NSColor::clearColor();
-        layer.setOpaque(false);
-        layer.setBackgroundColor(Some(&clear_color.CGColor()));
+        let color = if fullscreen.0 {
+            let [red, green, blue] = fullscreen_background(appearance.0);
+            NSColor::colorWithSRGBRed_green_blue_alpha(red.into(), green.into(), blue.into(), 1.0)
+        } else {
+            NSColor::clearColor()
+        };
+        layer.setOpaque(fullscreen.0);
+        layer.setBackgroundColor(Some(&color.CGColor()));
+        if let Some(window) = content.window() {
+            window.setOpaque(fullscreen.0);
+            window.setBackgroundColor(Some(&color));
+        }
     }
 }
 

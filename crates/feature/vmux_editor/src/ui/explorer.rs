@@ -10,7 +10,7 @@ use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
 use vmux_ui::components::tree_row::{
-    SIDEBAR_STICKY_SURFACE, SIDEBAR_TREE_LIST_GROUP, SIDEBAR_TREE_ROW_BASE, TreeRowAccent,
+    FILE_TREE_LIST_GROUP, FILE_TREE_ROW_BASE, FILE_TREE_STICKY_SURFACE, TreeRowAccent,
 };
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::focus::FocusClaim;
@@ -81,31 +81,10 @@ impl SidebarView {
         self == Self::Search
     }
 
-    fn other(self) -> Self {
-        match self {
-            Self::Explorer => Self::Search,
-            Self::Search => Self::Explorer,
-        }
-    }
-
     fn title(self) -> String {
         match self {
             Self::Explorer => translate("editor-explorer"),
             Self::Search => translate("editor-search"),
-        }
-    }
-
-    fn switch_glyph(self) -> TitleGlyph {
-        match self {
-            Self::Explorer => TitleGlyph::Search,
-            Self::Search => TitleGlyph::Files,
-        }
-    }
-
-    fn switch_label(self) -> String {
-        match self {
-            Self::Explorer => translate("editor-show-search"),
-            Self::Search => translate("editor-show-explorer"),
         }
     }
 }
@@ -670,8 +649,6 @@ enum TitleGlyph {
     NewFolder,
     Refresh,
     CollapseAll,
-    Search,
-    Files,
     Clear,
 }
 
@@ -696,11 +673,6 @@ impl TitleGlyph {
                 "M8 16H3v5",
             ],
             Self::CollapseAll => &["m7 20 5-5 5 5", "m7 4 5 5 5-5"],
-            Self::Search => &["M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z", "m21 21-4.35-4.35"],
-            Self::Files => &[
-                "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
-                "M10 3v18",
-            ],
             Self::Clear => &[
                 "M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
                 "m6.34 6.34 11.32 11.32",
@@ -746,7 +718,7 @@ fn TitleButtonIcon(glyph: TitleGlyph) -> Element {
 fn StickyOverlay(children: Element) -> Element {
     rsx! {
         div { class: "sticky top-0 z-[12] h-0",
-            div { class: "absolute inset-x-0 top-0 {SIDEBAR_STICKY_SURFACE}", {children} }
+            div { class: "absolute inset-x-0 top-0 {FILE_TREE_STICKY_SURFACE}", {children} }
         }
     }
 }
@@ -845,7 +817,6 @@ fn SearchView(view: ReadSignal<SidebarView>) -> Element {
     rsx! {
         div { class: if active { "contents" } else { "hidden" },
             div { class: "flex h-9 shrink-0 items-center gap-1.5 pl-2 pr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
-                SidebarViewSwitch { view }
                 span { class: "truncate", {SidebarView::Search.title()} }
                 div {
                     class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
@@ -935,7 +906,7 @@ fn SearchView(view: ReadSignal<SidebarView>) -> Element {
             div { class: "min-h-0 flex-1 overflow-y-auto pb-4",
                 if let Some(summary) = summary {
                     div { class: "px-3 py-1 text-[10px] text-muted-foreground", "{summary}" }
-                    div { class: "{SIDEBAR_TREE_LIST_GROUP}",
+                    div { class: "{FILE_TREE_LIST_GROUP}",
                         for file in files {
                             SearchFileGroup {
                                 key: "{file.path}",
@@ -978,7 +949,7 @@ fn SearchFileGroup(
     rsx! {
         div {
             div {
-                class: "{SIDEBAR_STICKY_SURFACE} sticky top-0 z-[11] flex h-[22px] cursor-default items-center gap-1 px-1 text-foreground/85 transition-colors duration-100 hover:bg-foreground/[0.08]",
+                class: "{FILE_TREE_STICKY_SURFACE} sticky top-0 z-[11] flex h-[22px] cursor-default items-center gap-1 px-1 text-foreground/85 transition-colors duration-100 hover:bg-foreground/[0.08]",
                 title: "{file.path}",
                 onclick: move |_| search.toggle_group(&path_toggle),
                 Chevron { expanded: !collapsed, loading: false }
@@ -1032,7 +1003,7 @@ fn SearchHitRow(
         div {
             id: "{tree_row_id(&key)}",
             tabindex: "-1",
-            class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()} pl-6",
+            class: "{FILE_TREE_ROW_BASE} {accent.classes()} pl-6",
             title: "{path}:{hit.line}",
             onkeydown: move |event: Event<KeyboardData>| {
                 let forward = match event.key() {
@@ -1083,25 +1054,6 @@ fn SearchToggle(label: String, hint: String, on: bool, on_press: EventHandler<()
     }
 }
 
-#[component]
-fn SidebarViewSwitch(view: ReadSignal<SidebarView>) -> Element {
-    let current = view();
-    rsx! {
-        button {
-            class: "flex h-5 w-5 shrink-0 items-center justify-center rounded text-foreground/55 outline-none transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:bg-foreground/[0.12] focus-visible:text-foreground",
-            title: current.switch_label(),
-            onclick: move |event: Event<MouseData>| {
-                event.stop_propagation();
-                let next = view.peek().other();
-                let _ = send(&ExplorerPanelViewSet {
-                    search: next.is_search(),
-                });
-            },
-            TitleButtonIcon { glyph: current.switch_glyph() }
-        }
-    }
-}
-
 fn localize_notice(message: &str) -> String {
     for (prefix, id) in [
         ("Created folder ", "editor-created-folder"),
@@ -1124,7 +1076,6 @@ pub fn ExplorerPanel(
 ) -> Element {
     let tree_state = FileUi::current().use_value(|state| state.explorer.explorer_tree.as_ref());
     let focus_state = FileUi::current().use_value(|state| state.explorer.explorer_focus.as_ref());
-    let editors_state = FileUi::current().use_value(|state| state.explorer.open_editors.as_ref());
     let outline_state = FileUi::current().use_value(|state| state.explorer.outline.as_ref());
     let notice = FileUi::current().use_value(|state| Some(&state.explorer.explorer_notice));
     let panel = FileUi::current().use_value(|state| state.explorer.explorer_panel.as_ref());
@@ -1159,13 +1110,6 @@ pub fn ExplorerPanel(
     });
     let root_loading =
         use_memo(move || tree_state.read().as_ref().is_some_and(|tree| tree.loading));
-    let open_editors = use_memo(move || {
-        editors_state
-            .read()
-            .as_ref()
-            .map(|editors| editors.items.clone())
-            .unwrap_or_default()
-    });
     let outline = use_memo(move || {
         outline_state
             .read()
@@ -1210,7 +1154,6 @@ pub fn ExplorerPanel(
     let outline_focus = TreeFocus {
         key: use_signal(String::new),
     };
-    let show_open = panel.read().as_ref().is_none_or(|panel| panel.open_editors);
     let show_files = panel.read().as_ref().is_none_or(|panel| panel.files);
     let show_outline = panel.read().as_ref().is_none_or(|panel| panel.outline);
     let mut menu = use_signal(|| None::<TreeMenu>);
@@ -1241,11 +1184,6 @@ pub fn ExplorerPanel(
             }
         })
     });
-    let open_body = if show_open {
-        "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-    } else {
-        "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-    };
     let files_body = if show_files {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
     } else {
@@ -1261,10 +1199,8 @@ pub fn ExplorerPanel(
         let _layout = (
             visible(),
             view().is_search(),
-            show_open,
             show_files,
             show_outline,
-            open_editors.read().len(),
             rows.read().len(),
             outline.read().len(),
         );
@@ -1322,7 +1258,6 @@ pub fn ExplorerPanel(
                 } else {
                     "flex h-9 shrink-0 items-center gap-1.5 pl-2 pr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
                 },
-                SidebarViewSwitch { view }
                 span { class: "truncate", {SidebarView::Explorer.title()} }
                 div {
                     class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
@@ -1370,56 +1305,6 @@ pub fn ExplorerPanel(
                     files_sticky.measure();
                     outline_sticky.measure();
                 },
-                SectionHeader {
-                    title: translate("editor-open-editors"),
-                    open: show_open,
-                    on_toggle: EventHandler::new(move |_| {
-                        let _ = send(&ExplorerOpenEditorsToggle);
-                    }),
-                }
-                div { class: "{open_body}",
-                    div { class: "min-h-0 overflow-hidden",
-                        for it in open_editors() {
-                            {
-                                let open_path = it.path.clone();
-                                let close_path = it.path.clone();
-                                let active = it.active;
-                                let dirty = it.dirty;
-                                rsx! {
-                                    div {
-                                        key: "{it.path}",
-                                        class: if active {
-                                            "group flex cursor-default items-center gap-1 bg-primary/12 py-0.5 pl-5 pr-2 text-foreground transition-[background-color,opacity,transform] duration-150"
-                                        } else {
-                                            "group flex cursor-default items-center gap-1 py-0.5 pl-5 pr-2 text-foreground/75 transition-[background-color,opacity,transform] duration-150 hover:bg-foreground/[0.08]"
-                                        },
-                                        onclick: move |_| {
-                                            let _ = send(&FileOpenEvent {
-                                                path: open_path.clone(),
-                                            });
-                                        },
-                                        span {
-                                            class: "inline-block w-3 shrink-0 cursor-default text-center text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground",
-                                            onclick: move |e: Event<MouseData>| {
-                                                e.stop_propagation();
-                                                let _ = send(&ExplorerCloseEditor {
-                                                    path: close_path.clone(),
-                                                });
-                                            },
-                                            "\u{00D7}"
-                                        }
-                                        {rsx! { TypeIcon { path: it.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
-                                        span { class: "truncate", "{it.name}" }
-                                        if dirty {
-                                            span { class: "ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-primary" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 div {
                     id: "{tree_row_id(&root_path())}",
                     tabindex: "-1",
@@ -1453,7 +1338,7 @@ pub fn ExplorerPanel(
                 }
                 div { class: "{files_body}",
                     div {
-                        class: "{SIDEBAR_TREE_LIST_GROUP} min-h-0 overflow-hidden",
+                        class: "{FILE_TREE_LIST_GROUP} min-h-0 overflow-hidden",
                         onmounted: move |event: Event<MountedData>| files_sticky.mounted(event.data()),
                         if tree_empty {
                             if root_loading() {
@@ -1493,7 +1378,7 @@ pub fn ExplorerPanel(
                                             div {
                                                 id: "{tree_row_id(&row.path)}",
                                                 tabindex: "-1",
-                                                class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()}",
+                                                class: "{FILE_TREE_ROW_BASE} {accent.classes()}",
                                                 style: "padding-left:{pad}px;",
                                                 title: "{row.path}",
                                                 onmouseenter: move |_| {
@@ -1587,7 +1472,7 @@ pub fn ExplorerPanel(
                 StickyOutline { rows: sticky_outline, on_pick: move |line: u32| goto_line(line) }
                 div { class: "{outline_body}",
                     div {
-                        class: "{SIDEBAR_TREE_LIST_GROUP} min-h-0 overflow-hidden",
+                        class: "{FILE_TREE_LIST_GROUP} min-h-0 overflow-hidden",
                         onmounted: move |event: Event<MountedData>| outline_sticky.mounted(event.data()),
                         for s in outline() {
                             {
@@ -1604,7 +1489,7 @@ pub fn ExplorerPanel(
                                         key: "{key}",
                                         id: "{tree_row_id(&key)}",
                                         tabindex: "-1",
-                                        class: "{SIDEBAR_TREE_ROW_BASE} {accent.classes()}",
+                                        class: "{FILE_TREE_ROW_BASE} {accent.classes()}",
                                         style: "padding-left:{pad}px;",
                                         onkeydown: move |e: Event<KeyboardData>| {
                                             let forward = match e.key() {

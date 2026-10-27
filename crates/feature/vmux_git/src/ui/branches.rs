@@ -1,19 +1,26 @@
 #![allow(non_snake_case)]
 
+use std::collections::{BTreeMap, HashSet};
+
 use dioxus::prelude::*;
-use vmux_ecs::event::space::ProjectActivateRequest;
+use vmux_ui::components::avatar::IdentityOrb;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
-use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
+use vmux_ui::components::error_state::ErrorState;
+use vmux_ui::components::segmented_control::{SegmentedControl, SegmentedControlItem};
 use vmux_ui::components::skeleton::Skeleton;
+use vmux_ui::components::tree_row::{
+    FileTree, FileTreeChildren, FileTreeRow, FileTreeRowGroup, FileTreeScroller,
+};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
+use vmux_ui::scroll::{ScrollIntoView, ScrollPreload};
 
 use crate::event::*;
-use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPanel};
+use crate::state::{GitBranchCollection, GitBranchPrompt};
 
-use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
+use super::model::GitPathChangeView;
 
 #[component]
 pub(super) fn BranchPromptDialog() -> Element {
@@ -85,63 +92,91 @@ pub(super) fn BranchPromptDialog() -> Element {
 }
 
 #[component]
-pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLog>) -> Element {
-    let log = branch_log.filter(|event| event.branch == branch);
-    let commit_count = log.as_ref().map(|event| event.commits.len()).unwrap_or(0);
-
+pub(super) fn BranchesCard(
+    files: Vec<GitBranchFileEntry>,
+    files_ready: bool,
+    files_total: u32,
+    files_loading: bool,
+    files_has_more: bool,
+    files_error: String,
+    selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    file_query: Signal<String>,
+    onfileselect: EventHandler<String>,
+) -> Element {
+    let query = file_query().trim().to_lowercase();
+    let files_empty = files.is_empty();
+    let visible_files = files
+        .into_iter()
+        .filter(|entry| query.is_empty() || entry.path.to_lowercase().contains(&query))
+        .collect::<Vec<_>>();
+    let visible_file_count = visible_files.len();
+    let tree = BranchFileTree::from_files(visible_files);
     rsx! {
-        Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-violet-400/30 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
-            div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-violet-400/[0.065] to-transparent px-2",
-                div { class: "flex size-5 shrink-0 items-center justify-center rounded-md bg-violet-400/10 text-violet-400 ring-1 ring-inset ring-violet-400/15",
-                    LineIconView { icon: LineIcon::GitCommit, class: "h-3 w-3" }
-                }
-                span { class: "font-mono text-[9px] font-semibold text-muted-foreground", "[0]" }
-                span { class: "text-[11px] font-semibold tracking-[-0.01em]", {translate("git-log")} }
-                span { class: "min-w-0 truncate rounded-full border border-violet-400/20 bg-violet-400/[0.07] px-2 py-0.5 font-mono text-[10px] text-violet-300", "{branch}" }
-            }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-4",
-                if let Some(log) = log {
-                    if log.commits.is_empty() {
-                        div { class: "flex h-full min-h-64 items-center justify-center text-sm text-muted-foreground", {translate("git-no-commits")} }
-                    } else {
-                        for (index, commit) in log.commits.into_iter().enumerate() {
-                            article { key: "{commit.sha}", class: "relative grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2.5 py-3 first:pt-1",
-                                div { class: "relative flex justify-center",
-                                    if index > 0 {
-                                        span { class: "absolute bottom-1/2 top-0 w-px bg-violet-400/35" }
-                                    }
-                                    if index + 1 < commit_count {
-                                        span { class: "absolute bottom-0 top-1/2 w-px bg-violet-400/35" }
-                                    }
-                                    span { class: if index == 0 {
-                                            "relative mt-1.5 size-2.5 rounded-full border-2 border-violet-300 bg-violet-400 shadow-[0_0_0_3px_color-mix(in_oklab,var(--card)_92%,transparent)]"
-                                        } else {
-                                            "relative mt-1.5 size-2 rounded-full border border-violet-400 bg-card shadow-[0_0_0_3px_color-mix(in_oklab,var(--card)_92%,transparent)]"
-                                        } }
-                                }
-                                div { class: "min-w-0 border-b border-foreground/[0.06] pb-3",
-                                    div { class: "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1",
-                                        code { class: "shrink-0 font-mono text-[11px] font-semibold text-amber-400", "{commit.short_sha}" }
-                                        if !commit.references.is_empty() {
-                                            span { class: "min-w-0 truncate rounded-full border border-ansi-2/20 bg-ansi-2/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-ansi-2", "{commit.references}" }
-                                        }
-                                        span { class: "ml-auto shrink-0 text-[10px] text-muted-foreground", "{commit.date}" }
-                                    }
-                                    div { class: "mt-1.5 text-sm font-medium leading-5 text-foreground", "{commit.summary}" }
-                                    div { class: "mt-1 text-[10px] text-muted-foreground", "{commit.author}" }
-                                    if !commit.body.is_empty() {
-                                        pre { class: "mt-3 whitespace-pre-wrap break-words border-l border-ansi-1/45 pl-3 font-sans text-xs leading-5 text-foreground/80", "{commit.body}" }
-                                    }
-                                }
-                            }
-                        }
+        FileTree {
+            FileTreeScroller {
+                class: "flex-1 px-2 pb-2".to_string(),
+                onscroll: move |event: Event<ScrollData>| {
+                    if ScrollPreload::LIST.reached(&event) && files_has_more && !files_loading {
+                        let _ = send(&GitBranchFilesNextRequest);
                     }
-                } else {
-                    div { class: "flex h-full min-h-64 flex-col gap-4 p-2",
-                        for width in ["w-10/12", "w-7/12", "w-full", "w-9/12", "w-11/12", "w-6/12"] {
+                },
+                if files_loading && files_empty {
+                    div { class: "flex flex-col gap-2 px-2.5 py-2",
+                        for width in ["w-9/12", "w-11/12", "w-8/12", "w-10/12"] {
                             Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
                         }
                     }
+                } else if !files_error.is_empty() {
+                    ErrorState {
+                        class: "min-h-40".to_string(),
+                        message: files_error,
+                        on_retry: move |_| {
+                            let _ = send(&GitBranchFilesRetryRequest);
+                        },
+                    }
+                } else if tree.is_empty() {
+                    div { class: "flex min-h-24 items-center justify-center px-3 text-center text-xs text-muted-foreground", {translate("git-no-changes")} }
+                    if files_has_more {
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Xs,
+                            class: "w-full".to_string(),
+                            onclick: move |_| {
+                                let _ = send(&GitBranchFilesNextRequest);
+                            },
+                            {translate("common-expand")}
+                        }
+                    }
+                } else {
+                    div {
+                        aria_disabled: !files_ready,
+                        class: if files_ready { "" } else { "pointer-events-none opacity-45" },
+                        BranchFileTreeView {
+                            tree,
+                            selected_path_bytes: selected_path_bytes.clone(),
+                            active_path,
+                            onfileselect,
+                        }
+                    }
+                    if files_loading {
+                        div { class: "flex flex-col gap-2 px-2.5 py-2",
+                            for width in ["w-10/12", "w-8/12"] {
+                                Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                            }
+                        }
+                    } else if files_has_more {
+                        div {
+                            key: "branch-files-next-{visible_file_count}",
+                            class: "flex flex-col gap-2 px-2.5 py-2",
+                            onvisible: move |_| {
+                                let _ = send(&GitBranchFilesNextRequest);
+                            },
+                            for width in ["w-10/12", "w-8/12", "w-11/12"] {
+                                Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -149,257 +184,374 @@ pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLog>) ->
 }
 
 #[component]
-pub(super) fn BranchesCard(
-    repository: GitRepositorySnapshot,
-    selected_branch: String,
-    branch_collection: GitBranchCollection,
-    focused_panel: GitPanel,
-    operations: GitOperationEligibility,
+fn BranchFileTreeView(
+    tree: BranchFileTree,
+    selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    onfileselect: EventHandler<String>,
 ) -> Element {
-    let collection = branch_collection;
-    let reference_count = collection.references(&repository).len();
-    let selected = if collection == GitBranchCollection::Local {
-        repository
-            .branches
-            .iter()
-            .find(|entry| entry.name == selected_branch)
-            .cloned()
-    } else {
-        None
-    };
-    let branch_operations = selected.map(|branch| {
-        rsx! {
-            div { class: "flex shrink-0 items-center gap-0.5",
-                HeaderOperationButton {
-                    icon: LineIcon::Check,
-                    shortcut: "space",
-                    label: translate("git-checkout"),
-                    disabled: !operations.checkout_branch,
-                    danger: false,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        let branch = branch.clone();
-                        move |_| {
-                            let _ = send(&ProjectActivateRequest {
-                                path: repo_root.clone(),
-                                branch: branch.name.clone(),
-                                checkout: branch.checkout.clone(),
-                                pane_id: None,
-                            });
-                        }
-                    },
+    let mut collapsed = use_signal(HashSet::<String>::new);
+    let follow_tree = tree.clone();
+    use_effect(move || {
+        let path = active_path();
+        if path.is_empty() {
+            return;
+        }
+        {
+            let mut collapsed = collapsed.write();
+            let mut parent = String::new();
+            for segment in path
+                .split('/')
+                .take(path.split('/').count().saturating_sub(1))
+            {
+                if !parent.is_empty() {
+                    parent.push('/');
                 }
-                HeaderOperationButton {
-                    icon: LineIcon::Plus,
-                    shortcut: "n",
-                    label: translate("git-new-branch"),
-                    disabled: !operations.create_branch,
-                    danger: false,
-                    onpress: {
-                        let base = branch.name.clone();
-                        move |_| {
-                            let _ = send(&GitBranchPromptOpenRequest {
-                                prompt: GitBranchPrompt::Create { base: base.clone() },
-                            });
-                        }
-                    },
-                }
-                HeaderOperationButton {
-                    icon: LineIcon::Trash,
-                    shortcut: "d",
-                    label: translate("git-delete-branch"),
-                    disabled: !operations.delete_branch,
-                    danger: true,
-                    onpress: {
-                        let branch = branch.name.clone();
-                        move |_| {
-                            let _ = send(&GitBranchPromptOpenRequest {
-                                prompt: GitBranchPrompt::Delete { branch: branch.clone() },
-                            });
-                        }
-                    },
-                }
-                HeaderOperationButton {
-                    icon: LineIcon::GitPullRequest,
-                    shortcut: "r",
-                    label: translate("git-rebase"),
-                    disabled: !operations.rebase,
-                    danger: false,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        let branch = branch.name.clone();
-                        move |_| GitOperation::Rebase { branch: branch.clone() }.send(repo_root.clone())
-                    },
-                }
-                HeaderOperationButton {
-                    icon: LineIcon::GitMerge,
-                    shortcut: "M",
-                    label: translate("git-merge"),
-                    disabled: !operations.merge,
-                    danger: false,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        let branch = branch.name.clone();
-                        move |_| GitOperation::Merge { branch: branch.clone() }.send(repo_root.clone())
-                    },
-                }
-                HeaderOperationButton {
-                    icon: LineIcon::FastForward,
-                    shortcut: "f",
-                    label: translate("git-fast-forward"),
-                    disabled: !operations.fast_forward,
-                    danger: false,
-                    onpress: {
-                        let repo_root = repository.repo_root.clone();
-                        let branch = branch.name.clone();
-                        move |_| GitOperation::FastForward { branch: branch.clone() }.send(repo_root.clone())
-                    },
-                }
+                parent.push_str(segment);
+                collapsed.remove(&parent);
             }
         }
+        let Some(row_id) = follow_tree.row_id(&path) else {
+            return;
+        };
+        spawn(async move {
+            vmux_ui::platform::Platform::sleep(0).await;
+            ScrollIntoView::nearest_vertical(&row_id);
+        });
     });
-
     rsx! {
-        Card {
-            variant: CardVariant::Panel,
-            class: if focused_panel == GitPanel::Branches {
-                "order-5 min-h-44 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
-            } else {
-                "order-5 min-h-44 border-t-violet-400/30 sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
-            },
-            onclick: move |_| {
-                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
-            },
-            PanelHeader {
-                index: 3,
-                title: translate("git-branches"),
-                count: Some(reference_count),
-                icon: PanelIcon::Line(LineIcon::GitBranch),
-                icon_class: "bg-violet-400/10 text-violet-400 ring-1 ring-inset ring-violet-400/15",
-                badge_class: "border-violet-400/20 bg-violet-400/[0.08] text-violet-400",
-                focused: focused_panel == GitPanel::Branches,
-                operations: rsx! {
-                    div { class: "flex shrink-0 items-center gap-1",
-                        BranchCollectionTabs {
-                            branch_collection,
+        div { class: "flex min-w-0 flex-col",
+            BranchFileTreeNodes {
+                nodes: tree.roots,
+                depth: 0,
+                collapsed,
+                selected_path_bytes,
+                active_path,
+                onfileselect,
+            }
+        }
+    }
+}
+
+#[component]
+fn BranchFileTreeNodes(
+    nodes: Vec<BranchFileNode>,
+    depth: u32,
+    collapsed: Signal<HashSet<String>>,
+    selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    onfileselect: EventHandler<String>,
+) -> Element {
+    rsx! {
+        for node in nodes {
+            match node {
+                BranchFileNode::Directory(directory) => {
+                    let path = directory.path.clone();
+                    let expanded = !collapsed.read().contains(&path);
+                    rsx! {
+                        div { key: "branch-dir-{path}",
+                            FileTreeRowGroup {
+                                FileTreeRow {
+                                    path: directory.path.clone(),
+                                    label: directory.label,
+                                    is_dir: true,
+                                    expanded,
+                                    show_dir_icon: true,
+                                    depth,
+                                    title: directory.path.clone(),
+                                    on_activate: move |_| {
+                                        let mut collapsed = collapsed.write();
+                                        if !collapsed.remove(&path) {
+                                            collapsed.insert(path.clone());
+                                        }
+                                    },
+                                }
+                            }
+                            FileTreeChildren { expanded,
+                                BranchFileTreeNodes {
+                                    nodes: directory.children,
+                                    depth: depth + 1,
+                                    collapsed,
+                                    selected_path_bytes: selected_path_bytes.clone(),
+                                    active_path,
+                                    onfileselect,
+                                }
+                            }
                         }
-                        {branch_operations}
+                    }
+                }
+                BranchFileNode::File(entry) => rsx! {
+                    BranchFileRow {
+                        key: "branch-file-{entry.path_bytes:?}",
+                        entry,
+                        depth,
+                        selected_path_bytes: selected_path_bytes.clone(),
+                        active_path,
+                        onfileselect,
                     }
                 },
             }
-            div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-0.5",
-                match collection {
-                    GitBranchCollection::Local => rsx! {
-                        for (index, branch) in repository.branches.into_iter().enumerate() {
-                            BranchRow {
-                                key: "local-{branch.name}",
-                                branch,
-                                index,
-                                remote: false,
-                                selected_branch: selected_branch.clone(),
-                            }
-                        }
+        }
+    }
+}
+
+#[component]
+fn BranchFileRow(
+    entry: GitBranchFileEntry,
+    depth: u32,
+    selected_path_bytes: Vec<u8>,
+    active_path: Signal<String>,
+    onfileselect: EventHandler<String>,
+) -> Element {
+    let current_path = active_path();
+    let selected = if current_path.is_empty() {
+        selected_path_bytes == entry.path_bytes
+    } else {
+        current_path == entry.path
+    };
+    let path_bytes = entry.path_bytes.clone();
+    let path = entry.path.clone();
+    let status_code = entry.change.code();
+    let status_class = entry.change.class();
+    rsx! {
+        div { id: "{entry.row_id()}",
+            FileTreeRowGroup {
+                FileTreeRow {
+                    path: entry.path.clone(),
+                    label: entry.name().to_string(),
+                    is_dir: false,
+                    active: selected,
+                    depth,
+                    title: entry.path.clone(),
+                    trailing: rsx! {
+                        span { class: "w-4 shrink-0 text-center font-mono text-[10px] font-semibold {status_class}", "{status_code}" }
                     },
-                    GitBranchCollection::Remote => rsx! {
-                        for (index, branch) in repository.remote_branches.into_iter().enumerate() {
-                            BranchRow {
-                                key: "remote-{branch.name}",
-                                branch,
-                                index,
-                                remote: true,
-                                selected_branch: selected_branch.clone(),
-                            }
-                        }
+                    on_activate: move |_| {
+                        onfileselect.call(path.clone());
+                        let _ = send(&GitBranchFileSelectRequest {
+                            path_bytes: path_bytes.clone(),
+                        });
                     },
-                    GitBranchCollection::Tags => rsx! {
-                        for (index, tag) in repository.tags.into_iter().enumerate() {
-                            TagRow {
-                                key: "tag-{tag.name}",
-                                tag,
-                                index,
-                                selected_branch: selected_branch.clone(),
-                            }
-                        }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct BranchFileTree {
+    roots: Vec<BranchFileNode>,
+}
+
+impl BranchFileTree {
+    fn from_files(files: Vec<GitBranchFileEntry>) -> Self {
+        let mut root = BranchDirectoryBuilder::default();
+        for file in files {
+            root.insert(file);
+        }
+        Self {
+            roots: root.finish(String::new()),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.roots.is_empty()
+    }
+
+    fn row_id(&self, path: &str) -> Option<String> {
+        BranchFileNode::row_id(&self.roots, path)
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum BranchFileNode {
+    Directory(BranchDirectoryNode),
+    File(GitBranchFileEntry),
+}
+
+impl BranchFileNode {
+    fn row_id(nodes: &[Self], path: &str) -> Option<String> {
+        for node in nodes {
+            match node {
+                Self::Directory(directory) => {
+                    if let Some(row_id) = Self::row_id(&directory.children, path) {
+                        return Some(row_id);
                     }
                 }
+                Self::File(entry) if entry.path == path => return Some(entry.row_id()),
+                Self::File(_) => {}
             }
+        }
+        None
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct BranchDirectoryNode {
+    path: String,
+    label: String,
+    children: Vec<BranchFileNode>,
+}
+
+#[derive(Default)]
+struct BranchDirectoryBuilder {
+    directories: BTreeMap<String, BranchDirectoryBuilder>,
+    files: Vec<GitBranchFileEntry>,
+}
+
+impl BranchDirectoryBuilder {
+    fn insert(&mut self, file: GitBranchFileEntry) {
+        let segments = file.path.split('/').collect::<Vec<_>>();
+        let mut directory = self;
+        for segment in segments.iter().take(segments.len().saturating_sub(1)) {
+            directory = directory
+                .directories
+                .entry((*segment).to_string())
+                .or_default();
+        }
+        directory.files.push(file);
+    }
+
+    fn finish(mut self, parent: String) -> Vec<BranchFileNode> {
+        self.files
+            .sort_by(|left, right| left.name().cmp(right.name()));
+        let mut nodes = Vec::with_capacity(self.directories.len() + self.files.len());
+        for (name, directory) in self.directories {
+            let path = if parent.is_empty() {
+                name.clone()
+            } else {
+                format!("{parent}/{name}")
+            };
+            nodes.push(BranchFileNode::Directory(directory.node(path, name)));
+        }
+        nodes.extend(self.files.into_iter().map(BranchFileNode::File));
+        nodes
+    }
+
+    fn node(mut self, mut path: String, mut label: String) -> BranchDirectoryNode {
+        while self.files.is_empty() && self.directories.len() == 1 {
+            let (name, next) = self.directories.pop_first().unwrap();
+            path.push('/');
+            path.push_str(&name);
+            label.push('/');
+            label.push_str(&name);
+            self = next;
+        }
+        BranchDirectoryNode {
+            children: self.finish(path.clone()),
+            path,
+            label,
         }
     }
 }
 
 #[component]
-fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
+pub(super) fn BranchCollectionTabs(
+    branch_collection: GitBranchCollection,
+    onselect: EventHandler<GitBranchCollection>,
+) -> Element {
+    let active = match branch_collection {
+        GitBranchCollection::Local => "local",
+        GitBranchCollection::Remote => "remote",
+        GitBranchCollection::Tags => "tags",
+    };
+    let items = vec![
+        SegmentedControlItem {
+            id: "local".to_string(),
+            label: translate("git-local"),
+        },
+        SegmentedControlItem {
+            id: "remote".to_string(),
+            label: translate("git-remote"),
+        },
+        SegmentedControlItem {
+            id: "tags".to_string(),
+            label: translate("git-tags"),
+        },
+    ];
     rsx! {
-        div { class: "flex h-5 shrink-0 items-center rounded-md bg-background/50 p-0.5 ring-1 ring-inset ring-foreground/10",
-            for (collection, label) in [
-                (GitBranchCollection::Local, translate("git-local")),
-                (GitBranchCollection::Remote, translate("git-remote")),
-                (GitBranchCollection::Tags, translate("git-tags")),
-            ] {
-                button {
-                    r#type: "button",
-                    class: if branch_collection == collection {
-                        "h-4 rounded px-1.5 text-[8px] font-semibold text-foreground shadow-sm bg-foreground/[0.10]"
-                    } else {
-                        "h-4 rounded px-1.5 text-[8px] font-medium text-muted-foreground hover:text-foreground"
-                    },
-                    onclick: {
-                        move |event: MouseEvent| {
-                            event.stop_propagation();
-                            let _ = send(&GitBranchCollectionSelectRequest { collection });
-                        }
-                    },
-                    "{label}"
-                }
-            }
+        SegmentedControl {
+            active: active.to_string(),
+            items,
+            onselect: move |id: String| {
+                let collection = match id.as_str() {
+                    "remote" => GitBranchCollection::Remote,
+                    "tags" => GitBranchCollection::Tags,
+                    _ => GitBranchCollection::Local,
+                };
+                onselect.call(collection);
+            },
         }
     }
 }
 
 #[component]
-fn BranchRow(
+pub(super) fn BranchRow(
     branch: GitBranchEntry,
     index: usize,
     remote: bool,
     selected_branch: String,
+    #[props(default)] checked_out: bool,
+    onselected: EventHandler<()>,
 ) -> Element {
     let name = branch.name.clone();
+    let title = if !branch.checkout.is_empty() {
+        branch.checkout.clone()
+    } else if !branch.upstream.is_empty() {
+        branch.upstream.clone()
+    } else if remote {
+        translate("git-remote")
+    } else {
+        translate("git-local")
+    };
     rsx! {
         button {
             id: "git-branch-row-{index}",
             r#type: "button",
-            title: if branch.checkout.is_empty() { branch.upstream.clone() } else { branch.checkout.clone() },
+            title,
             class: if selected_branch == branch.name {
-                "flex h-5 w-full items-center justify-start gap-1 rounded px-1.5 text-left text-foreground bg-primary/[0.10] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md bg-primary/[0.10] px-2.5 text-left text-foreground"
             } else {
-                "flex h-5 w-full items-center justify-start gap-1 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md px-2.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
                 let _ = send(&GitBranchSelectRequest {
                     reference: name.clone(),
                 });
+                onselected.call(());
             },
-            BranchMarker {
-                current: branch.current,
-                upstream: branch.upstream.clone(),
-                worktree: !branch.checkout.is_empty(),
-                remote,
+            IdentityOrb {
+                seed: branch.name.clone(),
+                alt: branch.name.clone(),
+                class: "size-5".to_string(),
             }
             div { class: "flex min-w-0 flex-1 items-center gap-1.5",
-                span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{branch.name}" }
+                span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{branch.name}" }
                 if branch.ahead > 0 {
-                    span { class: "shrink-0 rounded-full bg-sky-400/10 px-1.5 font-mono text-[8px] text-sky-400", "↑{branch.ahead}" }
+                    span { class: "shrink-0 rounded-full bg-git-ahead/10 px-1.5 font-mono text-[8px] text-git-ahead", "↑{branch.ahead}" }
                 }
                 if branch.behind > 0 {
-                    span { class: "shrink-0 rounded-full bg-violet-400/10 px-1.5 font-mono text-[8px] text-violet-400", "↓{branch.behind}" }
+                    span { class: "shrink-0 rounded-full bg-git-behind/10 px-1.5 font-mono text-[8px] text-git-behind", "↓{branch.behind}" }
                 }
-                if branch.current {
-                    span { class: "shrink-0 rounded-full bg-ansi-2/10 px-1.5 text-[8px] font-medium text-ansi-2", {translate("common-current")} }
+                if branch.changed_files > 0 {
+                    span {
+                        class: "flex shrink-0 items-center gap-1 font-mono text-[8px] tabular-nums text-muted-foreground",
+                        title: translate("git-branch-changes"),
+                        LineIconView { icon: LineIcon::File, class: "size-2.5" }
+                        span { class: "text-foreground/80", "{branch.changed_files}" }
+                        span { class: "text-success", "+{branch.insertions}" }
+                        span { class: "text-destructive", "−{branch.deletions}" }
+                    }
+                }
+                if checked_out {
+                    span { title: translate("common-current"),
+                        LineIconView {
+                            icon: LineIcon::Check,
+                            class: "size-3.5 shrink-0 text-success",
+                        }
+                    }
                 } else if !branch.upstream.is_empty() {
                     span { class: "max-w-[42%] shrink truncate font-mono text-[8px] text-muted-foreground", "{branch.upstream}" }
-                }
-                if !branch.short_sha.is_empty() {
-                    code { class: "shrink-0 font-mono text-[8px] text-muted-foreground/60", "{branch.short_sha}" }
                 }
             }
         }
@@ -407,7 +559,12 @@ fn BranchRow(
 }
 
 #[component]
-fn TagRow(tag: GitTagEntry, index: usize, selected_branch: String) -> Element {
+pub(super) fn TagRow(
+    tag: GitTagEntry,
+    index: usize,
+    selected_branch: String,
+    onselected: EventHandler<()>,
+) -> Element {
     let name = tag.name.clone();
     rsx! {
         button {
@@ -415,55 +572,67 @@ fn TagRow(tag: GitTagEntry, index: usize, selected_branch: String) -> Element {
             r#type: "button",
             title: "{tag.message}",
             class: if selected_branch == tag.name {
-                "flex h-5 w-full items-center justify-start gap-1.5 rounded px-1.5 text-left text-foreground bg-primary/[0.10] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md bg-primary/[0.10] px-2.5 text-left text-foreground"
             } else {
-                "flex h-5 w-full items-center justify-start gap-1.5 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
+                "flex h-9 w-full items-center justify-start gap-2 rounded-md px-2.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
                 let _ = send(&GitBranchSelectRequest {
                     reference: name.clone(),
                 });
+                onselected.call(());
             },
-            LineIconView { icon: LineIcon::Tag, class: "size-3 shrink-0 text-violet-400/75" }
-            span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{tag.name}" }
+            LineIconView { icon: LineIcon::Tag, class: "size-3 shrink-0 text-git-tag/75" }
+            span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{tag.name}" }
             code { class: "shrink-0 font-mono text-[8px] text-muted-foreground", "{tag.short_sha}" }
             span { class: "shrink-0 text-[8px] text-muted-foreground", "{tag.date}" }
         }
     }
 }
 
-#[component]
-fn BranchMarker(current: bool, upstream: String, worktree: bool, remote: bool) -> Element {
-    let icon = if worktree {
-        LineIcon::GitFork
-    } else {
-        LineIcon::GitBranch
-    };
-    let tone = if current {
-        "bg-ansi-2/12 text-ansi-2 ring-ansi-2/20"
-    } else if worktree {
-        "bg-amber-400/10 text-amber-400 ring-amber-400/20"
-    } else if remote || !upstream.is_empty() {
-        "bg-sky-400/10 text-sky-400 ring-sky-400/20"
-    } else {
-        "bg-violet-400/10 text-violet-400 ring-violet-400/20"
-    };
-    let title = if current {
-        translate("common-current")
-    } else if worktree {
-        translate("layout-worktree")
-    } else if remote {
-        translate("git-remote")
-    } else if !upstream.is_empty() {
-        upstream
-    } else {
-        translate("git-local")
-    };
-    rsx! {
-        span {
-            class: "flex size-4 shrink-0 items-center justify-center rounded-md ring-1 ring-inset {tone}",
-            title,
-            LineIconView { icon, class: "size-2.5" }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Fixture;
+
+    impl Fixture {
+        fn file(path: &str) -> GitBranchFileEntry {
+            GitBranchFileEntry {
+                path: path.to_string(),
+                path_bytes: path.as_bytes().to_vec(),
+                previous_path: None,
+                previous_path_bytes: None,
+                change: GitPathChange::Modified,
+            }
         }
+    }
+
+    #[test]
+    fn file_tree_compacts_single_directory_chains_and_sorts_files() {
+        let tree = BranchFileTree::from_files(vec![
+            Fixture::file("crates/app/vmux/src/main.rs"),
+            Fixture::file("Cargo.toml"),
+            Fixture::file(".github/workflows/ci.yml"),
+            Fixture::file("crates/app/vmux/src/lib.rs"),
+        ]);
+
+        let BranchFileNode::Directory(workflows) = &tree.roots[0] else {
+            panic!("first node must be the workflow directory");
+        };
+        assert_eq!(workflows.label, ".github/workflows");
+        let BranchFileNode::Directory(source) = &tree.roots[1] else {
+            panic!("second node must be the source directory");
+        };
+        assert_eq!(source.label, "crates/app/vmux/src");
+        assert_eq!(source.children.len(), 2);
+        let BranchFileNode::File(first) = &source.children[0] else {
+            panic!("source child must be a file");
+        };
+        assert_eq!(first.name(), "lib.rs");
+        let BranchFileNode::File(root) = &tree.roots[2] else {
+            panic!("last node must be the root file");
+        };
+        assert_eq!(root.name(), "Cargo.toml");
     }
 }

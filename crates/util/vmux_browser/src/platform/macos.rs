@@ -21,13 +21,14 @@ use vmux_ecs::page::HostsPage;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageMetadata, PageOpenSet};
 use vmux_layout::LayoutCef;
+use vmux_layout::overlay::LayoutOverlayDismissRevision;
 use vmux_layout::window::FocusedWindow;
 use vmux_page::{
     Appearance, AssetReply, Assets as RendererAssets, Embedding, LifecycleSink, LifecycleUpdate,
     Outbox as RendererOutbox, Page, PagePlacement, PageRegistration, SiblingOrder,
     Wake as RendererWake, WebView,
 };
-use vmux_setting::{AppSettings, ColorScheme};
+use vmux_setting::{AppSettings, ResolvedColorScheme, ResolvedScheme};
 use vmux_ui::hooks::EventListenerError;
 
 use crate::host::LayoutPointerCapture;
@@ -65,7 +66,7 @@ impl Plugin for MacosBrowserPlugin {
                     apply_metadata,
                     open.after(PageOpenSet::HandleKnownPages),
                     apply_lifecycle,
-                    sync_appearance.run_if(resource_changed::<AppSettings>),
+                    sync_appearance,
                     sync_scale,
                 )
                     .chain(),
@@ -84,11 +85,12 @@ impl Plugin for MacosBrowserPlugin {
     }
 }
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone)]
 struct HostedSurface {
     placement: PagePlacement,
     page: &'static Page,
     window: Entity,
+    url: String,
 }
 
 #[derive(Default)]
@@ -133,6 +135,7 @@ fn apply_metadata(receiver: Single<&PageMetadataReceiver>, mut pages: Query<&mut
         }
         if let Some(favicon) = update.favicon
             && !favicon.is_empty()
+            && !metadata.url.starts_with("vmux://")
         {
             metadata.icon = PageIcon::favicon(favicon);
         }
@@ -141,7 +144,11 @@ fn apply_metadata(receiver: Single<&PageMetadataReceiver>, mut pages: Query<&mut
 
 fn apply_lifecycle(
     receiver: Single<&PageLifecycleReceiver>,
+    renderer: Option<NonSend<PageRenderer>>,
     mut pages: Query<&mut crate::HostedPageLifecycle>,
+    source_hosts: Query<&HostWindow, Without<LayoutCef>>,
+    mut layouts: Query<(Entity, &HostWindow, &mut LayoutOverlayDismissRevision), With<LayoutCef>>,
+    mut commands: Commands,
 ) {
     while let Ok(envelope) = receiver.0.try_recv() {
         let Ok(mut page) = pages.get_mut(envelope.webview) else {
@@ -156,6 +163,9 @@ fn apply_lifecycle(
             }
             LifecycleUpdate::FramePending => page.frame_pending = true,
             LifecycleUpdate::FrameDelivered => page.frame_pending = false,
+            LifecycleUpdate::FrameApplied => {
+                page.frames_applied = page.frames_applied.wrapping_add(1).max(1);
+            }
             LifecycleUpdate::UiEventHandled => {
                 page.ui_events = page.ui_events.wrapping_add(1);
             }
@@ -166,6 +176,36 @@ fn apply_lifecycle(
                 page.listeners = page.listeners.saturating_add(1);
             }
             LifecycleUpdate::ListenersCleared => page.listeners = 0,
+            LifecycleUpdate::DropdownOpened | LifecycleUpdate::PageInteracted => {
+                if let Some(renderer) = renderer.as_ref() {
+                    for (entity, surface) in &renderer.0 {
+                        if *entity == envelope.webview {
+                            continue;
+                        }
+                        surface.evaluate_script(
+                            "for (const popup of document.querySelectorAll('[data-vmux-dropdown-popup]:popover-open')) popup.hidePopover();",
+                        );
+                    }
+                }
+                if envelope.update != LifecycleUpdate::PageInteracted {
+                    continue;
+                }
+                let Ok(source_host) = source_hosts.get(envelope.webview) else {
+                    continue;
+                };
+                let Some((layout, _, mut revision)) = layouts
+                    .iter_mut()
+                    .find(|(_, host, _)| host.0 == source_host.0)
+                else {
+                    continue;
+                };
+                commands.trigger(
+                    vmux_ecs::UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                        layout,
+                        &revision.next_effect(),
+                    ),
+                );
+            }
             LifecycleUpdate::MeasurementStarted => {
                 page.measurements = page.measurements.saturating_add(1);
             }
@@ -178,28 +218,40 @@ fn apply_lifecycle(
 }
 
 fn open(
-    entities: Query<EntityRef>,
+    mut state: ParamSet<(
+        Query<EntityRef>,
+        NonSendMut<PageRenderer>,
+        NonSendMut<Browsers>,
+    )>,
     requester: Option<Res<Requester>>,
     bin_ipc: Option<Res<BinIpcEventRawSender>>,
     metadata_sender: Query<&PageMetadataSender>,
     lifecycle_sender: Query<&PageLifecycleSender>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    settings: Res<AppSettings>,
-    mut renderer: NonSendMut<PageRenderer>,
-    mut browsers: NonSendMut<Browsers>,
+    appearance: Single<&ResolvedColorScheme>,
     mut commands: Commands,
 ) {
-    let registered = entities
-        .iter()
-        .filter_map(|entity| entity.get::<PageRegistration>().copied())
-        .collect::<Vec<_>>();
+    let registered = {
+        let entities = state.p0();
+        entities
+            .iter()
+            .filter_map(|entity| entity.get::<PageRegistration>().copied())
+            .collect::<Vec<_>>()
+    };
     let mut wanted = Vec::new();
     for registration in registered {
-        for entity in claim_hosted_pages(&entities, registration) {
-            let Ok(candidate) = entities.get(entity) else {
-                continue;
+        let claimed = {
+            let entities = state.p0();
+            claim_hosted_pages(&entities, registration)
+        };
+        for entity in claimed {
+            let priority = {
+                let entities = state.p0();
+                let Ok(candidate) = entities.get(entity) else {
+                    continue;
+                };
+                registration_priority(candidate, registration)
             };
-            let priority = registration_priority(candidate, registration);
             let existing = wanted
                 .iter_mut()
                 .find(|(candidate, _, _)| *candidate == entity);
@@ -217,10 +269,13 @@ fn open(
         return;
     }
 
-    let primary_window = entities
-        .iter()
-        .find(|entity| entity.contains::<PrimaryWindow>())
-        .map(|entity| entity.id());
+    let primary_window = {
+        let entities = state.p0();
+        entities
+            .iter()
+            .find(|entity| entity.contains::<PrimaryWindow>())
+            .map(|entity| entity.id())
+    };
     let embedder = match load_page_embedder(
         requester.as_deref(),
         bin_ipc.as_deref(),
@@ -234,33 +289,61 @@ fn open(
             return;
         }
     };
-    let appearance = appearance_of(settings.appearance.mode);
+    let appearance = appearance_of(appearance.0);
 
     for (entity, registration, _) in wanted {
         let page = registration.page();
         let placement = registration.placement();
-        let Some(window_entity) = host_window_for(&entities, entity).or(primary_window) else {
-            report_waiting("page has no host window entity");
-            continue;
+        let candidate = {
+            let entities = state.p0();
+            let Some(window_entity) = host_window_for(&entities, entity).or(primary_window) else {
+                report_waiting("page has no host window entity");
+                continue;
+            };
+            let Ok(candidate) = entities.get(entity) else {
+                continue;
+            };
+            (
+                window_entity,
+                candidate.get::<HostedSurface>().cloned(),
+                registration.instance(candidate),
+                candidate
+                    .get::<PageMetadata>()
+                    .map(|metadata| metadata.url.clone())
+                    .unwrap_or_else(|| page.url.to_string()),
+            )
         };
-        let Ok(candidate) = entities.get(entity) else {
-            continue;
-        };
-        let current = candidate.get::<HostedSurface>().copied();
-        let has_surface = renderer.0.contains_key(&entity);
-        if current.is_some_and(|current| {
+        let (window_entity, current, instance, url) = candidate;
+        let has_surface = state.p1().0.contains_key(&entity);
+        if let Some(current) = current.as_ref().filter(|current| {
             std::ptr::eq(current.page, page) && current.window == window_entity && has_surface
         }) {
+            let route_changed = current.url != url;
+            let placement_changed = current.placement != placement;
+            if route_changed {
+                let renderer = state.p1();
+                let surface = renderer.0.get(&entity).expect("the page was just found");
+                surface.navigate(page, instance);
+                info!("browser_platform: updated {entity:?} within {}", page.url);
+            }
+            if route_changed || placement_changed {
+                commands.entity(entity).insert(HostedSurface {
+                    placement,
+                    page,
+                    window: window_entity,
+                    url,
+                });
+            }
             continue;
         }
-        let instance = registration.instance(candidate);
-        if current.is_some_and(|current| {
+        if current.as_ref().is_some_and(|current| {
             current.page.transparent == page.transparent
                 && current.page.document_url() == page.document_url()
                 && current.window == window_entity
                 && has_surface
         }) {
             let remounted = {
+                let renderer = state.p1();
                 let surface = renderer.0.get(&entity).expect("the page was just found");
                 surface.navigate(page, instance)
             };
@@ -268,6 +351,7 @@ fn open(
                 placement,
                 page,
                 window: window_entity,
+                url,
             });
             if remounted {
                 commands.entity(entity).remove::<PageReady>();
@@ -276,7 +360,7 @@ fn open(
             continue;
         }
         if current.is_some() {
-            renderer.0.remove(&entity);
+            state.p1().0.remove(&entity);
             commands
                 .entity(entity)
                 .remove::<(HostedSurface, crate::HostedPageLifecycle)>();
@@ -294,6 +378,7 @@ fn open(
                 bounds,
                 embedder.embed(entity, page.url),
                 instance,
+                appearance,
             ))
         });
         match built {
@@ -302,22 +387,21 @@ fn open(
                 return;
             }
             Some(Ok(surface)) => {
-                surface.set_visible(false);
-                surface.set_appearance(appearance);
                 if placement.paints_in_front() {
                     surface.raise_above_layers();
                 }
-                browsers.set_externally_hosted(entity);
+                state.p2().set_externally_hosted(entity);
                 info!(
                     "browser_platform: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
                     page.url
                 );
-                renderer.0.insert(entity, surface);
+                state.p1().0.insert(entity, surface);
                 commands.entity(entity).insert((
                     HostedSurface {
                         placement,
                         page,
                         window: window_entity,
+                        url,
                     },
                     crate::HostedPageLifecycle::default(),
                 ));
@@ -351,7 +435,7 @@ fn registration_priority(entity: EntityRef<'_>, registration: PageRegistration) 
 
 fn place(
     renderer: Option<NonSendMut<PageRenderer>>,
-    hosted: Query<(Entity, &HostedSurface), With<HostsPage>>,
+    hosted: Query<(Entity, &HostedSurface, &crate::HostedPageLifecycle), With<HostsPage>>,
     frames: Query<&PaneFrame>,
     rings: Query<&FocusRing>,
     corners: Query<&AllCorners>,
@@ -370,10 +454,14 @@ fn place(
     {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
-    for (entity, page) in &hosted {
+    for (entity, page, lifecycle) in &hosted {
         let Some(surface) = renderer.0.get(&entity) else {
             continue;
         };
+        if lifecycle.frames_applied == 0 {
+            surface.set_visible(false);
+            continue;
+        }
         let window = windows.get(page.window).ok();
         let Some(bounds) = page.placement.bounds(entity, window, &frames) else {
             surface.set_visible(false);
@@ -472,11 +560,17 @@ fn forward_host_emit(
     surface.deliver(host_emit.id(), host_emit.payload());
 }
 
-fn sync_appearance(renderer: Option<NonSend<PageRenderer>>, settings: Res<AppSettings>) {
+fn sync_appearance(
+    renderer: Option<NonSend<PageRenderer>>,
+    appearance: Single<Ref<ResolvedColorScheme>>,
+) {
+    if !appearance.is_changed() {
+        return;
+    }
     let Some(renderer) = renderer else {
         return;
     };
-    let appearance = appearance_of(settings.appearance.mode);
+    let appearance = appearance_of(appearance.0);
     info!("browser_platform: colour scheme set to {appearance:?}");
     for surface in renderer.0.values() {
         surface.set_appearance(appearance);
@@ -502,11 +596,10 @@ fn page_scale_of(level: f64) -> f64 {
     1.2f64.powf(level)
 }
 
-fn appearance_of(mode: ColorScheme) -> Appearance {
-    match mode {
-        ColorScheme::Light => Appearance::Light,
-        ColorScheme::Dark => Appearance::Dark,
-        ColorScheme::Device => Appearance::System,
+fn appearance_of(scheme: ResolvedScheme) -> Appearance {
+    match scheme {
+        ResolvedScheme::Light => Appearance::Light,
+        ResolvedScheme::Dark => Appearance::Dark,
     }
 }
 
@@ -1007,11 +1100,22 @@ fn report_waiting(reason: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt, SimulatorFrame,
-        SimulatorFrameRequest,
+        MacosBrowserPlugin, PageMetadataReceiver, PageMetadataSender, PageOutbox, PagePlacementExt,
+        SimulatorFrame, SimulatorFrameRequest,
     };
+    use bevy::ecs::schedule::Schedules;
     use bevy::prelude::{App, MinimalPlugins, Update};
     use vmux_page::{PagePlacement, SiblingOrder};
+
+    #[test]
+    fn update_schedule_accepts_page_renderer_accesses() {
+        let mut app = App::new();
+        app.add_plugins(MacosBrowserPlugin);
+
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+        let mut update = schedules.remove(Update).unwrap();
+        update.initialize(app.world_mut()).unwrap();
+    }
 
     #[test]
     fn the_layout_is_asked_for_the_pointer_only_while_a_surface_of_its_own_is_up() {
@@ -1051,7 +1155,7 @@ mod tests {
     }
 
     #[test]
-    fn document_metadata_updates_the_hosted_page() {
+    fn document_title_updates_an_internal_page_without_replacing_its_icon() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, super::apply_metadata);
@@ -1062,7 +1166,7 @@ mod tests {
             .spawn(vmux_ecs::PageMetadata {
                 title: "vmux://history/".to_string(),
                 url: "vmux://history/".to_string(),
-                icon: vmux_api::PageIcon::None,
+                icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Clock),
                 bg_color: None,
             })
             .id();
@@ -1082,7 +1186,7 @@ mod tests {
         assert_eq!(metadata.title, "History");
         assert_eq!(
             metadata.icon,
-            vmux_api::PageIcon::favicon("vmux://history/assets/favicons/history.svg")
+            vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Clock)
         );
     }
 

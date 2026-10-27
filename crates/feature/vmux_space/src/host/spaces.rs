@@ -28,7 +28,7 @@ pub(crate) struct SpacesPageSnapshot(pub(crate) vmux_api::space::SpacesListEvent
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BOOTSTRAP_SPACE_ID, BOOTSTRAP_SPACE_NAME};
+    use crate::model::BOOTSTRAP_SPACE_ID;
 
     #[test]
     fn space_profile_bundle_spawns_space_name_profile_and_id() {
@@ -42,7 +42,7 @@ mod tests {
         ), With<vmux_layout::space::Space>>();
         let (name, profile, space_id) = query.single(app.world()).unwrap();
 
-        assert_eq!(name.as_str(), BOOTSTRAP_SPACE_NAME);
+        assert!(SpaceRecord::is_planet_name(name.as_str()));
         assert_eq!(profile.name, "Personal");
         assert_eq!(space_id.0, BOOTSTRAP_SPACE_ID);
     }

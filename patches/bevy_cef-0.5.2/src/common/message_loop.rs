@@ -121,7 +121,7 @@ impl Plugin for MessageLoopPlugin {
 
         #[cfg(target_os = "macos")]
         {
-            app.insert_non_send(cef_pump_timer::install(rx, 1.0 / 60.0));
+            app.insert_non_send(cef_pump_timer::install(rx, wake_policy, 1.0 / 60.0));
         }
     }
 }
@@ -225,6 +225,7 @@ Fix: make install-debug-render-process  (or: cargo build -p bevy_cef_debug_rende
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         disable_signal_handlers: true as _,
+        log_severity: cef::LogSeverity::DISABLE,
         ..Default::default()
     };
     assert_eq!(
@@ -270,6 +271,7 @@ fn cef_initialize(
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         disable_signal_handlers: false as _,
+        log_severity: cef::LogSeverity::DISABLE,
         ..Default::default()
     };
     assert_eq!(
@@ -402,7 +404,7 @@ mod cef_pump_timer {
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
-    use bevy_cef_core::prelude::MessageLoopTimer;
+    use bevy_cef_core::prelude::{MessageLoopTimer, MessageLoopWakePolicy};
 
     const IDLE_PUMP_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -434,6 +436,7 @@ mod cef_pump_timer {
         receiver: Receiver<MessageLoopTimer>,
         next: Option<MessageLoopTimer>,
         last_pump: Instant,
+        wake_policy: MessageLoopWakePolicy,
     }
 
     impl PumpState {
@@ -443,6 +446,11 @@ mod cef_pump_timer {
             }
             let requested = self.next.is_some_and(|timer| timer.is_finished());
             let fallback = now.duration_since(self.last_pump) >= IDLE_PUMP_INTERVAL;
+            let wake_allowed =
+                now.duration_since(self.last_pump) >= self.wake_policy.min_wake_interval();
+            if requested && !wake_allowed {
+                return false;
+            }
             if !requested && !fallback {
                 return false;
             }
@@ -498,13 +506,18 @@ mod cef_pump_timer {
         }
     }
 
-    pub fn install(receiver: Receiver<MessageLoopTimer>, interval: f64) -> Controller {
+    pub fn install(
+        receiver: Receiver<MessageLoopTimer>,
+        wake_policy: MessageLoopWakePolicy,
+        interval: f64,
+    ) -> Controller {
         let mut state = pump_state().lock().unwrap();
         assert!(state.is_none(), "CEF pump already installed");
         *state = Some(PumpState {
             receiver,
             next: Some(MessageLoopTimer::new(0)),
             last_pump: Instant::now(),
+            wake_policy,
         });
         drop(state);
         unsafe {
@@ -537,6 +550,7 @@ mod cef_pump_timer {
                 receiver,
                 next: None,
                 last_pump: Instant::now(),
+                wake_policy: MessageLoopWakePolicy::default(),
             }
         }
 
@@ -546,6 +560,7 @@ mod cef_pump_timer {
             tx.send(MessageLoopTimer::new(0)).unwrap();
             tx.send(MessageLoopTimer::new(0)).unwrap();
             let mut state = state(rx);
+            state.last_pump = Instant::now() - state.wake_policy.min_wake_interval();
 
             assert!(state.should_pump(Instant::now()));
             assert!(!state.should_pump(Instant::now()));
@@ -566,6 +581,20 @@ mod cef_pump_timer {
             let mut state = state(rx);
             state.last_pump = Instant::now() - IDLE_PUMP_INTERVAL;
 
+            assert!(state.should_pump(Instant::now()));
+        }
+
+        #[test]
+        fn immediate_requests_follow_the_wake_policy() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut state = state(rx);
+            state
+                .wake_policy
+                .set_min_wake_interval(Duration::from_millis(100));
+            tx.send(MessageLoopTimer::new(0)).unwrap();
+
+            assert!(!state.should_pump(Instant::now()));
+            state.last_pump = Instant::now() - Duration::from_millis(100);
             assert!(state.should_pump(Instant::now()));
         }
     }

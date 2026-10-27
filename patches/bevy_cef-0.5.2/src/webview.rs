@@ -233,10 +233,21 @@ fn shared_texture_enabled(windowed: bool) -> bool {
     !windowed
 }
 
+fn opaque_windowed_background_color(mode: CefColorMode) -> u32 {
+    match mode {
+        CefColorMode::Light => 0xFFF0F0F0,
+        CefColorMode::Dark | CefColorMode::System => 0xFF141414,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create_webview(
     mut browsers: NonSendMut<Browsers>,
-    cef_settings: (Res<CefDiskProfileRoot>, Res<CefAcceptLanguageList>),
+    cef_settings: (
+        Res<CefDiskProfileRoot>,
+        Res<CefAcceptLanguageList>,
+        Res<CefColorScheme>,
+    ),
     requester: Res<Requester>,
     ipc_event_sender: Res<IpcEventRawSender>,
     bin_ipc_event_sender: Res<BinIpcEventRawSender>,
@@ -350,7 +361,7 @@ fn create_webview(
                 cef_settings.0.0.as_deref(),
                 &cef_settings.1.0,
                 if windowed && opaque_windowed_background {
-                    Some(0xFF212124)
+                    Some(opaque_windowed_background_color(cef_settings.2.0))
                 } else if transparent {
                     Some(0x00000000)
                 } else {
@@ -425,5 +436,21 @@ mod tests {
     fn shared_textures_feed_every_windowless_webview() {
         assert!(shared_texture_enabled(false));
         assert!(!shared_texture_enabled(true));
+    }
+
+    #[test]
+    fn opaque_windowed_background_follows_the_resolved_scheme() {
+        assert_eq!(
+            opaque_windowed_background_color(CefColorMode::Light),
+            0xFFF0F0F0
+        );
+        assert_eq!(
+            opaque_windowed_background_color(CefColorMode::Dark),
+            0xFF141414
+        );
+        assert_eq!(
+            opaque_windowed_background_color(CefColorMode::System),
+            0xFF141414
+        );
     }
 }

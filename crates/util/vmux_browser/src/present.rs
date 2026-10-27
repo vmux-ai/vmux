@@ -25,7 +25,7 @@ use vmux_layout::{
     },
 };
 
-use vmux_ecs::KeyboardOwner;
+use vmux_ecs::{KeyboardOwner, PagePresented};
 use vmux_setting::AppSettings;
 
 use crate::host::{CommandBarRoute, LayoutPointerCapture, NATIVE_COMMAND_BAR_ROUTE};
@@ -54,25 +54,7 @@ impl Plugin for PresentPlugin {
             )
                 .chain()
                 .after(LayoutSystems::Layout),
-        )
-        .add_systems(Last, log_windowed_view_state);
-    }
-}
-
-fn log_windowed_view_state(
-    browsers: NonSend<Browsers>,
-    pages: Query<Entity, (With<Browser>, With<WebviewWindowed>, Without<WindowOverlay>)>,
-    mut previous: Local<std::collections::HashMap<Entity, String>>,
-) {
-    for entity in &pages {
-        let Some(state) = browsers.windowed_view_state(&entity) else {
-            continue;
-        };
-        if previous.get(&entity) == Some(&state) {
-            continue;
-        }
-        bevy::log::warn!(?entity, "cef_diagnostic: {state}");
-        previous.insert(entity, state);
+        );
     }
 }
 
@@ -207,11 +189,13 @@ fn sync_children_to_ui(
             Has<PendingCommandBarReveal>,
             Has<LayoutCef>,
             Has<WebviewWindowed>,
+            Has<PagePresented>,
         ),
         With<Browser>,
     >,
     queries: WindowFrameQueries,
     roots: Query<(Entity, &HostWindow, &ComputedNode), With<VmuxWindow>>,
+    mut commands: Commands,
 ) {
     for (
         browser,
@@ -228,14 +212,21 @@ fn sync_children_to_ui(
         pending_command_bar_reveal,
         is_layout_cef,
         is_windowed,
+        presented,
     ) in browser_q.iter_mut()
     {
         let Some(host_window) = queries.hierarchy.get(browser) else {
+            if presented {
+                commands.entity(browser).remove::<PagePresented>();
+            }
             continue;
         };
         let Some((glass_entity, _, glass_node)) =
             roots.iter().find(|(_, host, _)| host.0 == host_window)
         else {
+            if presented {
+                commands.entity(browser).remove::<PagePresented>();
+            }
             continue;
         };
         let glass_rect = *glass_node;
@@ -252,6 +243,9 @@ fn sync_children_to_ui(
         };
 
         if glass_size_px.x <= 0.0 || glass_size_px.y <= 0.0 {
+            if presented {
+                commands.entity(browser).remove::<PagePresented>();
+            }
             continue;
         }
 
@@ -274,12 +268,18 @@ fn sync_children_to_ui(
             HiddenWebviewSizing::Render => {}
             HiddenWebviewSizing::HideKeepSize => {
                 tf.scale = Vec3::splat(1.0e-6);
+                if presented {
+                    commands.entity(browser).remove::<PagePresented>();
+                }
                 continue;
             }
             HiddenWebviewSizing::Collapse => {
                 tf.scale = Vec3::splat(1.0e-6);
                 if webview_size.0 != Vec2::ONE {
                     webview_size.0 = Vec2::ONE;
+                }
+                if presented {
+                    commands.entity(browser).remove::<PagePresented>();
                 }
                 continue;
             }
@@ -294,6 +294,13 @@ fn sync_children_to_ui(
         let is_inactive_stack = parent != glass_entity && !is_cef_ui && !is_active_stack;
 
         let is_inactive_tab = under_inactive_tab;
+
+        let should_present = !is_inactive_stack && !is_inactive_tab;
+        if should_present && !presented {
+            commands.entity(browser).insert(PagePresented);
+        } else if !should_present && presented {
+            commands.entity(browser).remove::<PagePresented>();
+        }
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -398,7 +405,6 @@ fn windowed_ring_for(
 fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
-    hidden_windows: Query<(), With<vmux_layout::toggle::LayoutHidden>>,
     added_hidden_windows: Query<(), Added<vmux_layout::toggle::LayoutHidden>>,
     mut removed_hidden_windows: RemovedComponents<vmux_layout::toggle::LayoutHidden>,
     focus: vmux_layout::stack::FocusedStack,
@@ -478,7 +484,6 @@ fn sync_windowed_frames(
         }
         visible.push(entity);
         let host_window = queries.hierarchy.get(entity);
-        let layout_is_hidden = host_window.is_some_and(|window| hidden_windows.contains(window));
         let header_frame = host_window.and_then(|host_window| {
             queries.header_rect.iter().find_map(|(header, rect)| {
                 if queries.hierarchy.get(header) == Some(host_window) {
@@ -499,12 +504,7 @@ fn sync_windowed_frames(
             continue;
         };
         let scale = computed.scale();
-        let frame = windowed_page_frame_rect(
-            pane_frame,
-            header_frame,
-            layout_is_hidden,
-            visible_pane_count,
-        );
+        let frame = windowed_page_frame_rect(pane_frame, header_frame, visible_pane_count);
         let Some(logical) = PaneFrame::from_windowed(frame, scale) else {
             commands
                 .entity(entity)
@@ -515,9 +515,7 @@ fn sync_windowed_frames(
         let browser_ready = browsers.windowed_view_ready(&entity);
         let was_raised = memory.raised_frame.contains_key(&entity);
         let first_native_frame = browser_ready && !was_raised;
-        if windowed_page_needs_reveal(became_visible, browser_ready, was_raised) {
-            browsers.set_windowed_hidden(&entity, false);
-        }
+        let reveal = windowed_page_needs_reveal(became_visible, browser_ready, was_raised);
         browsers.set_windowed_frame(
             &entity,
             frame.left,
@@ -526,8 +524,11 @@ fn sync_windowed_frames(
             frame.height,
             scale,
         );
+        if reveal {
+            browsers.set_windowed_hidden(&entity, false);
+        }
         browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
-        let all_corners = windowed_page_all_corners(layout_is_hidden, visible_pane_count);
+        let all_corners = windowed_page_all_corners(header_frame.is_none(), visible_pane_count);
         browsers.set_windowed_corner_radius(
             &entity,
             settings.layout.radius * scale,
@@ -570,9 +571,12 @@ fn sync_windowed_frames(
                 frame.width.round() as i32,
                 frame.height.round() as i32,
             );
-            let changed = memory.raised_frame.insert(entity, key) != Some(key);
-            if force_raise || changed || became_visible || first_native_frame {
+            memory.raised_frame.insert(entity, key);
+            if force_raise || became_visible || first_native_frame {
                 browsers.raise_windowed_to_front(&entity);
+            }
+            if reveal {
+                browsers.nudge_windowed_repaint(&entity);
             }
         }
     }
@@ -693,15 +697,11 @@ impl WindowedFrameRect {
 fn windowed_page_frame_rect(
     pane: WindowedFrameRect,
     header: Option<WindowedFrameRect>,
-    layout_hidden: bool,
     visible_pane_count: usize,
 ) -> WindowedFrameRect {
     let Some(header) = header else {
         return pane;
     };
-    if layout_hidden {
-        return pane;
-    }
     let (left, right) = if visible_pane_count == 1 {
         (header.left.ceil(), header.right().floor())
     } else {
@@ -1730,7 +1730,7 @@ mod tests {
             height: 84.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 1);
+        let frame = windowed_page_frame_rect(pane, Some(header), 1);
 
         assert_eq!(
             frame,
@@ -1758,7 +1758,7 @@ mod tests {
             height: 72.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 2);
+        let frame = windowed_page_frame_rect(pane, Some(header), 2);
 
         assert_eq!(
             frame,

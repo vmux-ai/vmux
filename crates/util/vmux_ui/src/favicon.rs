@@ -13,25 +13,8 @@ impl FaviconSource {
             .filter(|host| !host.is_empty())
     }
 
-    fn agent_host(url: &str) -> Option<&'static str> {
-        const AGENTS: &[(&str, &str)] = &[
-            ("vibe", "chat.mistral.ai"),
-            ("mistral-vibe", "chat.mistral.ai"),
-            ("claude", "claude.ai"),
-            ("claude-acp", "claude.ai"),
-            ("codex", "chatgpt.com"),
-            ("codex-acp", "chatgpt.com"),
-            ("gemini", "gemini.google.com"),
-        ];
-        for &(kind, host) in AGENTS {
-            for prefix in ["vmux://sessions/", "vmux://agent/"] {
-                let base = format!("{prefix}{kind}");
-                if url == base || url.starts_with(&format!("{base}/")) {
-                    return Some(host);
-                }
-            }
-        }
-        None
+    pub fn agent(agent_id: &str) -> Option<String> {
+        AgentBrand::from_id(agent_id).map(|brand| brand.icon_url().to_string())
     }
 
     pub fn vmux(url: &str) -> Option<String> {
@@ -45,11 +28,6 @@ impl FaviconSource {
     }
 
     pub fn resolve(favicon_url: &str, url: &str) -> Option<String> {
-        if let Some(host) = Self::agent_host(url) {
-            return Some(format!(
-                "https://www.google.com/s2/favicons?domain={host}&sz=64"
-            ));
-        }
         if !favicon_url.is_empty() {
             return Some(favicon_url.to_string());
         }
@@ -58,6 +36,40 @@ impl FaviconSource {
         }
         Self::host(url)
             .map(|host| format!("https://www.google.com/s2/favicons?domain={host}&sz=64"))
+    }
+}
+
+enum AgentBrand {
+    Claude,
+    Codex,
+    Gemini,
+    Mistral,
+}
+
+impl AgentBrand {
+    fn from_id(value: &str) -> Option<Self> {
+        for token in value
+            .to_ascii_lowercase()
+            .split(|character: char| !character.is_ascii_alphanumeric())
+        {
+            match token {
+                "claude" => return Some(Self::Claude),
+                "codex" => return Some(Self::Codex),
+                "gemini" => return Some(Self::Gemini),
+                "mistral" | "vibe" => return Some(Self::Mistral),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn icon_url(&self) -> &'static str {
+        match self {
+            Self::Claude => "assets/agent-logos/claude.png",
+            Self::Codex => "assets/agent-logos/codex.png",
+            Self::Gemini => "https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg",
+            Self::Mistral => "assets/agent-logos/vibe.png",
+        }
     }
 }
 
@@ -204,45 +216,28 @@ mod tests {
     }
 
     #[test]
-    fn agent_host_maps_vibe() {
+    fn agent_maps_vibe() {
         assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/vibe/chat/abc"),
-            Some("chat.mistral.ai")
-        );
-        assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/vibe/cli/abc"),
-            Some("chat.mistral.ai")
-        );
-        assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/mistral-vibe/session-1"),
-            Some("chat.mistral.ai")
+            FaviconSource::agent("mistral-vibe"),
+            Some("assets/agent-logos/vibe.png".to_string())
         );
     }
 
     #[test]
-    fn agent_host_maps_claude_and_codex() {
+    fn agent_maps_claude_and_codex() {
         assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/claude/x"),
-            Some("claude.ai")
+            FaviconSource::agent("claude-acp"),
+            Some("assets/agent-logos/claude.png".to_string())
         );
         assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/claude-acp/x"),
-            Some("claude.ai")
-        );
-        assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/codex/x"),
-            Some("chatgpt.com")
-        );
-        assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/codex-acp/x"),
-            Some("chatgpt.com")
+            FaviconSource::agent("codex-acp"),
+            Some("assets/agent-logos/codex.png".to_string())
         );
     }
 
     #[test]
-    fn agent_host_unknown_returns_none() {
-        assert_eq!(FaviconSource::agent_host("vmux://sessions/unknown/x"), None);
-        assert_eq!(FaviconSource::agent_host("https://example.com"), None);
+    fn unknown_agent_returns_none() {
+        assert_eq!(FaviconSource::agent("unknown"), None);
     }
 
     #[test]
@@ -250,17 +245,6 @@ mod tests {
         assert_eq!(
             FaviconSource::resolve("https://cdn.example.com/icon.png", "https://example.com/"),
             Some("https://cdn.example.com/icon.png".to_string())
-        );
-    }
-
-    #[test]
-    fn favicon_src_prefers_agent_host_over_passed_icon() {
-        assert_eq!(
-            FaviconSource::resolve(
-                "https://cdn.example/claude-acp.svg",
-                "vmux://sessions/claude"
-            ),
-            Some("https://www.google.com/s2/favicons?domain=claude.ai&sz=64".to_string())
         );
     }
 
@@ -281,14 +265,6 @@ mod tests {
     }
 
     #[test]
-    fn favicon_src_falls_back_to_agent_host() {
-        assert_eq!(
-            FaviconSource::resolve("", "vmux://sessions/vibe/chat/abc"),
-            Some("https://www.google.com/s2/favicons?domain=chat.mistral.ai&sz=64".to_string())
-        );
-    }
-
-    #[test]
     fn favicon_src_uses_the_page_host_for_vmux_pages() {
         assert_eq!(
             FaviconSource::resolve("", "vmux://history/"),
@@ -302,31 +278,15 @@ mod tests {
     }
 
     #[test]
-    fn agent_host_matches_single_segment_acp_url() {
+    fn agent_maps_gemini() {
         assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/claude"),
-            Some("claude.ai")
-        );
-        assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/codex"),
-            Some("chatgpt.com")
-        );
-        assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/claude/cli"),
-            Some("claude.ai")
+            FaviconSource::agent("gemini"),
+            Some("https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg".to_string())
         );
     }
 
     #[test]
-    fn agent_host_maps_gemini() {
-        assert_eq!(
-            FaviconSource::agent_host("vmux://sessions/gemini"),
-            Some("gemini.google.com")
-        );
-    }
-
-    #[test]
-    fn agent_host_does_not_over_match_similar_ids() {
-        assert_eq!(FaviconSource::agent_host("vmux://sessions/claudex"), None);
+    fn agent_does_not_over_match_similar_ids() {
+        assert_eq!(FaviconSource::agent("claudex"), None);
     }
 }

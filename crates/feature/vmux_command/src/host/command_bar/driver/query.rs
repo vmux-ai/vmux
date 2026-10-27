@@ -20,13 +20,15 @@ impl<'a> PaletteQuery<'a> {
         matches!(open_target, Some(OpenTarget::InPlace))
             && !nav_mode
             && !query.is_empty()
+            && !query.starts_with('@')
             && !self.0.trim_start().starts_with('>')
             && Self::new(query).looks_like_url()
     }
 
-    pub fn is_start_prompt(&self) -> bool {
+    pub fn is_prompt(&self) -> bool {
         let query = self.0.trim();
         !query.is_empty()
+            && !query.starts_with('@')
             && !query.starts_with('>')
             && !Self::new(query).looks_like_url()
             && !Self::new(query).looks_like_explicit_path()
@@ -44,6 +46,9 @@ impl<'a> PaletteQuery<'a> {
             return PaletteMode::Ex;
         }
         let trimmed = self.0.trim();
+        if trimmed.starts_with('@') {
+            return PaletteMode::Path;
+        }
         if trimmed.starts_with('>') {
             return PaletteMode::Command;
         }
@@ -60,6 +65,9 @@ impl<'a> PaletteQuery<'a> {
     }
 
     pub fn opens_at_end(&self, asserted: Option<&CommandBarPicker>) -> bool {
+        if asserted.is_none() && self.0.trim() == "@" {
+            return true;
+        }
         let prefix = match self.mode(asserted.cloned(), &[]) {
             PaletteMode::Ex => ":",
             PaletteMode::Command => ">",
@@ -155,9 +163,9 @@ mod tests {
     }
 
     #[test]
-    fn start_prompt_rejects_navigation_and_commands() {
-        assert!(PaletteQuery::new("fix the failing test").is_start_prompt());
-        assert!(PaletteQuery::new("codex").is_start_prompt());
+    fn prompt_rejects_navigation_and_commands() {
+        assert!(PaletteQuery::new("fix the failing test").is_prompt());
+        assert!(PaletteQuery::new("codex").is_prompt());
         for query in [
             "https://example.com",
             "example.com",
@@ -167,8 +175,9 @@ mod tests {
             "./src",
             "../repo",
             "> close tab",
+            "@main.rs",
         ] {
-            assert!(!PaletteQuery::new(query).is_start_prompt(), "{query}");
+            assert!(!PaletteQuery::new(query).is_prompt(), "{query}");
         }
     }
 
@@ -184,6 +193,10 @@ mod tests {
         );
         assert!(
             !PaletteQuery::new("> close")
+                .opens_typed_url_on_enter(Some(OpenTarget::InPlace), false)
+        );
+        assert!(
+            !PaletteQuery::new("@main.rs")
                 .opens_typed_url_on_enter(Some(OpenTarget::InPlace), false)
         );
     }

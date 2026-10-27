@@ -13,6 +13,18 @@ pub struct UiStateBinding<T> {
     pub error: Signal<Option<String>>,
 }
 
+impl<T> UiStateBinding<T>
+where
+    T: 'static,
+{
+    pub fn use_selector<S>(self, select: impl Fn(&T) -> S + 'static) -> Memo<S>
+    where
+        S: Clone + PartialEq + 'static,
+    {
+        use_memo(move || select(&self.state.read()))
+    }
+}
+
 fn use_ui_state_listener<T, F>(on_state: F) -> UiStateListener
 where
     T: UiState + rkyv::Archive + 'static,
@@ -40,7 +52,7 @@ where
         let scope = current_scope_id();
         match Host::listen_state::<T, _>(move |state| {
             let listener = listener.clone();
-            runtime.in_scope(scope, || listener.call(state));
+            runtime.in_scope(scope, || listener.call(state))
         }) {
             Ok(()) => {
                 listening.set(true);

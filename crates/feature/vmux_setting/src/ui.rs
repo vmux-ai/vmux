@@ -11,11 +11,11 @@ use crate::state::{
     SettingsUiState,
 };
 use dioxus::prelude::*;
-use vmux_ui::components::button::{Button, ButtonVariant};
-use vmux_ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
+use vmux_ui::components::breadcrumb::{BreadcrumbOption, BreadcrumbSelector, BreadcrumbSeparator};
+use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::input::Input;
-use vmux_ui::components::select::{
-    Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
+use vmux_ui::components::manager::{
+    ManagerSearchAction, ManagerSelect, ManagerSelectItem, WorkspaceBreadcrumbHeader, WorkspacePage,
 };
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
@@ -23,8 +23,52 @@ use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
+const SETTINGS_SCROLL_SPY: &str = r#"
+globalThis.__vmuxSettingsScrollSpyCleanup?.();
+const viewport = document.getElementById('settings-scroll-viewport');
+const sections = [...document.querySelectorAll('[data-vmux-settings-section]')];
+if (viewport && sections.length) {
+  let active = '';
+  let frame = 0;
+  const update = () => {
+    frame = 0;
+    const threshold = viewport.getBoundingClientRect().top + 24;
+    let selected = sections[0];
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= threshold) selected = section;
+      else break;
+    }
+    if (viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 2) {
+      selected = sections[sections.length - 1];
+    }
+    if (selected.id !== active) {
+      active = selected.id;
+      dioxus.send(active);
+    }
+  };
+  const schedule = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(update);
+  };
+  const observer = new ResizeObserver(schedule);
+  observer.observe(viewport);
+  for (const section of sections) observer.observe(section);
+  viewport.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule, true);
+  globalThis.__vmuxSettingsScrollSpyCleanup = () => {
+    if (frame) cancelAnimationFrame(frame);
+    observer.disconnect();
+    viewport.removeEventListener('scroll', schedule);
+    window.removeEventListener('resize', schedule, true);
+    delete globalThis.__vmuxSettingsScrollSpyCleanup;
+  };
+  update();
+}
+"#;
+
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "SettingsUiState"]
 )]
 pub(crate) struct SettingsPage;
 
@@ -67,49 +111,96 @@ pub fn Page() -> Element {
         fields: Rc::new(fields),
         items: Rc::new(items),
     };
-    let search_placeholder = format!("{}…", translate("command-search"));
-
+    let mut active_section = use_signal(|| {
+        sections
+            .first()
+            .map(|section| section.id.clone())
+            .unwrap_or_default()
+    });
+    let current_section = sections
+        .iter()
+        .find(|section| section.id == active_section())
+        .or_else(|| sections.first())
+        .cloned();
+    let section_options = sections
+        .iter()
+        .map(|section| BreadcrumbOption {
+            label: section.title.clone(),
+            value: section.id.clone(),
+            identity_seed: String::new(),
+            icon_url: String::new(),
+            icon: None,
+        })
+        .collect::<Vec<_>>();
     rsx! {
-        div { class: "flex h-full min-h-0 flex-row bg-background text-foreground",
-            aside { class: "hidden w-56 shrink-0 border-r border-border px-4 py-6 lg:block",
-                div { class: "mb-4 px-2",
-                    div { class: "text-base font-semibold tracking-tight", {translate("settings-title")} }
-                    div { class: "mt-0.5 text-[11px] text-muted-foreground", "settings.ron" }
-                }
-                nav { class: "flex flex-col gap-0.5",
-                    for section in &sections {
-                        a {
-                            key: "{section.id}",
-                            href: "#{section.id}",
-                            class: "rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
-                            "{section.title}"
-                        }
+        div { class: "flex h-full min-h-0 flex-col bg-background text-foreground",
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Settings.option(),
+                options: WorkspacePage::options(),
+                actions: rsx! {
+                    ManagerSearchAction {
+                        value: query.clone(),
+                        placeholder: translate("command-search"),
+                        onsearch: move |query| {
+                            let _ = send(&SettingsFilterRequest { query });
+                        },
+                    }
+                },
+                if let Some(section) = current_section {
+                    BreadcrumbSeparator {}
+                    BreadcrumbSelector {
+                        label: section.title,
+                        value: section.id,
+                        options: section_options,
+                        active: true,
+                        onselect: move |id: String| {
+                            active_section.set(id.clone());
+                            SettingsSectionNavigation::open(&id);
+                        },
                     }
                 }
             }
-            main { class: "min-h-0 min-w-0 flex-1 overflow-y-auto",
-                div { class: "mx-auto max-w-3xl px-6 py-8 lg:px-10",
-                    div { class: "mb-8 lg:hidden",
-                        h1 { class: "text-xl font-semibold tracking-tight", {translate("settings-title")} }
-                        p { class: "mt-1 text-sm text-muted-foreground",
-                            {translate("settings-stored")}
+            div { class: "flex min-h-0 flex-1 flex-row",
+                aside { class: "hidden w-56 shrink-0 px-4 py-4 lg:block",
+                    nav { class: "flex flex-col gap-0.5",
+                        for section in &sections {
+                            button {
+                                key: "{section.id}",
+                                r#type: "button",
+                                class: if section.id == active_section() {
+                                    "rounded-md bg-foreground/[0.065] px-2 py-1.5 text-left text-sm text-foreground"
+                                } else {
+                                    "rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                                },
+                                onclick: {
+                                    let id = section.id.clone();
+                                    move |_| {
+                                        active_section.set(id.clone());
+                                        SettingsSectionNavigation::open(&id);
+                                    }
+                                },
+                                "{section.title}"
+                            }
                         }
                     }
-                    input {
-                        r#type: "search",
-                        class: "sticky top-0 z-10 mb-6 w-full rounded-xl bg-background/95 px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-border backdrop-blur-xl transition-colors placeholder:text-muted-foreground/60 focus:bg-muted/40 focus:ring-primary/40",
-                        placeholder: "{search_placeholder}",
-                        value: "{query}",
-                        oninput: move |event: FormEvent| {
-                            let _ = send(&SettingsFilterRequest { query: event.value() });
-                        },
+                }
+                main { id: "settings-scroll-viewport", class: "min-h-0 min-w-0 flex-1 overflow-y-auto",
+                    SettingsScrollSpy {
+                        active: active_section,
                     }
-                    div { class: "flex flex-col gap-8",
-                        for section in sections {
-                            SectionView {
-                                key: "{section.id}",
-                                section,
-                                catalog: catalog.clone(),
+                    div { class: "mx-auto max-w-3xl px-6 py-6 lg:px-10",
+                        div { class: "mb-8 lg:hidden",
+                            p { class: "text-sm text-muted-foreground",
+                                {translate("settings-stored")}
+                            }
+                        }
+                        div { class: "flex flex-col",
+                            for section in sections {
+                                SectionView {
+                                    key: "{section.id}",
+                                    section,
+                                    catalog: catalog.clone(),
+                                }
                             }
                         }
                     }
@@ -122,20 +213,44 @@ pub fn Page() -> Element {
 #[component]
 fn SectionView(section: SettingsSection, catalog: SettingsRenderCatalog) -> Element {
     rsx! {
-        section { id: "{section.id}", class: "scroll-mt-6",
-            Card {
-                CardHeader {
-                    CardTitle { "{section.title}" }
-                    if let Some(description) = section.description {
-                        CardDescription { "{description}" }
-                    }
-                }
-                CardContent {
-                    RenderFields { fields: section.fields, catalog }
+        section {
+            id: "{section.id}",
+            class: "scroll-mt-3 border-b border-foreground/[0.07] py-6 first:pt-3 last:border-b-0",
+            "data-vmux-settings-section": "",
+            header { class: "mb-3",
+                h2 { class: "text-sm font-semibold text-foreground/85", "{section.title}" }
+                if let Some(description) = section.description {
+                    p { class: "mt-1 text-[11px] leading-4 text-muted-foreground", "{description}" }
                 }
             }
+            RenderFields { fields: section.fields, catalog }
         }
     }
+}
+
+struct SettingsSectionNavigation;
+
+impl SettingsSectionNavigation {
+    fn open(id: &str) {
+        let id = serde_json::to_string(id).unwrap_or_else(|_| "\"\"".to_string());
+        let _ = document::eval(&format!(
+            "document.getElementById({id})?.scrollIntoView({{behavior:'smooth',block:'start'}});"
+        ));
+    }
+}
+
+#[component]
+fn SettingsScrollSpy(active: Signal<String>) -> Element {
+    use_future(move || async move {
+        let mut eval = document::eval(SETTINGS_SCROLL_SPY);
+        while let Ok(id) = eval.recv::<String>().await {
+            active.set(id);
+        }
+    });
+    use_drop(move || {
+        let _ = document::eval("globalThis.__vmuxSettingsScrollSpyCleanup?.();");
+    });
+    rsx! {}
 }
 
 #[component]
@@ -203,7 +318,7 @@ fn FieldView(field: SettingsRenderField, catalog: SettingsRenderCatalog) -> Elem
                 if let Some(hint) = hint {
                     p { class: "px-1 pb-2 text-xs text-muted-foreground", "{hint}" }
                 }
-                div { class: "flex flex-col divide-y divide-border/60 rounded-md border border-border/40 bg-muted/20 px-3",
+                div { class: "flex flex-col divide-y divide-foreground/[0.06] pl-3",
                     RenderFields { fields, catalog }
                 }
             }
@@ -228,6 +343,8 @@ fn FieldView(field: SettingsRenderField, catalog: SettingsRenderCatalog) -> Elem
                 control: rsx! {
                     Button {
                         variant: ButtonVariant::Outline,
+                        size: ButtonSize::Xs,
+                        class: "h-7 px-2.5 text-[11px]".to_string(),
                         disabled,
                         onclick: move |_| {
                             let _ = send(&CheckForUpdatesEvent);
@@ -243,11 +360,11 @@ fn FieldView(field: SettingsRenderField, catalog: SettingsRenderCatalog) -> Elem
 #[component]
 fn Row(label: String, hint: Option<String>, control: Element) -> Element {
     rsx! {
-        div { class: "flex items-center justify-between gap-6 py-3 first:pt-0 last:pb-0",
+        div { class: "flex items-center justify-between gap-6 py-2.5 first:pt-0 last:pb-0",
             div { class: "min-w-0 flex-1",
-                div { class: "text-sm font-medium text-foreground", "{label}" }
+                div { class: "text-xs font-medium text-foreground/90", "{label}" }
                 if let Some(hint) = hint {
-                    p { class: "mt-0.5 text-xs leading-snug text-muted-foreground", "{hint}" }
+                    p { class: "mt-0.5 text-[10px] leading-4 text-muted-foreground", "{hint}" }
                 }
             }
             div { class: "shrink-0", {control} }
@@ -258,11 +375,11 @@ fn Row(label: String, hint: Option<String>, control: Element) -> Element {
 #[component]
 fn StackedRow(label: String, hint: Option<String>, control: Element) -> Element {
     rsx! {
-        div { class: "flex flex-col gap-2 py-3 first:pt-0 last:pb-0",
+        div { class: "flex flex-col gap-2 py-2.5 first:pt-0 last:pb-0",
             div { class: "flex flex-col gap-0.5",
-                div { class: "text-sm font-medium text-foreground", "{label}" }
+                div { class: "text-xs font-medium text-foreground/90", "{label}" }
                 if let Some(hint) = hint {
-                    p { class: "text-xs leading-snug text-muted-foreground", "{hint}" }
+                    p { class: "text-[10px] leading-4 text-muted-foreground", "{hint}" }
                 }
             }
             {control}
@@ -273,15 +390,17 @@ fn StackedRow(label: String, hint: Option<String>, control: Element) -> Element 
 #[component]
 fn Toggle(path: String, value: bool) -> Element {
     rsx! {
-        Switch {
-            checked: value,
-            on_checked_change: move |checked| {
-                let _ = send(&SettingsRequest {
-                    path: path.clone(),
-                    value: serde_json::json!(checked).into(),
-                });
-            },
-            SwitchThumb { attributes: vec![] }
+        div { class: "origin-right scale-90",
+            Switch {
+                checked: value,
+                on_checked_change: move |checked| {
+                    let _ = send(&SettingsRequest {
+                        path: path.clone(),
+                        value: serde_json::json!(checked).into(),
+                    });
+                },
+                SwitchThumb { attributes: vec![] }
+            }
         }
     }
 }
@@ -294,7 +413,7 @@ fn IntInput(path: String, value: String) -> Element {
                 r#type: "number",
                 step: "1",
                 value: "{value}",
-                class: "w-24 text-right tabular-nums text-sm",
+                class: "h-7 w-20 bg-transparent px-2 py-1 text-right text-xs tabular-nums dark:bg-transparent",
             }),
             oninput: move |event: FormEvent| {
                 let _ = send(&SettingsEditRequest {
@@ -316,7 +435,7 @@ fn NumberInput(path: String, value: String, step: f64) -> Element {
                 r#type: "number",
                 step: "{step}",
                 value: "{value}",
-                class: "w-24 text-right tabular-nums text-sm",
+                class: "h-7 w-20 bg-transparent px-2 py-1 text-right text-xs tabular-nums dark:bg-transparent",
             }),
             oninput: move |event: FormEvent| {
                 let _ = send(&SettingsEditRequest {
@@ -339,7 +458,7 @@ fn TextInput(path: String, value: String, placeholder: Option<String>) -> Elemen
                 r#type: "text",
                 value: "{value}",
                 placeholder: "{placeholder}",
-                class: "w-full text-sm",
+                class: "h-7 w-full bg-transparent px-2 py-1 text-xs dark:bg-transparent",
             }),
             oninput: move |event: FormEvent| {
                 let _ = send(&SettingsEditRequest {
@@ -355,37 +474,24 @@ fn TextInput(path: String, value: String, placeholder: Option<String>) -> Elemen
 
 #[component]
 fn SelectInput(path: String, value: String, options: Vec<SettingsSelectOption>) -> Element {
-    let selected: Option<Option<String>> = Some((!value.is_empty()).then(|| value.clone()));
+    let items = options
+        .into_iter()
+        .map(|option| ManagerSelectItem {
+            value: option.value,
+            label: option.label,
+        })
+        .collect();
     rsx! {
-        Select::<String> {
-            value: Into::<ReadSignal<Option<Option<String>>>>::into(Signal::new(selected)),
-            default_value: (!value.is_empty()).then(|| value.clone()),
-            placeholder: Into::<ReadSignal<String>>::into(Signal::new(String::new())),
-            on_value_change: Callback::new(move |value: Option<String>| {
-                if let Some(value) = value {
-                    let _ = send(&SettingsRequest {
-                        path: path.clone(),
-                        value: serde_json::json!(value).into(),
-                    });
-                }
-            }),
-            attributes: vec![],
-            SelectTrigger { attributes: vec![], SelectValue { attributes: vec![] } }
-            SelectList { attributes: vec![],
-                SelectGroup { attributes: vec![],
-                    for (index, option) in options.iter().enumerate() {
-                        SelectOption::<String> {
-                            key: "{option.value}",
-                            value: Into::<ReadSignal<String>>::into(Signal::new(option.value.clone())),
-                            index,
-                            text_value: Some(option.label.clone()),
-                            attributes: vec![],
-                            "{option.label}"
-                            SelectItemIndicator {}
-                        }
-                    }
-                }
-            }
+        ManagerSelect {
+            items,
+            value: (!value.is_empty()).then_some(value),
+            placeholder: String::new(),
+            onselect: move |value| {
+                let _ = send(&SettingsRequest {
+                    path: path.clone(),
+                    value: serde_json::json!(value).into(),
+                });
+            },
         }
     }
 }
@@ -417,7 +523,7 @@ fn BindingsField(label: String, hint: Option<String>, rows: Vec<SettingsBindingR
 #[component]
 fn BindingRow(row: SettingsBindingRow) -> Element {
     rsx! {
-        div { class: "flex items-center justify-between gap-4 rounded-md border border-border/60 bg-muted/30 px-3 py-2",
+        div { class: "flex items-center justify-between gap-4 border-b border-foreground/[0.06] px-1 py-2 last:border-b-0",
             span { class: "truncate font-mono text-xs text-foreground", "{row.command}" }
             if let Some(path) = row.edit_path {
                 ChordEditor { path, text: row.chord }
@@ -432,17 +538,17 @@ fn BindingRow(row: SettingsBindingRow) -> Element {
 fn ArrayBody(items: Vec<SettingsRenderItemId>, catalog: SettingsRenderCatalog) -> Element {
     let Some(first) = items.first().and_then(|id| catalog.item(*id)) else {
         return rsx! {
-            div { class: "rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground",
+            div { class: "px-3 py-4 text-center text-xs text-muted-foreground",
                 {translate("settings-empty")}
             }
         };
     };
     if matches!(first, SettingsRenderItem::Value { .. }) {
         return rsx! {
-            div { class: "flex flex-col gap-1 rounded-md border border-border/60 bg-muted/30 p-2",
+            div { class: "flex flex-col gap-1",
                 for (index, item_id) in items.into_iter().enumerate() {
                     if let Some(SettingsRenderItem::Value { text }) = catalog.item(item_id) {
-                        div { key: "{index}", class: "rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-foreground",
+                        div { key: "{index}", class: "border-b border-foreground/[0.06] px-1 py-1.5 font-mono text-[11px] text-foreground last:border-b-0",
                             "{text}"
                         }
                     }
@@ -468,12 +574,12 @@ fn ArrayItemCard(
     catalog: SettingsRenderCatalog,
 ) -> Element {
     rsx! {
-        div { class: "rounded-xl border border-border bg-muted/30 p-4",
+        div { class: "border-b border-foreground/[0.07] py-4 last:border-b-0",
             div { class: "mb-3 flex items-center justify-between gap-2",
                 div { class: "min-w-0",
                     div { class: "truncate text-sm font-semibold text-foreground", "{title}" }
                 }
-                span { class: "rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground",
+                span { class: "px-1 text-[10px] uppercase tracking-wide text-muted-foreground",
                     {translate("settings-item")}
                 }
             }
@@ -556,7 +662,7 @@ fn ChordEditor(path: String, text: String) -> Element {
         rsx! {
             button {
                 r#type: "button",
-                class: "inline-flex cursor-pointer items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:border-foreground/40 hover:bg-muted/70",
+                class: "inline-flex cursor-pointer items-center rounded-md bg-foreground/[0.055] px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:bg-foreground/[0.09]",
                 title: translate("settings-record-key"),
                 onclick: move |_| {
                     feedback.set(None);
@@ -571,7 +677,7 @@ fn ChordEditor(path: String, text: String) -> Element {
 #[component]
 fn Kbd(text: String) -> Element {
     rsx! {
-        span { class: "inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground",
+        span { class: "inline-flex items-center rounded-md bg-foreground/[0.055] px-2 py-1 font-mono text-[11px] text-foreground",
             "{text}"
         }
     }

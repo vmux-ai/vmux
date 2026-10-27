@@ -263,7 +263,7 @@ carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control conne
 the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
 Remote agent operations are flat `SharedMessage` variants rather than a nested request enum.
-The QUIC application protocol is `vmux/8`; changing the positional rkyv wire contract requires
+The QUIC application protocol is `vmux/11`; changing the positional rkyv wire contract requires
 another ALPN version.
 
 Agent commands and queries use the same routed `AgentRequest` envelope. Each operation is a
@@ -532,6 +532,11 @@ corrupt another's panes.
 
 State snapshots to `store.ron` via `moonshine-save`. A schema-version sidecar hard-resets
 on an incompatible version rather than loading a broken store.
+
+World persistence uses named type-registry domains. A persisted component or resource registers
+once with its domain; that metadata produces the component and resource allowlists used by saves.
+The workspace domain also installs ordinary change tracking, while specialized domains such as
+bookmarks keep their own entity scope, dirty policy, path, migration, and seeding lifecycle.
 
 ---
 
@@ -807,6 +812,19 @@ line into `StyledSpan`s. The file viewer, the preview and git diffs all emit the
 spans, so code looks identical wherever it appears. No tree-sitter, no LSP. The host ships
 only the visible slice of a file and re-slices as you scroll.
 
+**Git.** The Git page and automatic Git-backed projections for the editor, Projects, Sessions and
+ACP enqueue work and only project completed results. Their repository discovery, status
+aggregation, directory reads and path resolution use one bounded worker runtime with separate
+interactive and mutating-operation lanes. Repository refreshes are single-flight per checkout,
+inactive views release their watches and tasks, and watcher bursts coalesce into invalidations; the
+watcher never runs a Git command or filters paths synchronously. Each Git child process drains
+stdin, stdout and stderr concurrently, has bounded output and a timeout, and is terminated when its
+operation entity is discarded. Catalogs and diffs page at their source, so opening a page cannot
+schedule work in proportion to the total repository history or block the ECS schedule. Branch
+review advances one file and one bounded line window at a time; viewport demand requests another
+window. A large lockfile therefore cannot produce an unbounded first render, and an idle review
+cannot silently materialize the rest of the branch in the page DOM.
+
 The host counts columns in **display cells** — `DisplayCells`, one per narrow character and
 two per wide one — because wrapping and selection are grid problems and the host has no
 font. Only the page can turn a cell into a pixel, so it does: it measures a narrow advance
@@ -914,7 +932,7 @@ components, validate typed arguments, and produce command or query dispatch.
 Publication and execution query those entities directly; there is no separate runtime registry or
 central function-pointer table. ACP sessions install the same tool plugin into the application's
 world and submit tool-call entities there; they do not maintain a nested or thread-local Bevy app.
-`vmux_agent` carries only the generic ACP and query envelopes. Browser, capture, bookmark, vault,
+`vmux_acp` carries only the ACP and query envelopes. Browser, capture, bookmark, vault,
 simulator, and other feature plugins decode their own query contracts, emit their own ECS requests,
 and map their results back to the service boundary. Feature-specific agent instructions and
 disabled skill roots are components registered by those same plugins. ACP and CLI launch boundaries
@@ -931,11 +949,11 @@ request. There is no command-catalog resource, second command enum, or MCP-only 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
 
-External MCP connections belong to Vmux rather than to one agent runtime. `/mcp` in either
-composer manages the shared catalog; OAuth credentials stay in the platform credential store,
-with packaged macOS builds accessing Keychain through the stable signed `vmux` helper. `tools.toml`
-keeps the non-secret server definition. Agent launch projects that one source into Codex, Claude,
-Vibe, or ACP configuration and refreshes an expiring token before injection.
+Each ACP agent's default config file is authoritative for its native MCP servers. Vmux may discover
+recognized native configs for read-only display, but never copies them into `tools.toml` or injects
+them back into ACP session creation. Agent launch injects only the internal `vmux` MCP anchored to
+the Session workspace. Profile-owned integrations and OAuth are a separate future feature rather
+than another representation of agent-native MCP config.
 
 `read_layout` / `update_layout` are the interesting pair: fetch the pane tree with stable
 ids, mutate it, commit it back. Vmux diffs against the live graph and reconciles
@@ -983,8 +1001,7 @@ crates/
 │   ├── vmux_desktop
 │   └── vmux_mobile
 ├── feature/                user-facing capability and page ownership
-│   ├── vmux_agent
-│   ├── vmux_chat
+│   ├── vmux_acp
 │   ├── vmux_command
 │   ├── vmux_editor
 │   ├── vmux_extension
@@ -993,6 +1010,7 @@ crates/
 │   ├── vmux_knowledge
 │   ├── vmux_layout
 │   ├── vmux_service
+│   ├── vmux_session
 │   ├── vmux_setting
 │   ├── vmux_shortcut
 │   ├── vmux_simulator
@@ -1014,7 +1032,6 @@ crates/
     ├── vmux_native         the VirtualDom driver and its wry webview
     ├── vmux_path           canonical and scoped path identities
     ├── vmux_profile
-    ├── vmux_session
     ├── vmux_transport
     └── vmux_ui
 ```
@@ -1026,23 +1043,45 @@ code and has no directory counterpart.
 
 Agent requests follow the same boundary. `#[vmux_api::agent]` generates only the opaque contract
 for the type declared in a feature crate. That feature owns its manifest, registration, ECS routing,
-handling, and result projection. `vmux_agent`, `vmux_mcp`, and `vmux_tool` transport and dispatch
+handling, and result projection. `vmux_acp`, `vmux_mcp`, and `vmux_tool` transport and dispatch
 opaque requests; they never enumerate browser, simulator, vault, layout, or other feature requests.
 Only the application composition root knows which feature plugins are installed.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
 
-`vmux_agent` owns session, runtime, and orchestration ECS. `vmux_chat` owns reusable chat state
-and Dioxus UI. Shared transcript grouping and projection live in `vmux_ecs`; neither feature
-reaches through the other's internals or through `vmux_service` for reusable chat behavior.
-The service carries serialized agent protocol messages and runs persistent daemon sessions;
-`vmux_agent` owns the client-host Bevy messages produced when those wire messages enter ECS.
+`vmux_session` owns the durable unit of work: one canonical Session entity with its stable ID,
+task metadata, working directory, data-driven stage, conversation-event children, optional agent
+identity, and the derived Session catalog. Session creation generates its ID inside the typed
+request and emits a typed creation event before navigation. Layout Stacks reference the Session
+entity and may close without deleting it. `vmux://sessions/` opens the manager;
+`vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
+identity. Session IDs are encoded as one URL path segment.
+
+`vmux_acp` attaches transient runtime and ACP capability state to Session entities and owns the
+provider-owned `AcpSessionId`, its persistence, and the single runtime detach path used by cleanup
+and agent replacement. `vmux_session` renders the
+Sessions page and Dioxus conversation UI. A dedicated manager-view marker is the authorization and
+publication boundary for Session catalog and mutation UI events; Session detail views receive only
+their bound Session state. The service carries serialized agent protocol messages and runs
+persistent daemon sessions; `vmux_acp` owns the client-host Bevy messages produced when those
+wire messages enter ECS.
+
+ACP `session/list` is the primary provider catalog. The Sessions page starts each installed ACP only
+long enough to enumerate its paginated catalog, then stops it; transport failure does not switch data
+sources. A bounded provider-store adapter is used only when no installed ACP owns that agent family
+or the ACP explicitly omits `session/list`. Browsing an external entry does not copy it into durable
+Vmux state. Resuming it creates the canonical Session entity, records its `AcpSessionId`, and lets
+the provider replay the conversation through `session/load`. Compatibility watches exist only while
+the Sessions page or one of their imported Sessions is present, debounce into one wake, rescan only
+the changed provider, and bound untrusted history traversal.
+The Session manager publishes only to its active page and leases Git metadata for every displayed
+repository while that page remains active.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
 `vmux_ecs` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,
 operation sequencing, and built-in Homebrew, NPM, MCP, and dotfile providers. Feature crates
-register their own provider entities, such as ACP in `vmux_agent` and LSP in `vmux_editor`;
+register their own provider entities, such as ACP in `vmux_acp` and LSP in `vmux_editor`;
 application crates only compose plugins. `vmux_path` gives filesystem boundaries one shared
 identity rule and rejects scoped paths that traverse or resolve outside their root.
 

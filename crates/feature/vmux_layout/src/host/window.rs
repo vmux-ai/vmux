@@ -201,7 +201,8 @@ const _: () = {
 #[derive(Asset, TypePath)]
 pub struct WindowMaterial;
 
-pub const WINDOW_BACKGROUND_SRGB: [f32; 3] = [0.13, 0.13, 0.14];
+pub const WINDOW_BACKGROUND_DARK_SRGB: [f32; 3] = [0.16, 0.16, 0.16];
+pub const WINDOW_BACKGROUND_LIGHT_SRGB: [f32; 3] = [0.9, 0.9, 0.9];
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct WindowBackground(pub Color);
@@ -318,6 +319,7 @@ fn setup_shells(
     windows: Query<(Entity, &Window, Has<NewWindowWorkspace>)>,
     roots: Query<&HostWindow, With<VmuxWindow>>,
     spaces: Query<&crate::space::SpaceId, With<crate::space::Space>>,
+    sections: Query<&crate::side_sheet::SideSheetSectionsExpanded>,
     focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
@@ -339,6 +341,10 @@ fn setup_shells(
             let name = format!("Space {next_space_number}");
             existing_space_ids.insert(id.clone());
             next_space_number += 1;
+            let expanded_sections = focused_space
+                .entity()
+                .and_then(|space| sections.get(space).ok())
+                .copied();
             spawn_new_window_workspace(
                 &mut commands,
                 &mut requests,
@@ -347,6 +353,7 @@ fn setup_shells(
                 id,
                 name,
                 focused_space.startup_url().map(str::to_string),
+                expanded_sections,
             );
         }
     }
@@ -381,7 +388,7 @@ fn spawn_window_shell(
                 right: Val::Px(settings.window.pad_right()),
                 bottom: Val::Px(settings.window.pad_bottom()),
             },
-            column_gap: Val::Px(crate::event::PANE_GAP_PX),
+            column_gap: Val::Px(crate::event::SIDE_SHEET_GAP_PX),
             ..default()
         },
     });
@@ -497,19 +504,22 @@ fn spawn_new_window_workspace(
     id: String,
     name: String,
     startup_url: Option<String>,
+    expanded_sections: Option<crate::side_sheet::SideSheetSectionsExpanded>,
 ) {
-    let space = commands
-        .spawn((
-            crate::space::SpaceId(id.clone()),
-            Name::new(name),
-            Order(0),
-            Active,
-            EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
-            LastActivatedAt::now(),
-            crate::space::Space::bundle(),
-            ChildOf(main),
-        ))
-        .id();
+    let mut space = commands.spawn((
+        crate::space::SpaceId(id.clone()),
+        Name::new(name),
+        Order(0),
+        Active,
+        EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
+        LastActivatedAt::now(),
+        crate::space::Space::bundle(),
+        ChildOf(main),
+    ));
+    if let Some(expanded_sections) = expanded_sections {
+        space.insert(expanded_sections);
+    }
+    let space = space.id();
     requests.write(TabLayoutSpawnRequest {
         space,
         primary_window: window,
@@ -715,7 +725,7 @@ fn persist(
     let pad_right = settings.window.pad_right();
     let pad_bottom = settings.window.pad_bottom();
     let pad_left = settings.window.pad_left();
-    let gap = crate::event::PANE_GAP_PX;
+    let gap = crate::event::SIDE_SHEET_GAP_PX;
     let configured_width =
         crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     for (host, mut node) in &mut window_q {
@@ -1002,7 +1012,7 @@ mod tests {
             .expect("window root");
         let node = app.world().get::<Node>(root).expect("window node");
 
-        assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
+        assert_eq!(node.column_gap, Val::Px(crate::event::SIDE_SHEET_GAP_PX));
     }
 
     #[test]

@@ -2,8 +2,9 @@ use dioxus::prelude::*;
 pub use vmux_api::prompt_media::PromptComposerAttachment;
 
 use crate::cn::cn;
-use crate::components::prompt_box::PromptBox;
+use crate::components::prompt_box::{PromptBox, PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
+use crate::icon::{LineIcon, LineIconView};
 use crate::ime::use_ime_guard;
 
 pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
@@ -43,6 +44,7 @@ pub fn PromptComposer(
     on_remove_attachment: EventHandler<usize>,
     on_action: EventHandler<()>,
 ) -> Element {
+    let mut add_menu_open = use_signal(|| false);
     let footer = footer.or_else(|| {
         Some(rsx! {
             div { class: "truncate text-[10px] text-muted-foreground/55", {translate("command-send")} }
@@ -85,20 +87,46 @@ pub fn PromptComposer(
             class: prompt_box_class,
             style: "--vmux-prompt-accent:{accent_color};",
             button {
-                class: "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg",
+                class: if add_menu_open() {
+                    "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-foreground/10 text-foreground transition sm:h-8 sm:w-8 sm:rounded-lg"
+                } else {
+                    "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg"
+                },
                 r#type: "button",
-                title: "{attach_title}",
+                title: translate("common-add"),
+                aria_label: translate("common-add"),
+                aria_expanded: add_menu_open(),
                 onmousedown: move |event| event.prevent_default(),
-                onclick: move |_| on_attach.call(()),
-                svg {
-                    class: "h-4 w-4",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" }
+                onclick: move |_| add_menu_open.set(!add_menu_open()),
+                LineIconView { icon: LineIcon::Plus, class: "size-4".to_string() }
+            }
+            if add_menu_open() {
+                PromptPopup {
+                    placement: PromptPopupPlacement::Upward,
+                    on_dismiss: move |_| add_menu_open.set(false),
+                    class: "max-w-56",
+                    button {
+                        r#type: "button",
+                        class: PromptMenuRow::class(false),
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            add_menu_open.set(false);
+                            on_attach.call(());
+                        },
+                        LineIconView { icon: LineIcon::Upload, class: "size-4 text-muted-foreground".to_string() }
+                        span { "{attach_title}" }
+                    }
+                    button {
+                        r#type: "button",
+                        class: PromptMenuRow::class(false),
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            add_menu_open.set(false);
+                            on_paste.call(());
+                        },
+                        LineIconView { icon: LineIcon::Copy, class: "size-4 text-muted-foreground".to_string() }
+                        span { {translate("editor-paste")} }
+                    }
                 }
             }
 

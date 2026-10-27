@@ -120,6 +120,13 @@ pub enum UpdateChannel {
 }
 
 impl AppSettings {
+    pub fn shell(&self) -> String {
+        self.terminal
+            .as_ref()
+            .map(|terminal| terminal.resolve_theme(&terminal.default_theme).shell)
+            .unwrap_or_else(TerminalTheme::default_shell)
+    }
+
     pub fn space(&self, space_id: &str) -> Option<&SpaceOverrides> {
         space_override(self, space_id)
     }
@@ -130,15 +137,7 @@ impl AppSettings {
             .map(str::trim)
             .filter(|s| !s.is_empty());
         let chosen = per_space.unwrap_or_else(|| self.browser.startup_url.trim());
-        if chosen.is_empty()
-            || [
-                "vmux://sessions/",
-                "vmux://sessions",
-                "vmux://agent/",
-                "vmux://agent",
-            ]
-            .contains(&chosen)
-        {
+        if chosen.is_empty() || ["vmux://sessions/", "vmux://sessions"].contains(&chosen) {
             default_url.to_string()
         } else {
             chosen.to_string()
@@ -147,6 +146,31 @@ impl AppSettings {
 
     pub fn startup_dir(&self, space_id: &str) -> Option<std::path::PathBuf> {
         StartupDir::resolve(self, space_id, None).map(|dir| dir.path)
+    }
+
+    pub fn project_rows(&self, space_id: &str) -> Vec<ProjectRow> {
+        let mut rows = space_override(self, space_id)
+            .map(SpaceOverrides::project_rows)
+            .unwrap_or_default();
+        for project in &self.projects {
+            let in_use = project.in_use();
+            if rows.iter().any(|row| row.path == in_use) {
+                continue;
+            }
+            rows.push(ProjectRow {
+                path: in_use.to_string(),
+                label: project.display_label().to_string(),
+                display_path: project.path.clone(),
+                depth: 0,
+                is_active: false,
+                is_worktree: project.checkout.is_some(),
+                missing: !std::path::Path::new(in_use).is_dir(),
+                branch: String::new(),
+                kind: ProjectRowKind::Project,
+                expanded: false,
+            });
+        }
+        rows
     }
 
     pub fn workspace_dir(
@@ -164,8 +188,9 @@ impl AppSettings {
         let mut value_json =
             serde_json::to_value(&*self).map_err(|e| format!("settings to JSON failed: {e}"))?;
         set_at_path(&mut value_json, path, value)?;
-        let new_settings: AppSettings = serde_json::from_value(value_json)
+        let mut new_settings: AppSettings = serde_json::from_value(value_json)
             .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
+        new_settings.agent.normalize();
         *self = new_settings;
         Ok(())
     }
@@ -289,6 +314,8 @@ pub enum ColorScheme {
 pub struct AppearanceSettings {
     #[serde(default)]
     pub mode: ColorScheme,
+    #[serde(default)]
+    pub project_icon: vmux_api::avatar::IdenticonVariant,
     #[serde(default = "default_locale_setting")]
     pub locale: String,
 }
@@ -297,6 +324,7 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             mode: ColorScheme::Device,
+            project_icon: vmux_api::avatar::IdenticonVariant::Marble,
             locale: default_locale_setting(),
         }
     }
@@ -511,10 +539,13 @@ impl SpaceOverrides {
         let mut rows = Vec::with_capacity(self.projects.len());
         for project in &self.projects {
             let in_use = project.in_use();
+            if rows.iter().any(|row: &ProjectRow| row.path == in_use) {
+                continue;
+            }
             rows.push(ProjectRow {
                 path: in_use.to_string(),
                 label: project.display_label().to_string(),
-                display_path: in_use.to_string(),
+                display_path: project.path.clone(),
                 depth: 0,
                 is_active: active == Some(in_use),
                 is_worktree: project.checkout.is_some(),
@@ -565,6 +596,12 @@ impl AgentSettings {
             .map(|level| level.trim())
             .filter(|level| !level.is_empty())
     }
+
+    fn normalize(&mut self) {
+        for config in &mut self.acp {
+            config.normalize();
+        }
+    }
 }
 
 impl Default for AgentSettings {
@@ -605,6 +642,16 @@ pub struct AcpAgentConfig {
     pub version: Option<String>,
 }
 
+impl AcpAgentConfig {
+    fn normalize(&mut self) {
+        for arg in &mut self.args {
+            if arg == "@zed-industries/codex-acp@latest" {
+                *arg = "@agentclientprotocol/codex-acp@latest".to_string();
+            }
+        }
+    }
+}
+
 fn default_acp_agents() -> Vec<AcpAgentConfig> {
     vec![
         AcpAgentConfig {
@@ -625,7 +672,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             command: "npx".to_string(),
             args: vec![
                 "-y".to_string(),
-                "@zed-industries/codex-acp@latest".to_string(),
+                "@agentclientprotocol/codex-acp@latest".to_string(),
             ],
             env: vec![],
             cwd: None,
@@ -1110,6 +1157,7 @@ impl PartialAppSettings {
         if let Some(agent) = &self.agent {
             settings.agent.clone_from(agent);
         }
+        settings.agent.normalize();
         if let Some(spaces) = &self.spaces {
             settings.spaces.clone_from(spaces);
         }
@@ -1768,7 +1816,7 @@ mod tests {
 
     const MANIFESTS: [&str; 9] = [
         include_str!("../feature.ron"),
-        include_str!("../../../vmux_agent/src/feature.ron"),
+        include_str!("../../../vmux_acp/src/feature.ron"),
         include_str!("../../../vmux_editor/src/feature.ron"),
         include_str!("../../../vmux_input/src/feature.ron"),
         include_str!("../../../vmux_layout/src/feature.ron"),
@@ -1826,6 +1874,57 @@ mod tests {
                 "missing acp agent {id}"
             );
         }
+        let codex = agent
+            .acp
+            .iter()
+            .find(|config| config.id == "codex")
+            .unwrap();
+        assert!(
+            codex
+                .args
+                .contains(&"@agentclientprotocol/codex-acp@latest".to_string())
+        );
+    }
+
+    #[test]
+    fn deprecated_codex_acp_package_is_migrated() {
+        let settings = parse_settings(
+            r#"(
+                agent: (
+                    acp: [(
+                        id: "codex",
+                        name: "Codex",
+                        command: "npx",
+                        args: ["-y", "@zed-industries/codex-acp@latest"],
+                    )],
+                ),
+            )"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.agent.acp[0].args,
+            ["-y", "@agentclientprotocol/codex-acp@latest"]
+        );
+    }
+
+    #[test]
+    fn custom_codex_acp_package_is_preserved() {
+        let settings = parse_settings(
+            r#"(
+                agent: (
+                    acp: [(
+                        id: "codex",
+                        name: "Codex",
+                        command: "npx",
+                        args: ["-y", "custom-codex-acp"],
+                    )],
+                ),
+            )"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.agent.acp[0].args, ["-y", "custom-codex-acp"]);
     }
 
     #[test]
@@ -1978,12 +2077,7 @@ mod tests {
 
     #[test]
     fn resolve_startup_url_treats_agent_roots_as_start() {
-        for url in [
-            "vmux://sessions/",
-            "vmux://sessions",
-            "vmux://agent/",
-            "vmux://agent",
-        ] {
+        for url in ["vmux://sessions/", "vmux://sessions"] {
             let mut s = base_settings();
             s.browser.startup_url = url.into();
             assert_eq!(
@@ -2526,6 +2620,22 @@ mod tests {
     }
 
     #[test]
+    fn checked_out_project_displays_repository_path() {
+        let space = SpaceOverrides {
+            projects: vec![SpaceProject::checked_out(
+                "/repo/vmux",
+                "/repo/vmux/.worktrees/vmx-226",
+            )],
+            ..Default::default()
+        };
+
+        let rows = space.project_rows();
+
+        assert_eq!(rows[0].path, "/repo/vmux/.worktrees/vmx-226");
+        assert_eq!(rows[0].display_path, "/repo/vmux");
+    }
+
+    #[test]
     fn a_worktree_left_over_as_its_own_project_folds_into_its_repository() {
         let mut space = SpaceOverrides {
             projects: vec![
@@ -2560,6 +2670,66 @@ mod tests {
         );
         assert_eq!(rows[0].path, "/worktrees/a1b2");
         assert_eq!(rows[0].label, "gone");
+    }
+
+    #[test]
+    fn repositories_sharing_one_checkout_render_as_one_project() {
+        let space = SpaceOverrides {
+            projects: vec![
+                SpaceProject::checked_out("/repo/vmux-cloud", "/worktrees/vmx-226"),
+                SpaceProject::checked_out("/repo/mold-linker", "/worktrees/vmx-226"),
+            ],
+            active_project: Some("/worktrees/vmx-226".to_string()),
+            ..Default::default()
+        };
+
+        let rows = space.project_rows();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "vmux-cloud");
+        assert!(rows[0].is_worktree);
+        assert!(rows[0].is_active);
+    }
+
+    #[test]
+    fn a_new_space_offers_known_projects_without_claiming_one() {
+        let project = tempfile::tempdir().expect("project");
+        let path = project.path().to_string_lossy().into_owned();
+        let mut settings = base_settings();
+        settings.projects.push(SpaceProject::at(path.clone()));
+
+        let rows = settings.project_rows("new-space");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, path);
+        assert!(!rows[0].is_active);
+        assert!(!rows[0].missing);
+    }
+
+    #[test]
+    fn an_existing_space_offers_known_projects_after_its_own_projects() {
+        let active = tempfile::tempdir().expect("active project");
+        let known = tempfile::tempdir().expect("known project");
+        let active_path = active.path().to_string_lossy().into_owned();
+        let known_path = known.path().to_string_lossy().into_owned();
+        let mut settings = base_settings();
+        settings.spaces.insert(
+            "work".to_string(),
+            SpaceOverrides {
+                projects: vec![SpaceProject::at(active_path.clone())],
+                active_project: Some(active_path.clone()),
+                ..Default::default()
+            },
+        );
+        settings.projects.push(SpaceProject::at(known_path.clone()));
+
+        let rows = settings.project_rows("work");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].path, active_path);
+        assert!(rows[0].is_active);
+        assert_eq!(rows[1].path, known_path);
+        assert!(!rows[1].is_active);
     }
 
     #[test]

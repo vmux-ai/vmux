@@ -157,10 +157,10 @@ fn receive_ui_events<E>(
     for event in &buffer.0 {
         let permitted = page_has_permission(permissions.iter(), &event.page_url, E::PERMISSION);
         if let Some(payload) = decode_ui_event::<E>(event, permitted) {
-            commands.trigger(UiInput {
+            commands.queue_silenced(bevy::ecs::system::command::trigger(UiInput {
                 webview: event.webview,
                 payload,
-            });
+            }));
         }
     }
 }
@@ -191,6 +191,9 @@ mod tests {
     use super::*;
     use vmux_api::BinEvent;
 
+    #[derive(Resource)]
+    struct EventTarget(Entity);
+
     #[vmux_api::ui_event(Eq)]
     struct AlphaEvent {
         value: u32,
@@ -204,6 +207,42 @@ mod tests {
     #[vmux_api::ui_event(Eq)]
     struct RestrictedEvent {
         value: u32,
+    }
+
+    fn despawn_event_target(mut commands: Commands, target: Res<EventTarget>) {
+        commands.entity(target.0).despawn();
+    }
+
+    #[test]
+    fn event_for_a_page_closed_in_the_same_frame_is_ignored() {
+        let payload = AlphaEvent { value: 7 };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .expect("serialize")
+            .into_vec();
+        let mut app = App::new();
+        let target = app
+            .world_mut()
+            .spawn(UiEventPermissions {
+                url: "vmux://allowed/",
+                owns_subtree: false,
+                permissions: &[AlphaEvent::PERMISSION],
+            })
+            .id();
+        app.insert_resource(EventTarget(target))
+            .insert_resource(BinIpcEventRawBuffer(vec![BinIpcEventRaw {
+                webview: target,
+                page_url: "vmux://allowed/".to_string(),
+                id: AlphaEvent::id().to_string(),
+                payload: bytes,
+            }]))
+            .add_systems(
+                Update,
+                (despawn_event_target, receive_ui_events::<AlphaEvent>).chain(),
+            );
+
+        app.update();
+
+        assert!(app.world().get_entity(target).is_err());
     }
 
     #[test]

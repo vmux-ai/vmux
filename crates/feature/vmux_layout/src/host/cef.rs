@@ -11,7 +11,11 @@ use vmux_flex::prelude::*;
 pub struct Browser;
 
 #[derive(Component)]
-#[require(crate::LayoutUiStateUpdates, ReloadRevision)]
+#[require(
+    crate::LayoutUiStateUpdates,
+    ReloadRevision,
+    crate::overlay::LayoutOverlayDismissRevision
+)]
 pub struct LayoutCef;
 
 impl LayoutCef {
@@ -212,7 +216,9 @@ impl Browser {
     pub fn hosted_page_with_icon(url: &str, title: &str, icon: PageIcon) -> impl Bundle {
         (
             Self,
+            crate::hosted_page::Surface::new(url),
             WebviewWindowed,
+            WebviewOpaqueWindowedBackground,
             HostsPage,
             PageMetadata {
                 title: title.to_string(),
@@ -276,7 +282,7 @@ mod apply_cef_state_tests {
     }
 
     #[test]
-    fn vmux_agent_url_accepts_dynamic_title_only() {
+    fn vmux_acp_url_accepts_dynamic_title_only() {
         for url in ["vmux://sessions/codex", "vmux://agent/codex"] {
             let mut meta = PageMetadata {
                 url: url.into(),

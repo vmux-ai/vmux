@@ -2,11 +2,117 @@ use dioxus::prelude::*;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;
+use crate::components::avatar::IdentityOrb;
+use crate::components::dropdown::{DropdownOption, DropdownPopup, DropdownTrigger};
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
 };
 use crate::components::skeleton::Skeleton;
 use crate::i18n::translate;
+use crate::icon::{BuiltinIconView, LineIcon, LineIconView};
+
+#[component]
+pub fn ProjectSelectTrigger(
+    label: String,
+    title: String,
+    open: bool,
+    #[props(default)] seed: String,
+    #[props(default)] class: String,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let leading = if seed.is_empty() {
+        rsx! { BuiltinIconView {
+            icon: vmux_api::BuiltinIcon::Project,
+            class: "size-4 shrink-0 text-muted-foreground".to_string(),
+        } }
+    } else {
+        rsx! { IdentityOrb {
+            seed,
+            alt: label.clone(),
+            class: "size-4".to_string(),
+        } }
+    };
+    rsx! {
+        DropdownTrigger {
+            label,
+            title,
+            open,
+            class: cn([class.as_str()]),
+            leading,
+            onclick,
+        }
+    }
+}
+
+#[component]
+pub fn ProjectSelectPopup(
+    projects: Vec<ProjectRow>,
+    selected_path: String,
+    #[props(default)] class: String,
+    #[props(default)] match_width: bool,
+    on_pick: EventHandler<ProjectRow>,
+    on_add: EventHandler<()>,
+    #[props(default)] on_open_selected: Option<EventHandler<ProjectRow>>,
+) -> Element {
+    let has_projects = !projects.is_empty();
+    let selected_project = projects
+        .iter()
+        .find(|project| project.path == selected_path)
+        .cloned();
+    rsx! {
+        DropdownPopup { match_width, class: cn([class.as_str(), "p-1.5"]),
+            for project in projects {
+                {
+                    let selected = project.path == selected_path;
+                    let row = project.clone();
+                    rsx! {
+                        DropdownOption {
+                            key: "project-select-{project.path}",
+                            label: project.label.clone(),
+                            secondary: project.display_path.clone(),
+                            selected,
+                            title: "{project.display_path}",
+                            onclick: move |_| on_pick.call(row.clone()),
+                            leading: rsx! { IdentityOrb {
+                                seed: project.path.clone(),
+                                alt: project.label.clone(),
+                                class: "size-5".to_string(),
+                            } },
+                            trailing: rsx! { if selected {
+                                LineIconView { icon: LineIcon::Check, class: "size-3.5 shrink-0" }
+                            } },
+                        }
+                    }
+                }
+            }
+            if has_projects {
+                div { class: "mx-1 my-1 h-px bg-foreground/[0.08]" }
+            }
+            if let (Some(handler), Some(project)) = (on_open_selected, selected_project) {
+                {
+                    let row = project.clone();
+                    rsx! {
+                        DropdownOption {
+                            label: translate("project-open"),
+                            selected: false,
+                            onclick: move |_| handler.call(row.clone()),
+                            leading: rsx! { BuiltinIconView {
+                                icon: vmux_api::BuiltinIcon::Project,
+                                class: "size-4 shrink-0".to_string(),
+                            } },
+                        }
+                    }
+                }
+            }
+            DropdownOption {
+                label: translate("common-add"),
+                selected: false,
+                onclick: move |_| on_add.call(()),
+                leading: rsx! { LineIconView { icon: LineIcon::Plus, class: "size-4 shrink-0" } },
+            }
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ProjectPickerProps {

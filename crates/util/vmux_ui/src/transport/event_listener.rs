@@ -57,15 +57,16 @@ impl Host {
             + for<'a> rkyv::bytecheck::CheckBytes<
                 rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
             >,
-        F: FnMut(T) + 'static,
+        F: FnMut(T) -> bool + 'static,
     {
         let mut on_event = on_event;
         Self::listen(
             T::id(),
             Box::new(move |bytes| {
                 if let Some(msg) = HostPayload::new(bytes).decode::<T>() {
-                    on_event(msg);
+                    return on_event(msg);
                 }
+                true
             }),
         )
     }

@@ -12,7 +12,13 @@ pub trait PageHost {
 
     fn show_element_popover(&self, _element_id: &str) {}
 
+    fn show_dropdown_popover(&self, element_id: &str) {
+        self.show_element_popover(element_id);
+    }
+
     fn scroll_element_into_view(&self, _element_id: &str) {}
+
+    fn scroll_element_into_view_vertical(&self, _element_id: &str) {}
 
     fn reveal_first_rendered(&self, _element_ids: &[&str], _centered: bool) {}
 
@@ -48,7 +54,7 @@ pub trait PageHost {
     }
 }
 
-pub type BytesListener = Box<dyn FnMut(&[u8])>;
+pub type BytesListener = Box<dyn FnMut(&[u8]) -> bool>;
 
 pub type TextOffsetAnswer = std::pin::Pin<Box<dyn std::future::Future<Output = Option<u32>>>>;
 
@@ -87,6 +93,10 @@ impl Host {
 
     pub(crate) fn show_element_popover(id: &str) {
         let _ = Self::with_installed(|host| host.show_element_popover(id));
+    }
+
+    pub(crate) fn show_dropdown_popover(id: &str) {
+        let _ = Self::with_installed(|host| host.show_dropdown_popover(id));
     }
 
     pub(crate) fn select_element_text(id: &str) {
@@ -134,6 +144,7 @@ impl Host {
     pub(crate) fn scroll_element_to(element_id: &str, top: f64) {
         let _ = Self::with_installed(|host| host.scroll_element_to(element_id, top));
     }
+
     pub(crate) fn reveal_first_rendered(element_ids: &[&str], centered: bool) {
         let _ = Self::with_installed(|host| host.reveal_first_rendered(element_ids, centered));
     }
@@ -200,11 +211,9 @@ mod tests {
 
     impl PageHost for LoopbackHost {
         fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-            for (registered, on_bytes) in self.listeners.borrow_mut().iter_mut() {
-                if registered == id {
-                    on_bytes(bytes);
-                }
-            }
+            self.listeners
+                .borrow_mut()
+                .retain_mut(|(registered, on_bytes)| registered != id || on_bytes(bytes));
             Ok(())
         }
 
@@ -226,6 +235,7 @@ mod tests {
                 if let Some(ping) = HostPayload::new(bytes).decode::<Ping>() {
                     sink.borrow_mut().push(ping);
                 }
+                true
             }),
         )
         .unwrap();
@@ -235,6 +245,18 @@ mod tests {
         Host::emit("other", &bytes).unwrap();
 
         assert_eq!(*seen.borrow(), vec![Ping { value: 7 }]);
+    }
+
+    #[test]
+    fn an_inactive_listener_is_removed_after_delivery() {
+        let host = Rc::new(LoopbackHost::default());
+        install_host(host.clone());
+        Host::listen("once", Box::new(|_| false)).unwrap();
+
+        Host::emit("once", &[]).unwrap();
+        Host::emit("once", &[]).unwrap();
+
+        assert!(host.listeners.borrow().is_empty());
     }
 
     #[derive(Default)]

@@ -17,9 +17,10 @@ use vmux_command::CommandInvocation;
 use vmux_command::CommandManifest;
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
+use vmux_ecs::page::PagePlacementCatalog;
 use vmux_ecs::persistence::PersistenceAppExt;
 pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
-use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -64,6 +65,12 @@ impl Plugin for StackPlugin {
             )
             .add_systems(
                 Update,
+                bevy::ecs::schedule::ApplyDeferred
+                    .after(LayoutRequestSet::Handle)
+                    .before(ComputeFocusSet),
+            )
+            .add_systems(
+                Update,
                 compute_focused
                     .in_set(ComputeFocusSet)
                     .after(LayoutRequestSet::Handle)
@@ -90,6 +97,7 @@ pub(crate) struct OpenStartupPageSet;
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub url: Option<String>,
+    pub focus_existing: bool,
 }
 
 impl TryFrom<&CommandInvocation> for OpenRequest {
@@ -99,6 +107,7 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
         match invocation.id.as_str() {
             "open_in_new_stack" => Ok(Self {
                 url: invocation.argument("url"),
+                focus_existing: false,
             }),
             _ => Err(()),
         }
@@ -188,7 +197,11 @@ fn close_pending(
     mut closer: StackCloser,
     mut commands: Commands,
 ) {
+    let mut closing = std::collections::HashSet::new();
     for request in reader.read() {
+        if !closing.insert(request.stack) {
+            continue;
+        }
         close_stack(*request, &mut closer, &mut commands);
     }
 }
@@ -243,7 +256,7 @@ fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &
     }
 
     let was_active = closer.active_stack(pane) == Some(request.stack);
-    commands.entity(request.stack).despawn();
+    commands.entity(request.stack).try_despawn();
     if !was_active {
         return;
     }
@@ -276,7 +289,7 @@ fn close_last_stack_in_pane(
         _ => None,
     };
     let Some(parent) = split_parent else {
-        commands.entity(stack).despawn();
+        commands.entity(stack).try_despawn();
         let replacement = commands
             .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
@@ -288,7 +301,7 @@ fn close_last_stack_in_pane(
         return;
     };
 
-    commands.entity(stack).despawn();
+    commands.entity(stack).try_despawn();
     let Ok(siblings) = closer.panes.children.get(parent) else {
         return;
     };
@@ -301,7 +314,7 @@ fn close_last_stack_in_pane(
         .collect();
 
     if pane_siblings.len() >= 2 {
-        commands.entity(pane).despawn();
+        commands.entity(pane).try_despawn();
         let new_active_pane = pane_siblings
             .iter()
             .copied()
@@ -344,7 +357,7 @@ fn close_last_stack_in_pane(
             .unwrap_or_default();
         new_active_pane = closer.panes.first_leaf(sibling);
         commands.entity(sibling).remove::<ChildOf>();
-        commands.entity(sibling).despawn();
+        commands.entity(sibling).try_despawn();
         commands.entity(parent).insert(PaneSplit {
             direction: sibling_direction,
         });
@@ -358,10 +371,10 @@ fn close_last_stack_in_pane(
             justify_content: JustifyContent::Stretch,
             ..default()
         });
-        commands.entity(sibling).despawn();
+        commands.entity(sibling).try_despawn();
     }
 
-    commands.entity(pane).despawn();
+    commands.entity(pane).try_despawn();
     commands
         .entity(new_active_pane)
         .insert(LastActivatedAt::now());
@@ -403,7 +416,7 @@ impl Stack {
     pub fn bundle() -> impl Bundle {
         (
             Self::default(),
-            vmux_ecs::PageMetadata::default(),
+            PageMetadata::default(),
             Transform::default(),
             Node {
                 position_type: PositionType::Absolute,
@@ -452,11 +465,21 @@ pub struct LayoutFocus<'w, 's> {
     pane_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    stack_metadata: Query<'w, 's, &'static PageMetadata, With<Stack>>,
     parents: Query<'w, 's, &'static ChildOf>,
     tabs: Query<'w, 's, (), With<Tab>>,
 }
 
 impl LayoutFocus<'_, '_> {
+    fn is_only_startup_stack(&self, stack: Entity, startup_url: &str) -> bool {
+        if self.stack_activity.iter().count() != 1 {
+            return false;
+        }
+        self.stack_metadata.get(stack).is_ok_and(|metadata| {
+            metadata.url.trim_end_matches('/') == startup_url.trim_end_matches('/')
+        })
+    }
+
     fn collect_leaf_panes(&self, root: Entity, result: &mut Vec<Entity>) {
         if self.leaf_panes.contains(root) {
             result.push(root);
@@ -523,6 +546,18 @@ impl LayoutFocus<'_, '_> {
         }
         None
     }
+
+    fn focus_stack(&self, stack: Entity, commands: &mut Commands) {
+        if let Ok(parent) = self.parents.get(stack) {
+            commands
+                .entity(parent.parent())
+                .insert(LastActivatedAt::now());
+        }
+        commands.entity(stack).insert(LastActivatedAt::now());
+        if let Some(tab) = self.tab_of(stack) {
+            commands.entity(tab).insert(LastActivatedAt::now());
+        }
+    }
 }
 
 fn compute_focused(
@@ -550,27 +585,142 @@ fn open(
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
     focused_space: crate::space::FocusedSpace,
+    target: StackOpenTarget,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
+    let mut startup_reused = false;
+    let mut pending = Vec::<(String, Entity)>::new();
     for request in reader.read() {
-        let (_, active_pane, _) = focus.resolve(active_tab_param.get());
+        let (active_tab, active_pane, active_stack) = focus.resolve(active_tab_param.get());
         let Some(pane) = active_pane else {
             continue;
         };
+        let startup_url = focused_space.resolved_startup_url();
         let url = request
             .url
             .clone()
             .filter(|url| !url.is_empty())
-            .unwrap_or_else(|| focused_space.resolved_startup_url());
-        let stack = commands
-            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
-            .id();
+            .unwrap_or_else(|| startup_url.clone());
+        if request.focus_existing
+            && let Some(tab) = active_tab
+            && let Some(stack) = target
+                .reusable(&focus, tab, &url)
+                .or_else(|| target.pending_reusable(&pending, &url))
+        {
+            focus.focus_stack(stack, &mut commands);
+            if target.navigates(stack, &url) {
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url: url.clone(),
+                    request_id: None,
+                });
+            }
+            continue;
+        }
+        let stack = active_stack.filter(|stack| {
+            if startup_reused || !target.is_startup(*stack, &startup_url) {
+                return false;
+            }
+            startup_reused = true;
+            true
+        });
+        let stack = stack.unwrap_or_else(|| {
+            commands
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id()
+        });
         page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
-            url,
+            url: url.clone(),
             request_id: None,
         });
+        pending.push((url, stack));
+    }
+}
+
+#[derive(SystemParam)]
+struct StackOpenTarget<'w, 's> {
+    metadata: Query<'w, 's, &'static PageMetadata, With<Stack>>,
+    placements: PagePlacementCatalog<'w, 's>,
+}
+
+impl StackOpenTarget<'_, '_> {
+    fn reusable(&self, focus: &LayoutFocus, tab: Entity, url: &str) -> Option<Entity> {
+        self.find(focus, tab, |existing| Self::same_url(url, existing))
+            .or_else(|| self.find(focus, tab, |existing| self.placements.reuses(url, existing)))
+    }
+
+    fn find(
+        &self,
+        focus: &LayoutFocus,
+        tab: Entity,
+        matches: impl Fn(&str) -> bool,
+    ) -> Option<Entity> {
+        for pane in focus.leaves(tab) {
+            let Ok(children) = focus.pane_children.get(pane) else {
+                continue;
+            };
+            for stack in children.iter() {
+                let Ok(metadata) = self.metadata.get(stack) else {
+                    continue;
+                };
+                if matches(&metadata.url) {
+                    return Some(stack);
+                }
+            }
+        }
+        None
+    }
+
+    fn pending_reusable(&self, pending: &[(String, Entity)], url: &str) -> Option<Entity> {
+        pending
+            .iter()
+            .find(|(pending_url, _)| Self::same_url(url, pending_url))
+            .or_else(|| {
+                pending
+                    .iter()
+                    .find(|(pending_url, _)| self.placements.reuses(url, pending_url))
+            })
+            .map(|(_, stack)| *stack)
+    }
+
+    fn navigates(&self, stack: Entity, url: &str) -> bool {
+        let Some(existing) = self.url(stack) else {
+            return true;
+        };
+        !(Self::same_url(url, existing)
+            || self.placements.group_entrypoint(url) && self.placements.same_group(url, existing))
+    }
+
+    fn same_url(left: &str, right: &str) -> bool {
+        match (
+            vmux_api::VmuxRoute::canonical(left),
+            vmux_api::VmuxRoute::canonical(right),
+        ) {
+            (Some(left), Some(right)) => left == right,
+            _ => left.trim_end_matches('/') == right.trim_end_matches('/'),
+        }
+    }
+
+    fn url(&self, stack: Entity) -> Option<&str> {
+        self.metadata
+            .get(stack)
+            .ok()
+            .map(|metadata| metadata.url.as_str())
+    }
+
+    fn is_startup(&self, stack: Entity, startup_url: &str) -> bool {
+        let Ok(metadata) = self.metadata.get(stack) else {
+            return false;
+        };
+        match (
+            vmux_api::VmuxRoute::parse(&metadata.url),
+            vmux_api::VmuxRoute::parse(startup_url),
+        ) {
+            (Some(current), Some(startup)) => current.same_page(&startup),
+            _ => metadata.url.trim_end_matches('/') == startup_url.trim_end_matches('/'),
+        }
     }
 }
 
@@ -578,6 +728,7 @@ fn close(
     mut reader: MessageReader<CloseRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
+    focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<CloseStackRequest>,
 ) {
     for _ in reader.read() {
@@ -585,6 +736,9 @@ fn close(
         let Some(active_stack) = active_stack else {
             continue;
         };
+        if focus.is_only_startup_stack(active_stack, &focused_space.resolved_startup_url()) {
+            continue;
+        }
         requests.write(CloseStackRequest::by_user(active_stack));
     }
 }
@@ -832,6 +986,38 @@ mod tests {
 
         assert!(app.world().get_entity(s1).is_err(), "target despawned");
         assert!(app.world().get_entity(s2).is_ok(), "sibling kept");
+    }
+
+    #[test]
+    fn duplicate_close_requests_despawn_a_stack_once() {
+        let mut app = close_request_app();
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let target = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let sibling = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+
+        let mut requests = app
+            .world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>();
+        requests.write(CloseStackRequest::by_user(target));
+        requests.write(CloseStackRequest::by_user(target));
+        app.update();
+
+        assert!(app.world().get_entity(target).is_err());
+        assert!(app.world().get_entity(sibling).is_ok());
     }
 
     #[test]
@@ -1578,6 +1764,32 @@ mod tests {
     }
 
     #[test]
+    fn closing_only_start_page_keeps_the_existing_stack() {
+        let mut app = build_app_with_collector();
+        let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            title: "Start".to_string(),
+            url: "vmux://start/".to_string(),
+            ..Default::default()
+        });
+        app.world_mut()
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+
+        app.update();
+
+        assert!(app.world().get_entity(stack).is_ok());
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<CloseTabRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
     fn open_in_new_stack_with_explicit_url() {
         let mut app = build_app_with_collector();
         let (_tab, pane, _stack) = build_hierarchy(&mut app, "");
@@ -1586,6 +1798,7 @@ mod tests {
             .resource_mut::<Messages<OpenRequest>>()
             .write(OpenRequest {
                 url: Some("https://example.com".into()),
+                focus_existing: false,
             });
 
         app.update();
@@ -1609,13 +1822,242 @@ mod tests {
     }
 
     #[test]
+    fn open_focuses_an_existing_page_in_the_active_tab() {
+        let mut app = build_app_with_collector();
+        let (_tab, pane, existing) = build_hierarchy(&mut app, "");
+        app.world_mut().entity_mut(existing).insert((
+            LastActivatedAt(1),
+            PageMetadata {
+                url: "vmux://services/".into(),
+                ..Default::default()
+            },
+        ));
+        let active = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                PageMetadata {
+                    url: "vmux://projects/".into(),
+                    ..Default::default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("vmux://services/".into()),
+                focus_existing: true,
+            });
+        app.update();
+
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Stack>>()
+                .iter(app.world())
+                .count(),
+            2
+        );
+        assert!(
+            app.world().get::<LastActivatedAt>(existing).unwrap().0
+                > app.world().get::<LastActivatedAt>(active).unwrap().0
+        );
+    }
+
+    #[test]
+    fn group_entrypoint_focuses_existing_page_without_navigation() {
+        let mut app = build_app_with_collector();
+        app.world_mut().spawn(vmux_ecs::page::PageManifest {
+            route: "git://",
+            url: "git://",
+            asset_host: "git",
+            owns_subtree: true,
+            title: "Git",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement {
+                group: "git",
+                reuse: vmux_ecs::page::PageReuse::Group,
+                ..vmux_ecs::page::PagePlacement::DEFAULT
+            },
+        });
+        let (_tab, pane, existing) = build_hierarchy(&mut app, "");
+        app.world_mut().entity_mut(existing).insert((
+            LastActivatedAt(1),
+            PageMetadata {
+                url: "git://repo-a?branch=feature".into(),
+                ..Default::default()
+            },
+        ));
+        let active = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                PageMetadata {
+                    url: "vmux://projects/".into(),
+                    ..Default::default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("git://".into()),
+                focus_existing: true,
+            });
+        app.update();
+
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert!(
+            app.world().get::<LastActivatedAt>(existing).unwrap().0
+                > app.world().get::<LastActivatedAt>(active).unwrap().0
+        );
+    }
+
+    #[test]
+    fn exact_group_page_is_preferred_over_another_group_member() {
+        let mut app = build_app_with_collector();
+        app.world_mut().spawn(vmux_ecs::page::PageManifest {
+            route: "git://",
+            url: "git://",
+            asset_host: "git",
+            owns_subtree: true,
+            title: "Git",
+            title_message_id: None,
+            replaces_command: None,
+            keywords: &[],
+            icon: Some(vmux_api::BuiltinIcon::GitBranch),
+            command_bar: true,
+            startup: false,
+            reports_title: false,
+            placement: vmux_ecs::page::PagePlacement {
+                group: "git",
+                reuse: vmux_ecs::page::PageReuse::Group,
+                ..vmux_ecs::page::PagePlacement::DEFAULT
+            },
+        });
+        let (_tab, pane, first) = build_hierarchy(&mut app, "");
+        app.world_mut().entity_mut(first).insert((
+            LastActivatedAt(1),
+            PageMetadata {
+                url: "git://repo-a".into(),
+                ..Default::default()
+            },
+        ));
+        let exact = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(2),
+                PageMetadata {
+                    url: "git://repo-b".into(),
+                    ..Default::default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("git://repo-b".into()),
+                focus_existing: true,
+            });
+        app.update();
+
+        assert!(app.world().resource::<CollectedSpawns>().0.is_empty());
+        assert!(
+            app.world().get::<LastActivatedAt>(exact).unwrap().0
+                > app.world().get::<LastActivatedAt>(first).unwrap().0
+        );
+    }
+
+    #[test]
+    fn open_reuses_the_active_startup_stack() {
+        let mut app = build_app_with_collector();
+        let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: "vmux://start/".into(),
+            ..Default::default()
+        });
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("git://".into()),
+                focus_existing: false,
+            });
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        let [request] = collected.0.as_slice() else {
+            panic!("one page is opened");
+        };
+        assert!(matches!(request.target, PageOpenTarget::Stack(target) if target == stack));
+        assert_eq!(request.url, "git://");
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Stack>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn open_reuses_the_active_startup_stack_once_per_batch() {
+        let mut app = build_app_with_collector();
+        let (_tab, _pane, stack) = build_hierarchy(&mut app, "vmux://start/");
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: "vmux://start/".into(),
+            ..Default::default()
+        });
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("git://".into()),
+                focus_existing: false,
+            });
+        app.world_mut()
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
+                url: Some("vmux://sessions/".into()),
+                focus_existing: false,
+            });
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        let [first, second] = collected.0.as_slice() else {
+            panic!("two pages are opened");
+        };
+        assert!(matches!(first.target, PageOpenTarget::Stack(target) if target == stack));
+        assert!(matches!(second.target, PageOpenTarget::Stack(target) if target != stack));
+    }
+
+    #[test]
     fn open_in_new_stack_none_url_opens_the_start_page() {
         let mut app = build_app_with_collector();
         let (_tab, pane, _stack) = build_hierarchy(&mut app, "vmux://start/");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest { url: None });
+            .write(OpenRequest {
+                url: None,
+                focus_existing: false,
+            });
 
         app.update();
 
@@ -1646,7 +2088,10 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
-            .write(OpenRequest { url: None });
+            .write(OpenRequest {
+                url: None,
+                focus_existing: false,
+            });
 
         app.update();
 

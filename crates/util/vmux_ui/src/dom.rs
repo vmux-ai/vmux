@@ -32,12 +32,20 @@ impl DomCaret {
         crate::transport::Host::place_caret(self.element_id, byte);
     }
 
+    pub fn select_all_in(element_id: &str) {
+        crate::transport::Host::select_element_text(element_id);
+    }
+
+    pub fn select_all_in_next_frame(element_id: &str) {
+        crate::transport::Host::offer_element_text(element_id);
+    }
+
     pub fn select_all(self) {
-        crate::transport::Host::select_element_text(self.element_id);
+        Self::select_all_in(self.element_id);
     }
 
     pub fn select_all_from_start_next_frame(self) {
-        crate::transport::Host::offer_element_text(self.element_id);
+        Self::select_all_in_next_frame(self.element_id);
     }
 
     pub fn to_end(self) {

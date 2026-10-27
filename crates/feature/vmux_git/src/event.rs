@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 pub use vmux_api::git::{
     DiffKind, DiffLine, FileGitState, FileStatus, GitDiffRow, GitDiffViewport, GitFileStatus,
     GitLineMarker, GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
@@ -78,10 +80,45 @@ pub struct GitFileSelectRequest {
     pub path_bytes: Vec<u8>,
 }
 
+#[vmux_api::ui_event(Eq)]
+pub struct GitBranchFileSelectRequest {
+    pub path_bytes: Vec<u8>,
+}
+
+#[vmux_api::ui_event]
+pub struct GitBranchFilesNextRequest;
+
+#[vmux_api::ui_event]
+pub struct GitBranchFilesRetryRequest;
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitCatalog {
+    LocalBranches,
+    RemoteBranches,
+    Tags,
+    Commits,
+    Stashes,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct GitCatalogNextRequest {
+    pub catalog: GitCatalog,
+}
+
 #[vmux_api::ui_event(Copy, Eq)]
 pub struct GitDiffRevealRequest {
     pub start: u32,
     pub end: u32,
+}
+
+#[vmux_api::ui_event]
+pub struct GitDiffNextRequest;
+
+#[vmux_api::ui_event]
+pub struct GitDiffRetryRequest;
+
+impl GitDiffRevealRequest {
+    pub const CHUNK: u32 = 20;
 }
 
 #[vmux_api::ui_event(Eq)]
@@ -98,6 +135,9 @@ pub struct GitBranchSelectRequest {
 pub struct GitCommitSelectRequest {
     pub commit: String,
 }
+
+#[vmux_api::ui_event]
+pub struct GitBranchDiffSelectRequest;
 
 #[vmux_api::ui_event(Eq)]
 pub struct GitStashSelectRequest {
@@ -147,11 +187,6 @@ pub struct GitConfigEditRequest {
 }
 #[vmux_api::ui_event]
 pub struct GitUpdateCheckRequest;
-#[vmux_api::ui_event(Eq)]
-pub struct GitBranchLogRequest {
-    pub repo_root: String,
-    pub branch: String,
-}
 #[vmux_api::ui_event(Eq)]
 pub struct GitDirectoryOpenRequest {
     pub path: String,
@@ -237,6 +272,36 @@ pub struct GitFileEntry {
     pub unstaged: bool,
 }
 
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitPathChange {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    TypeChanged,
+    Unmerged,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct GitBranchFileEntry {
+    pub path: String,
+    pub path_bytes: Vec<u8>,
+    pub previous_path: Option<String>,
+    pub previous_path_bytes: Option<Vec<u8>>,
+    pub change: GitPathChange,
+}
+
+impl GitBranchFileEntry {
+    pub fn row_id(&self) -> String {
+        let mut id = String::from("git-branch-file-row-");
+        for byte in &self.path_bytes {
+            let _ = write!(id, "{byte:02x}");
+        }
+        id
+    }
+}
+
 impl GitFileEntry {
     pub fn can_discard(&self) -> bool {
         self.unstaged && self.status != FileStatus::Untracked
@@ -263,6 +328,9 @@ pub struct GitBranchEntry {
     pub short_sha: String,
     pub ahead: u32,
     pub behind: u32,
+    pub changed_files: u32,
+    pub insertions: u32,
+    pub deletions: u32,
 }
 
 #[vmux_api::contract(Eq)]
@@ -285,7 +353,9 @@ pub struct GitRepositorySnapshot {
     pub path: String,
     pub repo_root: String,
     pub repo_name: String,
+    pub is_worktree: bool,
     pub branch: String,
+    pub base_ref: String,
     pub upstream: String,
     pub ahead: u32,
     pub behind: u32,
@@ -297,11 +367,16 @@ pub struct GitRepositorySnapshot {
     pub stashes: Vec<GitStashEntry>,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct GitBranchLog {
-    pub repo_root: String,
-    pub branch: String,
-    pub commits: Vec<GitCommitEntry>,
+impl GitRepositorySnapshot {
+    pub(crate) fn catalog_len(&self, catalog: GitCatalog) -> usize {
+        match catalog {
+            GitCatalog::LocalBranches => self.branches.len(),
+            GitCatalog::RemoteBranches => self.remote_branches.len(),
+            GitCatalog::Tags => self.tags.len(),
+            GitCatalog::Commits => self.commits.len(),
+            GitCatalog::Stashes => self.stashes.len(),
+        }
+    }
 }
 
 #[vmux_api::ui_event_variants(Eq, shared(repo_root: String))]

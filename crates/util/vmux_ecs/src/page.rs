@@ -10,7 +10,27 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_cef_core::prelude::CefEmbeddedHost;
 pub use vmux_api::PageReady;
 
+use crate::KeyboardOwner;
 use crate::page_driver::PageAssets;
+
+type PresentPages<'w, 's, M> = Query<'w, 's, (), (With<M>, With<PageReady>)>;
+type ActivePages<'w, 's, M> = Query<'w, 's, (), (With<M>, With<PageReady>, With<KeyboardOwner>)>;
+
+#[derive(SystemParam)]
+pub struct Activity<'w, 's, M: Component> {
+    present: PresentPages<'w, 's, M>,
+    active: ActivePages<'w, 's, M>,
+}
+
+impl<M: Component> Activity<'_, '_, M> {
+    pub fn present(activity: Activity<M>) -> bool {
+        !activity.present.is_empty()
+    }
+
+    pub fn active(activity: Activity<M>) -> bool {
+        !activity.active.is_empty()
+    }
+}
 
 pub struct PagePlugin;
 
@@ -65,6 +85,7 @@ impl PagePlacement {
         }
         match self.reuse {
             PageReuse::Exact => request_url == existing_url,
+            PageReuse::Group => true,
             PageReuse::Route => {
                 let Some(request) = vmux_api::VmuxRoute::parse(request_url) else {
                     return false;
@@ -93,6 +114,7 @@ impl Default for PagePlacement {
 pub enum PageReuse {
     #[default]
     Exact,
+    Group,
     Route,
     Fragmentless,
 }
@@ -135,6 +157,12 @@ impl PagePlacementCatalog<'_, '_> {
 
     pub fn same_group(&self, left: &str, right: &str) -> bool {
         self.resolve(left).group == self.resolve(right).group
+    }
+
+    pub fn group_entrypoint(&self, url: &str) -> bool {
+        self.pages
+            .iter()
+            .any(|page| page.url == url && page.placement.reuse == PageReuse::Group)
     }
 
     pub fn reports_title(&self, url: &str) -> bool {
@@ -182,6 +210,23 @@ pub struct PrewarmPage {
     pub pool_size: usize,
 }
 
+impl PrewarmPage {
+    pub fn answers_for(&self, url: &str) -> bool {
+        if self.url == url {
+            return true;
+        }
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return false;
+        };
+        let candidate = if scheme.eq_ignore_ascii_case("vmux") {
+            rest.split('/').next().unwrap_or_default()
+        } else {
+            scheme
+        };
+        candidate.eq_ignore_ascii_case(self.host)
+    }
+}
+
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostedPage {
     pub url: &'static str,
@@ -213,6 +258,11 @@ impl HostedPage {
         }
         .matches(url)
     }
+
+    pub fn specificity(&self, url: &str) -> Option<(bool, usize)> {
+        self.answers_for(url)
+            .then_some((PageRoute::same_page(self.url, url), self.url.len()))
+    }
 }
 
 struct PageRoute<'a> {
@@ -221,6 +271,14 @@ struct PageRoute<'a> {
 }
 
 impl PageRoute<'_> {
+    fn same_page(left: &str, right: &str) -> bool {
+        PageRoute {
+            url: left,
+            owns_subtree: false,
+        }
+        .matches(right)
+    }
+
     fn matches(&self, url: &str) -> bool {
         if let Some(scheme) = self.url.strip_suffix("://") {
             return url
@@ -361,6 +419,13 @@ impl HostHistory {
 
     pub fn can_go_forward(&self) -> bool {
         self.cursor + 1 < self.entries.len()
+    }
+
+    pub fn can_step(&self, delta: HostHistoryDelta) -> bool {
+        match delta {
+            HostHistoryDelta::Back => self.can_go_back(),
+            HostHistoryDelta::Forward => self.can_go_forward(),
+        }
     }
 
     pub fn showing(&self, url: &str, top_line: u32) -> bool {
@@ -778,6 +843,38 @@ mod tests {
         assert!(hosted.answers_for("git:///Users/me/repo"));
         assert!(hosted.answers_for("GIT://Users/me/repo"));
         assert!(!hosted.answers_for("https://example.com"));
+    }
+
+    #[test]
+    fn group_reuse_matches_changed_state_inside_one_feature() {
+        let git = PagePlacement {
+            group: "git",
+            reuse: PageReuse::Group,
+            ..PagePlacement::DEFAULT
+        };
+
+        assert!(git.reuses("git://", git, "git:///repo?branch=feature"));
+        assert!(!git.reuses("git://", PagePlacement::DEFAULT, "https://example.com"));
+    }
+
+    #[test]
+    fn a_prewarmed_host_answers_for_a_specific_route() {
+        let git = PrewarmPage {
+            host: "git",
+            url: "git://",
+            title: "Git",
+            pool_size: 1,
+        };
+        let projects = PrewarmPage {
+            host: "projects",
+            url: "vmux://projects/",
+            title: "Projects",
+            pool_size: 1,
+        };
+
+        assert!(git.answers_for("git://Users/me/repository"));
+        assert!(projects.answers_for("vmux://projects/github.com/vmux-ai/vmux"));
+        assert!(!projects.answers_for("vmux://sessions/"));
     }
 
     #[test]

@@ -468,6 +468,15 @@ impl Browsers {
             host.was_hidden(0);
         }
         #[cfg(target_os = "macos")]
+        if windowed {
+            use objc2_app_kit::NSView;
+            let handle = host.window_handle();
+            if !handle.is_null() {
+                let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+                view.setHidden(true);
+            }
+        }
+        #[cfg(target_os = "macos")]
         let native_liquid_glass =
             (windowed && native_liquid_glass).then(|| Self::create_native_liquid_glass(&host));
         #[cfg(target_os = "macos")]
@@ -1664,6 +1673,13 @@ impl Browsers {
             glass.as_super().setHidden(hidden);
         }
         view.setHidden(hidden);
+        if let Some(child) = browser.child_window.borrow().clone() {
+            if hidden {
+                child.orderOut(None);
+            } else if !child.isVisible() {
+                child.orderFront(None);
+            }
+        }
         if browser.hidden.replace(hidden) != hidden {
             browser.host.was_hidden(hidden as _);
             if !hidden {
@@ -1827,11 +1843,6 @@ impl Browsers {
                 cef_view.setFrame(bounds);
             }
         }
-        if !child.isVisible() {
-            child.orderFront(None);
-        }
-        // The standard buttons are not created until the window is first displayed, so hiding them
-        // at construction time is a no-op and they show through the chromeless surface.
         true
     }
 

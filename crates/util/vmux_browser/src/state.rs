@@ -21,7 +21,7 @@ use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, UpdateState,
     event::{
-        AddressParts, HEADER_HEIGHT_PX, LayoutGeometry, PANE_GAP_PX, PaneNode, PaneTreeState,
+        AddressParts, HEADER_HEIGHT_PX, LayoutGeometry, PaneNode, PaneTreeState, SIDE_SHEET_GAP_PX,
         StackNavigationState, StackNode, StackRow, TabBoundary, TabBoundaryState, TabListState,
         TabRow, UpdateCleared, UpdateProgress, UpdateReady,
     },
@@ -31,6 +31,7 @@ use vmux_layout::{
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
     tab::Tab,
+    toggle::LayoutHidden,
     window::{FocusedWindow, VmuxWindow, WindowHierarchy},
 };
 
@@ -367,6 +368,7 @@ type LayoutMarkerChanged = Or<(
     Changed<Space>,
     Changed<CurrentSpace>,
     Changed<Active>,
+    Changed<LayoutHidden>,
 )>;
 
 type BookmarkProjectionChanged = Or<(
@@ -442,6 +444,7 @@ struct PageStateRemovals<'w, 's> {
     collapsed: RemovedComponents<'w, 's, Collapsed>,
     smart_folder: RemovedComponents<'w, 's, SmartBookmarkFolder>,
     expanded_projects: RemovedComponents<'w, 's, ExpandedProjectDirs>,
+    layout_hidden: RemovedComponents<'w, 's, LayoutHidden>,
 }
 
 impl PageStateRemovals<'_, '_> {
@@ -488,6 +491,7 @@ impl PageStateRemovals<'_, '_> {
         any |= self.collapsed.read().count() > 0;
         any |= self.smart_folder.read().count() > 0;
         any |= self.expanded_projects.read().count() > 0;
+        any |= self.layout_hidden.read().count() > 0;
         any
     }
 }
@@ -515,7 +519,7 @@ fn push_layout_emit(
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
-    windows: Query<&Window>,
+    windows: Query<(&Window, Has<LayoutHidden>)>,
     settings: Res<AppSettings>,
 ) {
     let Some(target) = projection.target() else {
@@ -533,11 +537,11 @@ fn push_layout_emit(
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
         is_open && projection.layout.hierarchy.get(entity) == Some(host_window)
     });
-    let window_width_px = windows
+    let (window_width_px, zen) = windows
         .get(host_window)
         .ok()
-        .map(|window| window.resolution.physical_width() as f32)
-        .unwrap_or(0.0);
+        .map(|(window, zen)| (window.resolution.physical_width() as f32, zen))
+        .unwrap_or((0.0, false));
     let header_offsets = header_q.iter().find_map(|(entity, _, computed)| {
         if projection.layout.hierarchy.get(entity) == Some(host_window) {
             LayoutFixedOffsets::from_node(computed?, window_width_px)
@@ -563,13 +567,14 @@ fn push_layout_emit(
     }
 
     let payload = LayoutGeometry {
+        zen,
         header_open,
         side_sheet_open,
         header_height: header_offsets
             .map(|offsets| offsets.height)
             .unwrap_or(HEADER_HEIGHT_PX),
         side_sheet_width,
-        pane_gap: PANE_GAP_PX,
+        pane_gap: SIDE_SHEET_GAP_PX,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),
         header_top: header_offsets.map(|offsets| offsets.top),
@@ -612,7 +617,7 @@ impl AddressRoots<'_> {
             true => path,
             false => path.parent()?,
         };
-        self.repos.as_mut()?.lookup(dir)
+        self.repos.as_mut()?.snapshot(dir)
     }
 }
 
@@ -628,6 +633,7 @@ fn push_stacks_host_emit(
         ),
         With<Browser>,
     >,
+    stack_histories: Query<(&PageMetadata, &HostHistory), With<Stack>>,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<Zoomed>>,
     focus: FocusedStack,
@@ -665,7 +671,12 @@ fn push_stacks_host_emit(
             }
             let is_active = stack_entity == active_stack_entity;
             if is_active {
-                if let Some(history) = host_history {
+                if let Ok((metadata, history)) = stack_histories.get(stack_entity)
+                    && VmuxRoute::parse(&metadata.url).is_some()
+                {
+                    can_go_back = history.can_go_back();
+                    can_go_forward = history.can_go_forward();
+                } else if let Some(history) = host_history {
                     can_go_back = history.can_go_back();
                     can_go_forward = history.can_go_forward();
                 } else if let Some(ns) = nav_state {
@@ -825,55 +836,73 @@ fn push_pane_tree_emit(
         .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
-fn abbreviate_project_path(path: &std::path::Path) -> String {
-    let path = path.to_string_lossy();
-    let Some(home) = std::env::var_os("HOME") else {
-        return path.into_owned();
-    };
-    let home = home.to_string_lossy();
-    if home.is_empty() {
-        return path.into_owned();
-    }
-    let Some(rest) = path.strip_prefix(home.as_ref()) else {
-        return path.into_owned();
-    };
-    format!("~{rest}")
-}
-
 fn push_projects_host_emit(
     mut projection: LayoutProjection,
     space_projects: SpaceProjects,
+    active_projects: Res<vmux_space::ActiveProjectRows>,
     mut repo_info: Option<Single<&mut RepoInfoCache>>,
 ) {
     let Some(target) = projection.target() else {
         return;
     };
     let cef_e = target.entity;
-    let mut projects = space_projects.active_rows();
+    let source = space_projects.active_rows();
+    let mut projects = active_projects.layout_rows(space_projects.active_space_id(), &source);
     for row in &mut projects {
-        row.display_path = abbreviate_project_path(std::path::Path::new(&row.path));
+        let display_path = match row.display_path.is_empty() {
+            true => &row.path,
+            false => &row.display_path,
+        };
+        row.display_path = vmux_path::DisplayPath::project(display_path);
     }
     let mut boundary = projects
         .iter()
         .find(|project| project.depth == 0 && project.is_active)
         .map(|project| TabBoundary {
             effective_dir: project.path.clone(),
+            project_dir: project.path.clone(),
             source: "project".to_string(),
             branch: project.branch.clone(),
             ..Default::default()
         });
+    let mut branches = Vec::new();
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
+        cache.release(cef_e);
         for row in &mut projects {
             if row.missing || row.kind != vmux_api::space::ProjectRowKind::Project {
                 continue;
             }
-            if let Some(info) = cache.lookup(std::path::Path::new(&row.path)) {
+            let path = std::path::Path::new(&row.path);
+            let info = row
+                .is_active
+                .then(|| cache.observe_active(cef_e, path))
+                .flatten();
+            if let Some(info) = info {
                 row.branch = info.branch.clone();
                 if row.is_active {
                     let repository = info.project_name();
+                    let path = std::path::Path::new(&row.path);
+                    let Ok(relative) = path.strip_prefix(&info.repo_root) else {
+                        continue;
+                    };
+                    let project_dir = info.project_root().join(relative);
+                    branches.reserve(info.branches.len());
+                    for holder in info.branches.iter() {
+                        let checkout = holder
+                            .checkout
+                            .as_ref()
+                            .map(|checkout| checkout.join(relative).to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        branches.push(vmux_layout::event::WorkspaceBranch {
+                            branch: holder.branch.clone(),
+                            checkout,
+                            label: holder.checkout_label(),
+                        });
+                    }
                     boundary = Some(TabBoundary {
                         effective_dir: row.path.clone(),
+                        project_dir: project_dir.to_string_lossy().into_owned(),
                         source: "project".to_string(),
                         repository,
                         is_git_repo: true,
@@ -891,7 +920,11 @@ fn push_projects_host_emit(
             }
         }
     }
-    let payload = TabBoundaryState { boundary, projects };
+    let payload = TabBoundaryState {
+        boundary,
+        projects,
+        branches,
+    };
     projection
         .commands
         .entity(cef_e)

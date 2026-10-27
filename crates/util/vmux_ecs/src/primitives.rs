@@ -3,7 +3,10 @@ use moonshine_save::prelude::Save;
 
 use super::persistence::PersistenceAppExt;
 use crate::PageMetadata;
-use crate::component::{ActivateRequest, Active, CreatedAt, LastActivatedAt, Order};
+use crate::component::{
+    ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
+    LastActivatedAt, Order,
+};
 use vmux_api::{BuiltinIcon, PageIcon};
 
 use bevy::ecs::relationship::Relationship;
@@ -15,8 +18,12 @@ impl Plugin for PrimitivesPlugin {
         app.register_persisted::<PageMetadata>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
+            .register_persisted::<Cwd>()
+            .register_persisted::<Description>()
+            .register_persisted::<CollectionView>()
             .register_persisted::<CreatedAt>()
             .register_persisted::<LastActivatedAt>()
+            .register_persisted::<ArchivedAt>()
             .register_persisted::<Order>()
             .register_type::<Active>()
             .register_type::<Children>()
@@ -49,13 +56,18 @@ mod tests {
         app.add_plugins(PrimitivesPlugin);
 
         let registry = app.world().resource::<AppTypeRegistry>().read();
+        let filter = super::super::persistence::WorkspacePersisted::filter(&registry);
         assert!(
             registry
                 .get(std::any::TypeId::of::<PageMetadata>())
                 .is_some()
         );
         assert!(registry.get(std::any::TypeId::of::<CreatedAt>()).is_some());
+        assert!(registry.get(std::any::TypeId::of::<ArchivedAt>()).is_some());
         assert!(registry.get(std::any::TypeId::of::<Order>()).is_some());
+        assert!(filter.is_allowed::<Cwd>());
+        assert!(filter.is_allowed::<Description>());
+        assert!(filter.is_allowed::<CollectionView>());
     }
 
     #[test]

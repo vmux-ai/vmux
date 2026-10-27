@@ -3746,6 +3746,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fancy-regex"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4635,6 +4647,15 @@ checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
@@ -4662,6 +4683,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
+dependencies = [
+ "hashbrown 0.14.5",
 ]
 
 [[package]]
@@ -5528,6 +5558,17 @@ dependencies = [
  "libc",
  "plain",
  "redox_syscall 0.7.5",
+]
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -8261,6 +8302,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusqlite"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7753b721174eb8ff87a9a0e799e2d7bc3749323e773db92e0984debb00019d6e"
+dependencies = [
+ "bitflags 2.11.1",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10146,7 +10201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vmux_agent"
+name = "vmux_acp"
 version = "0.0.35"
 dependencies = [
  "agent-client-protocol",
@@ -10161,11 +10216,13 @@ dependencies = [
  "futures-lite",
  "image",
  "mockito",
+ "moonshine-save",
  "notify",
  "reqwest",
  "rfd 0.15.4",
  "rkyv",
  "ron 0.12.1",
+ "rusqlite",
  "serde",
  "serde_json",
  "serial_test",
@@ -10177,7 +10234,6 @@ dependencies = [
  "url",
  "uuid",
  "vmux_api",
- "vmux_chat",
  "vmux_command",
  "vmux_ecs",
  "vmux_editor",
@@ -10191,7 +10247,6 @@ dependencies = [
  "vmux_space",
  "vmux_start",
  "vmux_team",
- "vmux_terminal",
  "vmux_tool",
  "vmux_transport",
  "vmux_ui",
@@ -10201,6 +10256,7 @@ dependencies = [
 name = "vmux_api"
 version = "0.0.35"
 dependencies = [
+ "base64 0.22.1",
  "bevy_ecs",
  "bevy_reflect",
  "rkyv",
@@ -10221,10 +10277,9 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "vmux_agent",
+ "vmux_acp",
  "vmux_bookmark",
  "vmux_browser",
- "vmux_chat",
  "vmux_command",
  "vmux_ecs",
  "vmux_editor",
@@ -10314,39 +10369,6 @@ dependencies = [
  "vmux_ui",
  "wry",
  "zip",
-]
-
-[[package]]
-name = "vmux_chat"
-version = "0.0.35"
-dependencies = [
- "base64 0.22.1",
- "bevy",
- "bevy_app",
- "bevy_cef",
- "bevy_ecs",
- "chrono",
- "dioxus",
- "dioxus-primitives",
- "futures-lite",
- "image",
- "pulldown-cmark",
- "rfd 0.15.4",
- "rkyv",
- "serde",
- "serde_json",
- "similar",
- "unicode-segmentation",
- "uuid",
- "vmux_api",
- "vmux_clipboard",
- "vmux_command",
- "vmux_ecs",
- "vmux_layout",
- "vmux_page",
- "vmux_session",
- "vmux_tool",
- "vmux_ui",
 ]
 
 [[package]]
@@ -10444,7 +10466,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon 0.24.0",
  "url",
- "vmux_agent",
+ "vmux_acp",
  "vmux_api",
  "vmux_app",
  "vmux_browser",
@@ -10474,6 +10496,7 @@ name = "vmux_ecs"
 version = "0.0.35"
 dependencies = [
  "bevy",
+ "bevy_app",
  "bevy_cef",
  "bevy_cef_core",
  "bevy_ecs",
@@ -10485,6 +10508,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "toml",
  "url",
@@ -10520,6 +10544,7 @@ dependencies = [
  "pulldown-cmark",
  "regex",
  "reqwest",
+ "rfd 0.15.4",
  "rkyv",
  "ron 0.12.1",
  "ropey",
@@ -10544,8 +10569,10 @@ dependencies = [
  "vmux_mcp",
  "vmux_page",
  "vmux_path",
+ "vmux_session",
  "vmux_setting",
  "vmux_space",
+ "vmux_syntax",
  "vmux_tool",
  "vmux_transport",
  "vmux_ui",
@@ -10561,7 +10588,6 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "crossbeam-channel",
- "dioxus",
  "libc",
  "polling",
  "reqwest",
@@ -10579,9 +10605,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
- "vmux_page",
  "vmux_tool",
- "vmux_ui",
  "zip",
 ]
 
@@ -10616,6 +10640,7 @@ dependencies = [
  "vmux_ecs",
  "vmux_page",
  "vmux_path",
+ "vmux_syntax",
  "vmux_ui",
 ]
 
@@ -10697,6 +10722,7 @@ dependencies = [
  "dioxus",
  "libc",
  "moonshine-save",
+ "percent-encoding",
  "qrcode",
  "raw-window-handle 0.6.2",
  "rfd 0.15.4",
@@ -10715,6 +10741,7 @@ dependencies = [
  "vmux_history",
  "vmux_input",
  "vmux_page",
+ "vmux_session",
  "vmux_tool",
  "vmux_ui",
 ]
@@ -10778,7 +10805,6 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_app",
- "vmux_chat",
  "vmux_ecs",
  "vmux_path",
  "vmux_session",
@@ -10905,7 +10931,6 @@ dependencies = [
  "vmux_path",
  "vmux_process",
  "vmux_profile",
- "vmux_session",
  "vmux_transport",
 ]
 
@@ -10913,13 +10938,38 @@ dependencies = [
 name = "vmux_session"
 version = "0.0.35"
 dependencies = [
+ "base64 0.22.1",
+ "bevy",
  "bevy_app",
+ "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",
+ "chrono",
+ "dioxus",
+ "dioxus-primitives",
+ "futures-lite",
+ "ignore",
+ "image",
+ "moonshine-save",
+ "percent-encoding",
+ "pulldown-cmark",
+ "rfd 0.15.4",
+ "rkyv",
+ "ron 0.12.1",
  "serde",
  "serde_json",
+ "similar",
  "unicode-segmentation",
+ "url",
+ "uuid",
  "vmux_api",
+ "vmux_clipboard",
+ "vmux_command",
+ "vmux_ecs",
+ "vmux_git",
+ "vmux_page",
+ "vmux_tool",
+ "vmux_ui",
 ]
 
 [[package]]
@@ -11013,7 +11063,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vmux_api",
- "vmux_chat",
  "vmux_command",
  "vmux_ecs",
  "vmux_flex",
@@ -11051,6 +11100,13 @@ dependencies = [
  "vmux_page",
  "vmux_space",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_syntax"
+version = "0.0.35"
+dependencies = [
+ "syntect",
 ]
 
 [[package]]

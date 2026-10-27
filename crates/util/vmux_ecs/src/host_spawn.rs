@@ -65,10 +65,10 @@ mod tests {
     }
 
     #[test]
-    fn subtree_route_canonicalizes_legacy_aliases() {
+    fn subtree_route_matches_only_the_canonical_host() {
         let route = HostSpawnRoute::subtree("vmux://sessions/");
-        assert!(route.answers_for("vmux://sessions/codex/cli"));
-        assert!(route.answers_for("vmux://agent/codex/cli"));
+        assert!(route.answers_for("vmux://sessions/session-1"));
+        assert!(!route.answers_for("vmux://agent/codex/cli"));
         assert!(!route.answers_for("vmux://start/"));
     }
 

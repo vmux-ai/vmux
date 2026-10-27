@@ -1,4 +1,5 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
@@ -19,14 +20,42 @@ impl UnixMillis {
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
 
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PagePresented;
+
+#[derive(Component, Reflect)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum CollectionView {
+    #[default]
+    List,
+    Grid,
+}
+
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WindowFullscreen(pub bool);
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowFullscreenSet;
 
-#[derive(Component, Clone, Debug)]
-pub struct AgentWorkingDir(pub PathBuf);
+#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+pub struct Cwd(pub PathBuf);
+
+#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+pub struct Description(pub String);
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_ecs"]
+pub struct Terminal;
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct JsonArguments(pub serde_json::Value);
@@ -124,6 +153,12 @@ impl LastActivatedAt {
             .map(|(entity, _)| entity)
     }
 }
+
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_ecs"]
+pub struct ArchivedAt(pub i64);
 
 #[derive(EntityEvent, Clone, Copy, Debug)]
 pub struct ActivateRequest {

@@ -7,7 +7,7 @@ use vmux_api::service::*;
 use vmux_command::{CommandInvocation, ResolvedLocale};
 #[cfg(test)]
 use vmux_ecs::manifest::FeaturePlugin;
-use vmux_ecs::page::PageReady;
+use vmux_ecs::page::{Activity, PageReady};
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
@@ -15,6 +15,7 @@ use vmux_history::LastActivatedAt;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use super::input_queue::TerminalProcessIndex;
+use super::process_sampler::{LocalProcess, ProcSample, ProcessSampler};
 use crate::Terminal;
 use crate::plugin::ReattachedTerminalBundle;
 use vmux_ecs::{KeyboardOwner, Order};
@@ -51,9 +52,13 @@ impl Plugin for ProcessMonitorPlugin {
                 Update,
                 (
                     reconcile_service_processes,
-                    request_process_list,
-                    sample_process_usage,
-                    broadcast_to_monitors,
+                    (
+                        request_process_list,
+                        sample_process_usage,
+                        broadcast_to_monitors,
+                    )
+                        .chain()
+                        .run_if(Activity::<ProcessMonitorView>::active),
                 )
                     .chain()
                     .after(vmux_ecs::service::ServiceMessageSet),
@@ -145,7 +150,7 @@ struct Sparkline {
 }
 
 impl Sparkline {
-    fn plot(samples: &[f32], floor: f32) -> Self {
+    fn plot(samples: &[f32], minimum_span: f32) -> Self {
         let samples = if samples.is_empty() {
             vec![0.0, 0.0]
         } else if samples.len() == 1 {
@@ -153,17 +158,54 @@ impl Sparkline {
         } else {
             samples.to_vec()
         };
-        let ceiling = samples.iter().copied().fold(floor, f32::max).max(1.0);
+        let minimum = samples.iter().copied().fold(f32::INFINITY, f32::min);
+        let maximum = samples.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let sample_span = maximum - minimum;
+        let span = (sample_span * 1.1).max(minimum_span).max(1.0);
+        let center = (minimum + maximum) / 2.0;
+        let mut lower = center - span / 2.0;
+        let mut upper = center + span / 2.0;
+        if lower < 0.0 {
+            upper -= lower;
+            lower = 0.0;
+        }
         let last = (samples.len() - 1) as f32;
         let mut points = Vec::with_capacity(samples.len());
         for (index, sample) in samples.iter().enumerate() {
             let x = index as f32 / last * 100.0;
-            let y = 39.0 - (sample / ceiling).clamp(0.0, 1.0) * 37.0;
-            points.push(format!("{x:.2},{y:.2}"));
+            let y = 39.0 - ((sample - lower) / (upper - lower)).clamp(0.0, 1.0) * 37.0;
+            points.push((x, y));
         }
-        let line = points.join(" ");
-        let area = format!("0,40 {line} 100,40");
+        let segments = Self::curve_segments(&points);
+        let line = format!("M {:.2} {:.2}{segments}", points[0].0, points[0].1);
+        let area = format!(
+            "M 0 40 L {:.2} {:.2}{segments} L 100 40 Z",
+            points[0].0, points[0].1
+        );
         Self { line, area }
+    }
+
+    fn curve_segments(points: &[(f32, f32)]) -> String {
+        let mut path = String::new();
+        for index in 0..points.len() - 1 {
+            let previous = points[index.saturating_sub(1)];
+            let current = points[index];
+            let next = points[index + 1];
+            let following = points[(index + 2).min(points.len() - 1)];
+            let control_a = (
+                current.0 + (next.0 - previous.0) / 6.0,
+                current.1 + (next.1 - previous.1) / 6.0,
+            );
+            let control_b = (
+                next.0 - (following.0 - current.0) / 6.0,
+                next.1 - (following.1 - current.1) / 6.0,
+            );
+            path.push_str(&format!(
+                " C {:.2} {:.2}, {:.2} {:.2}, {:.2} {:.2}",
+                control_a.0, control_a.1, control_b.0, control_b.1, next.0, next.1
+            ));
+        }
+        path
     }
 }
 
@@ -200,6 +242,7 @@ fn open_services(
     for _ in requests.read() {
         stack_requests.write(OpenRequest {
             url: Some(ProcessMonitorPageManifest::URL.to_string()),
+            focus_existing: false,
         });
     }
 }
@@ -210,54 +253,17 @@ pub(crate) struct ServiceProcessSnapshot(pub(crate) Vec<vmux_api::protocol::Proc
 #[derive(Component)]
 struct ProcessMonitor {
     process_poll: Timer,
-    sysinfo_poll: Timer,
-    discovery_poll: Timer,
-    system: sysinfo::System,
+    sampler: ProcessSampler,
+    cpu_ready: bool,
 }
 
 impl Default for ProcessMonitor {
     fn default() -> Self {
         Self {
-            process_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
-            sysinfo_poll: Timer::from_seconds(2.0, TimerMode::Repeating),
-            discovery_poll: Timer::from_seconds(30.0, TimerMode::Repeating),
-            system: sysinfo::System::new(),
+            process_poll: Timer::from_seconds(5.0, TimerMode::Repeating),
+            sampler: ProcessSampler::default(),
+            cpu_ready: false,
         }
-    }
-}
-
-impl ProcessMonitor {
-    fn refresh(
-        &mut self,
-        delta: std::time::Duration,
-        immediate: bool,
-        service_roots: impl IntoIterator<Item = u32>,
-    ) -> Option<MonitoredProcesses> {
-        self.sysinfo_poll.tick(delta);
-        self.discovery_poll.tick(delta);
-        if !immediate && !self.sysinfo_poll.just_finished() {
-            return None;
-        }
-        if immediate || self.system.processes().is_empty() || self.discovery_poll.just_finished() {
-            self.discovery_poll.reset();
-            self.system.refresh_processes_specifics(
-                sysinfo::ProcessesToUpdate::All,
-                true,
-                sysinfo::ProcessRefreshKind::nothing(),
-            );
-        }
-        self.sysinfo_poll.reset();
-        let monitored = MonitoredProcesses::new(&self.system, service_roots);
-        self.system.refresh_processes_specifics(
-            sysinfo::ProcessesToUpdate::Some(&monitored.pids),
-            true,
-            sysinfo::ProcessRefreshKind::nothing()
-                .with_memory()
-                .with_cpu()
-                .with_exe(sysinfo::UpdateKind::OnlyIfNotSet)
-                .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet),
-        );
-        Some(monitored)
     }
 }
 
@@ -361,42 +367,31 @@ impl Usage {
 }
 
 #[derive(Component, Clone, Debug, PartialEq)]
-struct LocalVmuxProcess {
-    shell: String,
-    cwd: String,
-    uptime_secs: u64,
-}
+struct LocalVmuxProcess(LocalProcess);
 
 impl LocalVmuxProcess {
-    fn matches(name: &str, executable: &str) -> bool {
-        if name.to_ascii_lowercase().contains("vmux") {
-            return true;
-        }
-        let executable_name = executable.rsplit('/').next().unwrap_or(executable);
-        executable_name.to_ascii_lowercase().contains("vmux")
-    }
-
     fn entry(&self, pid: ProcessPid, usage: Usage, locale: &Locale) -> ProcessEntry {
+        let process = &self.0;
         ProcessEntry {
             id: format!("system:{}", pid.0),
             managed: false,
-            shell: self.shell.clone(),
-            shell_label: self
+            shell: process.shell.clone(),
+            shell_label: process
                 .shell
                 .rsplit('/')
                 .next()
-                .unwrap_or(&self.shell)
+                .unwrap_or(&process.shell)
                 .to_string(),
-            cwd: self.cwd.clone(),
-            cwd_label: match self.cwd.as_str() {
+            cwd: process.cwd.clone(),
+            cwd_label: match process.cwd.as_str() {
                 "" | "/" => None,
                 cwd => Some(cwd.to_string()),
             },
             cols: 0,
             rows: 0,
             pid: pid.0,
-            uptime_secs: self.uptime_secs,
-            uptime_label: ProcessUptime(self.uptime_secs).label(locale),
+            uptime_secs: process.uptime_secs,
+            uptime_label: ProcessUptime(process.uptime_secs).label(locale),
             cpu_percent: usage.cpu_percent,
             cpu_label: format!("{:.1}", usage.cpu_percent),
             mem_bytes: usage.mem_bytes,
@@ -407,72 +402,9 @@ impl LocalVmuxProcess {
     }
 }
 
-struct ProcSample {
-    parent: Option<u32>,
-    cpu: f32,
-    mem: u64,
-}
-
-struct MonitoredProcesses {
-    pids: Vec<sysinfo::Pid>,
-}
-
-impl MonitoredProcesses {
-    fn new(system: &sysinfo::System, service_roots: impl IntoIterator<Item = u32>) -> Self {
-        let mut roots = service_roots
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        let mut children = HashMap::<u32, Vec<u32>>::new();
-        for (pid, process) in system.processes() {
-            let pid = pid.as_u32();
-            if let Some(parent) = process.parent() {
-                children.entry(parent.as_u32()).or_default().push(pid);
-            }
-            let name = process.name().to_string_lossy();
-            let executable = process
-                .exe()
-                .map(|path| path.to_string_lossy())
-                .unwrap_or_default();
-            if LocalVmuxProcess::matches(&name, &executable) {
-                roots.insert(pid);
-            }
-        }
-        let mut selected = roots.clone();
-        let mut pending = roots.into_iter().collect::<Vec<_>>();
-        while let Some(parent) = pending.pop() {
-            let Some(descendants) = children.get(&parent) else {
-                continue;
-            };
-            for child in descendants {
-                if selected.insert(*child) {
-                    pending.push(*child);
-                }
-            }
-        }
-        let mut pids = selected
-            .into_iter()
-            .map(sysinfo::Pid::from_u32)
-            .collect::<Vec<_>>();
-        pids.sort_by_key(|pid| pid.as_u32());
-        Self { pids }
-    }
-
-    fn samples(&self, system: &sysinfo::System) -> HashMap<u32, ProcSample> {
-        let mut samples = HashMap::new();
-        for pid in &self.pids {
-            let Some(process) = system.process(*pid) else {
-                continue;
-            };
-            samples.insert(
-                pid.as_u32(),
-                ProcSample {
-                    parent: process.parent().map(|parent| parent.as_u32()),
-                    cpu: process.cpu_usage(),
-                    mem: process.memory(),
-                },
-            );
-        }
-        samples
+impl From<LocalProcess> for LocalVmuxProcess {
+    fn from(process: LocalProcess) -> Self {
+        Self(process)
     }
 }
 
@@ -540,6 +472,7 @@ fn sample_process_usage(
     mut runtime: Query<(Entity, &mut ProcessMonitor)>,
     monitors: Query<(), (With<ProcessMonitorView>, With<KeyboardOwner>)>,
     claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
+    opened: Query<(), Added<ProcessMonitorView>>,
     mut service_processes: Query<(&ProcessPid, &mut Usage), With<ServiceProcess>>,
     local_processes: Query<(Entity, &ProcessPid), With<LocalVmuxProcess>>,
     mut commands: Commands,
@@ -554,55 +487,43 @@ fn sample_process_usage(
         .iter_mut()
         .map(|(pid, _)| pid.0)
         .collect::<Vec<_>>();
-    let Some(monitored) = runtime.refresh(time.delta(), !claimed.is_empty(), service_roots) else {
+    let Some(snapshot) = runtime.sampler.refresh(
+        time.delta(),
+        !claimed.is_empty(),
+        !opened.is_empty() || !claimed.is_empty(),
+        service_roots,
+    ) else {
         return;
     };
-    let samples = monitored.samples(&runtime.system);
+    runtime.cpu_ready = snapshot.cpu_ready;
 
     for (pid, mut usage) in &mut service_processes {
-        *usage = Usage::subtree(pid.0, &samples);
+        *usage = Usage::subtree(pid.0, &snapshot.samples);
     }
 
     let mut existing = HashMap::new();
     for (entity, pid) in &local_processes {
         existing.insert(pid.0, entity);
     }
-    for pid in &monitored.pids {
-        let Some(process) = runtime.system.process(*pid) else {
-            continue;
-        };
-        let name = process.name().to_string_lossy().into_owned();
-        let executable = process
-            .exe()
-            .map(|path| path.to_string_lossy().into_owned())
+    for (pid, details) in snapshot.local {
+        let pid = ProcessPid(pid);
+        let usage = snapshot
+            .samples
+            .get(&pid.0)
+            .map(|sample| Usage {
+                cpu_percent: sample.cpu,
+                mem_bytes: sample.mem,
+            })
             .unwrap_or_default();
-        if !LocalVmuxProcess::matches(&name, &executable) {
-            continue;
-        }
-        let pid = ProcessPid(pid.as_u32());
-        let details = LocalVmuxProcess {
-            shell: if executable.is_empty() {
-                name
-            } else {
-                executable
-            },
-            cwd: process
-                .cwd()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            uptime_secs: process.run_time(),
-        };
-        let usage = Usage {
-            cpu_percent: process.cpu_usage(),
-            mem_bytes: process.memory(),
-        };
         if let Some(entity) = existing.remove(&pid.0) {
-            commands.entity(entity).insert((details, usage));
+            commands
+                .entity(entity)
+                .insert((LocalVmuxProcess::from(details), usage));
         } else {
             commands.spawn((
                 Name::new(format!("Vmux process {}", pid.0)),
                 pid,
-                details,
+                LocalVmuxProcess::from(details),
                 usage,
             ));
         }
@@ -614,7 +535,7 @@ fn sample_process_usage(
 }
 
 fn broadcast_to_monitors(
-    runtime: Query<(Entity, Has<ProcessMonitorDirty>), With<ProcessMonitor>>,
+    runtime: Query<(Entity, &ProcessMonitor, Has<ProcessMonitorDirty>)>,
     service_processes: Query<(&ProcessId, &ProcessPid, &ServiceProcess, &Usage, &Order)>,
     local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
     connected: Option<Single<(), With<ServiceConnected>>>,
@@ -634,7 +555,7 @@ fn broadcast_to_monitors(
     if monitors.is_empty() {
         return;
     }
-    let Ok((runtime_entity, dirty)) = runtime.single() else {
+    let Ok((runtime_entity, runtime, dirty)) = runtime.single() else {
         return;
     };
     if !dirty && claimed.is_empty() && monitors.iter().all(|(_, _, view_dirty)| !view_dirty) {
@@ -674,6 +595,11 @@ fn broadcast_to_monitors(
         processes.push(process);
     }
 
+    if !runtime.cpu_ready {
+        for process in &mut processes {
+            process.cpu_label.clear();
+        }
+    }
     let total_count = processes.len() as u32;
     let managed_count = processes.iter().filter(|process| process.managed).count() as u32;
     let total_cpu_percent = processes
@@ -731,8 +657,8 @@ fn broadcast_to_monitors(
             .iter()
             .copied()
             .collect::<Vec<_>>();
-        let cpu_graph = Sparkline::plot(&cpu_history, 100.0);
-        let memory_graph = Sparkline::plot(&memory_history, 128.0);
+        let cpu_graph = Sparkline::plot(&cpu_history, 5.0);
+        let memory_graph = Sparkline::plot(&memory_history, 64.0);
         let state = ProcessesUiState {
             connected,
             query: monitor.query.clone(),
@@ -740,10 +666,26 @@ fn broadcast_to_monitors(
             managed_count,
             cpu: ProcessUsageUiState {
                 label: "CPU".to_string(),
-                value: format!("{total_cpu_percent:.1}%"),
-                peak: format!("↑ {peak_cpu_percent:.1}%"),
-                line: cpu_graph.line,
-                area: cpu_graph.area,
+                value: if runtime.cpu_ready {
+                    format!("{total_cpu_percent:.1}%")
+                } else {
+                    String::new()
+                },
+                peak: if runtime.cpu_ready {
+                    format!("↑ {peak_cpu_percent:.1}%")
+                } else {
+                    String::new()
+                },
+                line: if runtime.cpu_ready {
+                    cpu_graph.line
+                } else {
+                    String::new()
+                },
+                area: if runtime.cpu_ready {
+                    cpu_graph.area
+                } else {
+                    String::new()
+                },
             },
             memory: ProcessUsageUiState {
                 label: locale.translate("services-memory"),
@@ -890,11 +832,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sparkline_scales_against_a_floor() {
-        let graph = Sparkline::plot(&[0.0, 50.0, 100.0], 100.0);
+    fn sparkline_uses_the_visible_sample_range() {
+        let graph = Sparkline::plot(&[19.0, 19.5, 20.0], 5.0);
 
-        assert_eq!(graph.line, "0.00,39.00 50.00,20.50 100.00,2.00");
-        assert!(graph.area.starts_with("0,40 "));
+        assert_eq!(
+            graph.line,
+            "M 0.00 24.20 C 8.33 23.58, 33.33 21.73, 50.00 20.50 C 66.67 19.27, 91.67 17.42, 100.00 16.80"
+        );
+        assert!(graph.area.starts_with("M 0 40 L 0.00 24.20"));
+        assert!(graph.area.ends_with("L 100 40 Z"));
     }
 
     #[test]
@@ -1041,11 +987,11 @@ mod tests {
     #[test]
     fn local_vmux_process_entry_is_unmanaged() {
         let locale = Locale::from("en-US");
-        let process = LocalVmuxProcess {
+        let process = LocalVmuxProcess(LocalProcess {
             shell: "/Applications/Vmux.app/Contents/MacOS/vmux_desktop".to_string(),
             cwd: "/tmp".to_string(),
             uptime_secs: 10,
-        };
+        });
         let entry = process.entry(
             ProcessPid(42),
             Usage {
@@ -1058,18 +1004,5 @@ mod tests {
         assert_eq!(entry.pid, 42);
         assert_eq!(entry.cpu_percent, 3.0);
         assert_eq!(entry.mem_bytes, 1024);
-    }
-
-    #[test]
-    fn vmux_process_match_uses_process_or_executable_name() {
-        assert!(LocalVmuxProcess::matches("vmux_desktop Helper", ""));
-        assert!(LocalVmuxProcess::matches(
-            "helper",
-            "/Applications/Vmux.app/Contents/MacOS/vmux_service"
-        ));
-        assert!(!LocalVmuxProcess::matches(
-            "codex",
-            "/Users/test/.vmux/projects/repo/codex"
-        ));
     }
 }

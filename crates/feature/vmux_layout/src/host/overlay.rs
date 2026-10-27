@@ -13,12 +13,23 @@ impl Plugin for LayoutOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(LayoutOverlayEvent,)>::default())
             .add_observer(emit)
-            .add_systems(PreUpdate, adopt_window_overlays);
+            .add_systems(PreUpdate, adopt_window_overlays)
+            .add_systems(PostUpdate, cleanup);
     }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct LayoutOverlayActive(BTreeSet<String>);
+
+#[derive(Component, Default)]
+pub struct LayoutOverlayDismissRevision(u64);
+
+impl LayoutOverlayDismissRevision {
+    pub fn next_effect(&mut self) -> crate::event::LayoutOverlayDismissEffect {
+        self.0 = self.0.wrapping_add(1).max(1);
+        crate::event::LayoutOverlayDismissEffect { revision: self.0 }
+    }
+}
 
 fn emit(
     trigger: On<UiInput<LayoutOverlayEvent>>,
@@ -39,10 +50,13 @@ fn emit(
         return;
     };
     overlays.0.remove(&event.id);
-    if overlays.0.is_empty()
-        && let Ok(mut webview) = commands.get_entity(trigger.event().webview)
-    {
-        webview.remove::<LayoutOverlayActive>();
+}
+
+fn cleanup(active: Query<(Entity, &LayoutOverlayActive)>, mut commands: Commands) {
+    for (entity, overlays) in &active {
+        if overlays.0.is_empty() {
+            commands.entity(entity).remove::<LayoutOverlayActive>();
+        }
     }
 }
 

@@ -36,6 +36,7 @@ pub struct CurrentSpaceSet;
 #[require(
     Save,
     SpaceId,
+    vmux_ecs::CollectionView,
     EffectiveStartupDir,
     EffectiveStartupUrl,
     crate::profile::Profile
@@ -316,6 +317,17 @@ mod tests {
         assert_eq!(
             Space::container_node().position_type,
             PositionType::Absolute
+        );
+    }
+
+    #[test]
+    fn space_owns_the_persisted_collection_view() {
+        let mut app = App::new();
+        let space = app.world_mut().spawn(Space).id();
+
+        assert_eq!(
+            app.world().get::<vmux_ecs::CollectionView>(space),
+            Some(&vmux_ecs::CollectionView::List)
         );
     }
 

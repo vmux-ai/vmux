@@ -6,18 +6,18 @@ use vmux_api::team::{
     TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
     TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
 };
-use vmux_ui::components::avatar::Avatar;
+use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
-use vmux_ui::components::select::{
-    Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger,
-};
-use vmux_ui::dioxus_ext::attributes;
+use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownSelector};
+use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
+use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
-    component = Page
+    component = Page,
+    states = ["ThemeUiState", "TeamUiState"]
 )]
 pub(crate) struct TeamPage;
 
@@ -37,10 +37,9 @@ pub fn Page() -> Element {
     rsx! {
         div {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
-            header { class: "flex items-center justify-between border-b border-border px-5 py-4",
-                div { class: "min-w-0",
-                    h1 { class: "text-lg font-semibold tracking-tight", {translate("team-title")} }
-                }
+            WorkspaceBreadcrumbHeader {
+                current: WorkspacePage::Team.option(),
+                options: WorkspacePage::options(),
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-5 py-5",
                 div { class: "mx-auto w-full max-w-4xl",
@@ -72,9 +71,9 @@ fn ProfileSection(
         .as_ref()
         .map(|profile| profile.id.clone())
         .unwrap_or_default();
-    let selected: Option<Option<String>> = Some((!active_id.is_empty()).then(|| active_id.clone()));
     let switch_active_id = active_id.clone();
     let edit_active_id = active_id.clone();
+    let mut profile_open = use_signal(|| false);
 
     rsx! {
         section { class: "mb-6",
@@ -83,61 +82,64 @@ fn ProfileSection(
             }
             div { class: "flex max-w-xl flex-col gap-2",
                 if let Some(form) = form.as_ref().filter(|form| form.profile_id.is_some()) {
-                    div { class: "glass flex min-h-16 items-center rounded-xl border border-primary/20 p-2",
-                        ProfileFormView { form: form.clone() }
+                    div { class: "flex h-12 items-center rounded-lg bg-foreground/[0.035] px-2",
+                        ProfileFormView {
+                            form: form.clone(),
+                            color: active.as_ref().map(|profile| profile.color.clone()).unwrap_or_default(),
+                        }
                     }
                 } else if let Some(active) = active.clone() {
-                    div { class: "flex items-stretch gap-2",
+                    div { class: "flex items-stretch rounded-lg bg-primary/[0.055] p-1",
                         div { class: "min-w-0 flex-1",
-                            Select::<String> {
-                                value: Into::<ReadSignal<Option<Option<String>>>>::into(Signal::new(selected)),
-                                default_value: Some(active_id.clone()),
-                                placeholder: Into::<ReadSignal<String>>::into(Signal::new(translate("team-profiles"))),
-                                on_value_change: Callback::new(move |profile_id: Option<String>| {
-                                    if let Some(profile_id) = profile_id
-                                        && profile_id != switch_active_id
-                                    {
-                                        let _ = send(&TeamProfileSwitchRequest { profile_id });
-                                    }
-                                }),
-                                attributes: vec![],
-                                SelectTrigger {
-                                    attributes: attributes!(button {
-                                        class: "w-full rounded-xl bg-primary/[0.06] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_25%,transparent)] dark:bg-primary/[0.06]"
-                                    }),
+                            DropdownSelector {
+                                label: active.name.clone(),
+                                title: active.id.clone(),
+                                open: profile_open(),
+                                active: true,
+                                align: DropdownAlign::Start,
+                                class: "w-full min-w-0".to_string(),
+                                trigger_class: "h-10 w-full justify-start bg-transparent px-2 hover:bg-foreground/[0.055]".to_string(),
+                                popup_class: "max-h-80 min-w-64 overflow-y-auto p-1".to_string(),
+                                ontoggle: move |_| profile_open.set(!profile_open()),
+                                on_dismiss: move |_| profile_open.set(false),
+                                leading: rsx! {
                                     Avatar {
                                         src: None,
                                         seed: active.id.clone(),
                                         background: active.color.clone(),
                                         alt: active.name.clone(),
-                                        class: "size-8",
+                                        class: "size-7",
                                     }
-                                    div { class: "flex min-w-0 flex-1 flex-col items-start",
-                                        span { class: "truncate text-sm font-semibold text-foreground", "{active.name}" }
-                                        span { class: "truncate font-mono text-[10px] text-muted-foreground", "{active.id}" }
-                                    }
-                                }
-                                SelectList { attributes: vec![],
-                                    SelectGroup { attributes: vec![],
-                                        for (index, profile) in profiles.iter().enumerate() {
-                                            SelectOption::<String> {
+                                },
+                                for profile in profiles.iter().cloned() {
+                                    {
+                                        let selected = profile.id == active_id;
+                                        let profile_id = profile.id.clone();
+                                        let selected_profile_id = profile_id.clone();
+                                        let active_profile_id = switch_active_id.clone();
+                                        rsx! {
+                                            DropdownOption {
                                                 key: "profile-{profile.id}",
-                                                value: Into::<ReadSignal<String>>::into(Signal::new(profile.id.clone())),
-                                                index,
-                                                text_value: Some(profile.name.clone()),
-                                                attributes: vec![],
+                                                label: profile.name.clone(),
+                                                secondary: profile.id.clone(),
+                                                selected,
+                                                onclick: move |_| {
+                                                    profile_open.set(false);
+                                                    if selected_profile_id != active_profile_id {
+                                                        let _ = send(&TeamProfileSwitchRequest {
+                                                            profile_id: selected_profile_id.clone(),
+                                                        });
+                                                    }
+                                                },
+                                                leading: rsx! {
                                                 Avatar {
                                                     src: None,
-                                                    seed: profile.id.clone(),
+                                                    seed: profile_id,
                                                     background: profile.color.clone(),
                                                     alt: profile.name.clone(),
                                                     class: "size-7",
                                                 }
-                                                div { class: "flex min-w-0 flex-1 flex-col items-start",
-                                                    span { class: "truncate text-sm font-medium", "{profile.name}" }
-                                                    span { class: "truncate font-mono text-[10px] opacity-60", "{profile.id}" }
-                                                }
-                                                SelectItemIndicator {}
+                                                },
                                             }
                                         }
                                     }
@@ -147,7 +149,7 @@ fn ProfileSection(
                         button {
                             id: "edit-active-profile",
                             r#type: "button",
-                            class: "glass flex w-11 shrink-0 items-center justify-center rounded-xl border border-border/70 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground",
+                            class: "flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.075] hover:text-foreground",
                             title: translate("team-edit-profile"),
                             onclick: move |_| {
                                 let _ = send(&TeamProfileFormOpenRequest {
@@ -155,22 +157,19 @@ fn ProfileSection(
                                     draft: active.name.clone(),
                                 });
                             },
-                            svg { class: "size-4", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
-                                path { d: "M12 20h9" }
-                                path { d: "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" }
-                            }
+                            LineIconView { icon: LineIcon::Pencil, class: "size-4" }
                         }
                     }
                 }
                 if let Some(form) = form.as_ref().filter(|form| form.profile_id.is_none()) {
-                    div { key: "create-{profile_count}", class: "glass flex min-h-24 items-center rounded-xl border border-border/70 p-2",
-                        ProfileFormView { form: form.clone() }
+                    div { key: "create-{profile_count}", class: "flex h-12 items-center rounded-lg bg-foreground/[0.035] px-2",
+                        ProfileFormView { form: form.clone(), color: String::new() }
                     }
                 } else {
                     button {
                         id: "new-profile",
                         r#type: "button",
-                        class: "flex h-10 items-center justify-center gap-2 rounded-xl border border-dashed border-border text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:bg-foreground/[0.035] hover:text-foreground",
+                        class: "flex h-10 items-center justify-center gap-2 rounded-lg bg-foreground/[0.03] text-sm font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.065] hover:text-foreground",
                         onclick: move |_| {
                             let _ = send(&TeamProfileFormOpenRequest {
                                 profile_id: None,
@@ -189,15 +188,28 @@ fn ProfileSection(
 }
 
 #[component]
-fn ProfileFormView(form: TeamProfileForm) -> Element {
+fn ProfileFormView(form: TeamProfileForm, color: String) -> Element {
     let mut finished = use_signal(|| false);
     let submission = ProfileFormSubmission(form.clone());
     let enter = submission.clone();
-    let blur = submission.clone();
+    let click = submission.clone();
+    let seed = if form.draft.trim().is_empty() {
+        "profile".to_string()
+    } else {
+        form.draft.clone()
+    };
+    let disabled = form.draft.trim().is_empty();
     rsx! {
+        Avatar {
+            src: None,
+            seed,
+            background: color,
+            alt: form.draft.clone(),
+            class: "size-8 shrink-0 text-[9px]".to_string(),
+        }
         input {
             r#type: "text",
-            class: "m-1 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50",
+            class: "h-full min-w-0 flex-1 bg-transparent px-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/60",
             placeholder: translate("team-profile-name"),
             aria_label: translate("team-profile-name"),
             value: form.draft,
@@ -219,12 +231,20 @@ fn ProfileFormView(form: TeamProfileForm) -> Element {
                 }
                 _ => {}
             },
-            onblur: move |_| {
+        }
+        button {
+            r#type: "button",
+            class: "flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.075] hover:text-foreground disabled:pointer-events-none disabled:opacity-30",
+            title: translate("common-save"),
+            aria_label: translate("common-save"),
+            disabled,
+            onclick: move |_| {
                 if !finished() {
                     finished.set(true);
-                    blur.submit();
+                    click.submit();
                 }
             },
+            LineIconView { icon: LineIcon::Check, class: "size-4" }
         }
     }
 }
@@ -299,7 +319,7 @@ fn AgentAvatar(member: TeamMemberRow) -> Element {
 
     rsx! {
         div { class: "relative shrink-0",
-            Avatar {
+            AgentThumbnail {
                 src,
                 seed: member.name.clone(),
                 background: member.color.clone(),

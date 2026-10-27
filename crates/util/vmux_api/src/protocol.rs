@@ -435,6 +435,16 @@ mod tests {
                 sid: "s".into(),
                 cwd: "/tmp/worktree".into(),
             },
+            ClientMessage::ListAcpSessions {
+                request_id: 9,
+                agent_id: "codex-acp".into(),
+                agent_name: "Codex".into(),
+                command: "codex-acp".into(),
+                args: vec!["--acp".into()],
+                env: vec![("K".into(), "V".into())],
+                cwd: "/tmp".into(),
+            },
+            ClientMessage::CancelAcpSessionCatalog { request_id: 9 },
         ];
         for msg in messages {
             let expects_allow_always = matches!(
@@ -506,39 +516,25 @@ mod tests {
             mcp_command: Some("vmux".into()),
             mcp_args: vec!["mcp".into(), "--anchor".into()],
             resume_acp_session_id: Some("prev-session".into()),
-            managed_mcp_servers: vec![ManagedMcpServer {
-                name: "docs".into(),
-                transport: ManagedMcpTransport::Http,
-                command: None,
-                args: Vec::new(),
-                env: Vec::new(),
-                cwd: None,
-                url: Some("https://example.com/mcp".into()),
-                headers: Vec::new(),
-            }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
         let ClientMessage::SpawnAcpAgent {
-            managed_mcp_servers,
+            sid,
+            agent_id,
+            mcp_command,
+            mcp_args,
+            resume_acp_session_id,
             ..
         } = decoded
         else {
             panic!("expected SpawnAcpAgent");
         };
-        assert_eq!(
-            managed_mcp_servers,
-            vec![ManagedMcpServer {
-                name: "docs".into(),
-                transport: ManagedMcpTransport::Http,
-                command: None,
-                args: Vec::new(),
-                env: Vec::new(),
-                cwd: None,
-                url: Some("https://example.com/mcp".into()),
-                headers: Vec::new(),
-            }]
-        );
+        assert_eq!(sid, "s1");
+        assert_eq!(agent_id, "vibe-acp");
+        assert_eq!(mcp_command.as_deref(), Some("vmux"));
+        assert_eq!(mcp_args, ["mcp", "--anchor"]);
+        assert_eq!(resume_acp_session_id.as_deref(), Some("prev-session"));
 
         let services = [
             ServiceMessage::AcpTerminalCreated {
@@ -586,6 +582,19 @@ mod tests {
                 config_id: Some("model".into()),
                 value: "opus".into(),
                 succeeded: false,
+            },
+            ServiceMessage::AcpSessionCatalog {
+                request_id: 9,
+                agent_id: "codex-acp".into(),
+                agent_name: "Codex".into(),
+                supported: true,
+                sessions: vec![AcpProviderSession {
+                    id: "provider-session".into(),
+                    cwd: "/tmp".into(),
+                    title: "Review changes".into(),
+                    updated_at: "2026-10-24T00:00:00Z".into(),
+                }],
+                error: None,
             },
         ];
         for msg in services {

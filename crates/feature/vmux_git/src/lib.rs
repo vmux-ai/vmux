@@ -1,7 +1,8 @@
 #[cfg(host)]
 pub use host::{
     FileGit, GitCheckForUpdatesRequest, GitDiffSource, GitError, GitPlugin, GitRepository,
-    RepoInfoCache, worktree,
+    GitRuntime, GitTask, RepoInfoCache, RepositoryProvisionCompleted, RepositoryProvisionOperation,
+    RepositoryProvisionRequest, worktree,
 };
 
 #[cfg(host)]
@@ -21,6 +22,10 @@ pub const GIT_PAGE_URL: &str = "git://";
 pub struct GitUrl;
 
 impl GitUrl {
+    pub fn is_page(value: &str) -> bool {
+        value.starts_with(GIT_PAGE_URL)
+    }
+
     pub fn parse(value: &str) -> Option<std::path::PathBuf> {
         let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
         Self::parse_with_home(value, home.as_deref())
@@ -51,6 +56,40 @@ impl GitUrl {
         let file_url = url::Url::from_file_path(path).ok()?;
         let rest = file_url.as_str().strip_prefix("file:///")?;
         Some(format!("{GIT_PAGE_URL}{rest}"))
+    }
+
+    pub fn from_path_with_commit(path: &std::path::Path, commit: Option<&str>) -> Option<String> {
+        let base = Self::from_path(path)?;
+        let Some(commit) = commit.filter(|commit| !commit.is_empty()) else {
+            return Some(base);
+        };
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        serializer.append_pair("commit", commit);
+        Some(format!("{base}?{}", serializer.finish()))
+    }
+
+    pub fn from_path_preserving_commit(
+        path: &std::path::Path,
+        current_url: &str,
+    ) -> Option<String> {
+        let commit = if Self::parse(current_url).as_deref() == Some(path) {
+            Self::commit(current_url)
+        } else {
+            None
+        };
+        Self::from_path_with_commit(path, commit.as_deref())
+    }
+
+    pub fn commit(value: &str) -> Option<String> {
+        let query = value
+            .split_once('?')?
+            .1
+            .split('#')
+            .next()
+            .unwrap_or_default();
+        url::form_urlencoded::parse(query.as_bytes()).find_map(|(key, value)| {
+            (key == "commit" && !value.is_empty()).then(|| value.into_owned())
+        })
     }
 }
 
@@ -92,5 +131,35 @@ mod tests {
                 "/Users/me/.vmux/projects/github.com/vmux-ai/vmux-cloud"
             ))
         );
+    }
+
+    #[test]
+    fn git_url_round_trips_a_selected_commit() {
+        let path = std::path::Path::new("/Users/me/a repo");
+        let url = GitUrl::from_path_with_commit(path, Some("abc/123")).unwrap();
+
+        assert_eq!(url, "git://Users/me/a%20repo?commit=abc%2F123");
+        assert_eq!(GitUrl::parse(&url), Some(path.to_path_buf()));
+        assert_eq!(GitUrl::commit(&url).as_deref(), Some("abc/123"));
+        assert_eq!(
+            GitUrl::from_path_with_commit(path, None),
+            GitUrl::from_path(path)
+        );
+        assert_eq!(
+            GitUrl::from_path_preserving_commit(path, &url),
+            Some(url.clone())
+        );
+        assert_eq!(
+            GitUrl::from_path_preserving_commit(std::path::Path::new("/Users/me/other"), &url),
+            GitUrl::from_path(std::path::Path::new("/Users/me/other"))
+        );
+    }
+
+    #[test]
+    fn git_page_identity_excludes_project_hosts() {
+        assert!(GitUrl::is_page("git://"));
+        assert!(GitUrl::is_page("git://Users/me/repo"));
+        assert!(!GitUrl::is_page("vmux://git/"));
+        assert!(!GitUrl::is_page("vmux://projects/"));
     }
 }

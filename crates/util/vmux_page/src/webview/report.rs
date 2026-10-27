@@ -4,7 +4,7 @@ use std::rc::Rc;
 use tracing::{error, info, warn};
 
 use crate::page::Page;
-use crate::webview::embed::{Outbox, Wake};
+use crate::webview::embed::{LifecycleSink, LifecycleUpdate, Outbox, Wake};
 use crate::webview::measurement::{Measured, PendingReads};
 
 use base64::Engine;
@@ -21,6 +21,7 @@ enum PageReport<'a> {
     },
     Link(&'a str),
     Favicon(&'a str),
+    Interaction,
     Emitted(&'a str),
 }
 
@@ -44,6 +45,9 @@ impl<'a> From<&'a str> for PageReport<'a> {
         }
         if let Some(href) = body.strip_prefix("favicon:") {
             return Self::Favicon(href);
+        }
+        if body == "interaction:" {
+            return Self::Interaction;
         }
 
         Self::Emitted(body)
@@ -69,6 +73,7 @@ pub(crate) struct PageMessage {
     page: Rc<Cell<&'static Page>>,
     reads: PendingReads,
     waker: Rc<dyn Wake>,
+    lifecycle: Rc<dyn LifecycleSink>,
 }
 
 impl PageMessage {
@@ -77,12 +82,14 @@ impl PageMessage {
         outbox: Rc<dyn Outbox>,
         reads: PendingReads,
         waker: Rc<dyn Wake>,
+        lifecycle: Rc<dyn LifecycleSink>,
     ) -> Self {
         Self {
             outbox,
             page,
             reads,
             waker,
+            lifecycle,
         }
     }
 
@@ -92,6 +99,7 @@ impl PageMessage {
             PageReport::Measured { token, measured } => self.measured(token, measured),
             PageReport::Link(href) => self.link(href),
             PageReport::Favicon(href) => self.outbox.set_favicon(href),
+            PageReport::Interaction => self.lifecycle.update(LifecycleUpdate::PageInteracted),
             PageReport::Emitted(payload) => self.emit(payload),
         }
     }
@@ -150,6 +158,7 @@ mod tests {
                 },
                 PageReport::Link(href) => format!("link {href}"),
                 PageReport::Favicon(href) => format!("favicon {href}"),
+                PageReport::Interaction => "interaction".to_string(),
                 PageReport::Emitted(payload) => format!("emitted {payload}"),
             }
         }
@@ -165,6 +174,7 @@ mod tests {
             "measured:9:1,2",
             "link:https://example.com/a:b",
             "favicon:vmux://history/assets/favicons/history.svg",
+            "interaction:",
             "AAAA",
         ]
         .iter()
@@ -181,6 +191,7 @@ mod tests {
                 "measured 9 gone",
                 "link https://example.com/a:b",
                 "favicon vmux://history/assets/favicons/history.svg",
+                "interaction",
                 "emitted AAAA",
             ]
         );

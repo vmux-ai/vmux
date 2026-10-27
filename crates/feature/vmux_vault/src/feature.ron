@@ -3,7 +3,7 @@
         (
             url: "vmux://vault/",
             title: "Vault",
-            bookmark: Some(60),
+            bookmark: Some(90),
             title_message_id: "vault-title",
             keywords: ["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
             icon: "Vault",
@@ -11,7 +11,8 @@
             manifest: true,
             permissions: [
                 "PageReady",
-                "ThemeEvent",
+                "ThemeUiState",
+                "OpenRequest",
                 "VaultUiState",
                 "VaultRefreshRequest",
                 "VaultCreateRequest",

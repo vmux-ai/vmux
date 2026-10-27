@@ -57,6 +57,11 @@ impl PageDom {
         Some(self.mutations.export_memory())
     }
 
+    pub fn update_instance(&mut self, instance: crate::Instance) {
+        instance.provide_to(&self.dom);
+        self.dom.mark_all_dirty();
+    }
+
     fn has_work(&mut self) -> bool {
         let mut context = Context::from_waker(Waker::noop());
 
@@ -120,6 +125,12 @@ mod tests {
     #[component]
     fn Static() -> Element {
         rsx! { div { "hello" } }
+    }
+
+    #[component]
+    fn InstanceContext() -> Element {
+        let value = consume_context::<String>();
+        rsx! { div { "{value}" } }
     }
 
     #[test]
@@ -192,6 +203,22 @@ mod tests {
             "a field the reader cannot edit by hand is only ever set by its state, so a batch \
              that leaves the new text out leaves the field showing the old one for good"
         );
+    }
+
+    #[test]
+    fn updating_an_instance_renders_again_without_rebuilding_the_dom() {
+        let mut page = PageDom::mount(
+            InstanceContext,
+            crate::Instance::from(|scope: crate::PageScope<'_>| scope.provide("first".to_string())),
+        );
+        page.rebuild();
+        page.flushed();
+        page.update_instance(crate::Instance::from(|scope: crate::PageScope<'_>| {
+            scope.provide("second".to_string())
+        }));
+
+        let batch = page.render().expect("the changed context dirties the page");
+        assert!(String::from_utf8_lossy(&batch).contains("second"));
     }
 
     #[test]

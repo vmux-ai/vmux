@@ -28,7 +28,10 @@ fn term_open(
     if url.is_empty() {
         return;
     }
-    stack_requests.write(OpenRequest { url: Some(url) });
+    stack_requests.write(OpenRequest {
+        url: Some(url),
+        focus_existing: false,
+    });
     if let Some(proxy) = proxy.as_ref() {
         let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
     }
@@ -203,7 +206,10 @@ mod tests {
         let captured = app.world().resource::<Captured>();
         assert!(captured.0.iter().any(|request| matches!(
             request,
-            OpenRequest { url: Some(url) } if url == "https://vmux.ai"
+            OpenRequest {
+                url: Some(url),
+                focus_existing: false,
+            } if url == "https://vmux.ai"
         )));
     }
 

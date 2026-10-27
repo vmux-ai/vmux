@@ -11,6 +11,8 @@ pub struct ReloadEffect {
 #[vmux_api::contract(Copy, Default)]
 pub struct LayoutGeometry {
     #[serde(default)]
+    pub zen: bool,
+    #[serde(default)]
     pub header_open: bool,
     #[serde(default)]
     pub side_sheet_open: bool,
@@ -47,6 +49,10 @@ impl LayoutGeometry {
         }
     }
 
+    pub fn main_cef_center_offset(&self) -> f32 {
+        (self.main_cef_left() - self.window_pad_right) / 2.0
+    }
+
     pub fn header_left(&self) -> f32 {
         self.header_left.unwrap_or_else(|| self.main_cef_left())
     }
@@ -81,14 +87,14 @@ fn default_side_sheet_width() -> f32 {
 }
 
 fn default_pane_gap() -> f32 {
-    8.0
+    SIDE_SHEET_GAP_PX
 }
 
 fn default_window_pad() -> f32 {
     WINDOW_PAD_PX
 }
 
-pub const HEADER_HEIGHT_PX: f32 = 84.0;
+pub const HEADER_HEIGHT_PX: f32 = 76.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
 pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
@@ -98,6 +104,7 @@ pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 pub const WINDOW_PAD_PX: f32 = 8.0;
 
 pub const PANE_GAP_PX: f32 = 4.0;
+pub const SIDE_SHEET_GAP_PX: f32 = 8.0;
 
 pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
 pub const SIDE_SHEET_MIN_WIDTH_PX: f32 = 160.0;
@@ -188,6 +195,13 @@ mod address_tests {
     }
 
     #[test]
+    fn an_internal_page_decodes_escaped_path_segments_for_display() {
+        let parts = AddressParts::internal("vmux://simulator/ios/27.0/iPhone%2018%20Pro");
+        assert_eq!(parts.origin, "");
+        assert_eq!(parts.rest, "vmux://simulator/ios/27.0/iPhone 18 Pro");
+    }
+
+    #[test]
     fn a_file_in_a_checkout_is_shown_against_its_repository_and_branch() {
         let parts = AddressParts::in_repo(
             Path::new("/w/.worktrees/lsp/client/crates/app/main.rs"),
@@ -264,6 +278,20 @@ mod tests {
 
         assert_eq!(closed.main_cef_left(), 16.0);
         assert_eq!(open.main_cef_left(), 304.0);
+    }
+
+    #[test]
+    fn main_cef_center_offset_centers_over_the_page_area() {
+        let geometry = LayoutGeometry {
+            side_sheet_open: true,
+            side_sheet_width: 220.0,
+            pane_gap: 4.0,
+            window_pad_left: 8.0,
+            window_pad_right: 8.0,
+            ..Default::default()
+        };
+
+        assert_eq!(geometry.main_cef_center_offset(), 112.0);
     }
 
     #[test]
@@ -383,7 +411,9 @@ impl AddressParts {
     }
 
     pub fn internal(url: &str) -> Self {
-        Self::new("", url.trim_end_matches('/'))
+        let url = url.trim_end_matches('/');
+        let decoded = percent_encoding::percent_decode_str(url).decode_utf8_lossy();
+        Self::new("", decoded)
     }
 
     pub fn in_repo(path: &Path, root: &Path, name: &str, branch: &str) -> Self {
@@ -612,6 +642,12 @@ pub struct SideSheetProjectOpenRequest {
 }
 
 #[vmux_api::ui_event(Eq)]
+pub struct SideSheetProjectPageOpenRequest {
+    pub pane_id: u64,
+    pub path: String,
+}
+
+#[vmux_api::ui_event(Eq)]
 pub struct SideSheetSectionRequest {
     pub pane_id: u64,
     pub path: String,
@@ -672,6 +708,11 @@ pub struct LayoutOverlayEvent {
     pub active: bool,
 }
 
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct LayoutOverlayDismissEffect {
+    pub revision: u64,
+}
+
 #[vmux_api::ui_event]
 pub struct RemoteCopyEvent;
 
@@ -683,6 +724,7 @@ pub struct RemoteRevokeRequest {
 #[vmux_api::contract(Default)]
 pub struct TabBoundary {
     pub effective_dir: String,
+    pub project_dir: String,
     pub source: String,
     pub repository: String,
     pub is_git_repo: bool,
@@ -701,6 +743,15 @@ pub struct TabBoundary {
 pub struct TabBoundaryState {
     pub boundary: Option<TabBoundary>,
     pub projects: Vec<vmux_ecs::event::ProjectRow>,
+    #[serde(default)]
+    pub branches: Vec<WorkspaceBranch>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct WorkspaceBranch {
+    pub branch: String,
+    pub checkout: String,
+    pub label: String,
 }
 
 #[vmux_api::contract(Default)]
@@ -711,10 +762,21 @@ pub struct ActiveSessionState {
 #[vmux_api::contract]
 pub struct ActiveSession {
     pub page: StackNode,
+    #[serde(default)]
+    pub task: Option<ActiveTask>,
     pub agent: Option<vmux_ecs::event::team::TeamMemberRow>,
     pub project: Option<ActiveWorkspaceProject>,
     pub boundary: Option<TabBoundary>,
     pub pane_id: u64,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ActiveTask {
+    pub name: String,
+    pub description: String,
+    pub stage: String,
+    pub stage_name: String,
+    pub runtime: String,
 }
 
 #[vmux_api::contract]
@@ -722,6 +784,11 @@ pub struct ActiveWorkspaceProject {
     pub root: vmux_ecs::event::ProjectRow,
     pub children: Vec<vmux_ecs::event::ProjectRow>,
     pub choices: Vec<vmux_ecs::event::ProjectRow>,
+    pub project_dir: String,
+    pub branch: String,
+    pub branches: Vec<WorkspaceBranch>,
+    #[serde(default)]
+    pub expanded: bool,
 }
 
 #[vmux_api::contract(Default)]
