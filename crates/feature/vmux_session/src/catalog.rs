@@ -25,8 +25,8 @@ use crate::model::{ProviderArchiveOperations, ProviderSessionTombstones};
 #[cfg(host)]
 use crate::{
     AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
-    ProviderArchive, ProviderStage, RunState, Session, SessionDuplicate, Stage, StageChangedAt,
-    StageDefinition, StageId, TerminalStage, Transcripts,
+    ProviderArchive, ProviderWorkflowState, RunState, Session, SessionDuplicate,
+    TerminalWorkflowState, Transcripts, WorkflowState, WorkflowStateChangedAt, WorkflowStateRef,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -273,10 +273,10 @@ type SessionCatalog<'w, 's> = Query<
         &'static Name,
         &'static Description,
         &'static Cwd,
-        &'static Stage,
+        &'static WorkflowStateRef,
         &'static CreatedAt,
         &'static LastActivatedAt,
-        &'static StageChangedAt,
+        &'static WorkflowStateChangedAt,
         Option<&'static ArchivedAt>,
         Option<&'static AgentId>,
         Option<&'static RunState>,
@@ -300,16 +300,16 @@ type LinkedSessions<'w, 's> = Query<
 >;
 
 #[cfg(host)]
-type StageCatalog<'w, 's> = Query<
+type WorkflowStateCatalog<'w, 's> = Query<
     'w,
     's,
     (
-        &'static StageId,
+        &'static Id<WorkflowState>,
         &'static Name,
         &'static Order,
-        Has<TerminalStage>,
+        Has<TerminalWorkflowState>,
     ),
-    With<StageDefinition>,
+    With<WorkflowState>,
 >;
 
 #[cfg(host)]
@@ -321,11 +321,11 @@ type ProviderStages<'w, 's> = Query<
         &'static ExternalScopeRef,
         &'static ResourceKind,
         &'static ExternalId,
-        &'static Stage,
-        &'static StageChangedAt,
+        &'static WorkflowStateRef,
+        &'static WorkflowStateChangedAt,
         &'static RemoteUpdatedAt,
     ),
-    With<ProviderStage>,
+    With<ProviderWorkflowState>,
 >;
 
 #[cfg(host)]
@@ -348,7 +348,7 @@ type ProviderArchives<'w, 's> = Query<
 struct CatalogSources<'w, 's> {
     sessions: SessionCatalog<'w, 's>,
     linked_sessions: LinkedSessions<'w, 's>,
-    stages: StageCatalog<'w, 's>,
+    stages: WorkflowStateCatalog<'w, 's>,
     providers: Res<'w, ProviderCatalog>,
     operations: ProviderArchiveOperations<'w, 's>,
     provider_stages: ProviderStages<'w, 's>,
@@ -370,10 +370,10 @@ type ChangedSessions<'w, 's> = Query<
             Changed<Name>,
             Changed<Description>,
             Changed<Cwd>,
-            Changed<Stage>,
+            Changed<WorkflowStateRef>,
             Changed<CreatedAt>,
             Changed<LastActivatedAt>,
-            Changed<StageChangedAt>,
+            Changed<WorkflowStateChangedAt>,
             Changed<ArchivedAt>,
             Changed<AgentId>,
             Changed<RunState>,
@@ -383,17 +383,17 @@ type ChangedSessions<'w, 's> = Query<
 >;
 
 #[cfg(host)]
-type ChangedStages<'w, 's> = Query<
+type ChangedWorkflowStates<'w, 's> = Query<
     'w,
     's,
     (),
     (
-        With<StageDefinition>,
+        With<WorkflowState>,
         Or<(
-            Changed<StageId>,
+            Changed<Id<WorkflowState>>,
             Changed<Name>,
             Changed<Order>,
-            Changed<TerminalStage>,
+            Changed<TerminalWorkflowState>,
         )>,
     ),
 >;
@@ -417,7 +417,7 @@ struct CatalogChanges<'w, 's> {
             )>,
         ),
     >,
-    stages: ChangedStages<'w, 's>,
+    stages: ChangedWorkflowStates<'w, 's>,
     events: Query<
         'w,
         's,
@@ -448,15 +448,15 @@ struct CatalogChanges<'w, 's> {
         's,
         (),
         (
-            With<ProviderStage>,
+            With<ProviderWorkflowState>,
             Or<(
-                Added<ProviderStage>,
+                Added<ProviderWorkflowState>,
                 Changed<ProviderKey>,
                 Changed<ExternalScopeRef>,
                 Changed<ResourceKind>,
                 Changed<ExternalId>,
-                Changed<Stage>,
-                Changed<StageChangedAt>,
+                Changed<WorkflowStateRef>,
+                Changed<WorkflowStateChangedAt>,
                 Changed<RemoteUpdatedAt>,
             )>,
         ),
@@ -484,14 +484,14 @@ struct CatalogChanges<'w, 's> {
     removed_names: RemovedComponents<'w, 's, Name>,
     removed_descriptions: RemovedComponents<'w, 's, Description>,
     removed_cwds: RemovedComponents<'w, 's, Cwd>,
-    removed_stages: RemovedComponents<'w, 's, Stage>,
+    removed_stages: RemovedComponents<'w, 's, WorkflowStateRef>,
     removed_created_at: RemovedComponents<'w, 's, CreatedAt>,
     removed_activated_at: RemovedComponents<'w, 's, LastActivatedAt>,
-    removed_stage_changed_at: RemovedComponents<'w, 's, StageChangedAt>,
-    removed_stage_definitions: RemovedComponents<'w, 's, StageDefinition>,
-    removed_stage_ids: RemovedComponents<'w, 's, StageId>,
+    removed_stage_changed_at: RemovedComponents<'w, 's, WorkflowStateChangedAt>,
+    removed_stage_definitions: RemovedComponents<'w, 's, WorkflowState>,
+    removed_stage_ids: RemovedComponents<'w, 's, Id<WorkflowState>>,
     removed_orders: RemovedComponents<'w, 's, Order>,
-    removed_terminal: RemovedComponents<'w, 's, TerminalStage>,
+    removed_terminal: RemovedComponents<'w, 's, TerminalWorkflowState>,
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
     removed_agents: RemovedComponents<'w, 's, AgentId>,
     removed_profiles: RemovedComponents<'w, 's, vmux_ecs::team::Profile>,
@@ -501,7 +501,7 @@ struct CatalogChanges<'w, 's> {
     removed_titles: RemovedComponents<'w, 's, AgentConversationTitle>,
     removed_events: RemovedComponents<'w, 's, ConversationEvent>,
     removed_messages: RemovedComponents<'w, 's, MessageContent>,
-    removed_provider_stages: RemovedComponents<'w, 's, ProviderStage>,
+    removed_provider_stages: RemovedComponents<'w, 's, ProviderWorkflowState>,
     removed_provider_archives: RemovedComponents<'w, 's, ProviderArchive>,
     removed_duplicates: RemovedComponents<'w, 's, SessionDuplicate>,
     removed_links: RemovedComponents<'w, 's, ExternalLink>,
@@ -587,7 +587,7 @@ fn project(
     let mut next = CatalogSnapshot::default();
     for (id, name, order, terminal) in &stages {
         next.stages.push(StageSummary {
-            id: id.0.clone(),
+            id: id.as_str().to_string(),
             name: name.as_str().to_string(),
             order: order.0,
             terminal,
@@ -667,7 +667,7 @@ fn project(
             name: name.as_str().to_string(),
             description: description.0.clone(),
             cwd: cwd.0.to_string_lossy().into_owned(),
-            stage: stage.0.0.clone(),
+            stage: stage.id().as_str().to_string(),
             created_at: created_at.milliseconds(),
             last_activated_at: last_activated_at.milliseconds(),
             stage_changed_at: stage_changed_at.milliseconds(),
@@ -705,7 +705,7 @@ fn project(
                         id.clone(),
                     ),
                     (
-                        stage.0.0.clone(),
+                        stage.id().as_str().to_string(),
                         changed_at.milliseconds(),
                         source_updated_at.0.0,
                     ),
@@ -999,10 +999,10 @@ mod tests {
         app.update();
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
                 identity: ProviderFixture::identity("codex", "provider-session"),
-                stage: StageId("done".into()),
+                workflow_state: Id::new("done"),
                 source_updated_at: 10,
             });
         app.update();
@@ -1090,10 +1090,10 @@ mod tests {
                 ..Default::default()
             });
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
                 identity: ProviderFixture::identity("acp:codex", "provider-session"),
-                stage: StageId("in_progress".into()),
+                workflow_state: Id::new("in_progress"),
                 source_updated_at: 100,
             });
         app.update();
@@ -1182,10 +1182,10 @@ mod tests {
             });
         app.update();
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
                 identity: ProviderFixture::identity("acp:codex", "provider-session"),
-                stage: StageId("done".into()),
+                workflow_state: Id::new("done"),
                 source_updated_at: 10,
             });
         app.update();
@@ -1198,10 +1198,10 @@ mod tests {
         assert_eq!(session.stage_changed_at, archived_at + 1);
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
                 identity: ProviderFixture::identity("acp:codex", "provider-session"),
-                stage: StageId("done".into()),
+                workflow_state: Id::new("done"),
                 source_updated_at: archived_at + 1,
             });
         app.update();
@@ -1229,10 +1229,10 @@ mod tests {
             });
         let identity = ProviderFixture::components("acp:codex", "provider-session");
         app.world_mut().spawn((
-            ProviderStage,
+            ProviderWorkflowState,
             identity,
-            Stage(StageId("done".into())),
-            StageChangedAt::new(200),
+            WorkflowStateRef::new(Id::new("done")),
+            WorkflowStateChangedAt::new(200),
             RemoteUpdatedAt(vmux_ecs::UnixMillis(100)),
         ));
         app.update();
@@ -1255,8 +1255,8 @@ mod tests {
         "vmux_history::CreatedAt": ((1)),
         "vmux_history::LastActivatedAt": ((2)),
         "vmux_api::Session": (),
-        "vmux_session::Stage": (("in_progress")),
-        "vmux_session::StageChangedAt": ((1)),
+        "vmux_session::WorkflowStateRef": ((value: "in_progress")),
+        "vmux_session::WorkflowStateChangedAt": ((1)),
       },
     ),
   },

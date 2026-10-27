@@ -24,10 +24,13 @@ pub use model::{
     AgentFamily, AgentId, ArchiveRequest, Cleanup, CleanupRequest, CleanupTarget, CreateRequest,
     Created, DescriptionUpdateRequest, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveRequest, ProviderArchiveWriteRequest, ProviderSessionRestoreRequest,
-    ProviderSessionTombstone, ProviderStage, ProviderStageChangeRequest, RenameRequest,
-    SessionDuplicate, Stage, StageChangeRequest, StageChangedAt, StageDefinition, StageId,
-    TerminalStage,
+    ProviderSessionTombstone, ProviderWorkflowState, ProviderWorkflowStateChangeRequest,
+    RenameRequest, SessionDuplicate, TerminalWorkflowState, WorkflowState,
+    WorkflowStateChangeRequest, WorkflowStateChangedAt, WorkflowStateRef, WorkflowStateSources,
+    WorkflowStateTarget,
 };
+#[cfg(host)]
+pub use model::{WorkflowStateIndex, WorkflowStateLookupError};
 pub use route::Route;
 pub use run_state::{AgentTurnMeta, RunState};
 pub use session::{
@@ -79,7 +82,7 @@ impl Plugin for DomainPlugin {
         app.add_plugins((
             model::EntityPlugin,
             model::MetadataPlugin,
-            model::StagePlugin,
+            model::WorkflowStatePlugin,
             catalog::CatalogPlugin,
             conversation::ConversationPlugin,
         ));

@@ -20,8 +20,8 @@ use vmux_git::RepoInfoCache;
 use vmux_session::{
     AgentId, ArchiveRequest, CatalogSnapshot, CleanupRequest, CleanupTarget, CreateRequest,
     Created, DescriptionUpdateRequest, Id, ProviderArchiveRequest, ProviderCatalog,
-    ProviderSessionRestoreRequest, ProviderStageChangeRequest, RenameRequest, Route, Session,
-    SessionSummary, SessionSummaryProjection, StageChangeRequest, StageId,
+    ProviderSessionRestoreRequest, ProviderWorkflowStateChangeRequest, RenameRequest, Route,
+    Session, SessionSummary, SessionSummaryProjection, WorkflowState, WorkflowStateChangeRequest,
 };
 
 use super::session::SessionView;
@@ -472,8 +472,8 @@ fn change_stage(
     views: CatalogViews,
     catalog: Res<CatalogSnapshot>,
     providers: Res<ProviderCatalog>,
-    mut requests: MessageWriter<StageChangeRequest>,
-    mut provider_requests: MessageWriter<ProviderStageChangeRequest>,
+    mut requests: MessageWriter<WorkflowStateChangeRequest>,
+    mut provider_requests: MessageWriter<ProviderWorkflowStateChangeRequest>,
 ) {
     let request = &trigger.event().payload;
     let Some(session) = catalog
@@ -493,16 +493,16 @@ fn change_stage(
         let Some(identity) = provider.identity() else {
             return;
         };
-        provider_requests.write(ProviderStageChangeRequest {
+        provider_requests.write(ProviderWorkflowStateChangeRequest {
             identity,
-            stage: StageId(request.stage.clone()),
+            workflow_state: Id::<WorkflowState>::new(request.stage.clone()),
             source_updated_at: provider.source_updated_at(),
         });
         return;
     }
-    requests.write(StageChangeRequest {
+    requests.write(WorkflowStateChangeRequest {
         id: Id::<Session>::new(request.id.clone()),
-        stage: StageId(request.stage.clone()),
+        workflow_state: Id::<WorkflowState>::new(request.stage.clone()),
     });
 }
 

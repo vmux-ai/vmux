@@ -1109,10 +1109,13 @@ Layout Tabs use a marker plus Bevy `Name` and a persisted `StartupDir(Option<Pat
 working directory change independently instead of replacing one aggregate component.
 
 `vmux_session` owns the durable unit of work: one canonical Session entity with `Id<Session>`, task
-metadata, working directory, data-driven stage, conversation-event children, optional agent
-identity, and the derived Session catalog. Session creation generates its ID inside the typed
-request and emits a typed creation event before navigation. Layout Stacks reference the Session
-entity and may close without deleting it. `vmux://sessions/` opens the manager;
+metadata, working directory, workflow-state reference, conversation-event children, optional agent
+identity, and the derived Session catalog. Workflow states are durable entities composed from
+`WorkflowState`, `Id<WorkflowState>`, `Name`, `Order`, and optional terminal state. Sessions persist
+the stable reference and resolve a non-owning ECS relationship through a duplicate-detecting index;
+removing or replacing the target leaves the reference repairable. Session creation generates its ID
+inside the typed request and emits a typed creation event before navigation. Layout Stacks reference
+the Session entity and may close without deleting it. `vmux://sessions/` opens the manager;
 `vmux://sessions/{session_id}` opens a Session independently of its agent or provider conversation
 identity. Session IDs are encoded as one URL path segment.
 

@@ -114,8 +114,8 @@ fn validate_sessions(world: &mut World) -> Result<(), String> {
         Option<&vmux_ecs::Cwd>,
         Option<&vmux_ecs::CreatedAt>,
         Option<&vmux_ecs::LastActivatedAt>,
-        Option<&crate::Stage>,
-        Option<&crate::StageChangedAt>,
+        Option<&crate::WorkflowStateRef>,
+        Option<&crate::WorkflowStateChangedAt>,
     ), bevy_ecs::query::With<crate::Session>>();
     for (entity, id, name, description, cwd, created, activated, stage, changed) in
         sessions.iter(world)
@@ -130,9 +130,6 @@ fn validate_sessions(world: &mut World) -> Result<(), String> {
             || changed.is_none()
         {
             return Err(format!("Session {entity} is partially initialized"));
-        }
-        if stage.is_some_and(|stage| stage.0.0.trim().is_empty()) {
-            return Err(format!("Session {entity} has an empty stage"));
         }
     }
     Ok(())

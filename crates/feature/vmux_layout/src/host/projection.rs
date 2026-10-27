@@ -2,13 +2,14 @@ use std::collections::HashSet;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use vmux_api::Id;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
 use vmux_api::space::ProjectRowKind;
 use vmux_ecs::event::team::{TeamMemberRow, UiTeam};
 use vmux_ecs::{Description, EntityTarget};
-use vmux_session::{RunState, Session, Stage, StageDefinition, StageId};
+use vmux_session::{RunState, Session, WorkflowState, WorkflowStateRef};
 
 use crate::cef::{Browser, LayoutCef};
 use crate::event::{
@@ -409,19 +410,19 @@ impl ActiveSession {
 struct SessionProjection<'w, 's> {
     targets: Query<'w, 's, &'static EntityTarget<Session>>,
     session_entities: Query<'w, 's, (), With<Session>>,
-    stage_entities: Query<'w, 's, (), With<StageDefinition>>,
+    stage_entities: Query<'w, 's, (), With<WorkflowState>>,
     sessions: Query<
         'w,
         's,
         (
             &'static Name,
             &'static Description,
-            &'static Stage,
+            &'static WorkflowStateRef,
             Option<&'static RunState>,
         ),
         With<Session>,
     >,
-    stages: Query<'w, 's, (&'static StageId, &'static Name), With<StageDefinition>>,
+    stages: Query<'w, 's, (&'static Id<WorkflowState>, &'static Name), With<WorkflowState>>,
     changed_targets: Query<'w, 's, (), Changed<EntityTarget<Session>>>,
     changed_sessions: Query<
         'w,
@@ -432,21 +433,28 @@ struct SessionProjection<'w, 's> {
             Or<(
                 Changed<Name>,
                 Changed<Description>,
-                Changed<Stage>,
+                Changed<WorkflowStateRef>,
                 Changed<RunState>,
             )>,
         ),
     >,
-    changed_stages:
-        Query<'w, 's, (), (With<StageDefinition>, Or<(Changed<StageId>, Changed<Name>)>)>,
+    changed_stages: Query<
+        'w,
+        's,
+        (),
+        (
+            With<WorkflowState>,
+            Or<(Changed<Id<WorkflowState>>, Changed<Name>)>,
+        ),
+    >,
     removed_targets: RemovedComponents<'w, 's, EntityTarget<Session>>,
     removed_sessions: RemovedComponents<'w, 's, Session>,
     removed_names: RemovedComponents<'w, 's, Name>,
     removed_descriptions: RemovedComponents<'w, 's, Description>,
-    removed_stages: RemovedComponents<'w, 's, Stage>,
+    removed_stages: RemovedComponents<'w, 's, WorkflowStateRef>,
     removed_states: RemovedComponents<'w, 's, RunState>,
-    removed_stage_definitions: RemovedComponents<'w, 's, StageDefinition>,
-    removed_stage_ids: RemovedComponents<'w, 's, StageId>,
+    removed_stage_definitions: RemovedComponents<'w, 's, WorkflowState>,
+    removed_stage_ids: RemovedComponents<'w, 's, Id<WorkflowState>>,
 }
 
 #[derive(Clone)]
@@ -554,12 +562,12 @@ impl SessionProjection<'_, '_> {
         let stage_name = self
             .stages
             .iter()
-            .find_map(|(id, name)| (id == &stage.0).then(|| name.as_str().to_string()))
-            .unwrap_or_else(|| stage.0.0.clone());
+            .find_map(|(id, name)| (id == stage.id()).then(|| name.as_str().to_string()))
+            .unwrap_or_else(|| stage.id().as_str().to_string());
         Some(ActiveTask {
             name: name.as_str().to_string(),
             description: description.0.clone(),
-            stage: stage.0.0.clone(),
+            stage: stage.id().as_str().to_string(),
             stage_name,
             runtime: runtime
                 .map(RunState::status)
@@ -980,14 +988,14 @@ mod tests {
                 Session,
                 Name::new("Ship session manager"),
                 Description("End-to-end slice".into()),
-                Stage(StageId("in_review".into())),
+                WorkflowStateRef::new(Id::new("in_review")),
                 RunState::Streaming,
             ))
             .id();
         let stack = world.spawn(EntityTarget::<Session>::new(session)).id();
         world.spawn((
-            StageDefinition,
-            StageId("in_review".into()),
+            WorkflowState,
+            Id::<WorkflowState>::new("in_review"),
             Name::new("session-stage-in-review"),
         ));
         let page = StackNode {
@@ -1025,7 +1033,7 @@ mod tests {
                 Session,
                 Name::new("Task"),
                 Description::default(),
-                Stage(StageId("in_progress".into())),
+                WorkflowStateRef::new(Id::new("in_progress")),
                 RunState::Idle,
             ))
             .id();
@@ -1036,8 +1044,8 @@ mod tests {
         let stage = app
             .world_mut()
             .spawn((
-                StageDefinition,
-                StageId("in_progress".into()),
+                WorkflowState,
+                Id::<WorkflowState>::new("in_progress"),
                 Name::new("In progress"),
             ))
             .id();

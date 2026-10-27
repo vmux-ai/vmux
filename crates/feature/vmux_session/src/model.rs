@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[cfg(host)]
-use bevy_app::{App, Plugin, PostUpdate, Update};
+use bevy_app::{App, Plugin, PostUpdate, PreUpdate, Update};
 use bevy_ecs::prelude::*;
 #[cfg(host)]
 use bevy_ecs::system::SystemParam;
@@ -44,7 +44,7 @@ impl Plugin for EntityPlugin {
         app.register_persisted::<Session>()
             .register_persisted::<Id<Session>>()
             .register_persisted::<AgentId>()
-            .register_persisted::<ProviderStage>()
+            .register_persisted::<ProviderWorkflowState>()
             .register_persisted::<ProviderArchive>()
             .register_persisted::<ProviderSessionTombstone>()
             .register_persisted::<AgentConversationTitle>()
@@ -110,21 +110,43 @@ impl Plugin for MetadataPlugin {
 }
 
 #[cfg(host)]
-pub(crate) struct StagePlugin;
+pub(crate) struct WorkflowStatePlugin;
 
 #[cfg(host)]
-impl Plugin for StagePlugin {
+impl Plugin for WorkflowStatePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Configuration::load())
-            .register_persisted::<Stage>()
-            .register_persisted::<StageChangedAt>()
-            .register_type::<StageId>()
-            .register_type::<StageDefinition>()
-            .add_message::<StageChangeRequest>()
-            .add_message::<ProviderStageChangeRequest>()
+            .register_persisted::<WorkflowState>()
+            .register_persisted::<Id<WorkflowState>>()
+            .register_persisted::<WorkflowStateRef>()
+            .register_persisted::<WorkflowStateChangedAt>()
+            .register_persisted::<TerminalWorkflowState>()
+            .init_resource::<WorkflowStateIndex>()
+            .init_resource::<IndexedWorkflowStates>()
+            .add_message::<WorkflowStateChangeRequest>()
+            .add_message::<ProviderWorkflowStateChangeRequest>()
+            .add_systems(
+                PreUpdate,
+                (
+                    ensure_workflow_states,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    rebuild_workflow_state_index,
+                )
+                    .chain(),
+            )
             .add_systems(
                 Update,
-                (ensure_stages, change_stage, change_provider_stage).in_set(MutationSet),
+                (change_workflow_state, change_provider_workflow_state).in_set(MutationSet),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    bevy_ecs::schedule::ApplyDeferred,
+                    rebuild_workflow_state_index,
+                    resolve_workflow_state_targets,
+                )
+                    .chain()
+                    .after(CanonicalizeSet),
             );
     }
 }
@@ -180,26 +202,54 @@ impl AgentFamily {
     }
 }
 
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct StageId(pub String);
-
-#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct Stage(pub StageId);
+pub struct WorkflowState;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct WorkflowStateRef(Id<WorkflowState>);
+
+impl WorkflowStateRef {
+    pub fn new(id: Id<WorkflowState>) -> Self {
+        Self(id)
+    }
+
+    pub fn id(&self) -> &Id<WorkflowState> {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = WorkflowStateSources)]
+pub struct WorkflowStateTarget(Entity);
+
+impl WorkflowStateTarget {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = WorkflowStateTarget)]
+pub struct WorkflowStateSources(Vec<Entity>);
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct StageChangedAt(UnixMillis);
+pub struct WorkflowStateChangedAt(UnixMillis);
 
-impl StageChangedAt {
+impl WorkflowStateChangedAt {
     pub const fn new(milliseconds: i64) -> Self {
         Self(UnixMillis(milliseconds))
     }
@@ -217,7 +267,7 @@ impl StageChangedAt {
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct ProviderStage;
+pub struct ProviderWorkflowState;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
@@ -233,13 +283,9 @@ pub struct ProviderSessionTombstone;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
+#[require(Save)]
 #[type_path = "vmux_session"]
-pub struct StageDefinition;
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct TerminalStage;
+pub struct TerminalWorkflowState;
 
 #[derive(Message, Clone, Debug)]
 pub struct CreateRequest {
@@ -314,9 +360,9 @@ pub struct DescriptionUpdateRequest {
 }
 
 #[derive(Message, Clone, Debug)]
-pub struct StageChangeRequest {
+pub struct WorkflowStateChangeRequest {
     pub id: Id<Session>,
-    pub stage: StageId,
+    pub workflow_state: Id<WorkflowState>,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -354,9 +400,9 @@ pub struct ProviderSessionRestoreRequest {
 }
 
 #[derive(Message, Clone, Debug)]
-pub struct ProviderStageChangeRequest {
+pub struct ProviderWorkflowStateChangeRequest {
     pub identity: ExternalLinkIdentity,
-    pub stage: StageId,
+    pub workflow_state: Id<WorkflowState>,
     pub source_updated_at: i64,
 }
 
@@ -542,7 +588,7 @@ pub struct Cleanup {
 #[cfg(host)]
 #[derive(Resource)]
 struct Configuration {
-    default_stage: StageId,
+    default_workflow_state: Id<WorkflowState>,
     stages: Vec<StageSeed>,
 }
 
@@ -553,7 +599,7 @@ impl Configuration {
             .expect("embedded Session configuration must be valid RON");
         file.session.validate();
         Self {
-            default_stage: StageId(file.session.default_stage),
+            default_workflow_state: Id::new(file.session.default_stage),
             stages: file.session.stages,
         }
     }
@@ -602,26 +648,135 @@ struct StageSeed {
 }
 
 #[cfg(host)]
-fn ensure_stages(
+#[derive(Resource, Default)]
+pub struct WorkflowStateIndex {
+    entities: HashMap<Id<WorkflowState>, Entity>,
+    duplicates: HashSet<Id<WorkflowState>>,
+}
+
+#[cfg(host)]
+impl WorkflowStateIndex {
+    pub fn entity(
+        &self,
+        id: &Id<WorkflowState>,
+    ) -> Result<Option<Entity>, WorkflowStateLookupError> {
+        if self.duplicates.contains(id) {
+            return Err(WorkflowStateLookupError::Duplicate(id.clone()));
+        }
+        Ok(self.entities.get(id).copied())
+    }
+}
+
+#[cfg(host)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkflowStateLookupError {
+    Duplicate(Id<WorkflowState>),
+}
+
+#[cfg(host)]
+impl std::fmt::Display for WorkflowStateLookupError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Duplicate(id) => write!(formatter, "duplicate workflow state ID `{id}`"),
+        }
+    }
+}
+
+#[cfg(host)]
+#[derive(Resource, Default)]
+struct IndexedWorkflowStates(HashSet<Entity>);
+
+#[cfg(host)]
+fn rebuild_workflow_state_index(
+    states: Query<(Entity, &Id<WorkflowState>), With<WorkflowState>>,
+    changed: Query<
+        (),
+        (
+            With<WorkflowState>,
+            Or<(Added<WorkflowState>, Changed<Id<WorkflowState>>)>,
+        ),
+    >,
+    mut removed_states: RemovedComponents<WorkflowState>,
+    mut removed_ids: RemovedComponents<Id<WorkflowState>>,
+    mut current: ResMut<WorkflowStateIndex>,
+    mut indexed: ResMut<IndexedWorkflowStates>,
+) {
+    let removed_state = removed_states
+        .read()
+        .any(|entity| indexed.0.contains(&entity));
+    let removed_id = removed_ids.read().any(|entity| indexed.0.contains(&entity));
+    if changed.is_empty() && !removed_state && !removed_id {
+        return;
+    }
+
+    let mut next = WorkflowStateIndex::default();
+    let mut next_indexed = HashSet::new();
+    for (entity, id) in &states {
+        next_indexed.insert(entity);
+        if next.entities.insert(id.clone(), entity).is_some() {
+            next.duplicates.insert(id.clone());
+        }
+    }
+    *current = next;
+    indexed.0 = next_indexed;
+}
+
+#[cfg(host)]
+fn resolve_workflow_state_targets(
+    index: Res<WorkflowStateIndex>,
+    references: Query<(Entity, Ref<WorkflowStateRef>, Option<&WorkflowStateTarget>)>,
+    mut commands: Commands,
+) {
+    for (entity, reference, current) in &references {
+        if !index.is_changed() && !reference.is_changed() {
+            continue;
+        }
+        let target = index.entity(reference.id()).ok().flatten();
+        match (target, current.map(WorkflowStateTarget::entity)) {
+            (Some(target), Some(current)) if target == current => {}
+            (Some(target), _) => {
+                commands
+                    .entity(entity)
+                    .insert(WorkflowStateTarget::new(target));
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<WorkflowStateTarget>();
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+#[cfg(host)]
+fn ensure_workflow_states(
     configuration: Res<Configuration>,
     definitions: Query<
-        (Entity, &StageId, &Name, &Order, Has<TerminalStage>),
-        With<StageDefinition>,
+        (
+            Entity,
+            &Id<WorkflowState>,
+            &Name,
+            &Order,
+            Has<TerminalWorkflowState>,
+        ),
+        With<WorkflowState>,
     >,
     mut commands: Commands,
 ) {
     for stage in &configuration.stages {
-        if definitions.iter().any(|(_, id, _, _, _)| id.0 == stage.id) {
+        if definitions
+            .iter()
+            .any(|(_, id, _, _, _)| id.as_str() == stage.id)
+        {
             continue;
         }
         let mut entity = commands.spawn((
-            StageDefinition,
-            StageId(stage.id.clone()),
+            WorkflowState,
+            Id::<WorkflowState>::new(stage.id.clone()),
             Name::new(stage.name.clone()),
             Order(stage.order),
         ));
         if stage.terminal {
-            entity.insert(TerminalStage);
+            entity.insert(TerminalWorkflowState);
         }
     }
 }
@@ -652,8 +807,8 @@ fn create(
             Cwd(request.cwd.clone()),
             CreatedAt::new(created_at),
             LastActivatedAt::new(activated_at),
-            Stage(configuration.default_stage.clone()),
-            StageChangedAt::new(activated_at),
+            WorkflowStateRef::new(configuration.default_workflow_state.clone()),
+            WorkflowStateChangedAt::new(activated_at),
         ));
         if let Some(agent) = request.agent.clone() {
             session.insert(agent);
@@ -779,18 +934,30 @@ fn update_description(
 }
 
 #[cfg(host)]
-fn change_stage(
-    mut requests: MessageReader<StageChangeRequest>,
-    definitions: Query<&StageId, With<StageDefinition>>,
-    mut sessions: Query<(&Id<Session>, &mut Stage, &mut StageChangedAt), With<Session>>,
+fn change_workflow_state(
+    mut requests: MessageReader<WorkflowStateChangeRequest>,
+    index: Res<WorkflowStateIndex>,
+    mut sessions: Query<
+        (
+            Entity,
+            &Id<Session>,
+            &WorkflowStateRef,
+            &mut WorkflowStateChangedAt,
+        ),
+        With<Session>,
+    >,
+    mut commands: Commands,
 ) {
     for request in requests.read() {
-        if !definitions.iter().any(|id| id == &request.stage) {
+        let Ok(Some(target)) = index.entity(&request.workflow_state) else {
             continue;
-        }
-        for (id, mut stage, mut changed_at) in &mut sessions {
-            if id == &request.id && stage.0 != request.stage {
-                stage.0.clone_from(&request.stage);
+        };
+        for (entity, id, current, mut changed_at) in &mut sessions {
+            if id == &request.id && current.id() != &request.workflow_state {
+                commands.entity(entity).insert((
+                    WorkflowStateRef::new(request.workflow_state.clone()),
+                    WorkflowStateTarget::new(target),
+                ));
                 changed_at.record_transition(UnixMillis::now());
             }
         }
@@ -1027,9 +1194,9 @@ fn restore_tombstones(
 }
 
 #[cfg(host)]
-fn change_provider_stage(
-    mut requests: MessageReader<ProviderStageChangeRequest>,
-    definitions: Query<&StageId, With<StageDefinition>>,
+fn change_provider_workflow_state(
+    mut requests: MessageReader<ProviderWorkflowStateChangeRequest>,
+    index: Res<WorkflowStateIndex>,
     mut stages: Query<
         (
             Entity,
@@ -1037,21 +1204,21 @@ fn change_provider_stage(
             &ExternalScopeRef,
             &ResourceKind,
             &ExternalId,
-            &mut Stage,
-            &mut StageChangedAt,
+            &WorkflowStateRef,
+            &mut WorkflowStateChangedAt,
             &RemoteUpdatedAt,
         ),
-        With<ProviderStage>,
+        With<ProviderWorkflowState>,
     >,
     mut commands: Commands,
 ) {
     for request in requests.read() {
-        if !definitions.iter().any(|id| id == &request.stage) {
+        let Ok(Some(target)) = index.entity(&request.workflow_state) else {
             continue;
-        }
+        };
         let now = UnixMillis::now();
         let mut found = false;
-        for (entity, provider, scope, kind, id, mut stage, mut changed_at, source_updated_at) in
+        for (entity, provider, scope, kind, id, current, mut changed_at, source_updated_at) in
             &mut stages
         {
             let identity = ExternalLinkIdentity::new(
@@ -1064,8 +1231,11 @@ fn change_provider_stage(
                 continue;
             }
             found = true;
-            if stage.0 != request.stage {
-                stage.0.clone_from(&request.stage);
+            if current.id() != &request.workflow_state {
+                commands.entity(entity).insert((
+                    WorkflowStateRef::new(request.workflow_state.clone()),
+                    WorkflowStateTarget::new(target),
+                ));
             }
             changed_at.record_transition(now);
             if source_updated_at.0.0 != request.source_updated_at {
@@ -1077,13 +1247,14 @@ fn change_provider_stage(
         }
         if !found {
             commands.spawn((
-                ProviderStage,
+                ProviderWorkflowState,
                 request.identity.provider().clone(),
                 ExternalScopeRef::new(request.identity.scope().clone()),
                 request.identity.kind().clone(),
                 request.identity.external_id().clone(),
-                Stage(request.stage.clone()),
-                StageChangedAt(now),
+                WorkflowStateRef::new(request.workflow_state.clone()),
+                WorkflowStateTarget::new(target),
+                WorkflowStateChangedAt(now),
                 RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
             ));
         }
@@ -1182,7 +1353,7 @@ struct CanonicalizationChanges<'w, 's> {
             Or<(
                 Added<Session>,
                 Changed<LastActivatedAt>,
-                Changed<StageChangedAt>,
+                Changed<WorkflowStateChangedAt>,
                 Changed<ArchivedAt>,
                 Changed<crate::RunState>,
             )>,
@@ -1213,7 +1384,7 @@ struct CanonicalizationChanges<'w, 's> {
     removed_external_ids: RemovedComponents<'w, 's, ExternalId>,
     removed_owners: RemovedComponents<'w, 's, ChildOf>,
     removed_activated_at: RemovedComponents<'w, 's, LastActivatedAt>,
-    removed_stage_changed_at: RemovedComponents<'w, 's, StageChangedAt>,
+    removed_stage_changed_at: RemovedComponents<'w, 's, WorkflowStateChangedAt>,
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
     removed_run_state: RemovedComponents<'w, 's, crate::RunState>,
     removed_targets: RemovedComponents<'w, 's, EntityTarget<Session>>,
@@ -1260,7 +1431,7 @@ fn canonicalize_provider_sessions(
     sessions: Query<
         (
             Option<&LastActivatedAt>,
-            Option<&StageChangedAt>,
+            Option<&WorkflowStateChangedAt>,
             Has<ArchivedAt>,
             Option<&crate::RunState>,
             Option<&SessionDuplicate>,
@@ -1401,9 +1572,9 @@ mod tests {
     }
 
     #[test]
-    fn creation_uses_configured_default_stage_and_common_components() {
+    fn creation_uses_configured_default_workflow_state_and_common_components() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, MetadataPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, MetadataPlugin, WorkflowStatePlugin));
         let request = CreateRequest::new(
             "Task",
             "Description",
@@ -1422,22 +1593,22 @@ mod tests {
             &Name,
             &Description,
             &Cwd,
-            &Stage,
+            &WorkflowStateRef,
             &AgentId,
         ), With<Session>>();
-        let (id, name, description, cwd, stage, agent) = sessions.single(app.world()).unwrap();
+        let (id, name, description, cwd, state, agent) = sessions.single(app.world()).unwrap();
         assert_eq!(id, &expected_id);
         assert_eq!(name.as_str(), "Task");
         assert_eq!(description.0, "Description");
         assert_eq!(cwd.0, PathBuf::from("/tmp/project"));
-        assert_eq!(stage.0.0, "in_progress");
+        assert_eq!(state.id().as_str(), "in_progress");
         assert_eq!(agent.0, "codex");
     }
 
     #[test]
     fn provider_import_preserves_source_time() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         let request = CreateRequest::imported(
             "Imported",
             "Provider session",
@@ -1461,18 +1632,18 @@ mod tests {
     }
 
     #[test]
-    fn stage_definitions_are_available_after_update() {
+    fn workflow_states_are_available_after_update() {
         let mut app = App::new();
-        app.add_plugins(StagePlugin);
+        app.add_plugins(WorkflowStatePlugin);
 
         app.update();
         app.update();
 
         let mut definitions = app
             .world_mut()
-            .query_filtered::<(&StageId, &Order), With<StageDefinition>>()
+            .query_filtered::<(&Id<WorkflowState>, &Order), With<WorkflowState>>()
             .iter(app.world())
-            .map(|(id, order)| (id.0.clone(), order.0))
+            .map(|(id, order)| (id.as_str().to_string(), order.0))
             .collect::<Vec<_>>();
         definitions.sort_by_key(|(_, order)| *order);
         assert_eq!(
@@ -1487,9 +1658,69 @@ mod tests {
     }
 
     #[test]
+    fn workflow_state_relationship_repairs_after_target_replacement() {
+        let mut app = App::new();
+        app.add_plugins(WorkflowStatePlugin);
+        let state_id = Id::<WorkflowState>::new("custom");
+        let original = app
+            .world_mut()
+            .spawn((WorkflowState, state_id.clone()))
+            .id();
+        let session = app
+            .world_mut()
+            .spawn((
+                Session,
+                WorkflowStateRef::new(state_id.clone()),
+                WorkflowStateChangedAt::new(1),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<WorkflowStateTarget>(session)
+                .map(WorkflowStateTarget::entity),
+            Some(original)
+        );
+
+        app.world_mut().despawn(original);
+        app.update();
+
+        assert!(app.world().get::<WorkflowStateRef>(session).is_some());
+        assert!(app.world().get::<WorkflowStateTarget>(session).is_none());
+
+        let replacement = app.world_mut().spawn((WorkflowState, state_id)).id();
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<WorkflowStateTarget>(session)
+                .map(WorkflowStateTarget::entity),
+            Some(replacement)
+        );
+    }
+
+    #[test]
+    fn duplicate_workflow_state_ids_are_explicit() {
+        let mut app = App::new();
+        app.add_plugins(WorkflowStatePlugin);
+        let id = Id::<WorkflowState>::new("duplicate");
+        app.world_mut().spawn((WorkflowState, id.clone()));
+        app.world_mut().spawn((WorkflowState, id.clone()));
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<WorkflowStateIndex>().entity(&id),
+            Err(WorkflowStateLookupError::Duplicate(id))
+        );
+    }
+
+    #[test]
     fn archive_is_independent_from_stage() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         let session = app
             .world_mut()
             .spawn((Session, Id::<Session>::new("session-1")))
@@ -1521,50 +1752,62 @@ mod tests {
     }
 
     #[test]
-    fn stage_change_rejects_unknown_stage_and_records_transition_time() {
+    fn workflow_state_change_rejects_unknown_state_and_records_transition_time() {
         let mut app = App::new();
-        app.add_plugins(StagePlugin);
+        app.add_plugins(WorkflowStatePlugin);
         let session = app
             .world_mut()
             .spawn((
                 Session,
                 Id::<Session>::new("session-1"),
-                Stage(StageId("in_progress".into())),
-                StageChangedAt::new(1),
+                WorkflowStateRef::new(Id::<WorkflowState>::new("in_progress")),
+                WorkflowStateChangedAt::new(1),
             ))
             .id();
         app.update();
 
         app.world_mut()
-            .resource_mut::<Messages<StageChangeRequest>>()
-            .write(StageChangeRequest {
+            .resource_mut::<Messages<WorkflowStateChangeRequest>>()
+            .write(WorkflowStateChangeRequest {
                 id: Id::<Session>::new("session-1"),
-                stage: StageId("missing".into()),
+                workflow_state: Id::new("missing"),
             });
         app.update();
         assert_eq!(
-            app.world().get::<Stage>(session).unwrap().0.0,
+            app.world()
+                .get::<WorkflowStateRef>(session)
+                .unwrap()
+                .id()
+                .as_str(),
             "in_progress"
         );
         assert_eq!(
             app.world()
-                .get::<StageChangedAt>(session)
+                .get::<WorkflowStateChangedAt>(session)
                 .unwrap()
                 .milliseconds(),
             1
         );
 
         app.world_mut()
-            .resource_mut::<Messages<StageChangeRequest>>()
-            .write(StageChangeRequest {
+            .resource_mut::<Messages<WorkflowStateChangeRequest>>()
+            .write(WorkflowStateChangeRequest {
                 id: Id::<Session>::new("session-1"),
-                stage: StageId("done".into()),
+                workflow_state: Id::new("done"),
             });
         app.update();
-        assert_eq!(app.world().get::<Stage>(session).unwrap().0.0, "done");
+        assert_eq!(
+            app.world()
+                .get::<WorkflowStateRef>(session)
+                .unwrap()
+                .id()
+                .as_str(),
+            "done"
+        );
+        assert!(app.world().get::<WorkflowStateTarget>(session).is_some());
         assert!(
             app.world()
-                .get::<StageChangedAt>(session)
+                .get::<WorkflowStateChangedAt>(session)
                 .unwrap()
                 .milliseconds()
                 > 1
@@ -1572,16 +1815,16 @@ mod tests {
     }
 
     #[test]
-    fn provider_stage_change_creates_and_updates_one_durable_override() {
+    fn provider_workflow_state_change_creates_and_updates_one_durable_override() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         app.update();
 
         app.world_mut()
-            .resource_mut::<Messages<ProviderStageChangeRequest>>()
-            .write(ProviderStageChangeRequest {
+            .resource_mut::<Messages<ProviderWorkflowStateChangeRequest>>()
+            .write(ProviderWorkflowStateChangeRequest {
                 identity: ProviderFixture::identity("codex", "provider-session"),
-                stage: StageId("done".into()),
+                workflow_state: Id::new("done"),
                 source_updated_at: 10,
             });
         app.update();
@@ -1591,46 +1834,48 @@ mod tests {
             &ProviderKey,
             &ExternalScopeRef,
             &ExternalId,
-            &Stage,
-            &StageChangedAt,
-        ), With<ProviderStage>>();
-        let (entity, provider, scope, id, stage, changed_at) =
+            &WorkflowStateRef,
+            &WorkflowStateChangedAt,
+        ), With<ProviderWorkflowState>>();
+        let (entity, provider, scope, id, state, changed_at) =
             overrides.single(app.world()).unwrap();
         assert_eq!(provider.as_str(), "codex");
         assert_eq!(scope.id().as_str(), "codex");
         assert_eq!(id.as_str(), "provider-session");
-        assert_eq!(stage.0.0, "done");
+        assert_eq!(state.id().as_str(), "done");
         assert!(changed_at.milliseconds() > 0);
 
         app.world_mut()
-            .resource_mut::<Messages<ProviderStageChangeRequest>>()
-            .write(ProviderStageChangeRequest {
+            .resource_mut::<Messages<ProviderWorkflowStateChangeRequest>>()
+            .write(ProviderWorkflowStateChangeRequest {
                 identity: ProviderFixture::identity("codex", "provider-session"),
-                stage: StageId("in_review".into()),
+                workflow_state: Id::new("in_review"),
                 source_updated_at: 20,
             });
         app.update();
 
         let mut overrides = app
             .world_mut()
-            .query_filtered::<(Entity, &Stage), With<ProviderStage>>();
-        let (updated, stage) = overrides.single(app.world()).unwrap();
+            .query_filtered::<(Entity, &WorkflowStateRef), With<ProviderWorkflowState>>();
+        let (updated, state) = overrides.single(app.world()).unwrap();
         assert_eq!(updated, entity);
-        assert_eq!(stage.0.0, "in_review");
+        assert_eq!(state.id().as_str(), "in_review");
 
-        *app.world_mut().get_mut::<StageChangedAt>(entity).unwrap() = StageChangedAt::new(1);
+        *app.world_mut()
+            .get_mut::<WorkflowStateChangedAt>(entity)
+            .unwrap() = WorkflowStateChangedAt::new(1);
         app.world_mut()
-            .resource_mut::<Messages<ProviderStageChangeRequest>>()
-            .write(ProviderStageChangeRequest {
+            .resource_mut::<Messages<ProviderWorkflowStateChangeRequest>>()
+            .write(ProviderWorkflowStateChangeRequest {
                 identity: ProviderFixture::identity("codex", "provider-session"),
-                stage: StageId("in_review".into()),
+                workflow_state: Id::new("in_review"),
                 source_updated_at: 30,
             });
         app.update();
 
         assert!(
             app.world()
-                .get::<StageChangedAt>(entity)
+                .get::<WorkflowStateChangedAt>(entity)
                 .unwrap()
                 .milliseconds()
                 > 1
@@ -1640,7 +1885,7 @@ mod tests {
     #[test]
     fn provider_archive_change_creates_and_updates_one_durable_override() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         let request = ProviderArchiveRequest {
             identity: ProviderFixture::identity("acp:codex", "provider-session"),
             archived: true,
@@ -1683,7 +1928,7 @@ mod tests {
     #[test]
     fn native_provider_archive_persists_before_the_provider_write_finishes() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         app.world_mut()
             .resource_mut::<Messages<ProviderArchiveRequest>>()
             .write(ProviderArchiveRequest {
@@ -1713,7 +1958,7 @@ mod tests {
     #[test]
     fn duplicate_creation_requests_create_one_session() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         let request = CreateRequest::new("Task", "", PathBuf::new(), None);
         app.world_mut()
             .resource_mut::<Messages<CreateRequest>>()
@@ -1732,7 +1977,7 @@ mod tests {
     #[test]
     fn cleanup_request_targets_the_canonical_session() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin))
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin))
             .init_resource::<Cleaned>()
             .add_observer(Cleaned::record);
         let session = app
@@ -1820,13 +2065,16 @@ mod tests {
         assert!(filter.is_allowed::<Session>());
         assert!(filter.is_allowed::<Id<Session>>());
         assert!(filter.is_allowed::<AgentId>());
-        assert!(filter.is_allowed::<ProviderStage>());
+        assert!(filter.is_allowed::<ProviderWorkflowState>());
         assert!(filter.is_allowed::<ProviderArchive>());
         assert!(filter.is_allowed::<ProviderSessionTombstone>());
         assert!(filter.is_allowed::<AgentConversationTitle>());
         assert!(filter.is_allowed::<TitlePending>());
-        assert!(filter.is_allowed::<Stage>());
-        assert!(filter.is_allowed::<StageChangedAt>());
+        assert!(filter.is_allowed::<WorkflowState>());
+        assert!(filter.is_allowed::<Id<WorkflowState>>());
+        assert!(filter.is_allowed::<WorkflowStateRef>());
+        assert!(filter.is_allowed::<WorkflowStateChangedAt>());
+        assert!(filter.is_allowed::<TerminalWorkflowState>());
     }
 
     #[test]
@@ -1856,7 +2104,7 @@ mod tests {
     #[test]
     fn renamed_session_updates_view_metadata() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, MetadataPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, MetadataPlugin, WorkflowStatePlugin));
         let session = app
             .world_mut()
             .spawn((
