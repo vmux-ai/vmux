@@ -28,7 +28,10 @@ fn spawn(mut commands: Commands) {
 fn publish_workspace_snapshot(
     tab_gather: TabGather,
     locale: Option<Res<ResolvedLocale>>,
-    projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
+    projects: Query<
+        (&crate::tab::StartupDir, Option<&crate::tab::TabWorkspace>),
+        With<crate::tab::Tab>,
+    >,
     context: Single<&CommandBarContextSnapshot>,
     mut state: Single<&mut CommandBarWorkspaceSnapshot>,
 ) {
@@ -37,7 +40,7 @@ fn publish_workspace_snapshot(
         let Some(active_tab) = active_tab else {
             break 'root None;
         };
-        let Ok((tab, workspace)) = projects.get(active_tab) else {
+        let Ok((startup_dir, workspace)) = projects.get(active_tab) else {
             break 'root None;
         };
         if let Some(workspace) = workspace {
@@ -46,9 +49,10 @@ fn publish_workspace_snapshot(
                 break 'root Some(dir.to_string());
             }
         }
-        let Some(dir) = tab.startup_dir.as_deref() else {
+        let Some(dir) = startup_dir.0.as_deref() else {
             break 'root None;
         };
+        let dir = dir.to_string_lossy();
         let dir = dir.trim();
         if dir.is_empty() {
             break 'root None;

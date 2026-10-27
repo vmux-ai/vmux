@@ -1,11 +1,12 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use vmux_api::Id;
 use vmux_api::protocol::{SharedMessage, SharedResponse};
 use vmux_api::session::{
-    ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteAgent,
-    RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
-    SessionId,
+    ApprovalRequest, ClientOperation, ConversationEvent, NewChatRequest, PromptRequest,
+    RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession,
+    RemoteStatus, Session,
 };
 use vmux_ui::i18n::translate;
 
@@ -18,13 +19,13 @@ static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct ClientOperationIds;
 
 impl ClientOperationIds {
-    pub(crate) fn next() -> ClientOpId {
+    pub(crate) fn next() -> Id<ClientOperation> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
         let sequence = NEXT_CLIENT_OP_ID.fetch_add(1, Ordering::Relaxed);
-        ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
+        Id::new(format!("mobile:{timestamp}:{sequence}"))
     }
 }
 
@@ -209,7 +210,7 @@ impl Api {
     pub(crate) fn event(event: vmux_api::protocol::SharedEvent) -> Option<RemoteEvent> {
         match event {
             Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
-                session_id: SessionId::from(sid),
+                session_id: Id::<Session>::from(sid),
                 text,
             }),
             Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
@@ -229,7 +230,7 @@ impl Api {
             }),
             Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
             Shared::AgentMessagesSnapshot { sid, messages } => {
-                let session_id = SessionId::from(sid);
+                let session_id = Id::<Session>::from(sid);
                 let events = ConversationEvent::from_messages(&session_id, 0, &messages);
                 Some(RemoteEvent::Snapshot {
                     session_id,

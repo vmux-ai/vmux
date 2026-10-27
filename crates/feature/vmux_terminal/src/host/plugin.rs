@@ -22,7 +22,7 @@ use vmux_command::{KeyCombo, Keymap, Modifiers};
 #[cfg(test)]
 use vmux_ecs::PageOpenId;
 use vmux_ecs::UiStateWrite;
-use vmux_ecs::event::TerminalUiState;
+use vmux_ecs::event::UiTerminal;
 use vmux_ecs::page::{BindsEditingChords, HostsPage};
 use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
@@ -101,7 +101,7 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::CopyModeRequest>()
         .add_message::<PendingProcessPresentation>()
         .add_plugins((
-            vmux_ecs::UiStatePlugin::<TerminalUiState>::default(),
+            vmux_ecs::UiStatePlugin::<UiTerminal>::default(),
             super::agent::AgentTerminalPlugin,
             crate::TerminalToolPlugin,
         ))
@@ -163,9 +163,7 @@ fn present(
         };
         let target_pane =
             placement.resolve_spiral(agent_pane, TerminalPlugin::URL, false, &mut split_batch);
-        let tab = commands
-            .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
-            .id();
+        let tab = commands.spawn((Stack::bundle(), ChildOf(target_pane))).id();
         commands.spawn((
             ReattachedTerminalBundle::new(request.process_id),
             RetainOnProcessExit,
@@ -748,14 +746,11 @@ fn respond_stack_spawn(
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let stack_ts = if request.activate {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
-        let stack = commands
-            .spawn((Stack::bundle(), stack_ts, ChildOf(request.pane)))
-            .id();
+        let mut stack = commands.spawn((Stack::bundle(), ChildOf(request.pane)));
+        if request.activate {
+            stack.insert(LastActivatedAt::now());
+        }
+        let stack = stack.id();
         let title = request
             .cwd
             .as_ref()
@@ -905,7 +900,7 @@ impl TerminalServiceStatus<'_, '_> {
         let event = ServiceUnavailableEvent { message };
         for entity in &self.terminals {
             self.commands
-                .trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &event));
+                .trigger(UiStateWrite::<UiTerminal>::from_event(entity, &event));
         }
     }
 }
@@ -1080,7 +1075,7 @@ fn apply_viewport_updates(
         for (_, line) in patch.changed_lines.iter_mut() {
             super::link::LinkDetector::new(None).annotate(line);
         }
-        commands.trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &patch));
+        commands.trigger(UiStateWrite::<UiTerminal>::from_event(entity, &patch));
     }
 }
 
@@ -2007,7 +2002,7 @@ fn apply_osc_title(
             .as_ref()
             .is_some_and(|browsers| browsers.can_emit_to(&entity))
         {
-            commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiTerminal>::from_event(
                 entity,
                 &TermTitleEvent {
                     title: ev.title.clone(),
@@ -2046,8 +2041,11 @@ mod tests {
     use bevy::ecs::message::Messages;
 
     fn spawn_active_space(app: &mut App, record: &SpaceRecord) {
-        app.world_mut()
-            .spawn((record.bundle(), vmux_layout::space::CurrentSpace));
+        let space = app
+            .world_mut()
+            .spawn((record.bundle(), vmux_layout::space::CurrentSpace))
+            .id();
+        app.world_mut().spawn(record.profile_bundle(space));
     }
 
     #[test]
@@ -2078,7 +2076,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::bundle(),
-                LastActivatedAt(10),
+                LastActivatedAt::new(10),
                 ChildOf(pane),
                 EntityTarget::<Session>::new(session),
             ))
@@ -2092,17 +2090,20 @@ mod tests {
 
         let stack_times = {
             let world = app.world_mut();
-            let mut query = world.query_filtered::<(Entity, &LastActivatedAt), With<Stack>>();
+            let mut query =
+                world.query_filtered::<(Entity, Option<&LastActivatedAt>), With<Stack>>();
             query
                 .iter(world)
-                .map(|(entity, activated)| (entity, activated.0))
+                .map(|(entity, activated)| {
+                    (entity, activated.map(|activated| activated.milliseconds()))
+                })
                 .collect::<Vec<_>>()
         };
         assert_eq!(
             stack_times
                 .iter()
                 .find(|(entity, _)| *entity == owner)
-                .map(|(_, activated)| *activated),
+                .and_then(|(_, activated)| *activated),
             Some(10)
         );
         assert_eq!(
@@ -2110,7 +2111,7 @@ mod tests {
                 .iter()
                 .find(|(entity, _)| *entity != owner)
                 .map(|(_, activated)| *activated),
-            Some(0)
+            Some(None)
         );
     }
 
@@ -2131,7 +2132,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Stack::bundle(),
-                LastActivatedAt(10),
+                LastActivatedAt::new(10),
                 ChildOf(pane),
                 EntityTarget::<Session>::new(session),
             ))
@@ -2422,10 +2423,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "t".into(),
-                startup_dir: Some(tab_dir.path().to_string_lossy().into()),
-            })
+            .spawn(Tab::named("t").with_startup_dir(tab_dir.path()))
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         app.world_mut().spawn(PageOpenTask {
@@ -2469,10 +2467,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "t".into(),
-                startup_dir: Some("/no/such/vmux-tab-workspace".into()),
-            })
+            .spawn(Tab::named("t").with_startup_dir("/no/such/vmux-tab-workspace"))
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         let task = app
@@ -2520,10 +2515,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "t".into(),
-                startup_dir: Some("/no/such/vmux-tab-workspace".into()),
-            })
+            .spawn(Tab::named("t").with_startup_dir("/no/such/vmux-tab-workspace"))
             .id();
         let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         app.world_mut()

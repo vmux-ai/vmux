@@ -31,7 +31,7 @@ impl EditorInput {
         if text.is_empty() {
             return;
         }
-        let _ = send(&FileTextInput { text });
+        send(&FileTextInput { text });
         field.set(String::new());
     }
 
@@ -46,7 +46,7 @@ impl EditorInput {
             return false;
         }
         event.prevent_default();
-        let _ = send(&stroke);
+        send(&stroke);
         true
     }
 }

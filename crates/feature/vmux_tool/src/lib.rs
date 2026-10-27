@@ -20,7 +20,7 @@ pub use provider::*;
 #[cfg(host)]
 pub use query::*;
 pub use registry::*;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 pub use vmux_macro::input;
 
 #[doc(hidden)]
@@ -34,7 +34,7 @@ pub const EXTENSIONS_URL: &str = "vmux://tools/extensions";
 
 pub(crate) struct Feature;
 
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -69,7 +69,7 @@ pub struct ToolPlugin;
 
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<Feature>::default());
+        app.register_feature::<Feature>();
         #[cfg(ui)]
         app.add_plugins(ui::ToolsPage::plugin());
 

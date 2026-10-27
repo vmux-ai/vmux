@@ -14,7 +14,7 @@ use crate::host::definition::{
 };
 use crate::host::shortcut_driver::{KeyCombo, KeyContext, Keymap};
 use crate::host::snapshot::UiStatePlugin;
-use vmux_ecs::team::{Agent, Profile, User};
+use vmux_ecs::team::{Agent, Profiles, User};
 
 pub struct CommandPlugin;
 
@@ -137,12 +137,26 @@ fn wake(
     let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
 }
 
-fn log(mut reader: MessageReader<CommandInvocation>, profiles: Query<(&Profile, Has<User>)>) {
+fn log(
+    mut reader: MessageReader<CommandInvocation>,
+    profiles: Profiles,
+    users: Query<(), With<User>>,
+) {
     for invocation in reader.read() {
         let who = profiles
             .get(invocation.caller)
-            .map(|(p, is_user)| format!("{} ({})", p.name, if is_user { "user" } else { "agent" }))
-            .unwrap_or_else(|_| "unknown".to_string());
+            .map(|profile| {
+                format!(
+                    "{} ({})",
+                    profile.name(),
+                    if users.contains(invocation.caller) {
+                        "user"
+                    } else {
+                        "agent"
+                    }
+                )
+            })
+            .unwrap_or_else(|| "unknown".to_string());
         info!(
             target: "vmux_command::invocation",
             caller = %who,

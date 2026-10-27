@@ -3,11 +3,10 @@ use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_api::PageIcon;
 use vmux_api::bookmark::{
     BookmarkAddRequest as BookmarkAddUiRequest, BookmarkContextMenuRequest, BookmarkDropRequest,
     BookmarkDropSource, BookmarkDropTarget, BookmarkEditCloseRequest, BookmarkEditInputRequest,
-    BookmarkEditState, BookmarkEditSubmitRequest,
+    BookmarkEditState, BookmarkEditSubmitRequest, BookmarkEntry,
     BookmarkFolderCreateRequest as BookmarkFolderCreateUiRequest, BookmarkFolderEditOpenRequest,
     BookmarkFolderEditState, BookmarkFolderMoveRequest as BookmarkFolderMoveUiRequest,
     BookmarkFolderRemoveRequest as BookmarkFolderRemoveUiRequest,
@@ -21,11 +20,12 @@ use vmux_api::bookmark::{
     BookmarkTextInputRequest, BookmarkToggleRequest,
     BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
+use vmux_api::{Id, PageIcon};
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageManifest;
-use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, UiStateWrite};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 
 use super::{command::LayoutRequestSet, stack::OpenRequest};
 
@@ -37,7 +37,7 @@ pub struct BookmarkRequestSet;
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -169,7 +169,7 @@ fn open_folder_edit(trigger: On<UiInput<BookmarkFolderEditOpenRequest>>, mut com
             parent: state.parent.clone(),
             draft: state.draft.clone(),
         });
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         event.webview,
         &BookmarkEditState {
             create: state,
@@ -194,7 +194,7 @@ fn open_rename_edit(trigger: On<UiInput<BookmarkRenameEditOpenRequest>>, mut com
             folder: state.folder,
             draft: state.draft.clone(),
         });
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         event.webview,
         &BookmarkEditState {
             rename: state,
@@ -233,7 +233,7 @@ fn edit_draft(
             draft: rename.draft.clone(),
         };
     }
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         event.webview,
         &state,
     ));
@@ -280,7 +280,7 @@ fn submit_edit(
         .entity(webview)
         .remove::<BookmarkFolderEditor>()
         .remove::<BookmarkRenameEditor>();
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         webview,
         &BookmarkEditState::default(),
     ));
@@ -292,16 +292,16 @@ fn close_edit(trigger: On<UiInput<BookmarkEditCloseRequest>>, mut commands: Comm
         .entity(webview)
         .remove::<BookmarkFolderEditor>()
         .remove::<BookmarkRenameEditor>();
-    commands.trigger(UiStateWrite::<crate::state::LayoutUiState>::from_event(
+    commands.trigger(UiStateWrite::<crate::state::UiLayout>::from_event(
         webview,
         &BookmarkEditState::default(),
     ));
 }
 
 fn menu_edit(
-    trigger: On<UiStateWrite<crate::state::LayoutUiState>>,
+    trigger: On<UiStateWrite<crate::state::UiLayout>>,
     handled: Query<&BookmarkMenuRevisions>,
-    entries: Query<(&Uuid, &Name, Has<Folder>)>,
+    entries: Query<(&Id<BookmarkEntry>, &Name, Has<Folder>)>,
     mut commands: Commands,
 ) {
     let Some(effect) = trigger.event().update().bookmark_menu.as_ref() else {
@@ -327,7 +327,7 @@ fn menu_edit(
         revisions.rename = effect.rename.revision;
         if let Some((_, name, folder)) = entries
             .iter()
-            .find(|(uuid, _, _)| uuid.0 == effect.rename.uuid)
+            .find(|(uuid, _, _)| uuid.as_str() == effect.rename.uuid)
         {
             commands.trigger(UiInput {
                 webview,
@@ -531,14 +531,14 @@ fn text_input(trigger: On<UiInput<BookmarkTextInputRequest>>, mut commands: Comm
 
 #[derive(SystemParam)]
 struct BookmarkEntities<'w, 's> {
-    ids: Query<'w, 's, (Entity, &'static Uuid)>,
+    ids: Query<'w, 's, (Entity, &'static Id<BookmarkEntry>)>,
     parents: Query<'w, 's, &'static ChildOf>,
     orders: Query<'w, 's, &'static BookmarkOrder>,
 }
 
 impl BookmarkEntities<'_, '_> {
-    fn new_uuid(&self) -> Uuid {
-        Uuid(uuid::Uuid::new_v4().to_string())
+    fn new_uuid(&self) -> Id<BookmarkEntry> {
+        Id::<BookmarkEntry>::new(uuid::Uuid::new_v4().to_string())
     }
 
     fn next_order(&self) -> BookmarkOrder {
@@ -555,7 +555,7 @@ impl BookmarkEntities<'_, '_> {
     fn find(&self, target: &str) -> Option<Entity> {
         self.ids
             .iter()
-            .find(|(_, id)| id.0 == target)
+            .find(|(_, id)| id.as_str() == target)
             .map(|(entity, _)| entity)
     }
 
@@ -762,13 +762,13 @@ fn move_pin(
 
 fn reorder_pin(
     mut reader: MessageReader<ReorderPinRequest>,
-    pin_orders: Query<(Entity, &Uuid, &BookmarkOrder), With<Pin>>,
+    pin_orders: Query<(Entity, &Id<BookmarkEntry>, &BookmarkOrder), With<Pin>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
         let mut pins = pin_orders
             .iter()
-            .map(|(entity, uuid, order)| (entity, uuid.0.clone(), order.0))
+            .map(|(entity, uuid, order)| (entity, uuid.as_str().to_string(), order.0))
             .collect::<Vec<_>>();
         pins.sort_by_key(|(entity, _, order)| (*order, entity.to_bits()));
         let Some(source_index) = pins.iter().position(|(_, id, _)| id == &request.uuid) else {
@@ -1360,12 +1360,12 @@ mod tests {
     #[test]
     fn command_id_dispatches_the_typed_bookmark_request() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<crate::Feature>::default(),
-            vmux_command::CommandRuntimePlugin,
-        ))
-        .add_message::<BookmarkToggleActiveRequest>();
+        app.add_plugins(MinimalPlugins)
+            .register_feature::<crate::Feature>()
+            .add_plugins(vmux_command::CommandRuntimePlugin)
+            .add_message::<BookmarkToggleActiveRequest>();
+        app.finish();
+        app.cleanup();
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<vmux_command::CommandInvocation>>()
@@ -1678,8 +1678,12 @@ mod tests {
     fn reorder_pin_moves_source_to_target_slot() {
         let mut app = test_app();
         for (uuid, order) in [("a", 2), ("b", 5), ("c", 9)] {
-            app.world_mut()
-                .spawn((Pin, Uuid(uuid.into()), metadata(uuid), BookmarkOrder(order)));
+            app.world_mut().spawn((
+                Pin,
+                Id::<BookmarkEntry>::new(uuid),
+                metadata(uuid),
+                BookmarkOrder(order),
+            ));
         }
 
         TestRequest::send(
@@ -1692,9 +1696,9 @@ mod tests {
 
         let mut pins = app
             .world_mut()
-            .query_filtered::<(&Uuid, &BookmarkOrder), With<Pin>>()
+            .query_filtered::<(&Id<BookmarkEntry>, &BookmarkOrder), With<Pin>>()
             .iter(app.world())
-            .map(|(uuid, order)| (order.0, uuid.0.clone()))
+            .map(|(uuid, order)| (order.0, uuid.as_str().to_string()))
             .collect::<Vec<_>>();
         pins.sort();
         assert_eq!(pins, [(2, "b".into()), (5, "c".into()), (9, "a".into())]);
@@ -1906,11 +1910,11 @@ mod tests {
         );
         let uuid = app
             .world_mut()
-            .query_filtered::<&Uuid, With<Bookmark>>()
+            .query_filtered::<&Id<BookmarkEntry>, With<Bookmark>>()
             .single(app.world())
             .unwrap()
-            .0
-            .clone();
+            .as_str()
+            .to_string();
         TestRequest::send(&mut app, RemoveRequest { uuid });
         assert_eq!(count::<With<Bookmark>>(&mut app), 0);
     }
@@ -1926,11 +1930,11 @@ mod tests {
         );
         let uuid = app
             .world_mut()
-            .query_filtered::<&Uuid, With<Pin>>()
+            .query_filtered::<&Id<BookmarkEntry>, With<Pin>>()
             .single(app.world())
             .unwrap()
-            .0
-            .clone();
+            .as_str()
+            .to_string();
         TestRequest::send(
             &mut app,
             ToggleForUrlRequest {
@@ -1944,29 +1948,29 @@ mod tests {
 
     fn folder_uuid(app: &mut App) -> String {
         app.world_mut()
-            .query_filtered::<&Uuid, With<Folder>>()
+            .query_filtered::<&Id<BookmarkEntry>, With<Folder>>()
             .single(app.world())
             .unwrap()
-            .0
-            .clone()
+            .as_str()
+            .to_string()
     }
 
     fn folder_named(app: &mut App, target: &str) -> (Entity, String) {
         app.world_mut()
-            .query_filtered::<(Entity, &Name, &Uuid), With<Folder>>()
+            .query_filtered::<(Entity, &Name, &Id<BookmarkEntry>), With<Folder>>()
             .iter(app.world())
             .find(|(_, name, _)| name.as_str() == target)
-            .map(|(entity, _, uuid)| (entity, uuid.0.clone()))
+            .map(|(entity, _, uuid)| (entity, uuid.as_str().to_string()))
             .unwrap()
     }
 
     fn bookmark_uuid(app: &mut App) -> String {
         app.world_mut()
-            .query_filtered::<&Uuid, With<Bookmark>>()
+            .query_filtered::<&Id<BookmarkEntry>, With<Bookmark>>()
             .single(app.world())
             .unwrap()
-            .0
-            .clone()
+            .as_str()
+            .to_string()
     }
 
     #[test]
@@ -2185,11 +2189,11 @@ mod tests {
         );
         let uuid = app
             .world_mut()
-            .query_filtered::<&Uuid, With<Bookmark>>()
+            .query_filtered::<&Id<BookmarkEntry>, With<Bookmark>>()
             .single(app.world())
             .unwrap()
-            .0
-            .clone();
+            .as_str()
+            .to_string();
         TestRequest::send(&mut app, PinRequest { uuid: uuid.clone() });
         assert_eq!(count::<With<Pin>>(&mut app), 1);
         assert_eq!(
@@ -2271,11 +2275,11 @@ mod tests {
         let folder = folder_uuid(&mut app);
         let uuid = app
             .world_mut()
-            .query_filtered::<&Uuid, With<Pin>>()
+            .query_filtered::<&Id<BookmarkEntry>, With<Pin>>()
             .single(app.world())
             .unwrap()
-            .0
-            .clone();
+            .as_str()
+            .to_string();
         TestRequest::send(
             &mut app,
             MovePinRequest {

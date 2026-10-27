@@ -3,24 +3,25 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use vmux_api::Id;
 use vmux_api::avatar::AvatarSpec;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
-use vmux_api::space::SpacesUiState;
+use vmux_api::space::UiSpaces;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_ecs::event::team::{
     ProfileRow, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest, TeamProfileCreateRequest,
     TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
-    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
+    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, UiTeam,
 };
 use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::profile::{
-    ActiveProfile, Profile as StoredProfile, ProfileCatalog, ProfileId, ProfileLabel,
-    ProfileRecord, SessionEnvironment,
+    ActiveProfile, Profile as StoredProfile, ProfileCatalog, ProfileLabel, ProfileRecord,
+    SessionEnvironment,
 };
-use vmux_ecs::team::{Agent, Profile, Tester, User};
+use vmux_ecs::team::{Agent, Avatar, Profile, Profiles, Tester, User};
 use vmux_ecs::{ActivateRequest, Active, EntityTarget, PageMetadata};
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
 use vmux_layout::cef::LayoutCef;
@@ -68,7 +69,7 @@ struct ProjectionPlugin;
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_agent_request::<AgentListTeam>()
-            .add_plugins(UiStatePlugin::<TeamUiState>::default())
+            .add_plugins(UiStatePlugin::<UiTeam>::default())
             .add_observer(replay)
             .add_systems(Update, (sync_user_profile_name, project, publish).chain())
             .add_systems(Update, list.after(AgentRequestRouteSet));
@@ -134,13 +135,13 @@ struct ProfileRenameTask(Task<Result<ProfileRecord, String>>);
 struct Team;
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-struct TeamPresentation(TeamUiState);
+struct TeamPresentation(UiTeam);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct ProfileFormState(TeamProfileForm);
 
 fn spawn_user_profile(mut commands: Commands) {
-    let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
+    let mut identity = commands.spawn((Profile::user(), User));
     if SessionEnvironment::is_test() {
         identity.insert(Tester);
     }
@@ -148,16 +149,17 @@ fn spawn_user_profile(mut commands: Commands) {
 
 fn sync_user_profile_name(
     current: vmux_ecs::profile::CurrentProfile,
-    mut user: Query<&mut Profile, With<User>>,
+    mut user: Query<(&mut Name, &mut Avatar), (With<Profile>, With<User>, Without<ActiveProfile>)>,
 ) {
     let Some(name) = current.label() else {
         return;
     };
-    let Ok(mut profile) = user.single_mut() else {
+    let Ok((mut profile_name, mut avatar)) = user.single_mut() else {
         return;
     };
-    if profile.name != name {
-        *profile = Profile::user_named(name.to_string());
+    if profile_name.as_str() != name {
+        *profile_name = Name::new(name.to_string());
+        avatar.0 = AvatarSpec::for_user_named(name);
     }
 }
 
@@ -166,13 +168,12 @@ fn sync_user_profile_name(
 struct TeamProjector<'w, 's> {
     current_space: Query<'w, 's, Entity, With<CurrentSpace>>,
     active_spaces: Query<'w, 's, Entity, (With<Space>, With<Active>)>,
-    user: Query<'w, 's, (Entity, &'static Profile), With<User>>,
+    user: Query<'w, 's, Entity, With<User>>,
     agents: Query<
         'w,
         's,
         (
             Entity,
-            &'static Profile,
             &'static Agent,
             Option<&'static RunState>,
             Option<&'static AgentDoneUnseen>,
@@ -184,8 +185,9 @@ struct TeamProjector<'w, 's> {
     metadata: Query<'w, 's, &'static PageMetadata>,
     children: Query<'w, 's, &'static Children>,
     session_views: Query<'w, 's, (Entity, &'static EntityTarget<Session>)>,
+    profiles: Profiles<'w, 's>,
     profile_labels:
-        Query<'w, 's, (&'static ProfileId, &'static Name, Has<Active>), With<ProfileLabel>>,
+        Query<'w, 's, (&'static Id<StoredProfile>, &'static Name, Has<Active>), With<ProfileLabel>>,
 }
 
 impl TeamProjector<'_, '_> {
@@ -253,12 +255,14 @@ impl TeamProjector<'_, '_> {
 
     fn members(&self, active_space: Option<Entity>) -> Vec<TeamMemberRow> {
         let mut members = Vec::new();
-        if let Ok((entity, profile)) = self.user.single() {
+        if let Ok(entity) = self.user.single()
+            && let Some(profile) = self.profiles.get(entity)
+        {
             members.push(TeamMemberRow {
                 id: entity.to_bits().to_string(),
-                name: profile.name.clone(),
-                initials: profile.avatar.initials.clone(),
-                color: profile.avatar.color.clone(),
+                name: profile.name().to_string(),
+                initials: profile.avatar().initials.clone(),
+                color: profile.avatar().color.clone(),
                 is_user: true,
                 ..Default::default()
             });
@@ -266,16 +270,19 @@ impl TeamProjector<'_, '_> {
         let Some(active_space) = active_space else {
             return members;
         };
-        for (entity, profile, agent, run, done) in &self.agents {
+        for (entity, agent, run, done) in &self.agents {
             if !self.belongs_to(entity, active_space) {
                 continue;
             }
+            let Some(profile) = self.profiles.get(entity) else {
+                continue;
+            };
             let (icon, url, title) = self.page(entity);
             members.push(TeamMemberRow {
                 id: entity.to_bits().to_string(),
-                name: profile.name.clone(),
-                initials: profile.avatar.initials.clone(),
-                color: profile.avatar.color.clone(),
+                name: profile.name().to_string(),
+                initials: profile.avatar().initials.clone(),
+                color: profile.avatar().color.clone(),
                 icon,
                 url,
                 title,
@@ -292,9 +299,9 @@ impl TeamProjector<'_, '_> {
         let mut profiles = Vec::new();
         for (id, name, is_active) in &self.profile_labels {
             profiles.push(ProfileRow {
-                id: id.0.clone(),
+                id: id.as_str().to_string(),
                 name: name.as_str().to_string(),
-                color: AvatarSpec::color(&id.0),
+                color: AvatarSpec::color(id.as_str()),
                 is_active,
             });
         }
@@ -358,13 +365,10 @@ fn publish(
 ) {
     for (entity, presentation) in &presentations {
         if team_views.contains(entity) {
-            commands.trigger(UiStateWrite::<TeamUiState>::from_event(
-                entity,
-                &presentation.0,
-            ));
+            commands.trigger(UiStateWrite::<UiTeam>::from_event(entity, &presentation.0));
         }
         if spaces_views.contains(entity) {
-            commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiSpaces>::from_event(
                 entity,
                 &presentation.0,
             ));
@@ -390,13 +394,10 @@ fn replay(
         return;
     };
     if team_views.contains(entity) {
-        commands.trigger(UiStateWrite::<TeamUiState>::from_event(
-            entity,
-            &presentation.0,
-        ));
+        commands.trigger(UiStateWrite::<UiTeam>::from_event(entity, &presentation.0));
     }
     if spaces_views.contains(entity) {
-        commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiSpaces>::from_event(
             entity,
             &presentation.0,
         ));
@@ -470,7 +471,7 @@ fn profile_create_request(
 fn profile_switch_request(
     trigger: On<UiInput<TeamProfileSwitchRequest>>,
     active: Query<&ActiveProfile>,
-    profile_labels: Query<&ProfileId, With<ProfileLabel>>,
+    profile_labels: Query<&Id<StoredProfile>, With<ProfileLabel>>,
     mut profile_switches: MessageWriter<ProfileSwitchRequested>,
 ) {
     let profile_id = StoredProfile::named(&trigger.event().payload.profile_id).into_id();
@@ -480,7 +481,7 @@ fn profile_switch_request(
     if profile_id == active.0.id() {
         return;
     }
-    if profile_labels.iter().any(|id| id.0 == profile_id) {
+    if profile_labels.iter().any(|id| id.as_str() == profile_id) {
         profile_switches.write(ProfileSwitchRequested { profile_id });
     }
 }
@@ -599,7 +600,7 @@ fn finish_profile_create(
                 let profile_id = record.profile.into_id();
                 commands.spawn((
                     ProfileLabel,
-                    ProfileId(profile_id.clone()),
+                    Id::<StoredProfile>::new(profile_id.clone()),
                     Name::new(record.name),
                 ));
                 profile_switches.write(ProfileSwitchRequested { profile_id });
@@ -612,8 +613,11 @@ fn finish_profile_create(
 fn finish_profile_rename(
     mut tasks: Query<(Entity, &mut ProfileRenameTask)>,
     user: Query<Entity, With<User>>,
-    mut space_profiles: Query<&mut SpaceProfile, With<Space>>,
-    mut profile_labels: Query<(&ProfileId, &mut Name), With<ProfileLabel>>,
+    mut space_profiles: Query<&mut Name, (With<SpaceProfile>, Without<ProfileLabel>)>,
+    mut profile_labels: Query<
+        (&Id<StoredProfile>, &mut Name),
+        (With<ProfileLabel>, Without<SpaceProfile>),
+    >,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -630,15 +634,15 @@ fn finish_profile_rename(
         };
         let profile_id = record.profile.id().to_string();
         for (id, mut label) in &mut profile_labels {
-            if id.0 == profile_id {
+            if id.as_str() == profile_id {
                 *label = Name::new(record.name.clone());
             }
         }
         if !record.active {
             continue;
         }
-        for mut profile in &mut space_profiles {
-            profile.name.clone_from(&record.name);
+        for mut profile_name in &mut space_profiles {
+            *profile_name = Name::new(record.name.clone());
         }
         if let Ok(entity) = user.single() {
             commands
@@ -711,17 +715,13 @@ mod tests {
             .world_mut()
             .spawn((Profile::user_named("Old".to_string()), User))
             .id();
-        app.world_mut().spawn((
-            Space,
-            CurrentSpace,
-            SpaceProfile {
-                name: String::new(),
-            },
-        ));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
+        app.world_mut()
+            .spawn(SpaceProfile::owned_by("Personal", space));
 
         app.update();
 
-        assert_eq!(app.world().get::<Profile>(user).unwrap().name, "Personal");
+        assert_eq!(app.world().get::<Name>(user).unwrap().as_str(), "Personal");
     }
 
     #[test]
@@ -740,7 +740,7 @@ mod tests {
         ));
         app.world_mut().spawn((
             ProfileLabel,
-            ProfileId("work".to_string()),
+            Id::<StoredProfile>::new("work"),
             Name::new("Work"),
             vmux_ecs::Active,
         ));
@@ -835,7 +835,7 @@ mod tests {
     fn command_app() -> App {
         let mut app = App::new();
         app.add_message::<vmux_layout::stack::OpenRequest>()
-            .add_plugins(IntentPlugin);
+            .add_plugins((vmux_ecs::PrimitivesPlugin, IntentPlugin));
         app
     }
 

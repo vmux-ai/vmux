@@ -75,7 +75,7 @@ impl VaultOperation {
 }
 
 #[vmux_api::ui_state(Default, Eq, version = 4)]
-pub struct VaultUiState {
+pub struct UiVault {
     pub vault: VaultSnapshot,
     pub operation: Option<VaultOperation>,
     pub generated_recovery_key: String,

@@ -143,13 +143,13 @@ impl<S: UiStateContract> UiStateWrite<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{FileDirtyEvent, FileUiState};
+    use crate::event::{FileDirtyEvent, UiFile};
     use bevy_cef::prelude::UiInput;
     use vmux_api::BinEvent;
     use vmux_api::git::FileGitState;
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<FileUiState>);
+    struct Emitted(Vec<UiFile>);
 
     #[derive(Resource)]
     struct Targets {
@@ -171,15 +171,15 @@ mod tests {
     struct SnapshotEmitted(Vec<SnapshotState>);
 
     fn record_file_state(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>) {
-        if trigger.event().id() != FileUiState::id() {
+        if trigger.event().id() != UiFile::id() {
             return;
         }
-        let event = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(trigger.event().payload())
-            .unwrap();
+        let event =
+            rkyv::from_bytes::<UiFile, rkyv::rancor::Error>(trigger.event().payload()).unwrap();
         emitted.0.push(event);
     }
 
-    fn record_write(trigger: On<UiStateWrite<FileUiState>>, mut delivered: ResMut<Delivered>) {
+    fn record_write(trigger: On<UiStateWrite<UiFile>>, mut delivered: ResMut<Delivered>) {
         delivered.writes.push(trigger.event().webview());
     }
 
@@ -195,12 +195,12 @@ mod tests {
 
     fn deliver(
         targets: Res<Targets>,
-        pages: Query<(), With<UiState<FileUiState>>>,
+        pages: Query<(), With<UiState<UiFile>>>,
         mut commands: Commands,
     ) {
         for target in [targets.file, targets.direct] {
             if pages.contains(target) {
-                commands.trigger(UiStateWrite::<FileUiState>::from_event(
+                commands.trigger(UiStateWrite::<UiFile>::from_event(
                     target,
                     &FileGitState::default(),
                 ));
@@ -211,27 +211,22 @@ mod tests {
     #[test]
     fn same_frame_updates_emit_one_snapshot() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, UiStatePlugin::<FileUiState>::default()))
+        app.add_plugins((MinimalPlugins, UiStatePlugin::<UiFile>::default()))
             .init_resource::<Emitted>()
             .add_observer(record_file_state);
-        let entity = app
-            .world_mut()
-            .spawn(UiState::<FileUiState>::default())
-            .id();
+        let entity = app.world_mut().spawn(UiState::<UiFile>::default()).id();
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);
         app.world_mut().insert_non_send(browsers);
 
-        app.world_mut()
-            .trigger(UiStateWrite::<FileUiState>::from_event(
-                entity,
-                &FileDirtyEvent { dirty: true },
-            ));
-        app.world_mut()
-            .trigger(UiStateWrite::<FileUiState>::from_event(
-                entity,
-                &FileDirtyEvent { dirty: false },
-            ));
+        app.world_mut().trigger(UiStateWrite::<UiFile>::from_event(
+            entity,
+            &FileDirtyEvent { dirty: true },
+        ));
+        app.world_mut().trigger(UiStateWrite::<UiFile>::from_event(
+            entity,
+            &FileDirtyEvent { dirty: false },
+        ));
         app.update();
 
         let emitted = &app.world().resource::<Emitted>().0;
@@ -291,10 +286,7 @@ mod tests {
     #[test]
     fn delivery_only_targets_pages_with_the_requested_ui_state() {
         let mut app = App::new();
-        let file = app
-            .world_mut()
-            .spawn(UiState::<FileUiState>::default())
-            .id();
+        let file = app.world_mut().spawn(UiState::<UiFile>::default()).id();
         let direct = app.world_mut().spawn_empty().id();
         app.insert_resource(Targets { file, direct })
             .init_resource::<Delivered>()

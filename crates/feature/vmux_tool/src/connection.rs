@@ -16,13 +16,13 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
-    McpServerStatus, McpServersRequest, McpServersUiState,
+    McpServerStatus, McpServersRequest, UiMcpServers,
 };
-use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::profile::McpCredentials;
 use vmux_ecs::profile::mcp_credentials::McpOauthCredentials;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_ecs::{UiStatePlugin, UiStateWrite};
+use vmux_feature::FeatureManifest;
 
 pub struct McpConnectionPlugin;
 
@@ -30,7 +30,7 @@ impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
-            UiStatePlugin::<McpServersUiState>::default(),
+            UiStatePlugin::<UiMcpServers>::default(),
         ))
         .add_systems(Startup, spawn_mcp_catalog)
         .add_message::<PageOpenRequest>()
@@ -80,7 +80,7 @@ fn begin_mcp_snapshot(
         Err(_) => {
             let state = McpPageState {
                 generation: 1,
-                snapshot: McpServersUiState {
+                snapshot: UiMcpServers {
                     loading: true,
                     ..Default::default()
                 },
@@ -284,7 +284,7 @@ fn publish_mcp_connections(
 ) {
     for (target, state) in &states {
         if browsers.can_emit_to(&target) {
-            commands.trigger(UiStateWrite::<McpServersUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiMcpServers>::from_event(
                 target,
                 &state.snapshot,
             ));
@@ -301,7 +301,7 @@ pub(crate) struct McpSnapshotRequest {
 #[derive(Component, Default)]
 struct McpPageState {
     generation: u64,
-    snapshot: McpServersUiState,
+    snapshot: UiMcpServers,
 }
 
 #[derive(Component)]
@@ -329,7 +329,7 @@ struct McpOperationTask {
 #[derive(Component)]
 struct McpSnapshotTask {
     generation: u64,
-    task: Task<McpServersUiState>,
+    task: Task<UiMcpServers>,
 }
 
 #[derive(Component, Clone)]
@@ -399,11 +399,7 @@ impl McpCatalog<'_, '_> {
 struct McpSnapshotSource(Vec<(String, McpCatalogServer)>);
 
 impl McpSnapshotSource {
-    fn load(
-        self,
-        result: Option<McpServerResult>,
-        credentials: &McpCredentials,
-    ) -> McpServersUiState {
+    fn load(self, result: Option<McpServerResult>, credentials: &McpCredentials) -> UiMcpServers {
         let manifest = ToolStore::current().load().unwrap_or_default();
         let mut servers = Vec::new();
         let mut catalog_ids = BTreeSet::new();
@@ -450,7 +446,7 @@ impl McpSnapshotSource {
                 status: McpServerStatus::Configured,
             });
         }
-        McpServersUiState {
+        UiMcpServers {
             loaded: true,
             loading: false,
             servers,
@@ -864,9 +860,7 @@ mod tests {
     };
     use bevy::prelude::*;
     use bevy_cef::prelude::UiInput;
-    use vmux_api::mcp::{
-        McpServerOperation, McpServerPending, McpServerRequest, McpServersUiState,
-    };
+    use vmux_api::mcp::{McpServerOperation, McpServerPending, McpServerRequest, UiMcpServers};
 
     #[test]
     fn pkce_uses_unpadded_url_safe_base64() {
@@ -910,7 +904,7 @@ mod tests {
             .world_mut()
             .spawn(McpPageState {
                 generation: 1,
-                snapshot: McpServersUiState {
+                snapshot: UiMcpServers {
                     loaded: true,
                     servers: vec![vmux_api::mcp::McpServerEntry {
                         id: "linear".to_string(),

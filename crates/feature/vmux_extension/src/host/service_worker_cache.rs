@@ -29,9 +29,9 @@ impl ServiceWorkerCache {
             return Ok(());
         }
         self.clear()?;
-        std::fs::create_dir_all(&self.default_dir).map_err(|error| error.to_string())?;
         let _ = std::fs::remove_file(self.default_dir.join(LEGACY_RUNTIME_MARKER));
-        std::fs::write(&marker, fingerprint).map_err(|error| error.to_string())
+        vmux_path::AtomicFile::write(&marker, fingerprint.as_bytes())
+            .map_err(|error| error.to_string())
     }
 
     fn fingerprint(prepared: &[PreparedRuntime]) -> String {

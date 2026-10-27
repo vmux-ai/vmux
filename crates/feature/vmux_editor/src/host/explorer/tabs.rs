@@ -84,7 +84,7 @@ fn emit_open_editors(
                 is_dir: path.is_dir(),
             });
         }
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(
             entity,
             &OpenEditorsEvent { items },
         ));

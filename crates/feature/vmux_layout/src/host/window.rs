@@ -5,7 +5,7 @@ use crate::{
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition},
     stack::Stack,
-    tab::Tab,
+    tab::{StartupDir, Tab},
     unit::WindowExt,
 };
 use bevy::{
@@ -13,14 +13,15 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_api::Id;
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::PageEmbedSet;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::{
     Active, EffectiveStartupUrl, Order, PageOpenRequest, PageOpenSet, PageOpenTarget, PendingPrompt,
 };
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -31,7 +32,7 @@ pub struct WindowLayoutPlugin;
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -318,7 +319,7 @@ impl WindowHierarchy<'_, '_> {
 fn setup_shells(
     windows: Query<(Entity, &Window, Has<NewWindowWorkspace>)>,
     roots: Query<&HostWindow, With<VmuxWindow>>,
-    spaces: Query<&crate::space::SpaceId, With<crate::space::Space>>,
+    spaces: Query<&Id<crate::space::Space>, With<crate::space::Space>>,
     sections: Query<&crate::side_sheet::SideSheetSectionsExpanded>,
     focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
@@ -326,7 +327,7 @@ fn setup_shells(
     settings: Res<LayoutSettings>,
 ) {
     let mut existing_space_ids: std::collections::HashSet<String> =
-        spaces.iter().map(|id| id.0.clone()).collect();
+        spaces.iter().map(|id| id.as_str().to_string()).collect();
     let mut next_space_number = existing_space_ids.len() + 1;
     for (window_entity, window, new_workspace) in &windows {
         if roots.iter().any(|root| root.0 == window_entity) {
@@ -507,13 +508,12 @@ fn spawn_new_window_workspace(
     expanded_sections: Option<crate::side_sheet::SideSheetSectionsExpanded>,
 ) {
     let mut space = commands.spawn((
-        crate::space::SpaceId(id.clone()),
+        crate::space::Space::bundle(Id::<crate::space::Space>::new(id.clone())),
         Name::new(name),
         Order(0),
         Active,
         EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
         LastActivatedAt::now(),
-        crate::space::Space::bundle(),
         ChildOf(main),
     ));
     if let Some(expanded_sections) = expanded_sections {
@@ -660,21 +660,20 @@ fn spawn_requested_tab_layouts(
             .startup_dir
             .as_ref()
             .and_then(|startup_dir| startup_dir.canonicalize().ok())
-            .filter(|startup_dir| startup_dir.is_dir())
-            .and_then(|startup_dir| startup_dir.to_str().map(str::to_string));
+            .filter(|startup_dir| startup_dir.is_dir());
         let TabScaffold {
             tab: tab_e,
             pane: leaf,
             stack,
         } = tabs.spawn(request.space, request.primary_window, settings.pane.gap);
-        commands.entity(tab_e).insert(Tab {
-            name: request.name.clone().unwrap_or_default(),
-            startup_dir,
-        });
+        commands.entity(tab_e).insert((
+            Name::new(request.name.clone().unwrap_or_else(|| "Tab".to_string())),
+            StartupDir(startup_dir),
+        ));
         if !request.focus {
-            commands.entity(tab_e).insert(LastActivatedAt(0));
-            commands.entity(leaf).insert(LastActivatedAt(0));
-            commands.entity(stack).insert(LastActivatedAt(0));
+            commands.entity(tab_e).remove::<LastActivatedAt>();
+            commands.entity(leaf).remove::<LastActivatedAt>();
+            commands.entity(stack).remove::<LastActivatedAt>();
         }
         match &request.content {
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
@@ -821,7 +820,12 @@ mod tests {
     #[test]
     fn scaffold_builds_tab_pane_stack_under_space() {
         let mut app = App::new();
-        let space = app.world_mut().spawn(crate::space::Space).id();
+        let space = app
+            .world_mut()
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "space",
+            )))
+            .id();
         let window = app.world_mut().spawn_empty().id();
         let result = {
             let world = app.world_mut();
@@ -1055,7 +1059,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
@@ -1091,7 +1098,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .entity_mut(space)
@@ -1101,10 +1111,14 @@ mod tests {
 
         app.update();
 
-        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
+        let tab = app
+            .world_mut()
+            .query_filtered::<&StartupDir, With<Tab>>()
+            .single(app.world())
+            .unwrap();
         assert_eq!(
-            tab.startup_dir.as_deref(),
-            startup_dir.path().canonicalize().unwrap().to_str()
+            tab.0.as_deref(),
+            Some(startup_dir.path().canonicalize().unwrap().as_path())
         );
     }
 
@@ -1122,7 +1136,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .entity_mut(space)
@@ -1130,8 +1147,12 @@ mod tests {
 
         app.update();
 
-        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
-        assert_eq!(tab.startup_dir, None);
+        let tab = app
+            .world_mut()
+            .query_filtered::<&StartupDir, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(tab.0, None);
     }
 
     #[test]
@@ -1146,7 +1167,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .resource_mut::<Messages<TabLayoutSpawnRequest>>()
@@ -1162,8 +1186,12 @@ mod tests {
 
         app.update();
 
-        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
-        assert_eq!(tab.startup_dir, None);
+        let tab = app
+            .world_mut()
+            .query_filtered::<&StartupDir, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(tab.0, None);
     }
 
     #[test]
@@ -1178,11 +1206,18 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let requested_space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("active")),
+                vmux_ecs::Active,
+                ChildOf(main),
+            ))
             .id();
         let later_space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("inactive")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut()
             .resource_mut::<Messages<TabLayoutSpawnRequest>>()
@@ -1238,7 +1273,10 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, ChildOf(main)))
+            .spawn((
+                crate::space::Space::bundle(Id::<crate::space::Space>::new("space")),
+                ChildOf(main),
+            ))
             .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
@@ -1274,7 +1312,12 @@ mod tests {
 
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);
-        let space = app.world_mut().spawn(crate::space::Space).id();
+        let space = app
+            .world_mut()
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "space",
+            )))
+            .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
             vmux_ecs::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),

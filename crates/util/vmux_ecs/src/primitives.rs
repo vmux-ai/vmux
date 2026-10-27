@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use moonshine_save::prelude::Save;
 
 use super::persistence::PersistenceAppExt;
-use crate::PageMetadata;
 use crate::component::{
     ActivateRequest, Active, ArchivedAt, CollectionView, CreatedAt, Cwd, Description,
-    LastActivatedAt, Order,
+    LastActivatedAt, Order, Revision,
 };
+use crate::{DeletedAt, LastSyncedAt, PageMetadata, RemoteUpdatedAt, UpdatedAt};
 use vmux_api::{BuiltinIcon, PageIcon};
 
 use bevy::ecs::relationship::Relationship;
@@ -15,16 +15,22 @@ pub struct PrimitivesPlugin;
 
 impl Plugin for PrimitivesPlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<PageMetadata>()
+        app.add_plugins((crate::OperationPlugin, crate::ReplicationPlugin))
+            .register_persisted::<PageMetadata>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
             .register_persisted::<Cwd>()
             .register_persisted::<Description>()
             .register_persisted::<CollectionView>()
             .register_persisted::<CreatedAt>()
+            .register_persisted::<UpdatedAt>()
             .register_persisted::<LastActivatedAt>()
             .register_persisted::<ArchivedAt>()
+            .register_persisted::<DeletedAt>()
+            .register_persisted::<RemoteUpdatedAt>()
+            .register_persisted::<LastSyncedAt>()
             .register_persisted::<Order>()
+            .register_persisted::<Revision>()
             .register_type::<Active>()
             .register_type::<Children>()
             .register_type::<ChildOf>()
@@ -32,8 +38,16 @@ impl Plugin for PrimitivesPlugin {
             .track_persistence::<Name>()
             .track_persistence::<Children>()
             .track_persistence::<ChildOf>()
+            .add_systems(PreStartup, spawn_restore_validator)
             .add_observer(activate);
     }
+}
+
+fn spawn_restore_validator(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Workspace ownership validator"),
+        super::persistence::WorkspaceRestoreValidator::ownership(),
+    ));
 }
 
 fn activate(trigger: On<ActivateRequest>, child_of: Query<&ChildOf>, mut commands: Commands) {
@@ -55,6 +69,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(PrimitivesPlugin);
 
+        assert!(app.is_plugin_added::<crate::ReplicationPlugin>());
         let registry = app.world().resource::<AppTypeRegistry>().read();
         let filter = super::super::persistence::WorkspacePersisted::filter(&registry);
         assert!(
@@ -68,6 +83,7 @@ mod tests {
         assert!(filter.is_allowed::<Cwd>());
         assert!(filter.is_allowed::<Description>());
         assert!(filter.is_allowed::<CollectionView>());
+        assert!(filter.is_allowed::<Revision>());
     }
 
     #[test]
@@ -84,21 +100,39 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(PrimitivesPlugin);
 
-        let root = app.world_mut().spawn(LastActivatedAt(1)).id();
+        let root = app.world_mut().spawn(LastActivatedAt::new(1)).id();
         let child = app
             .world_mut()
-            .spawn((LastActivatedAt(1), ChildOf(root)))
+            .spawn((LastActivatedAt::new(1), ChildOf(root)))
             .id();
         let leaf = app
             .world_mut()
-            .spawn((LastActivatedAt(1), ChildOf(child)))
+            .spawn((LastActivatedAt::new(1), ChildOf(child)))
             .id();
 
         app.world_mut().trigger(ActivateRequest { entity: leaf });
         app.update();
 
-        assert!(app.world().get::<LastActivatedAt>(root).unwrap().0 > 1);
-        assert!(app.world().get::<LastActivatedAt>(child).unwrap().0 > 1);
-        assert!(app.world().get::<LastActivatedAt>(leaf).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(root)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(child)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(leaf)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 }

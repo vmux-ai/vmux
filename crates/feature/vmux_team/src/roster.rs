@@ -1,7 +1,7 @@
 use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::page::UiStateEmit;
-use vmux_api::team::{TeamMemberRow, TeamUiState};
+use vmux_api::team::{TeamMemberRow, UiTeam};
 
 use crate::projection::TeamStateProjection;
 
@@ -31,7 +31,7 @@ struct Projection;
 pub struct Members(pub Vec<TeamMemberRow>);
 
 #[derive(Component, Default)]
-pub struct Team(pub TeamUiState);
+pub struct Team(pub UiTeam);
 
 #[derive(Component)]
 struct Runtime;
@@ -95,7 +95,7 @@ mod tests {
             started
         }
 
-        fn team(&self) -> &TeamUiState {
+        fn team(&self) -> &UiTeam {
             &self
                 .0
                 .world()

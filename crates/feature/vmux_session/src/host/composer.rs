@@ -149,8 +149,9 @@ fn slash_command(
         return;
     };
     let effect = composer.slash_effect(command);
-    commands
-        .trigger(vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect));
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        webview, &effect,
+    ));
     commands.trigger(ComposerChanged::new(webview));
     match command {
         SlashCommand::Upload => commands.trigger(UiInput {
@@ -171,14 +172,12 @@ fn project_queries(
     let Ok((composer, mut selectors)) = composers.get_mut(webview) else {
         return;
     };
-    commands.trigger(
-        vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-            webview,
-            &ChatComposerDraft {
-                text: composer.draft.clone(),
-            },
-        ),
-    );
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        webview,
+        &ChatComposerDraft {
+            text: composer.draft.clone(),
+        },
+    ));
     let media_query = InlineMediaQuery::parse(&composer.draft).map(|query| query.query.to_string());
     if selectors.media_query != media_query {
         selectors.media_query.clone_from(&media_query);

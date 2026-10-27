@@ -5,7 +5,7 @@ use vmux_api::protocol::SharedMessage;
 use vmux_command::WriteCommandRequests;
 use vmux_ecs::agent::AgentContinuationRequest;
 use vmux_ecs::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
-use vmux_session::{RunState, SessionId};
+use vmux_session::{Id, RunState, Session};
 
 pub(super) fn add(app: &mut App) {
     app.add_message::<AgentContinuationRequest>()
@@ -37,7 +37,7 @@ fn send_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
-        Option<&SessionId>,
+        Option<&Id<Session>>,
         Option<&mut RunState>,
     )>,
     connected: Option<Single<(), With<ServiceConnected>>>,
@@ -56,7 +56,7 @@ fn send_continuations(
         }
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
-                sid: session_id.0.clone(),
+                sid: session_id.as_str().to_string(),
                 text: String::new(),
                 context: Some(continuation.0.clone()),
                 attachments: Vec::new(),

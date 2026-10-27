@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 
 use crate::state::{
-    VaultConnectionProvider, VaultDestination, VaultDestinationSelectRequest,
+    UiVault, VaultConnectionProvider, VaultDestination, VaultDestinationSelectRequest,
     VaultGenerateRecoveryKeyRequest, VaultOperationKind, VaultOwnerSelectRequest,
     VaultPrivacyRequest, VaultProviderSelectRequest, VaultRecoveryConfirmationRequest,
     VaultRecoveryInputRequest, VaultRefreshRequest, VaultRepositoryNameRequest,
-    VaultRepositorySelectRequest, VaultSnapshot, VaultSyncRequest, VaultSyncStatus, VaultUiState,
+    VaultRepositorySelectRequest, VaultSnapshot, VaultSyncRequest, VaultSyncStatus,
     VaultWorkflowConnectRequest, VaultWorkflowCreateRequest, VaultWorkflowState,
 };
 use dioxus::prelude::*;
@@ -14,12 +14,12 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
     ManagerSelectItem, ManagerSpinner, WorkspaceBreadcrumbHeader, WorkspacePage,
 };
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "VaultUiState"],
+    states = [vmux_ui::theme::UiTheme, crate::state::UiVault],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]
@@ -28,7 +28,7 @@ pub struct VaultPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<VaultUiState>().state;
+    let state = UiState::<UiVault>::use_context().state;
     let mut recovery_key_copied = use_signal(|| false);
     let mut github_device_code_copied = use_signal(|| false);
 
@@ -52,7 +52,7 @@ pub fn Page() -> Element {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
-                            let _ = send(&VaultRefreshRequest {
+                            send(&VaultRefreshRequest {
                                 load_repositories: false,
                             });
                         },
@@ -179,7 +179,7 @@ fn VaultPanel(
                         variant: ManagerButtonVariant::Primary,
                         disabled: workflow.pending.is_some(),
                         onclick: move |_| {
-                            let _ = send(&VaultSyncRequest);
+                            send(&VaultSyncRequest);
                         },
                         {translate("vault-sync")}
                     }
@@ -198,7 +198,7 @@ fn VaultPanel(
                                 title: option.name(),
                                 aria_label: option.name(),
                                 onclick: move |_| {
-                                    let _ = send(&VaultProviderSelectRequest { provider: option });
+                                    send(&VaultProviderSelectRequest { provider: option });
                                 },
                                 ProviderIcon { provider: option }
                             }
@@ -280,7 +280,7 @@ fn VaultPanel(
                                             value: (!workflow.selected_owner.is_empty()).then(|| workflow.selected_owner.clone()),
                                             placeholder: vault.github_owner.clone(),
                                             onselect: move |value: String| {
-                                                let _ = send(&VaultOwnerSelectRequest { owner: value });
+                                                send(&VaultOwnerSelectRequest { owner: value });
                                             },
                                         }
                                     }
@@ -293,7 +293,7 @@ fn VaultPanel(
                                             "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
                                         },
                                         onclick: move |_| {
-                                            let _ = send(&VaultDestinationSelectRequest {
+                                            send(&VaultDestinationSelectRequest {
                                                 destination: VaultDestination::Create,
                                             });
                                         },
@@ -306,7 +306,7 @@ fn VaultPanel(
                                             "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
                                         },
                                         onclick: move |_| {
-                                            let _ = send(&VaultDestinationSelectRequest {
+                                            send(&VaultDestinationSelectRequest {
                                                 destination: VaultDestination::Existing,
                                             });
                                         },
@@ -329,7 +329,7 @@ fn VaultPanel(
                                                             value: "{workflow.repository_name}",
                                                             placeholder: translate("vault-repository-name"),
                                                             oninput: move |event| {
-                                                                let _ = send(&VaultRepositoryNameRequest {
+                                                                send(&VaultRepositoryNameRequest {
                                                                     name: event.value(),
                                                                 });
                                                             },
@@ -341,7 +341,7 @@ fn VaultPanel(
                                                         value: "{workflow.repository_name}",
                                                         placeholder: translate("vault-repository-name"),
                                                         oninput: move |event| {
-                                                            let _ = send(&VaultRepositoryNameRequest {
+                                                            send(&VaultRepositoryNameRequest {
                                                                 name: event.value(),
                                                             });
                                                         },
@@ -351,7 +351,7 @@ fn VaultPanel(
                                                     variant: ManagerButtonVariant::Primary,
                                                     disabled: workflow.pending.is_some() || workflow.repository_name.trim().is_empty() || (provider == VaultConnectionProvider::Github && workflow.selected_owner.is_empty()),
                                                     onclick: move |_| {
-                                                        let _ = send(&VaultWorkflowCreateRequest);
+                                                        send(&VaultWorkflowCreateRequest);
                                                     },
                                                     {translate("vault-create")}
                                                 }
@@ -361,7 +361,7 @@ fn VaultPanel(
                                                     Checkbox {
                                                         checked: workflow.private,
                                                         on_checked_change: move |private| {
-                                                            let _ = send(&VaultPrivacyRequest { private });
+                                                            send(&VaultPrivacyRequest { private });
                                                         },
                                                         attributes: vec![],
                                                     }
@@ -382,7 +382,7 @@ fn VaultPanel(
                                                             value: (!workflow.selected_repository.is_empty()).then(|| workflow.selected_repository.clone()),
                                                             placeholder: translate("vault-choose-repository"),
                                                             onselect: move |repository| {
-                                                                let _ = send(&VaultRepositorySelectRequest { repository });
+                                                                send(&VaultRepositorySelectRequest { repository });
                                                             },
                                                         }
                                                     }
@@ -390,7 +390,7 @@ fn VaultPanel(
                                                         variant: ManagerButtonVariant::Primary,
                                                         disabled: workflow.pending.is_some() || workflow.selected_repository.is_empty(),
                                                         onclick: move |_| {
-                                                            let _ = send(&VaultWorkflowConnectRequest);
+                                                            send(&VaultWorkflowConnectRequest);
                                                         },
                                                         {translate("vault-use-repository")}
                                                     }
@@ -400,7 +400,7 @@ fn VaultPanel(
                                                     class: "flex w-full items-center justify-center gap-2 rounded-md bg-foreground/[0.055] px-4 py-3 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.085]",
                                                     disabled: workflow.pending.is_some(),
                                                     onclick: move |_| {
-                                                        let _ = send(&VaultWorkflowConnectRequest);
+                                                        send(&VaultWorkflowConnectRequest);
                                                     },
                                                     svg { class: "h-4 w-4", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                                                         path { d: "M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" }
@@ -498,7 +498,7 @@ fn RecoveryCard(
                         variant: ManagerButtonVariant::Secondary,
                         disabled: workflow.pending.is_some() || !generated.is_empty(),
                         onclick: move |_| {
-                            let _ = send(&VaultGenerateRecoveryKeyRequest);
+                            send(&VaultGenerateRecoveryKeyRequest);
                         },
                         {translate("vault-recovery-key-create")}
                     }
@@ -552,7 +552,7 @@ fn RecoveryCard(
                                 placeholder: translate("vault-recovery-key-verify-placeholder"),
                                 disabled: workflow.pending.is_some(),
                                 oninput: move |event| {
-                                    let _ = send(&VaultRecoveryConfirmationRequest {
+                                    send(&VaultRecoveryConfirmationRequest {
                                         value: event.value(),
                                     });
                                 },
@@ -577,7 +577,7 @@ fn RecoveryCard(
                         placeholder: translate("vault-recovery-key-placeholder"),
                         disabled: workflow.pending.is_some(),
                         oninput: move |event| {
-                            let _ = send(&VaultRecoveryInputRequest {
+                            send(&VaultRecoveryInputRequest {
                                 value: event.value(),
                             });
                         },

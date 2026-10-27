@@ -7,21 +7,24 @@ use vmux_ui::components::manager::{
     ManagerSearchAction, ManagerTone, WorkspaceBreadcrumbHeader, WorkspacePage,
 };
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
     page = "process_monitor",
     component = Page,
-    states = ["ThemeUiState", "ProcessesUiState"]
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_api::service::UiProcesses,
+    ]
 )]
 pub struct ProcessMonitorPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ProcessesUiState>().state;
+    let state = UiState::<UiProcesses>::use_context().state;
     let snapshot = state();
     let processes = snapshot.processes.clone();
     let connected = snapshot.connected;
@@ -45,7 +48,7 @@ pub fn Page() -> Element {
                         value: snapshot.query.clone(),
                         placeholder: translate("services-filter"),
                         onsearch: move |query| {
-                            let _ = send(&ProcessSearchRequest { query });
+                            send(&ProcessSearchRequest { query });
                         },
                     }
                     span { class: "text-[10px] tabular-nums text-muted-foreground", "{process_count}" }
@@ -55,7 +58,7 @@ pub fn Page() -> Element {
                             variant: ManagerButtonVariant::Danger,
                             onclick: move |event: Event<MouseData>| {
                                 event.stop_propagation();
-                                let _ = send(&ProcessKillAllEvent { kill_all: true });
+                                send(&ProcessKillAllEvent { kill_all: true });
                             },
                             {translate("services-kill-all")}
                         }
@@ -85,8 +88,8 @@ pub fn Page() -> Element {
 #[component]
 fn ServiceDashboard(
     processes: Vec<ProcessEntry>,
-    cpu: ProcessUsageUiState,
-    memory: ProcessUsageUiState,
+    cpu: UiProcessUsage,
+    memory: UiProcessUsage,
 ) -> Element {
     rsx! {
         div { class: "grid min-h-0 gap-3 xl:grid-cols-2",
@@ -108,12 +111,7 @@ fn ServiceDashboard(
 }
 
 #[component]
-fn UsageChart(
-    class: String,
-    usage: ProcessUsageUiState,
-    line_class: String,
-    fill: String,
-) -> Element {
+fn UsageChart(class: String, usage: UiProcessUsage, line_class: String, fill: String) -> Element {
     rsx! {
         section { class: "min-w-0 overflow-hidden rounded-xl bg-foreground/[0.025] ring-1 ring-inset ring-foreground/10 {class}",
             div { class: "flex h-9 items-center justify-between border-b border-foreground/[0.07] px-3",
@@ -210,14 +208,14 @@ fn ProcessRow(process: ProcessEntry) -> Element {
         if !managed {
             return;
         }
-        let _ = send(&ProcessNavigateEvent {
+        send(&ProcessNavigateEvent {
             process_id: nav_id.clone(),
             navigate: true,
         });
     };
     let onkill = move |event: Event<MouseData>| {
         event.stop_propagation();
-        let _ = send(&ProcessKillEvent {
+        send(&ProcessKillEvent {
             process_id: kill_id.clone(),
             kill: true,
         });

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vmux_setting::StartupDir;
 
@@ -9,14 +9,14 @@ impl WorkspaceCwd {
         self.0
     }
 
-    pub fn from_tab(tab_cwd: Option<&str>) -> Result<Option<PathBuf>, String> {
+    pub fn from_tab(tab_cwd: Option<&Path>) -> Result<Option<PathBuf>, String> {
         let Some(tab_cwd) = tab_cwd else {
             return Ok(None);
         };
-        StartupDir::from_tab(tab_cwd).map(|dir| Some(dir.path))
+        StartupDir::from_tab_path(tab_cwd).map(|dir| Some(dir.path))
     }
 
-    pub fn resolve(tab_cwd: Option<&str>, launch_cwd: Option<&str>) -> Result<PathBuf, String> {
+    pub fn resolve(tab_cwd: Option<&Path>, launch_cwd: Option<&str>) -> Result<PathBuf, String> {
         if let Some(path) = Self::from_tab(tab_cwd)? {
             return Ok(path);
         }

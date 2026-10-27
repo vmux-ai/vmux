@@ -3,13 +3,14 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use vmux_api::protocol::ClientMessage;
+use vmux_connector::ExternalId;
 use vmux_ecs::event::InstallPhase;
 use vmux_ecs::{Cwd, ProcessAnchor};
 use vmux_editor::lsp::archive::ArchiveKind;
 use vmux_editor::lsp::download::{self, RemoteArtifact};
 use vmux_editor::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
 use vmux_editor::lsp::store::{PackageStore, Receipt};
-use vmux_session::{AgentId, SessionId};
+use vmux_session::{AgentRef, Id, Session};
 use vmux_setting::AppSettings;
 
 use super::environment_driver::AcpEnvironment;
@@ -18,8 +19,6 @@ use super::{
     AcpInstallJob, AcpInstallKey, AcpInstallOutcome, AcpInstallProgressSink, AcpInstallRequest,
     AcpInstallWaiter, AcpLaunch, InstallState,
 };
-use crate::AcpSessionId;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ResolvedAgent {
     pub command: String,
@@ -183,19 +182,19 @@ impl AcpInstallRequest {
 }
 
 impl AcpInstallWaiter {
-    pub(super) fn matches(&self, session_id: &SessionId, agent_id: &AgentId) -> bool {
-        self.sid == session_id.0 && self.agent_id == agent_id.0
+    pub(super) fn matches(&self, session_id: &Id<Session>, agent_id: &AgentRef) -> bool {
+        self.sid == session_id.as_str() && self.agent_id == agent_id.as_str()
     }
 }
 
 impl AcpLaunch {
     pub(super) fn message_for(
         &self,
-        session_id: &SessionId,
-        agent_id: &AgentId,
+        session_id: &Id<Session>,
+        agent_id: &AgentRef,
         cwd: &Cwd,
         anchor: &ProcessAnchor,
-        resume: Option<&AcpSessionId>,
+        resume: Option<&ExternalId>,
         settings: Option<&AppSettings>,
     ) -> ClientMessage {
         let shell = settings
@@ -210,8 +209,8 @@ impl AcpLaunch {
             })
             .ok();
         ClientMessage::SpawnAcpAgent {
-            sid: session_id.0.clone(),
-            agent_id: agent_id.0.clone(),
+            sid: session_id.as_str().to_string(),
+            agent_id: agent_id.as_str().to_string(),
             command: self.command.clone(),
             args: self.args.clone(),
             env: self.env.clone(),
@@ -219,7 +218,7 @@ impl AcpLaunch {
             anchor: anchor.0,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
             mcp_args: mcp.map(|mcp| mcp.args).unwrap_or_default(),
-            resume_acp_session_id: resume.map(|resume| resume.0.clone()),
+            resume_acp_session_id: resume.map(|resume| resume.as_str().to_string()),
         }
     }
 }

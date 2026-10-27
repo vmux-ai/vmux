@@ -10,7 +10,7 @@ use vmux_ecs::page::PageReady;
 use vmux_ecs::{Cwd, EntityTarget, KeyboardOwner, ProcessAnchor};
 use vmux_git::RepoInfoCache;
 use vmux_git::worktree::RepoInfo;
-use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace, TabWorktree};
 use vmux_session::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
@@ -55,10 +55,11 @@ struct ComposerProjection<'w, 's> {
         'w,
         's,
         (
-            &'static Tab,
+            &'static StartupDir,
             Option<&'static TabWorkspace>,
             Option<&'static TabWorktree>,
         ),
+        With<Tab>,
     >,
     repo_info: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
     space_projects: SpaceProjects<'w, 's>,
@@ -103,9 +104,9 @@ impl ComposerProjection<'_, '_> {
         let mut workspace_selected = false;
         let mut worktree = None;
         loop {
-            if let Ok((tab, workspace, managed)) = self.tabs.get(current) {
-                tab_dir = tab.startup_dir.as_ref().map(std::path::PathBuf::from);
-                workspace_selected = workspace.is_some() || tab.startup_dir.is_some();
+            if let Ok((startup_dir, workspace, managed)) = self.tabs.get(current) {
+                tab_dir = startup_dir.0.clone();
+                workspace_selected = workspace.is_some() || startup_dir.0.is_some();
                 worktree = managed.cloned();
                 break;
             }
@@ -161,7 +162,7 @@ fn push_context_to_page(
         }
         if changed || ready.is_changed() {
             commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+                vmux_ecs::UiStateWrite::<vmux_session::state::UiChat>::from_event(
                     webview, &context,
                 ),
             );
@@ -236,10 +237,7 @@ fn chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
-            webview,
-            &projection.0,
-        ),
+        vmux_ecs::UiStateWrite::<vmux_session::state::UiChat>::from_event(webview, &projection.0),
     );
     let root = std::path::PathBuf::from(&project);
     let wake = vmux_ecs::wake::Wake::beside(proxy.as_deref());
@@ -294,7 +292,7 @@ fn drain_branch_reads(
             continue;
         }
         commands.trigger(
-            vmux_ecs::UiStateWrite::<vmux_session::state::ChatUiState>::from_event(
+            vmux_ecs::UiStateWrite::<vmux_session::state::UiChat>::from_event(
                 read.webview,
                 &projection.0,
             ),

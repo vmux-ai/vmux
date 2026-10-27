@@ -10,14 +10,14 @@ use vmux_api::session::RemoteMediaEntry;
 #[cfg(host)]
 use vmux_ecs::service::ServiceRequest;
 #[cfg(host)]
-use vmux_session::{AgentConversationTitle, PromptQueue, RunState, SessionId};
+use vmux_session::{AgentConversationTitle, Id, PromptQueue, RunState, Session};
 
 #[cfg(host)]
 use super::composer::{ComposerChanged, ComposerState};
 use super::conversation::Submitted;
 #[cfg(host)]
 use super::session::{ChatAttachmentProjection, SessionView};
-use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishUiChat};
 #[cfg(host)]
 use crate::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
@@ -59,10 +59,10 @@ struct SessionControl<'w> {
 
 #[cfg(host)]
 impl SessionControl<'_> {
-    fn cancel(&mut self, session: &SessionId) {
+    fn cancel(&mut self, session: &Id<Session>) {
         self.requests.write(ServiceRequest(ClientMessage::Shared(
             SharedMessage::AgentCancel {
-                sid: session.0.clone(),
+                sid: session.as_str().to_string(),
             },
         )));
     }
@@ -142,16 +142,15 @@ fn submit(
     }
     enqueue_prompt(&mut queue, &mut state, text, attachments);
     let effect = composer.effect(String::new(), true);
-    commands
-        .trigger(vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect));
+    commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+        webview, &effect,
+    ));
     commands.trigger(ComposerChanged::new(webview));
     if selected.clear_selected() {
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview,
-                &selected.state(),
-            ),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview,
+            &selected.state(),
+        ));
     }
 }
 
@@ -159,7 +158,7 @@ fn submit(
 fn stop(
     trigger: On<UiInput<ChatStop>>,
     targets: super::session::SessionViews,
-    mut sessions: Query<(&mut PromptQueue, &mut RunState, &SessionId)>,
+    mut sessions: Query<(&mut PromptQueue, &mut RunState, &Id<Session>)>,
     mut control: SessionControl,
 ) {
     let Some(session_entity) = targets.session(trigger.event().webview) else {
@@ -203,7 +202,7 @@ fn enqueue_prompt(
 fn cancel(
     trigger: On<UiInput<ChatCancel>>,
     targets: super::session::SessionViews,
-    mut sessions: Query<(&mut PromptQueue, &SessionId)>,
+    mut sessions: Query<(&mut PromptQueue, &Id<Session>)>,
     mut control: SessionControl,
 ) {
     let Some(session_entity) = targets.session(trigger.event().webview) else {
@@ -223,7 +222,7 @@ fn escape(
     trigger: On<UiInput<ChatEscape>>,
     targets: super::session::SessionViews,
     mut composers: Query<&mut ComposerState, With<SessionView>>,
-    mut sessions: Query<(&mut PromptQueue, &mut RunState, &SessionId)>,
+    mut sessions: Query<(&mut PromptQueue, &mut RunState, &Id<Session>)>,
     mut commands: Commands,
     mut control: SessionControl,
 ) {
@@ -257,9 +256,9 @@ fn escape(
     };
     if !running && queue.items.is_empty() && !composer.draft().is_empty() {
         let effect = composer.effect(String::new(), true);
-        commands.trigger(
-            vmux_ecs::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
-        );
+        commands.trigger(vmux_ecs::UiStateWrite::<crate::state::UiChat>::from_event(
+            webview, &effect,
+        ));
         commands.trigger(ComposerChanged::new(webview));
     }
 }
@@ -404,7 +403,7 @@ fn project_media(mut runtimes: ChangedMediaPicker) {
 }
 
 fn emit_media(
-    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut refreshes: MessageReader<RepublishUiChat>,
     mut runtimes: Query<(Ref<Media>, &mut ChatUiStateProjection), With<ChatRuntime>>,
 ) {
     let refresh = refreshes.read().next().is_some();
@@ -418,7 +417,7 @@ fn emit_media(
 }
 
 fn emit_attachments(
-    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut refreshes: MessageReader<RepublishUiChat>,
     attachments: Single<Ref<Attachments>, With<ChatRuntime>>,
     focus: Single<Ref<ChatPromptFocusRevision>, With<ChatRuntime>>,
     mut projection: Single<&mut ChatUiStateProjection, With<ChatRuntime>>,
@@ -499,8 +498,8 @@ mod tests {
         fn bundle() -> impl Bundle {
             (
                 vmux_session::Session,
-                SessionId("session".into()),
-                vmux_session::AgentId("mock".into()),
+                Id::<Session>::new("session"),
+                vmux_session::AgentRef::new("mock"),
                 vmux_ecs::Cwd("/tmp".into()),
                 vmux_ecs::ProcessAnchor(vmux_ecs::ProcessId::new()),
             )

@@ -1,7 +1,7 @@
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_ecs::FileUiStateWrite;
+use vmux_ecs::UiFileWrite;
 use vmux_ecs::event::{
     ExplorerFilesToggle, ExplorerOpenEditorsToggle, ExplorerOutlineToggle, ExplorerPanelEvent,
     ExplorerPanelSetVisible, ExplorerPanelViewSet, ExplorerPanelViewportWidth, ExplorerPanelWidth,
@@ -178,7 +178,7 @@ fn emit(
             .map(|viewport| viewport.visible)
             .unwrap_or(preferred_visible);
         let view = panel_views.get(scope).copied().unwrap_or_default();
-        commands.trigger(FileUiStateWrite::from_event(
+        commands.trigger(UiFileWrite::from_event(
             entity,
             &ExplorerPanelEvent {
                 visible,

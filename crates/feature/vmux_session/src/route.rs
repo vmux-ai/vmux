@@ -1,10 +1,10 @@
-use crate::{AgentId, SessionId};
+use crate::{AgentRef, Id, Session};
 use percent_encoding::percent_decode_str;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
     Manager,
-    Session(SessionId),
+    Session(Id<Session>),
 }
 
 impl Route {
@@ -18,7 +18,7 @@ impl Route {
             [] => Some(Self::Manager),
             [id] if route.query().is_none() && route.fragment().is_none() => {
                 let id = percent_decode_str(id).decode_utf8().ok()?;
-                (!id.is_empty()).then(|| Self::Session(SessionId(id.into_owned())))
+                (!id.is_empty()).then(|| Self::Session(Id::<Session>::new(id.into_owned())))
             }
             _ => None,
         }
@@ -32,26 +32,26 @@ impl Route {
                     .expect("static Session route must be valid");
                 url.path_segments_mut()
                     .expect("Session route must support path segments")
-                    .push(&id.0);
+                    .push(id.as_str());
                 url.into()
             }
         }
     }
 
-    pub fn manager_for_agent(agent: &AgentId) -> String {
+    pub fn manager_for_agent(agent: &AgentRef) -> String {
         let query = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("agent", &agent.0)
+            .append_pair("agent", agent.as_str())
             .finish();
         format!("{}?{query}", Self::Manager.url())
     }
 
-    pub fn requested_agent(url: &str) -> Option<AgentId> {
+    pub fn requested_agent(url: &str) -> Option<AgentRef> {
         if Self::parse(url) != Some(Self::Manager) {
             return None;
         }
         let route = vmux_api::VmuxRoute::parse(url)?;
         url::form_urlencoded::parse(route.query()?.as_bytes()).find_map(|(key, value)| {
-            (key == "agent" && !value.is_empty()).then(|| AgentId(value.into()))
+            (key == "agent" && !value.is_empty()).then(|| AgentRef::new(value.into_owned()))
         })
     }
 
@@ -90,20 +90,20 @@ mod tests {
         assert_eq!(Route::parse("vmux://sessions/"), Some(Route::Manager));
         assert_eq!(
             Route::parse("vmux://sessions/01a0fc43-68f9-7121-a388-59e1891fdc41"),
-            Some(Route::Session(SessionId(
-                "01a0fc43-68f9-7121-a388-59e1891fdc41".into()
+            Some(Route::Session(Id::<Session>::new(
+                "01a0fc43-68f9-7121-a388-59e1891fdc41"
             )))
         );
     }
 
     #[test]
     fn manager_agent_is_transient_creation_context() {
-        let url = Route::manager_for_agent(&AgentId("claude acp".into()));
+        let url = Route::manager_for_agent(&AgentRef::new("claude acp"));
 
         assert_eq!(url, "vmux://sessions/?agent=claude+acp");
         assert_eq!(
             Route::requested_agent(&url),
-            Some(AgentId("claude acp".into()))
+            Some(AgentRef::new("claude acp"))
         );
         assert_eq!(Route::parse(&url), Some(Route::Manager));
         assert_eq!(Route::requested_agent("vmux://sessions/session-1"), None);
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn session_ids_round_trip_as_one_encoded_segment() {
-        let id = SessionId("task/name?draft#1".into());
+        let id = Id::<Session>::new("task/name?draft#1");
         let url = Route::Session(id.clone()).url();
 
         assert_eq!(Route::parse(&url), Some(Route::Session(id)));

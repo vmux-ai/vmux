@@ -401,10 +401,7 @@ mod tests {
             app.add_plugins(MinimalPlugins)
                 .add_message::<ResizeRequest>()
                 .add_systems(Update, from_commands);
-            let tab = app
-                .world_mut()
-                .spawn((Tab::default(), LastActivatedAt::now()))
-                .id();
+            let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
             let split = app
                 .world_mut()
                 .spawn((
@@ -434,13 +431,13 @@ mod tests {
                         ..default()
                     },
                     PaneSize { flex_grow },
-                    LastActivatedAt(activated_at),
+                    LastActivatedAt::new(activated_at),
                     ChildOf(parent),
                 ))
                 .id();
             app.world_mut().spawn((
                 Stack::default(),
-                LastActivatedAt(activated_at),
+                LastActivatedAt::new(activated_at),
                 ChildOf(pane),
             ));
             pane

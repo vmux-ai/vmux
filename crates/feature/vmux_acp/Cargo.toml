@@ -48,6 +48,7 @@ app = [
     "dep:url",
     "dep:uuid",
     "dep:vmux_command",
+    "dep:vmux_connector",
     "dep:vmux_ecs",
     "dep:vmux_editor",
     "dep:vmux_git",
@@ -77,6 +78,7 @@ vmux_ui = { path = "../../util/vmux_ui", default-features = false, optional = tr
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 vmux_command = { path = "../vmux_command", optional = true }
+vmux_connector = { path = "../vmux_connector", optional = true }
 agent-client-protocol = { version = "1.0.1", optional = true }
 base64 = { version = "0.22", optional = true }
 bevy = { workspace = true, optional = true }
@@ -101,6 +103,7 @@ tempfile = { version = "3", optional = true }
 uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
+vmux_feature = { path = "../../util/vmux_feature" }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }

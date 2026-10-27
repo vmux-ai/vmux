@@ -67,7 +67,7 @@ impl AgentBrowserResolve<'_, '_> {
     pub fn working_directory(&self, anchor: vmux_ecs::ProcessId) -> Option<std::path::PathBuf> {
         let pane = self.agent_pane(anchor)?;
         let path = self.tabs.startup_dir(pane)?;
-        vmux_setting::StartupDir::from_tab(&path)
+        vmux_setting::StartupDir::from_tab_path(&path)
             .ok()
             .map(|dir| dir.path)
     }
@@ -77,17 +77,17 @@ impl AgentBrowserResolve<'_, '_> {
         anchor: vmux_ecs::ProcessId,
     ) -> Option<AgentBrowserPaneClaim> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
-        let profile = vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}"));
+        let scope = vmux_layout::active_pane::ActivePaneScope::Agent(format!("{anchor:?}"));
         let stack = self
             .active
-            .get(&profile)
+            .get(&scope)
             .filter(|active| active.pane == Some(pane))
             .and_then(|active| active.stack);
         Some(AgentBrowserPaneClaim {
             pane,
             stack,
             activation: vmux_layout::active_pane::ActivatePane {
-                profile,
+                scope,
                 active: vmux_layout::active_pane::ActiveStack {
                     tab: None,
                     pane: Some(pane),

@@ -1,8 +1,8 @@
 use crate::host::snapshot::{CommandBarWorkDirectory, CommandBarWorkSnapshot};
 use bevy::prelude::*;
 use vmux_api::command_bar::{CommandBarWorkDir, SearchEngine};
-use vmux_ecs::manifest::FeatureManifest;
 use vmux_ecs::{LastActivatedAt, LastVisitedAt, PageMetadata, Url, VisitCount};
+use vmux_feature::FeatureManifest;
 
 use super::work_snapshot_driver::{RecentFile, WorkDirectories};
 
@@ -37,7 +37,9 @@ fn directories(
     for (directory, activated_at) in &directories {
         current.add(
             &directory.0,
-            activated_at.map(|activated_at| activated_at.0).unwrap_or(0),
+            activated_at
+                .map(|activated_at| activated_at.milliseconds())
+                .unwrap_or(0),
         );
     }
     let cwds = current.paths();
@@ -122,7 +124,7 @@ fn recent(
         let mut latest = i64::MIN;
         for (metadata, _, visited) in &urls {
             if engine.matches_url(&metadata.url) {
-                latest = latest.max(visited.0);
+                latest = latest.max(visited.milliseconds());
             }
         }
         engine_recency.push((engine, latest));
@@ -257,8 +259,8 @@ mod tests {
                 ..default()
             },
             VisitCount(9),
-            LastVisitedAt(1000),
-            CreatedAt(0),
+            LastVisitedAt::new(1000),
+            CreatedAt::new(1),
         ));
         app.world_mut().spawn((
             Url,
@@ -268,8 +270,8 @@ mod tests {
                 ..default()
             },
             VisitCount(1),
-            LastVisitedAt(1000),
-            CreatedAt(0),
+            LastVisitedAt::new(1000),
+            CreatedAt::new(1),
         ));
         app.update();
         let snap = WorkSnapshot::read(&mut app);
@@ -294,8 +296,8 @@ mod tests {
                     ..default()
                 },
                 VisitCount(1),
-                LastVisitedAt(visited),
-                CreatedAt(0),
+                LastVisitedAt::new(visited),
+                CreatedAt::new(1),
             ));
         }
         app.update();

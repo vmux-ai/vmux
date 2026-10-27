@@ -4,29 +4,29 @@ use dioxus::prelude::*;
 use vmux_api::team::{
     ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamMemberRow, TeamProfileCreateRequest,
     TeamProfileForm, TeamProfileFormCloseRequest, TeamProfileFormInputRequest,
-    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamUiState,
+    TeamProfileFormOpenRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, UiTeam,
 };
 use vmux_ui::components::avatar::{AgentThumbnail, Avatar};
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::dropdown::{DropdownAlign, DropdownOption, DropdownSelector};
 use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::favicon::FaviconSource;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "TeamUiState"]
+    states = [vmux_ui::theme::UiTheme, vmux_api::team::UiTeam]
 )]
 pub(crate) struct TeamPage;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let team = use_ui_state::<TeamUiState>().state;
+    let team = UiState::<UiTeam>::use_context().state;
 
-    let TeamUiState {
+    let UiTeam {
         profiles,
         active_profile,
         agents,
@@ -126,7 +126,7 @@ fn ProfileSection(
                                                 onclick: move |_| {
                                                     profile_open.set(false);
                                                     if selected_profile_id != active_profile_id {
-                                                        let _ = send(&TeamProfileSwitchRequest {
+                                                        send(&TeamProfileSwitchRequest {
                                                             profile_id: selected_profile_id.clone(),
                                                         });
                                                     }
@@ -152,7 +152,7 @@ fn ProfileSection(
                             class: "flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.075] hover:text-foreground",
                             title: translate("team-edit-profile"),
                             onclick: move |_| {
-                                let _ = send(&TeamProfileFormOpenRequest {
+                                send(&TeamProfileFormOpenRequest {
                                     profile_id: Some(edit_active_id.clone()),
                                     draft: active.name.clone(),
                                 });
@@ -171,7 +171,7 @@ fn ProfileSection(
                         r#type: "button",
                         class: "flex h-10 items-center justify-center gap-2 rounded-lg bg-foreground/[0.03] text-sm font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.065] hover:text-foreground",
                         onclick: move |_| {
-                            let _ = send(&TeamProfileFormOpenRequest {
+                            send(&TeamProfileFormOpenRequest {
                                 profile_id: None,
                                 draft: String::new(),
                             });
@@ -216,7 +216,7 @@ fn ProfileFormView(form: TeamProfileForm, color: String) -> Element {
             autofocus: true,
             autocomplete: "off",
             oninput: move |event: FormEvent| {
-                let _ = send(&TeamProfileFormInputRequest { draft: event.value() });
+                send(&TeamProfileFormInputRequest { draft: event.value() });
             },
             onkeydown: move |event: KeyboardEvent| match event.key() {
                 Key::Enter if !finished() => {
@@ -227,7 +227,7 @@ fn ProfileFormView(form: TeamProfileForm, color: String) -> Element {
                 Key::Escape if !finished() => {
                     event.prevent_default();
                     finished.set(true);
-                    let _ = send(&TeamProfileFormCloseRequest);
+                    send(&TeamProfileFormCloseRequest);
                 }
                 _ => {}
             },
@@ -256,21 +256,21 @@ impl ProfileFormSubmission {
     fn submit(&self) {
         let name = self.0.draft.trim().to_string();
         if name.is_empty() {
-            let _ = send(&TeamProfileFormCloseRequest);
+            send(&TeamProfileFormCloseRequest);
             return;
         }
         match &self.0.profile_id {
             Some(profile_id) => {
-                let _ = send(&TeamProfileUpdateRequest {
+                send(&TeamProfileUpdateRequest {
                     profile_id: profile_id.clone(),
                     name,
                 });
             }
             None => {
-                let _ = send(&TeamProfileCreateRequest { name });
+                send(&TeamProfileCreateRequest { name });
             }
         }
-        let _ = send(&TeamProfileFormCloseRequest);
+        send(&TeamProfileFormCloseRequest);
     }
 }
 

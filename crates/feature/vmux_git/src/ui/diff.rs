@@ -192,7 +192,7 @@ fn RevisionDiffCard(
                     class: "flex-1".to_string(),
                     message: error,
                     on_retry: move |_| {
-                        let _ = send(&crate::event::GitBranchFilesRetryRequest);
+                        send(&crate::event::GitBranchFilesRetryRequest);
                     },
                 }
             } else if available {

@@ -614,17 +614,17 @@ impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.add_plugins(vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default())
+        app.add_plugins(vmux_ecs::UiStatePlugin::<vmux_ecs::event::UiFile>::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);
     }
 
     fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
-        if emit.id() != FileUiState::id() {
+        if emit.id() != UiFile::id() {
             return;
         }
-        let decoded = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(emit.payload());
+        let decoded = rkyv::from_bytes::<UiFile, rkyv::rancor::Error>(emit.payload());
         let Ok(event) = decoded else {
             return;
         };

@@ -9,7 +9,7 @@ pub use pointer::{NativePointer, NativePointerSnapshot};
 
 pub(crate) struct Feature;
 
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

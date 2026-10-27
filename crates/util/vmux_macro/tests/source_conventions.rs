@@ -25,6 +25,50 @@ struct FeaturePage {
 }
 
 #[test]
+fn feature_composition_dependencies_preserve_layering() {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates dir");
+    let feature_manifest = std::fs::read_to_string(crates_dir.join("util/vmux_feature/Cargo.toml"))
+        .expect("vmux_feature Cargo manifest");
+    let ecs_manifest = std::fs::read_to_string(crates_dir.join("util/vmux_ecs/Cargo.toml"))
+        .expect("vmux_ecs Cargo manifest");
+
+    assert!(
+        !feature_manifest.contains("vmux_ecs"),
+        "vmux_feature must not depend on vmux_ecs"
+    );
+    assert!(
+        !ecs_manifest.contains("vmux_feature"),
+        "vmux_ecs must not depend on vmux_feature"
+    );
+}
+
+#[test]
+fn feature_registration_uses_the_shared_registry_path() {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates dir");
+    let mut violations = Vec::new();
+    let legacy_module = ["vmux_ecs::", "manifest"].concat();
+    let legacy_plugin = ["Feature", "Plugin<"].concat();
+
+    walk(crates_dir, &mut |path, source| {
+        if source.contains(&legacy_module) || source.contains(&legacy_plugin) {
+            violations.push(path.display().to_string());
+        }
+    });
+
+    assert!(
+        violations.is_empty(),
+        "features must register through vmux_feature::AppFeatureExt:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn ui_events_are_declared_in_the_owning_feature_page_manifest() {
     let feature_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

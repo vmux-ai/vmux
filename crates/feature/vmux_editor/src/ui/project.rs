@@ -3,8 +3,8 @@ use std::path::Path;
 use dioxus::prelude::*;
 use vmux_ecs::event::{FileDirEntry, FileDirectoryOpenRequest, OpenEditorItem};
 use vmux_git::event::GitRepositoryRequest;
-use vmux_git::state::GitUiState;
-use vmux_session::state::SessionScopeUiState;
+use vmux_git::state::UiGit;
+use vmux_session::state::UiSessionScope;
 use vmux_session::{SessionSummary, SessionSummaryProjection, StageSummary};
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
@@ -27,7 +27,7 @@ use vmux_ui::components::sheet::SheetHeaderChevron;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::components::tooltip::Tooltip;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{CollectionController, send, use_collection_controller, use_ui_state};
+use vmux_ui::hooks::{CollectionController, UiState, send, use_collection_controller};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{GitSymbol, GitSymbolView, LineIcon, LineIconView};
 use vmux_ui::navigation::{NavigationGesture, PageNavigation};
@@ -38,13 +38,13 @@ use super::project_manager::{
 use super::state::FileUi;
 use crate::project::{
     ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCreateRequest,
-    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectUiState,
-    ProjectView,
+    ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectImportRequest, ProjectView,
+    UiProject,
 };
 
 #[component]
 pub(super) fn ProjectPage() -> Element {
-    let state = use_ui_state::<ProjectUiState>().state;
+    let state = UiState::<UiProject>::use_context().state;
     let snapshot = state();
     match snapshot.view {
         ProjectView::Detail(detail) => rsx! { ProjectDashboard { detail } },
@@ -97,7 +97,7 @@ pub(super) fn ProjectList(
                                     grid_label: translate("tools-view-grid"),
                                     onchange: move |view| {
                                         controls.set_view(view);
-                                        let _ = send(&ViewPreference::request(view));
+                                        send(&ViewPreference::request(view));
                                     },
                                 }
                             }
@@ -362,7 +362,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         danger: false,
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&ProjectArchiveRequest {
+                            send(&ProjectArchiveRequest {
                                 url: archive_url.clone(),
                                 archived: !archived,
                             });
@@ -407,7 +407,7 @@ fn ProjectActions(entry: ProjectEntry) -> Element {
                         on_click: Some(EventHandler::new(move |event: MouseEvent| {
                             event.stop_propagation();
                             confirm_open.set(false);
-                            let _ = send(&ProjectDeleteRequest { url: delete_url.clone() });
+                            send(&ProjectDeleteRequest { url: delete_url.clone() });
                         })),
                         {translate("common-delete")}
                     }
@@ -499,7 +499,7 @@ fn ProjectAdd(pending: bool, #[props(default)] compact: bool) -> Element {
                         description: translate("project-import-description"),
                         onclick: move |_| {
                             open.set(false);
-                            let _ = send(&ProjectImportRequest);
+                            send(&ProjectImportRequest);
                         },
                     }
                     ProjectAddItem {
@@ -572,10 +572,10 @@ impl ProjectPrompt {
     fn submit(self, draft: String) {
         match self {
             Self::New => {
-                let _ = send(&ProjectCreateRequest { name: draft });
+                send(&ProjectCreateRequest { name: draft });
             }
             Self::Clone => {
-                let _ = send(&ProjectCloneRequest { repository: draft });
+                send(&ProjectCloneRequest { repository: draft });
             }
         }
     }
@@ -606,7 +606,7 @@ fn ProjectAddItem(
 pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     let root = detail.path;
     let project_name = detail.name;
-    let project_identity = detail.id.0;
+    let project_identity = detail.id.into_string();
     let mut requested_git = use_signal(String::new);
     let requested_root = root.clone();
     use_effect(move || {
@@ -614,7 +614,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
             return;
         }
         requested_git.set(requested_root.clone());
-        let _ = send(&GitRepositoryRequest {
+        send(&GitRepositoryRequest {
             path: requested_root.clone(),
         });
     });
@@ -666,7 +666,7 @@ pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
 
 #[component]
 fn ProjectSessionsPanel() -> Element {
-    let sessions = use_ui_state::<SessionScopeUiState>();
+    let sessions = UiState::<UiSessionScope>::use_context();
     let projection = sessions.use_selector(|state| {
         let now = vmux_ecs::UnixMillis::now().0;
         ProjectSessionList {
@@ -734,7 +734,7 @@ fn ProjectSessions(projection: ProjectSessionList) -> Element {
 
 #[component]
 fn ProjectGitPanel(root: String) -> Element {
-    let git = use_ui_state::<GitUiState>();
+    let git = UiState::<UiGit>::use_context();
     let reactive_root = root.clone();
     let selected_root = use_memo(use_reactive!(|(reactive_root,)| reactive_root.clone()));
     let projection = git.use_selector(move |state| ProjectGitProjection {
@@ -955,7 +955,7 @@ fn ProjectFileButton(path: String, name: String, context: String, is_dir: bool) 
             class: "group flex min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left hover:bg-foreground/[0.04]",
             title: "{path}",
             onclick: move |_| {
-                let _ = send(&FileDirectoryOpenRequest { path: open_path.clone() });
+                send(&FileDirectoryOpenRequest { path: open_path.clone() });
             },
             TypeIcon { path: icon_path, is_dir, class: "size-4 shrink-0".to_string() }
             div { class: "min-w-0 flex-1",

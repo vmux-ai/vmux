@@ -104,7 +104,7 @@ impl Session {
             .read()
             .current
             .as_ref()
-            .map(|session| session.id.0.clone())
+            .map(|session| session.id.as_str().to_string())
             .unwrap_or_default()
     }
 }
@@ -216,7 +216,7 @@ fn start_chats(
         let known = connection
             .sessions()
             .iter()
-            .map(|session| session.id.0.clone())
+            .map(|session| session.id.as_str().to_string())
             .collect::<HashSet<_>>();
         let agent_url = request.agent_url.clone();
         let api = api.clone();
@@ -236,7 +236,7 @@ fn start_chats(
                 };
                 let created = sessions
                     .iter()
-                    .find(|candidate| !known.contains(&candidate.id.0))
+                    .find(|candidate| !known.contains(candidate.id.as_str()))
                     .cloned();
                 if let Some(created) = created {
                     return Some((sessions, created));
@@ -295,7 +295,7 @@ fn open(
         state.view.generation = state.view.generation.wrapping_add(1);
         commands.entity(entity).insert(SessionStream::spawn(
             api.clone(),
-            request.0.id.0.clone(),
+            request.0.id.as_str().to_string(),
             state.view.generation,
             false,
         ));
@@ -358,7 +358,7 @@ fn restart(
     let Some(api) = connection.api() else {
         return;
     };
-    let sid = current.id.0.clone();
+    let sid = current.id.as_str().to_string();
     state.view.connected = false;
     state.view.generation = state.view.generation.wrapping_add(1);
     commands

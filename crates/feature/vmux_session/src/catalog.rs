@@ -9,19 +9,24 @@ use bevy_ecs::system::SystemParam;
 #[cfg(host)]
 use std::collections::{HashMap, HashSet};
 #[cfg(host)]
+use vmux_api::Id;
+#[cfg(host)]
 use vmux_api::session::{AssistantBlock, Message};
 #[cfg(host)]
-use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, Terminal};
-
-#[cfg(host)]
-use crate::model::{
-    ProviderArchiveOperations, ProviderSessionKey, ProviderSessionTombstones, SourceUpdatedAt,
+use vmux_connector::{
+    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScope, ExternalScopeRef, ProviderKey,
+    ResourceKind,
 };
 #[cfg(host)]
+use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, RemoteUpdatedAt};
+
+#[cfg(host)]
+use crate::model::{ProviderArchiveOperations, ProviderSessionTombstones};
+#[cfg(host)]
 use crate::{
-    AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
-    ProviderArchive, ProviderKind, ProviderSessionId, ProviderStage, RunState, Session,
-    SessionDuplicate, SessionId, Stage, StageChangedAt, StageDefinition, StageId, Transcripts,
+    AgentConversationTitle, AgentFamily, AgentRef, ConversationEvent, MessageContent,
+    ProviderArchive, ProviderWorkflowState, RunState, Session, SessionDuplicate,
+    TerminalWorkflowState, Transcripts, WorkflowState, WorkflowStateChangedAt, WorkflowStateRef,
 };
 
 #[vmux_api::contract(Default, Eq)]
@@ -70,6 +75,37 @@ impl ProviderSession {
             .map(ArchiveState::updated_at)
             .unwrap_or_default()
             .max(self.updated_at)
+    }
+
+    #[cfg(host)]
+    pub fn has_valid_identity(&self) -> bool {
+        let provider = Self::provider(&self.kind);
+        ProviderKey::is_valid(provider) && ExternalId::is_valid(&self.sid)
+    }
+
+    #[cfg(host)]
+    pub fn external_identity(
+        provider: &str,
+        kind: &str,
+        sid: &str,
+    ) -> Option<ExternalLinkIdentity> {
+        Some(ExternalLinkIdentity::new(
+            ProviderKey::new(provider).ok()?,
+            Id::<ExternalScope>::new(kind),
+            ResourceKind::session(),
+            ExternalId::new(sid).ok()?,
+        ))
+    }
+
+    #[cfg(host)]
+    pub fn identity(&self) -> Option<ExternalLinkIdentity> {
+        Self::external_identity(Self::provider(&self.kind), &self.kind, &self.sid)
+    }
+
+    fn provider(kind: &str) -> &str {
+        kind.split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or(kind)
     }
 }
 
@@ -249,17 +285,16 @@ type SessionCatalog<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static SessionId,
+        &'static Id<Session>,
         &'static Name,
         &'static Description,
         &'static Cwd,
-        &'static Stage,
+        &'static WorkflowStateRef,
         &'static CreatedAt,
         &'static LastActivatedAt,
-        &'static StageChangedAt,
+        &'static WorkflowStateChangedAt,
         Option<&'static ArchivedAt>,
-        Option<&'static AgentId>,
-        Option<&'static vmux_ecs::team::Profile>,
+        Option<&'static AgentRef>,
         Option<&'static RunState>,
         Option<&'static AgentConversationTitle>,
     ),
@@ -270,21 +305,27 @@ type SessionCatalog<'w, 's> = Query<
 type LinkedSessions<'w, 's> = Query<
     'w,
     's,
-    (Entity, &'static ProviderKind, &'static ProviderSessionId),
-    (With<Session>, Without<SessionDuplicate>),
+    (
+        &'static ChildOf,
+        &'static ProviderKey,
+        &'static ExternalScopeRef,
+        &'static ResourceKind,
+        &'static ExternalId,
+    ),
+    With<ExternalLink>,
 >;
 
 #[cfg(host)]
-type StageCatalog<'w, 's> = Query<
+type WorkflowStateCatalog<'w, 's> = Query<
     'w,
     's,
     (
-        &'static StageId,
+        &'static Id<WorkflowState>,
         &'static Name,
         &'static Order,
-        Has<Terminal>,
+        Has<TerminalWorkflowState>,
     ),
-    With<StageDefinition>,
+    With<WorkflowState>,
 >;
 
 #[cfg(host)]
@@ -292,13 +333,15 @@ type ProviderStages<'w, 's> = Query<
     'w,
     's,
     (
-        &'static ProviderKind,
-        &'static ProviderSessionId,
-        &'static Stage,
-        &'static StageChangedAt,
-        &'static SourceUpdatedAt,
+        &'static ProviderKey,
+        &'static ExternalScopeRef,
+        &'static ResourceKind,
+        &'static ExternalId,
+        &'static WorkflowStateRef,
+        &'static WorkflowStateChangedAt,
+        &'static RemoteUpdatedAt,
     ),
-    With<ProviderStage>,
+    With<ProviderWorkflowState>,
 >;
 
 #[cfg(host)]
@@ -306,9 +349,11 @@ type ProviderArchives<'w, 's> = Query<
     'w,
     's,
     (
-        &'static ProviderKind,
-        &'static ProviderSessionId,
-        &'static SourceUpdatedAt,
+        &'static ProviderKey,
+        &'static ExternalScopeRef,
+        &'static ResourceKind,
+        &'static ExternalId,
+        &'static RemoteUpdatedAt,
         Option<&'static ArchivedAt>,
     ),
     With<ProviderArchive>,
@@ -319,13 +364,14 @@ type ProviderArchives<'w, 's> = Query<
 struct CatalogSources<'w, 's> {
     sessions: SessionCatalog<'w, 's>,
     linked_sessions: LinkedSessions<'w, 's>,
-    stages: StageCatalog<'w, 's>,
+    stages: WorkflowStateCatalog<'w, 's>,
     providers: Res<'w, ProviderCatalog>,
-    operations: Res<'w, ProviderArchiveOperations>,
+    operations: ProviderArchiveOperations<'w, 's>,
     provider_stages: ProviderStages<'w, 's>,
     provider_archives: ProviderArchives<'w, 's>,
     provider_tombstones: Res<'w, ProviderSessionTombstones>,
     transcripts: Transcripts<'w, 's>,
+    profiles: vmux_ecs::team::Profiles<'w, 's>,
 }
 
 #[cfg(host)]
@@ -336,37 +382,34 @@ type ChangedSessions<'w, 's> = Query<
     (
         With<Session>,
         Or<(
-            Changed<SessionId>,
+            Changed<Id<Session>>,
             Changed<Name>,
             Changed<Description>,
             Changed<Cwd>,
-            Changed<Stage>,
+            Changed<WorkflowStateRef>,
             Changed<CreatedAt>,
             Changed<LastActivatedAt>,
-            Changed<StageChangedAt>,
+            Changed<WorkflowStateChangedAt>,
             Changed<ArchivedAt>,
-            Changed<AgentId>,
-            Changed<vmux_ecs::team::Profile>,
+            Changed<AgentRef>,
             Changed<RunState>,
             Changed<AgentConversationTitle>,
-            Changed<ProviderKind>,
-            Changed<ProviderSessionId>,
         )>,
     ),
 >;
 
 #[cfg(host)]
-type ChangedStages<'w, 's> = Query<
+type ChangedWorkflowStates<'w, 's> = Query<
     'w,
     's,
     (),
     (
-        With<StageDefinition>,
+        With<WorkflowState>,
         Or<(
-            Changed<StageId>,
+            Changed<Id<WorkflowState>>,
             Changed<Name>,
             Changed<Order>,
-            Changed<Terminal>,
+            Changed<TerminalWorkflowState>,
         )>,
     ),
 >;
@@ -375,7 +418,22 @@ type ChangedStages<'w, 's> = Query<
 #[derive(SystemParam)]
 struct CatalogChanges<'w, 's> {
     sessions: ChangedSessions<'w, 's>,
-    stages: ChangedStages<'w, 's>,
+    profiles: Query<
+        'w,
+        's,
+        (),
+        (
+            With<vmux_ecs::team::Profile>,
+            Or<(
+                Added<vmux_ecs::team::Profile>,
+                Changed<Name>,
+                Changed<vmux_ecs::team::Avatar>,
+                Changed<vmux_ecs::team::Icon>,
+                Changed<ChildOf>,
+            )>,
+        ),
+    >,
+    stages: ChangedWorkflowStates<'w, 's>,
     events: Query<
         'w,
         's,
@@ -385,19 +443,37 @@ struct CatalogChanges<'w, 's> {
             Or<(Added<ConversationEvent>, Changed<MessageContent>)>,
         ),
     >,
+    links: Query<
+        'w,
+        's,
+        (),
+        (
+            With<ExternalLink>,
+            Or<(
+                Added<ExternalLink>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<ChildOf>,
+            )>,
+        ),
+    >,
     provider_stages: Query<
         'w,
         's,
         (),
         (
-            With<ProviderStage>,
+            With<ProviderWorkflowState>,
             Or<(
-                Added<ProviderStage>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
-                Changed<Stage>,
-                Changed<StageChangedAt>,
-                Changed<SourceUpdatedAt>,
+                Added<ProviderWorkflowState>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<WorkflowStateRef>,
+                Changed<WorkflowStateChangedAt>,
+                Changed<RemoteUpdatedAt>,
             )>,
         ),
     >,
@@ -409,47 +485,57 @@ struct CatalogChanges<'w, 's> {
             With<ProviderArchive>,
             Or<(
                 Added<ProviderArchive>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
-                Changed<SourceUpdatedAt>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<RemoteUpdatedAt>,
                 Changed<ArchivedAt>,
             )>,
         ),
     >,
     duplicates: Query<'w, 's, (), Or<(Added<SessionDuplicate>, Changed<SessionDuplicate>)>>,
     removed_sessions: RemovedComponents<'w, 's, Session>,
-    removed_ids: RemovedComponents<'w, 's, SessionId>,
+    removed_ids: RemovedComponents<'w, 's, Id<Session>>,
     removed_names: RemovedComponents<'w, 's, Name>,
     removed_descriptions: RemovedComponents<'w, 's, Description>,
     removed_cwds: RemovedComponents<'w, 's, Cwd>,
-    removed_stages: RemovedComponents<'w, 's, Stage>,
+    removed_stages: RemovedComponents<'w, 's, WorkflowStateRef>,
     removed_created_at: RemovedComponents<'w, 's, CreatedAt>,
     removed_activated_at: RemovedComponents<'w, 's, LastActivatedAt>,
-    removed_stage_changed_at: RemovedComponents<'w, 's, StageChangedAt>,
-    removed_stage_definitions: RemovedComponents<'w, 's, StageDefinition>,
-    removed_stage_ids: RemovedComponents<'w, 's, StageId>,
+    removed_stage_changed_at: RemovedComponents<'w, 's, WorkflowStateChangedAt>,
+    removed_stage_definitions: RemovedComponents<'w, 's, WorkflowState>,
+    removed_stage_ids: RemovedComponents<'w, 's, Id<WorkflowState>>,
     removed_orders: RemovedComponents<'w, 's, Order>,
-    removed_terminal: RemovedComponents<'w, 's, Terminal>,
+    removed_terminal: RemovedComponents<'w, 's, TerminalWorkflowState>,
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
-    removed_agents: RemovedComponents<'w, 's, AgentId>,
+    removed_agents: RemovedComponents<'w, 's, AgentRef>,
     removed_profiles: RemovedComponents<'w, 's, vmux_ecs::team::Profile>,
+    removed_avatars: RemovedComponents<'w, 's, vmux_ecs::team::Avatar>,
+    removed_icons: RemovedComponents<'w, 's, vmux_ecs::team::Icon>,
     removed_states: RemovedComponents<'w, 's, RunState>,
     removed_titles: RemovedComponents<'w, 's, AgentConversationTitle>,
     removed_events: RemovedComponents<'w, 's, ConversationEvent>,
     removed_messages: RemovedComponents<'w, 's, MessageContent>,
-    removed_provider_stages: RemovedComponents<'w, 's, ProviderStage>,
+    removed_provider_stages: RemovedComponents<'w, 's, ProviderWorkflowState>,
     removed_provider_archives: RemovedComponents<'w, 's, ProviderArchive>,
     removed_duplicates: RemovedComponents<'w, 's, SessionDuplicate>,
-    removed_provider_kinds: RemovedComponents<'w, 's, ProviderKind>,
-    removed_provider_ids: RemovedComponents<'w, 's, ProviderSessionId>,
+    removed_links: RemovedComponents<'w, 's, ExternalLink>,
+    removed_providers: RemovedComponents<'w, 's, ProviderKey>,
+    removed_scopes: RemovedComponents<'w, 's, ExternalScopeRef>,
+    removed_resource_kinds: RemovedComponents<'w, 's, ResourceKind>,
+    removed_external_ids: RemovedComponents<'w, 's, ExternalId>,
+    removed_owners: RemovedComponents<'w, 's, ChildOf>,
 }
 
 #[cfg(host)]
 impl CatalogChanges<'_, '_> {
     fn any(&mut self) -> bool {
         let mut any = !self.sessions.is_empty()
+            || !self.profiles.is_empty()
             || !self.stages.is_empty()
             || !self.events.is_empty()
+            || !self.links.is_empty()
             || !self.provider_stages.is_empty()
             || !self.provider_archives.is_empty()
             || !self.duplicates.is_empty();
@@ -469,6 +555,8 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_archived_at.read().count() > 0;
         any |= self.removed_agents.read().count() > 0;
         any |= self.removed_profiles.read().count() > 0;
+        any |= self.removed_avatars.read().count() > 0;
+        any |= self.removed_icons.read().count() > 0;
         any |= self.removed_states.read().count() > 0;
         any |= self.removed_titles.read().count() > 0;
         any |= self.removed_events.read().count() > 0;
@@ -476,8 +564,12 @@ impl CatalogChanges<'_, '_> {
         any |= self.removed_provider_stages.read().count() > 0;
         any |= self.removed_provider_archives.read().count() > 0;
         any |= self.removed_duplicates.read().count() > 0;
-        any |= self.removed_provider_kinds.read().count() > 0;
-        any |= self.removed_provider_ids.read().count() > 0;
+        any |= self.removed_links.read().count() > 0;
+        any |= self.removed_providers.read().count() > 0;
+        any |= self.removed_scopes.read().count() > 0;
+        any |= self.removed_resource_kinds.read().count() > 0;
+        any |= self.removed_external_ids.read().count() > 0;
+        any |= self.removed_owners.read().count() > 0;
         any
     }
 }
@@ -498,6 +590,7 @@ fn project(
         provider_archives,
         provider_tombstones,
         transcripts,
+        profiles,
     } = sources;
     if !catalog.is_added()
         && !providers.is_changed()
@@ -510,7 +603,7 @@ fn project(
     let mut next = CatalogSnapshot::default();
     for (id, name, order, terminal) in &stages {
         next.stages.push(StageSummary {
-            id: id.0.clone(),
+            id: id.as_str().to_string(),
             name: name.as_str().to_string(),
             order: order.0,
             terminal,
@@ -525,7 +618,18 @@ fn project(
         .unwrap_or_default();
     let linked_sessions = linked_sessions
         .iter()
-        .map(|(entity, kind, id)| (entity, ProviderSessionKey::from_components(kind, id)))
+        .filter(|(_, _, _, kind, _)| kind.as_str() == "session")
+        .map(|(owner, provider, scope, kind, id)| {
+            (
+                owner.parent(),
+                ExternalLinkIdentity::new(
+                    provider.clone(),
+                    scope.id().clone(),
+                    kind.clone(),
+                    id.clone(),
+                ),
+            )
+        })
         .collect::<HashMap<_, _>>();
     for (
         entity,
@@ -539,57 +643,63 @@ fn project(
         stage_changed_at,
         archived_at,
         agent,
-        profile,
         runtime,
         conversation_title,
     ) in &sessions
     {
+        let profile = profiles.get(entity);
         let conversation =
             ConversationPreview::from(conversation_title, &transcripts.get(entity).messages);
         let agent_name = agent
             .map(|agent| {
                 let fallback = profile
-                    .map(|profile| profile.name.as_str())
-                    .unwrap_or(agent.0.as_str());
-                AgentFamily::of(&agent.0).name(fallback)
+                    .as_ref()
+                    .map(vmux_ecs::team::ProfileView::name)
+                    .unwrap_or(agent.as_str());
+                AgentFamily::of(agent.as_str()).name(fallback)
             })
             .unwrap_or_default();
         let archived_at = linked_sessions
             .get(&entity)
-            .and_then(|key| operations.archived_at(key))
+            .and_then(|identity| operations.archived_at(identity))
             .unwrap_or_else(|| {
                 archived_at
-                    .map(|archived_at| archived_at.0)
+                    .map(|archived_at| archived_at.milliseconds())
                     .unwrap_or_default()
             });
         next.sessions.push(SessionSummary {
-            id: id.0.clone(),
+            id: id.as_str().to_string(),
             kind: "session".to_string(),
-            sid: id.0.clone(),
+            sid: id.as_str().to_string(),
             provider_kind: linked_sessions
                 .get(&entity)
-                .map(|key| key.kind.0.clone())
+                .map(|identity| identity.scope().as_str().to_string())
                 .unwrap_or_default(),
             provider_sid: linked_sessions
                 .get(&entity)
-                .map(|key| key.id.0.clone())
+                .map(|identity| identity.external_id().as_str().to_string())
                 .unwrap_or_default(),
             managed: true,
             name: name.as_str().to_string(),
             description: description.0.clone(),
             cwd: cwd.0.to_string_lossy().into_owned(),
-            stage: stage.0.0.clone(),
-            created_at: created_at.0,
-            last_activated_at: last_activated_at.0,
-            stage_changed_at: stage_changed_at.0,
+            stage: stage.id().as_str().to_string(),
+            created_at: created_at.milliseconds(),
+            last_activated_at: last_activated_at.milliseconds(),
+            stage_changed_at: stage_changed_at.milliseconds(),
             archived_at,
-            agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
+            agent: agent
+                .map(|agent| agent.as_str().to_string())
+                .unwrap_or_default(),
             agent_name,
             agent_icon: profile
-                .and_then(|profile| profile.icon.clone())
+                .as_ref()
+                .and_then(vmux_ecs::team::ProfileView::icon)
+                .map(str::to_string)
                 .unwrap_or_default(),
             agent_color: profile
-                .map(|profile| profile.avatar.color.clone())
+                .as_ref()
+                .map(|profile| profile.avatar().color.clone())
                 .unwrap_or_default(),
             runtime: runtime
                 .map(RunState::status)
@@ -603,33 +713,48 @@ fn project(
     let linked_sessions = linked_sessions.values().cloned().collect::<HashSet<_>>();
     let provider_stages = provider_stages
         .iter()
-        .map(|(kind, id, stage, changed_at, source_updated_at)| {
-            (
-                ProviderSessionKey::from_components(kind, id),
-                (stage.0.0.clone(), changed_at.0, source_updated_at.0),
-            )
-        })
+        .map(
+            |(provider, scope, kind, id, stage, changed_at, source_updated_at)| {
+                (
+                    ExternalLinkIdentity::new(
+                        provider.clone(),
+                        scope.id().clone(),
+                        kind.clone(),
+                        id.clone(),
+                    ),
+                    (
+                        stage.id().as_str().to_string(),
+                        changed_at.milliseconds(),
+                        source_updated_at.0.0,
+                    ),
+                )
+            },
+        )
         .collect::<HashMap<_, _>>();
     let provider_archives = provider_archives
         .iter()
-        .map(|(kind, id, source_updated_at, archived_at)| {
-            (
-                ProviderSessionKey::from_components(kind, id),
+        .map(
+            |(provider, scope, kind, id, source_updated_at, archived_at)| {
                 (
-                    source_updated_at.0,
-                    archived_at.map(|archived_at| archived_at.0),
-                ),
-            )
-        })
+                    ExternalLinkIdentity::new(
+                        provider.clone(),
+                        scope.id().clone(),
+                        kind.clone(),
+                        id.clone(),
+                    ),
+                    (
+                        source_updated_at.0.0,
+                        archived_at.map(|archived_at| archived_at.milliseconds()),
+                    ),
+                )
+            },
+        )
         .collect::<HashMap<_, _>>();
     for session in &providers.sessions {
-        let key = ProviderSessionKey::new(
-            ProviderKind(session.kind.clone()),
-            ProviderSessionId(session.sid.clone()),
-        );
-        if linked_sessions.contains(&key)
-            || provider_tombstones.contains(&session.kind, &session.sid)
-        {
+        let Some(key) = session.identity() else {
+            continue;
+        };
+        if linked_sessions.contains(&key) || provider_tombstones.contains(&key) {
             continue;
         }
         let provider_updated_at = session.source_updated_at();
@@ -766,7 +891,7 @@ impl ConversationPreview {
 #[cfg(all(test, host))]
 mod tests {
     use super::*;
-    use crate::{CreateRequest, DomainPlugin, RenameRequest, SnapshotReceived};
+    use crate::{CreateRequest, RenameRequest, SessionDomainPlugin, SnapshotReceived};
     #[cfg(feature = "app")]
     use bevy::MinimalPlugins;
     #[cfg(feature = "app")]
@@ -776,10 +901,37 @@ mod tests {
     #[cfg(feature = "app")]
     use moonshine_save::prelude::{LoadWorld, load_on_default_event};
 
+    struct ProviderFixture;
+
+    impl ProviderFixture {
+        fn identity(kind: &str, id: &str) -> ExternalLinkIdentity {
+            ProviderSession {
+                kind: kind.to_string(),
+                sid: id.to_string(),
+                ..Default::default()
+            }
+            .identity()
+            .unwrap()
+        }
+
+        fn components(
+            kind: &str,
+            id: &str,
+        ) -> (ProviderKey, ExternalScopeRef, ResourceKind, ExternalId) {
+            let identity = Self::identity(kind, id);
+            (
+                identity.provider().clone(),
+                ExternalScopeRef::new(identity.scope().clone()),
+                identity.kind().clone(),
+                identity.external_id().clone(),
+            )
+        }
+    }
+
     #[test]
     fn catalog_tracks_session_metadata() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         let request = CreateRequest::new("Task", "Description", "/tmp/project".into(), None);
         let id = request.id().clone();
         app.world_mut()
@@ -789,7 +941,7 @@ mod tests {
 
         let catalog = app.world().resource::<CatalogSnapshot>();
         assert_eq!(catalog.sessions.len(), 1);
-        assert_eq!(catalog.sessions[0].id, id.0);
+        assert_eq!(catalog.sessions[0].id, id.as_str());
         assert_eq!(catalog.sessions[0].name, "Task");
         assert_eq!(catalog.sessions[0].description, "Description");
         assert_eq!(catalog.sessions[0].cwd, "/tmp/project");
@@ -849,7 +1001,7 @@ mod tests {
     #[test]
     fn catalog_applies_provider_stage_override_without_importing_the_session() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -865,11 +1017,10 @@ mod tests {
         app.update();
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
-                stage: StageId("done".into()),
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
+                identity: ProviderFixture::identity("codex", "provider-session"),
+                workflow_state: Id::new("done"),
                 source_updated_at: 10,
             });
         app.update();
@@ -891,7 +1042,7 @@ mod tests {
     #[test]
     fn provider_removal_hides_the_session_across_source_updates() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -906,13 +1057,13 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<CatalogSnapshot>().sessions.len(), 1);
 
+        let identity = app.world().resource::<ProviderCatalog>().sessions[0]
+            .identity()
+            .unwrap();
         app.world_mut()
             .resource_mut::<Messages<crate::CleanupRequest>>()
             .write(crate::CleanupRequest {
-                targets: vec![crate::CleanupTarget::Provider(ProviderSessionKey::new(
-                    ProviderKind("acp:codex".into()),
-                    ProviderSessionId("provider-session".into()),
-                ))],
+                targets: vec![crate::CleanupTarget::Provider(identity)],
             });
         app.update();
         assert!(
@@ -941,7 +1092,7 @@ mod tests {
     #[test]
     fn provider_archive_state_is_independent_from_stage_state() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.update();
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
@@ -957,11 +1108,10 @@ mod tests {
                 ..Default::default()
             });
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
-                stage: StageId("in_progress".into()),
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
+                workflow_state: Id::new("in_progress"),
                 source_updated_at: 100,
             });
         app.update();
@@ -993,7 +1143,7 @@ mod tests {
     #[test]
     fn provider_archive_override_is_fallback_until_native_state_catches_up() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -1011,8 +1161,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::ProviderArchiveRequest>>()
             .write(crate::ProviderArchiveRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
                 archived: true,
                 source_updated_at: 10,
                 native: false,
@@ -1036,7 +1185,7 @@ mod tests {
     #[test]
     fn provider_activity_after_archive_returns_to_the_default_stage() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -1051,11 +1200,10 @@ mod tests {
             });
         app.update();
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
-                stage: StageId("done".into()),
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
+                workflow_state: Id::new("done"),
                 source_updated_at: 10,
             });
         app.update();
@@ -1068,11 +1216,10 @@ mod tests {
         assert_eq!(session.stage_changed_at, archived_at + 1);
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ProviderStageChangeRequest>>()
-            .write(crate::ProviderStageChangeRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
-                stage: StageId("done".into()),
+            .resource_mut::<Messages<crate::ProviderWorkflowStateChangeRequest>>()
+            .write(crate::ProviderWorkflowStateChangeRequest {
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
+                workflow_state: Id::new("done"),
                 source_updated_at: archived_at + 1,
             });
         app.update();
@@ -1083,47 +1230,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_provider_stage_uses_transition_time_as_source_fallback() {
-        let mut app = App::new();
-        app.add_plugins(DomainPlugin);
-        app.world_mut()
-            .resource_mut::<ProviderCatalog>()
-            .sessions
-            .push(ProviderSession {
-                kind: "acp:codex".into(),
-                sid: "provider-session".into(),
-                agent: "codex".into(),
-                name: "External task".into(),
-                cwd: "/tmp/project".into(),
-                updated_at: 10,
-                ..Default::default()
-            });
-        app.world_mut().spawn((
-            ProviderStage,
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-            Stage(StageId("done".into())),
-            StageChangedAt(20),
-            SourceUpdatedAt(0),
-        ));
-        app.update();
-
-        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
-        assert_eq!(session.stage, "done");
-        assert_eq!(session.stage_changed_at, 20);
-
-        app.world_mut().resource_mut::<ProviderCatalog>().sessions[0].updated_at = 21;
-        app.update();
-
-        let session = &app.world().resource::<CatalogSnapshot>().sessions[0];
-        assert_eq!(session.stage, "in_progress");
-        assert_eq!(session.stage_changed_at, 21);
-    }
-
-    #[test]
     fn provider_source_timestamp_remains_authoritative() {
         let mut app = App::new();
-        app.add_plugins(DomainPlugin);
+        app.add_plugins(SessionDomainPlugin);
         app.world_mut()
             .resource_mut::<ProviderCatalog>()
             .sessions
@@ -1136,13 +1245,13 @@ mod tests {
                 updated_at: 150,
                 ..Default::default()
             });
+        let identity = ProviderFixture::components("acp:codex", "provider-session");
         app.world_mut().spawn((
-            ProviderStage,
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-            Stage(StageId("done".into())),
-            StageChangedAt(200),
-            SourceUpdatedAt(100),
+            ProviderWorkflowState,
+            identity,
+            WorkflowStateRef::new(Id::new("done")),
+            WorkflowStateChangedAt::new(200),
+            RemoteUpdatedAt(vmux_ecs::UnixMillis(100)),
         ));
         app.update();
 
@@ -1153,26 +1262,26 @@ mod tests {
 
     #[test]
     #[cfg(feature = "app")]
-    fn legacy_session_without_task_components_remains_in_catalog() {
+    fn session_without_task_components_remains_in_catalog() {
         let store = r#"(
   resources: {},
   entities: {
     1: (
       components: {
         "bevy_ecs::name::Name": "Task",
-        "vmux_ecs::SessionId": ("session-1"),
-        "vmux_history::CreatedAt": (1),
-        "vmux_history::LastActivatedAt": (2),
-        "vmux_session::Session": (),
-        "vmux_session::Stage": (("in_progress")),
-        "vmux_session::StageChangedAt": (1),
+        "vmux_api::Id<vmux_api::Session>": (value: "session-1"),
+        "vmux_history::CreatedAt": ((1)),
+        "vmux_history::LastActivatedAt": ((2)),
+        "vmux_api::Session": (),
+        "vmux_session::WorkflowStateRef": ((value: "in_progress")),
+        "vmux_session::WorkflowStateChangedAt": ((1)),
       },
     ),
   },
 )"#;
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins((vmux_ecs::PrimitivesPlugin, DomainPlugin))
+            .add_plugins((vmux_ecs::PrimitivesPlugin, SessionDomainPlugin))
             .add_observer(load_on_default_event);
         app.update();
         app.world_mut()

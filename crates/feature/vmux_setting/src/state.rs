@@ -3,7 +3,7 @@ pub const EXPLORER_MIN_WIDTH: u32 = 160;
 pub const EXPLORER_MAX_WIDTH: u32 = 600;
 
 #[vmux_api::ui_state(Default, version = 2)]
-pub struct SettingsUiState {
+pub struct UiSettings {
     pub query: String,
     pub sections: Vec<SettingsSection>,
     pub fields: Vec<SettingsRenderField>,
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn typed_snapshot_round_trips() {
-        let state = SettingsUiState {
+        let state = UiSettings {
             query: String::new(),
             sections: vec![SettingsSection {
                 id: "general".into(),
@@ -124,7 +124,7 @@ mod tests {
         };
 
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
-        let decoded = rkyv::from_bytes::<SettingsUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiSettings, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded, state);
     }

@@ -18,7 +18,7 @@ pub use close::{ForcePaneClose, PendingPaneClose};
 use focus::FocusPlugin;
 pub use focus::{PaneHoverCooldown, PendingCursorWarp};
 use identity::IdentityPlugin;
-pub use identity::{PaneId, SpawnCounter, SpawnSeq};
+pub use identity::{SpawnCounter, SpawnSeq};
 use moonshine_save::prelude::*;
 use open::OpenPlugin;
 #[cfg(test)]
@@ -32,9 +32,9 @@ pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_command::{CommandInvocation, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
-#[cfg(test)]
 use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 #[cfg(test)]
 use vmux_flex::prelude::*;
 #[cfg(test)]
@@ -240,7 +240,7 @@ pub struct PaneCommandPlugin;
 impl Plugin for PaneCommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -538,12 +538,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let browser_pane =
             place_pane_with_url(&mut app, tab, 5, Vec2::new(800.0, 600.0), "https://a.com");
@@ -584,12 +579,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -644,12 +634,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -736,12 +721,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -803,12 +783,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -869,12 +844,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -943,12 +913,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -1024,12 +989,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -1093,12 +1053,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -1166,12 +1121,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -1237,12 +1187,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -1281,12 +1226,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -1352,12 +1292,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent_pane = place_pane_with_url(
             &mut app,
@@ -1421,12 +1356,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let browser_pane =
             place_pane_with_url(&mut app, tab, 5, Vec2::new(1600.0, 900.0), "https://a.com");
@@ -1459,12 +1389,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let browser_pane =
             place_pane_with_url(&mut app, tab, 5, Vec2::new(800.0, 600.0), "https://a.com");
@@ -1506,12 +1431,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let file_pane = place_pane_with_url(
             &mut app,
@@ -1554,12 +1474,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let file_pane = place_pane_with_url(
             &mut app,
@@ -1602,12 +1517,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let file_pane = place_pane_with_url(
             &mut app,
@@ -1654,11 +1564,11 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let old_tab = app
             .world_mut()
-            .spawn((Tab::default(), Active, LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab, Active, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let active_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(10), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(10), ChildOf(space)))
             .id();
         let file_pane = place_pane_with_url(
             &mut app,
@@ -1686,9 +1596,18 @@ mod tests {
             });
         app.update();
 
-        assert_eq!(app.world().get::<LastActivatedAt>(old_tab).unwrap().0, 1);
         assert_eq!(
-            app.world().get::<LastActivatedAt>(active_tab).unwrap().0,
+            app.world()
+                .get::<LastActivatedAt>(old_tab)
+                .unwrap()
+                .milliseconds(),
+            1
+        );
+        assert_eq!(
+            app.world()
+                .get::<LastActivatedAt>(active_tab)
+                .unwrap()
+                .milliseconds(),
             10
         );
     }
@@ -1699,12 +1618,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let browser_pane =
             place_pane_with_url(&mut app, tab, 1, Vec2::new(800.0, 600.0), "https://a.com");
@@ -1774,12 +1688,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let browser_pane =
             place_pane_with_url(&mut app, tab, 1, Vec2::new(800.0, 600.0), "https://a.com");
@@ -1847,12 +1756,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let browser_pane =
             place_pane_with_url(&mut app, tab, 1, Vec2::new(800.0, 600.0), "https://a.com");
@@ -1903,12 +1807,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let browser_pane = place_pane_with_url(
             &mut app,
@@ -1986,12 +1885,7 @@ mod tests {
         let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                Active,
-                LastActivatedAt::now(),
-                ChildOf(space),
-            ))
+            .spawn((Tab, Active, LastActivatedAt::now(), ChildOf(space)))
             .id();
         let agent = place_pane_with_url(&mut app, tab, 1, Vec2::new(800.0, 900.0), anchor_url);
         if let Some((url, seq, size)) = other {
@@ -2073,7 +1967,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 Zoomed {
                     leaf,
                     hidden: vec![],
@@ -2096,10 +1990,7 @@ mod tests {
             .add_plugins(PaneZoomPlugin);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let split = app
             .world_mut()
             .spawn((
@@ -2160,10 +2051,7 @@ mod tests {
             .add_plugins(PaneZoomPlugin);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let split = app
             .world_mut()
             .spawn((
@@ -2223,10 +2111,7 @@ mod tests {
             .add_plugins(PaneZoomPlugin);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let only = app
             .world_mut()
             .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(tab)))
@@ -2257,7 +2142,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 Zoomed {
                     leaf: leaf_b,
                     hidden: vec![leaf_a],
@@ -2286,10 +2171,7 @@ mod tests {
             .add_plugins(PaneZoomPlugin);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let split = app
             .world_mut()
             .spawn((
@@ -2358,10 +2240,7 @@ mod tests {
             .add_plugins(PaneZoomPlugin);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let split = app
             .world_mut()
             .spawn((
@@ -2439,7 +2318,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 Zoomed {
                     leaf,
                     hidden: vec![sib],
@@ -2472,7 +2351,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 Zoomed {
                     leaf,
                     hidden: vec![sib_a, sib_b],
@@ -2509,10 +2388,7 @@ mod tests {
         ));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let split_root = app
             .world_mut()
             .spawn((
@@ -2528,12 +2404,12 @@ mod tests {
             .spawn((
                 Pane,
                 Node::default(),
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 ChildOf(split_root),
             ))
             .id();
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(left)));
+            .spawn((Stack::default(), LastActivatedAt::new(2), ChildOf(left)));
         let right_split = app
             .world_mut()
             .spawn((
@@ -2549,7 +2425,7 @@ mod tests {
             .spawn((
                 Pane,
                 Node::default(),
-                LastActivatedAt(4),
+                LastActivatedAt::new(4),
                 ChildOf(right_split),
             ))
             .id();
@@ -2558,14 +2434,20 @@ mod tests {
             .spawn((
                 Pane,
                 Node::default(),
-                LastActivatedAt(3),
+                LastActivatedAt::new(3),
                 ChildOf(right_split),
             ))
             .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(4), ChildOf(right_top)));
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(right_bot)));
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt::new(4),
+            ChildOf(right_top),
+        ));
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt::new(3),
+            ChildOf(right_bot),
+        ));
         app.world_mut()
             .resource_mut::<Messages<ToggleZoomRequest>>()
             .write(ToggleZoomRequest);
@@ -2606,10 +2488,7 @@ mod tests {
     }
 
     fn build_single_pane(app: &mut App) -> (Entity, Entity, Entity) {
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
         let pane = app
             .world_mut()
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
@@ -2622,10 +2501,7 @@ mod tests {
     }
 
     fn build_pre_split(app: &mut App) -> (Entity, Entity, Entity, Entity) {
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
-            .id();
+        let tab = app.world_mut().spawn((Tab, LastActivatedAt::new(1))).id();
         let split = app
             .world_mut()
             .spawn((
@@ -2644,16 +2520,16 @@ mod tests {
             .id();
         let left = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(10), ChildOf(split)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(10), ChildOf(split)))
             .id();
         let right = app
             .world_mut()
-            .spawn((Pane::bundle(), LastActivatedAt(5), ChildOf(split)))
+            .spawn((Pane::bundle(), LastActivatedAt::new(5), ChildOf(split)))
             .id();
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(10), ChildOf(left)));
+            .spawn((Stack::default(), LastActivatedAt::new(10), ChildOf(left)));
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(5), ChildOf(right)));
+            .spawn((Stack::default(), LastActivatedAt::new(5), ChildOf(right)));
         (tab, split, left, right)
     }
     #[test]
@@ -2725,11 +2601,14 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut stacks = world.query_filtered::<&LastActivatedAt, With<Stack>>();
-        let unactivated = stacks.iter(world).filter(|la| la.0 == 0).count();
+        let mut stacks = world.query_filtered::<Option<&LastActivatedAt>, With<Stack>>();
+        let unactivated = stacks
+            .iter(world)
+            .filter(|activated| activated.is_none())
+            .count();
         assert_eq!(
             unactivated, 1,
-            "focus:false leaves exactly the new stack un-activated (ts 0) so focus stays put"
+            "focus:false leaves exactly the new stack without activation so focus stays put"
         );
     }
 
@@ -2877,7 +2756,7 @@ mod tests {
     fn in_pane_new_split_without_url_opens_the_start_page() {
         let mut app = build_in_pane_app();
         app.world_mut().spawn((
-            crate::space::Space,
+            crate::space::Space::bundle(vmux_api::Id::<crate::space::Space>::new("space")),
             vmux_ecs::Active,
             vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
         ));

@@ -8,7 +8,7 @@ pub(super) fn add(app: &mut App) {
 
 fn start(
     mut commands: Commands,
-    sessions: Query<(Entity, &SessionId, &AgentId), (With<Session>, Without<AcpLaunchStarted>)>,
+    sessions: Query<(Entity, &Id<Session>, &AgentRef), (With<Session>, Without<AcpLaunchStarted>)>,
     targets: Query<&EntityTarget<Session>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
     profile: CurrentProfile,
@@ -43,10 +43,10 @@ fn start(
             .agent
             .acp
             .iter()
-            .find(|config| config.id == agent_id.0)
+            .find(|config| config.id == agent_id.as_str())
             .cloned();
         let request = AcpInstallRequest {
-            agent_id: agent_id.0.clone(),
+            agent_id: agent_id.as_str().to_string(),
             fallback,
             shell: shell.clone(),
         };
@@ -75,8 +75,8 @@ fn start(
             AcpLaunchStarted,
             AcpInstallWaiter {
                 job,
-                sid: session_id.0.clone(),
-                agent_id: agent_id.0.clone(),
+                sid: session_id.as_str().to_string(),
+                agent_id: agent_id.as_str().to_string(),
             },
         ));
     }
@@ -97,16 +97,16 @@ fn poll(
     mut waiters: Query<
         (
             Entity,
-            &SessionId,
-            &AgentId,
+            &Id<Session>,
+            &AgentRef,
             &Cwd,
             &ProcessAnchor,
-            Option<&AcpSessionId>,
             &AcpInstallWaiter,
             &mut RunState,
         ),
         With<Session>,
     >,
+    links: crate::session::AcpSessionLinks,
     mut package_changes: MessageWriter<AcpPackageChanged>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -116,7 +116,7 @@ fn poll(
         .filter_map(|request| targets.get(request.stack).ok().map(EntityTarget::entity))
         .collect();
     let mut invalid_waiters = std::collections::HashSet::new();
-    for (entity, session_id, agent_id, _, _, _, waiter, _) in &mut waiters {
+    for (entity, session_id, agent_id, _, _, waiter, _) in &mut waiters {
         if swapping.contains(&entity)
             || !waiter.matches(session_id, agent_id)
             || !jobs.contains(waiter.job)
@@ -157,7 +157,7 @@ fn poll(
         let has_waiters = related_waiters.iter().any(|entity| {
             waiters
                 .get(*entity)
-                .is_ok_and(|(_, session_id, agent_id, _, _, _, waiter, _)| {
+                .is_ok_and(|(_, session_id, agent_id, _, _, waiter, _)| {
                     !invalid_waiters.contains(entity) && waiter.matches(session_id, agent_id)
                 })
         });
@@ -166,7 +166,7 @@ fn poll(
         }
         let outcome = job.outcome.take().unwrap();
         for entity in related_waiters {
-            let Ok((_, session_id, agent_id, cwd, anchor, resume, waiter, mut state)) =
+            let Ok((_, session_id, agent_id, cwd, anchor, waiter, mut state)) =
                 waiters.get_mut(entity)
             else {
                 continue;
@@ -176,12 +176,13 @@ fn poll(
             }
             match &outcome.launch {
                 Ok(launch) => {
+                    let resume = links.get(entity);
                     let message = launch.message_for(
                         session_id,
                         agent_id,
                         cwd,
                         anchor,
-                        resume,
+                        resume.as_ref().map(|resume| resume.id()),
                         settings.as_deref(),
                     );
                     service_requests.write(ServiceRequest(message));

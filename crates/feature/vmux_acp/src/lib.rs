@@ -5,13 +5,10 @@ pub use host::AcpPlugin;
 #[cfg(all(host, feature = "service"))]
 pub use service::AcpServicePlugin;
 #[cfg(all(host, feature = "app"))]
-pub use session::AcpSessionId;
-
-#[cfg(all(host, feature = "app"))]
 pub(crate) struct Feature;
 
 #[cfg(all(host, feature = "app"))]
-impl vmux_ecs::manifest::FeatureManifestSource for Feature {
+impl vmux_feature::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 

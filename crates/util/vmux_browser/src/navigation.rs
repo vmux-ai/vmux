@@ -7,10 +7,10 @@ use vmux_api::VmuxRoute;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin, ReadCommandRequests};
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::Browser;
 use vmux_layout::{
@@ -29,7 +29,7 @@ pub(crate) struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         app.add_message::<vmux_ecs::service::ServiceRequest>()
             .add_message::<WebviewCommittedNavigationEvent>()
             .add_message::<HostHistoryStep>();
@@ -326,20 +326,14 @@ fn navigate(
                         };
                         !interaction.active()
                     });
-                    let stack = commands
-                        .spawn((
-                            Stack::bundle(),
-                            if activate_new {
-                                LastActivatedAt::now()
-                            } else {
-                                LastActivatedAt(0)
-                            },
-                            ChildOf(target),
-                        ))
-                        .id();
+                    let mut stack = commands.spawn((Stack::bundle(), ChildOf(target)));
+                    if activate_new {
+                        stack.insert(LastActivatedAt::now());
+                    }
+                    let stack = stack.id();
                     if let Some(profile) = profile {
                         activate.write(vmux_layout::active_pane::ActivatePane {
-                            profile: vmux_layout::active_pane::ProfileId::Agent(profile),
+                            scope: vmux_layout::active_pane::ActivePaneScope::Agent(profile),
                             active: vmux_layout::active_pane::ActiveStack {
                                 tab: None,
                                 pane: Some(target),
@@ -514,10 +508,12 @@ mod command_definition_tests {
     fn history_mcp_definition_dispatches_to_the_typed_request() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(FeaturePlugin::<crate::Feature>::default())
+            .register_feature::<crate::Feature>()
             .add_plugins(CommandRuntimePlugin)
             .add_message::<OpenHistoryRequest>()
             .add_observer(issue_open_history);
+        app.finish();
+        app.cleanup();
         app.update();
 
         let mut query = app.world_mut().query::<&CommandDefinition>();

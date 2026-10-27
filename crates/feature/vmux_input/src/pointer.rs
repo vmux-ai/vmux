@@ -15,6 +15,7 @@ static Y_BITS: AtomicU32 = AtomicU32::new(0);
 static BUTTONS: AtomicU8 = AtomicU8::new(0);
 static MOTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static WINDOW_GESTURE: AtomicBool = AtomicBool::new(false);
+static IN_MAIN_WINDOW: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativePointerSnapshot {
@@ -97,6 +98,14 @@ impl NativePointer {
 
     pub fn window_gesture() -> bool {
         WINDOW_GESTURE.load(Ordering::Relaxed)
+    }
+
+    pub fn set_in_main_window(inside: bool) {
+        IN_MAIN_WINDOW.store(inside, Ordering::Relaxed);
+    }
+
+    pub fn in_main_window() -> bool {
+        IN_MAIN_WINDOW.load(Ordering::Relaxed)
     }
 
     pub fn position(window_entity: Entity, window: &Window) -> Option<Vec2> {

@@ -68,7 +68,7 @@ pub(super) fn ChangesCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         move |_| {
-                            let _ = send(&GitStageAllRequest { path: repo_root.clone() });
+                            send(&GitStageAllRequest { path: repo_root.clone() });
                         }
                     },
                 }
@@ -212,7 +212,7 @@ fn FileRow(
             onclick: {
                 let file_path_bytes = file_path_bytes.clone();
                 move |_| {
-                    let _ = send(&GitFileSelectRequest {
+                    send(&GitFileSelectRequest {
                         path_bytes: file_path_bytes.clone(),
                     });
                 }
@@ -237,11 +237,11 @@ fn FileRow(
                         let repo_root = repo_root.clone();
                         move |event: Event<MouseData>| {
                             event.stop_propagation();
-                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
+                            send(&GitPanelSelectRequest { panel: GitPanel::Files });
                             if staged_view {
-                                let _ = send(&GitUnstageRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
+                                send(&GitUnstageRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
                             } else {
-                                let _ = send(&GitStageRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
+                                send(&GitStageRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
                             }
                         }
                     },
@@ -261,7 +261,7 @@ fn FileRow(
                             let path_bytes = file_path_bytes.clone();
                             move |event: Event<MouseData>| {
                                 event.stop_propagation();
-                                let _ = send(&GitDiscardFileRequest {
+                                send(&GitDiscardFileRequest {
                                     path_bytes: path_bytes.clone(),
                                 });
                             }
@@ -291,7 +291,7 @@ fn CommitPanel(
                 placeholder: translate("git-commit-message"),
                 value: "{commit_message}",
                 oninput: move |event: Event<FormData>| {
-                    let _ = send(&GitCommitDraftRequest {
+                    send(&GitCommitDraftRequest {
                         message: event.value(),
                     });
                 },
@@ -304,7 +304,7 @@ fn CommitPanel(
                     class: "ml-auto h-6 shrink-0 rounded-md px-2 text-[10px] font-medium shadow-sm disabled:opacity-40",
                     disabled: !can_commit,
                     onclick: move |_| {
-                        let _ = send(&GitCommitSubmitRequest);
+                        send(&GitCommitSubmitRequest);
                     },
                     {translate_with("git-commit", &[("count", TranslationValue::Number(staged_count as i64))])}
                 }

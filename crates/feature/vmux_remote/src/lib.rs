@@ -8,9 +8,9 @@ use vmux_ecs::UiStateWrite;
 use vmux_ecs::page::PageReady;
 use vmux_layout::event::{
     RemoteCopyEvent, RemoteDevice, RemotePairingDismissRequest, RemotePairingShowRequest,
-    RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
+    RemotePhase, RemoteRequest, RemoteRevokeRequest, UiRemote,
 };
-use vmux_layout::{LayoutCef, state::LayoutUiState};
+use vmux_layout::{LayoutCef, state::UiLayout};
 use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
 
 use std::os::unix::fs::PermissionsExt;
@@ -431,13 +431,13 @@ fn push_state_emit(
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     states: Query<(&RemoteState, Option<&RemotePairingInfo>, &PairingVisibility)>,
-    mut last: Local<std::collections::HashMap<Entity, RemoteUiState>>,
+    mut last: Local<std::collections::HashMap<Entity, UiRemote>>,
 ) {
     let Ok((state, pairing, visibility)) = states.single() else {
         return;
     };
     let now = Instant::now();
-    let payload = RemoteUiState {
+    let payload = UiRemote {
         enabled: state.enabled,
         phase: state.phase,
         pairing_url: pairing
@@ -464,7 +464,7 @@ fn push_state_emit(
         if last.get(&cef_e) == Some(&payload) && !page_ready.is_changed() {
             continue;
         }
-        commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+        commands.trigger(UiStateWrite::<UiLayout>::from_event(cef_e, &payload));
         last.insert(cef_e, payload.clone());
     }
 }
@@ -503,11 +503,8 @@ fn ensure_relay_device_id() -> std::io::Result<String> {
             return Ok(existing.to_string());
         }
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let device_id = uuid::Uuid::new_v4().simple().to_string();
-    std::fs::write(&path, &device_id)?;
+    vmux_path::AtomicFile::write(&path, device_id.as_bytes())?;
     #[cfg(unix)]
     {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
@@ -517,10 +514,7 @@ fn ensure_relay_device_id() -> std::io::Result<String> {
 
 fn persist_enabled(enabled: bool) -> std::io::Result<()> {
     let path = RemotePaths::current().state();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, if enabled { "enabled\n" } else { "disabled\n" })
+    vmux_path::AtomicFile::write(path, if enabled { b"enabled\n" } else { b"disabled\n" })
 }
 
 fn remove_if_exists(path: &Path) -> std::io::Result<()> {

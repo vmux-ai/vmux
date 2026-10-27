@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor};
-use vmux_session::{AgentConversationTitle, PromptQueue, SessionId, TitlePending};
+use vmux_session::{AgentConversationTitle, Id, PromptQueue, Session, TitlePending};
 
 pub(super) use super::attach_driver::AcpAgentAttachment;
 use super::attach_driver::{
     AcpAttachmentIcon, AcpId, AcpResume, AgentName, PendingAcpAgentAttachment, SessionName,
     SessionTarget, StackTarget, WorkingDirectory,
 };
-use crate::AcpSessionId;
+use crate::session::{AcpSessionLink, AcpSessionLinks};
 
 pub(super) fn add(app: &mut App) {
     app.add_systems(Update, attach);
@@ -23,7 +23,7 @@ fn attach(
             &SessionName,
             &AgentName,
             &AcpId,
-            &SessionId,
+            &Id<Session>,
             &WorkingDirectory,
             &AcpAttachmentIcon,
             &AcpResume,
@@ -33,6 +33,7 @@ fn attach(
     >,
     titles: Query<(), With<AgentConversationTitle>>,
     transcripts: vmux_session::Transcripts,
+    links: AcpSessionLinks,
     mut commands: Commands,
 ) {
     for (
@@ -42,7 +43,7 @@ fn attach(
         SessionName(session_name),
         AgentName(agent_name),
         AcpId(agent_id),
-        SessionId(sid),
+        session_id,
         WorkingDirectory(cwd),
         AcpAttachmentIcon(icon),
         AcpResume(resume),
@@ -50,10 +51,11 @@ fn attach(
     ) in &attachments
     {
         let agent_id = agent_id.as_str();
-        let url = vmux_session::Route::Session(SessionId(sid.clone())).url();
+        let sid = session_id.as_str();
+        let url = vmux_session::Route::Session(session_id.clone()).url();
         let profile_icon = (!icon.favicon_url().is_empty()).then(|| icon.favicon_url().to_string());
         commands.entity(*stack).insert((
-            EntityTarget::<vmux_session::Session>::new(*session_entity),
+            EntityTarget::<Session>::new(*session_entity),
             PageMetadata {
                 url: url.clone(),
                 title: session_name.clone(),
@@ -64,21 +66,26 @@ fn attach(
         let anchor = ProcessId::new();
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
-            vmux_session::AgentId(agent_id.to_string()),
+            vmux_session::AgentRef::new(agent_id),
             Cwd(cwd.clone()),
             ProcessAnchor(anchor),
             vmux_session::RunState::default(),
             vmux_session::ApprovalPolicy::default(),
-            vmux_ecs::team::Profile::registry(agent_name, agent_id).with_icon(profile_icon),
-            vmux_ecs::team::Agent { sid: sid.clone() },
+            vmux_ecs::team::Agent {
+                sid: sid.to_string(),
+            },
         ));
+        commands.spawn(
+            vmux_ecs::team::Profile::registry(agent_name, agent_id)
+                .with_icon(profile_icon)
+                .owned_by(*session_entity),
+        );
         commands
             .entity(*session_entity)
             .entry::<PromptQueue>()
             .or_default();
         if let Some(resume) = resume.clone() {
             let mut session = commands.entity(*session_entity);
-            session.insert(AcpSessionId(resume));
             if transcripts.get(*session_entity).messages.is_empty() {
                 session.insert(vmux_session::TranscriptLoading);
             } else {
@@ -87,10 +94,18 @@ fn attach(
             if !titles.contains(*session_entity) {
                 session.insert((AgentConversationTitle(session_name.clone()), TitlePending));
             }
+            links.set(
+                &mut commands,
+                *session_entity,
+                &AcpSessionLink::kind(agent_id),
+                &resume,
+                None,
+            );
         } else {
+            links.remove(&mut commands, *session_entity);
             commands
                 .entity(*session_entity)
-                .remove::<(AcpSessionId, vmux_session::TranscriptLoading)>();
+                .remove::<vmux_session::TranscriptLoading>();
         }
         let view = if let Some(webview) = webview {
             webview.entity()
@@ -132,6 +147,7 @@ fn attach(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
 
     #[derive(Resource)]
     struct DeferredPrompt(Entity);
@@ -162,25 +178,31 @@ mod tests {
         ));
         app.update();
 
-        let world = app.world();
-        let profile = world
-            .get::<vmux_ecs::team::Profile>(session)
+        let (profile_name, profile_icon) = app
+            .world_mut()
+            .run_system_once(move |profiles: vmux_ecs::team::Profiles| {
+                profiles.get(session).map(|profile| {
+                    (
+                        profile.name().to_string(),
+                        profile.icon().map(str::to_string),
+                    )
+                })
+            })
+            .unwrap()
             .expect("profile");
-        assert_eq!(profile.name, "Mistral Vibe");
+        assert_eq!(profile_name, "Mistral Vibe");
         assert_eq!(
-            profile.icon.as_deref(),
+            profile_icon.as_deref(),
             Some("https://cdn.example/vibe.svg")
         );
+        let world = app.world();
         let agent = world.get::<vmux_ecs::team::Agent>(session).expect("agent");
         assert_eq!(agent.sid, "sid-1");
         let meta = world.get::<PageMetadata>(stack).expect("meta");
         assert_eq!(meta.title, "Task");
         assert_eq!(meta.icon.favicon_url(), "https://cdn.example/vibe.svg");
         assert_eq!(
-            world
-                .get::<EntityTarget<vmux_session::Session>>(stack)
-                .unwrap()
-                .entity(),
+            world.get::<EntityTarget<Session>>(stack).unwrap().entity(),
             session
         );
     }

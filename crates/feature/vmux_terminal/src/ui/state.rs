@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use dioxus::prelude::*;
 
 use crate::event::{
-    TermCursor, TermLine, TermLoadingEvent, TermSelectionRange, TermThemeEvent, TerminalUiState,
+    TermCursor, TermLine, TermLoadingEvent, TermSelectionRange, TermThemeEvent, UiTerminal,
 };
-use vmux_ui::hooks::use_ui_state;
+use vmux_ui::hooks::UiState;
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct TerminalRowState {
@@ -33,7 +33,7 @@ pub(crate) struct TerminalState {
 
 impl TerminalState {
     pub(crate) fn use_state() -> Self {
-        let root = use_ui_state::<TerminalUiState>().state;
+        let root = UiState::<UiTerminal>::use_context().state;
         Self {
             rows: use_memo(move || {
                 let state = root.read();

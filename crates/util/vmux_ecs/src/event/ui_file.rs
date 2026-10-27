@@ -10,7 +10,7 @@ use super::{
 use vmux_api::git::FileGitState;
 
 #[vmux_api::ui_state_patch(Default)]
-pub struct FileUiStatePatch {
+pub struct UiFilePatch {
     pub meta: Option<FileMetaEvent>,
     pub viewport: Option<FileViewportPatch>,
     pub note: Option<FileNoteEvent>,
@@ -48,18 +48,18 @@ pub struct FileUiStatePatch {
     pub find: Option<FileFindEvent>,
 }
 
-#[vmux_api::ui_state(Default, patch = FileUiStatePatch, version = 4)]
-pub struct FileUiState {
-    pub document: FileDocumentUiState,
-    pub viewport: FileViewportUiState,
-    pub explorer: FileExplorerUiState,
-    pub language: FileLanguageUiState,
-    pub panel: FilePanelUiState,
-    pub git: FileGitUiState,
+#[vmux_api::ui_state(Default, patch = UiFilePatch, version = 4)]
+pub struct UiFile {
+    pub document: UiFileDocument,
+    pub viewport: UiFileViewport,
+    pub explorer: UiFileExplorer,
+    pub language: UiFileLanguage,
+    pub panel: UiFilePanel,
+    pub git: UiFileGit,
 }
 
 #[vmux_api::contract(Default)]
-pub struct FileDocumentUiState {
+pub struct UiFileDocument {
     pub meta: Option<FileMetaEvent>,
     pub note: Option<FileNoteEvent>,
     pub error: Option<FileErrorEvent>,
@@ -76,7 +76,7 @@ pub struct FileDocumentUiState {
 }
 
 #[vmux_api::contract(Default)]
-pub struct FileViewportUiState {
+pub struct UiFileViewport {
     pub content: Option<FileViewportPatch>,
     pub scroll_by: Option<FileScrollByEvent>,
     pub cursor: Option<FileCursorEvent>,
@@ -85,7 +85,7 @@ pub struct FileViewportUiState {
 }
 
 #[vmux_api::contract(Default)]
-pub struct FileExplorerUiState {
+pub struct UiFileExplorer {
     pub tidy: FileTidyState,
     pub explorer_tree: Option<ExplorerTreeEvent>,
     pub explorer_focus: Option<ExplorerFocusEvent>,
@@ -98,7 +98,7 @@ pub struct FileExplorerUiState {
 }
 
 #[vmux_api::contract(Default)]
-pub struct FileLanguageUiState {
+pub struct UiFileLanguage {
     pub diagnostics: Option<FileDiagnostics>,
     pub lsp_status: Option<FileLspStatus>,
     pub lsp_install_notice: LspInstallNotice,
@@ -108,17 +108,17 @@ pub struct FileLanguageUiState {
 }
 
 #[vmux_api::contract(Default)]
-pub struct FilePanelUiState {
+pub struct UiFilePanel {
     pub panel: Option<FilePanelState>,
 }
 
 #[vmux_api::contract(Default)]
-pub struct FileGitUiState {
+pub struct UiFileGit {
     pub git_state: Option<FileGitState>,
 }
 
-impl vmux_api::UiStateProjection<FileUiStatePatch> for FileUiState {
-    fn apply(&mut self, patch: FileUiStatePatch) {
+impl vmux_api::UiStateProjection<UiFilePatch> for UiFile {
+    fn apply(&mut self, patch: UiFilePatch) {
         let reset_document = patch.meta.as_ref().is_some_and(|meta| {
             self.document
                 .meta
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn patches_build_a_retained_tree() {
-        let event = <FileUiState as vmux_api::UiState>::from_updates(
+        let event = <UiFile as vmux_api::UiState>::from_updates(
             None,
             vec![
                 FileMetaEvent {
@@ -293,7 +293,7 @@ mod tests {
             ],
         );
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiFile, rkyv::rancor::Error>(&bytes).unwrap();
         assert!(decoded.document.meta.is_some());
         assert!(decoded.document.dirty.unwrap().dirty);
     }

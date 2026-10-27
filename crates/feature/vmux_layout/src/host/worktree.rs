@@ -10,7 +10,7 @@ use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 use bevy::prelude::*;
 use sha2::{Digest, Sha256};
 
-use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use crate::tab::{StartupDir, Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_ecs::{PageOpenDeferred, PageOpenError};
 use vmux_git::worktree::{self, CheckoutInfo};
 
@@ -76,7 +76,7 @@ pub struct TabWorktreePending;
 
 #[derive(Component)]
 struct TabWorktreeTask {
-    startup_dir: Option<String>,
+    startup_dir: Option<PathBuf>,
     workspace: TabWorkspace,
     metadata: TabWorktree,
     task: vmux_git::GitTask<Result<TabWorktreeActivation, String>>,
@@ -453,7 +453,7 @@ impl TabWorktreeActivation {
     }
 
     pub fn restore(
-        tab: &Tab,
+        startup_dir: &StartupDir,
         workspace: &TabWorkspace,
         metadata: &TabWorktree,
         managed_root: &Path,
@@ -466,13 +466,13 @@ impl TabWorktreeActivation {
             .strip_prefix(&source.root)
             .map_err(|_| "project directory is outside its checkout".to_string())?;
         let mut checkout_dir = if metadata.checkout_dir.is_empty() {
-            let startup_dir = tab
-                .startup_dir
+            let startup_dir = startup_dir
+                .0
                 .as_deref()
                 .ok_or_else(|| "managed worktree checkout path is missing".to_string())?;
-            CheckoutInfo::try_from(Path::new(startup_dir))
+            CheckoutInfo::try_from(startup_dir)
                 .map(|checkout| checkout.root)
-                .unwrap_or_else(|_| PathBuf::from(startup_dir))
+                .unwrap_or_else(|_| startup_dir.to_path_buf())
         } else {
             PathBuf::from(&metadata.checkout_dir)
         };
@@ -526,20 +526,18 @@ impl TabWorktreeActivation {
 }
 
 fn ensure_tab_workspaces(
-    tabs: Query<(Entity, &Tab, Option<&TabWorktree>), Without<TabWorkspace>>,
+    tabs: Query<(Entity, &StartupDir, Option<&TabWorktree>), (With<Tab>, Without<TabWorkspace>)>,
     mut commands: Commands,
 ) {
-    for (entity, tab, worktree) in &tabs {
+    for (entity, startup_dir, worktree) in &tabs {
         let Some(project_dir) = worktree
-            .map(|worktree| worktree.repo_root.as_str())
-            .filter(|path| !path.is_empty())
-            .or(tab.startup_dir.as_deref())
+            .map(|worktree| PathBuf::from(&worktree.repo_root))
+            .filter(|path| !path.as_os_str().is_empty())
+            .or_else(|| startup_dir.0.clone())
         else {
             continue;
         };
-        let project_dir = Path::new(project_dir)
-            .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from(project_dir));
+        let project_dir = project_dir.canonicalize().unwrap_or(project_dir);
         commands.entity(entity).insert(TabWorkspace {
             project_dir: project_dir.to_string_lossy().into_owned(),
         });
@@ -560,7 +558,7 @@ fn queue_added_tab_worktrees(
 fn start_reconcile(
     pending: Query<Entity, (With<TabWorktreePending>, Without<TabWorktreeTask>)>,
     running: Query<(), With<TabWorktreeTask>>,
-    tabs: Query<(&Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
+    tabs: Query<(&StartupDir, &TabWorkspace, &TabWorktree), (With<Tab>, Without<TabWorktreeReady>)>,
     managed_root: Res<ManagedWorktreeRoot>,
     runtime: Res<vmux_git::GitRuntime>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -570,15 +568,12 @@ fn start_reconcile(
         return;
     }
     for entity in &pending {
-        let Ok((tab, workspace, metadata)) = tabs.get(entity) else {
+        let Ok((startup_dir, workspace, metadata)) = tabs.get(entity) else {
             commands.entity(entity).remove::<TabWorktreePending>();
             continue;
         };
-        let startup_dir = tab.startup_dir.clone();
-        let tab = Tab {
-            name: tab.name.clone(),
-            startup_dir: tab.startup_dir.clone(),
-        };
+        let startup_dir = startup_dir.0.clone();
+        let restore_dir = StartupDir(startup_dir.clone());
         let workspace = workspace.clone();
         let metadata = metadata.clone();
         let task_workspace = workspace.clone();
@@ -586,7 +581,7 @@ fn start_reconcile(
         let root = managed_root.0.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let Some(task) = runtime.spawn_operation(wake, move || {
-            TabWorktreeActivation::restore(&tab, &task_workspace, &task_metadata, &root)
+            TabWorktreeActivation::restore(&restore_dir, &task_workspace, &task_metadata, &root)
         }) else {
             return;
         };
@@ -602,7 +597,7 @@ fn start_reconcile(
 
 fn finish_reconcile(
     mut pending: Query<(Entity, &mut TabWorktreeTask)>,
-    mut tabs: Query<(&mut Tab, Option<&TabWorkspace>, Option<&TabWorktree>)>,
+    mut tabs: Query<(&mut StartupDir, Option<&TabWorkspace>, Option<&TabWorktree>), With<Tab>>,
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut pending {
@@ -610,13 +605,13 @@ fn finish_reconcile(
             continue;
         };
         let result = result.unwrap_or_else(|_| Err("Git worktree worker panicked".to_string()));
-        let Ok((mut tab, workspace, metadata)) = tabs.get_mut(entity) else {
+        let Ok((mut startup_dir, workspace, metadata)) = tabs.get_mut(entity) else {
             commands
                 .entity(entity)
                 .remove::<(TabWorktreeTask, TabWorktreePending)>();
             continue;
         };
-        if tab.startup_dir != pending.startup_dir
+        if startup_dir.0 != pending.startup_dir
             || workspace != Some(&pending.workspace)
             || metadata != Some(&pending.metadata)
         {
@@ -630,9 +625,9 @@ fn finish_reconcile(
         entity_commands.remove::<(TabWorktreeTask, TabWorktreePending)>();
         match result {
             Ok(activation) => {
-                let startup_dir = activation.execution_dir.to_string_lossy().into_owned();
-                if tab.startup_dir.as_deref() != Some(&startup_dir) {
-                    tab.startup_dir = Some(startup_dir);
+                let next_startup_dir = activation.execution_dir;
+                if startup_dir.0.as_deref() != Some(next_startup_dir.as_path()) {
+                    startup_dir.0 = Some(next_startup_dir);
                 }
                 if metadata != Some(&activation.metadata) {
                     entity_commands.insert(activation.metadata);
@@ -877,8 +872,13 @@ impl TabWorktreeReady {
         })
     }
 
-    pub fn is_current(&self, tab: &Tab, workspace: &TabWorkspace, metadata: &TabWorktree) -> bool {
-        tab.startup_dir.as_deref() == Some(self.startup_dir.as_str())
+    pub fn is_current(
+        &self,
+        startup_dir: &StartupDir,
+        workspace: &TabWorkspace,
+        metadata: &TabWorktree,
+    ) -> bool {
+        startup_dir.0.as_deref() == Some(Path::new(&self.startup_dir))
             && workspace.project_dir == self.project_dir
             && metadata == &self.metadata
             && CheckoutFingerprint::read(&self.checkout).as_ref()
@@ -890,7 +890,7 @@ impl TabWorktreeReady {
 
 fn rebind_tab_directories(
     mut reader: MessageReader<TabDirectoryObserved>,
-    mut tabs: Query<&mut Tab>,
+    mut tabs: Query<&mut StartupDir, With<Tab>>,
     mut workspaces: Query<&mut TabWorkspace>,
     managed: Query<(), With<TabWorktree>>,
     mut removed_tabs: RemovedComponents<Tab>,
@@ -904,13 +904,13 @@ fn rebind_tab_directories(
         let Some(observed_dir) = observed.directory() else {
             continue;
         };
-        let Ok(mut tab) = tabs.get_mut(observed.tab) else {
+        let Ok(mut startup_dir) = tabs.get_mut(observed.tab) else {
             continue;
         };
-        let Some(current) = tab.startup_dir.clone() else {
+        let Some(current) = startup_dir.0.clone() else {
             continue;
         };
-        let Ok(current_dir) = Path::new(&current).canonicalize() else {
+        let Ok(current_dir) = current.canonicalize() else {
             continue;
         };
         if observed_dir.is_within(&current_dir) {
@@ -919,7 +919,8 @@ fn rebind_tab_directories(
         let Ok(observed_info) = CheckoutInfo::try_from(observed_dir.path()) else {
             continue;
         };
-        let current_info = checkout_cache.resolve(observed.tab, &current, |path| {
+        let current_text = current.to_string_lossy();
+        let current_info = checkout_cache.resolve(observed.tab, &current_text, |path| {
             CheckoutInfo::try_from(path).ok()
         });
         if current_info.is_none()
@@ -946,20 +947,19 @@ fn rebind_tab_directories(
         let same_repository = current_info
             .as_ref()
             .is_some_and(|current| current.common_dir == observed_info.common_dir);
-        let Some(startup_dir) = observed_info.root.to_str().map(str::to_owned) else {
-            continue;
-        };
+        let next_startup_dir = observed_info.root.clone();
+        let startup_dir_text = next_startup_dir.to_string_lossy().into_owned();
         if !same_repository {
             if let Ok(mut workspace) = workspaces.get_mut(observed.tab) {
-                workspace.project_dir.clone_from(&startup_dir);
+                workspace.project_dir.clone_from(&startup_dir_text);
             } else {
                 commands.entity(observed.tab).insert(TabWorkspace {
-                    project_dir: startup_dir.clone(),
+                    project_dir: startup_dir_text.clone(),
                 });
             }
         }
-        tab.startup_dir = Some(startup_dir.clone());
-        checkout_cache.store(observed.tab, startup_dir, &observed_info);
+        startup_dir.0 = Some(next_startup_dir);
+        checkout_cache.store(observed.tab, startup_dir_text, &observed_info);
         if managed.contains(observed.tab) {
             commands
                 .entity(observed.tab)
@@ -989,7 +989,7 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct CapturedStartupDir(Option<String>);
+    struct CapturedStartupDir(Option<PathBuf>);
 
     fn emit_observation(
         input: Res<ObservationInput>,
@@ -1004,10 +1004,14 @@ mod tests {
 
     fn capture_startup_dir(
         input: Res<ObservationInput>,
-        tabs: Query<&Tab>,
+        tabs: Query<&StartupDir, With<Tab>>,
         mut captured: ResMut<CapturedStartupDir>,
     ) {
-        captured.0 = tabs.get(input.tab).unwrap().startup_dir.clone();
+        captured.0.clone_from(&tabs.get(input.tab).unwrap().0);
+    }
+
+    fn startup_dir(app: &App, tab: Entity) -> Option<&Path> {
+        app.world().get::<StartupDir>(tab)?.0.as_deref()
     }
 
     fn git(dir: &Path, args: &[&str]) {
@@ -1270,10 +1274,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "recover".into(),
-                    startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
-                },
+                Tab::named("recover").with_startup_dir(activation.execution_dir.clone()),
                 TabWorkspace {
                     project_dir: repo.path().to_string_lossy().into_owned(),
                 },
@@ -1304,16 +1305,13 @@ mod tests {
             TabWorktreeActivation::create(repo.path(), "recover", managed_root.path()).unwrap();
         std::fs::remove_dir_all(&activation.metadata.checkout_dir).unwrap();
         git(repo.path(), &["worktree", "prune", "--expire", "now"]);
-        let tab = Tab {
-            name: "recover".into(),
-            startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
-        };
+        let startup_dir = StartupDir(Some(activation.execution_dir.clone()));
         let workspace = TabWorkspace {
             project_dir: repo.path().to_string_lossy().into_owned(),
         };
 
         let recovered = TabWorktreeActivation::restore(
-            &tab,
+            &startup_dir,
             &workspace,
             &activation.metadata,
             managed_root.path(),
@@ -1337,10 +1335,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "missing".into(),
-                    startup_dir: Some("/no/such/vmux-worktree".into()),
-                },
+                Tab::named("missing").with_startup_dir("/no/such/vmux-worktree"),
                 TabWorkspace {
                     project_dir: "/no/such/vmux-project".into(),
                 },
@@ -1375,17 +1370,18 @@ mod tests {
         let outside = outside_parent.path().join("escape");
         let mut metadata = activation.metadata;
         metadata.checkout_dir = outside.to_string_lossy().into_owned();
-        let tab = Tab {
-            name: "managed".into(),
-            startup_dir: Some(outside.to_string_lossy().into_owned()),
-        };
+        let startup_dir = StartupDir(Some(outside.clone()));
         let workspace = TabWorkspace {
             project_dir: repo.path().to_string_lossy().into_owned(),
         };
 
-        let error =
-            TabWorktreeActivation::restore(&tab, &workspace, &metadata, managed_root.path())
-                .unwrap_err();
+        let error = TabWorktreeActivation::restore(
+            &startup_dir,
+            &workspace,
+            &metadata,
+            managed_root.path(),
+        )
+        .unwrap_err();
 
         assert!(error.contains("repository storage directory"));
         assert!(!outside.exists());
@@ -1406,16 +1402,13 @@ mod tests {
         std::fs::remove_dir_all(&activation.execution_dir).unwrap();
         let outside = tempfile::tempdir().unwrap();
         symlink(outside.path(), &activation.execution_dir).unwrap();
-        let tab = Tab {
-            name: "managed".into(),
-            startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
-        };
+        let startup_dir = StartupDir(Some(activation.execution_dir.clone()));
         let workspace = TabWorkspace {
             project_dir: nested.to_string_lossy().into_owned(),
         };
 
         let error = TabWorktreeActivation::restore(
-            &tab,
+            &startup_dir,
             &workspace,
             &activation.metadata,
             managed_root.path(),
@@ -1440,10 +1433,7 @@ mod tests {
             .add_plugins(WorktreePlugin);
         for activation in [first, second] {
             app.world_mut().spawn((
-                Tab {
-                    name: "restore".into(),
-                    startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
-                },
+                Tab::named("restore").with_startup_dir(activation.execution_dir.clone()),
                 TabWorkspace {
                     project_dir: repo.path().to_string_lossy().into_owned(),
                 },
@@ -1510,10 +1500,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "tab".into(),
-                    startup_dir: Some(managed.execution_dir.to_string_lossy().into_owned()),
-                },
+                Tab::named("tab").with_startup_dir(managed.execution_dir.clone()),
                 TabWorkspace {
                     project_dir: repo.path().to_string_lossy().into_owned(),
                 },
@@ -1523,10 +1510,7 @@ mod tests {
 
         observe_edit(&mut app, tab, &touched);
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(expected.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&expected)));
         assert!(app.world().get::<TabWorktree>(tab).is_none());
         assert!(
             Path::new(&managed.metadata.checkout_dir).is_dir(),
@@ -1551,10 +1535,7 @@ mod tests {
             .init_resource::<CapturedStartupDir>();
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(managed.execution_dir.to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(managed.execution_dir.clone()))
             .id();
         app.insert_resource(ObservationInput {
             tab,
@@ -1567,7 +1548,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<CapturedStartupDir>().0.as_deref(),
-            Some(expected.as_str())
+            Some(Path::new(&expected))
         );
     }
 
@@ -1599,23 +1580,14 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(first.execution_dir.to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(first.execution_dir.clone()))
             .id();
 
         observe(&mut app, tab, &second_file);
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(second_expected.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&second_expected)));
 
         observe(&mut app, tab, &main_file);
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(main_expected.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&main_expected)));
     }
 
     #[test]
@@ -1631,18 +1603,12 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(original.clone()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(original.clone()))
             .id();
 
         observe(&mut app, tab, &repo.path().join("seed.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(original.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&original)));
     }
 
     #[test]
@@ -1662,18 +1628,12 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(repo.path().to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(repo.path()))
             .id();
 
         observe(&mut app, tab, &linked_path.join("seed.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(expected.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&expected)));
     }
 
     #[test]
@@ -1693,18 +1653,12 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(original.clone()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(original.clone()))
             .id();
 
         observe(&mut app, tab, &nested.join("nested.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(original.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&original)));
     }
 
     #[test]
@@ -1842,18 +1796,12 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(original.clone()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(original.clone()))
             .id();
 
         observe_edit(&mut app, tab, &observed.join("seed.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(original.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&original)));
     }
 
     #[test]
@@ -1869,20 +1817,14 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(original.clone()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(original.clone()))
             .id();
 
         observe(&mut app, tab, &other.path().join("seed.txt"));
         observe(&mut app, tab, &non_git_file);
         observe(&mut app, tab, &missing);
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(original.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&original)));
     }
 
     #[test]
@@ -1899,18 +1841,12 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(current.path().to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(current.path()))
             .id();
 
         observe_edit(&mut app, tab, &observed.path().join("seed.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(expected.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&expected)));
     }
 
     #[test]
@@ -1927,18 +1863,12 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(current.path().to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(current.path()))
             .id();
 
         observe_edit(&mut app, tab, &observed.path().join("seed.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(expected.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&expected)));
     }
 
     #[test]
@@ -1955,18 +1885,12 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(original.clone()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(original.clone()))
             .id();
 
         observe(&mut app, tab, &observed.path().join("seed.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(original.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&original)));
     }
 
     #[test]
@@ -1984,17 +1908,11 @@ mod tests {
         app.add_plugins(WorktreePlugin);
         let tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "tab".into(),
-                startup_dir: Some(original.clone()),
-            })
+            .spawn(Tab::named("tab").with_startup_dir(original.clone()))
             .id();
 
         observe_edit(&mut app, tab, &observed.path().join("seed.txt"));
 
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(original.as_str())
-        );
+        assert_eq!(startup_dir(&app, tab), Some(Path::new(&original)));
     }
 }

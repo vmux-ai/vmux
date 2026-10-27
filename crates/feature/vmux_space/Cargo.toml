@@ -16,6 +16,7 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_feature = { path = "../../util/vmux_feature" }
 vmux_page = { path = "../../util/vmux_page" }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }

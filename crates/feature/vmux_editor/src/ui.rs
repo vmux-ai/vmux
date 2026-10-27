@@ -28,7 +28,11 @@ mod workspace;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_ecs::event::UiFile,
+        vmux_api::input::UiKeyClaims,
+    ],
     dom_group = "editor",
     subtree
 )]
@@ -37,7 +41,14 @@ pub(crate) struct FilePage;
 #[vmux_page::page(
     page = "projects",
     component = Page,
-    states = ["ThemeUiState", "FileUiState", "ProjectUiState", "SessionScopeUiState", "GitUiState", "KeyClaimsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_ecs::event::UiFile,
+        crate::project::UiProject,
+        vmux_session::state::UiSessionScope,
+        vmux_git::state::UiGit,
+        vmux_api::input::UiKeyClaims,
+    ],
     dom_group = "editor",
     subtree,
     takes = vmux_ecs::PageMetadata
@@ -47,7 +58,11 @@ pub(crate) struct ProjectsPage;
 #[vmux_page::page(
     file = "../vmux_knowledge/src/feature.ron",
     component = Page,
-    states = ["ThemeUiState", "FileUiState", "KeyClaimsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_ecs::event::UiFile,
+        vmux_api::input::UiKeyClaims,
+    ],
     dom_group = "editor",
     subtree
 )]

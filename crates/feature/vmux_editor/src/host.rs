@@ -47,7 +47,7 @@ impl Plugin for EditorPlugin {
             navigation::NavigationPlugin,
             history::HistoryPlugin,
             explorer::ExplorerPlugin,
-            vmux_ecs::UiStatePlugin::<vmux_ecs::event::FileUiState>::default(),
+            vmux_ecs::UiStatePlugin::<vmux_ecs::event::UiFile>::default(),
         ))
         .add_plugins((
             Self::MANIFEST

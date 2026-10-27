@@ -113,6 +113,8 @@ fn compute_intent(
     ) {
         if shown_inline {
             HostFocusIntent::LayoutView
+        } else if hosted.contains(modal) {
+            HostFocusIntent::HostedPane(modal)
         } else if windowed {
             HostFocusIntent::Windowed(modal)
         } else {
@@ -343,6 +345,32 @@ mod tests {
         app.update();
 
         assert_eq!(intent(&app), HostFocusIntent::Windowed(modal));
+    }
+
+    #[test]
+    fn open_hosted_modal_takes_its_page_focus() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        let modal = app
+            .world_mut()
+            .spawn((
+                Browser,
+                WindowOverlay,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Visible,
+                KeyboardOwner,
+                vmux_ecs::page::HostsPage,
+            ))
+            .id();
+        set_focus(&mut app, stack);
+
+        app.update();
+
+        assert_eq!(intent(&app), HostFocusIntent::HostedPane(modal));
     }
 
     #[test]

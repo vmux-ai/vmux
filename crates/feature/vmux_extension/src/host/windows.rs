@@ -611,7 +611,9 @@ fn route_close(
             && let Some(entity) = stacks
                 .iter()
                 .filter(|(_, metadata, _)| request.matches_page(&metadata.url))
-                .max_by_key(|(_, _, activated)| activated.map_or(0, |activated| activated.0))
+                .max_by_key(|(_, _, activated)| {
+                    activated.map_or(0, |activated| activated.milliseconds())
+                })
                 .map(|(entity, _, _)| entity)
         {
             targets.insert(entity);
@@ -1337,7 +1339,7 @@ mod tests {
                     url: format!("chrome-extension://{EXTENSION_ID}/popup/index.html#/vault"),
                     ..default()
                 },
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
             ))
             .id();
         let popout = app
@@ -1348,7 +1350,7 @@ mod tests {
                     url: format!("chrome-extension://{EXTENSION_ID}/popup/index.html#/fido2"),
                     ..default()
                 },
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
             ))
             .id();
         let mut cursor = app

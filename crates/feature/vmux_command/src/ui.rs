@@ -5,13 +5,14 @@ use crate::ui::input_driver::{
 };
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
-    CommandBarControl, CommandBarUiState, CommandPaletteActivateRequest,
-    CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
+    CommandBarControl, CommandPaletteActivateRequest, CommandPaletteDraftRequest,
+    CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
     CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
     CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest,
-    CommandPaletteSubmitRequest, CommandPaletteUiState, InvokeRequest, PaletteGlyph, PaletteMode,
+    CommandPaletteSubmitRequest, InvokeRequest, PaletteGlyph, PaletteMode, UiCommandBar,
+    UiCommandPalette,
 };
 use vmux_api::input::KeyContextRequest;
 use vmux_api::prompt_media::{ChatPasteMedia, ChatPickFiles};
@@ -23,7 +24,7 @@ use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlaceme
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::dom::DomSelection;
 use vmux_ui::hooks::Unclaimed;
-use vmux_ui::hooks::{send, use_key_claim, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_key_claim};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::BuiltinIconView;
 use vmux_ui::ime::use_ime_guard;
@@ -42,8 +43,8 @@ mod panel;
 mod readline_driver;
 mod row;
 
-pub fn use_command_bar_ui() -> Signal<CommandBarUiState> {
-    let ui = use_ui_state::<CommandBarUiState>();
+pub fn use_command_bar_ui() -> Signal<UiCommandBar> {
+    let ui = UiState::<UiCommandBar>::use_context();
     let state = ui.state;
     let mut handled_focus_revision = use_signal(|| 0);
     use_effect(move || {
@@ -74,7 +75,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut handled_close = use_signal(|| None);
 
     use_drop(move || {
-        let _ = send(&KeyContextRequest { keys: Vec::new() });
+        send(&KeyContextRequest { keys: Vec::new() });
     });
 
     use_effect(move || {
@@ -157,7 +158,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let palette_data = if host_snapshot.open_id == state_val.open_id {
         host_snapshot
     } else {
-        CommandPaletteUiState::default()
+        UiCommandPalette::default()
     };
     let projection = std::rc::Rc::new(palette_data.projection.clone());
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
@@ -231,7 +232,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if let Some(edited) =
                 Readline::chord(&e, keys, &query, &projection.ghost, PROMPT_INPUT_ID)
             {
-                let _ = send(&CommandPaletteDraftRequest {
+                send(&CommandPaletteDraftRequest {
                     open_id: state().open_id,
                     query: edited,
                     start: is_start,
@@ -251,7 +252,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 && digit < projection.numbered_count as usize
             {
                 e.prevent_default();
-                let _ = send(&CommandPaletteHighlightRequest {
+                send(&CommandPaletteHighlightRequest {
                     open_id: state().open_id,
                     index: digit as u32,
                 });
@@ -284,20 +285,20 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     return;
                 }
                 if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
-                    let _ = send(&CommandPaletteMenuDismissRequest {
+                    send(&CommandPaletteMenuDismissRequest {
                         open_id: state().open_id,
                     });
                     return;
                 }
                 if let Some(next) = direction {
-                    let _ = send(&CommandPaletteMenuMoveRequest {
+                    send(&CommandPaletteMenuMoveRequest {
                         open_id: state().open_id,
                         next,
                     });
                     return;
                 }
                 if e.key() == Key::Enter && !e.modifiers().shift() {
-                    let _ = send(&CommandPaletteMenuActivateRequest {
+                    send(&CommandPaletteMenuActivateRequest {
                         open_id: state().open_id,
                         index: projection.menu_cursor,
                     });
@@ -317,7 +318,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 if go_down || go_up {
                     e.prevent_default();
-                    let _ = send(&CommandPaletteMediaMoveRequest {
+                    send(&CommandPaletteMediaMoveRequest {
                         open_id: state().open_id,
                         next: go_down,
                     });
@@ -325,7 +326,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 if e.key() == Key::Enter && !e.modifiers().shift() {
                     e.prevent_default();
-                    let _ = send(&CommandPaletteMediaActivateRequest {
+                    send(&CommandPaletteMediaActivateRequest {
                         open_id: state().open_id,
                         index: None,
                     });
@@ -333,7 +334,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 if e.key() == Key::Escape || ctrl && e.code() == Code::KeyC {
                     e.prevent_default();
-                    let _ = send(&CommandPaletteMediaDismissRequest {
+                    send(&CommandPaletteMediaDismissRequest {
                         open_id: state().open_id,
                     });
                     return;
@@ -360,7 +361,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             };
             if let Some(wanted) = wanted {
                 e.prevent_default();
-                let _ = send(&CommandPaletteHistoryMoveRequest {
+                send(&CommandPaletteHistoryMoveRequest {
                     open_id: state().open_id,
                     older: matches!(wanted, PromptHistoryDirection::Older),
                 });
@@ -378,7 +379,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 if keys.resolves() {
                     keys.on_keydown(&e, |_| false);
                 } else {
-                    let _ = send(&CommandPaletteSubmitRequest {
+                    send(&CommandPaletteSubmitRequest {
                         open_id: state().open_id,
                     });
                 }
@@ -395,7 +396,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if let Some(edited) =
                 Readline::chord(&e, keys, &query, &projection.ghost, COMMAND_BAR_INPUT_ID)
             {
-                let _ = send(&CommandPaletteDraftRequest {
+                send(&CommandPaletteDraftRequest {
                     open_id: state().open_id,
                     query: edited,
                     start: is_start,
@@ -415,7 +416,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 && digit < projection.numbered_count as usize
             {
                 e.prevent_default();
-                let _ = send(&CommandPaletteHighlightRequest {
+                send(&CommandPaletteHighlightRequest {
                     open_id: state().open_id,
                     index: digit as u32,
                 });
@@ -426,7 +427,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 if keys.resolves() {
                     keys.on_keydown(&e, |_| false);
                 } else {
-                    let _ = send(&CommandPaletteSubmitRequest {
+                    send(&CommandPaletteSubmitRequest {
                         open_id: state().open_id,
                     });
                 }
@@ -436,7 +437,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     };
     let on_send = move |_| {
-        let _ = send(&CommandPaletteSubmitRequest {
+        send(&CommandPaletteSubmitRequest {
             open_id: state().open_id,
         });
     };
@@ -459,7 +460,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     action_title: translate("command-send"),
                     action_enabled: start_submission_enabled,
                     on_input: move |query| {
-                        let _ = send(&CommandPaletteDraftRequest {
+                        send(&CommandPaletteDraftRequest {
                             open_id: state().open_id,
                             query,
                             start: is_start,
@@ -467,16 +468,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     },
                     on_keydown: start_keydown,
                     on_paste: move |_| {
-                        let _ = send(&ChatPasteMedia);
+                        send(&ChatPasteMedia);
                     },
                     on_attach: move |_| {
-                        let _ = send(&ChatPickFiles);
+                        send(&ChatPickFiles);
                     },
                     on_remove_attachment: move |index: usize| {
                         let Some(attachment) = removable_attachments.get(index) else {
                             return;
                         };
-                        let _ = send(&CommandPaletteRemoveAttachmentRequest {
+                        send(&CommandPaletteRemoveAttachmentRequest {
                             open_id: state().open_id,
                             path: attachment.path.clone(),
                         });
@@ -521,7 +522,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 value: "{q}",
                                 autofocus: true,
                                 oninput: move |event| {
-                                    let _ = send(&CommandPaletteDraftRequest {
+                                    send(&CommandPaletteDraftRequest {
                                         open_id: state().open_id,
                                         query: event.value(),
                                         start: is_start,
@@ -549,13 +550,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         loading_label: translate("agent-loading-media"),
                         empty_label: translate("agent-no-matching-media"),
                         on_hover: move |index| {
-                            let _ = send(&CommandPaletteMediaHighlightRequest {
+                            send(&CommandPaletteMediaHighlightRequest {
                                 open_id: state().open_id,
                                 index: index as u32,
                             });
                         },
                         on_select: move |index| {
-                            let _ = send(&CommandPaletteMediaActivateRequest {
+                            send(&CommandPaletteMediaActivateRequest {
                                 open_id: state().open_id,
                                 index: Some(index as u32),
                             });
@@ -576,14 +577,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         selected: i == projection.selected as usize
                             && (projection.navigating || !q.trim().is_empty()),
                         on_activate: move |_| {
-                            let _ = send(&CommandPaletteActivateRequest {
+                            send(&CommandPaletteActivateRequest {
                                 open_id: state().open_id,
                                 index: i as u32,
                             });
                         },
                         on_hover: move |_| {
                             if is_start {
-                                let _ = send(&CommandPaletteHighlightRequest {
+                                send(&CommandPaletteHighlightRequest {
                                     open_id: state().open_id,
                                     index: i as u32,
                                 });
@@ -675,7 +676,7 @@ fn CommandBarControlButton(control: CommandBarControl) -> Element {
             onclick: move |event| {
                 event.prevent_default();
                 event.stop_propagation();
-                let _ = send(&InvokeRequest {
+                send(&InvokeRequest {
                     id: id.clone(),
                     open: None,
                 });
@@ -687,7 +688,7 @@ fn CommandBarControlButton(control: CommandBarControl) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PaletteProps {
-    pub state: ReadSignal<CommandBarUiState>,
+    pub state: ReadSignal<UiCommandBar>,
     pub surface: CommandPaletteSurface,
     pub on_close: EventHandler<()>,
     pub on_activity: EventHandler<()>,

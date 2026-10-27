@@ -36,10 +36,16 @@ objc2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
     "NSAppearance",
+    "NSGlassEffectView",
+    "NSPanel",
     "NSColor",
     "NSResponder",
     "NSView",
     "NSWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSGeometry",
 ] }
 objc2-web-kit = { version = "0.3", default-features = false, features = [
     "std",

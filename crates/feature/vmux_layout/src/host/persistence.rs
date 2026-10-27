@@ -2,29 +2,30 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_ecs::persistence::{PageRestore, WorkspaceStoreValidator};
+use vmux_api::Id;
+use vmux_ecs::persistence::{
+    PageRestore, WorkspaceRestoreSet, WorkspaceRestoreValidator, WorkspaceStoreValidator,
+};
 use vmux_ecs::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
-use crate::LayoutStartupSet;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::space::Space;
 use crate::stack::Stack;
 use crate::tab::Tab;
 use crate::window::Main;
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LayoutPersistenceSet {
-    Restore,
-}
-
 pub(crate) struct LayoutPersistencePlugin;
 
 impl Plugin for LayoutPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreStartup, spawn_store_validator)
-            .add_systems(Startup, restore_views.in_set(LayoutStartupSet::Post))
-            .add_systems(Update, restore_views.in_set(LayoutPersistenceSet::Restore));
+            .add_systems(
+                PreUpdate,
+                (restore_views, ApplyDeferred)
+                    .chain()
+                    .in_set(WorkspaceRestoreSet::Resolve),
+            );
     }
 }
 
@@ -36,6 +37,50 @@ fn spawn_store_validator(mut commands: Commands) {
             rejects: persisted_store_has_only_empty_page_urls,
         },
     ));
+    commands.spawn((
+        Name::new("Space identity validator"),
+        WorkspaceRestoreValidator::unique::<Id<Space>>("Space identity"),
+    ));
+    commands.spawn((
+        Name::new("Pane identity validator"),
+        WorkspaceRestoreValidator::unique::<Id<Pane>>("Pane identity"),
+    ));
+    commands.spawn((
+        Name::new("Layout composition validator"),
+        WorkspaceRestoreValidator {
+            name: "layout composition",
+            validate: validate_layout,
+        },
+    ));
+}
+
+fn validate_layout(world: &mut World) -> Result<(), String> {
+    let mut spaces = world.query_filtered::<(Entity, Option<&Id<Space>>), With<Space>>();
+    for (entity, id) in spaces.iter(world) {
+        if id.is_none() {
+            return Err(format!("Space {entity} has no valid identity"));
+        }
+    }
+    let mut panes = world.query_filtered::<(Entity, Option<&Id<Pane>>), With<Pane>>();
+    for (entity, id) in panes.iter(world) {
+        if id.is_none() {
+            return Err(format!("Pane {entity} has no valid identity"));
+        }
+    }
+    let mut tabs = world
+        .query_filtered::<(Entity, Option<&Name>, Option<&crate::tab::StartupDir>), With<Tab>>();
+    for (entity, name, startup_dir) in tabs.iter(world) {
+        if name.is_none() || startup_dir.is_none() {
+            return Err(format!("Tab {entity} is partially initialized"));
+        }
+    }
+    let mut stacks = world.query_filtered::<(Entity, Option<&PageMetadata>), With<Stack>>();
+    for (entity, metadata) in stacks.iter(world) {
+        if metadata.is_none() {
+            return Err(format!("Stack {entity} has no page metadata"));
+        }
+    }
+    Ok(())
 }
 
 fn persisted_store_has_only_empty_page_urls(body: &str) -> bool {
@@ -107,13 +152,19 @@ fn restore_views(layout: PersistedLayout, mut commands: Commands) {
     for space in &layout.spaces {
         commands
             .entity(space)
-            .insert((Space::bundle(), ChildOf(main)));
+            .insert((Space::restore_bundle(), ChildOf(main)));
     }
 
     let mut tabs = layout
         .tabs
         .iter()
-        .map(|(entity, order, created)| (entity, order.map(|order| order.0), created.map(|v| v.0)))
+        .map(|(entity, order, created)| {
+            (
+                entity,
+                order.map(|order| order.0),
+                created.map(|value| value.milliseconds()),
+            )
+        })
         .collect::<Vec<_>>();
     tabs.sort_by_key(|(_, order, created)| (order.unwrap_or(u32::MAX), created.unwrap_or(0)));
     for (tab, _, _) in tabs {

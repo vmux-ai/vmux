@@ -1,7 +1,7 @@
-use std::{borrow::Borrow, path::PathBuf};
+use std::path::PathBuf;
 
 #[cfg(host)]
-use bevy_app::{App, Plugin, PostUpdate, Update};
+use bevy_app::{App, Plugin, PostUpdate, PreUpdate, Update};
 use bevy_ecs::prelude::*;
 #[cfg(host)]
 use bevy_ecs::system::SystemParam;
@@ -10,12 +10,18 @@ use moonshine_save::prelude::Save;
 use serde::{Deserialize, Serialize};
 #[cfg(host)]
 use std::collections::{HashMap, HashSet};
-use vmux_api::session::SessionId;
+use vmux_api::{Id, session::Session};
+use vmux_connector::{
+    ExternalId, ExternalLink, ExternalLinkIdentity, ExternalScopeRef, ProviderKey, ResourceKind,
+};
 #[cfg(host)]
 use vmux_ecs::persistence::PersistenceAppExt;
 #[cfg(host)]
-use vmux_ecs::{ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Order, PageMetadata};
-use vmux_ecs::{ArchivedAt, Cwd, Description};
+use vmux_ecs::{
+    ActivateRequest, CreatedAt, EntityTarget, LastActivatedAt, Operation, OperationKind,
+    OperationState, OperationTargetRevision, Order, PageMetadata, Revision,
+};
+use vmux_ecs::{ArchivedAt, Cwd, Description, RemoteUpdatedAt, UnixMillis};
 
 #[cfg(host)]
 use crate::{AgentConversationTitle, TitlePending};
@@ -26,20 +32,33 @@ pub(crate) struct EntityPlugin;
 #[cfg(host)]
 impl Plugin for EntityPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
+        if !app.is_plugin_added::<vmux_ecs::OperationPlugin>() {
+            app.add_plugins(vmux_ecs::OperationPlugin);
+        }
+        if !app.is_plugin_added::<vmux_ecs::ReplicationPlugin>() {
+            app.add_plugins(vmux_ecs::ReplicationPlugin);
+        }
+        app.world_mut()
+            .register_required_components::<Session, Save>();
+        app.world_mut()
+            .register_required_components::<Session, Cwd>();
+        app.world_mut()
+            .register_required_components::<Session, Description>();
+        app.world_mut()
+            .register_required_components::<Session, vmux_ecs::ReplicationRoot>();
         app.register_persisted::<Session>()
-            .register_persisted::<SessionId>()
-            .register_persisted::<AgentId>()
-            .register_persisted::<ProviderStage>()
+            .register_persisted::<Id<Session>>()
+            .register_persisted::<AgentRef>()
+            .register_persisted::<ProviderWorkflowState>()
             .register_persisted::<ProviderArchive>()
             .register_persisted::<ProviderSessionTombstone>()
-            .register_persisted::<SourceUpdatedAt>()
-            .register_persisted::<ProviderKind>()
-            .register_persisted::<ProviderSessionId>()
             .register_persisted::<AgentConversationTitle>()
             .register_persisted::<TitlePending>()
-            .register_persisted::<LocalTask>()
-            .init_resource::<ProviderArchiveOperations>()
             .init_resource::<ProviderSessionTombstones>()
+            .init_resource::<ProviderArchiveRevision>()
             .add_message::<CreateRequest>()
             .add_message::<ArchiveRequest>()
             .add_message::<ProviderArchiveRequest>()
@@ -50,9 +69,14 @@ impl Plugin for EntityPlugin {
             .add_observer(activate)
             .add_systems(
                 Update,
+                (create, bevy_ecs::schedule::ApplyDeferred, rebuild_index)
+                    .chain()
+                    .in_set(crate::SessionMutationReceiveSet),
+            )
+            .add_systems(Update, archive.in_set(crate::SessionMutationReceiveSet))
+            .add_systems(
+                Update,
                 (
-                    create,
-                    archive,
                     archive_provider,
                     finish_provider_archives,
                     sync_tombstones,
@@ -83,57 +107,125 @@ pub(crate) struct MutationSet;
 pub(crate) struct CanonicalizeSet;
 
 #[cfg(host)]
+fn rebuild_index(mut index: vmux_ecs::IdentityIndexWriter<Session>) {
+    index.rebuild();
+}
+
+#[cfg(host)]
+pub(crate) struct SessionIdentityPlugin;
+
+#[cfg(host)]
+impl Plugin for SessionIdentityPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_ecs::IdentityIndexPlugin::<Session>::default())
+            .add_systems(PreUpdate, rebuild_index)
+            .add_systems(PostUpdate, rebuild_index);
+    }
+}
+
+#[cfg(host)]
 pub(crate) struct MetadataPlugin;
 
 #[cfg(host)]
 impl Plugin for MetadataPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         app.add_message::<RenameRequest>()
             .add_message::<DescriptionUpdateRequest>()
             .add_systems(
                 Update,
-                (rename, update_description, sync_conversation_title).in_set(MutationSet),
+                (rename, update_description, sync_conversation_title)
+                    .in_set(crate::SessionMutationReceiveSet),
             )
-            .add_systems(Update, project_views.after(MutationSet));
+            .add_systems(Update, project_views.after(crate::SessionMutationCommitSet));
     }
 }
 
 #[cfg(host)]
-pub(crate) struct StagePlugin;
+pub(crate) struct WorkflowStatePlugin;
 
 #[cfg(host)]
-impl Plugin for StagePlugin {
+impl Plugin for WorkflowStatePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::mutation::MutationPlugin>() {
+            app.add_plugins(crate::mutation::MutationPlugin);
+        }
         app.insert_resource(Configuration::load())
-            .register_persisted::<Stage>()
-            .register_persisted::<StageChangedAt>()
-            .register_type::<StageId>()
-            .register_type::<StageDefinition>()
-            .add_message::<StageChangeRequest>()
-            .add_message::<ProviderStageChangeRequest>()
+            .register_persisted::<WorkflowState>()
+            .register_persisted::<Id<WorkflowState>>()
+            .register_persisted::<WorkflowStateRef>()
+            .register_persisted::<WorkflowStateChangedAt>()
+            .register_persisted::<TerminalWorkflowState>()
+            .add_plugins(vmux_ecs::IdentityIndexPlugin::<WorkflowState>::default())
+            .add_message::<WorkflowStateChangeRequest>()
+            .add_message::<ProviderWorkflowStateChangeRequest>()
+            .add_systems(
+                PreUpdate,
+                (
+                    ensure_workflow_states,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    rebuild_workflow_state_index,
+                )
+                    .chain(),
+            )
             .add_systems(
                 Update,
-                (ensure_stages, change_stage, change_provider_stage).in_set(MutationSet),
+                change_workflow_state.in_set(crate::SessionMutationReceiveSet),
+            )
+            .add_systems(Update, change_provider_workflow_state.in_set(MutationSet))
+            .add_systems(
+                PostUpdate,
+                (
+                    bevy_ecs::schedule::ApplyDeferred,
+                    rebuild_workflow_state_index,
+                    resolve_workflow_state_targets,
+                )
+                    .chain()
+                    .after(CanonicalizeSet),
             );
     }
 }
 
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[require(Save, Cwd, Description)]
-#[type_path = "vmux_session"]
-pub struct Session;
-
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionDuplicate(pub Entity);
+#[relationship(relationship_target = SessionDuplicates)]
+pub struct SessionDuplicate(Entity);
 
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
+impl SessionDuplicate {
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = SessionDuplicate)]
+pub struct SessionDuplicates(Vec<Entity>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Reflect)]
+#[type_path = "vmux_session"]
+pub enum Agent {}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct AgentId(pub String);
+pub struct AgentRef(Id<Agent>);
+
+impl AgentRef {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(Id::new(value))
+    }
+
+    pub fn id(&self) -> &Id<Agent> {
+        &self.0
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AgentFamily(String);
@@ -164,28 +256,64 @@ impl AgentFamily {
     }
 }
 
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct StageId(pub String);
-
-#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct Stage(pub StageId);
-
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct StageChangedAt(pub i64);
+pub struct WorkflowState;
 
-impl StageChangedAt {
-    fn record_transition(&mut self, now: i64) {
-        self.0 = now.max(self.0.saturating_add(1));
+#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct WorkflowStateRef(Id<WorkflowState>);
+
+impl WorkflowStateRef {
+    pub fn new(id: Id<WorkflowState>) -> Self {
+        Self(id)
+    }
+
+    pub fn id(&self) -> &Id<WorkflowState> {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = WorkflowStateSources)]
+pub struct WorkflowStateTarget(Entity);
+
+impl WorkflowStateTarget {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = WorkflowStateTarget)]
+pub struct WorkflowStateSources(Vec<Entity>);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_session"]
+pub struct WorkflowStateChangedAt(UnixMillis);
+
+impl WorkflowStateChangedAt {
+    pub const fn new(milliseconds: i64) -> Self {
+        Self(UnixMillis(milliseconds))
+    }
+
+    pub const fn milliseconds(self) -> i64 {
+        self.0.0
+    }
+
+    fn record_transition(&mut self, now: UnixMillis) {
+        self.0 = now.max(UnixMillis(self.0.0.saturating_add(1)));
     }
 }
 
@@ -193,17 +321,11 @@ impl StageChangedAt {
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct LocalTask;
+pub struct ProviderWorkflowState;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
-#[require(Save, SourceUpdatedAt)]
-#[type_path = "vmux_session"]
-pub struct ProviderStage;
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[require(Save, SourceUpdatedAt)]
+#[require(Save)]
 #[type_path = "vmux_session"]
 pub struct ProviderArchive;
 
@@ -217,71 +339,17 @@ pub struct ProviderSessionTombstone;
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct SourceUpdatedAt(pub i64);
-
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct ProviderKind(pub String);
-
-impl Borrow<str> for ProviderKind {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
-#[reflect(Component)]
-#[require(Save)]
-#[type_path = "vmux_session"]
-pub struct ProviderSessionId(pub String);
-
-impl Borrow<str> for ProviderSessionId {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct ProviderSessionKey {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
-}
-
-impl ProviderSessionKey {
-    pub fn new(kind: ProviderKind, id: ProviderSessionId) -> Self {
-        Self { kind, id }
-    }
-
-    pub fn from_components(kind: &ProviderKind, id: &ProviderSessionId) -> Self {
-        Self::new(kind.clone(), id.clone())
-    }
-
-    pub fn matches(&self, kind: &str, id: &str) -> bool {
-        self.kind.0 == kind && self.id.0 == id
-    }
-}
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_session"]
-pub struct StageDefinition;
+pub struct TerminalWorkflowState;
 
 #[derive(Message, Clone, Debug)]
 pub struct CreateRequest {
-    id: SessionId,
+    id: Id<Session>,
     pub name: String,
     pub description: String,
     pub cwd: PathBuf,
-    pub agent: Option<AgentId>,
+    pub agent: Option<AgentRef>,
     created_at: Option<i64>,
     activated_at: Option<i64>,
-    local: bool,
 }
 
 impl CreateRequest {
@@ -289,17 +357,16 @@ impl CreateRequest {
         name: impl Into<String>,
         description: impl Into<String>,
         cwd: PathBuf,
-        agent: Option<AgentId>,
+        agent: Option<AgentRef>,
     ) -> Self {
         Self {
-            id: SessionId(uuid::Uuid::new_v4().to_string()),
+            id: Id::<Session>::new(uuid::Uuid::new_v4().to_string()),
             name: name.into(),
             description: description.into(),
             cwd,
             agent,
             created_at: None,
             activated_at: None,
-            local: true,
         }
     }
 
@@ -307,23 +374,22 @@ impl CreateRequest {
         name: impl Into<String>,
         description: impl Into<String>,
         cwd: PathBuf,
-        agent: AgentId,
+        agent: AgentRef,
         created_at: i64,
         activated_at: i64,
     ) -> Self {
         Self {
-            id: SessionId(uuid::Uuid::new_v4().to_string()),
+            id: Id::<Session>::new(uuid::Uuid::new_v4().to_string()),
             name: name.into(),
             description: description.into(),
             cwd,
             agent: Some(agent),
             created_at: Some(created_at),
             activated_at: Some(activated_at),
-            local: false,
         }
     }
 
-    pub fn id(&self) -> &SessionId {
+    pub fn id(&self) -> &Id<Session> {
         &self.id
     }
 }
@@ -332,37 +398,36 @@ impl CreateRequest {
 pub struct Created {
     #[event_target]
     pub entity: Entity,
-    pub id: SessionId,
+    pub id: Id<Session>,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct RenameRequest {
-    pub id: SessionId,
+    pub id: Id<Session>,
     pub name: String,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct DescriptionUpdateRequest {
-    pub id: SessionId,
+    pub id: Id<Session>,
     pub description: String,
 }
 
 #[derive(Message, Clone, Debug)]
-pub struct StageChangeRequest {
-    pub id: SessionId,
-    pub stage: StageId,
+pub struct WorkflowStateChangeRequest {
+    pub id: Id<Session>,
+    pub workflow_state: Id<WorkflowState>,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct ArchiveRequest {
-    pub id: SessionId,
+    pub id: Id<Session>,
     pub archived_at: Option<i64>,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderArchiveRequest {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
+    pub identity: ExternalLinkIdentity,
     pub archived: bool,
     pub source_updated_at: i64,
     pub native: bool,
@@ -370,16 +435,14 @@ pub struct ProviderArchiveRequest {
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderArchiveWriteRequest {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
+    pub identity: ExternalLinkIdentity,
     pub archived: bool,
     pub revision: u64,
 }
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderArchiveCompleted {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
+    pub identity: ExternalLinkIdentity,
     pub archived: bool,
     pub revision: u64,
     pub success: bool,
@@ -387,14 +450,13 @@ pub struct ProviderArchiveCompleted {
 
 #[derive(Message, Clone, Debug)]
 pub struct ProviderSessionRestoreRequest {
-    pub keys: Vec<ProviderSessionKey>,
+    pub identities: Vec<ExternalLinkIdentity>,
 }
 
 #[derive(Message, Clone, Debug)]
-pub struct ProviderStageChangeRequest {
-    pub kind: ProviderKind,
-    pub id: ProviderSessionId,
-    pub stage: StageId,
+pub struct ProviderWorkflowStateChangeRequest {
+    pub identity: ExternalLinkIdentity,
+    pub workflow_state: Id<WorkflowState>,
     pub source_updated_at: i64,
 }
 
@@ -405,132 +467,128 @@ pub struct CleanupRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CleanupTarget {
-    Session(SessionId),
-    Provider(ProviderSessionKey),
+    Session(Id<Session>),
+    Provider(ExternalLinkIdentity),
 }
 
 #[cfg(host)]
 #[derive(Resource, Default)]
-pub(crate) struct ProviderArchiveOperations {
-    next_revision: u64,
-    pending: HashMap<ProviderSessionKey, ProviderArchiveOperation>,
+struct ProviderArchiveRevision(u64);
+
+#[cfg(host)]
+impl ProviderArchiveRevision {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(1).max(1);
+        self.0
+    }
 }
 
 #[cfg(host)]
-struct ProviderArchiveOperation {
+#[derive(Component)]
+pub(crate) struct ProviderArchiveOperation {
+    identity: ExternalLinkIdentity,
     archived: bool,
     source_updated_at: i64,
     revision: u64,
-    in_flight: Option<u64>,
+    in_flight: u64,
 }
 
 #[cfg(host)]
-impl ProviderArchiveOperations {
-    fn request(&mut self, request: &ProviderArchiveRequest) -> Option<ProviderArchiveWriteRequest> {
-        self.next_revision = self.next_revision.wrapping_add(1).max(1);
-        let revision = self.next_revision;
-        let key = ProviderSessionKey::from_components(&request.kind, &request.id);
-        let operation = self.pending.entry(key).or_insert(ProviderArchiveOperation {
-            archived: request.archived,
-            source_updated_at: request.source_updated_at,
-            revision,
-            in_flight: None,
-        });
-        operation.archived = request.archived;
-        operation.source_updated_at = request.source_updated_at;
-        operation.revision = revision;
-        if operation.in_flight.is_some() {
-            return None;
+impl ProviderArchiveOperation {
+    fn write(&self) -> ProviderArchiveWriteRequest {
+        ProviderArchiveWriteRequest {
+            identity: self.identity.clone(),
+            archived: self.archived,
+            revision: self.revision,
         }
-        operation.in_flight = Some(revision);
-        Some(ProviderArchiveWriteRequest {
-            kind: request.kind.clone(),
-            id: request.id.clone(),
-            archived: request.archived,
-            revision,
+    }
+
+    pub(crate) fn identity(&self) -> &ExternalLinkIdentity {
+        &self.identity
+    }
+
+    pub(crate) fn archived_at(&self) -> i64 {
+        if self.archived {
+            self.source_updated_at.max(1)
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(host)]
+#[derive(SystemParam)]
+pub(crate) struct ProviderArchiveOperations<'w, 's> {
+    operations: Query<
+        'w,
+        's,
+        (&'static ProviderArchiveOperation, &'static OperationState),
+        With<Operation>,
+    >,
+    changed: Query<
+        'w,
+        's,
+        (),
+        (
+            With<Operation>,
+            Or<(
+                Added<ProviderArchiveOperation>,
+                Changed<ProviderArchiveOperation>,
+                Added<OperationState>,
+                Changed<OperationState>,
+            )>,
+        ),
+    >,
+}
+
+#[cfg(host)]
+impl ProviderArchiveOperations<'_, '_> {
+    pub(crate) fn archived_at(&self, identity: &ExternalLinkIdentity) -> Option<i64> {
+        self.operations.iter().find_map(|(operation, state)| {
+            (operation.identity() == identity
+                && matches!(state, OperationState::Pending | OperationState::Running))
+            .then(|| operation.archived_at())
         })
     }
 
-    fn complete(
-        &mut self,
-        result: &ProviderArchiveCompleted,
-    ) -> Option<ProviderArchiveWriteRequest> {
-        let key = ProviderSessionKey::from_components(&result.kind, &result.id);
-        let operation = self.pending.get_mut(&key)?;
-        if operation.in_flight != Some(result.revision) {
-            return None;
-        }
-        if operation.revision == result.revision {
-            self.pending.remove(&key);
-            return None;
-        }
-        operation.in_flight = Some(operation.revision);
-        Some(ProviderArchiveWriteRequest {
-            kind: result.kind.clone(),
-            id: result.id.clone(),
-            archived: operation.archived,
-            revision: operation.revision,
-        })
-    }
-
-    pub(crate) fn archived_at(&self, key: &ProviderSessionKey) -> Option<i64> {
-        self.pending.get(key).map(|operation| {
-            if operation.archived {
-                operation.source_updated_at.max(1)
-            } else {
-                0
-            }
-        })
+    pub(crate) fn is_changed(&self) -> bool {
+        !self.changed.is_empty()
     }
 }
 
 #[cfg(host)]
 #[derive(Resource, Default)]
 pub struct ProviderSessionTombstones {
-    entries: HashMap<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>,
+    entries: HashMap<ExternalLinkIdentity, Option<Entity>>,
 }
 
 #[cfg(host)]
 impl ProviderSessionTombstones {
-    pub fn new(keys: impl IntoIterator<Item = ProviderSessionKey>) -> Self {
+    pub fn new(identities: impl IntoIterator<Item = ExternalLinkIdentity>) -> Self {
         let mut tombstones = Self::default();
-        for key in keys {
-            tombstones
-                .entries
-                .entry(key.kind)
-                .or_default()
-                .insert(key.id, None);
+        for identity in identities {
+            tombstones.entries.insert(identity, None);
         }
         tombstones
     }
 
-    pub fn contains(&self, kind: &str, id: &str) -> bool {
-        self.entries
-            .get(kind)
-            .is_some_and(|entries| entries.contains_key(id))
+    pub fn contains(&self, identity: &ExternalLinkIdentity) -> bool {
+        self.entries.contains_key(identity)
     }
 
-    fn insert(&mut self, key: ProviderSessionKey, entity: Entity) {
-        self.entries
-            .entry(key.kind)
-            .or_default()
-            .insert(key.id, Some(entity));
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
-    fn remove(&mut self, key: &ProviderSessionKey) -> Option<Entity> {
-        let entries = self.entries.get_mut(key.kind.0.as_str())?;
-        let entity = entries.remove(key.id.0.as_str()).flatten();
-        let remove_kind = entries.is_empty();
-        if remove_kind {
-            self.entries.remove(key.kind.0.as_str());
-        }
-        entity
+    fn insert(&mut self, identity: ExternalLinkIdentity, entity: Entity) {
+        self.entries.insert(identity, Some(entity));
     }
 
-    fn replace(
-        &mut self,
-        entries: HashMap<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>,
-    ) {
+    fn remove(&mut self, identity: &ExternalLinkIdentity) -> Option<Entity> {
+        self.entries.remove(identity).flatten()
+    }
+
+    fn replace(&mut self, entries: HashMap<ExternalLinkIdentity, Option<Entity>>) {
         if self.entries != entries {
             self.entries = entries;
         }
@@ -551,22 +609,28 @@ impl TombstoneMutations<'_, '_> {
         self.commands.entity(entity).despawn();
     }
 
-    fn dismiss(&mut self, keys: impl IntoIterator<Item = ProviderSessionKey>) {
-        for key in keys {
-            if self.index.contains(&key.kind.0, &key.id.0) {
+    fn dismiss(&mut self, identities: impl IntoIterator<Item = ExternalLinkIdentity>) {
+        for identity in identities {
+            if self.index.contains(&identity) {
                 continue;
             }
             let entity = self
                 .commands
-                .spawn((ProviderSessionTombstone, key.kind.clone(), key.id.clone()))
+                .spawn((
+                    ProviderSessionTombstone,
+                    identity.provider().clone(),
+                    ExternalScopeRef::new(identity.scope().clone()),
+                    identity.kind().clone(),
+                    identity.external_id().clone(),
+                ))
                 .id();
-            self.index.insert(key, entity);
+            self.index.insert(identity, entity);
         }
     }
 
-    fn restore(&mut self, keys: impl IntoIterator<Item = ProviderSessionKey>) {
-        for key in keys {
-            if let Some(entity) = self.index.remove(&key) {
+    fn restore(&mut self, identities: impl IntoIterator<Item = ExternalLinkIdentity>) {
+        for identity in identities {
+            if let Some(entity) = self.index.remove(&identity) {
                 self.commands.entity(entity).despawn();
             }
         }
@@ -582,7 +646,7 @@ pub struct Cleanup {
 #[cfg(host)]
 #[derive(Resource)]
 struct Configuration {
-    default_stage: StageId,
+    default_workflow_state: Id<WorkflowState>,
     stages: Vec<StageSeed>,
 }
 
@@ -593,7 +657,7 @@ impl Configuration {
             .expect("embedded Session configuration must be valid RON");
         file.session.validate();
         Self {
-            default_stage: StageId(file.session.default_stage),
+            default_workflow_state: Id::new(file.session.default_stage),
             stages: file.session.stages,
         }
     }
@@ -642,26 +706,66 @@ struct StageSeed {
 }
 
 #[cfg(host)]
-fn ensure_stages(
+fn rebuild_workflow_state_index(mut index: vmux_ecs::IdentityIndexWriter<WorkflowState>) {
+    index.rebuild();
+}
+
+#[cfg(host)]
+fn resolve_workflow_state_targets(
+    index: Res<vmux_ecs::IdentityIndex<WorkflowState>>,
+    references: Query<(Entity, Ref<WorkflowStateRef>, Option<&WorkflowStateTarget>)>,
+    mut commands: Commands,
+) {
+    for (entity, reference, current) in &references {
+        if !index.is_changed() && !reference.is_changed() {
+            continue;
+        }
+        let target = index.entity(reference.id()).ok().flatten();
+        match (target, current.map(WorkflowStateTarget::entity)) {
+            (Some(target), Some(current)) if target == current => {}
+            (Some(target), _) => {
+                commands
+                    .entity(entity)
+                    .insert(WorkflowStateTarget::new(target));
+            }
+            (None, Some(_)) => {
+                commands.entity(entity).remove::<WorkflowStateTarget>();
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+#[cfg(host)]
+fn ensure_workflow_states(
     configuration: Res<Configuration>,
     definitions: Query<
-        (Entity, &StageId, &Name, &Order, Has<vmux_ecs::Terminal>),
-        With<StageDefinition>,
+        (
+            Entity,
+            &Id<WorkflowState>,
+            &Name,
+            &Order,
+            Has<TerminalWorkflowState>,
+        ),
+        With<WorkflowState>,
     >,
     mut commands: Commands,
 ) {
     for stage in &configuration.stages {
-        if definitions.iter().any(|(_, id, _, _, _)| id.0 == stage.id) {
+        if definitions
+            .iter()
+            .any(|(_, id, _, _, _)| id.as_str() == stage.id)
+        {
             continue;
         }
         let mut entity = commands.spawn((
-            StageDefinition,
-            StageId(stage.id.clone()),
+            WorkflowState,
+            Id::<WorkflowState>::new(stage.id.clone()),
             Name::new(stage.name.clone()),
             Order(stage.order),
         ));
         if stage.terminal {
-            entity.insert(vmux_ecs::Terminal);
+            entity.insert(TerminalWorkflowState);
         }
     }
 }
@@ -670,7 +774,7 @@ fn ensure_stages(
 fn create(
     mut requests: MessageReader<CreateRequest>,
     configuration: Res<Configuration>,
-    existing: Query<&SessionId, With<Session>>,
+    existing: Query<&Id<Session>, With<Session>>,
     mut commands: Commands,
 ) {
     if requests.is_empty() {
@@ -681,29 +785,46 @@ fn create(
         if !ids.insert(request.id.clone()) {
             continue;
         }
-        let now = vmux_ecs::UnixMillis::now().0;
+        let now = UnixMillis::now().0;
         let created_at = request.created_at.unwrap_or(now);
         let activated_at = request.activated_at.unwrap_or(now);
-        let entity = {
-            let mut session = commands.spawn((
-                Session,
-                request.id.clone(),
-                Name::new(request.name.clone()),
-                Description(request.description.clone()),
-                Cwd(request.cwd.clone()),
-                CreatedAt(created_at),
-                LastActivatedAt(activated_at),
-                Stage(configuration.default_stage.clone()),
-                StageChangedAt(activated_at),
-            ));
-            if request.local {
-                session.insert(LocalTask);
-            }
-            if let Some(agent) = request.agent.clone() {
-                session.insert(agent);
-            }
-            session.id()
-        };
+        let mut session = commands.spawn((
+            Session,
+            request.id.clone(),
+            Name::new(request.name.clone()),
+            Description(request.description.clone()),
+            Cwd(request.cwd.clone()),
+            CreatedAt::new(created_at),
+            LastActivatedAt::new(activated_at),
+            WorkflowStateRef::new(configuration.default_workflow_state.clone()),
+            WorkflowStateChangedAt::new(activated_at),
+            Revision::new(1),
+        ));
+        if let Some(agent) = request.agent.clone() {
+            session.insert(agent);
+        }
+        let entity = session.id();
+        let mutation = crate::SessionMutation::Created(crate::CreatedMutation {
+            name: request.name.clone(),
+            description: request.description.clone(),
+            cwd: request.cwd.clone(),
+            agent: request.agent.clone(),
+            workflow_state: configuration.default_workflow_state.clone(),
+            created_at,
+            activated_at,
+        });
+        if let Ok(spec) = vmux_ecs::CommittedOperationSpec::new(
+            Id::new(uuid::Uuid::new_v4().to_string()),
+            crate::SessionMutationRequest::local_actor(),
+            request.id.clone(),
+            Revision::new(0),
+            Revision::new(1),
+            1,
+            UnixMillis::now(),
+        ) {
+            let bundle = vmux_ecs::CommittedOperation::bundle(entity, spec);
+            commands.spawn((bundle, mutation));
+        }
         commands.trigger(Created {
             entity,
             id: request.id.clone(),
@@ -739,7 +860,7 @@ fn activate(
 
 #[cfg(host)]
 fn project_views(
-    sessions: Query<(&SessionId, Ref<Name>), With<Session>>,
+    sessions: Query<(&Id<Session>, Ref<Name>), With<Session>>,
     views: Query<(Entity, Ref<EntityTarget<Session>>, Option<&Children>)>,
     mut metadata: Query<&mut PageMetadata>,
 ) {
@@ -765,15 +886,19 @@ fn project_views(
 
 #[cfg(host)]
 fn sync_conversation_title(
-    mut sessions: Query<
-        (&AgentConversationTitle, &mut Name),
+    sessions: Query<
+        (&Id<Session>, &AgentConversationTitle, &Name),
         (With<Session>, Changed<AgentConversationTitle>),
     >,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
-    for (title, mut name) in &mut sessions {
+    for (id, title, name) in &sessions {
         let title = title.0.trim();
         if !title.is_empty() && name.as_str() != title {
-            *name = Name::new(title.to_string());
+            commits.write(crate::SessionMutationRequest::local(
+                id.clone(),
+                crate::SessionMutation::Rename(title.to_string()),
+            ));
         }
     }
 }
@@ -781,99 +906,71 @@ fn sync_conversation_title(
 #[cfg(host)]
 fn rename(
     mut requests: MessageReader<RenameRequest>,
-    mut sessions: Query<
-        (
-            Entity,
-            &SessionId,
-            &mut Name,
-            Option<&mut AgentConversationTitle>,
-        ),
-        With<Session>,
-    >,
-    mut commands: Commands,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        for (entity, id, mut name, title) in &mut sessions {
-            if id == &request.id {
-                *name = Name::new(request.name.clone());
-                if let Some(mut title) = title {
-                    title.0.clone_from(&request.name);
-                } else {
-                    commands
-                        .entity(entity)
-                        .insert(AgentConversationTitle(request.name.clone()));
-                }
-                commands.entity(entity).remove::<TitlePending>();
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::Rename(request.name.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn update_description(
     mut requests: MessageReader<DescriptionUpdateRequest>,
-    mut sessions: Query<(&SessionId, &mut Description), With<Session>>,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        for (id, mut description) in &mut sessions {
-            if id == &request.id {
-                description.0.clone_from(&request.description);
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::Describe(request.description.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
-fn change_stage(
-    mut requests: MessageReader<StageChangeRequest>,
-    definitions: Query<&StageId, With<StageDefinition>>,
-    mut sessions: Query<(&SessionId, &mut Stage, &mut StageChangedAt), With<Session>>,
+fn change_workflow_state(
+    mut requests: MessageReader<WorkflowStateChangeRequest>,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        if !definitions.iter().any(|id| id == &request.stage) {
-            continue;
-        }
-        for (id, mut stage, mut changed_at) in &mut sessions {
-            if id == &request.id && stage.0 != request.stage {
-                stage.0.clone_from(&request.stage);
-                changed_at.record_transition(vmux_ecs::UnixMillis::now().0);
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::ChangeWorkflowState(request.workflow_state.clone()),
+        ));
     }
 }
 
 #[cfg(host)]
 fn archive(
     mut requests: MessageReader<ArchiveRequest>,
-    sessions: Query<(Entity, &SessionId, Option<&ArchivedAt>), With<Session>>,
-    mut commands: Commands,
+    mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {
     for request in requests.read() {
-        for (entity, id, current) in &sessions {
-            if id != &request.id {
-                continue;
-            }
-            if let Some(archived_at) = request.archived_at.map(|value| value.max(1)) {
-                if current.is_none_or(|current| current.0 != archived_at) {
-                    commands.entity(entity).insert(ArchivedAt(archived_at));
-                }
-            } else if current.is_some() {
-                commands.entity(entity).remove::<ArchivedAt>();
-            }
-        }
+        commits.write(crate::SessionMutationRequest::local(
+            request.id.clone(),
+            crate::SessionMutation::Archive(request.archived_at),
+        ));
     }
 }
 
 #[cfg(host)]
 fn archive_provider(
     mut requests: MessageReader<ProviderArchiveRequest>,
-    mut operations: ResMut<ProviderArchiveOperations>,
+    mut revision: ResMut<ProviderArchiveRevision>,
+    mut operations: Query<
+        (Entity, &mut ProviderArchiveOperation, &mut OperationState),
+        With<Operation>,
+    >,
     mut overrides: Query<
         (
             Entity,
-            &ProviderKind,
-            &ProviderSessionId,
-            &mut SourceUpdatedAt,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+            &RemoteUpdatedAt,
             Option<&ArchivedAt>,
         ),
         With<ProviderArchive>,
@@ -881,78 +978,155 @@ fn archive_provider(
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
     mut commands: Commands,
 ) {
-    let mut latest = HashMap::<ProviderSessionKey, ProviderArchiveRequest>::new();
+    let mut latest = HashMap::<ExternalLinkIdentity, ProviderArchiveRequest>::new();
     for request in requests.read().cloned() {
-        latest.insert(
-            ProviderSessionKey::from_components(&request.kind, &request.id),
-            request,
-        );
+        latest.insert(request.identity.clone(), request);
     }
     for request in latest.into_values() {
         let next_archived_at = request.source_updated_at.max(1);
         let mut found = false;
-        for (entity, kind, id, mut source_updated_at, current_archived_at) in &mut overrides {
-            if kind != &request.kind || id != &request.id {
+        for (entity, provider, scope, kind, id, source_updated_at, current_archived_at) in
+            &mut overrides
+        {
+            let identity = ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            );
+            if identity != request.identity {
                 continue;
             }
-            source_updated_at.0 = request.source_updated_at;
+            if source_updated_at.0.0 != request.source_updated_at {
+                commands
+                    .entity(entity)
+                    .insert(RemoteUpdatedAt(UnixMillis(request.source_updated_at)));
+            }
             if request.archived && current_archived_at.is_none() {
-                commands.entity(entity).insert(ArchivedAt(next_archived_at));
+                commands
+                    .entity(entity)
+                    .insert(ArchivedAt::new(next_archived_at));
             } else if !request.archived && current_archived_at.is_some() {
                 commands.entity(entity).remove::<ArchivedAt>();
             }
             found = true;
             break;
         }
-        if found {
-            if request.native
-                && let Some(write) = operations.request(&request)
-            {
-                writes.write(write);
+        if !found {
+            let mut entity = commands.spawn((
+                ProviderArchive,
+                request.identity.provider().clone(),
+                ExternalScopeRef::new(request.identity.scope().clone()),
+                request.identity.kind().clone(),
+                request.identity.external_id().clone(),
+                RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
+            ));
+            if request.archived {
+                entity.insert(ArchivedAt::new(next_archived_at));
             }
+        }
+        if !request.native {
             continue;
         }
-        let mut entity = commands.spawn((
-            ProviderArchive,
-            request.kind.clone(),
-            request.id.clone(),
-            SourceUpdatedAt(request.source_updated_at),
+        let next_revision = revision.next();
+        let mut accepted = false;
+        for (entity, mut operation, mut state) in &mut operations {
+            if operation.identity != request.identity {
+                continue;
+            }
+            operation.archived = request.archived;
+            operation.source_updated_at = request.source_updated_at;
+            operation.revision = next_revision;
+            commands
+                .entity(entity)
+                .insert(OperationTargetRevision(Revision::new(
+                    request.source_updated_at.max(1) as u64,
+                )));
+            if !matches!(*state, OperationState::Pending | OperationState::Running) {
+                operation.in_flight = next_revision;
+                *state = OperationState::Running;
+                writes.write(operation.write());
+            }
+            accepted = true;
+            break;
+        }
+        if accepted {
+            continue;
+        }
+        let operation = ProviderArchiveOperation {
+            identity: request.identity.clone(),
+            archived: request.archived,
+            source_updated_at: request.source_updated_at,
+            revision: next_revision,
+            in_flight: next_revision,
+        };
+        writes.write(operation.write());
+        commands.spawn((
+            Operation,
+            Id::<Operation>::new(uuid::Uuid::new_v4().to_string()),
+            OperationKind::new("provider_archive").unwrap(),
+            OperationState::Running,
+            OperationTargetRevision(Revision::new(request.source_updated_at.max(1) as u64)),
+            operation,
         ));
-        if request.archived {
-            entity.insert(ArchivedAt(next_archived_at));
-        }
-        if request.native
-            && let Some(write) = operations.request(&request)
-        {
-            writes.write(write);
-        }
     }
 }
 
 #[cfg(host)]
 fn finish_provider_archives(
     mut completed: MessageReader<ProviderArchiveCompleted>,
-    mut operations: ResMut<ProviderArchiveOperations>,
+    mut operations: Query<
+        (Entity, &mut ProviderArchiveOperation, &mut OperationState),
+        With<Operation>,
+    >,
     mut writes: MessageWriter<ProviderArchiveWriteRequest>,
+    mut commands: Commands,
 ) {
     for result in completed.read() {
-        if let Some(write) = operations.complete(result) {
-            writes.write(write);
+        for (entity, mut operation, mut state) in &mut operations {
+            if operation.identity != result.identity || operation.in_flight != result.revision {
+                continue;
+            }
+            if operation.revision != result.revision {
+                operation.in_flight = operation.revision;
+                writes.write(operation.write());
+                break;
+            }
+            *state = if result.success {
+                OperationState::Succeeded
+            } else {
+                commands.entity(entity).insert(
+                    vmux_ecs::OperationError::new("provider archive write failed").unwrap(),
+                );
+                OperationState::Failed
+            };
+            break;
         }
     }
 }
 
 #[cfg(host)]
 fn sync_tombstones(
-    tombstones: Query<(Entity, &ProviderKind, &ProviderSessionId), With<ProviderSessionTombstone>>,
+    tombstones: Query<
+        (
+            Entity,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+        ),
+        With<ProviderSessionTombstone>,
+    >,
     changed: Query<
         (),
         (
             With<ProviderSessionTombstone>,
             Or<(
                 Added<ProviderSessionTombstone>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
             )>,
         ),
     >,
@@ -963,12 +1137,17 @@ fn sync_tombstones(
     if !index.is_added() && changed.is_empty() && !removed {
         return;
     }
-    let mut entries = HashMap::<ProviderKind, HashMap<ProviderSessionId, Option<Entity>>>::new();
-    for (entity, kind, id) in &tombstones {
-        entries
-            .entry(kind.clone())
-            .or_default()
-            .insert(id.clone(), Some(entity));
+    let mut entries = HashMap::<ExternalLinkIdentity, Option<Entity>>::new();
+    for (entity, provider, scope, kind, id) in &tombstones {
+        entries.insert(
+            ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            ),
+            Some(entity),
+        );
     }
     index.replace(entries);
 }
@@ -979,52 +1158,73 @@ fn restore_tombstones(
     mut tombstones: TombstoneMutations,
 ) {
     for request in requests.read() {
-        tombstones.restore(request.keys.iter().cloned());
+        tombstones.restore(request.identities.iter().cloned());
     }
 }
 
 #[cfg(host)]
-fn change_provider_stage(
-    mut requests: MessageReader<ProviderStageChangeRequest>,
-    definitions: Query<&StageId, With<StageDefinition>>,
+fn change_provider_workflow_state(
+    mut requests: MessageReader<ProviderWorkflowStateChangeRequest>,
+    index: Res<vmux_ecs::IdentityIndex<WorkflowState>>,
     mut stages: Query<
         (
-            &ProviderKind,
-            &ProviderSessionId,
-            &mut Stage,
-            &mut StageChangedAt,
-            &mut SourceUpdatedAt,
+            Entity,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+            &WorkflowStateRef,
+            &mut WorkflowStateChangedAt,
+            &RemoteUpdatedAt,
         ),
-        With<ProviderStage>,
+        With<ProviderWorkflowState>,
     >,
     mut commands: Commands,
 ) {
     for request in requests.read() {
-        if !definitions.iter().any(|id| id == &request.stage) {
+        let Ok(Some(target)) = index.entity(&request.workflow_state) else {
             continue;
-        }
-        let now = vmux_ecs::UnixMillis::now().0;
+        };
+        let now = UnixMillis::now();
         let mut found = false;
-        for (kind, id, mut stage, mut changed_at, mut source_updated_at) in &mut stages {
-            if kind != &request.kind || id != &request.id {
+        for (entity, provider, scope, kind, id, current, mut changed_at, source_updated_at) in
+            &mut stages
+        {
+            let identity = ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            );
+            if identity != request.identity {
                 continue;
             }
             found = true;
-            if stage.0 != request.stage {
-                stage.0.clone_from(&request.stage);
+            if current.id() != &request.workflow_state {
+                commands.entity(entity).insert((
+                    WorkflowStateRef::new(request.workflow_state.clone()),
+                    WorkflowStateTarget::new(target),
+                ));
             }
             changed_at.record_transition(now);
-            source_updated_at.0 = request.source_updated_at;
+            if source_updated_at.0.0 != request.source_updated_at {
+                commands
+                    .entity(entity)
+                    .insert(RemoteUpdatedAt(UnixMillis(request.source_updated_at)));
+            }
             break;
         }
         if !found {
             commands.spawn((
-                ProviderStage,
-                request.kind.clone(),
-                request.id.clone(),
-                Stage(request.stage.clone()),
-                StageChangedAt(now),
-                SourceUpdatedAt(request.source_updated_at),
+                ProviderWorkflowState,
+                request.identity.provider().clone(),
+                ExternalScopeRef::new(request.identity.scope().clone()),
+                request.identity.kind().clone(),
+                request.identity.external_id().clone(),
+                WorkflowStateRef::new(request.workflow_state.clone()),
+                WorkflowStateTarget::new(target),
+                WorkflowStateChangedAt(now),
+                RemoteUpdatedAt(UnixMillis(request.source_updated_at)),
             ));
         }
     }
@@ -1033,14 +1233,16 @@ fn change_provider_stage(
 #[cfg(host)]
 fn cleanup(
     mut requests: MessageReader<CleanupRequest>,
-    sessions: Query<
+    sessions: Query<(Entity, &Id<Session>), With<Session>>,
+    links: Query<
         (
-            Entity,
-            &SessionId,
-            Option<&ProviderKind>,
-            Option<&ProviderSessionId>,
+            &ChildOf,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
         ),
-        With<Session>,
+        With<ExternalLink>,
     >,
     mut tombstones: TombstoneMutations,
 ) {
@@ -1061,16 +1263,24 @@ fn cleanup(
     if requested_sessions.is_empty() && dismissed_providers.is_empty() {
         return;
     }
-    let sessions = sessions
+    let linked = links
         .iter()
-        .map(|(entity, id, kind, provider_id)| {
+        .filter(|(_, _, _, kind, _)| kind.as_str() == "session")
+        .map(|(owner, provider, scope, kind, id)| {
             (
-                entity,
-                id.clone(),
-                kind.zip(provider_id)
-                    .map(|(kind, id)| ProviderSessionKey::from_components(kind, id)),
+                owner.parent(),
+                ExternalLinkIdentity::new(
+                    provider.clone(),
+                    scope.id().clone(),
+                    kind.clone(),
+                    id.clone(),
+                ),
             )
         })
+        .collect::<HashMap<_, _>>();
+    let sessions = sessions
+        .iter()
+        .map(|(entity, id)| (entity, id.clone(), linked.get(&entity).cloned()))
         .collect::<Vec<_>>();
     for (_, id, provider) in &sessions {
         if requested_sessions.contains(id)
@@ -1111,21 +1321,39 @@ struct CanonicalizationChanges<'w, 's> {
             With<Session>,
             Or<(
                 Added<Session>,
-                Changed<ProviderKind>,
-                Changed<ProviderSessionId>,
                 Changed<LastActivatedAt>,
-                Changed<StageChangedAt>,
+                Changed<WorkflowStateChangedAt>,
                 Changed<ArchivedAt>,
                 Changed<crate::RunState>,
             )>,
         ),
     >,
+    links: Query<
+        'w,
+        's,
+        (),
+        (
+            With<ExternalLink>,
+            Or<(
+                Added<ExternalLink>,
+                Changed<ProviderKey>,
+                Changed<ExternalScopeRef>,
+                Changed<ResourceKind>,
+                Changed<ExternalId>,
+                Changed<ChildOf>,
+            )>,
+        ),
+    >,
     targets: Query<'w, 's, (), Or<(Added<EntityTarget<Session>>, Changed<EntityTarget<Session>>)>>,
     removed_sessions: RemovedComponents<'w, 's, Session>,
-    removed_provider_kinds: RemovedComponents<'w, 's, ProviderKind>,
-    removed_provider_ids: RemovedComponents<'w, 's, ProviderSessionId>,
+    removed_links: RemovedComponents<'w, 's, ExternalLink>,
+    removed_providers: RemovedComponents<'w, 's, ProviderKey>,
+    removed_scopes: RemovedComponents<'w, 's, ExternalScopeRef>,
+    removed_kinds: RemovedComponents<'w, 's, ResourceKind>,
+    removed_external_ids: RemovedComponents<'w, 's, ExternalId>,
+    removed_owners: RemovedComponents<'w, 's, ChildOf>,
     removed_activated_at: RemovedComponents<'w, 's, LastActivatedAt>,
-    removed_stage_changed_at: RemovedComponents<'w, 's, StageChangedAt>,
+    removed_stage_changed_at: RemovedComponents<'w, 's, WorkflowStateChangedAt>,
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
     removed_run_state: RemovedComponents<'w, 's, crate::RunState>,
     removed_targets: RemovedComponents<'w, 's, EntityTarget<Session>>,
@@ -1135,10 +1363,15 @@ struct CanonicalizationChanges<'w, 's> {
 impl CanonicalizationChanges<'_, '_> {
     fn any(&mut self) -> bool {
         !self.sessions.is_empty()
+            || !self.links.is_empty()
             || !self.targets.is_empty()
             || self.removed_sessions.read().count() > 0
-            || self.removed_provider_kinds.read().count() > 0
-            || self.removed_provider_ids.read().count() > 0
+            || self.removed_links.read().count() > 0
+            || self.removed_providers.read().count() > 0
+            || self.removed_scopes.read().count() > 0
+            || self.removed_kinds.read().count() > 0
+            || self.removed_external_ids.read().count() > 0
+            || self.removed_owners.read().count() > 0
             || self.removed_activated_at.read().count() > 0
             || self.removed_stage_changed_at.read().count() > 0
             || self.removed_archived_at.read().count() > 0
@@ -1166,16 +1399,23 @@ fn canonicalize_provider_sessions(
     mut changes: CanonicalizationChanges,
     sessions: Query<
         (
-            Entity,
-            &ProviderKind,
-            &ProviderSessionId,
             Option<&LastActivatedAt>,
-            Option<&StageChangedAt>,
+            Option<&WorkflowStateChangedAt>,
             Has<ArchivedAt>,
             Option<&crate::RunState>,
             Option<&SessionDuplicate>,
         ),
         With<Session>,
+    >,
+    links: Query<
+        (
+            &ChildOf,
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ResourceKind,
+            &ExternalId,
+        ),
+        With<ExternalLink>,
     >,
     duplicates: Query<(Entity, &SessionDuplicate), With<Session>>,
     targets: Query<&EntityTarget<Session>>,
@@ -1188,27 +1428,40 @@ fn canonicalize_provider_sessions(
         .iter()
         .map(EntityTarget::entity)
         .collect::<HashSet<_>>();
-    let mut groups = HashMap::<ProviderSessionKey, Vec<ProviderSessionCandidate>>::new();
-    for (entity, kind, id, activated_at, stage_changed_at, archived, runtime, duplicate) in
-        &sessions
-    {
-        if kind.0.is_empty() || id.0.is_empty() {
+    let mut groups = HashMap::<ExternalLinkIdentity, Vec<ProviderSessionCandidate>>::new();
+    for (owner, provider, scope, kind, id) in &links {
+        if kind.as_str() != "session" {
             continue;
         }
+        let entity = owner.parent();
+        let Ok((activated_at, stage_changed_at, archived, runtime, duplicate)) =
+            sessions.get(entity)
+        else {
+            continue;
+        };
         groups
-            .entry(ProviderSessionKey::from_components(kind, id))
+            .entry(ExternalLinkIdentity::new(
+                provider.clone(),
+                scope.id().clone(),
+                kind.clone(),
+                id.clone(),
+            ))
             .or_default()
             .push(ProviderSessionCandidate {
                 entity,
-                duplicate: duplicate.map(|duplicate| duplicate.0),
+                duplicate: duplicate.map(SessionDuplicate::entity),
                 archived,
                 active: matches!(
                     runtime,
                     Some(crate::RunState::Streaming | crate::RunState::AwaitingApproval { .. })
                 ),
                 targeted: targeted.contains(&entity),
-                activated_at: activated_at.map(|value| value.0).unwrap_or_default(),
-                stage_changed_at: stage_changed_at.map(|value| value.0).unwrap_or_default(),
+                activated_at: activated_at
+                    .map(|value| value.milliseconds())
+                    .unwrap_or_default(),
+                stage_changed_at: stage_changed_at
+                    .map(|value| value.milliseconds())
+                    .unwrap_or_default(),
             });
     }
     let mut expected = HashMap::<Entity, Entity>::new();
@@ -1243,6 +1496,7 @@ fn canonicalize_provider_sessions(
 mod tests {
     use super::*;
     use bevy_ecs::reflect::AppTypeRegistry;
+    use vmux_connector::ExternalScope;
 
     #[derive(Resource, Default)]
     struct Cleaned(Vec<Entity>);
@@ -1250,6 +1504,23 @@ mod tests {
     impl Cleaned {
         fn record(trigger: On<Cleanup>, mut cleaned: ResMut<Cleaned>) {
             cleaned.0.push(trigger.event_target());
+        }
+    }
+
+    struct ProviderFixture;
+
+    impl ProviderFixture {
+        fn identity(kind: &str, id: &str) -> ExternalLinkIdentity {
+            let provider = kind
+                .split_once(':')
+                .map(|(provider, _)| provider)
+                .unwrap_or(kind);
+            ExternalLinkIdentity::new(
+                ProviderKey::new(provider).unwrap(),
+                vmux_api::Id::<ExternalScope>::new(kind),
+                ResourceKind::session(),
+                ExternalId::new(id).unwrap(),
+            )
         }
     }
 
@@ -1270,14 +1541,14 @@ mod tests {
     }
 
     #[test]
-    fn creation_uses_configured_default_stage_and_common_components() {
+    fn creation_uses_configured_default_workflow_state_and_common_components() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, MetadataPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, MetadataPlugin, WorkflowStatePlugin));
         let request = CreateRequest::new(
             "Task",
             "Description",
             PathBuf::from("/tmp/project"),
-            Some(AgentId("codex".into())),
+            Some(AgentRef::new("codex")),
         );
         let expected_id = request.id.clone();
         app.world_mut()
@@ -1287,31 +1558,31 @@ mod tests {
         app.update();
 
         let mut sessions = app.world_mut().query_filtered::<(
-            &SessionId,
+            &Id<Session>,
             &Name,
             &Description,
             &Cwd,
-            &Stage,
-            &AgentId,
+            &WorkflowStateRef,
+            &AgentRef,
         ), With<Session>>();
-        let (id, name, description, cwd, stage, agent) = sessions.single(app.world()).unwrap();
+        let (id, name, description, cwd, state, agent) = sessions.single(app.world()).unwrap();
         assert_eq!(id, &expected_id);
         assert_eq!(name.as_str(), "Task");
         assert_eq!(description.0, "Description");
         assert_eq!(cwd.0, PathBuf::from("/tmp/project"));
-        assert_eq!(stage.0.0, "in_progress");
-        assert_eq!(agent.0, "codex");
+        assert_eq!(state.id().as_str(), "in_progress");
+        assert_eq!(agent.as_str(), "codex");
     }
 
     #[test]
-    fn provider_import_preserves_time_without_marking_a_local_task() {
+    fn provider_import_preserves_source_time() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         let request = CreateRequest::imported(
             "Imported",
             "Provider session",
             PathBuf::from("/tmp/project"),
-            AgentId("codex".into()),
+            AgentRef::new("codex"),
             100,
             200,
         );
@@ -1323,26 +1594,25 @@ mod tests {
 
         let mut sessions = app
             .world_mut()
-            .query_filtered::<(&CreatedAt, &LastActivatedAt, Has<LocalTask>), With<Session>>();
-        let (created, activated, local) = sessions.single(app.world()).unwrap();
-        assert_eq!(created.0, 100);
-        assert_eq!(activated.0, 200);
-        assert!(!local);
+            .query_filtered::<(&CreatedAt, &LastActivatedAt), With<Session>>();
+        let (created, activated) = sessions.single(app.world()).unwrap();
+        assert_eq!(created.milliseconds(), 100);
+        assert_eq!(activated.milliseconds(), 200);
     }
 
     #[test]
-    fn stage_definitions_are_available_after_update() {
+    fn workflow_states_are_available_after_update() {
         let mut app = App::new();
-        app.add_plugins(StagePlugin);
+        app.add_plugins(WorkflowStatePlugin);
 
         app.update();
         app.update();
 
         let mut definitions = app
             .world_mut()
-            .query_filtered::<(&StageId, &Order), With<StageDefinition>>()
+            .query_filtered::<(&Id<WorkflowState>, &Order), With<WorkflowState>>()
             .iter(app.world())
-            .map(|(id, order)| (id.0.clone(), order.0))
+            .map(|(id, order)| (id.as_str().to_string(), order.0))
             .collect::<Vec<_>>();
         definitions.sort_by_key(|(_, order)| *order);
         assert_eq!(
@@ -1357,27 +1627,95 @@ mod tests {
     }
 
     #[test]
-    fn archive_is_independent_from_stage() {
+    fn workflow_state_relationship_repairs_after_target_replacement() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins(WorkflowStatePlugin);
+        let state_id = Id::<WorkflowState>::new("custom");
+        let original = app
+            .world_mut()
+            .spawn((WorkflowState, state_id.clone()))
+            .id();
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into())))
+            .spawn((
+                Session,
+                WorkflowStateRef::new(state_id.clone()),
+                WorkflowStateChangedAt::new(1),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<WorkflowStateTarget>(session)
+                .map(WorkflowStateTarget::entity),
+            Some(original)
+        );
+
+        app.world_mut().despawn(original);
+        app.update();
+
+        assert!(app.world().get::<WorkflowStateRef>(session).is_some());
+        assert!(app.world().get::<WorkflowStateTarget>(session).is_none());
+
+        let replacement = app.world_mut().spawn((WorkflowState, state_id)).id();
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<WorkflowStateTarget>(session)
+                .map(WorkflowStateTarget::entity),
+            Some(replacement)
+        );
+    }
+
+    #[test]
+    fn duplicate_workflow_state_ids_are_explicit() {
+        let mut app = App::new();
+        app.add_plugins(WorkflowStatePlugin);
+        let id = Id::<WorkflowState>::new("duplicate");
+        app.world_mut().spawn((WorkflowState, id.clone()));
+        app.world_mut().spawn((WorkflowState, id.clone()));
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<vmux_ecs::IdentityIndex<WorkflowState>>()
+                .entity(&id),
+            Err(vmux_ecs::IdentityLookupError::Duplicate(id))
+        );
+    }
+
+    #[test]
+    fn archive_is_independent_from_stage() {
+        let mut app = App::new();
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
+        let session = app
+            .world_mut()
+            .spawn((Session, Id::<Session>::new("session-1")))
             .id();
 
         app.world_mut()
             .resource_mut::<Messages<ArchiveRequest>>()
             .write(ArchiveRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 archived_at: Some(10),
             });
         app.update();
-        assert_eq!(app.world().get::<ArchivedAt>(session).unwrap().0, 10);
+        assert_eq!(
+            app.world()
+                .get::<ArchivedAt>(session)
+                .unwrap()
+                .milliseconds(),
+            10
+        );
 
         app.world_mut()
             .resource_mut::<Messages<ArchiveRequest>>()
             .write(ArchiveRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 archived_at: None,
             });
         app.update();
@@ -1385,111 +1723,142 @@ mod tests {
     }
 
     #[test]
-    fn stage_change_rejects_unknown_stage_and_records_transition_time() {
+    fn workflow_state_change_rejects_unknown_state_and_records_transition_time() {
         let mut app = App::new();
-        app.add_plugins(StagePlugin);
+        app.add_plugins(WorkflowStatePlugin);
         let session = app
             .world_mut()
             .spawn((
                 Session,
-                SessionId("session-1".into()),
-                Stage(StageId("in_progress".into())),
-                StageChangedAt(1),
+                Id::<Session>::new("session-1"),
+                WorkflowStateRef::new(Id::<WorkflowState>::new("in_progress")),
+                WorkflowStateChangedAt::new(1),
             ))
             .id();
         app.update();
 
         app.world_mut()
-            .resource_mut::<Messages<StageChangeRequest>>()
-            .write(StageChangeRequest {
-                id: SessionId("session-1".into()),
-                stage: StageId("missing".into()),
+            .resource_mut::<Messages<WorkflowStateChangeRequest>>()
+            .write(WorkflowStateChangeRequest {
+                id: Id::<Session>::new("session-1"),
+                workflow_state: Id::new("missing"),
             });
         app.update();
         assert_eq!(
-            app.world().get::<Stage>(session).unwrap().0.0,
+            app.world()
+                .get::<WorkflowStateRef>(session)
+                .unwrap()
+                .id()
+                .as_str(),
             "in_progress"
         );
-        assert_eq!(app.world().get::<StageChangedAt>(session).unwrap().0, 1);
+        assert_eq!(
+            app.world()
+                .get::<WorkflowStateChangedAt>(session)
+                .unwrap()
+                .milliseconds(),
+            1
+        );
 
         app.world_mut()
-            .resource_mut::<Messages<StageChangeRequest>>()
-            .write(StageChangeRequest {
-                id: SessionId("session-1".into()),
-                stage: StageId("done".into()),
+            .resource_mut::<Messages<WorkflowStateChangeRequest>>()
+            .write(WorkflowStateChangeRequest {
+                id: Id::<Session>::new("session-1"),
+                workflow_state: Id::new("done"),
             });
         app.update();
-        assert_eq!(app.world().get::<Stage>(session).unwrap().0.0, "done");
-        assert!(app.world().get::<StageChangedAt>(session).unwrap().0 > 1);
+        assert_eq!(
+            app.world()
+                .get::<WorkflowStateRef>(session)
+                .unwrap()
+                .id()
+                .as_str(),
+            "done"
+        );
+        assert!(app.world().get::<WorkflowStateTarget>(session).is_some());
+        assert!(
+            app.world()
+                .get::<WorkflowStateChangedAt>(session)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]
-    fn provider_stage_change_creates_and_updates_one_durable_override() {
+    fn provider_workflow_state_change_creates_and_updates_one_durable_override() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         app.update();
 
         app.world_mut()
-            .resource_mut::<Messages<ProviderStageChangeRequest>>()
-            .write(ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
-                stage: StageId("done".into()),
+            .resource_mut::<Messages<ProviderWorkflowStateChangeRequest>>()
+            .write(ProviderWorkflowStateChangeRequest {
+                identity: ProviderFixture::identity("codex", "provider-session"),
+                workflow_state: Id::new("done"),
                 source_updated_at: 10,
             });
         app.update();
 
         let mut overrides = app.world_mut().query_filtered::<(
             Entity,
-            &ProviderKind,
-            &ProviderSessionId,
-            &Stage,
-            &StageChangedAt,
-        ), With<ProviderStage>>();
-        let (entity, kind, id, stage, changed_at) = overrides.single(app.world()).unwrap();
-        assert_eq!(kind.0, "codex");
-        assert_eq!(id.0, "provider-session");
-        assert_eq!(stage.0.0, "done");
-        assert!(changed_at.0 > 0);
+            &ProviderKey,
+            &ExternalScopeRef,
+            &ExternalId,
+            &WorkflowStateRef,
+            &WorkflowStateChangedAt,
+        ), With<ProviderWorkflowState>>();
+        let (entity, provider, scope, id, state, changed_at) =
+            overrides.single(app.world()).unwrap();
+        assert_eq!(provider.as_str(), "codex");
+        assert_eq!(scope.id().as_str(), "codex");
+        assert_eq!(id.as_str(), "provider-session");
+        assert_eq!(state.id().as_str(), "done");
+        assert!(changed_at.milliseconds() > 0);
 
         app.world_mut()
-            .resource_mut::<Messages<ProviderStageChangeRequest>>()
-            .write(ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
-                stage: StageId("in_review".into()),
+            .resource_mut::<Messages<ProviderWorkflowStateChangeRequest>>()
+            .write(ProviderWorkflowStateChangeRequest {
+                identity: ProviderFixture::identity("codex", "provider-session"),
+                workflow_state: Id::new("in_review"),
                 source_updated_at: 20,
             });
         app.update();
 
         let mut overrides = app
             .world_mut()
-            .query_filtered::<(Entity, &Stage), With<ProviderStage>>();
-        let (updated, stage) = overrides.single(app.world()).unwrap();
+            .query_filtered::<(Entity, &WorkflowStateRef), With<ProviderWorkflowState>>();
+        let (updated, state) = overrides.single(app.world()).unwrap();
         assert_eq!(updated, entity);
-        assert_eq!(stage.0.0, "in_review");
+        assert_eq!(state.id().as_str(), "in_review");
 
-        app.world_mut().get_mut::<StageChangedAt>(entity).unwrap().0 = 1;
+        *app.world_mut()
+            .get_mut::<WorkflowStateChangedAt>(entity)
+            .unwrap() = WorkflowStateChangedAt::new(1);
         app.world_mut()
-            .resource_mut::<Messages<ProviderStageChangeRequest>>()
-            .write(ProviderStageChangeRequest {
-                kind: ProviderKind("codex".into()),
-                id: ProviderSessionId("provider-session".into()),
-                stage: StageId("in_review".into()),
+            .resource_mut::<Messages<ProviderWorkflowStateChangeRequest>>()
+            .write(ProviderWorkflowStateChangeRequest {
+                identity: ProviderFixture::identity("codex", "provider-session"),
+                workflow_state: Id::new("in_review"),
                 source_updated_at: 30,
             });
         app.update();
 
-        assert!(app.world().get::<StageChangedAt>(entity).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<WorkflowStateChangedAt>(entity)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]
     fn provider_archive_change_creates_and_updates_one_durable_override() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         let request = ProviderArchiveRequest {
-            kind: ProviderKind("acp:codex".into()),
-            id: ProviderSessionId("provider-session".into()),
+            identity: ProviderFixture::identity("acp:codex", "provider-session"),
             archived: true,
             source_updated_at: 10,
             native: false,
@@ -1502,11 +1871,11 @@ mod tests {
 
         let mut overrides = app.world_mut().query_filtered::<(
             Entity,
-            &SourceUpdatedAt,
+            &RemoteUpdatedAt,
             Option<&ArchivedAt>,
         ), With<ProviderArchive>>();
         let (entity, source_updated_at, archived_at) = overrides.single(app.world()).unwrap();
-        assert_eq!(source_updated_at.0, 10);
+        assert_eq!(source_updated_at.0.0, 10);
         assert!(archived_at.is_some());
 
         app.world_mut()
@@ -1520,22 +1889,21 @@ mod tests {
 
         let mut overrides = app
             .world_mut()
-            .query_filtered::<(Entity, &SourceUpdatedAt, Has<ArchivedAt>), With<ProviderArchive>>();
+            .query_filtered::<(Entity, &RemoteUpdatedAt, Has<ArchivedAt>), With<ProviderArchive>>();
         let (updated, source_updated_at, archived) = overrides.single(app.world()).unwrap();
         assert_eq!(updated, entity);
-        assert_eq!(source_updated_at.0, 20);
+        assert_eq!(source_updated_at.0.0, 20);
         assert!(!archived);
     }
 
     #[test]
     fn native_provider_archive_persists_before_the_provider_write_finishes() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         app.world_mut()
             .resource_mut::<Messages<ProviderArchiveRequest>>()
             .write(ProviderArchiveRequest {
-                kind: ProviderKind("acp:codex".into()),
-                id: ProviderSessionId("provider-session".into()),
+                identity: ProviderFixture::identity("acp:codex", "provider-session"),
                 archived: true,
                 source_updated_at: 40,
                 native: true,
@@ -1545,10 +1913,10 @@ mod tests {
 
         let mut overrides = app
             .world_mut()
-            .query_filtered::<(&SourceUpdatedAt, &ArchivedAt), With<ProviderArchive>>();
+            .query_filtered::<(&RemoteUpdatedAt, &ArchivedAt), With<ProviderArchive>>();
         let (source_updated_at, archived_at) = overrides.single(app.world()).unwrap();
-        assert_eq!(source_updated_at.0, 40);
-        assert_eq!(archived_at.0, 40);
+        assert_eq!(source_updated_at.0.0, 40);
+        assert_eq!(archived_at.milliseconds(), 40);
         let writes = app
             .world_mut()
             .resource_mut::<Messages<ProviderArchiveWriteRequest>>()
@@ -1561,7 +1929,7 @@ mod tests {
     #[test]
     fn duplicate_creation_requests_create_one_session() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin));
         let request = CreateRequest::new("Task", "", PathBuf::new(), None);
         app.world_mut()
             .resource_mut::<Messages<CreateRequest>>()
@@ -1580,17 +1948,17 @@ mod tests {
     #[test]
     fn cleanup_request_targets_the_canonical_session() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin))
+        app.add_plugins((EntityPlugin, WorkflowStatePlugin))
             .init_resource::<Cleaned>()
             .add_observer(Cleaned::record);
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into())))
+            .spawn((Session, Id::<Session>::new("session-1")))
             .id();
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
-                targets: vec![CleanupTarget::Session(SessionId("session-1".into()))],
+                targets: vec![CleanupTarget::Session(Id::<Session>::new("session-1"))],
             });
 
         app.update();
@@ -1602,23 +1970,30 @@ mod tests {
     #[test]
     fn cleanup_removes_linked_provider_copies_and_can_restore_visibility() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, StagePlugin));
+        app.add_plugins((
+            vmux_connector::ConnectorPlugin,
+            EntityPlugin,
+            WorkflowStatePlugin,
+        ));
+        let identity = ProviderFixture::identity("acp:codex", "provider-session");
         for id in ["canonical", "duplicate"] {
+            let session = app
+                .world_mut()
+                .spawn((Session, Id::<Session>::new(id)))
+                .id();
             app.world_mut().spawn((
-                Session,
-                SessionId(id.into()),
-                ProviderKind("acp:codex".into()),
-                ProviderSessionId("provider-session".into()),
+                ExternalLink,
+                identity.provider().clone(),
+                ExternalScopeRef::new(identity.scope().clone()),
+                identity.kind().clone(),
+                identity.external_id().clone(),
+                ChildOf(session),
             ));
         }
-        let key = ProviderSessionKey::new(
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-        );
         app.world_mut()
             .resource_mut::<Messages<CleanupRequest>>()
             .write(CleanupRequest {
-                targets: vec![CleanupTarget::Session(SessionId("canonical".into()))],
+                targets: vec![CleanupTarget::Session(Id::<Session>::new("canonical"))],
             });
 
         app.update();
@@ -1632,20 +2007,20 @@ mod tests {
         assert!(
             app.world()
                 .resource::<ProviderSessionTombstones>()
-                .contains(&key.kind.0, &key.id.0)
+                .contains(&identity)
         );
 
         app.world_mut()
             .resource_mut::<Messages<ProviderSessionRestoreRequest>>()
             .write(ProviderSessionRestoreRequest {
-                keys: vec![key.clone()],
+                identities: vec![identity.clone()],
             });
         app.update();
 
         assert!(
             !app.world()
                 .resource::<ProviderSessionTombstones>()
-                .contains(&key.kind.0, &key.id.0)
+                .contains(&identity)
         );
         let tombstones = app
             .world_mut()
@@ -1658,31 +2033,33 @@ mod tests {
     #[test]
     fn domain_plugin_registers_its_durable_components() {
         let mut app = App::new();
-        app.add_plugins(crate::DomainPlugin);
+        app.add_plugins(crate::SessionDomainPlugin);
         let registry = app.world().resource::<AppTypeRegistry>().read();
         let filter = vmux_ecs::persistence::WorkspacePersisted::filter(&registry);
 
         assert!(filter.is_allowed::<Session>());
-        assert!(filter.is_allowed::<SessionId>());
-        assert!(filter.is_allowed::<AgentId>());
-        assert!(filter.is_allowed::<ProviderStage>());
+        assert!(filter.is_allowed::<Id<Session>>());
+        assert!(filter.is_allowed::<AgentRef>());
+        assert!(filter.is_allowed::<ProviderWorkflowState>());
         assert!(filter.is_allowed::<ProviderArchive>());
         assert!(filter.is_allowed::<ProviderSessionTombstone>());
-        assert!(filter.is_allowed::<SourceUpdatedAt>());
-        assert!(filter.is_allowed::<ProviderKind>());
-        assert!(filter.is_allowed::<ProviderSessionId>());
         assert!(filter.is_allowed::<AgentConversationTitle>());
         assert!(filter.is_allowed::<TitlePending>());
-        assert!(filter.is_allowed::<LocalTask>());
-        assert!(filter.is_allowed::<Stage>());
-        assert!(filter.is_allowed::<StageChangedAt>());
+        assert!(filter.is_allowed::<WorkflowState>());
+        assert!(filter.is_allowed::<Id<WorkflowState>>());
+        assert!(filter.is_allowed::<WorkflowStateRef>());
+        assert!(filter.is_allowed::<WorkflowStateChangedAt>());
+        assert!(filter.is_allowed::<TerminalWorkflowState>());
     }
 
     #[test]
     fn activating_a_session_view_updates_the_session_timestamp() {
         let mut app = App::new();
         app.add_plugins(EntityPlugin);
-        let session = app.world_mut().spawn((Session, LastActivatedAt(1))).id();
+        let session = app
+            .world_mut()
+            .spawn((Session, LastActivatedAt::new(1)))
+            .id();
         let stack = app
             .world_mut()
             .spawn(EntityTarget::<Session>::new(session))
@@ -1690,16 +2067,26 @@ mod tests {
 
         app.world_mut().trigger(ActivateRequest { entity: stack });
 
-        assert!(app.world().get::<LastActivatedAt>(session).unwrap().0 > 1);
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(session)
+                .unwrap()
+                .milliseconds()
+                > 1
+        );
     }
 
     #[test]
     fn renamed_session_updates_view_metadata() {
         let mut app = App::new();
-        app.add_plugins((EntityPlugin, MetadataPlugin, StagePlugin));
+        app.add_plugins((EntityPlugin, MetadataPlugin, WorkflowStatePlugin));
         let session = app
             .world_mut()
-            .spawn((Session, SessionId("session-1".into()), Name::new("Before")))
+            .spawn((
+                Session,
+                Id::<Session>::new("session-1"),
+                Name::new("Before"),
+            ))
             .id();
         let stack = app
             .world_mut()
@@ -1718,7 +2105,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<RenameRequest>>()
             .write(RenameRequest {
-                id: SessionId("session-1".into()),
+                id: Id::<Session>::new("session-1"),
                 name: "After".into(),
             });
         app.update();

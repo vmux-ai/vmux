@@ -106,10 +106,7 @@ impl LaunchAgent {
         if current.as_deref() == Some(desired.as_str()) {
             return Ok(false);
         }
-        if let Some(parent) = plist.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(plist, desired)?;
+        vmux_path::AtomicFile::write(plist, desired.as_bytes())?;
         Ok(true)
     }
 

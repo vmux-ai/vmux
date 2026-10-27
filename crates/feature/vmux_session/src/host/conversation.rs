@@ -2,14 +2,15 @@ use super::group::ChatMessages;
 use super::presentation::ChatPresentation;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use vmux_api::Id;
 use vmux_api::chat::ChatItem;
 use vmux_api::session::{
     AssistantBlock, ConversationEvent, Message as ConversationMessage, RemoteAgent, RemoteApproval,
-    RemoteEvent, RemoteSession, RemoteStatus, SessionId,
+    RemoteEvent, RemoteSession, RemoteStatus, Session,
 };
 
 use super::prompt::AttachmentPreviews;
-use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishUiChat};
 use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
 
 pub struct ChatConversationPlugin;
@@ -131,7 +132,7 @@ fn fold(
 
 #[derive(Component, Default, PartialEq)]
 pub struct Log {
-    pub session_id: Option<SessionId>,
+    pub session_id: Option<Id<Session>>,
     pub through_seq: u64,
     pub events: Vec<ConversationEvent>,
 }
@@ -147,7 +148,7 @@ pub struct Snapshot(pub ChatSnapshot);
 
 #[derive(Component, Default)]
 pub(crate) struct ConversationTranscript {
-    session_id: Option<SessionId>,
+    session_id: Option<Id<Session>>,
     state: ChatTranscriptState,
 }
 
@@ -187,7 +188,7 @@ type ChangedChatProjection<'w, 's> = Query<
 >;
 
 fn emit_snapshot(
-    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut refreshes: MessageReader<RepublishUiChat>,
     mut runtimes: ChatProjectionOutput,
 ) {
     let refresh = refreshes.read().next().is_some();
@@ -394,10 +395,10 @@ mod tests {
 
         fn snapshot_of(seq: u64, text: &str) -> RemoteEvent {
             RemoteEvent::Snapshot {
-                session_id: SessionId::from("s"),
+                session_id: Id::<Session>::from("s"),
                 through_seq: seq,
                 events: ConversationEvent::from_messages(
-                    &SessionId::from("s"),
+                    &Id::<Session>::from("s"),
                     seq,
                     &[ConversationMessage::user(text)],
                 ),
@@ -409,7 +410,7 @@ mod tests {
         fn with_agent(name: &str) -> Self {
             Self {
                 session: Some(RemoteSession {
-                    id: SessionId::from("s"),
+                    id: Id::<Session>::from("s"),
                     url: "vmux://sessions/s".to_string(),
                     title: String::new(),
                     name: name.to_string(),
@@ -446,7 +447,7 @@ mod tests {
                 session_id: None,
                 through_seq: 0,
                 events: ConversationEvent::from_messages(
-                    &SessionId::from("s"),
+                    &Id::<Session>::from("s"),
                     0,
                     &[
                         ConversationMessage::user("hello"),
@@ -500,7 +501,7 @@ mod tests {
             session_id: None,
             through_seq: 0,
             events: ConversationEvent::from_messages(
-                &SessionId::from("s"),
+                &Id::<Session>::from("s"),
                 100,
                 &[ConversationMessage::user("hello")],
             ),
@@ -567,7 +568,7 @@ mod tests {
     fn a_snapshot_retires_the_tokens_it_now_contains() {
         let mut started = Started::open();
         started.report(RemoteEvent::Delta {
-            session_id: SessionId::from("s"),
+            session_id: Id::<Session>::from("s"),
             text: "partial".to_string(),
         });
         assert_eq!(started.component::<LiveTurn>().0, "partial");
@@ -603,7 +604,7 @@ mod tests {
 
         let mut moved = Conversation::with_agent("ada");
         let session = moved.session.as_mut().expect("a session");
-        session.id = SessionId::from("elsewhere");
+        session.id = Id::<Session>::from("elsewhere");
         started.report(RemoteEvent::Session {
             session: Box::new(session.clone()),
         });

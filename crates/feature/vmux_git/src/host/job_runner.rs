@@ -20,7 +20,7 @@ use crate::event::{
     DiffLine, GitCatalog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
     GitRepositorySnapshot,
 };
-use crate::state::GitUiState;
+use crate::state::UiGit;
 use vmux_path::PathIdentity;
 
 const REPOSITORY_LOAD_CACHE_CAPACITY: usize = 128;
@@ -612,7 +612,7 @@ fn deliver_diff_outputs(
                     .append_diff_patch(event, &revealed.0)
                     .expect("appendability was checked");
                 projection.capture(snapshot, &revealed.0);
-                commands.trigger(vmux_ecs::UiStateWrite::<GitUiState>::from_event(
+                commands.trigger(vmux_ecs::UiStateWrite::<UiGit>::from_event(
                     webview, &append,
                 ));
             } else {

@@ -6,6 +6,7 @@ use self::side_sheet::SideSheetView;
 use self::state::LayoutUi;
 use dioxus::prelude::*;
 pub(crate) use error::ErrorPage;
+pub(crate) use project_dropdown::ProjectDropdownPage;
 use vmux_command::CommandBarPanel;
 use vmux_ui::components::dropdown::Dropdown;
 use vmux_ui::hooks::{send, use_theme};
@@ -17,6 +18,7 @@ mod bookmark;
 mod error;
 mod extension;
 mod header;
+mod project_dropdown;
 mod remote;
 mod side_sheet;
 mod stack;
@@ -28,11 +30,11 @@ mod window_drag;
 #[vmux_page::page(
     component = Page,
     states = [
-        "ThemeUiState",
-        "LayoutUiState",
-        "ExtensionsUiState",
-        "CommandBarUiState",
-        "KeyClaimsUiState",
+        vmux_ui::theme::UiTheme,
+        crate::state::UiLayout,
+        vmux_api::extension::UiExtensions,
+        vmux_api::command_bar::UiCommandBar,
+        vmux_api::input::UiKeyClaims,
     ],
     placement = layout,
     transparent,
@@ -101,13 +103,13 @@ pub(super) fn LayoutDropdown(
     });
     let overlay_id = id.clone();
     use_effect(move || {
-        let _ = send(&LayoutOverlayEvent {
+        send(&LayoutOverlayEvent {
             id: overlay_id.clone(),
             active: open,
         });
     });
     use_drop(move || {
-        let _ = send(&LayoutOverlayEvent { id, active: false });
+        send(&LayoutOverlayEvent { id, active: false });
     });
     rsx! {
         Dropdown {

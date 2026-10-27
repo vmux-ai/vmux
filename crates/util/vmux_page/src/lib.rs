@@ -2,7 +2,7 @@ pub use event_request::{EventOutcome, EventRequest, EventRequestError};
 pub use instance::{Instance, PageScope};
 pub use page::Page;
 pub use page_dom::{PageComponent, PageDom};
-pub use registration::{PagePlacement, PagePlugin, PageRegistration};
+pub use registration::{ModalFrame, PagePlacement, PagePlugin, PageRegistration};
 pub use shell::InterpreterShell;
 pub use vmux_macro::page;
 #[cfg(ui)]

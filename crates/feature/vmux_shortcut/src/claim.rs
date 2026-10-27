@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiInput, WebviewSource};
-use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+use vmux_api::input::{KeyContextRequest, UiKeyClaims};
 use vmux_command::{KeyContext, Keymap};
 use vmux_ecs::page::HostsPage;
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
@@ -12,7 +12,7 @@ type MissingKeyContext = (PageHost, Without<KeyContext>);
 
 impl Plugin for ClaimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiStatePlugin::<KeyClaimsUiState>::default())
+        app.add_plugins(UiStatePlugin::<UiKeyClaims>::default())
             .add_observer(receive)
             .add_systems(Update, (spawn, publish).chain());
     }
@@ -20,10 +20,9 @@ impl Plugin for ClaimPlugin {
 
 fn spawn(pages: Query<Entity, MissingKeyContext>, mut commands: Commands) {
     for entity in pages.iter() {
-        commands.entity(entity).insert((
-            KeyContext::default(),
-            UiState::<KeyClaimsUiState>::default(),
-        ));
+        commands
+            .entity(entity)
+            .insert((KeyContext::default(), UiState::<UiKeyClaims>::default()));
     }
 }
 
@@ -41,7 +40,7 @@ fn receive(
         Err(_) => {
             commands
                 .entity(target)
-                .insert((next, UiState::<KeyClaimsUiState>::default()));
+                .insert((next, UiState::<UiKeyClaims>::default()));
         }
     }
 }
@@ -58,10 +57,8 @@ fn publish(
         if !keymap.is_changed() && !context.is_changed() {
             continue;
         }
-        let claims: KeyClaimsUiState = keymap.in_context(&context).claims();
-        commands.trigger(UiStateWrite::<KeyClaimsUiState>::from_event(
-            entity, &claims,
-        ));
+        let claims: UiKeyClaims = keymap.in_context(&context).claims();
+        commands.trigger(UiStateWrite::<UiKeyClaims>::from_event(entity, &claims));
     }
 }
 
@@ -74,7 +71,7 @@ mod tests {
     use vmux_command::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
 
     #[derive(Resource, Default)]
-    struct Pushed(Vec<(Entity, KeyClaimsUiState)>);
+    struct Pushed(Vec<(Entity, UiKeyClaims)>);
 
     impl Pushed {
         fn codes(world: &World, page: Entity) -> Vec<Vec<String>> {
@@ -96,12 +93,12 @@ mod tests {
             mut pushed: ResMut<Self>,
             mut rejected: ResMut<Rejected>,
         ) {
-            if trigger.id() != KeyClaimsUiState::id() {
+            if trigger.id() != UiKeyClaims::id() {
                 rejected.0.push(trigger.id().to_string());
                 return;
             }
             let Ok(claims) =
-                rkyv::from_bytes::<KeyClaimsUiState, rkyv::rancor::Error>(trigger.payload())
+                rkyv::from_bytes::<UiKeyClaims, rkyv::rancor::Error>(trigger.payload())
             else {
                 rejected.0.push("undecodable payload".to_string());
                 return;

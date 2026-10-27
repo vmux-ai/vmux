@@ -1,6 +1,6 @@
 use bevy::ecs::component::Component;
 use bevy::input::keyboard::KeyCode;
-use vmux_api::input::{ClaimedKey, KeyClaimsUiState, KeyModifiers};
+use vmux_api::input::{ClaimedKey, KeyModifiers, UiKeyClaims};
 
 #[derive(Component, Debug, Clone, Default)]
 pub struct Keymap {
@@ -172,7 +172,7 @@ impl KeymapView<'_> {
             .unwrap_or(false)
     }
 
-    pub fn claims(&self) -> KeyClaimsUiState {
+    pub fn claims(&self) -> UiKeyClaims {
         let mut keys: Vec<ClaimedKey> = Vec::new();
         for binding in self.applicable() {
             if !self.keymap.recognizes(&binding.command) {
@@ -193,7 +193,7 @@ impl KeymapView<'_> {
             }
             keys.push(claimed);
         }
-        KeyClaimsUiState { keys }
+        UiKeyClaims { keys }
     }
 }
 
@@ -1000,7 +1000,7 @@ mod tests {
 
     #[test]
     fn a_claim_matches_the_stroke_that_produced_it() {
-        let claims = KeyClaimsUiState {
+        let claims = UiKeyClaims {
             keys: vec![modified(KeyCode::KeyX, CTRL).claimed("test").unwrap()],
         };
         let stroke = |mods: KeyModifiers| vmux_api::input::KeyStroke {

@@ -1,15 +1,193 @@
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSColor, NSView, NSWindowOrderingMode,
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
+    NSGlassEffectViewStyle, NSPanel, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSWindowOrderingMode, NSWindowStyleMask,
 };
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CACornerMask;
 use objc2_web_kit::WKWebViewConfiguration;
+use std::cell::Cell;
 use tracing::{error, warn};
 use wry::WebViewExtMacOS;
 
 use super::{Appearance, SiblingOrder, WebView};
+
+objc2::define_class!(
+    #[unsafe(super(NSPanel, NSWindow, objc2_app_kit::NSResponder, objc2::runtime::NSObject))]
+    #[thread_kind = objc2::MainThreadOnly]
+    #[name = "VmuxPageModalPanel"]
+    struct ModalPanel;
+
+    impl ModalPanel {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            false
+        }
+    }
+);
+
+pub(super) struct ModalHost {
+    parent: Retained<NSWindow>,
+    panel: Retained<NSPanel>,
+    glass: Option<Retained<NSGlassEffectView>>,
+    visible: Cell<bool>,
+}
+
+impl ModalHost {
+    fn new(webview: &wry::WebView) -> Option<Self> {
+        let marker = MainThreadMarker::new()?;
+        let wk = webview.webview();
+        let view: &NSView = &wk;
+        let parent = view.window()?;
+        let panel: Retained<NSPanel> = {
+            let panel = ModalPanel::alloc(marker);
+            let panel: Retained<ModalPanel> = unsafe {
+                objc2::msg_send![
+                    panel,
+                    initWithContentRect: NSRect::new(
+                        NSPoint::new(0.0, 0.0),
+                        NSSize::new(1.0, 1.0),
+                    ),
+                    styleMask: NSWindowStyleMask::Borderless
+                        | NSWindowStyleMask::NonactivatingPanel,
+                    backing: NSBackingStoreType::Buffered,
+                    defer: false,
+                ]
+            };
+            Retained::into_super(panel)
+        };
+        panel.setFloatingPanel(false);
+        panel.setBecomesKeyOnlyIfNeeded(false);
+        panel.setMovableByWindowBackground(false);
+        panel.setHidesOnDeactivate(true);
+        panel.setOpaque(false);
+        panel.setBackgroundColor(Some(&NSColor::clearColor()));
+        panel.setHasShadow(true);
+        panel.setCollectionBehavior(
+            NSWindowCollectionBehavior::FullScreenAuxiliary | NSWindowCollectionBehavior::Transient,
+        );
+        unsafe { panel.setReleasedWhenClosed(false) };
+
+        view.removeFromSuperview();
+        let glass = if AnyClass::get(c"NSGlassEffectView").is_some() {
+            let glass = NSGlassEffectView::new(marker);
+            glass.setStyle(NSGlassEffectViewStyle::Clear);
+            glass.setTintColor(Some(&NSColor::clearColor()));
+            let glass_view: &NSView = glass.as_super();
+            glass_view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0)));
+            glass_view.setAutoresizingMask(
+                NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable,
+            );
+            glass.setContentView(Some(view));
+            panel.setContentView(Some(glass_view));
+            Some(glass)
+        } else {
+            panel.setContentView(Some(view));
+            None
+        };
+        view.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        if let Some(content) = panel.contentView() {
+            view.setFrame(content.bounds());
+        }
+        unsafe { parent.addChildWindow_ordered(&panel, NSWindowOrderingMode::Above) };
+        panel.orderOut(None);
+
+        Some(Self {
+            parent,
+            panel,
+            glass,
+            visible: Cell::new(false),
+        })
+    }
+
+    pub(super) fn set_bounds(&self, webview: &wry::WebView, bounds: wry::Rect) {
+        let scale = self.parent.backingScaleFactor();
+        let position = bounds.position.to_logical::<f64>(scale);
+        let size = bounds.size.to_logical::<f64>(scale);
+        let parent_frame = self.parent.frame();
+        let content_height = self
+            .parent
+            .contentView()
+            .map(|view| view.frame().size.height)
+            .unwrap_or(parent_frame.size.height);
+        let frame = NSRect::new(
+            NSPoint::new(
+                parent_frame.origin.x + position.x,
+                parent_frame.origin.y + content_height - position.y - size.height,
+            ),
+            NSSize::new(size.width, size.height),
+        );
+        self.panel.setFrame_display(frame, true);
+        let wk = webview.webview();
+        let view: &NSView = &wk;
+        if let Some(content) = self.panel.contentView() {
+            content.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), frame.size));
+            view.setFrame(content.bounds());
+        }
+    }
+
+    pub(super) fn set_visible(&self, visible: bool) {
+        if self.visible.replace(visible) == visible {
+            return;
+        }
+        if visible {
+            self.panel.orderFront(None);
+            self.panel.makeKeyWindow();
+        } else {
+            self.parent.makeKeyWindow();
+            self.panel.orderOut(None);
+        }
+    }
+
+    pub(super) fn set_corner_radius(&self, radius: f64, all_corners: bool) {
+        if let Some(glass) = &self.glass {
+            Self::apply_corner_radius(glass.as_super(), radius, all_corners);
+            return;
+        }
+        let Some(content) = self.panel.contentView() else {
+            return;
+        };
+        Self::apply_corner_radius(&content, radius, all_corners);
+    }
+
+    fn apply_corner_radius(view: &NSView, radius: f64, all_corners: bool) {
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            return;
+        };
+        let all = CACornerMask::LayerMinXMinYCorner
+            | CACornerMask::LayerMaxXMinYCorner
+            | CACornerMask::LayerMinXMaxYCorner
+            | CACornerMask::LayerMaxXMaxYCorner;
+        let bottom = CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner;
+        layer.setCornerRadius(radius.max(0.0));
+        layer.setMasksToBounds(true);
+        layer.setMaskedCorners(if all_corners { all } else { bottom });
+    }
+}
+
+impl Drop for ModalHost {
+    fn drop(&mut self) {
+        self.parent.removeChildWindow(&self.panel);
+        self.panel.orderOut(None);
+        if let Some(glass) = &self.glass {
+            glass.setContentView(None);
+        }
+        self.panel.setContentView(None);
+    }
+}
 
 struct SurfaceBackground;
 
@@ -36,7 +214,21 @@ impl SurfaceBackground {
 }
 
 impl WebView {
+    pub fn host_as_modal(&self) -> bool {
+        if self.modal.borrow().is_some() {
+            return true;
+        }
+        let Some(host) = ModalHost::new(&self.webview) else {
+            return false;
+        };
+        self.modal.replace(Some(host));
+        true
+    }
+
     pub fn order_among_siblings(&self, order: SiblingOrder) {
+        if self.modal.borrow().is_some() {
+            return;
+        }
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         let Some(parent) = (unsafe { view.superview() }) else {
@@ -59,6 +251,9 @@ impl WebView {
     }
 
     pub fn raise_above_layers(&self) {
+        if self.modal.borrow().is_some() {
+            return;
+        }
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setWantsLayer(true);
@@ -70,6 +265,9 @@ impl WebView {
     }
 
     pub fn set_corner_radius(&self, radius: f64, all_corners: bool) {
+        if let Some(modal) = self.modal.borrow().as_ref() {
+            modal.set_corner_radius(radius, all_corners);
+        }
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setWantsLayer(true);

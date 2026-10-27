@@ -459,9 +459,9 @@
             bookmark: Some(150),
             permissions: [
                 "PageReady",
-                "ThemeUiState",
+                "UiTheme",
                 "OpenRequest",
-                "SettingsUiState",
+                "UiSettings",
                 "CheckForUpdatesEvent",
                 "SettingsRequest",
                 "SettingsEditRequest",

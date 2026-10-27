@@ -8,20 +8,18 @@ use vmux_api::chat::{
     PromptHistory, PromptHistoryRequest, ResumableSessionEntry, ResumableSessions,
     ResumeListRequest, ResumeSession,
 };
-use vmux_api::command_bar::CommandBarUiState;
-use vmux_ecs::team::Profile;
+use vmux_api::command_bar::UiCommandBar;
+use vmux_ecs::team::Profiles;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
-    AgentFamily, AgentId, ProviderCatalog, ProviderSessionTombstones, Route, Session,
-    SessionDuplicate, SessionId, Transcripts,
+    AgentFamily, AgentRef, Id, ProviderCatalog, ProviderSessionTombstones, Route, Session,
+    SessionDuplicate, Transcripts,
 };
-#[cfg(test)]
-use vmux_session::{ProviderKind, ProviderSessionId, ProviderSessionKey};
 
 use crate::event::ChatResumeQueryRequest;
 use crate::host::session::{ChatResumeProjection, SessionView};
-use crate::state::ChatUiState;
+use crate::state::UiChat;
 
 pub(super) struct Plugin;
 
@@ -46,13 +44,13 @@ type Sessions<'w, 's> = Query<
     'w,
     's,
     (
-        &'static SessionId,
+        Entity,
+        &'static Id<Session>,
         &'static Name,
         &'static Description,
         &'static Cwd,
         &'static LastActivatedAt,
-        Option<&'static AgentId>,
-        Option<&'static Profile>,
+        Option<&'static AgentRef>,
     ),
     (With<Session>, Without<SessionDuplicate>),
 >;
@@ -63,6 +61,7 @@ struct ResumeCatalog<'w, 's> {
     providers: Res<'w, ProviderCatalog>,
     tombstones: Res<'w, ProviderSessionTombstones>,
     cache: Option<Single<'w, 's, &'static mut RepoInfoCache>>,
+    profiles: Profiles<'w, 's>,
 }
 
 impl ResumeCatalog<'_, '_> {
@@ -70,7 +69,8 @@ impl ResumeCatalog<'_, '_> {
         let query_lower = query.trim().to_ascii_lowercase();
         let now = vmux_ecs::UnixMillis::now().0;
         let mut sessions = Vec::new();
-        for (id, name, description, cwd, activated, agent, profile) in &self.sessions {
+        for (entity, id, name, description, cwd, activated, agent) in &self.sessions {
+            let profile = self.profiles.get(entity);
             let path = cwd.0.as_path();
             let info = self.cache.as_mut().and_then(|cache| cache.snapshot(path));
             let subtitle = path
@@ -86,9 +86,10 @@ impl ResumeCatalog<'_, '_> {
             let agent_name = agent
                 .map(|agent| {
                     let fallback = profile
-                        .map(|profile| profile.name.as_str())
-                        .unwrap_or(agent.0.as_str());
-                    AgentFamily::of(&agent.0).name(fallback)
+                        .as_ref()
+                        .map(vmux_ecs::team::ProfileView::name)
+                        .unwrap_or(agent.as_str());
+                    AgentFamily::of(agent.as_str()).name(fallback)
                 })
                 .filter(|agent| !agent.is_empty())
                 .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-title"));
@@ -107,8 +108,9 @@ impl ResumeCatalog<'_, '_> {
             {
                 continue;
             }
-            let age_seconds = now.saturating_sub(activated.0.max(0)).max(0) as u64 / 1_000;
-            let updated_at = chrono::DateTime::from_timestamp_millis(activated.0)
+            let activated = activated.milliseconds();
+            let age_seconds = now.saturating_sub(activated.max(0)).max(0) as u64 / 1_000;
+            let updated_at = chrono::DateTime::from_timestamp_millis(activated)
                 .map(|timestamp| {
                     timestamp
                         .with_timezone(&chrono::Local)
@@ -117,10 +119,10 @@ impl ResumeCatalog<'_, '_> {
                 })
                 .unwrap_or_default();
             sessions.push((
-                activated.0,
+                activated,
                 ResumableSessionEntry {
                     kind: "session".to_string(),
-                    sid: id.0.clone(),
+                    sid: id.as_str().to_string(),
                     cwd,
                     url: Route::Session(id.clone()).url(),
                     title: name.as_str().to_string(),
@@ -136,8 +138,16 @@ impl ResumeCatalog<'_, '_> {
             ));
         }
         for session in &self.providers.sessions {
-            if self.tombstones.contains(&session.kind, &session.sid) {
+            if !session.has_valid_identity() {
                 continue;
+            }
+            if !self.tombstones.is_empty() {
+                let Some(identity) = session.identity() else {
+                    continue;
+                };
+                if self.tombstones.contains(&identity) {
+                    continue;
+                }
             }
             let path = Path::new(&session.cwd);
             let subtitle = path
@@ -210,7 +220,7 @@ impl ResumeCatalog<'_, '_> {
 fn prompt_history(
     trigger: On<UiInput<PromptHistoryRequest>>,
     sessions: Query<
-        (Entity, &Cwd, &AgentId, &LastActivatedAt),
+        (Entity, &Cwd, &AgentRef, &LastActivatedAt),
         (With<Session>, Without<SessionDuplicate>),
     >,
     transcripts: Transcripts,
@@ -220,8 +230,10 @@ fn prompt_history(
     let requested_cwd = Path::new(&request.cwd);
     let mut matching = sessions
         .iter()
-        .filter(|(_, cwd, agent, _)| agent.0 == request.agent && cwd.0.as_path() == requested_cwd)
-        .map(|(entity, _, _, activated)| (activated.0, entity))
+        .filter(|(_, cwd, agent, _)| {
+            agent.as_str() == request.agent && cwd.0.as_path() == requested_cwd
+        })
+        .map(|(entity, _, _, activated)| (activated.milliseconds(), entity))
         .collect::<Vec<_>>();
     matching.sort_by_key(|(activated, _)| *activated);
     let mut prompts = Vec::new();
@@ -238,7 +250,7 @@ fn prompt_history(
     if prompts.len() > 100 {
         prompts.drain(..prompts.len() - 100);
     }
-    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
         trigger.event().webview,
         &PromptHistory { prompts },
     ));
@@ -251,7 +263,7 @@ fn list(
 ) {
     let request = &trigger.event().payload;
     let response = catalog.page(request.request_id, &request.query, request.offset);
-    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+    commands.trigger(UiStateWrite::<UiCommandBar>::from_event(
         trigger.event().webview,
         &response,
     ));
@@ -260,11 +272,15 @@ fn list(
 fn open(
     trigger: On<UiInput<ResumeSession>>,
     parents: Query<&ChildOf>,
-    sessions: Query<&SessionId, With<Session>>,
+    sessions: Query<&Id<Session>, With<Session>>,
     mut opens: MessageWriter<PageOpenRequest>,
 ) {
     let request = &trigger.event().payload;
-    if request.kind != "session" || !sessions.iter().any(|session| session.0 == request.sid) {
+    if request.kind != "session"
+        || !sessions
+            .iter()
+            .any(|session| session.as_str() == request.sid)
+    {
         return;
     }
     let Ok(parent) = parents.get(trigger.event().webview) else {
@@ -272,7 +288,7 @@ fn open(
     };
     opens.write(PageOpenRequest {
         target: PageOpenTarget::Stack(parent.parent()),
-        url: Route::Session(SessionId(request.sid.clone())).url(),
+        url: Route::Session(Id::<Session>::new(request.sid.clone())).url(),
         request_id: None,
     });
 }
@@ -295,17 +311,14 @@ fn query(
         let response = catalog.page(request_id, &request.query, 0);
         projection.finish(&response);
     }
-    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-        webview,
-        &projection.0,
-    ));
+    commands.trigger(UiStateWrite::<UiChat>::from_event(webview, &projection.0));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::event::ChatResumeState;
-    use vmux_api::command_bar::CommandBarUiStatePatch;
+    use vmux_api::command_bar::UiCommandBarPatch;
 
     #[derive(Resource, Default)]
     struct Responses {
@@ -315,26 +328,25 @@ mod tests {
     }
 
     impl Responses {
-        fn command_bar(
-            trigger: On<UiStateWrite<CommandBarUiState>>,
-            mut responses: ResMut<Responses>,
-        ) {
-            if let Some(resume) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-                ResumableSessions,
-            >>::payload(trigger.event().update())
+        fn command_bar(trigger: On<UiStateWrite<UiCommandBar>>, mut responses: ResMut<Responses>) {
+            if let Some(resume) =
+                <UiCommandBarPatch as vmux_api::UiStatePatch<ResumableSessions>>::payload(
+                    trigger.event().update(),
+                )
             {
                 responses.resumes.push(resume.clone());
             }
-            if let Some(history) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-                PromptHistory,
-            >>::payload(trigger.event().update())
+            if let Some(history) =
+                <UiCommandBarPatch as vmux_api::UiStatePatch<PromptHistory>>::payload(
+                    trigger.event().update(),
+                )
             {
                 responses.prompt_histories.push(history.clone());
             }
         }
 
-        fn chat(trigger: On<UiStateWrite<ChatUiState>>, mut responses: ResMut<Responses>) {
-            if let Some(resume) = <crate::state::ChatUiStatePatch as vmux_api::UiStatePatch<
+        fn chat(trigger: On<UiStateWrite<UiChat>>, mut responses: ResMut<Responses>) {
+            if let Some(resume) = <crate::state::UiChatPatch as vmux_api::UiStatePatch<
                 ChatResumeState,
             >>::payload(trigger.event().update())
             {
@@ -347,12 +359,12 @@ mod tests {
         world
             .spawn((
                 Session,
-                SessionId("session-1".into()),
+                Id::<Session>::new("session-1"),
                 Name::new("Repair resume"),
                 Description("Restore delegated session requests".into()),
                 Cwd("/work/vmux".into()),
-                LastActivatedAt(2),
-                AgentId("codex".into()),
+                LastActivatedAt::new(2),
+                AgentRef::new("codex"),
             ))
             .id()
     }
@@ -366,19 +378,15 @@ mod tests {
             .add_observer(Responses::command_bar);
         let stack = app.world_mut().spawn_empty().id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
-        let session_id = SessionId("session-1".into());
+        let session_id = Id::<Session>::new("session-1");
         let session = spawn_session(app.world_mut());
         app.world_mut().spawn((
             vmux_session::ConversationEvent,
-            vmux_session::EventIdentity {
-                event_id: vmux_api::session::EventId::new("event-1"),
-                actor_id: vmux_api::session::MemberId::local(&session_id),
-                client_op_id: None,
-                sequence: 1,
-                reply_to: None,
-            },
+            Id::<vmux_api::session::ConversationEvent>::new("event-1"),
+            vmux_session::ActorRef::new(vmux_api::session::Member::local_id(&session_id)),
+            vmux_session::Sequence(1),
             vmux_session::MessageContent(vmux_api::session::Message::user("First prompt")),
-            vmux_ecs::CreatedAt(3),
+            vmux_ecs::CreatedAt::new(3),
             ChildOf(session),
         ));
 
@@ -447,16 +455,60 @@ mod tests {
                 updated_at: 2,
                 ..Default::default()
             });
-        app.insert_resource(ProviderSessionTombstones::new([ProviderSessionKey::new(
-            ProviderKind("acp:codex".into()),
-            ProviderSessionId("provider-session".into()),
-        )]));
+        let identity = vmux_connector::ExternalLinkIdentity::new(
+            vmux_connector::ProviderKey::new("acp").unwrap(),
+            Id::<vmux_connector::ExternalScope>::new("acp:codex"),
+            vmux_connector::ResourceKind::session(),
+            vmux_connector::ExternalId::new("provider-session").unwrap(),
+        );
+        app.insert_resource(ProviderSessionTombstones::new([identity]));
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(UiInput {
             webview,
             payload: ResumeListRequest {
                 request_id: 11,
+                query: String::new(),
+                offset: 0,
+            },
+        });
+        app.world_mut().flush();
+
+        let responses = app.world().resource::<Responses>();
+        assert_eq!(responses.resumes.len(), 1);
+        assert_eq!(responses.resumes[0].total, 0);
+        assert!(responses.resumes[0].sessions.is_empty());
+    }
+
+    #[test]
+    fn invalid_provider_identities_stay_out_of_resume_results() {
+        let mut app = App::new();
+        app.init_resource::<Responses>()
+            .add_plugins(Plugin)
+            .add_observer(Responses::command_bar);
+        app.world_mut()
+            .resource_mut::<ProviderCatalog>()
+            .sessions
+            .extend([
+                vmux_session::ProviderSession {
+                    kind: " ".into(),
+                    sid: "provider-session".into(),
+                    cwd: "/work/vmux".into(),
+                    ..Default::default()
+                },
+                vmux_session::ProviderSession {
+                    kind: "acp:codex".into(),
+                    sid: " ".into(),
+                    cwd: "/work/vmux".into(),
+                    ..Default::default()
+                },
+            ]);
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ResumeListRequest {
+                request_id: 12,
                 query: String::new(),
                 offset: 0,
             },

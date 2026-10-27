@@ -5,7 +5,7 @@ use crate::event::{
     SimulatorClipboardPasteRequest, SimulatorClipboardSelectAllRequest,
     SimulatorInputHardwareButtonRequest, SimulatorInputKeyRequest,
     SimulatorInputModifiedKeyRequest, SimulatorInputTextRequest, SimulatorKeyModifiers,
-    SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase, SimulatorUiState,
+    SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase, UiSimulator,
 };
 use crate::url::SimulatorRoute;
 use dioxus::html::geometry::ClientPoint;
@@ -14,14 +14,17 @@ use dioxus::prelude::*;
 use std::rc::Rc;
 use vmux_ui::components::manager::{WorkspaceBreadcrumbHeader, WorkspacePage};
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::hooks::{send, use_theme, use_ui_state};
+use vmux_ui::hooks::{UiState, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::Platform;
 use vmux_ui::script::PageScript;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "SimulatorUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        crate::event::UiSimulator,
+    ],
     subtree,
     takes = vmux_ecs::PageMetadata
 )]
@@ -30,7 +33,7 @@ pub(crate) struct SimulatorPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let ready = use_ui_state::<SimulatorUiState>().state;
+    let ready = UiState::<UiSimulator>::use_context().state;
     let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).ok());
 
@@ -125,7 +128,7 @@ fn Mirror(
             onkeydown: move |event| {
                 if SoftwareKeyboardShortcut::matches(&event) {
                     event.prevent_default();
-                    let _ = send(&SimulatorSoftwareKeyboard);
+                    send(&SimulatorSoftwareKeyboard);
                     return;
                 }
                 if ClipboardShortcut::send(&event) {
@@ -155,7 +158,7 @@ fn Mirror(
                 press.set(Some(next));
                 home_progress.set(next.home_progress());
                 if let Some(touch) = touch {
-                    let _ = send(&touch);
+                    send(&touch);
                 }
             },
             onpointerup: move |event: Event<PointerData>| {
@@ -226,7 +229,7 @@ fn Mirror(
                             press.set(Some(session));
                             home_progress.set(0.0);
                             if let Some(touch) = touch {
-                                let _ = send(&touch);
+                                send(&touch);
                             }
                         },
                     }
@@ -368,16 +371,16 @@ impl ClipboardShortcut {
         }
         match event.key().to_string().to_ascii_lowercase().as_str() {
             "a" => {
-                let _ = send(&SimulatorClipboardSelectAllRequest);
+                send(&SimulatorClipboardSelectAllRequest);
             }
             "c" => {
-                let _ = send(&SimulatorClipboardCopyRequest);
+                send(&SimulatorClipboardCopyRequest);
             }
             "x" => {
-                let _ = send(&SimulatorClipboardCutRequest);
+                send(&SimulatorClipboardCutRequest);
             }
             "v" => {
-                let _ = send(&SimulatorClipboardPasteRequest);
+                send(&SimulatorClipboardPasteRequest);
             }
             _ => return false,
         }
@@ -399,7 +402,7 @@ impl Keystroke {
                 _ => None,
             };
             if let Some(button) = button {
-                let _ = send(&SimulatorInputHardwareButtonRequest { button });
+                send(&SimulatorInputHardwareButtonRequest { button });
                 return true;
             }
         }
@@ -408,18 +411,18 @@ impl Keystroke {
             let Some(code) = BrowserCode::new(event.code().to_string()).hid_code() else {
                 return false;
             };
-            let _ = send(&SimulatorInputModifiedKeyRequest { code, modifiers });
+            send(&SimulatorInputModifiedKeyRequest { code, modifiers });
             return true;
         }
         let browser_key = BrowserKey::new(key);
         if let Some(code) = browser_key.hid_code() {
-            let _ = send(&SimulatorInputKeyRequest { code });
+            send(&SimulatorInputKeyRequest { code });
             return true;
         }
         let Some(text) = browser_key.text() else {
             return false;
         };
-        let _ = send(&SimulatorInputTextRequest { text });
+        send(&SimulatorInputTextRequest { text });
         true
     }
 
@@ -856,11 +859,11 @@ impl PointerRelease {
         match self {
             Self::Touch(touch) => {
                 home_progress.set(0.0);
-                let _ = send(&touch);
+                send(&touch);
             }
             Self::Home => {
                 home_progress.set(1.0);
-                let _ = send(&SimulatorInputHardwareButtonRequest {
+                send(&SimulatorInputHardwareButtonRequest {
                     button: HardwareButton::Home,
                 });
                 spawn(async move {

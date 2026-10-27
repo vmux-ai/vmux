@@ -4,128 +4,21 @@ use bevy_ecs::reflect::ReflectComponent;
 use bevy_reflect::std_traits::ReflectDefault;
 use serde::{Deserialize, Serialize};
 
+use crate::Id;
 pub use crate::prompt_media::InlineMediaQuery;
 pub use crate::protocol::AgentAttachment;
 use crate::protocol::AgentRunStatus;
 
-use vmux_macro::string_id;
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(
     feature = "bevy",
     derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
 )]
 #[cfg_attr(feature = "bevy", reflect(Component, Default))]
-#[cfg_attr(feature = "bevy", type_path = "vmux_ecs")]
-#[serde(transparent)]
-pub struct SessionId(pub String);
-
-impl SessionId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for SessionId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl From<&str> for SessionId {
-    fn from(value: &str) -> Self {
-        Self(value.to_string())
-    }
-}
-
-impl std::fmt::Display for SessionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[cfg_attr(
-    feature = "bevy",
-    derive(bevy_ecs::prelude::Component, bevy_reflect::Reflect)
-)]
-#[cfg_attr(feature = "bevy", reflect(Component))]
 #[cfg_attr(feature = "bevy", type_path = "vmux_api")]
-#[serde(transparent)]
-pub struct MemberId(pub String);
+pub struct Session;
 
-impl MemberId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn local(session_id: &SessionId) -> Self {
-        Self::new(format!("session:{}:member:local", session_id.as_str()))
-    }
-
-    pub fn agent(session_id: &SessionId) -> Self {
-        Self::new(format!("session:{}:member:agent", session_id.as_str()))
-    }
-}
-
-impl From<String> for MemberId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl From<&str> for MemberId {
-    fn from(value: &str) -> Self {
-        Self(value.to_string())
-    }
-}
-
-impl std::fmt::Display for MemberId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[string_id]
-pub struct EventId(pub String);
-
-#[string_id]
-pub struct ClientOpId(pub String);
+pub enum ClientOperation {}
 #[vmux_api::contract(Copy, Eq)]
 #[cfg_attr(
     feature = "bevy",
@@ -155,12 +48,24 @@ pub enum MemberKind {
 }
 
 #[vmux_api::contract(Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy_reflect::TypePath))]
+#[cfg_attr(feature = "bevy", type_path = "vmux_api")]
 pub struct Member {
-    pub session_id: SessionId,
-    pub member_id: MemberId,
+    pub session_id: Id<Session>,
+    pub member_id: Id<Member>,
     pub display_name: String,
     pub role: MemberRole,
     pub kind: MemberKind,
+}
+
+impl Member {
+    pub fn local_id(session_id: &Id<Session>) -> Id<Self> {
+        Id::new(format!("session:{}:member:local", session_id.as_str()))
+    }
+
+    pub fn agent_id(session_id: &Id<Session>) -> Id<Self> {
+        Id::new(format!("session:{}:member:agent", session_id.as_str()))
+    }
 }
 
 #[vmux_api::contract]
@@ -182,29 +87,29 @@ pub enum Message {
 
 #[vmux_api::contract]
 pub struct ConversationEvent {
-    pub event_id: EventId,
-    pub session_id: SessionId,
-    pub actor_id: MemberId,
-    pub client_op_id: Option<ClientOpId>,
+    pub event_id: Id<ConversationEvent>,
+    pub session_id: Id<Session>,
+    pub actor_id: Id<Member>,
+    pub client_op_id: Option<Id<ClientOperation>>,
     pub server_seq: u64,
     pub created_at_ms: u64,
-    pub reply_to: Option<EventId>,
+    pub reply_to: Option<Id<ConversationEvent>>,
     pub message: Message,
 }
 
 impl ConversationEvent {
     pub fn from_messages(
-        session_id: &SessionId,
+        session_id: &Id<Session>,
         created_at_ms: u64,
         messages: &[Message],
     ) -> Vec<Self> {
-        let local_member = MemberId::local(session_id);
-        let agent_member = MemberId::agent(session_id);
+        let local_member = Member::local_id(session_id);
+        let agent_member = Member::agent_id(session_id);
         let mut events = Vec::with_capacity(messages.len());
         let mut reply_to = None;
         for (index, message) in messages.iter().enumerate() {
             let server_seq = index as u64 + 1;
-            let event_id = EventId::new(format!(
+            let event_id = Id::<ConversationEvent>::new(format!(
                 "session:{}:event:{server_seq}",
                 session_id.as_str()
             ));
@@ -337,7 +242,7 @@ pub struct RemoteMediaEntry {
 
 #[vmux_api::contract]
 pub struct RemoteSession {
-    pub id: SessionId,
+    pub id: Id<Session>,
     #[serde(default)]
     pub url: String,
     #[serde(default)]
@@ -358,12 +263,12 @@ pub enum RemoteEvent {
         session: Box<RemoteSession>,
     },
     Snapshot {
-        session_id: SessionId,
+        session_id: Id<Session>,
         through_seq: u64,
         events: Vec<ConversationEvent>,
     },
     Delta {
-        session_id: SessionId,
+        session_id: Id<Session>,
         text: String,
     },
     Status {
@@ -392,7 +297,7 @@ pub struct RemoteModelState {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PromptRequest {
-    pub client_op_id: ClientOpId,
+    pub client_op_id: Id<ClientOperation>,
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AgentAttachment>,
@@ -400,7 +305,7 @@ pub struct PromptRequest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NewChatRequest {
-    pub client_op_id: ClientOpId,
+    pub client_op_id: Id<ClientOperation>,
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_url: Option<String>,
@@ -475,7 +380,7 @@ mod tests {
     #[test]
     fn new_chat_request_roundtrips() {
         let request = NewChatRequest {
-            client_op_id: ClientOpId::new("op-1"),
+            client_op_id: Id::<ClientOperation>::new("op-1"),
             text: "start here".to_string(),
             agent_url: Some("vmux://sessions/?agent=claude".to_string()),
         };

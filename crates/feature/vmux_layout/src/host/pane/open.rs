@@ -475,14 +475,11 @@ fn spawn_beside_stack(
         spawn_seq,
         pending_size,
     );
-    let stack_ts = if req.focus {
-        LastActivatedAt::now()
-    } else {
-        LastActivatedAt(0)
-    };
-    let new_stack = commands
-        .spawn((Stack::bundle(), stack_ts, ChildOf(target_pane)))
-        .id();
+    let mut new_stack = commands.spawn((Stack::bundle(), ChildOf(target_pane)));
+    if req.focus {
+        new_stack.insert(LastActivatedAt::now());
+    }
+    let new_stack = new_stack.id();
     commands.entity(new_stack).insert(PageMetadata {
         url: req.url.clone(),
         ..default()

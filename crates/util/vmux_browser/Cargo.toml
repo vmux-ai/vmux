@@ -22,6 +22,7 @@ serde_json = { workspace = true }
 url = { workspace = true }
 vmux_command = { path = "../../feature/vmux_command" }
 vmux_ecs = { path = "../vmux_ecs" }
+vmux_feature = { path = "../vmux_feature" }
 vmux_editor = { path = "../../feature/vmux_editor" }
 vmux_flex = { path = "../vmux_flex" }
 vmux_git = { path = "../../feature/vmux_git" }

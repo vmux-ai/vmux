@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_ecs::manifest::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
-use vmux_ecs::manifest::{FeatureManifestSource, FeaturePlugin};
+use vmux_feature::{AppFeatureExt, FeatureManifestSource};
+use vmux_feature::{FeatureManifest, FeatureManifestOwner};
 #[cfg(test)]
 use vmux_path::Executable;
 
@@ -170,12 +170,11 @@ mod tests {
     #[test]
     fn load_ignores_other_feature_policies() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeaturePlugin::<crate::Feature>::default(),
-            FeaturePlugin::<ForeignFeature>::default(),
-        ));
+        app.add_plugins(MinimalPlugins)
+            .register_feature::<crate::Feature>()
+            .register_feature::<ForeignFeature>();
         add(&mut app);
+        app.finish();
         app.update();
 
         let registries = app

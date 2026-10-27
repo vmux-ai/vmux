@@ -65,7 +65,7 @@ impl RecentFile {
         if std::path::Path::new(path).is_dir() {
             return None;
         }
-        let age_hours = ((now - last_visited_at.0).max(0) as f32) / 3_600_000.0;
+        let age_hours = ((now - last_visited_at.milliseconds()).max(0) as f32) / 3_600_000.0;
         let decay = 1.0 / (1.0 + age_hours / 24.0);
         Some(Self {
             score: (visit_count.0 as f32) * decay,

@@ -8,6 +8,10 @@ pub enum VmuxPlugin {
     Ecs(VmuxEcsPlugin),
     #[plugin(feature = "command", desktop, requires(ecs))]
     Command(vmux_command::CommandPlugin),
+    #[plugin(feature = "connector", desktop, requires(ecs))]
+    Connector(vmux_connector::ConnectorPlugin),
+    #[plugin(feature = "auth", desktop, requires(connector))]
+    Auth(vmux_auth::AuthPlugin),
     #[plugin(feature = "setting", desktop, requires(ecs))]
     Setting(vmux_setting::SettingsPlugin),
     #[plugin(feature = "session", desktop, mobile)]
@@ -33,7 +37,9 @@ pub enum VmuxPlugin {
     #[plugin(
         feature = "acp",
         desktop,
-        requires(command, editor, history, knowledge, service, session, space, terminal)
+        requires(
+            auth, command, editor, history, knowledge, service, session, space, terminal
+        )
     )]
     Acp(vmux_acp::AcpPlugin),
     #[plugin(feature = "knowledge", desktop, requires(ecs))]
@@ -67,6 +73,7 @@ pub struct VmuxEcsPlugin;
 impl Plugin for VmuxEcsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            vmux_feature::FeatureRegistryPlugin,
             vmux_flex::FlexPlugin,
             vmux_ecs::PrimitivesPlugin,
             vmux_ecs::profile::ProfilePlugin,
@@ -103,7 +110,9 @@ mod tests {
         let options = VmuxPluginOptions::none().acp(true);
 
         assert!(options.acp);
+        assert!(options.auth);
         assert!(options.command);
+        assert!(options.connector);
         assert!(options.ecs);
         assert!(options.layout);
         assert!(options.editor);

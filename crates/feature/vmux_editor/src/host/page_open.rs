@@ -243,9 +243,9 @@ impl KnowledgeLanding {
             }
             if recent
                 .as_ref()
-                .is_none_or(|(_, timestamp)| visited.0 > *timestamp)
+                .is_none_or(|(_, timestamp)| visited.milliseconds() > *timestamp)
             {
-                recent = Some((path, visited.0));
+                recent = Some((path, visited.milliseconds()));
             }
         }
         if let Some((path, _)) = recent {
@@ -495,8 +495,8 @@ mod tests {
             url: vmux_path::FileUrl::from_path(&recent, None, None, None),
             ..Default::default()
         };
-        let older_visit = LastVisitedAt(10);
-        let recent_visit = LastVisitedAt(20);
+        let older_visit = LastVisitedAt::new(10);
+        let recent_visit = LastVisitedAt::new(20);
 
         assert_eq!(
             KnowledgeLanding::select(

@@ -2,35 +2,39 @@ use bevy::prelude::*;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
 use vmux_ecs::ProcessId;
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+#[cfg(test)]
 use vmux_ecs::team::Profile;
+use vmux_ecs::team::{Avatar, Profiles};
 use vmux_ecs::{Cwd, EntityTarget, PageMetadata, ProcessAnchor, ProcessPresentationRequest};
+use vmux_feature::AppFeatureExt;
 use vmux_git::worktree::ValidatedLinkedWorkspace;
-use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_layout::tab::{
+    StartupDir, Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable,
+};
 use vmux_layout::worktree::TabWorktreeReady;
 
 use super::handoff::PendingHandoff;
 #[cfg(test)]
 use super::runtime_driver::AcpWorkspaceState;
 use super::runtime_driver::PromptWorkspace;
-use crate::AcpSessionId;
 use crate::host::acp::AcpSpawnQueued;
 use crate::host::event::{
     AcpAgentInfo, AcpSessionConfigSelectionResult, AcpSessionConfigSnapshot, AcpSessionCreated,
     AcpTerminalCreated, AcpWorkspaceChanged, AgentApprovalRequest,
 };
 use crate::policy::AcpWorkspacePolicy;
+use crate::session::{AcpSessionLink, AcpSessionLinks};
 use vmux_session::host::{ImportedConversation, SessionView};
 use vmux_session::{
-    AgentId, ApprovalPolicy, PromptQueue, Route, RunState, Session, SessionId, TitlePending,
+    AgentRef, ApprovalPolicy, Id, PromptQueue, Route, RunState, Session, TitlePending,
 };
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AcpSessionConfigSet;
 
 pub(super) fn add(app: &mut App) {
-    app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+    app.register_feature::<crate::Feature>();
     crate::policy::add(app);
     crate::host::acp::add_registry(app);
     crate::host::acp::add(app);
@@ -81,17 +85,30 @@ pub(super) struct InitialAcpSessionConfig {
 
 fn info(
     mut reader: MessageReader<AcpAgentInfo>,
-    mut sessions: Query<(&SessionId, &AgentId, &mut Profile), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentRef), With<Session>>,
+    profiles: Profiles,
+    mut commands: Commands,
 ) {
     for event in reader.read() {
         let name = event.name.trim();
         if name.is_empty() {
             continue;
         }
-        for (session_id, agent_id, mut profile) in &mut sessions {
-            if session_id.0 == event.sid && profile.name != name {
-                let icon = profile.icon.clone();
-                *profile = Profile::registry(name, &agent_id.0).with_icon(icon);
+        for (session, session_id, agent_id) in &sessions {
+            if session_id.as_str() != event.sid {
+                continue;
+            }
+            let Some(profile) = profiles.get(session) else {
+                continue;
+            };
+            if profile.name() != name {
+                commands.entity(profile.entity()).insert((
+                    Name::new(name.to_string()),
+                    Avatar(vmux_ecs::team::AvatarSpec::for_registry(
+                        name,
+                        agent_id.as_str(),
+                    )),
+                ));
             }
         }
     }
@@ -113,11 +130,11 @@ fn ancestor_tab(
 
 fn workspace(
     mut reader: MessageReader<AcpWorkspaceChanged>,
-    mut sessions: Query<(Entity, &SessionId, &mut Cwd), With<Session>>,
+    mut sessions: Query<(Entity, &Id<Session>, &mut Cwd), With<Session>>,
     session_views: Query<(Entity, &EntityTarget<Session>)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
-    mut tabs: Query<&mut Tab>,
+    mut tabs: Query<&mut StartupDir, With<Tab>>,
     mut workspaces: Query<&mut TabWorkspace>,
     managed: Query<&TabWorktree>,
     mut commands: Commands,
@@ -135,7 +152,7 @@ fn workspace(
         let workspace_cwd = validated.workspace_cwd;
         let checkout = validated.checkout;
         for (session_entity, session_id, mut session_cwd) in &mut sessions {
-            if session_id.0 != event.sid {
+            if session_id.as_str() != event.sid {
                 continue;
             }
             session_cwd.0.clone_from(&cwd);
@@ -149,8 +166,8 @@ fn workspace(
             let Some(tab_entity) = ancestor_tab(stack, &child_of, &tab_entities) else {
                 continue;
             };
-            if let Ok(mut tab) = tabs.get_mut(tab_entity) {
-                tab.startup_dir = Some(cwd.to_string_lossy().into_owned());
+            if let Ok(mut startup_dir) = tabs.get_mut(tab_entity) {
+                startup_dir.0 = Some(cwd.clone());
             }
             let workspace_project_dir = workspace_cwd.to_string_lossy().into_owned();
             if let Ok(mut workspace) = workspaces.get_mut(tab_entity) {
@@ -190,12 +207,12 @@ fn workspace(
 
 fn config(
     mut reader: MessageReader<AcpSessionConfigSnapshot>,
-    mut sessions: Query<(Entity, &SessionId, Option<&mut AcpSessionConfigState>), With<Session>>,
+    mut sessions: Query<(Entity, &Id<Session>, Option<&mut AcpSessionConfigState>), With<Session>>,
     mut commands: Commands,
 ) {
     for event in reader.read() {
         for (entity, session_id, current) in &mut sessions {
-            if session_id.0 != event.sid {
+            if session_id.as_str() != event.sid {
                 continue;
             }
             if event.configs.is_empty() {
@@ -248,11 +265,11 @@ fn config(
 
 fn selection(
     mut reader: MessageReader<AcpSessionConfigSelectionResult>,
-    mut sessions: Query<(&SessionId, &mut AcpSessionConfigState), With<Session>>,
+    mut sessions: Query<(&Id<Session>, &mut AcpSessionConfigState), With<Session>>,
 ) {
     for event in reader.read() {
         for (session_id, mut state) in &mut sessions {
-            if session_id.0 != event.sid {
+            if session_id.as_str() != event.sid {
                 continue;
             }
             let Some(index) = state.pending.iter().position(|pending| {
@@ -277,7 +294,7 @@ fn selection(
 
 fn auto_allow(
     trigger: On<AgentApprovalRequest>,
-    sessions: Query<(&SessionId, &ApprovalPolicy), With<Session>>,
+    sessions: Query<(&Id<Session>, &ApprovalPolicy), With<Session>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let request = trigger.event();
@@ -289,7 +306,7 @@ fn auto_allow(
     }
     service_requests.write(ServiceRequest(ClientMessage::Shared(
         SharedMessage::AgentApprove {
-            sid: session_id.0.clone(),
+            sid: session_id.as_str().to_string(),
             call_id: request.call_id.clone(),
             decision: ApprovalDecision::AllowAlways,
         },
@@ -299,19 +316,24 @@ fn auto_allow(
 #[allow(clippy::type_complexity)]
 fn session(
     mut reader: MessageReader<AcpSessionCreated>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentRef), With<Session>>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
     mut page_meta: Query<&mut PageMetadata, With<SessionView>>,
+    links: AcpSessionLinks,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
-        for (session_entity, session_id) in &sessions {
-            if session_id.0 != ev.sid {
+        for (session_entity, session_id, agent_id) in &sessions {
+            if session_id.as_str() != ev.sid {
                 continue;
             }
-            commands
-                .entity(session_entity)
-                .insert(AcpSessionId(ev.acp_session_id.clone()));
+            links.set(
+                &mut commands,
+                session_entity,
+                &AcpSessionLink::kind(agent_id.as_str()),
+                &ev.acp_session_id,
+                None,
+            );
             let url = Route::Session(session_id.clone()).url();
             for (target, kids) in &stacks {
                 if target.entity() != session_entity {
@@ -331,13 +353,13 @@ fn session(
 
 fn present_process(
     mut reader: MessageReader<AcpTerminalCreated>,
-    sessions: Query<(Entity, &SessionId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>), With<Session>>,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
         let Some(session_entity) = sessions
             .iter()
-            .find(|(_, session_id)| session_id.0 == ev.sid)
+            .find(|(_, session_id)| session_id.as_str() == ev.sid)
             .map(|(entity, _)| entity)
         else {
             continue;
@@ -352,8 +374,8 @@ fn present_process(
 fn input(
     mut q: Query<(
         Entity,
-        &SessionId,
-        &AgentId,
+        &Id<Session>,
+        &AgentRef,
         &mut RunState,
         &mut PromptQueue,
         Has<AcpSpawnQueued>,
@@ -402,12 +424,12 @@ fn input(
         let context = PromptWorkspace::prompt(&policy, handoff, workspace_state, title_pending);
         let preferred_mode = modes
             .as_ref()
-            .and_then(|modes| modes.by_agent.get(&agent_id.0))
+            .and_then(|modes| modes.by_agent.get(agent_id.as_str()))
             .map(|memory| memory.selected.clone())
             .filter(|mode| !mode.is_empty());
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
-                sid: session_id.0.clone(),
+                sid: session_id.as_str().to_string(),
                 text,
                 context,
                 attachments: prompt.attachments,
@@ -425,14 +447,14 @@ fn acp_prompt_dispatch_ready(state: &RunState, queue: &PromptQueue, spawn_queued
 
 fn close_on_remove(
     trigger: On<Remove, ProcessAnchor>,
-    sessions: Query<&SessionId, With<Session>>,
+    sessions: Query<&Id<Session>, With<Session>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let Ok(session_id) = sessions.get(trigger.event_target()) else {
         return;
     };
     service_requests.write(ServiceRequest(ClientMessage::CloseAgentSession {
-        sid: session_id.0.clone(),
+        sid: session_id.as_str().to_string(),
     }));
 }
 
@@ -449,8 +471,8 @@ mod tests {
         fn bundle(agent: &str, sid: &str, cwd: impl Into<std::path::PathBuf>) -> impl Bundle {
             (
                 Session,
-                SessionId(sid.into()),
-                AgentId(agent.into()),
+                Id::<Session>::new(sid),
+                AgentRef::new(agent),
                 Cwd(cwd.into()),
                 ProcessAnchor(ProcessId::new()),
             )
@@ -591,13 +613,7 @@ mod tests {
     #[test]
     fn ancestor_workspace_state_tracks_pending_and_bound_tab() {
         let mut app = App::new();
-        let tab = app
-            .world_mut()
-            .spawn(Tab {
-                name: "Tab 1".into(),
-                startup_dir: None,
-            })
-            .id();
+        let tab = app.world_mut().spawn(Tab::named("Tab 1")).id();
         let session = app.world_mut().spawn(Session).id();
         app.world_mut()
             .spawn((EntityTarget::<Session>::new(session), ChildOf(tab)));
@@ -616,10 +632,7 @@ mod tests {
             Some(AcpWorkspaceState::PendingWorktree)
         );
         app.world_mut().entity_mut(tab).insert((
-            Tab {
-                name: "Tab 1".into(),
-                startup_dir: Some("/repo".into()),
-            },
+            StartupDir(Some("/repo".into())),
             vmux_space::RepositoryNeedsWorktree,
         ));
         assert_eq!(
@@ -671,10 +684,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "matching".into(),
-                    startup_dir: Some(project_dir.to_string_lossy().into_owned()),
-                },
+                Tab::named("matching").with_startup_dir(project_dir.clone()),
                 TabWorkspace {
                     project_dir: project_dir.to_string_lossy().into_owned(),
                 },
@@ -692,10 +702,7 @@ mod tests {
             .spawn((EntityTarget::<Session>::new(session), ChildOf(tab)));
         let unrelated_tab = app
             .world_mut()
-            .spawn(Tab {
-                name: "unrelated".into(),
-                startup_dir: Some(project_dir.to_string_lossy().into_owned()),
-            })
+            .spawn(Tab::named("unrelated").with_startup_dir(project_dir.clone()))
             .id();
         app.world_mut()
             .resource_mut::<Messages<crate::host::event::AcpWorkspaceChanged>>()
@@ -710,16 +717,16 @@ mod tests {
 
         assert_eq!(app.world().get::<Cwd>(session).unwrap().0, worktree_dir);
         assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some(worktree_dir.to_string_lossy().as_ref())
+            app.world().get::<StartupDir>(tab).unwrap().0.as_deref(),
+            Some(worktree_dir.as_path())
         );
         assert_eq!(
             app.world()
-                .get::<Tab>(unrelated_tab)
+                .get::<StartupDir>(unrelated_tab)
                 .unwrap()
-                .startup_dir
+                .0
                 .as_deref(),
-            Some(project_dir.to_string_lossy().as_ref())
+            Some(project_dir.as_path())
         );
 
         let background = app
@@ -771,22 +778,32 @@ mod tests {
         });
         app.update();
 
+        let profile = app
+            .world_mut()
+            .run_system_once(move |profiles: Profiles| {
+                profiles.get(matching).map(|profile| {
+                    (
+                        profile.name().to_string(),
+                        profile.icon().map(str::to_string),
+                    )
+                })
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(profile.0, "Antigravity");
         assert_eq!(
-            app.world().get::<Profile>(matching).unwrap().name,
-            "Antigravity"
-        );
-        assert_eq!(
-            app.world()
-                .get::<Profile>(matching)
-                .unwrap()
-                .icon
-                .as_deref(),
+            profile.1.as_deref(),
             Some("https://cdn.example/antigravity.svg")
         );
-        assert_eq!(
-            app.world().get::<Profile>(unrelated).unwrap().name,
-            "Claude"
-        );
+        let unrelated_name = app
+            .world_mut()
+            .run_system_once(move |profiles: Profiles| {
+                profiles
+                    .get(unrelated)
+                    .map(|profile| profile.name().to_string())
+            })
+            .unwrap();
+        assert_eq!(unrelated_name.as_deref(), Some("Claude"));
 
         app.world_mut().write_message(AcpAgentInfo {
             sid: "s1".into(),
@@ -794,10 +811,15 @@ mod tests {
         });
         app.update();
 
-        assert_eq!(
-            app.world().get::<Profile>(matching).unwrap().name,
-            "Antigravity"
-        );
+        let matching_name = app
+            .world_mut()
+            .run_system_once(move |profiles: Profiles| {
+                profiles
+                    .get(matching)
+                    .map(|profile| profile.name().to_string())
+            })
+            .unwrap();
+        assert_eq!(matching_name.as_deref(), Some("Antigravity"));
     }
 
     #[test]

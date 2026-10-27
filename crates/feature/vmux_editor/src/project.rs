@@ -1,9 +1,136 @@
-#[vmux_api::contract(Default, Eq)]
-pub struct ProjectId(pub String);
+use std::path::{Path, PathBuf};
 
-#[vmux_api::contract(Default, Eq)]
+use bevy_ecs::prelude::*;
+use bevy_reflect::Reflect;
+use moonshine_save::prelude::Save;
+use serde::{Deserialize, Serialize};
+use vmux_api::Id;
+pub use vmux_api::project::Project;
+
+impl ProjectBundle {
+    pub fn new(
+        id: Id<Project>,
+        name: impl Into<String>,
+        path: PathBuf,
+        source: impl Into<String>,
+        branch: impl Into<String>,
+    ) -> Result<ProjectBundle, String> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err("project name must not be empty".to_string());
+        }
+        Ok(Self {
+            save: Save,
+            project: Project,
+            id,
+            name: Name::new(name),
+            path: ProjectPath::new(path)?,
+            source: ProjectSource(source.into()),
+            branch: ProjectBranch(branch.into()),
+        })
+    }
+}
+
+#[derive(Bundle)]
+pub struct ProjectBundle {
+    save: Save,
+    project: Project,
+    id: Id<Project>,
+    name: Name,
+    path: ProjectPath,
+    source: ProjectSource,
+    branch: ProjectBranch,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_editor"]
+pub struct ProjectPath(PathBuf);
+
+impl ProjectPath {
+    pub fn new(path: PathBuf) -> Result<Self, String> {
+        if !path.is_absolute() {
+            return Err("project path must be absolute".to_string());
+        }
+        Ok(Self(path))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
+#[reflect(Component)]
+#[require(Save)]
+#[type_path = "vmux_editor"]
+pub struct ProjectSource(String);
+
+impl ProjectSource {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProjectBranch(String);
+
+impl ProjectBranch {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = OwnedProjects)]
+pub struct ProjectOwner(Entity);
+
+impl ProjectOwner {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = ProjectOwner, linked_spawn)]
+pub struct OwnedProjects(Vec<Entity>);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = ProjectSources)]
+pub struct ProjectTarget(Entity);
+
+impl ProjectTarget {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = ProjectTarget)]
+pub struct ProjectSources(Vec<Entity>);
+
+#[vmux_api::contract(Eq)]
 pub struct ProjectEntry {
-    pub id: ProjectId,
+    pub id: Id<Project>,
     pub name: String,
     pub source: String,
     pub path: String,
@@ -20,16 +147,7 @@ pub struct ProjectEntry {
 
 impl ProjectEntry {
     pub fn identity_seed(&self) -> &str {
-        if !self.id.0.trim().is_empty() {
-            return &self.id.0;
-        }
-        if !self.url.trim().is_empty() {
-            return &self.url;
-        }
-        if !self.path.trim().is_empty() {
-            return &self.path;
-        }
-        &self.name
+        self.id.as_str()
     }
 }
 
@@ -48,21 +166,21 @@ pub enum ProjectView {
     Error(String),
 }
 
-#[vmux_api::contract(Default, Eq)]
+#[vmux_api::contract(Eq)]
 pub struct ProjectDetailView {
-    pub id: ProjectId,
+    pub id: Id<Project>,
     pub name: String,
     pub path: String,
 }
 
 #[vmux_api::ui_state(Default, Eq, version = 3)]
-pub struct ProjectUiState {
+pub struct UiProject {
     pub view: ProjectView,
     pub collection_view: vmux_ecs::CollectionView,
 }
 
 #[cfg(host)]
-impl ProjectUiState {
+impl UiProject {
     pub(crate) fn pending(mut self) -> Self {
         if let ProjectView::Catalog(catalog) = &mut self.view {
             catalog.operation_pending = true;
@@ -158,10 +276,7 @@ mod tests {
 
 #[cfg(host)]
 impl ProjectRoute {
-    pub(crate) fn route_path(
-        value: &str,
-        root: &std::path::Path,
-    ) -> Option<Result<std::path::PathBuf, String>> {
+    pub(crate) fn route_path(value: &str, root: &Path) -> Option<Result<PathBuf, String>> {
         let root = match root.canonicalize() {
             Ok(root) => root,
             Err(error) => {
@@ -181,7 +296,7 @@ impl ProjectRoute {
             let Ok(decoded) = percent_encoding::percent_decode_str(encoded).decode_utf8() else {
                 return Some(Err("project URL contains invalid UTF-8".to_string()));
             };
-            let mut components = std::path::Path::new(decoded.as_ref()).components();
+            let mut components = Path::new(decoded.as_ref()).components();
             let Some(std::path::Component::Normal(component)) = components.next() else {
                 return Some(Err("project URL contains an invalid path".to_string()));
             };
@@ -193,10 +308,7 @@ impl ProjectRoute {
         Some(Ok(path))
     }
 
-    pub fn resolve(
-        value: &str,
-        root: &std::path::Path,
-    ) -> Option<Result<std::path::PathBuf, String>> {
+    pub fn resolve(value: &str, root: &Path) -> Option<Result<PathBuf, String>> {
         let root = match root.canonicalize() {
             Ok(root) => root,
             Err(error) => {
@@ -221,7 +333,7 @@ impl ProjectRoute {
         Some(Ok(canonical))
     }
 
-    pub fn from_path(root: &std::path::Path, path: &std::path::Path) -> Option<String> {
+    pub fn from_path(root: &Path, path: &Path) -> Option<String> {
         let relative = path.strip_prefix(root).ok()?;
         let mut url = url::Url::parse(Self::ROOT).ok()?;
         let mut segments = url.path_segments_mut().ok()?;

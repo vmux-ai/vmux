@@ -26,7 +26,11 @@ const MEASURE_ROWS: usize = 8;
 
 #[vmux_page::page(
     component = Page,
-    states = ["ThemeUiState", "TerminalUiState", "KeyClaimsUiState"],
+    states = [
+        vmux_ui::theme::UiTheme,
+        vmux_ecs::event::UiTerminal,
+        vmux_api::input::UiKeyClaims,
+    ],
     claims = crate::Terminal
 )]
 pub(crate) struct TerminalPage;
@@ -70,7 +74,7 @@ impl Viewport {
         if cw <= 0.0 || ch <= 0.0 || self.client.1 <= 0.0 {
             return;
         }
-        let _ = send(&TermResizeEvent {
+        send(&TermResizeEvent {
             char_width: cw as f32,
             char_height: ch as f32,
             viewport_width: (self.client.0 - 2.0 * padding) as f32,
@@ -321,7 +325,7 @@ pub fn Page() -> Element {
                 if follow != *following.peek() {
                     following.set(follow);
                     last_scroll_req.set(if follow { u32::MAX } else { vis_first });
-                    let _ = send(&TermScrollEvent {
+                    send(&TermScrollEvent {
                         top_row: vis_first,
                         follow,
                     });
@@ -340,7 +344,7 @@ pub fn Page() -> Element {
                     && last_scroll_req() != vis_first
                 {
                     last_scroll_req.set(vis_first);
-                    let _ = send(&TermScrollEvent {
+                    send(&TermScrollEvent {
                         top_row: vis_first,
                         follow: false,
                     });
@@ -562,7 +566,7 @@ fn TerminalRow(
                             onclick: move |e: Event<MouseData>| {
                                 e.stop_propagation();
                                 e.prevent_default();
-                                let _ = send(&TermLinkOpenRequest { url: url.clone() });
+                                send(&TermLinkOpenRequest { url: url.clone() });
                             },
                         }
                     }
@@ -612,7 +616,7 @@ fn modifier_bits(mods: Modifiers) -> u8 {
 }
 
 fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, moving: bool) {
-    let _ = send(&TermMouseEvent {
+    send(&TermMouseEvent {
         button,
         col,
         row,

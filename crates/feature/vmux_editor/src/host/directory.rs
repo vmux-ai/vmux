@@ -186,7 +186,7 @@ fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut co
             continue;
         }
         let state = navigation.state(file, &directory);
-        commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+        commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &state));
         commands.entity(entity).insert(FileInitialMetaSent);
         if let Some(entry) = state.entries.get(state.selected as usize) {
             commands.trigger(FilePreviewLoad {
@@ -228,7 +228,7 @@ fn breadcrumb(
         return;
     }
     let path_text = path.to_string_lossy().into_owned();
-    commands.trigger(vmux_ecs::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::UiFileWrite::from_event(
         entity,
         &FileBreadcrumbState {
             path: path_text.clone(),
@@ -257,7 +257,7 @@ fn finish_breadcrumb(
         };
         commands.entity(entity).remove::<BreadcrumbTask>();
         if browsers.can_emit_to(&entity) {
-            commands.trigger(vmux_ecs::FileUiStateWrite::from_event(entity, &state));
+            commands.trigger(vmux_ecs::UiFileWrite::from_event(entity, &state));
         }
     }
 }

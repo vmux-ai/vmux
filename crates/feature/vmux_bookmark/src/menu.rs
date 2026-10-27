@@ -30,17 +30,18 @@ mod macos {
     use bevy::ecs::system::{NonSendMarker, SystemParam};
     use bevy::prelude::*;
     use std::collections::HashSet;
+    use vmux_api::Id;
     use vmux_api::bookmark::{
-        BookmarkFolderCreateEffect, BookmarkMenuEffect, BookmarkRenameEffect,
+        BookmarkEntry, BookmarkFolderCreateEffect, BookmarkMenuEffect, BookmarkRenameEffect,
     };
-    use vmux_ecs::{Bookmark, Collapsed, Folder, PageMetadata, Pin, UiStateWrite, Uuid};
+    use vmux_ecs::{Bookmark, Collapsed, Folder, PageMetadata, Pin, UiStateWrite};
     use vmux_layout::bookmark::{
         AddRequest, BookmarkMenuTarget, MoveFolderRequest, MoveRequest, PinRequest,
         RemoveFolderRequest, RemoveRequest, ShowBookmarkMenuRequest, ToggleFolderRequest,
         UnpinRequest,
     };
     use vmux_layout::stack::OpenRequest;
-    use vmux_layout::state::LayoutUiState;
+    use vmux_layout::state::UiLayout;
     use vmux_page::menu::{
         OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet,
     };
@@ -101,7 +102,7 @@ mod macos {
         's,
         (
             Entity,
-            &'static Uuid,
+            &'static Id<BookmarkEntry>,
             Option<&'static Name>,
             Option<&'static PageMetadata>,
             Has<Pin>,
@@ -130,7 +131,7 @@ mod macos {
                 }
                 folders.push(FolderMenuRow {
                     entity,
-                    uuid: uuid.0.clone(),
+                    uuid: uuid.as_str().to_string(),
                     name: name
                         .map(|name| name.as_str())
                         .unwrap_or_default()
@@ -289,7 +290,7 @@ mod macos {
         uuid: &str,
     ) {
         let Some((_, _, _, Some(metadata), true, bookmarked, _, _, _)) =
-            entries.iter().find(|(_, id, ..)| id.0 == uuid)
+            entries.iter().find(|(_, id, ..)| id.as_str() == uuid)
         else {
             return;
         };
@@ -330,7 +331,7 @@ mod macos {
         webview: Entity,
     ) {
         let Some((_, _, _, Some(metadata), pinned, true, _, _, parent)) =
-            entries.iter().find(|(_, id, ..)| id.0 == uuid)
+            entries.iter().find(|(_, id, ..)| id.as_str() == uuid)
         else {
             return;
         };
@@ -418,7 +419,7 @@ mod macos {
         webview: Entity,
     ) {
         let Some((entity, _, _, _, _, _, true, collapsed, parent)) =
-            entries.iter().find(|(_, id, ..)| id.0 == uuid)
+            entries.iter().find(|(_, id, ..)| id.as_str() == uuid)
         else {
             return;
         };
@@ -551,7 +552,7 @@ mod macos {
     ) {
         for request in new_folders.read() {
             revision.0 = revision.0.wrapping_add(1);
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 request.webview,
                 &BookmarkMenuEffect {
                     create_folder: BookmarkFolderCreateEffect {
@@ -564,7 +565,7 @@ mod macos {
         }
         for request in renames.read() {
             revision.0 = revision.0.wrapping_add(1);
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            commands.trigger(UiStateWrite::<UiLayout>::from_event(
                 request.webview,
                 &BookmarkMenuEffect {
                     rename: BookmarkRenameEffect {

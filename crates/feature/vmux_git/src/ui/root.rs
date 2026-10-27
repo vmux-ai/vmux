@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_api::input::KeyModifiers;
-use vmux_ui::hooks::{send, use_theme};
+use vmux_ui::hooks::{send, try_send, use_theme};
 use vmux_ui::i18n::translate;
 
 use super::branches::BranchPromptDialog;
@@ -31,7 +31,7 @@ pub fn Page() -> Element {
                 if event.key() == Key::Escape && shortcut_help_visible() {
                     event.prevent_default();
                     event.stop_propagation();
-                    let _ = send(&GitShortcutHelpRequest { visible: false });
+                    send(&GitShortcutHelpRequest { visible: false });
                     return;
                 }
                 let modifiers = event.modifiers();
@@ -47,7 +47,7 @@ pub fn Page() -> Element {
                     repeat: event.is_auto_repeating(),
                 };
                 let captured = request.captures_browser_default(repository_loaded());
-                if send(&request).is_ok() && captured {
+                if try_send(&request).is_ok() && captured {
                     event.prevent_default();
                     event.stop_propagation();
                 }

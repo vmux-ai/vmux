@@ -2,6 +2,8 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 pub use executable::Executable;
 pub use file_url::FileUrl;
 pub use navigation::NavigationText;
@@ -58,6 +60,11 @@ impl AtomicFile {
         Self::sync_parent(parent)
     }
 
+    pub fn write_revision(path: impl AsRef<Path>, bytes: &[u8]) -> io::Result<FileRevision> {
+        Self::write(path, bytes)?;
+        Ok(FileRevision::of(bytes))
+    }
+
     #[cfg(unix)]
     fn sync_parent(parent: &Path) -> io::Result<()> {
         std::fs::File::open(parent)?.sync_all()
@@ -66,6 +73,19 @@ impl AtomicFile {
     #[cfg(not(unix))]
     fn sync_parent(_parent: &Path) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FileRevision([u8; 32]);
+
+impl FileRevision {
+    pub fn of(bytes: &[u8]) -> Self {
+        Self(Sha256::digest(bytes).into())
+    }
+
+    pub fn read(path: impl AsRef<Path>) -> io::Result<Self> {
+        std::fs::read(path).map(|bytes| Self::of(&bytes))
     }
 }
 
@@ -235,6 +255,17 @@ mod tests {
         AtomicFile::write(&path, b"second").unwrap();
 
         assert_eq!(std::fs::read(path).unwrap(), b"second");
+    }
+
+    #[test]
+    fn atomic_file_returns_the_revision_written_to_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state.ron");
+
+        let revision = AtomicFile::write_revision(&path, b"state").unwrap();
+
+        assert_eq!(FileRevision::read(path).unwrap(), revision);
+        assert_ne!(revision, FileRevision::of(b"other"));
     }
 
     #[cfg(unix)]

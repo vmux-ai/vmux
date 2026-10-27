@@ -446,7 +446,7 @@ fn MdInlineView(inline: MdInline, inline_key: usize) -> Element {
                     },
                     onclick: move |event: Event<MouseData>| {
                         event.stop_propagation();
-                        let _ = send(&vmux_ecs::event::KnowledgeLinkOpen {
+                        send(&vmux_ecs::event::KnowledgeLinkOpen {
                             path: open_path.clone(),
                             title: open_title.clone(),
                             line: open_line,

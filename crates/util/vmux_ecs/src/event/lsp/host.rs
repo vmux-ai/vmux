@@ -45,13 +45,13 @@ pub struct LspInstallNotice {
 }
 
 #[vmux_api::ui_state(Eq)]
-pub struct LspManagerUiState {
+pub struct UiLspManager {
     pub packages: Vec<LspPackage>,
     pub progress: Vec<LspInstallProgress>,
     pub loading: bool,
 }
 
-impl Default for LspManagerUiState {
+impl Default for UiLspManager {
     fn default() -> Self {
         Self {
             packages: Vec::new(),

@@ -1,7 +1,7 @@
 use crate::event::HistoryEntry;
 
 #[vmux_api::ui_state(Default)]
-pub struct HistoryUiState {
+pub struct UiHistory {
     pub entries: Vec<HistoryEntry>,
     pub has_more: bool,
     pub query: String,
@@ -14,7 +14,7 @@ mod tests {
 
     #[test]
     fn history_snapshot_round_trips_through_ui_state() {
-        let state = HistoryUiState {
+        let state = UiHistory {
             entries: vec![HistoryEntry {
                 url_entity_bits: 7,
                 url: "https://example.com".to_string(),
@@ -29,7 +29,7 @@ mod tests {
             clear_confirm_open: true,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
-        let decoded = rkyv::from_bytes::<HistoryUiState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<UiHistory, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.entries.len(), 1);
         assert_eq!(decoded.entries[0].url_entity_bits, 7);

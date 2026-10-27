@@ -54,13 +54,34 @@ pub fn ProjectSelectPopup(
     on_add: EventHandler<()>,
     #[props(default)] on_open_selected: Option<EventHandler<ProjectRow>>,
 ) -> Element {
+    rsx! {
+        DropdownPopup { match_width, class,
+            ProjectSelectPopupContent {
+                projects,
+                selected_path,
+                on_pick,
+                on_add,
+                on_open_selected,
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ProjectSelectPopupContent(
+    projects: Vec<ProjectRow>,
+    selected_path: String,
+    on_pick: EventHandler<ProjectRow>,
+    on_add: EventHandler<()>,
+    #[props(default)] on_open_selected: Option<EventHandler<ProjectRow>>,
+) -> Element {
     let has_projects = !projects.is_empty();
     let selected_project = projects
         .iter()
         .find(|project| project.path == selected_path)
         .cloned();
     rsx! {
-        DropdownPopup { match_width, class: cn([class.as_str(), "p-1.5"]),
+        div { class: "p-1.5",
             for project in projects {
                 {
                     let selected = project.path == selected_path;

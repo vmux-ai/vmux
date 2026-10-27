@@ -8,7 +8,8 @@ use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::i18n::translate;
 
 #[component]
-pub(super) fn MediaMenu(chat: Chat) -> Element {
+pub(super) fn MediaMenu() -> Element {
+    let chat = use_context::<Chat>();
     let media = chat.media.current();
     rsx! {
         PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
@@ -26,7 +27,8 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
 }
 
 #[component]
-pub(super) fn CommandMenu(chat: Chat) -> Element {
+pub(super) fn CommandMenu() -> Element {
+    let chat = use_context::<Chat>();
     rsx! {
         PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             for (index , command) in chat.filtered_commands().into_iter().enumerate() {
@@ -55,7 +57,8 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
 }
 
 #[component]
-pub(super) fn ResumeMenu(chat: Chat) -> Element {
+pub(super) fn ResumeMenu() -> Element {
+    let chat = use_context::<Chat>();
     let state = chat.resume_state();
     let resume = chat.resume.current();
     let note = match state {

@@ -16,13 +16,13 @@ use vmux_command::{
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
 use vmux_ecs::KeyboardOwner;
 use vmux_ecs::PageMetadata;
-use vmux_ecs::manifest::FeaturePlugin;
+use vmux_feature::AppFeatureExt;
 use vmux_ui::i18n::Locale;
 
 use crate::event::StartSelectWorkspace;
 use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
-use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace, TabWorktree};
 use vmux_layout::workspace_snapshot::TabGather;
 
 #[vmux_page::page]
@@ -30,7 +30,7 @@ pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(
@@ -91,10 +91,11 @@ struct StartPromptContext<'w, 's> {
         'w,
         's,
         (
-            Ref<'static, Tab>,
+            Ref<'static, StartupDir>,
             Option<Ref<'static, TabWorkspace>>,
             Option<Ref<'static, TabWorktree>>,
         ),
+        With<Tab>,
     >,
     context: Single<'w, 's, Ref<'static, CommandBarContextSnapshot>>,
     pages: Single<'w, 's, Ref<'static, CommandBarPagesSnapshot>>,
@@ -151,8 +152,9 @@ impl StartPromptContext<'_, '_> {
         let Ok((tab, workspace, _)) = self.tabs.get(tab) else {
             return String::new();
         };
-        tab.startup_dir
-            .clone()
+        tab.0
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
             .or_else(|| {
                 workspace
                     .as_ref()
@@ -411,15 +413,15 @@ fn finish_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(
-            read.webview,
-            &vmux_api::command_bar::StartProjectBranches {
-                project: read.project.clone(),
-                branches,
-            },
-        ));
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(
+                read.webview,
+                &vmux_api::command_bar::StartProjectBranches {
+                    project: read.project.clone(),
+                    branches,
+                },
+            ),
+        );
     }
 }
 
@@ -481,20 +483,20 @@ struct ChosenProject {
 
 fn apply_chosen_project(
     trigger: On<ChosenProject>,
-    mut tabs: Query<&mut Tab>,
+    mut tabs: Query<(&mut Name, &mut StartupDir), With<Tab>>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
-    let Ok(mut tab) = tabs.get_mut(request.tab) else {
+    let Ok((mut name, mut startup_dir)) = tabs.get_mut(request.tab) else {
         return;
     };
     let dir = request.path.to_string_lossy().into_owned();
-    tab.startup_dir = Some(dir.clone());
-    if vmux_layout::worktree::WorktreeName::is_generated(&tab.name)
-        && let Some(name) = request.path.file_name().and_then(|name| name.to_str())
-        && !name.is_empty()
+    startup_dir.0 = Some(request.path.clone());
+    if vmux_layout::worktree::WorktreeName::is_generated(name.as_str())
+        && let Some(project_name) = request.path.file_name().and_then(|name| name.to_str())
+        && !project_name.is_empty()
     {
-        tab.name = name.to_string();
+        *name = Name::new(project_name.to_string());
     }
     let mut entity = commands.entity(request.tab);
     entity
@@ -621,9 +623,9 @@ fn sync_pages(
         &locale,
     );
     for (e, focus_requested) in targets {
-        commands.trigger(vmux_ecs::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(e, &payload));
+        commands.trigger(
+            vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(e, &payload),
+        );
         if focus_requested {
             commands.trigger(CommandBarFocusRequested { webview: e });
         }
@@ -646,9 +648,9 @@ fn focus_command_bar(
             effect
         }
     };
-    commands.trigger(vmux_ecs::UiStateWrite::<
-        vmux_api::command_bar::CommandBarUiState,
-    >::from_event(webview, &effect));
+    commands.trigger(
+        vmux_ecs::UiStateWrite::<vmux_api::command_bar::UiCommandBar>::from_event(webview, &effect),
+    );
 }
 
 fn mark_launcher(
@@ -689,9 +691,9 @@ fn begin_inline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::command_bar::CommandBarUiState;
+    use vmux_api::command_bar::UiCommandBar;
     #[cfg(ui)]
-    use vmux_api::input::{KeyClaimsUiState, KeyContextRequest};
+    use vmux_api::input::{KeyContextRequest, UiKeyClaims};
     #[cfg(ui)]
     use vmux_api::{BinEvent, UiEventPermissions};
     use vmux_ecs::UiStateWrite;
@@ -700,10 +702,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct EmittedIds(Vec<(&'static str, u64)>);
 
-    fn capture_state(
-        trigger: On<UiStateWrite<CommandBarUiState>>,
-        mut emitted: ResMut<EmittedIds>,
-    ) {
+    fn capture_state(trigger: On<UiStateWrite<UiCommandBar>>, mut emitted: ResMut<EmittedIds>) {
         let patch = trigger.event().update();
         let entry = if patch.snapshot.is_some() {
             ("snapshot", 0)
@@ -754,7 +753,7 @@ mod tests {
         assert!(UiEventPermissions::allows_page(
             permissions.iter(app.world()),
             StartPlugin::URL,
-            KeyClaimsUiState::PERMISSION,
+            UiKeyClaims::PERMISSION,
         ));
     }
 

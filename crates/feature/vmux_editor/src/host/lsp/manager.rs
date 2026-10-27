@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiInput};
-use vmux_ecs::FileUiStateWrite;
+use vmux_ecs::UiFileWrite;
 #[cfg(test)]
 use vmux_ecs::event::FileLine;
 use vmux_ecs::event::{
@@ -1094,7 +1094,7 @@ fn drain_requests(
             ReqKind::Hover { line, col } => {
                 let blocks = parse_hover(&value);
                 if !blocks.is_empty() && ready {
-                    commands.trigger(FileUiStateWrite::from_event(
+                    commands.trigger(UiFileWrite::from_event(
                         request.target,
                         &FileHoverState {
                             value: Some(FileHover {
@@ -1152,7 +1152,7 @@ fn drain_requests(
                     ));
                     continue;
                 }
-                commands.trigger(FileUiStateWrite::from_event(
+                commands.trigger(UiFileWrite::from_event(
                     request.target,
                     &FileCodeActions {
                         titles,
@@ -1215,7 +1215,7 @@ fn drain_requests(
             ReqKind::DocumentSymbol => {
                 let items = crate::host::explorer::OutlineRows::from_lsp(&value).into_vec();
                 if ready {
-                    commands.trigger(FileUiStateWrite::from_event(
+                    commands.trigger(UiFileWrite::from_event(
                         request.target,
                         &OutlineEvent { items },
                     ));
@@ -1391,7 +1391,7 @@ fn move_code_action(
         };
         titles.push(title);
     }
-    commands.trigger(FileUiStateWrite::from_event(
+    commands.trigger(UiFileWrite::from_event(
         entity,
         &FileCodeActions {
             titles,
@@ -1408,7 +1408,7 @@ fn file_code_action_pick(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    commands.trigger(FileUiStateWrite::from_event(
+    commands.trigger(UiFileWrite::from_event(
         entity,
         &FileCodeActions {
             titles: Vec::new(),
@@ -1463,7 +1463,7 @@ fn dismiss_code_actions(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    commands.trigger(FileUiStateWrite::from_event(
+    commands.trigger(UiFileWrite::from_event(
         entity,
         &FileCodeActions {
             titles: Vec::new(),
@@ -1516,7 +1516,7 @@ fn emit_diagnostics(
             None if merged.is_empty() => continue,
             _ => {}
         }
-        commands.trigger(FileUiStateWrite::from_event(
+        commands.trigger(UiFileWrite::from_event(
             entity,
             &FileDiagnostics {
                 path: fv.path.to_string_lossy().into_owned(),
@@ -1670,7 +1670,7 @@ fn publish_status(
             .then(|| registry.package(ext))
             .flatten()
             .map(str::to_string);
-        commands.trigger(FileUiStateWrite::from_event(
+        commands.trigger(UiFileWrite::from_event(
             entity,
             &FileLspStatus {
                 path: fv.path.to_string_lossy().into_owned(),

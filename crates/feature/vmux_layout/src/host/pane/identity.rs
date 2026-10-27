@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_api::Id;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_history::LastActivatedAt;
 
@@ -10,11 +11,10 @@ pub(super) struct IdentityPlugin;
 
 impl Plugin for IdentityPlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<PaneId>()
+        app.register_persisted::<Id<Pane>>()
             .register_type::<SpawnSeq>()
             .add_systems(Update, repair_stack_parents)
             .add_systems(Update, stamp_spawn_seq)
-            .add_systems(Update, assign_ids)
             .add_systems(
                 Startup,
                 (spawn_spawn_counter, reseed_spawn_counter)
@@ -23,12 +23,6 @@ impl Plugin for IdentityPlugin {
             );
     }
 }
-
-#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct PaneId(pub String);
 
 #[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[reflect(Component)]
@@ -41,14 +35,6 @@ pub struct SpawnCounter(pub u64);
 
 fn spawn_spawn_counter(mut commands: Commands) {
     commands.spawn((Name::new("Pane spawn counter"), SpawnCounter::default()));
-}
-
-fn assign_ids(panes: Query<Entity, (With<Pane>, Without<PaneId>)>, mut commands: Commands) {
-    for entity in &panes {
-        commands
-            .entity(entity)
-            .insert(PaneId(uuid::Uuid::new_v4().to_string()));
-    }
 }
 
 fn stamp_spawn_seq(
@@ -176,22 +162,5 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(counter.0, 8);
-    }
-
-    #[test]
-    fn assign_pane_ids_fills_missing_and_keeps_existing() {
-        let mut app = App::new();
-        app.add_systems(Update, assign_ids);
-        let bare = app.world_mut().spawn(Pane).id();
-        let kept = app
-            .world_mut()
-            .spawn((Pane, PaneId("fixed".to_string())))
-            .id();
-
-        app.update();
-
-        let assigned = app.world().get::<PaneId>(bare).expect("id assigned");
-        assert!(!assigned.0.is_empty());
-        assert_eq!(app.world().get::<PaneId>(kept).unwrap().0, "fixed");
     }
 }

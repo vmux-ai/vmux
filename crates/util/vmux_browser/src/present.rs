@@ -96,9 +96,9 @@ impl WindowFrameQueries<'_, '_> {
             let Ok((entity, activated_at)) = self.tabs.get(entity) else {
                 continue;
             };
-            if latest
-                .is_none_or(|(_, current): (Entity, LastActivatedAt)| activated_at.0 > current.0)
-            {
+            if latest.is_none_or(|(_, current): (Entity, LastActivatedAt)| {
+                activated_at.milliseconds() > current.milliseconds()
+            }) {
                 latest = Some((entity, *activated_at));
             }
         }
@@ -1540,7 +1540,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(glass)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(glass)))
             .id();
         let pane = app
             .world_mut()
@@ -1555,7 +1555,7 @@ mod tests {
             .id();
         let stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::new(1), ChildOf(pane)))
             .id();
         let page = app
             .world_mut()

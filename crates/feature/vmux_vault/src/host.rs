@@ -9,8 +9,8 @@ use parking_lot::Mutex;
 use vmux_ecs::{UiState, UiStatePlugin};
 
 use crate::state::{
-    VaultAuthorization, VaultCompletion, VaultOperation, VaultOperationKind, VaultOperationState,
-    VaultSnapshot, VaultUiState, VaultWorkflowState,
+    UiVault, VaultAuthorization, VaultCompletion, VaultOperation, VaultOperationKind,
+    VaultOperationState, VaultSnapshot, VaultWorkflowState,
 };
 
 mod operation;
@@ -44,7 +44,7 @@ impl Plugin for VaultPlugin {
 
         app.add_plugins((
             crate::agent::VaultAgentPlugin,
-            UiStatePlugin::<VaultUiState>::default(),
+            UiStatePlugin::<UiVault>::default(),
             RuntimePlugin,
             OperationPlugin,
             WorkflowPlugin,
@@ -93,12 +93,12 @@ impl VaultOperationSequence {
 }
 
 #[derive(Component, Default)]
-#[require(UiState<VaultUiState>, VaultWorkflow)]
+#[require(UiState<UiVault>, VaultWorkflow)]
 struct VaultSubscriber {
     snapshot_revision: u64,
     revision: u64,
     emitted_revision: u64,
-    state: VaultUiState,
+    state: UiVault,
 }
 
 #[derive(Component, Default)]

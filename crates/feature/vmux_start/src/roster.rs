@@ -1,7 +1,7 @@
 use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::command_bar::{
-    CommandBarOpenEvent, CommandBarPage, CommandBarTab, CommandBarUiState, OpenId,
+    CommandBarOpenEvent, CommandBarPage, CommandBarTab, OpenId, UiCommandBar,
 };
 use vmux_api::page::UiStateEmit;
 
@@ -83,7 +83,7 @@ fn emit(
         return;
     }
     launcher.sequence = launcher.sequence.wrapping_add(1).max(1);
-    let state = CommandBarUiState {
+    let state = UiCommandBar {
         snapshot: launcher.snapshot.clone(),
         ..Default::default()
     };
@@ -140,7 +140,8 @@ impl Launcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::session::{RemoteStatus, SessionId};
+    use vmux_api::Id;
+    use vmux_api::session::{RemoteStatus, Session};
 
     impl Roster {
         fn one() -> Self {
@@ -164,7 +165,7 @@ mod tests {
 
         fn session(name: &str) -> RemoteSession {
             RemoteSession {
-                id: SessionId::new(format!("sid-{name}")),
+                id: Id::<Session>::new(format!("sid-{name}")),
                 url: format!("vmux://sessions/sid-{name}"),
                 title: String::new(),
                 name: name.into(),

@@ -539,7 +539,7 @@ pub struct SideSheetState {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct BookmarkUiState {
+pub struct UiBookmark {
     pub pins: Vec<BookmarkPinState>,
     pub rows: Vec<BookmarkTreeState>,
     pub folders: Vec<BookmarkFolderChoice>,
@@ -674,7 +674,7 @@ pub enum RemotePhase {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct RemoteUiState {
+pub struct UiRemote {
     pub enabled: bool,
     pub phase: RemotePhase,
     pub pairing_url: String,
@@ -711,6 +711,50 @@ pub struct LayoutOverlayEvent {
 #[vmux_api::contract(Copy, Default, Eq)]
 pub struct LayoutOverlayDismissEffect {
     pub revision: u64,
+}
+
+#[vmux_api::contract(Default)]
+#[cfg_attr(host, derive(bevy::prelude::Component))]
+pub struct ProjectDropdownState {
+    pub id: String,
+    pub pane_id: u64,
+    pub current_dir: String,
+    pub selected_path: String,
+    pub projects: Vec<vmux_ecs::event::ProjectRow>,
+    pub anchor: vmux_api::dropdown::DropdownAnchor,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ProjectDropdownOpenRequest {
+    pub state: ProjectDropdownState,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ProjectDropdownSizeRequest {
+    pub id: String,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ProjectDropdownPickRequest {
+    pub id: String,
+    pub path: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ProjectDropdownAddRequest {
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ProjectDropdownOpenSelectedRequest {
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Default, Eq)]
+pub struct ProjectDropdownCloseRequest {
+    pub id: String,
 }
 
 #[vmux_api::ui_event]

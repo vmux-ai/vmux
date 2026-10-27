@@ -1,15 +1,13 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::use_ui_state;
+use vmux_ui::hooks::UiState;
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::{GitDiffRow, GitDiffViewport};
-use crate::state::{
-    GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, GitUiState,
-};
+use crate::state::{GitDiffAppend, GitPageControllerState, GitPageSnapshot, GitProjects, UiGit};
 
 #[derive(Clone, Copy)]
 pub(super) struct GitPageState {
-    root: Signal<GitUiState>,
+    root: Signal<UiGit>,
     pub(super) snapshot: Memo<GitPageSnapshot>,
     pub(super) controller: Memo<GitPageControllerState>,
     pub(super) projects: Memo<GitProjects>,
@@ -21,7 +19,7 @@ pub(super) struct GitPageState {
 
 impl GitPageState {
     pub(super) fn use_state() -> Self {
-        let root = use_ui_state::<GitUiState>().state;
+        let root = UiState::<UiGit>::use_context().state;
         let state = Self {
             root,
             snapshot: use_memo(move || root.read().snapshot.clone()),
@@ -36,14 +34,14 @@ impl GitPageState {
         state
     }
 
-    pub(super) fn use_selector<T>(self, select: impl Fn(&GitUiState) -> T + 'static) -> Memo<T>
+    pub(super) fn use_selector<T>(self, select: impl Fn(&UiGit) -> T + 'static) -> Memo<T>
     where
         T: Clone + PartialEq + 'static,
     {
         use_memo(move || select(&self.root.read()))
     }
 
-    fn subscribe(self, root: Signal<GitUiState>) {
+    fn subscribe(self, root: Signal<UiGit>) {
         use_effect(move || {
             let root = root.read();
             self.diff.synchronize(&root.snapshot);

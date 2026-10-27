@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::FileUiStateWrite;
+use vmux_ecs::UiFileWrite;
 use vmux_ecs::event::{FileTidyRequest, FileTidyState, TidyChoice};
 use vmux_ecs::notify::AgentAttention;
 use vmux_ecs::team::Agent;
@@ -47,10 +47,7 @@ fn request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    commands.trigger(FileUiStateWrite::from_event(
-        webview,
-        &FileTidyState::default(),
-    ));
+    commands.trigger(UiFileWrite::from_event(webview, &FileTidyState::default()));
     let Some(mut settings) = settings else {
         return;
     };

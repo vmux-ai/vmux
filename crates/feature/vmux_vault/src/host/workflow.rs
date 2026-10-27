@@ -6,14 +6,14 @@ use vmux_ecs::UiStateWrite;
 use vmux_ecs::page::PageReady;
 
 use crate::state::{
-    VaultChooseCloudFolderRequest, VaultConnectCloudRequest, VaultConnectGithubRequest,
+    UiVault, VaultChooseCloudFolderRequest, VaultConnectCloudRequest, VaultConnectGithubRequest,
     VaultConnectRequest, VaultConnectionProvider, VaultCreateCloudFolderRequest,
     VaultCreateRecoveryKeyRequest, VaultCreateRequest, VaultDestination,
     VaultDestinationSelectRequest, VaultNotice, VaultOperation, VaultOperationKind,
     VaultOwnerChoice, VaultOwnerKind, VaultOwnerSelectRequest, VaultPrivacyRequest,
     VaultProviderSelectRequest, VaultRecoveryConfirmationRequest, VaultRecoveryInputRequest,
     VaultRefreshRequest, VaultRepository, VaultRepositoryChoice, VaultRepositoryNameRequest,
-    VaultRepositorySelectRequest, VaultSyncStatus, VaultUiState, VaultUnlockRecoveryKeyRequest,
+    VaultRepositorySelectRequest, VaultSyncStatus, VaultUnlockRecoveryKeyRequest,
     VaultWorkflowConnectRequest, VaultWorkflowCreateRequest, VaultWorkflowState,
 };
 
@@ -72,7 +72,7 @@ impl VaultWorkflow {
         }
     }
 
-    fn projected(&self, state: &VaultUiState, snapshot_changed: bool) -> VaultWorkflowState {
+    fn projected(&self, state: &UiVault, snapshot_changed: bool) -> VaultWorkflowState {
         let vault = &state.vault;
         let mut projected = self.state.clone();
         if !vault.github_owner.is_empty()
@@ -574,7 +574,7 @@ fn emit_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        commands.trigger(UiStateWrite::<VaultUiState>::from_event(
+        commands.trigger(UiStateWrite::<UiVault>::from_event(
             entity,
             &subscriber.state,
         ));
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn projects_choices_notice_and_recovery_validation() {
         let recovery_key = "a".repeat(68);
-        let state = VaultUiState {
+        let state = UiVault {
             vault: VaultSnapshot {
                 github_owner: "jun".to_string(),
                 github_owners: vec!["jun".to_string(), "vmux-ai".to_string()],

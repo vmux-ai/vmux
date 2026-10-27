@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::UiInput;
+use vmux_api::Id;
 use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::space::{ProjectActivateRequest, ProjectPickerRequest};
 use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
@@ -11,10 +12,10 @@ use vmux_ecs::{PageMetadata, UiStateWrite};
 use vmux_git::worktree::{CheckoutInfo, LinkedRepoRoot};
 #[cfg(test)]
 use vmux_layout::pane::Pane;
-use vmux_layout::space::{
-    EffectiveStartupSet, FocusedSpace, Space, SpaceHierarchy, SpaceId, SpaceOfPane,
-};
-use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+use vmux_layout::space::{EffectiveStartupSet, FocusedSpace, Space, SpaceHierarchy, SpaceOfPane};
+#[cfg(test)]
+use vmux_layout::tab::Tab;
+use vmux_layout::tab::{StartupDir, TabWorkspace, TabWorktree};
 #[cfg(test)]
 use vmux_setting::SpaceOverrides;
 use vmux_setting::{AppSettings, SettingsSaveRequest, SpaceProject};
@@ -418,7 +419,7 @@ fn publish_git_projects(
         commands
             .entity(entity)
             .insert(GitProjectsProjection(rows.0.clone()));
-        commands.trigger(UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+        commands.trigger(UiStateWrite::<vmux_git::state::UiGit>::from_event(
             entity,
             &vmux_git::state::GitProjects {
                 rows: rows.0.clone(),
@@ -513,7 +514,7 @@ pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, AppSettings>>,
     active_space: FocusedSpace<'w, 's>,
     hierarchy: SpaceHierarchy<'w, 's>,
-    space_ids: Query<'w, 's, &'static SpaceId>,
+    space_ids: Query<'w, 's, &'static Id<Space>>,
     expanded: Query<'w, 's, &'static ExpandedProjectDirs, With<Space>>,
 }
 
@@ -531,7 +532,7 @@ impl SpaceProjects<'_, '_> {
         let Ok(space_id) = self.space_ids.get(space) else {
             return self.active_rows();
         };
-        self.rows_of(&space_id.0, Some(space))
+        self.rows_of(space_id.as_str(), Some(space))
     }
 
     pub fn active_rows(&self) -> Vec<ProjectRow> {
@@ -564,8 +565,8 @@ impl SpaceProjects<'_, '_> {
             let source = self.active_projects();
             return catalog.selector_rows(self.active_space.id(), &source);
         };
-        let source = self.projects_of(&space_id.0);
-        catalog.selector_rows(Some(&space_id.0), &source)
+        let source = self.projects_of(space_id.as_str());
+        catalog.selector_rows(Some(space_id.as_str()), &source)
     }
 
     fn projects_of(&self, space_id: &str) -> Vec<ProjectRow> {
@@ -640,7 +641,7 @@ fn remember(
         Entity,
         Ref<TabWorkspace>,
         Option<Ref<TabWorktree>>,
-        Option<&Tab>,
+        Option<&StartupDir>,
     )>,
     space_of_tab: SpaceOfTab,
     roots: Single<&RepoRoots>,
@@ -675,13 +676,14 @@ fn remember(
                     .entity(tab_entity)
                     .remove::<(PendingRepoRoot, RepoRootTask)>();
                 let checkout = tab
-                    .and_then(|tab| tab.startup_dir.as_deref())
-                    .filter(|path| !path.is_empty())
+                    .and_then(|startup_dir| startup_dir.0.as_deref())
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or_else(|| {
                         if worktree.checkout_dir.is_empty() {
-                            dir
+                            dir.to_string()
                         } else {
-                            &worktree.checkout_dir
+                            worktree.checkout_dir.clone()
                         }
                     });
                 SpaceProject::checked_out(&worktree.repo_root, checkout)
@@ -807,9 +809,9 @@ mod tests {
                 .insert_resource(AppSettings::default());
             let space = app
                 .world_mut()
-                .spawn((Space, SpaceId(space_id.to_string())))
+                .spawn(Space::bundle(Id::<Space>::new(space_id)))
                 .id();
-            let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
             let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
             app.update();
             Self {
@@ -862,9 +864,9 @@ mod tests {
         fn select_worktree(&mut self, project_dir: &str, repo_root: &str) {
             self.app
                 .world_mut()
-                .get_mut::<Tab>(self.tab)
+                .get_mut::<StartupDir>(self.tab)
                 .unwrap()
-                .startup_dir = Some(project_dir.to_string());
+                .0 = Some(project_dir.into());
             self.app.world_mut().entity_mut(self.tab).insert((
                 TabWorkspace {
                     project_dir: project_dir.to_string(),
@@ -887,9 +889,9 @@ mod tests {
         ) {
             self.app
                 .world_mut()
-                .get_mut::<Tab>(self.tab)
+                .get_mut::<StartupDir>(self.tab)
                 .unwrap()
-                .startup_dir = Some(checkout_dir.to_string());
+                .0 = Some(checkout_dir.into());
             self.app.world_mut().entity_mut(self.tab).insert((
                 TabWorkspace {
                     project_dir: project_dir.to_string(),
@@ -1174,14 +1176,13 @@ mod tests {
         let expanded_space = app
             .world_mut()
             .spawn((
-                Space,
-                SpaceId("work".to_string()),
+                Space::bundle(Id::<Space>::new("work")),
                 ExpandedProjectDirs(vec![path]),
             ))
             .id();
         let fresh_space = app
             .world_mut()
-            .spawn((Space, SpaceId("work".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("work")))
             .id();
         let expanded_pane = app.world_mut().spawn(ChildOf(expanded_space)).id();
         let fresh_pane = app.world_mut().spawn(ChildOf(fresh_space)).id();

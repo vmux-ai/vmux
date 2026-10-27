@@ -475,7 +475,7 @@ mod browser_navigate_flow {
             .world_mut()
             .spawn((
                 vmux_layout::stack::Stack::bundle(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(pane),
             ))
             .id();
@@ -502,7 +502,7 @@ mod browser_navigate_flow {
         let second = stacks
             .iter(world)
             .find(|(_, metadata, _)| metadata.url == "https://second.example")
-            .map(|(entity, _, activated)| (entity, activated.0))
+            .map(|(entity, _, activated)| (entity, activated.milliseconds()))
             .expect("new browser stack");
         assert_ne!(second.0, first_stack);
         assert!(second.1 > 1);
@@ -523,7 +523,7 @@ mod browser_navigate_flow {
             .world_mut()
             .spawn((
                 vmux_layout::stack::Stack::bundle(),
-                LastActivatedAt(10),
+                LastActivatedAt::new(10),
                 ChildOf(pane),
             ))
             .id();
@@ -545,14 +545,16 @@ mod browser_navigate_flow {
         app.update();
 
         let world = app.world_mut();
-        let mut stacks = world
-            .query_filtered::<(&PageMetadata, &LastActivatedAt), With<vmux_layout::stack::Stack>>();
+        let mut stacks = world.query_filtered::<
+            (&PageMetadata, Option<&LastActivatedAt>),
+            With<vmux_layout::stack::Stack>,
+        >();
         let activated = stacks
             .iter(world)
             .find(|(metadata, _)| metadata.url == "https://second.example")
-            .map(|(_, activated)| activated.0)
+            .map(|(_, activated)| activated)
             .expect("new browser stack");
-        assert_eq!(activated, 0);
+        assert!(activated.is_none());
     }
 
     #[test]
@@ -646,7 +648,7 @@ mod browser_navigate_flow {
             .world_mut()
             .spawn((
                 vmux_layout::stack::Stack::bundle(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(pane),
             ))
             .insert(PageMetadata {
@@ -703,7 +705,7 @@ mod browser_navigate_flow {
             .world_mut()
             .spawn((
                 vmux_layout::stack::Stack::bundle(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(pane),
             ))
             .insert(PageMetadata {
@@ -749,7 +751,7 @@ mod browser_navigate_flow {
             .world_mut()
             .spawn((
                 vmux_layout::stack::Stack::bundle(),
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(pane),
             ))
             .insert(PageMetadata {
@@ -1083,25 +1085,25 @@ mod open_in_place_flow {
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
+                vmux_layout::space::Space::bundle(vmux_api::Id::<vmux_layout::space::Space>::new(
+                    "test",
+                )),
                 vmux_layout::space::CurrentSpace,
-                vmux_layout::space::SpaceId("test".to_string()),
-                vmux_layout::profile::Profile::default(),
                 vmux_ecs::Active,
             ))
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
             .spawn(Stack::bundle())
-            .insert((ChildOf(pane), LastActivatedAt(1)))
+            .insert((ChildOf(pane), LastActivatedAt::new(1)))
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
         app.world_mut().spawn(
@@ -1119,25 +1121,25 @@ mod open_in_place_flow {
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
+                vmux_layout::space::Space::bundle(vmux_api::Id::<vmux_layout::space::Space>::new(
+                    "test",
+                )),
                 vmux_layout::space::CurrentSpace,
-                vmux_layout::space::SpaceId("test".to_string()),
-                vmux_layout::profile::Profile::default(),
                 vmux_ecs::Active,
             ))
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
             .spawn(Stack::bundle())
-            .insert((ChildOf(pane), LastActivatedAt(1)))
+            .insert((ChildOf(pane), LastActivatedAt::new(1)))
             .id();
         app.world_mut()
             .spawn((Browser, Terminal))
@@ -1157,25 +1159,25 @@ mod open_in_place_flow {
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
+                vmux_layout::space::Space::bundle(vmux_api::Id::<vmux_layout::space::Space>::new(
+                    "test",
+                )),
                 vmux_layout::space::CurrentSpace,
-                vmux_layout::space::SpaceId("test".to_string()),
-                vmux_layout::profile::Profile::default(),
                 vmux_ecs::Active,
             ))
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
+            .spawn((Pane, LastActivatedAt::new(1), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
             .spawn(Stack::bundle())
-            .insert((ChildOf(pane), LastActivatedAt(1)))
+            .insert((ChildOf(pane), LastActivatedAt::new(1)))
             .id();
         app.world_mut()
             .spawn((

@@ -18,6 +18,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_feature = { path = "../../util/vmux_feature" }
 vmux_layout = { path = "../vmux_layout" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
@@ -37,6 +38,7 @@ uuid = { workspace = true }
 vmux_browser = { path = "../../util/vmux_browser" }
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_history = { path = "../vmux_history" }
+vmux_path = { path = "../../util/vmux_path" }
 vmux_tool = { path = "../vmux_tool" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 

@@ -49,7 +49,7 @@ impl ComposerChips {
         )
         .with_agent(agent_icon, agent_seed)
         .opens(EventHandler::new(move |()| {
-            let _ = send(&CommandPaletteAgentMenuToggleRequest { open_id });
+            send(&CommandPaletteAgentMenuToggleRequest { open_id });
             PromptFocus::end(PROMPT_INPUT_ID);
         }));
         let model = match composer.model_name.is_empty() {
@@ -57,7 +57,7 @@ impl ComposerChips {
             false => Some(
                 ComposerChip::ready(composer.model_name.clone(), translate("agent-change-model"))
                     .opens(EventHandler::new(move |()| {
-                        let _ = send(&CommandPaletteModelMenuToggleRequest { open_id });
+                        send(&CommandPaletteModelMenuToggleRequest { open_id });
                         PromptFocus::end(PROMPT_INPUT_ID);
                     })),
             ),
@@ -68,7 +68,7 @@ impl ComposerChips {
         )
         .with_identity(project_seed.clone())
         .opens(EventHandler::new(move |()| {
-            let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
+            send(&CommandPaletteProjectMenuToggleRequest { open_id });
             PromptFocus::end(PROMPT_INPUT_ID);
         }));
         let branch = match composer.is_git_repo {
@@ -77,7 +77,7 @@ impl ComposerChips {
                 ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
                     .with_identity(format!("{}:{}", project_seed, composer.branch_label))
                     .opens(EventHandler::new(move |()| {
-                        let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
+                        send(&CommandPaletteBranchMenuToggleRequest { open_id });
                         PromptFocus::end(PROMPT_INPUT_ID);
                     })),
             ),
@@ -91,7 +91,7 @@ impl ComposerChips {
                     composer.permission_title.clone(),
                 )
                 .opens(EventHandler::new(move |()| {
-                    let _ = send(&CommandPalettePermissionMenuToggleRequest { open_id });
+                    send(&CommandPalettePermissionMenuToggleRequest { open_id });
                     PromptFocus::end(PROMPT_INPUT_ID);
                 })),
             )
@@ -116,7 +116,7 @@ impl MenuSelection {
     }
 
     pub(super) fn activate(self, index: usize) {
-        let _ = send(&CommandPaletteMenuActivateRequest {
+        send(&CommandPaletteMenuActivateRequest {
             open_id: self.0,
             index: index as u32,
         });

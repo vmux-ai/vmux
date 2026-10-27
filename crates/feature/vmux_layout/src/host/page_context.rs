@@ -89,7 +89,7 @@ impl ProjectActivationOutcome {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct ProjectActivationContext<'w, 's> {
-    tabs: Query<'w, 's, &'static mut Tab>,
+    tabs: Query<'w, 's, (&'static mut Name, &'static mut crate::tab::StartupDir), With<Tab>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     pages: Query<'w, 's, (Entity, &'static PageMetadata)>,
     commands: Commands<'w, 's>,
@@ -104,7 +104,7 @@ impl ProjectActivationContext<'_, '_> {
         };
         let Some(tab) = tab else {
             self.commands.trigger(
-                vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(webview, &event),
+                vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(webview, &event),
             );
             return;
         };
@@ -116,9 +116,7 @@ impl ProjectActivationContext<'_, '_> {
             loop {
                 if current == tab {
                     self.commands.trigger(
-                        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
-                            page, &event,
-                        ),
+                        vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(page, &event),
                     );
                     break;
                 }
@@ -135,18 +133,18 @@ impl ProjectActivationContext<'_, '_> {
         selection: TabWorkspaceSelection,
         tab_entity: Entity,
     ) -> Result<String, String> {
-        let mut tab = self
+        let (mut tab_name, mut startup_dir) = self
             .tabs
             .get_mut(tab_entity)
             .map_err(|error| error.to_string())?;
-        tab.startup_dir = Some(selection.startup_dir.clone());
-        if crate::worktree::WorktreeName::is_generated(&tab.name)
+        startup_dir.0 = Some(selection.startup_dir.clone().into());
+        if crate::worktree::WorktreeName::is_generated(tab_name.as_str())
             && let Some(name) = std::path::Path::new(&selection.project_dir)
                 .file_name()
                 .and_then(|name| name.to_str())
             && !name.is_empty()
         {
-            tab.name = name.to_string();
+            *tab_name = Name::new(name.to_string());
         }
         let mut entity = self.commands.entity(tab_entity);
         entity.insert((
@@ -300,13 +298,12 @@ fn git_page_ready(
     }
     let path = tabs
         .startup_dir(webview)
-        .map(PathBuf::from)
         .or_else(|| focused_space.startup_dir().map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
     commands.trigger(
-        vmux_ecs::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+        vmux_ecs::UiStateWrite::<vmux_git::state::UiGit>::from_event(
             webview,
             &GitPageContext {
                 working_directory: path,
@@ -438,7 +435,7 @@ mod tests {
     struct WorkspaceWrites(Vec<Entity>);
 
     fn capture_context(
-        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::UiGit>>,
         mut writes: ResMut<ContextWrites>,
     ) {
         if let Some(context) = &trigger.event().update().context {
@@ -447,7 +444,7 @@ mod tests {
     }
 
     fn capture_workspace(
-        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::UiStateWrite<vmux_git::state::UiGit>>,
         mut writes: ResMut<WorkspaceWrites>,
     ) {
         if trigger.event().update().workspace.is_some() {
@@ -491,7 +488,7 @@ mod tests {
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_observer(project_activate)
             .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let webview = app.world_mut().spawn(ChildOf(tab)).id();
 
         app.world_mut().trigger(UiInput {
@@ -511,12 +508,9 @@ mod tests {
         }
 
         let expected = project.path().canonicalize().unwrap();
-        let tab_state = app.world().get::<Tab>(tab).unwrap();
+        let tab_state = app.world().get::<crate::tab::StartupDir>(tab).unwrap();
         let workspace = app.world().get::<TabWorkspace>(tab).unwrap();
-        assert_eq!(
-            tab_state.startup_dir.as_deref(),
-            Some(expected.to_string_lossy().as_ref())
-        );
+        assert_eq!(tab_state.0.as_deref(), Some(expected.as_path()));
         assert_eq!(
             workspace.project_dir,
             expected.to_string_lossy().into_owned()
@@ -537,7 +531,7 @@ mod tests {
             .add_observer(project_activate)
             .add_observer(capture_workspace)
             .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let requester = app
             .world_mut()
             .spawn((

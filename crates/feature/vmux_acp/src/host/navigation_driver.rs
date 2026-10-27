@@ -9,15 +9,15 @@ use vmux_ecs::{
     ProcessAnchor,
 };
 use vmux_layout::space::FocusedSpace;
-use vmux_layout::tab::{Tab, TabWorkspace};
+use vmux_layout::tab::{StartupDir, Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
-use vmux_session::{AgentConversationTitle, AgentId, PromptQueue, Route, Session, SessionId};
+use vmux_session::{AgentConversationTitle, AgentRef, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
 
 use super::acp::registry::RegistryAgent;
 use super::attach::AcpAgentAttachment;
-use crate::AcpSessionId;
+use crate::session::AcpSessionLinks;
 
 #[derive(SystemParam)]
 pub(super) struct AcpCatalog<'w, 's> {
@@ -37,18 +37,18 @@ pub(super) struct PageOpener<'w, 's> {
         's,
         (
             Entity,
-            &'static SessionId,
+            &'static Id<Session>,
             &'static Name,
             &'static Cwd,
-            Option<&'static AgentId>,
-            Option<&'static AcpSessionId>,
+            Option<&'static AgentRef>,
             Option<&'static ProcessAnchor>,
         ),
         With<Session>,
     >,
+    links: AcpSessionLinks<'w, 's>,
     children: Query<'w, 's, &'static Children>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    tabs: Query<'w, 's, &'static mut Tab>,
+    tabs: Query<'w, 's, &'static mut StartupDir, With<Tab>>,
     workspaces: Query<'w, 's, &'static mut TabWorkspace>,
     queues: Query<'w, 's, &'static mut PromptQueue>,
     transcripts: vmux_session::Transcripts<'w, 's>,
@@ -105,11 +105,11 @@ impl AgentPageOpenWorkspace<'_, '_> {
 }
 
 impl PageOpener<'_, '_> {
-    pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<String>)> {
+    pub(super) fn tab(&self, entity: Entity) -> Option<(Entity, Option<std::path::PathBuf>)> {
         let mut current = entity;
         loop {
-            if let Ok(tab) = self.tabs.get(current) {
-                return Some((current, tab.startup_dir.clone()));
+            if let Ok(startup_dir) = self.tabs.get(current) {
+                return Some((current, startup_dir.0.clone()));
             }
             current = self.child_of.get(current).ok()?.parent();
         }
@@ -136,6 +136,23 @@ impl PageOpener<'_, '_> {
                 Ok(())
             }
             Route::Session(id) => {
+                let mut selected = None;
+                for (entity, candidate, name, cwd, agent, active) in &self.sessions {
+                    if candidate != &id {
+                        continue;
+                    }
+                    selected = Some((
+                        entity,
+                        name.as_str().to_string(),
+                        cwd.0.clone(),
+                        agent.map(|agent| agent.as_str().to_string()),
+                        self.links
+                            .get(entity)
+                            .map(|link| link.id().as_str().to_string()),
+                        active.map(|active| active.0),
+                    ));
+                    break;
+                }
                 let Some((
                     session_entity,
                     session_name,
@@ -143,22 +160,9 @@ impl PageOpener<'_, '_> {
                     selected_agent,
                     resume,
                     active,
-                )) = self
-                    .sessions
-                    .iter()
-                    .find(|(_, candidate, ..)| *candidate == &id)
-                    .map(|(entity, _, name, cwd, agent, resume, active)| {
-                        (
-                            entity,
-                            name.as_str().to_string(),
-                            cwd.0.clone(),
-                            agent.map(|agent| agent.0.clone()),
-                            resume.map(|resume| resume.0.clone()),
-                            active.map(|active| active.0),
-                        )
-                    })
+                )) = selected
                 else {
-                    return Err(format!("Session '{}' was not found", id.0));
+                    return Err(format!("Session '{id}' was not found"));
                 };
                 let agent_id = selected_agent
                     .or_else(|| {
@@ -228,14 +232,14 @@ impl PageOpener<'_, '_> {
                     agent_id.clone(),
                     &session_name,
                     agent_name,
-                    id.0.clone(),
+                    id.as_str().to_string(),
                     cwd,
                     icon,
                     resume,
                 );
                 self.commands
                     .entity(session_entity)
-                    .insert(AgentId(agent_id));
+                    .insert(AgentRef::new(agent_id));
                 let operation = self.commands.spawn(request).id();
                 if let Some(webview) = transition_webview {
                     self.commands
@@ -339,10 +343,10 @@ impl PageOpener<'_, '_> {
         let Some((tab_entity, _)) = self.tab(stack) else {
             return;
         };
-        let cwd = cwd.to_string_lossy().into_owned();
-        if let Ok(mut tab) = self.tabs.get_mut(tab_entity) {
-            tab.startup_dir = Some(cwd.clone());
+        if let Ok(mut startup_dir) = self.tabs.get_mut(tab_entity) {
+            startup_dir.0 = Some(cwd.to_path_buf());
         }
+        let cwd = cwd.to_string_lossy().into_owned();
         if let Ok(mut workspace) = self.workspaces.get_mut(tab_entity) {
             workspace.project_dir.clone_from(&cwd);
         } else {

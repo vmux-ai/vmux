@@ -488,6 +488,7 @@ fn install_input_wake_monitor(
                 | NSEventType::OtherMouseDragged
         );
         let event_belongs_to_main_window = event_belongs_to_main_window_frame(ev);
+        vmux_input::NativePointer::set_in_main_window(event_belongs_to_main_window);
         let button_event = matches!(
             event_type,
             NSEventType::LeftMouseDown

@@ -6,23 +6,24 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
+use vmux_api::Id;
 use vmux_command::{CommandDispatch, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_ecs::Active;
-#[cfg(test)]
-use vmux_ecs::manifest::FeaturePlugin;
 use vmux_ecs::persistence::{PageRestore, PersistenceAppExt};
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, UnixMillis,
 };
+#[cfg(test)]
+use vmux_feature::AppFeatureExt;
 use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;
-use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::settings::LayoutSettings;
-use crate::space::{CurrentSpace, Space, SpaceHierarchy, SpaceId};
+use crate::space::{CurrentSpace, Space, SpaceHierarchy};
 #[cfg(test)]
 use crate::stack::CloseRequest;
 use crate::stack::{
@@ -53,7 +54,7 @@ pub struct ArchivePlugin;
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
+        app.register_feature::<crate::Feature>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -235,7 +236,7 @@ struct TabArchiveLayout<'w, 's> {
     space_hierarchy: SpaceHierarchy<'w, 's>,
     tabs: Query<'w, 's, (), With<Tab>>,
     stacks: Query<'w, 's, (), With<Stack>>,
-    pane_ids: Query<'w, 's, &'static PaneId>,
+    pane_ids: Query<'w, 's, &'static Id<Pane>>,
     splits: Query<'w, 's, &'static PaneSplit>,
     pane_sizes: Query<'w, 's, &'static PaneSize>,
     panes: Query<'w, 's, (), With<Pane>>,
@@ -264,7 +265,7 @@ impl TabArchiveLayout<'_, '_> {
         if !self.panes.contains(leaf) {
             return None;
         }
-        let leaf_pane_id = self.pane_ids.get(leaf).ok()?.0.clone();
+        let leaf_pane_id = self.pane_ids.get(leaf).ok()?.as_str().to_string();
         let stack_index = self
             .children_q
             .get(leaf)
@@ -302,7 +303,7 @@ impl TabArchiveLayout<'_, '_> {
                 })
                 .collect();
             steps.push(PaneStep {
-                split_id: self.pane_ids.get(parent).ok()?.0.clone(),
+                split_id: self.pane_ids.get(parent).ok()?.as_str().to_string(),
                 axis: match split.direction {
                     PaneSplitDirection::Row => SplitAxis::Row,
                     PaneSplitDirection::Column => SplitAxis::Column,
@@ -321,7 +322,7 @@ impl TabArchiveLayout<'_, '_> {
 struct TabCloseLayout<'w, 's> {
     active_tab: ActiveTabParam<'w, 's>,
     hierarchy: TabHierarchy<'w, 's>,
-    tabs: Query<'w, 's, &'static Tab>,
+    tabs: Query<'w, 's, (&'static Name, &'static crate::tab::StartupDir), With<Tab>>,
     archive: TabArchiveLayout<'w, 's>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
     layout_requests: MessageWriter<'w, TabLayoutSpawnRequest>,
@@ -398,13 +399,25 @@ fn handle_close_tab_requests(
             layout.commands.entity(next).insert(LastActivatedAt::now());
         }
 
-        archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
+        archive_tab(
+            request.tab,
+            tab.0,
+            tab.1,
+            &layout.archive,
+            &mut layout.commands,
+        );
         layout.commands.trigger(TabClosed);
         layout.commands.entity(request.tab).despawn();
     }
 }
 
-fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, commands: &mut Commands) {
+fn archive_tab(
+    tab_entity: Entity,
+    name: &Name,
+    startup_dir: &crate::tab::StartupDir,
+    layout: &TabArchiveLayout,
+    commands: &mut Commands,
+) {
     let Some(space) = layout.space_hierarchy.get(tab_entity) else {
         return;
     };
@@ -423,7 +436,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
             .get(*stack)
             .ok()
             .and_then(|(_, _, _, activated)| activated)
-            .map(|activated| activated.0)
+            .map(|activated| activated.milliseconds())
             .unwrap_or_default()
     });
     let group_id = uuid::Uuid::new_v4().to_string();
@@ -449,8 +462,8 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
             closed_at,
             Some(ArchivedTabPage {
                 group_id: group_id.clone(),
-                tab_name: tab.name.clone(),
-                tab_startup_dir: tab.startup_dir.clone(),
+                tab_name: name.as_str().to_string(),
+                tab_startup_dir: startup_dir.0.clone(),
                 active: active_stack == Some(stack),
             }),
         ) {
@@ -479,14 +492,14 @@ fn collect_descendant_stacks(
 
 #[derive(SystemParam)]
 struct ReopenLayout<'w, 's> {
-    pane_ids: Query<'w, 's, (Entity, &'static PaneId)>,
+    pane_ids: Query<'w, 's, (Entity, &'static Id<Pane>)>,
     leaf_panes: Query<'w, 's, (), (With<Pane>, Without<PaneSplit>)>,
     child_of: Query<'w, 's, &'static ChildOf>,
     window_hierarchy: crate::window::WindowHierarchy<'w, 's>,
     children_q: Query<'w, 's, &'static Children>,
     stacks_q: Query<'w, 's, (), With<Stack>>,
     tabs: Query<'w, 's, (), With<Tab>>,
-    spaces: Query<'w, 's, (Entity, &'static SpaceId), With<Space>>,
+    spaces: Query<'w, 's, (Entity, &'static Id<Space>), With<Space>>,
     any_space: Query<'w, 's, Entity, With<Space>>,
     current_space: Query<'w, 's, Entity, With<CurrentSpace>>,
     focused_window: crate::window::FocusedWindow<'w, 's>,
@@ -506,12 +519,12 @@ impl ReopenLayout<'_, '_> {
         let origin_space = self
             .spaces
             .iter()
-            .filter(|(_, id)| id.0 == space_id)
+            .filter(|(_, id)| id.as_str() == space_id)
             .find(|(space, _)| {
                 focused_window
                     .is_some_and(|focused| self.window_hierarchy.get(*space) == Some(focused))
             })
-            .or_else(|| self.spaces.iter().find(|(_, id)| id.0 == space_id))
+            .or_else(|| self.spaces.iter().find(|(_, id)| id.as_str() == space_id))
             .map(|(entity, _)| entity);
         let space = origin_space
             .or_else(|| {
@@ -693,10 +706,10 @@ fn restore_archived_tab(
             ChildOf(space),
         ))
         .id();
-    commands.entity(tab).insert(Tab {
-        name: archived_tab.tab_name.clone(),
-        startup_dir: archived_tab.tab_startup_dir.clone(),
-    });
+    commands.entity(tab).insert((
+        Name::new(archived_tab.tab_name.clone()),
+        crate::tab::StartupDir(archived_tab.tab_startup_dir.clone()),
+    ));
     if origin_matches && let Some(index) = entries.first().and_then(|entry| entry.page.tab_index) {
         commands.entity(space).insert_children(index, &[tab]);
     }
@@ -721,9 +734,10 @@ fn restore_archived_tab(
         let root_id = uuid::Uuid::new_v4().to_string();
         let root = commands
             .spawn((
-                Pane::split_bundle(PaneSplitDirection::Row),
-                PaneId(root_id.clone()),
-                LastActivatedAt(0),
+                Pane::split_bundle_with_id(
+                    Id::<Pane>::new(root_id.clone()),
+                    PaneSplitDirection::Row,
+                ),
                 HostWindow(primary_window),
                 ChildOf(tab),
             ))
@@ -732,9 +746,7 @@ fn restore_archived_tab(
         let leaf_id = uuid::Uuid::new_v4().to_string();
         let leaf = commands
             .spawn((
-                Pane::bundle(),
-                PaneId(leaf_id.clone()),
-                LastActivatedAt(0),
+                Pane::bundle_with_id(Id::<Pane>::new(leaf_id.clone())),
                 ChildOf(root),
             ))
             .id();
@@ -763,14 +775,11 @@ fn restore_archived_tab(
             continue;
         };
         let active = entry.entity == active_entry;
-        let stack = commands
-            .spawn((
-                Stack::bundle(),
-                LastActivatedAt(if active { UnixMillis::now().0 } else { 0 }),
-                CreatedAt::now(),
-                ChildOf(leaf),
-            ))
-            .id();
+        let mut stack = commands.spawn((Stack::bundle(), CreatedAt::now(), ChildOf(leaf)));
+        if active {
+            stack.insert(LastActivatedAt::now());
+        }
+        let stack = stack.id();
         commands.entity(stack).insert(PageMetadata {
             url: entry.page.url.clone(),
             title: entry.page.title.clone(),
@@ -856,9 +865,7 @@ fn spawn_archived_split(
     };
     let entity = commands
         .spawn((
-            Pane::split_bundle(direction),
-            PaneId(id.to_string()),
-            LastActivatedAt(0),
+            Pane::split_bundle_with_id(Id::<Pane>::new(id), direction),
             ChildOf(parent),
         ))
         .id();
@@ -889,9 +896,7 @@ fn spawn_archived_split(
             ArchivedPaneChild::Leaf(child_id) => {
                 let leaf = commands
                     .spawn((
-                        Pane::bundle(),
-                        PaneId(child_id.clone()),
-                        LastActivatedAt(0),
+                        Pane::bundle_with_id(Id::<Pane>::new(child_id.clone())),
                         ChildOf(entity),
                     ))
                     .id();
@@ -920,7 +925,7 @@ fn resolve_reopen_stack(
         if let Some(leaf) = layout
             .pane_ids
             .iter()
-            .find(|(e, id)| id.0 == pos.leaf_pane_id && layout.leaf_panes.contains(*e))
+            .find(|(e, id)| id.as_str() == pos.leaf_pane_id && layout.leaf_panes.contains(*e))
             .map(|(e, _)| e)
             .filter(|&leaf| layout.pane_in_space(leaf, space))
         {
@@ -989,7 +994,7 @@ fn reattach_along_path(
     let root = layout
         .pane_ids
         .iter()
-        .find(|(_, id)| id.0 == root_step.split_id)
+        .find(|(_, id)| id.as_str() == root_step.split_id)
         .map(|(e, _)| e)?;
     if !layout.pane_in_space(root, space) {
         return None;
@@ -1007,7 +1012,7 @@ fn reattach_along_path(
             layout
                 .pane_ids
                 .iter()
-                .any(|(e, pid)| e == child && pid.0 == id)
+                .any(|(e, pid)| e == child && pid.as_str() == id)
         })
     };
 
@@ -1052,8 +1057,7 @@ fn reattach_along_path(
         let new_child = if is_last {
             commands
                 .spawn((
-                    Pane::bundle(),
-                    PaneId(child_id),
+                    Pane::bundle_with_id(Id::<Pane>::new(child_id)),
                     LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
@@ -1065,8 +1069,7 @@ fn reattach_along_path(
             };
             commands
                 .spawn((
-                    Pane::split_bundle(axis),
-                    PaneId(child_id),
+                    Pane::split_bundle_with_id(Id::<Pane>::new(child_id), axis),
                     LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
@@ -1127,7 +1130,7 @@ fn promote_leaf_to_split(
     }
     commands
         .entity(parent)
-        .insert(Pane::split_bundle(direction));
+        .insert(Pane::split_state_bundle(direction));
 }
 
 #[cfg(test)]
@@ -1135,7 +1138,7 @@ mod tests {
     use super::*;
     use bevy::ecs::relationship::Relationship;
 
-    use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+    use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 
     fn page(url: &str, closed_at: i64) -> ArchivedPage {
         ArchivedPage {
@@ -1287,7 +1290,7 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let stack = app
             .world_mut()
@@ -1313,7 +1316,7 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let stack = app
             .world_mut()
@@ -1349,10 +1352,10 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        app.world_mut().spawn((Tab::default(), ChildOf(space)));
-        let tab1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        app.world_mut().spawn((Tab, ChildOf(space)));
+        let tab1 = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let pane = app.world_mut().spawn(ChildOf(tab1)).id();
         let stack = app
             .world_mut()
@@ -1376,9 +1379,9 @@ mod tests {
         let mut app = archive_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -1386,7 +1389,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -1394,7 +1397,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("leaf0".to_string()),
+                Id::<Pane>::new("leaf0"),
                 PaneSize { flex_grow: 1.0 },
                 ChildOf(root),
             ))
@@ -1403,7 +1406,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("leaf1".to_string()),
+                Id::<Pane>::new("leaf1"),
                 PaneSize { flex_grow: 3.0 },
                 ChildOf(root),
             ))
@@ -1448,18 +1451,18 @@ mod tests {
     fn spawn_inactive_and_active_stacks(app: &mut App) -> (Entity, Entity) {
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("leaf".to_string()),
-                LastActivatedAt(1),
+                Id::<Pane>::new("leaf"),
+                LastActivatedAt::new(1),
                 ChildOf(tab),
             ))
             .id();
@@ -1471,7 +1474,7 @@ mod tests {
                     url: "https://inactive.example".to_string(),
                     ..default()
                 },
-                LastActivatedAt(1),
+                LastActivatedAt::new(1),
                 ChildOf(pane),
             ))
             .id();
@@ -1483,7 +1486,7 @@ mod tests {
                     url: "https://active.example".to_string(),
                     ..default()
                 },
-                LastActivatedAt(2),
+                LastActivatedAt::new(2),
                 ChildOf(pane),
             ))
             .id();
@@ -1544,18 +1547,15 @@ mod tests {
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string()), Active))
+            .spawn((Space::bundle(Id::<Space>::new("s1")), Active))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)));
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)));
         let tab = app
             .world_mut()
             .spawn((
-                Tab {
-                    name: "Work".to_string(),
-                    startup_dir: Some("/tmp/work".to_string()),
-                },
-                LastActivatedAt(2),
+                Tab::named("Work").with_startup_dir("/tmp/work"),
+                LastActivatedAt::new(2),
                 Active,
                 ChildOf(space),
             ))
@@ -1567,7 +1567,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -1575,7 +1575,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("left".to_string()),
+                Id::<Pane>::new("left"),
                 PaneSize { flex_grow: 1.0 },
                 ChildOf(root),
             ))
@@ -1584,7 +1584,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Pane,
-                PaneId("right".to_string()),
+                Id::<Pane>::new("right"),
                 PaneSize { flex_grow: 2.0 },
                 ChildOf(root),
             ))
@@ -1595,7 +1595,7 @@ mod tests {
                 url: "https://left.example".to_string(),
                 ..default()
             },
-            LastActivatedAt(3),
+            LastActivatedAt::new(3),
             ChildOf(left),
         ));
         app.world_mut().spawn((
@@ -1604,13 +1604,13 @@ mod tests {
                 url: "https://right.example".to_string(),
                 ..default()
             },
-            LastActivatedAt(4),
+            LastActivatedAt::new(4),
             ChildOf(right),
         ));
         app.world_mut().spawn((
             Stack::default(),
             PageMetadata::default(),
-            LastActivatedAt(2),
+            LastActivatedAt::new(2),
             ChildOf(left),
         ));
         app.world_mut()
@@ -1649,7 +1649,7 @@ mod tests {
         assert!(
             archived
                 .iter()
-                .all(|entry| entry.4.as_deref() == Some("/tmp/work"))
+                .all(|entry| entry.4.as_deref() == Some(std::path::Path::new("/tmp/work")))
         );
         assert_eq!(archived.iter().filter(|entry| entry.5).count(), 1);
         assert!(
@@ -1683,7 +1683,7 @@ mod tests {
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string()), Active))
+            .spawn((Space::bundle(Id::<Space>::new("s1")), Active))
             .id();
         app.world_mut()
             .entity_mut(space)
@@ -1692,11 +1692,11 @@ mod tests {
             ))));
         let first = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), Active, ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(2), Active, ChildOf(space)))
             .id();
         let second = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab, LastActivatedAt::new(1), ChildOf(space)))
             .id();
         app.world_mut()
             .resource_mut::<Messages<CloseTabRequest>>()
@@ -1748,7 +1748,7 @@ mod tests {
     #[test]
     fn reopen_targets_materialized_stack() {
         let mut app = reopen_app();
-        app.world_mut().spawn((Space, SpaceId("s1".to_string())));
+        app.world_mut().spawn(Space::bundle(Id::<Space>::new("s1")));
         app.world_mut().spawn(ArchivedPage {
             url: "vmux://terminal/".to_string(),
             space_id: "s1".to_string(),
@@ -1771,15 +1771,10 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        app.world_mut().spawn((
-            Tab {
-                name: "Existing".to_string(),
-                startup_dir: None,
-            },
-            ChildOf(space),
-        ));
+        app.world_mut()
+            .spawn((Tab::named("Existing"), ChildOf(space)));
         for (url, leaf, stack_index, child_index, active) in [
             ("https://left-1.example", "left", 0, 0, false),
             ("https://left-2.example", "left", 1, 0, false),
@@ -1807,7 +1802,7 @@ mod tests {
                 ArchivedTabPage {
                     group_id: "group-1".to_string(),
                     tab_name: "Recovered".to_string(),
-                    tab_startup_dir: Some("/tmp/recovered".to_string()),
+                    tab_startup_dir: Some("/tmp/recovered".into()),
                     active,
                 },
             ));
@@ -1825,12 +1820,18 @@ mod tests {
             .into_iter()
             .find(|entity| {
                 app.world()
-                    .get::<Tab>(*entity)
-                    .is_some_and(|tab| tab.name == "Recovered")
+                    .get::<Name>(*entity)
+                    .is_some_and(|name| name.as_str() == "Recovered")
             })
             .expect("recovered tab");
-        let recovered_tab = app.world().get::<Tab>(recovered).unwrap();
-        assert_eq!(recovered_tab.startup_dir.as_deref(), Some("/tmp/recovered"));
+        let recovered_tab = app
+            .world()
+            .get::<crate::tab::StartupDir>(recovered)
+            .unwrap();
+        assert_eq!(
+            recovered_tab.0.as_deref(),
+            Some(std::path::Path::new("/tmp/recovered"))
+        );
         let space_tabs: Vec<Entity> = app
             .world()
             .get::<Children>(space)
@@ -1841,9 +1842,9 @@ mod tests {
         assert_eq!(space_tabs[1], recovered);
         let root = app
             .world_mut()
-            .query::<(Entity, &PaneId)>()
+            .query::<(Entity, &Id<Pane>)>()
             .iter(app.world())
-            .find(|(_, id)| id.0 == "root")
+            .find(|(_, id)| id.as_str() == "root")
             .map(|(entity, _)| entity)
             .expect("root pane");
         assert_eq!(
@@ -1861,7 +1862,7 @@ mod tests {
         assert!(
             app.world()
                 .get::<LastActivatedAt>(root)
-                .is_some_and(|activated| activated.0 > 0)
+                .is_some_and(|activated| activated.milliseconds() > 0)
         );
         for (leaf_id, expected_urls) in [
             (
@@ -1876,9 +1877,9 @@ mod tests {
         ] {
             let leaf = app
                 .world_mut()
-                .query::<(Entity, &PaneId)>()
+                .query::<(Entity, &Id<Pane>)>()
                 .iter(app.world())
-                .find(|(_, id)| id.0 == leaf_id)
+                .find(|(_, id)| id.as_str() == leaf_id)
                 .map(|(entity, _)| entity)
                 .expect("leaf pane");
             let expected_flex = if leaf_id == "left" { 1.0 } else { 2.0 };
@@ -1899,7 +1900,7 @@ mod tests {
                 assert!(
                     app.world()
                         .get::<LastActivatedAt>(leaf)
-                        .is_some_and(|activated| activated.0 > 0)
+                        .is_some_and(|activated| activated.milliseconds() > 0)
                 );
                 let active_stack = app
                     .world()
@@ -1915,7 +1916,7 @@ mod tests {
                 assert!(
                     app.world()
                         .get::<LastActivatedAt>(active_stack)
-                        .is_some_and(|activated| activated.0 > 0)
+                        .is_some_and(|activated| activated.milliseconds() > 0)
                 );
             }
         }
@@ -1923,7 +1924,7 @@ mod tests {
             app.world_mut()
                 .query::<(&Stack, &LastActivatedAt)>()
                 .iter(app.world())
-                .filter(|(_, activated)| activated.0 > 0)
+                .filter(|(_, activated)| activated.milliseconds() > 0)
                 .count(),
             1
         );
@@ -1941,7 +1942,9 @@ mod tests {
     fn reopen_web_opens_in_origin_space_and_consumes_entry() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "https://a.example".to_string(),
             title: "A".to_string(),
@@ -1982,13 +1985,15 @@ mod tests {
         let secondary_root = app.world_mut().spawn(HostWindow(secondary_window)).id();
         let primary_space = app
             .world_mut()
-            .spawn((Space, SpaceId("shared".to_string()), ChildOf(primary_root)))
+            .spawn((
+                Space::bundle(Id::<Space>::new("shared")),
+                ChildOf(primary_root),
+            ))
             .id();
         let secondary_space = app
             .world_mut()
             .spawn((
-                Space,
-                SpaceId("shared".to_string()),
+                Space::bundle(Id::<Space>::new("shared")),
                 ChildOf(secondary_root),
             ))
             .id();
@@ -2015,7 +2020,9 @@ mod tests {
     fn reopen_picks_newest_first() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "https://old.example".to_string(),
             title: String::new(),
@@ -2042,7 +2049,9 @@ mod tests {
     fn reopen_terminal_respawns_at_cwd() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "vmux://terminal/".to_string(),
             title: String::new(),
@@ -2073,7 +2082,9 @@ mod tests {
     fn reopen_empty_archive_is_noop() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         dispatch_reopen(&mut app);
         assert!(drain_opens(&mut app).is_empty());
     }
@@ -2083,10 +2094,9 @@ mod tests {
         let mut app = reopen_app();
         let active = app
             .world_mut()
-            .spawn((
-                crate::space::Space,
-                crate::space::SpaceId("active".to_string()),
-            ))
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "active",
+            )))
             .id();
         app.world_mut()
             .entity_mut(active)
@@ -2111,10 +2121,10 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let t0 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
-        let t1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let t0 = app.world_mut().spawn((Tab, ChildOf(space))).id();
+        let t1 = app.world_mut().spawn((Tab, ChildOf(space))).id();
         app.world_mut().spawn(ArchivedPage {
             url: "https://z.example".to_string(),
             title: String::new(),
@@ -2139,19 +2149,13 @@ mod tests {
         let mut app = reopen_app();
         let active = app
             .world_mut()
-            .spawn((Space, SpaceId("active".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("active")))
             .id();
         app.world_mut()
             .entity_mut(active)
             .insert(crate::space::CurrentSpace);
-        let t0 = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(active)))
-            .id();
-        let t1 = app
-            .world_mut()
-            .spawn((Tab::default(), ChildOf(active)))
-            .id();
+        let t0 = app.world_mut().spawn((Tab, ChildOf(active))).id();
+        let t1 = app.world_mut().spawn((Tab, ChildOf(active))).id();
         app.world_mut().spawn(ArchivedPage {
             url: "https://z.example".to_string(),
             title: String::new(),
@@ -2176,12 +2180,12 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let leaf = app
             .world_mut()
-            .spawn((Pane, PaneId("leaf-A".to_string()), ChildOf(tab)))
+            .spawn((Pane, Id::<Pane>::new("leaf-A"), ChildOf(tab)))
             .id();
         app.world_mut().spawn((Stack::default(), ChildOf(leaf)));
         app.world_mut().spawn((
@@ -2214,7 +2218,9 @@ mod tests {
     fn reopen_without_position_recreates_tab() {
         let mut app = reopen_app();
         app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+            .spawn(crate::space::Space::bundle(Id::<crate::space::Space>::new(
+                "s1",
+            )));
         app.world_mut().spawn(ArchivedPage {
             url: "https://a.example".to_string(),
             space_id: "s1".to_string(),
@@ -2233,9 +2239,9 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2243,12 +2249,12 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
         app.world_mut()
-            .spawn((Pane, PaneId("survivor".to_string()), ChildOf(root)));
+            .spawn((Pane, Id::<Pane>::new("survivor"), ChildOf(root)));
         app.world_mut().spawn((
             ArchivedPage {
                 url: "https://z".to_string(),
@@ -2295,9 +2301,9 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2305,12 +2311,12 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
         app.world_mut()
-            .spawn((Pane, PaneId("root-leaf".to_string()), ChildOf(root)));
+            .spawn((Pane, Id::<Pane>::new("root-leaf"), ChildOf(root)));
         app.world_mut().spawn((
             ArchivedPage {
                 url: "https://z".to_string(),
@@ -2339,8 +2345,8 @@ mod tests {
         ));
         dispatch_reopen(&mut app);
 
-        let mut ids = app.world_mut().query::<&PaneId>();
-        let recreated_nested = ids.iter(app.world()).any(|id| id.0 == "nested");
+        let mut ids = app.world_mut().query::<&Id<Pane>>();
+        let recreated_nested = ids.iter(app.world()).any(|id| id.as_str() == "nested");
         assert!(recreated_nested, "nested split recreated by id");
         let stack_count = app.world_mut().query::<&Stack>().iter(app.world()).count();
         assert_eq!(stack_count, 1);
@@ -2352,12 +2358,12 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let leaf = app
             .world_mut()
-            .spawn((Pane, PaneId("leaf-A".to_string()), ChildOf(tab)))
+            .spawn((Pane, Id::<Pane>::new("leaf-A"), ChildOf(tab)))
             .id();
         app.world_mut().spawn((
             ArchivedPage {
@@ -2382,9 +2388,9 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2392,7 +2398,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -2403,7 +2409,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Column,
                 },
-                PaneId("mid".to_string()),
+                Id::<Pane>::new("mid"),
                 ChildOf(root),
             ))
             .id();
@@ -2445,9 +2451,9 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
             .spawn((
@@ -2455,7 +2461,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                PaneId("root".to_string()),
+                Id::<Pane>::new("root"),
                 ChildOf(tab),
             ))
             .id();
@@ -2466,13 +2472,13 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Column,
                 },
-                PaneId("old-leaf".to_string()),
+                Id::<Pane>::new("old-leaf"),
                 ChildOf(root),
             ))
             .id();
         let survivor = app
             .world_mut()
-            .spawn((Pane, PaneId("survivor".to_string()), ChildOf(promoted)))
+            .spawn((Pane, Id::<Pane>::new("survivor"), ChildOf(promoted)))
             .id();
         app.world_mut().spawn((Stack::default(), ChildOf(survivor)));
         app.world_mut().spawn((
@@ -2518,12 +2524,12 @@ mod tests {
         let mut app = reopen_app();
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string())))
+            .spawn(Space::bundle(Id::<Space>::new("s1")))
             .id();
-        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let tab = app.world_mut().spawn((Tab, ChildOf(space))).id();
         let root = app
             .world_mut()
-            .spawn((Pane, PaneId("root".to_string()), ChildOf(tab)))
+            .spawn((Pane, Id::<Pane>::new("root"), ChildOf(tab)))
             .id();
         let survivor_stack = app
             .world_mut()

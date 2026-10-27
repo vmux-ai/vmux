@@ -134,19 +134,19 @@ fn HeaderContent() -> Element {
                 if let Some(err) = stacks_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    NavButton { label: translate("layout-back"), disabled: !can_go_back, onclick: move |_| { let _ = send(&HeaderBackRequest); },
+                    NavButton { label: translate("layout-back"), disabled: !can_go_back, onclick: move |_| { send(&HeaderBackRequest); },
                         Icon { class: "h-4 w-4",
                             path { d: "M19 12H5" }
                             path { d: "M12 19l-7-7 7-7" }
                         }
                     }
-                    NavButton { label: translate("layout-forward"), disabled: !can_go_forward, onclick: move |_| { let _ = send(&HeaderForwardRequest); },
+                    NavButton { label: translate("layout-forward"), disabled: !can_go_forward, onclick: move |_| { send(&HeaderForwardRequest); },
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "M12 5l7 7-7 7" }
                         }
                     }
-                    NavButton { label: translate("layout-reload"), disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| { let _ = send(&HeaderReloadRequest); },
+                    NavButton { label: translate("layout-reload"), disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| { send(&HeaderReloadRequest); },
                         span {
                             key: "{reload_key}",
                             class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
@@ -171,7 +171,7 @@ fn HeaderContent() -> Element {
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                             },
                             onclick: move |_| {
-                                let _ = send(&BookmarkToggleRequest);
+                                send(&BookmarkToggleRequest);
                             },
                             Icon { class: "h-4 w-4",
                                 path {
@@ -191,9 +191,9 @@ fn HeaderContent() -> Element {
                             },
                             onclick: move |_| {
                                 if let Some(uuid) = pinned_uuid.clone() {
-                                    let _ = send(&BookmarkUnpinRequest { uuid });
+                                    send(&BookmarkUnpinRequest { uuid });
                                 } else if let Some(metadata) = active_metadata.clone() {
-                                    let _ = send(&BookmarkPinUrlRequest { metadata });
+                                    send(&BookmarkPinUrlRequest { metadata });
                                 }
                             },
                             Icon { class: "h-4 w-4",
@@ -362,7 +362,7 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                     onclick: move |evt| {
                         evt.prevent_default();
                         evt.stop_propagation();
-                        let _ = send(&TabCloseRequest {
+                        send(&TabCloseRequest {
                             tab_id: Some(id_close.clone()),
                         });
                     },
@@ -378,14 +378,14 @@ fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| { let _ = send(&BookmarkAddRequest { metadata: bookmark_metadata.clone(), folder: None }); },
+                    on_select: move |_: String| { send(&BookmarkAddRequest { metadata: bookmark_metadata.clone(), folder: None }); },
                     attributes: vec![],
                     {translate("layout-bookmark")}
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| { let _ = send(&BookmarkPinUrlRequest { metadata: pin_metadata.clone() }); },
+                    on_select: move |_: String| { send(&BookmarkPinUrlRequest { metadata: pin_metadata.clone() }); },
                     attributes: vec![],
                     {translate("layout-pin")}
                 }
@@ -411,7 +411,7 @@ fn NewTabButton() -> Element {
                 title: translate("layout-new-tab"),
                 class: "absolute inset-0 flex appearance-none cursor-pointer items-center justify-center rounded-md border-0 bg-foreground/[0.04] text-muted-foreground shadow-none outline-none transition-colors hover:bg-foreground/[0.09] hover:text-foreground active:bg-foreground/[0.12] focus-visible:bg-foreground/[0.09] focus-visible:text-foreground",
                 onclick: move |_| {
-                    let _ = send(&TabCreateRequest);
+                    send(&TabCreateRequest);
                 },
                 Icon { class: "h-4 w-4",
                     path { d: "M12 5v14" }
@@ -465,7 +465,7 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
             onclick: move |_| {
-                let _ = send(&HeaderAddressFocusRequest);
+                send(&HeaderAddressFocusRequest);
             },
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
@@ -495,7 +495,7 @@ fn TeamFacepile(user: Option<TeamMemberRow>) -> Element {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
                     title: translate("team-profiles"),
                     onclick: move |_| {
-                        let _ = send(&TeamOpenRequest);
+                        send(&TeamOpenRequest);
                     },
                     Avatar {
                         src: None,

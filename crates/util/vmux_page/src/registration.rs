@@ -14,6 +14,56 @@ pub enum PagePlacement {
     Modal,
 }
 
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+pub struct ModalFrame {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl ModalFrame {
+    pub fn dropdown(
+        anchor: vmux_api::dropdown::DropdownAnchor,
+        width: f32,
+        height: f32,
+        viewport_width: f32,
+        viewport_height: f32,
+    ) -> Option<Self> {
+        if !anchor.is_valid()
+            || !width.is_finite()
+            || !height.is_finite()
+            || !viewport_width.is_finite()
+            || !viewport_height.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+            || viewport_width <= 0.0
+            || viewport_height <= 0.0
+        {
+            return None;
+        }
+        let margin = 6.0;
+        let gap = 4.0;
+        let width = width.min((viewport_width - margin * 2.0).max(1.0));
+        let height = height.min((viewport_height - margin * 2.0).max(1.0));
+        let mut left = anchor.left;
+        let below = anchor.top + anchor.height + gap;
+        let above = anchor.top - gap - height;
+        let mut top = below;
+        if below + height > viewport_height - margin && above >= margin {
+            top = above;
+        }
+        left = left.clamp(margin, (viewport_width - width - margin).max(margin));
+        top = top.clamp(margin, (viewport_height - height - margin).max(margin));
+        Some(Self {
+            left,
+            top,
+            width,
+            height,
+        })
+    }
+}
+
 #[derive(Component, Clone, Copy)]
 pub struct PageRegistration {
     page: &'static Page,
@@ -106,5 +156,56 @@ impl PagePlugin {
 
     fn has<C: Component>(entity: EntityRef<'_>) -> bool {
         entity.contains::<C>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn anchor(left: f32, top: f32) -> vmux_api::dropdown::DropdownAnchor {
+        vmux_api::dropdown::DropdownAnchor {
+            left,
+            top,
+            width: 100.0,
+            height: 32.0,
+        }
+    }
+
+    #[test]
+    fn dropdown_frame_opens_below_its_anchor() {
+        let frame = ModalFrame::dropdown(anchor(24.0, 40.0), 220.0, 180.0, 800.0, 600.0).unwrap();
+
+        assert_eq!(
+            frame,
+            ModalFrame {
+                left: 24.0,
+                top: 76.0,
+                width: 220.0,
+                height: 180.0,
+            }
+        );
+    }
+
+    #[test]
+    fn dropdown_frame_flips_above_when_below_does_not_fit() {
+        let frame = ModalFrame::dropdown(anchor(24.0, 540.0), 220.0, 180.0, 800.0, 600.0).unwrap();
+
+        assert_eq!(frame.top, 356.0);
+    }
+
+    #[test]
+    fn dropdown_frame_stays_inside_the_viewport() {
+        let frame = ModalFrame::dropdown(anchor(780.0, 590.0), 900.0, 900.0, 800.0, 600.0).unwrap();
+
+        assert_eq!(
+            frame,
+            ModalFrame {
+                left: 6.0,
+                top: 6.0,
+                width: 788.0,
+                height: 588.0,
+            }
+        );
     }
 }
