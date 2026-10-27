@@ -300,7 +300,7 @@ fn spawn(
 ) {
     let mut session_ids = HashSet::new();
     for sid in &sessions {
-        session_ids.insert(sid.0.clone());
+        session_ids.insert(sid.as_str().to_string());
     }
     for (request_entity, mut request) in &mut requests {
         if !session_ids.contains(&request.sid) {
@@ -363,7 +363,7 @@ fn project_info(
             shared
                 .0
                 .emit(ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
-                    sid: sid.0.clone(),
+                    sid: sid.as_str().to_string(),
                     name,
                 }));
         }
@@ -386,7 +386,7 @@ fn project_config_state(
             }
             *configs = next;
             shared.0.emit(ServiceMessage::AcpSessionConfigState {
-                sid: sid.0.clone(),
+                sid: sid.as_str().to_string(),
                 configs: configs.0.clone(),
             });
         }
@@ -437,7 +437,7 @@ fn project_selected_config(
             }
             config.current_value = input.value;
             shared.0.emit(ServiceMessage::AcpSessionConfigState {
-                sid: sid.0.clone(),
+                sid: sid.as_str().to_string(),
                 configs: configs.0.clone(),
             });
         }
@@ -456,7 +456,7 @@ fn project_status(
     for (sid, shared, mut inbox, mut run_state, mut approval) in &mut sessions {
         while let Ok(status) = inbox.0.try_recv() {
             if let AgentRunStatus::Errored(message) = &status {
-                tracing::warn!(target: "acp", sid = %sid.0, "{message}");
+                tracing::warn!(target: "acp", sid = %sid, "{message}");
             }
             if !matches!(status, AgentRunStatus::Streaming) {
                 approval.0 = None;
@@ -465,7 +465,7 @@ fn project_status(
             shared
                 .0
                 .emit(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
-                    sid: sid.0.clone(),
+                    sid: sid.as_str().to_string(),
                     status,
                 }));
         }
@@ -486,7 +486,7 @@ fn project_approval_requested(
             shared
                 .0
                 .emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-                    sid: sid.0.clone(),
+                    sid: sid.as_str().to_string(),
                     call_id: next.call_id,
                     name: next.name,
                     args: next.args,
@@ -516,7 +516,7 @@ fn project_approval_resolved(
             shared
                 .0
                 .emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
-                    sid: sid.0.clone(),
+                    sid: sid.as_str().to_string(),
                     call_id,
                 }));
         }
@@ -546,7 +546,7 @@ fn route_input(
     for (request_entity, mut request) in &mut requests {
         let mut accepted = false;
         for (sid, input, shared, mut projector) in &mut sessions {
-            if sid.0 != request.sid {
+            if sid.as_str() != request.sid {
                 continue;
             }
             if let Some(session_input) = request.input.take() {
@@ -581,7 +581,7 @@ fn subscribe(
     for (request_entity, mut request) in &mut requests {
         let mut receiver = None;
         for (sid, shared) in &sessions {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 receiver = Some(shared.0.stream_tx.subscribe());
                 break;
             }
@@ -612,7 +612,7 @@ fn read(
     for (request_entity, mut request) in &mut snapshots {
         let mut result = None;
         for (sid, shared, projector, _, _, _) in &sessions {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 result = Some(shared.0.snapshot_message(projector.messages()));
                 break;
             }
@@ -625,10 +625,10 @@ fn read(
     for (request_entity, mut request) in &mut agent_infos {
         let mut result = None;
         for (sid, _, _, agent_name, _, _) in &sessions {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 result = agent_name.0.as_ref().map(|name| {
                     ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
-                        sid: sid.0.clone(),
+                        sid: sid.as_str().to_string(),
                         name: name.clone(),
                     })
                 });
@@ -643,9 +643,9 @@ fn read(
     for (request_entity, mut request) in &mut config_states {
         let mut result = None;
         for (sid, _, _, _, configs, _) in &sessions {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 result = Some(ServiceMessage::AcpSessionConfigState {
-                    sid: sid.0.clone(),
+                    sid: sid.as_str().to_string(),
                     configs: configs.0.clone(),
                 });
                 break;
@@ -659,9 +659,9 @@ fn read(
     for (request_entity, mut request) in &mut statuses {
         let mut result = None;
         for (sid, _, _, _, _, status) in &sessions {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 result = Some(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
-                    sid: sid.0.clone(),
+                    sid: sid.as_str().to_string(),
                     status: status.0.clone(),
                 }));
                 break;
@@ -675,7 +675,7 @@ fn read(
     for (request_entity, mut request) in &mut messages {
         let mut result = None;
         for (sid, _, projector, _, _, _) in &sessions {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 result = Some(projector.messages().to_vec());
                 break;
             }
@@ -711,7 +711,7 @@ fn list(
             let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
             result.push(RemoteSession {
                 id: sid.clone(),
-                url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
+                url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid),
                 title: vmux_session::ConversationTitle::from_messages(projector.messages(), &name),
                 name,
                 runtime: "acp".to_string(),
@@ -724,7 +724,7 @@ fn list(
                 cwd: shared.0.cwd().to_string_lossy().into_owned(),
                 status: RemoteStatus::from(&status.0),
                 approval: approval.0.clone(),
-                created_at_ms: created_at.0.max(0) as u64,
+                created_at_ms: created_at.milliseconds().max(0) as u64,
             });
         }
         if let Some(response) = request.response.take() {
@@ -737,11 +737,11 @@ fn list(
         for (sid, shared, agent, created_at, projector, name, configs, status, approval) in
             &sessions
         {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
                 result = Some(RemoteSession {
                     id: sid.clone(),
-                    url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid.0),
+                    url: format!("{}{}", vmux_api::VmuxRoute::SESSIONS_ROOT, sid),
                     title: vmux_session::ConversationTitle::from_messages(
                         projector.messages(),
                         &name,
@@ -757,7 +757,7 @@ fn list(
                     cwd: shared.0.cwd().to_string_lossy().into_owned(),
                     status: RemoteStatus::from(&status.0),
                     approval: approval.0.clone(),
-                    created_at_ms: created_at.0.max(0) as u64,
+                    created_at_ms: created_at.milliseconds().max(0) as u64,
                 });
                 break;
             }
@@ -777,7 +777,7 @@ fn rebind(
     for (request_entity, mut request) in &mut requests {
         let mut result = Err("ACP session not found".to_string());
         for (sid, shared) in &sessions {
-            if sid.0 == request.sid {
+            if sid.as_str() == request.sid {
                 result = shared.0.rebind_cwd(std::mem::take(&mut request.cwd));
                 break;
             }
@@ -797,7 +797,7 @@ fn close(
     for (request_entity, mut request) in &mut requests {
         let mut closed = false;
         for (session_entity, sid, input) in &sessions {
-            if sid.0 != request.sid {
+            if sid.as_str() != request.sid {
                 continue;
             }
             let _ = input.0.send(AcpInput::Close);
