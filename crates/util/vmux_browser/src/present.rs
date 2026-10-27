@@ -1717,7 +1717,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Tab,
                 LastActivatedAt::new(1),
                 PresentationLayer::Current,
                 ChildOf(glass),

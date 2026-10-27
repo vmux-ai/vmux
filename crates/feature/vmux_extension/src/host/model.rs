@@ -194,14 +194,14 @@ mod tests {
         let space_one = app.world_mut().spawn((Space, Order(1))).id();
         let tab_one = app
             .world_mut()
-            .spawn((Tab::default(), Order(1), ChildOf(space_one)))
+            .spawn((Tab, Order(1), ChildOf(space_one)))
             .id();
         let pane_one = app.world_mut().spawn((Pane, ChildOf(tab_one))).id();
         let first = spawn_page(app.world_mut(), pane_one, "https://one.example/", "One", 1);
         let terminal = spawn_page(app.world_mut(), pane_one, "vmux://terminal/", "Terminal", 2);
         let tab_two = app
             .world_mut()
-            .spawn((Tab::default(), Order(1), ChildOf(space_two)))
+            .spawn((Tab, Order(1), ChildOf(space_two)))
             .id();
         let pane_two = app.world_mut().spawn((Pane, ChildOf(tab_two))).id();
         let second = spawn_page(app.world_mut(), pane_two, "https://two.example/", "Two", 5);

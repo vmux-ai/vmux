@@ -401,10 +401,7 @@ mod tests {
             app.add_plugins(MinimalPlugins)
                 .add_message::<ResizeRequest>()
                 .add_systems(Update, from_commands);
-            let tab = app
-                .world_mut()
-                .spawn((Tab::default(), LastActivatedAt::now()))
-                .id();
+            let tab = app.world_mut().spawn((Tab, LastActivatedAt::now())).id();
             let split = app
                 .world_mut()
                 .spawn((

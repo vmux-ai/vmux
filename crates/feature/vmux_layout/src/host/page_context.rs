@@ -922,7 +922,7 @@ mod tests {
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_observer(project_activate)
             .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let webview = app.world_mut().spawn(ChildOf(tab)).id();
 
         app.world_mut().trigger(UiInput {
@@ -1285,7 +1285,7 @@ mod tests {
             .add_observer(project_activate)
             .add_observer(capture_workspace)
             .add_systems(Update, poll_project_activations);
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab).id();
         let requester = app
             .world_mut()
             .spawn((
