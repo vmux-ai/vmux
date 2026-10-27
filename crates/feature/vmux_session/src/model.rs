@@ -69,11 +69,7 @@ impl Plugin for EntityPlugin {
             .add_observer(activate)
             .add_systems(
                 Update,
-                (
-                    create,
-                    bevy_ecs::schedule::ApplyDeferred,
-                    rebuild_session_index,
-                )
+                (create, bevy_ecs::schedule::ApplyDeferred, rebuild_index)
                     .chain()
                     .in_set(crate::SessionMutationReceiveSet),
             )
@@ -111,7 +107,7 @@ pub(crate) struct MutationSet;
 pub(crate) struct CanonicalizeSet;
 
 #[cfg(host)]
-fn rebuild_session_index(mut index: vmux_ecs::IdentityIndexWriter<Session>) {
+fn rebuild_index(mut index: vmux_ecs::IdentityIndexWriter<Session>) {
     index.rebuild();
 }
 
@@ -122,8 +118,8 @@ pub(crate) struct SessionIdentityPlugin;
 impl Plugin for SessionIdentityPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_ecs::IdentityIndexPlugin::<Session>::default())
-            .add_systems(PreUpdate, rebuild_session_index)
-            .add_systems(PostUpdate, rebuild_session_index);
+            .add_systems(PreUpdate, rebuild_index)
+            .add_systems(PostUpdate, rebuild_index);
     }
 }
 

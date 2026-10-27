@@ -610,7 +610,7 @@ fn materialize(
             MaterializationSource::Operation,
         );
     }
-    index.resolve_replies(&mut materializer.commands);
+    materializer.resolve_replies(&index);
 }
 
 struct EventIndex {
@@ -646,21 +646,6 @@ impl EventIndex {
                 .insert(session, (event_sequence, event_id.clone()));
         }
     }
-
-    fn resolve_replies(&self, commands: &mut Commands) {
-        for (source, (session, reply_id)) in &self.reply_ids {
-            let target = self.events.get(&(*session, reply_id.clone())).copied();
-            let mut entity = commands.entity(*source);
-            match target {
-                Some(target) if target != *source => {
-                    entity.insert(ReplyTo(target));
-                }
-                _ => {
-                    entity.remove::<ReplyTo>();
-                }
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -675,6 +660,21 @@ struct EventMaterializer<'w, 's> {
 }
 
 impl EventMaterializer<'_, '_> {
+    fn resolve_replies(&mut self, index: &EventIndex) {
+        for (source, (session, reply_id)) in &index.reply_ids {
+            let target = index.events.get(&(*session, reply_id.clone())).copied();
+            let mut entity = self.commands.entity(*source);
+            match target {
+                Some(target) if target != *source => {
+                    entity.insert(ReplyTo(target));
+                }
+                _ => {
+                    entity.remove::<ReplyTo>();
+                }
+            }
+        }
+    }
+
     fn append(&mut self, index: &mut EventIndex, session_id: &Id<Session>, messages: &[Message]) {
         let Some(&session) = index.sessions.get(session_id) else {
             return;

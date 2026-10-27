@@ -111,7 +111,10 @@ fn spawn_store_validator(mut commands: Commands) {
     ));
     commands.spawn((
         Name::new("Session composition validator"),
-        WorkspaceRestoreValidator::new("Session composition", validate_sessions),
+        WorkspaceRestoreValidator {
+            name: "Session composition",
+            validate: validate_sessions,
+        },
     ));
 }
 

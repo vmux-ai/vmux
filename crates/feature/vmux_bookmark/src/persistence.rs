@@ -7,7 +7,7 @@ use vmux_api::bookmark::{BookmarkEntry, SmartBookmarkFolder};
 use vmux_api::{Id, PageIcon};
 use vmux_ecs::persistence::{
     AtomicSaveWorld, PersistenceAppExt, PersistenceDomain, PersistenceRecovery, PersistenceState,
-    RestorePhase, StoreLoad, TrackedLoadWorld, load_tracked_on,
+    RestorePhase, StoreLoad, TrackedLoadPlugin, TrackedLoadWorld, TriggerSingle,
 };
 use vmux_ecs::profile::SessionEnvironment;
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin};
@@ -63,7 +63,7 @@ impl Plugin for BookmarkPersistencePlugin {
         app.init_resource::<OfferedBookmarkDefaults>()
             .add_observer(save_on::<AtomicSaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
-            .add_observer(load_tracked_on::<BookmarkFilter>)
+            .add_plugins(TrackedLoadPlugin::<BookmarkFilter>::default())
             .add_observer(seed_defaults)
             .add_observer(insert_defaults)
             .add_systems(
@@ -151,11 +151,10 @@ fn load_bookmarks_on_startup(
     state.begin_validation(snapshot.metadata().revision());
     state.begin_materialize();
     commands.entity(*entity).insert(BookmarkLoadPending);
-    TrackedLoadWorld::<BookmarkFilter>::from_stream(
+    commands.trigger_single(TrackedLoadWorld::<BookmarkFilter>::from_stream(
         *entity,
         std::io::Cursor::new(snapshot.into_payload().into_bytes()),
-    )
-    .trigger(&mut commands);
+    ));
 }
 
 fn recover_failed_restore(

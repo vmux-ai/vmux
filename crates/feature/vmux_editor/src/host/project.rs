@@ -54,18 +54,18 @@ impl Plugin for ProjectPagePlugin {
             .add_observer(collection_view)
             .add_observer(open_context)
             .add_systems(PreStartup, prewarm)
-            .add_systems(PreUpdate, rebuild_project_index)
+            .add_systems(PreUpdate, rebuild_index)
             .add_systems(
                 Update,
                 (
-                    resolve_project_owners,
+                    resolve_owners,
                     queue,
                     sync_icons,
                     finish_catalogs,
                     finish_files,
                     bevy::ecs::schedule::ApplyDeferred,
-                    rebuild_project_index,
-                    reconcile_project_refs.in_set(vmux_session::SessionMutationReceiveSet),
+                    rebuild_index,
+                    reconcile_refs.in_set(vmux_session::SessionMutationReceiveSet),
                     finish_imports,
                     finish_deletes,
                 )
@@ -74,7 +74,7 @@ impl Plugin for ProjectPagePlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    resolve_project_targets,
+                    resolve_targets,
                     finish_repository_operations,
                     sync_session_counts,
                 )
@@ -83,7 +83,7 @@ impl Plugin for ProjectPagePlugin {
     }
 }
 
-fn rebuild_project_index(mut index: vmux_ecs::IdentityIndexWriter<Project>) {
+fn rebuild_index(mut index: vmux_ecs::IdentityIndexWriter<Project>) {
     index.rebuild();
 }
 
@@ -102,7 +102,7 @@ impl ProjectMatch {
     }
 }
 
-fn reconcile_project_refs(
+fn reconcile_refs(
     index: Res<vmux_ecs::IdentityIndex<Project>>,
     projects: ProjectIdentities,
     sessions: Query<
@@ -170,7 +170,7 @@ fn reconcile_project_ref(
     }
 }
 
-fn resolve_project_targets(
+fn resolve_targets(
     index: Res<vmux_ecs::IdentityIndex<Project>>,
     references: Query<(Entity, Ref<ProjectRef>, Option<&ProjectTarget>)>,
     mut commands: Commands,
@@ -193,7 +193,7 @@ fn resolve_project_targets(
     }
 }
 
-fn resolve_project_owners(
+fn resolve_owners(
     projects: Query<Entity, (With<Project>, Without<ProjectOwner>)>,
     owner: vmux_ecs::profile::Projects,
     mut commands: Commands,
@@ -1144,10 +1144,16 @@ struct ProjectEntities {
     by_id: HashMap<Id<Project>, ProjectEntityState>,
 }
 
-impl ProjectEntities {
-    fn collect(projects: &CanonicalProjects, commands: &mut Commands) -> Self {
+#[derive(SystemParam)]
+struct ProjectReconciler<'w, 's> {
+    projects: CanonicalProjects<'w, 's>,
+    commands: Commands<'w, 's>,
+}
+
+impl ProjectReconciler<'_, '_> {
+    fn collect(&mut self) -> ProjectEntities {
         let mut by_id = HashMap::<Id<Project>, ProjectEntityState>::new();
-        for (entity, id, name, path, source, branch, archived, owner) in projects {
+        for (entity, id, name, path, source, branch, archived, owner) in &self.projects {
             let next = ProjectEntityState {
                 entity,
                 name: name.as_str().to_string(),
@@ -1162,17 +1168,22 @@ impl ProjectEntities {
             };
             if let Some(existing) = by_id.get(id) {
                 if existing.entity.to_bits() <= entity.to_bits() {
-                    commands.entity(entity).despawn();
+                    self.commands.entity(entity).despawn();
                     continue;
                 }
-                commands.entity(existing.entity).despawn();
+                self.commands.entity(existing.entity).despawn();
             }
             by_id.insert(id.clone(), next);
         }
-        Self { by_id }
+        ProjectEntities { by_id }
     }
 
-    fn reconcile(&mut self, state: &mut UiProject, owner: Option<Entity>, commands: &mut Commands) {
+    fn reconcile(
+        &mut self,
+        projects: &mut ProjectEntities,
+        state: &mut UiProject,
+        owner: Option<Entity>,
+    ) {
         let ProjectView::Catalog(catalog) = &mut state.view else {
             return;
         };
@@ -1180,11 +1191,11 @@ impl ProjectEntities {
         for entry in &mut catalog.entries {
             let id = entry.id.clone();
             seen.insert(id.clone());
-            if let Some(current) = self.by_id.get_mut(&id) {
+            if let Some(current) = projects.by_id.get_mut(&id) {
                 entry.archived = current.archived;
                 let path = PathBuf::from(&entry.path);
                 if current.name != entry.name {
-                    commands
+                    self.commands
                         .entity(current.entity)
                         .insert(Name::new(entry.name.clone()));
                     current.name.clone_from(&entry.name);
@@ -1192,17 +1203,17 @@ impl ProjectEntities {
                 if current.path != path
                     && let Ok(path) = ProjectPath::new(path)
                 {
-                    commands.entity(current.entity).insert(path.clone());
+                    self.commands.entity(current.entity).insert(path.clone());
                     current.path = path.path().to_path_buf();
                 }
                 if current.source != entry.source {
-                    commands
+                    self.commands
                         .entity(current.entity)
                         .insert(ProjectSource::new(entry.source.clone()));
                     current.source.clone_from(&entry.source);
                 }
                 if current.branch != entry.branch {
-                    commands
+                    self.commands
                         .entity(current.entity)
                         .insert(ProjectBranch::new(entry.branch.clone()));
                     current.branch.clone_from(&entry.branch);
@@ -1210,7 +1221,7 @@ impl ProjectEntities {
                 if let Some(owner) = owner
                     && current.owner != Some(owner)
                 {
-                    commands
+                    self.commands
                         .entity(current.entity)
                         .insert(ProjectOwner::new(owner));
                     current.owner = Some(owner);
@@ -1227,12 +1238,12 @@ impl ProjectEntities {
             ) else {
                 continue;
             };
-            let mut project = commands.spawn(bundle);
+            let mut project = self.commands.spawn(bundle);
             if let Some(owner) = owner {
                 project.insert(ProjectOwner::new(owner));
             }
             let entity = project.id();
-            self.by_id.insert(
+            projects.by_id.insert(
                 id,
                 ProjectEntityState {
                     entity,
@@ -1246,15 +1257,15 @@ impl ProjectEntities {
             );
         }
 
-        let stale = self
+        let stale = projects
             .by_id
             .keys()
             .filter(|id| !seen.contains(*id))
             .cloned()
             .collect::<Vec<_>>();
         for id in stale {
-            if let Some(project) = self.by_id.remove(&id) {
-                commands.entity(project.entity).despawn();
+            if let Some(project) = projects.by_id.remove(&id) {
+                self.commands.entity(project.entity).despawn();
             }
         }
     }
@@ -1268,31 +1279,35 @@ fn finish_catalogs(
         &ProjectPageRevision,
     )>,
     catalog: Res<CatalogSnapshot>,
-    projects: CanonicalProjects,
+    mut reconciler: ProjectReconciler,
     owner: vmux_ecs::profile::Projects,
     states: Query<&vmux_ecs::UiState<UiProject>>,
-    mut commands: Commands,
 ) {
-    let mut projects = ProjectEntities::collect(&projects, &mut commands);
+    let mut projects = reconciler.collect();
     let owner = owner.entity();
     for (entity, mut task, page, revision) in &mut tasks {
         let Some(state) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        commands.entity(entity).remove::<ProjectCatalogTask>();
+        reconciler
+            .commands
+            .entity(entity)
+            .remove::<ProjectCatalogTask>();
         if !ProjectRoute::is_root(&page.url) || revision.value != task.revision {
             continue;
         }
         let mut state = ProjectCatalog::with_session_counts(state, &catalog);
-        projects.reconcile(&mut state, owner, &mut commands);
+        reconciler.reconcile(&mut projects, &mut state, owner);
         if let Ok(current) = states.get(entity)
             && let Some(current) = current.current()
         {
             state.collection_view = current.collection_view;
         }
-        commands.trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
-            entity, &state,
-        ));
+        reconciler
+            .commands
+            .trigger(vmux_ecs::UiStateWrite::<UiProject>::from_event(
+                entity, &state,
+            ));
     }
 }
 
@@ -1828,11 +1843,9 @@ mod tests {
         let state = app
             .world_mut()
             .run_system_once_with(
-                move |In(mut state): In<UiProject>,
-                      projects: CanonicalProjects,
-                      mut commands: Commands| {
-                    let mut entities = ProjectEntities::collect(&projects, &mut commands);
-                    entities.reconcile(&mut state, Some(owner), &mut commands);
+                move |In(mut state): In<UiProject>, mut reconciler: ProjectReconciler| {
+                    let mut entities = reconciler.collect();
+                    reconciler.reconcile(&mut entities, &mut state, Some(owner));
                     state
                 },
                 state,
@@ -1863,11 +1876,9 @@ mod tests {
         let state = app
             .world_mut()
             .run_system_once_with(
-                move |In(mut state): In<UiProject>,
-                      projects: CanonicalProjects,
-                      mut commands: Commands| {
-                    let mut entities = ProjectEntities::collect(&projects, &mut commands);
-                    entities.reconcile(&mut state, Some(owner), &mut commands);
+                move |In(mut state): In<UiProject>, mut reconciler: ProjectReconciler| {
+                    let mut entities = reconciler.collect();
+                    reconciler.reconcile(&mut entities, &mut state, Some(owner));
                     state
                 },
                 state,
@@ -1883,7 +1894,7 @@ mod tests {
     fn duplicate_project_ids_are_explicit() {
         let mut app = App::new();
         app.add_plugins(vmux_ecs::IdentityIndexPlugin::<Project>::default())
-            .add_systems(Update, rebuild_project_index);
+            .add_systems(Update, rebuild_index);
         let id = Id::<Project>::new("vmux://projects/duplicate");
         let path = PathBuf::from("/tmp/duplicate");
         app.world_mut()
@@ -1908,11 +1919,8 @@ mod tests {
             vmux_session::SessionDomainPlugin,
             vmux_ecs::IdentityIndexPlugin::<Project>::default(),
         ))
-        .add_systems(
-            Update,
-            (rebuild_project_index, reconcile_project_refs).chain(),
-        )
-        .add_systems(PostUpdate, resolve_project_targets);
+        .add_systems(Update, (rebuild_index, reconcile_refs).chain())
+        .add_systems(PostUpdate, resolve_targets);
         let id = Id::<Project>::new("vmux://projects/github.com/vmux-ai/vmux");
         let root = PathBuf::from("/projects/vmux");
         let project = app
