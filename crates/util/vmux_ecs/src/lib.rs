@@ -42,8 +42,8 @@ pub use process_id::ProcessId;
 pub use process_id::ProcessPresentationRequest;
 #[cfg(host)]
 pub use replication::{
-    AcknowledgedSequence, Actor, CommittedAt, CommittedOperation, CommittedRevision,
-    DeletionRevision, DeletionSequence, OperationSequence, Replica, ReplicaAck,
+    AcknowledgedSequence, Actor, CommittedAt, CommittedOperation, CommittedOperationSpec,
+    CommittedRevision, DeletionRevision, DeletionSequence, OperationSequence, Replica, ReplicaAck,
     ReplicationConflict, ReplicationIndex, ReplicationPlugin, ReplicationRoot, ReplicationSnapshot,
     SnapshotRevision, SnapshotSequence, Tombstone, TombstoneRetention,
 };

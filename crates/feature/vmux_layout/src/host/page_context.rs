@@ -534,7 +534,6 @@ impl GitPageContextWriter<'_, '_> {
             .tabs
             .startup_dir(webview)
             .or_else(|| owner.and_then(|owner| self.tabs.startup_dir(owner)))
-            .map(PathBuf::from)
             .or_else(|| {
                 self.hierarchy
                     .get(owner.unwrap_or(webview))

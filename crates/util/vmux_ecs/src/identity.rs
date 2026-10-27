@@ -107,12 +107,14 @@ impl<T, M> Default for IndexedIdentities<T, M> {
 #[derive(SystemParam)]
 pub struct IdentityIndexWriter<'w, 's, T: Send + Sync + 'static, M: Component = T> {
     entities: Query<'w, 's, (Entity, &'static Id<T>), With<M>>,
-    changed: Query<'w, 's, (), (With<M>, Or<(Added<M>, Changed<Id<T>>)>)>,
+    changed: ChangedIdentities<'w, 's, T, M>,
     removed_markers: RemovedComponents<'w, 's, M>,
     removed_ids: RemovedComponents<'w, 's, Id<T>>,
     current: ResMut<'w, IdentityIndex<T>>,
     indexed: ResMut<'w, IndexedIdentities<T, M>>,
 }
+
+type ChangedIdentities<'w, 's, T, M> = Query<'w, 's, (), (With<M>, Or<(Added<M>, Changed<Id<T>>)>)>;
 
 impl<T: Send + Sync + 'static, M: Component> IdentityIndexWriter<'_, '_, T, M> {
     pub fn rebuild(&mut self) {

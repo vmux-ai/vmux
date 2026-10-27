@@ -813,8 +813,7 @@ fn create(
             created_at,
             activated_at,
         });
-        if let Ok(bundle) = vmux_ecs::CommittedOperation::bundle(
-            entity,
+        if let Ok(spec) = vmux_ecs::CommittedOperationSpec::new(
             Id::new(uuid::Uuid::new_v4().to_string()),
             crate::SessionMutationRequest::local_actor(),
             request.id.clone(),
@@ -823,6 +822,7 @@ fn create(
             1,
             UnixMillis::now(),
         ) {
+            let bundle = vmux_ecs::CommittedOperation::bundle(entity, spec);
             commands.spawn((bundle, mutation));
         }
         commands.trigger(Created {
