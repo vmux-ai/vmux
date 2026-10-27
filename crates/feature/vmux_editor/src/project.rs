@@ -275,10 +275,7 @@ mod tests {
 
 #[cfg(host)]
 impl ProjectRoute {
-    pub(crate) fn route_path(
-        value: &str,
-        root: &std::path::Path,
-    ) -> Option<Result<std::path::PathBuf, String>> {
+    pub(crate) fn route_path(value: &str, root: &Path) -> Option<Result<PathBuf, String>> {
         let root = match root.canonicalize() {
             Ok(root) => root,
             Err(error) => {
@@ -298,7 +295,7 @@ impl ProjectRoute {
             let Ok(decoded) = percent_encoding::percent_decode_str(encoded).decode_utf8() else {
                 return Some(Err("project URL contains invalid UTF-8".to_string()));
             };
-            let mut components = std::path::Path::new(decoded.as_ref()).components();
+            let mut components = Path::new(decoded.as_ref()).components();
             let Some(std::path::Component::Normal(component)) = components.next() else {
                 return Some(Err("project URL contains an invalid path".to_string()));
             };
@@ -310,10 +307,7 @@ impl ProjectRoute {
         Some(Ok(path))
     }
 
-    pub fn resolve(
-        value: &str,
-        root: &std::path::Path,
-    ) -> Option<Result<std::path::PathBuf, String>> {
+    pub fn resolve(value: &str, root: &Path) -> Option<Result<PathBuf, String>> {
         let root = match root.canonicalize() {
             Ok(root) => root,
             Err(error) => {
@@ -338,7 +332,7 @@ impl ProjectRoute {
         Some(Ok(canonical))
     }
 
-    pub fn from_path(root: &std::path::Path, path: &std::path::Path) -> Option<String> {
+    pub fn from_path(root: &Path, path: &Path) -> Option<String> {
         let relative = path.strip_prefix(root).ok()?;
         let mut url = url::Url::parse(Self::ROOT).ok()?;
         let mut segments = url.path_segments_mut().ok()?;

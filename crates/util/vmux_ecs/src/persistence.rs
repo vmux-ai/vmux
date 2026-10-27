@@ -8,7 +8,8 @@ use bevy_world_serialization::WorldFilter;
 use moonshine_save::load::{DefaultUnloadFilter, LoadCommand, LoadStream, LoadWorld};
 use moonshine_save::prelude::{SaveEvent, SaveOutput};
 use moonshine_save::save::{DefaultSaveFilter, EntityFilter, SaveResult};
-use moonshine_util::event::{OnSingle, SingleEvent, TriggerSingle};
+pub use moonshine_util::event::TriggerSingle;
+use moonshine_util::event::{OnSingle, SingleEvent};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -262,13 +263,6 @@ impl<U: QueryFilter> TrackedLoadWorld<U> {
             state,
         }
     }
-
-    pub fn trigger(self, commands: &mut Commands)
-    where
-        U: Send + Sync + 'static,
-    {
-        commands.trigger_single(self);
-    }
 }
 
 impl TrackedLoadWorld {
@@ -279,7 +273,24 @@ impl TrackedLoadWorld {
 
 impl<U> SingleEvent for TrackedLoadWorld<U> where U: QueryFilter + Send + Sync + 'static {}
 
-pub fn load_tracked_on<U>(event: OnSingle<TrackedLoadWorld<U>>, mut commands: Commands)
+pub struct TrackedLoadPlugin<U>(PhantomData<fn() -> U>);
+
+impl<U> Default for TrackedLoadPlugin<U> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<U> bevy_app::Plugin for TrackedLoadPlugin<U>
+where
+    U: QueryFilter + Send + Sync + 'static,
+{
+    fn build(&self, app: &mut App) {
+        app.add_observer(load::<U>);
+    }
+}
+
+fn load<U>(event: OnSingle<TrackedLoadWorld<U>>, mut commands: Commands)
 where
     U: QueryFilter + Send + Sync + 'static,
 {
@@ -313,19 +324,21 @@ pub struct WorkspaceRestoreValidator {
 }
 
 impl WorkspaceRestoreValidator {
-    pub const fn new(name: &'static str, validate: fn(&mut World) -> Result<(), String>) -> Self {
-        Self { name, validate }
-    }
-
     pub fn unique<T>(name: &'static str) -> Self
     where
         T: Component + Clone + Eq + Hash,
     {
-        Self::new(name, validate_unique::<T>)
+        Self {
+            name,
+            validate: validate_unique::<T>,
+        }
     }
 
     pub const fn ownership() -> Self {
-        Self::new("ownership graph", validate_ownership)
+        Self {
+            name: "ownership graph",
+            validate: validate_ownership,
+        }
     }
 }
 
@@ -858,7 +871,7 @@ mod tests {
     fn materialization_failure_becomes_typed_persistence_state() {
         let mut app = App::new();
         app.add_plugins((bevy::MinimalPlugins, bevy::asset::AssetPlugin::default()))
-            .add_observer(load_tracked_on::<DefaultUnloadFilter>);
+            .add_plugins(TrackedLoadPlugin::<DefaultUnloadFilter>::default());
         let state = app.world_mut().spawn(PersistenceState::new(1)).id();
         app.world_mut()
             .trigger_single(TrackedLoadWorld::default_from_stream(

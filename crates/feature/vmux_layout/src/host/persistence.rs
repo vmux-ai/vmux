@@ -47,7 +47,10 @@ fn spawn_store_validator(mut commands: Commands) {
     ));
     commands.spawn((
         Name::new("Layout composition validator"),
-        WorkspaceRestoreValidator::new("layout composition", validate_layout),
+        WorkspaceRestoreValidator {
+            name: "layout composition",
+            validate: validate_layout,
+        },
     ));
 }
 

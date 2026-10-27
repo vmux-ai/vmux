@@ -17,9 +17,9 @@ use vmux_api::Id;
 use vmux_ecs::persistence::PersistenceAppExt;
 use vmux_ecs::persistence::{
     AtomicSaveWorld, DurableStore, PersistenceDirty, PersistenceRecovery, PersistenceState,
-    RestorePhase, StoreLoad, TrackedLoadWorld, WorkspacePersisted, WorkspaceRestoreSet,
-    WorkspaceRestoreValidator, WorkspaceSaveRequest, WorkspaceStore, WorkspaceStoreValidators,
-    load_tracked_on,
+    RestorePhase, StoreLoad, TrackedLoadPlugin, TrackedLoadWorld, TriggerSingle,
+    WorkspacePersisted, WorkspaceRestoreSet, WorkspaceRestoreValidator, WorkspaceSaveRequest,
+    WorkspaceStore, WorkspaceStoreValidators,
 };
 #[cfg(test)]
 use vmux_ecs::profile::ProfilePaths;
@@ -42,7 +42,7 @@ impl Plugin for WorkspacePersistencePlugin {
         app.add_message::<WorkspaceSaveRequest>()
             .add_observer(save_on::<AtomicSaveWorld>)
             .add_observer(load_on_default_event)
-            .add_observer(load_tracked_on::<moonshine_save::load::DefaultUnloadFilter>)
+            .add_plugins(TrackedLoadPlugin::<moonshine_save::load::DefaultUnloadFilter>::default())
             .add_systems(
                 Startup,
                 (spawn, ApplyDeferred, load_on_startup)
@@ -503,11 +503,10 @@ fn load_on_startup(
     commands
         .entity(*entity)
         .insert(RestoreBaseline(saved.iter().collect()));
-    TrackedLoadWorld::default_from_stream(
+    commands.trigger_single(TrackedLoadWorld::default_from_stream(
         *entity,
         std::io::Cursor::new(snapshot.into_payload().into_bytes()),
-    )
-    .trigger(&mut commands);
+    ));
 }
 
 fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {

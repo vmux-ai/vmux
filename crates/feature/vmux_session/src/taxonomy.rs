@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 #[cfg(host)]
 use bevy_app::{App, Plugin, PostUpdate, Update};
 use bevy_ecs::prelude::*;
@@ -46,10 +44,7 @@ impl Plugin for TaxonomyPlugin {
             Update,
             (save_labels, save_cycles).in_set(crate::model::MutationSet),
         )
-        .add_systems(
-            Update,
-            update_taxonomy.in_set(crate::SessionMutationReceiveSet),
-        )
+        .add_systems(Update, update.in_set(crate::SessionMutationReceiveSet))
         .add_systems(
             PostUpdate,
             (
@@ -403,86 +398,12 @@ pub struct TaxonomyUpdateRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 #[type_path = "vmux_session"]
 pub struct TaxonomyMutation {
-    cycle: Option<Id<Cycle>>,
-    assignee: Option<Id<SerializedMember>>,
-    labels: Vec<Id<Label>>,
-    priority: Option<Priority>,
-    estimate: Option<Estimate>,
-    due_at: Option<DueAt>,
-}
-
-impl TaxonomyMutation {
-    pub(crate) fn apply(
-        &self,
-        session: Entity,
-        children: Option<&Children>,
-        assignments: &Query<(Entity, &LabelRef), With<LabelAssignment>>,
-        commands: &mut Commands,
-    ) {
-        let mut entity = commands.entity(session);
-        match &self.cycle {
-            Some(cycle) => {
-                entity.insert(CycleRef::new(cycle.clone()));
-            }
-            None => {
-                entity.remove::<(CycleRef, CycleTarget)>();
-            }
-        }
-        match &self.assignee {
-            Some(assignee) => {
-                entity.insert(AssigneeRef::new(assignee.clone()));
-            }
-            None => {
-                entity.remove::<(AssigneeRef, AssigneeTarget)>();
-            }
-        }
-        match self.priority {
-            Some(priority) => {
-                entity.insert(priority);
-            }
-            None => {
-                entity.remove::<Priority>();
-            }
-        }
-        match self.estimate {
-            Some(estimate) => {
-                entity.insert(estimate);
-            }
-            None => {
-                entity.remove::<Estimate>();
-            }
-        }
-        match self.due_at {
-            Some(due_at) => {
-                entity.insert(due_at);
-            }
-            None => {
-                entity.remove::<DueAt>();
-            }
-        }
-
-        let requested = self.labels.iter().cloned().collect::<HashSet<_>>();
-        let mut existing = HashMap::<Id<Label>, Entity>::new();
-        for child in children.into_iter().flat_map(|children| children.iter()) {
-            if let Ok((assignment, label)) = assignments.get(child) {
-                existing.insert(label.id().clone(), assignment);
-            }
-        }
-        for (label, assignment) in &existing {
-            if !requested.contains(label) {
-                commands.entity(*assignment).despawn();
-            }
-        }
-        for label in &self.labels {
-            if !existing.contains_key(label) {
-                commands.spawn((
-                    LabelAssignment,
-                    LabelRef::new(label.clone()),
-                    ChildOf(session),
-                ));
-            }
-        }
-    }
+    pub(crate) cycle: Option<Id<Cycle>>,
+    pub(crate) assignee: Option<Id<SerializedMember>>,
+    pub(crate) labels: Vec<Id<Label>>,
+    pub(crate) priority: Option<Priority>,
+    pub(crate) estimate: Option<Estimate>,
+    pub(crate) due_at: Option<DueAt>,
 }
 
 #[cfg(host)]
@@ -595,7 +516,7 @@ fn save_cycles(
 }
 
 #[cfg(host)]
-fn update_taxonomy(
+fn update(
     mut requests: MessageReader<TaxonomyUpdateRequest>,
     mut commits: MessageWriter<crate::SessionMutationRequest>,
 ) {

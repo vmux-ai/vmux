@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use bevy_app::{App, Plugin, Update};
@@ -207,7 +207,7 @@ impl SessionMutations<'_, '_> {
             }
             (Some(session), _) => session,
             (None, SessionMutation::Created(created)) => {
-                let session = created.spawn(request.session.clone(), &mut self.commands);
+                let session = self.spawn(created, request.session.clone());
                 sessions.insert(request.session.clone(), session);
                 revisions.insert(session, Revision::new(0));
                 session
@@ -253,12 +253,11 @@ impl SessionMutations<'_, '_> {
             .ok_or(SessionMutationRejection::RevisionExhausted)?;
         let sequence = sequences.entry(session).or_default();
         *sequence = sequence.saturating_add(1);
-        request.mutation.apply(
-            session,
-            children,
-            &self.label_assignments,
-            &mut self.commands,
-        );
+        let children = children
+            .into_iter()
+            .flat_map(|children| children.iter())
+            .collect::<Vec<_>>();
+        self.apply(&request.mutation, session, &children);
         self.commands
             .entity(session)
             .insert((vmux_ecs::ReplicationRoot, next));
@@ -282,6 +281,143 @@ impl SessionMutations<'_, '_> {
             revision: next,
         })
     }
+
+    fn spawn(&mut self, created: &CreatedMutation, id: Id<Session>) -> Entity {
+        let mut session = self.commands.spawn((
+            Save,
+            Session,
+            id,
+            Name::new(created.name.clone()),
+            Description(created.description.clone()),
+            Cwd(created.cwd.clone()),
+            CreatedAt::new(created.created_at),
+            LastActivatedAt::new(created.activated_at),
+            WorkflowStateRef::new(created.workflow_state.clone()),
+            WorkflowStateChangedAt::new(created.activated_at),
+        ));
+        if let Some(agent) = created.agent.clone() {
+            session.insert(agent);
+        }
+        session.id()
+    }
+
+    fn apply(&mut self, mutation: &SessionMutation, session: Entity, children: &[Entity]) {
+        match mutation {
+            SessionMutation::Created(_) => {}
+            SessionMutation::Rename(name) => {
+                self.commands.entity(session).insert((
+                    Name::new(name.clone()),
+                    AgentConversationTitle(name.clone()),
+                ));
+                self.commands.entity(session).remove::<TitlePending>();
+            }
+            SessionMutation::Describe(description) => {
+                self.commands
+                    .entity(session)
+                    .insert(Description(description.clone()));
+            }
+            SessionMutation::ChangeWorkflowState(workflow_state) => {
+                self.commands.entity(session).insert((
+                    WorkflowStateRef::new(workflow_state.clone()),
+                    WorkflowStateChangedAt::new(UnixMillis::now().0),
+                ));
+            }
+            SessionMutation::Archive(archived_at) => match archived_at {
+                Some(archived_at) => {
+                    self.commands
+                        .entity(session)
+                        .insert(ArchivedAt::new((*archived_at).max(1)));
+                }
+                None => {
+                    self.commands.entity(session).remove::<ArchivedAt>();
+                }
+            },
+            SessionMutation::ChangeProject(project) => match project {
+                Some(project) => {
+                    self.commands
+                        .entity(session)
+                        .insert(ProjectRef::new(project.clone()));
+                }
+                None => {
+                    self.commands.entity(session).remove::<ProjectRef>();
+                }
+            },
+            SessionMutation::ChangeTaxonomy(taxonomy) => {
+                self.apply_taxonomy(taxonomy, session, children);
+            }
+        }
+    }
+
+    fn apply_taxonomy(
+        &mut self,
+        taxonomy: &TaxonomyMutation,
+        session: Entity,
+        children: &[Entity],
+    ) {
+        let mut entity = self.commands.entity(session);
+        match &taxonomy.cycle {
+            Some(cycle) => {
+                entity.insert(crate::CycleRef::new(cycle.clone()));
+            }
+            None => {
+                entity.remove::<(crate::CycleRef, crate::CycleTarget)>();
+            }
+        }
+        match &taxonomy.assignee {
+            Some(assignee) => {
+                entity.insert(crate::AssigneeRef::new(assignee.clone()));
+            }
+            None => {
+                entity.remove::<(crate::AssigneeRef, crate::AssigneeTarget)>();
+            }
+        }
+        match taxonomy.priority {
+            Some(priority) => {
+                entity.insert(priority);
+            }
+            None => {
+                entity.remove::<crate::Priority>();
+            }
+        }
+        match taxonomy.estimate {
+            Some(estimate) => {
+                entity.insert(estimate);
+            }
+            None => {
+                entity.remove::<crate::Estimate>();
+            }
+        }
+        match taxonomy.due_at {
+            Some(due_at) => {
+                entity.insert(due_at);
+            }
+            None => {
+                entity.remove::<crate::DueAt>();
+            }
+        }
+
+        let requested = taxonomy.labels.iter().cloned().collect::<HashSet<_>>();
+        let mut existing = HashMap::<Id<crate::Label>, Entity>::new();
+        for child in children {
+            if let Ok((assignment, label)) = self.label_assignments.get(*child) {
+                existing.insert(label.id().clone(), assignment);
+            }
+        }
+        for (label, assignment) in &existing {
+            if !requested.contains(label) {
+                self.commands.entity(*assignment).despawn();
+            }
+        }
+        for label in &taxonomy.labels {
+            if !existing.contains_key(label) {
+                self.commands.spawn((
+                    crate::LabelAssignment,
+                    crate::LabelRef::new(label.clone()),
+                    ChildOf(session),
+                ));
+            }
+        }
+    }
 }
 
 impl SessionMutation {
@@ -297,75 +433,6 @@ impl SessionMutation {
             return Err(SessionMutationRejection::MissingWorkflowState(id.clone()));
         }
         Ok(())
-    }
-
-    fn apply(
-        &self,
-        session: Entity,
-        children: Option<&Children>,
-        assignments: &Query<(Entity, &crate::LabelRef), With<crate::LabelAssignment>>,
-        commands: &mut Commands,
-    ) {
-        let mut entity = commands.entity(session);
-        match self {
-            Self::Created(_) => {}
-            Self::Rename(name) => {
-                entity.insert((
-                    Name::new(name.clone()),
-                    AgentConversationTitle(name.clone()),
-                ));
-                entity.remove::<TitlePending>();
-            }
-            Self::Describe(description) => {
-                entity.insert(Description(description.clone()));
-            }
-            Self::ChangeWorkflowState(workflow_state) => {
-                entity.insert((
-                    WorkflowStateRef::new(workflow_state.clone()),
-                    WorkflowStateChangedAt::new(UnixMillis::now().0),
-                ));
-            }
-            Self::Archive(archived_at) => match archived_at {
-                Some(archived_at) => {
-                    entity.insert(ArchivedAt::new((*archived_at).max(1)));
-                }
-                None => {
-                    entity.remove::<ArchivedAt>();
-                }
-            },
-            Self::ChangeProject(project) => match project {
-                Some(project) => {
-                    entity.insert(ProjectRef::new(project.clone()));
-                }
-                None => {
-                    entity.remove::<ProjectRef>();
-                }
-            },
-            Self::ChangeTaxonomy(taxonomy) => {
-                taxonomy.apply(session, children, assignments, commands);
-            }
-        }
-    }
-}
-
-impl CreatedMutation {
-    fn spawn(&self, id: Id<Session>, commands: &mut Commands) -> Entity {
-        let mut session = commands.spawn((
-            Save,
-            Session,
-            id,
-            Name::new(self.name.clone()),
-            Description(self.description.clone()),
-            Cwd(self.cwd.clone()),
-            CreatedAt::new(self.created_at),
-            LastActivatedAt::new(self.activated_at),
-            WorkflowStateRef::new(self.workflow_state.clone()),
-            WorkflowStateChangedAt::new(self.activated_at),
-        ));
-        if let Some(agent) = self.agent.clone() {
-            session.insert(agent);
-        }
-        session.id()
     }
 }
 
