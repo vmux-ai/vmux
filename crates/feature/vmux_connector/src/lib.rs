@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy_app::{App, Plugin};
 use vmux_feature::AppFeatureExt;
 
 pub use link::{

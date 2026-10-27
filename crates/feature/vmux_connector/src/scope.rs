@@ -1,4 +1,6 @@
-use bevy::prelude::*;
+use bevy_app::{App, Plugin, PreUpdate};
+use bevy_ecs::prelude::*;
+use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 use moonshine_save::prelude::Save;
 use vmux_api::Id;
 #[cfg(host)]
