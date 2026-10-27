@@ -6,7 +6,7 @@ use vmux_command::{CommandBarWorkDirectory, ContributedPage, WriteCommandBarSnap
 use vmux_ecs::{Cwd, EntityTarget, LastActivatedAt};
 #[cfg(test)]
 use vmux_session::Id;
-use vmux_session::{AgentId, Session};
+use vmux_session::{AgentRef, Session};
 
 use super::acp::AcpPackageChanged;
 use super::acp::registry::RegistryAgent;
@@ -81,7 +81,7 @@ fn sync_installed(
 
 fn publish(
     agents: Query<(Entity, &RegistryAgent, Option<&ContributedPage>), With<InstalledAgent>>,
-    sessions: Query<(&AgentId, Option<&LastActivatedAt>), With<Session>>,
+    sessions: Query<(&AgentRef, Option<&LastActivatedAt>), With<Session>>,
     mut commands: Commands,
 ) {
     let mut recent = Vec::<(String, i64)>::new();
@@ -89,11 +89,11 @@ fn publish(
         let timestamp = timestamp.map_or(i64::MIN, |timestamp| timestamp.milliseconds());
         if let Some((_, current)) = recent
             .iter_mut()
-            .find(|(candidate, _)| candidate == &agent_id.0)
+            .find(|(candidate, _)| candidate == agent_id.as_str())
         {
             *current = (*current).max(timestamp);
         } else {
-            recent.push((agent_id.0.clone(), timestamp));
+            recent.push((agent_id.as_str().to_string(), timestamp));
         }
     }
     recent.sort_by(|(left_agent, left_time), (right_agent, right_time)| {
@@ -110,7 +110,7 @@ fn publish(
                 id: agent.id.clone(),
                 rank: 0,
                 page: CommandBarPage {
-                    url: SessionRoute::manager_for_agent(&AgentId(agent.id.clone())),
+                    url: SessionRoute::manager_for_agent(&AgentRef::new(agent.id.clone())),
                     title: agent.name.clone(),
                     keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
                     icon: agent
@@ -175,7 +175,7 @@ mod tests {
         app.world_mut().spawn((
             Session,
             Id::<Session>::new("session"),
-            AgentId("codex".into()),
+            AgentRef::new("codex"),
             Cwd::default(),
             vmux_ecs::ProcessAnchor(ProcessId::new()),
             LastActivatedAt::new(20),

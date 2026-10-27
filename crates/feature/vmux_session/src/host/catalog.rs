@@ -18,7 +18,7 @@ use vmux_ecs::{
 use vmux_ecs::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
-    AgentId, ArchiveRequest, CatalogSnapshot, CleanupRequest, CleanupTarget, CreateRequest,
+    AgentRef, ArchiveRequest, CatalogSnapshot, CleanupRequest, CleanupTarget, CreateRequest,
     Created, DescriptionUpdateRequest, Id, ProviderArchiveRequest, ProviderCatalog,
     ProviderSessionRestoreRequest, ProviderWorkflowStateChangeRequest, RenameRequest, Route,
     Session, SessionSummary, SessionSummaryProjection, WorkflowState, WorkflowStateChangeRequest,
@@ -248,7 +248,7 @@ impl CatalogViews<'_, '_> {
         MutationAuthority::None
     }
 
-    fn agent(&self, entity: Entity) -> Option<AgentId> {
+    fn agent(&self, entity: Entity) -> Option<AgentRef> {
         self.managers
             .get(entity)
             .ok()
@@ -1244,7 +1244,7 @@ mod tests {
                 SessionManagerView,
                 ChildOf(stack),
                 PageMetadata {
-                    url: Route::manager_for_agent(&AgentId("codex".into())),
+                    url: Route::manager_for_agent(&AgentRef::new("codex")),
                     title: String::new(),
                     icon: Default::default(),
                     bg_color: None,
@@ -1267,7 +1267,7 @@ mod tests {
             .resource_mut::<Messages<CreateRequest>>()
             .drain()
             .collect::<Vec<_>>();
-        assert_eq!(created[0].agent, Some(AgentId("codex".into())));
+        assert_eq!(created[0].agent, Some(AgentRef::new("codex")));
     }
 
     #[test]

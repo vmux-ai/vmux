@@ -7,6 +7,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use serde::{Deserialize, Serialize};
+use vmux_api::Id;
 use vmux_api::avatar::IdenticonSpec;
 use vmux_ecs::page::PrewarmPage;
 use vmux_git::worktree::RepoLabel;
@@ -17,9 +18,9 @@ use vmux_session::host::ScopeProjectionRequest;
 use vmux_session::{CatalogSnapshot, SessionSummaryProjection};
 
 use crate::project::{
-    ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest, ProjectCollectionViewRequest,
-    ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView, ProjectEntry, ProjectId,
-    ProjectImportRequest, ProjectRoute, ProjectView, UiProject,
+    Project, ProjectArchiveRequest, ProjectCatalogView, ProjectCloneRequest,
+    ProjectCollectionViewRequest, ProjectCreateRequest, ProjectDeleteRequest, ProjectDetailView,
+    ProjectEntry, ProjectImportRequest, ProjectRoute, ProjectView, UiProject,
 };
 
 pub(super) struct ProjectPagePlugin;
@@ -716,7 +717,7 @@ fn queue(
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.to_string_lossy().into_owned());
                     page.title.clone_from(&name);
-                    let id = ProjectId(url.clone());
+                    let id = Id::<Project>::new(url.clone());
                     (
                         UiProject {
                             view: ProjectView::Detail(ProjectDetailView {
@@ -739,7 +740,7 @@ fn queue(
                 None => continue,
             };
             let seed = match &state.view {
-                ProjectView::Detail(detail) => detail.id.0.as_str(),
+                ProjectView::Detail(detail) => detail.id.as_str(),
                 _ => &url,
             };
             page.icon = vmux_api::PageIcon::favicon(IdenticonSpec::favicon_with_variant(
@@ -1059,7 +1060,7 @@ impl ProjectCatalog {
                 .map(|label| label.branch)
                 .unwrap_or_default();
             let archived = archive.contains(&url);
-            let id = ProjectId(url.clone());
+            let id = Id::<Project>::new(url.clone());
             entries.push(ProjectEntry {
                 id,
                 name: name.to_string(),
@@ -1158,7 +1159,7 @@ mod tests {
         let ProjectView::Catalog(initial) = initial.view else {
             panic!("expected project catalog");
         };
-        assert_eq!(initial.entries[0].id.0, initial.entries[0].url);
+        assert_eq!(initial.entries[0].id.as_str(), initial.entries[0].url);
 
         let linked = root.path().join("github.com/vmux-ai/vmux");
         std::fs::create_dir_all(linked.parent().unwrap()).unwrap();
@@ -1168,7 +1169,7 @@ mod tests {
         let ProjectView::Catalog(moved) = moved.view else {
             panic!("expected project catalog");
         };
-        assert_eq!(moved.entries[0].id.0, moved.entries[0].url);
+        assert_eq!(moved.entries[0].id.as_str(), moved.entries[0].url);
         assert_eq!(
             moved.entries[0].url,
             "vmux://projects/github.com/vmux-ai/vmux"
@@ -1184,8 +1185,19 @@ mod tests {
         let state = UiProject {
             view: ProjectView::Catalog(ProjectCatalogView {
                 entries: vec![ProjectEntry {
+                    id: Id::new("vmux://projects/test"),
+                    name: "test".into(),
+                    source: String::new(),
                     path: project.display().to_string(),
-                    ..Default::default()
+                    url: "vmux://projects/test".into(),
+                    branch: String::new(),
+                    base_ref: String::new(),
+                    is_worktree: false,
+                    uncommitted: 0,
+                    ahead: 0,
+                    ongoing_sessions: 0,
+                    stale_sessions: 0,
+                    archived: false,
                 }],
                 operation_pending: false,
             }),

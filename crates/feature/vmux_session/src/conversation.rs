@@ -13,7 +13,7 @@ use vmux_api::session::{
 use vmux_ecs::CreatedAt;
 use vmux_ecs::persistence::PersistenceAppExt;
 
-use crate::{AgentId, Id, Session};
+use crate::{AgentRef, Id, Session};
 
 pub(crate) struct ConversationPlugin;
 
@@ -208,7 +208,7 @@ fn ensure(
 }
 
 fn sync_agent(
-    sessions: Query<(Entity, &Id<Session>, &AgentId, Option<&Children>), Changed<AgentId>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentRef, Option<&Children>), Changed<AgentRef>>,
     mut members: Query<
         (
             Entity,
@@ -234,7 +234,7 @@ fn sync_agent(
             if id != Some(&expected) {
                 commands.entity(entity).insert(expected);
             }
-            *name = Name::new(agent_id.0.clone());
+            *name = Name::new(agent_id.as_str().to_string());
             *role = MemberRole::Participant;
             found = true;
         }
@@ -242,7 +242,7 @@ fn sync_agent(
             commands.spawn((
                 Member,
                 SerializedMember::agent_id(session_id),
-                Name::new(agent_id.0.clone()),
+                Name::new(agent_id.as_str().to_string()),
                 MemberRole::Participant,
                 MemberKind::Agent,
                 ChildOf(session),
@@ -681,7 +681,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(session)
-            .insert(AgentId("codex".into()));
+            .insert(AgentRef::new("codex"));
         app.update();
 
         let members = app

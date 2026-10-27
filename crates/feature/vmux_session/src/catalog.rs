@@ -24,7 +24,7 @@ use vmux_ecs::{ArchivedAt, CreatedAt, Cwd, Description, LastActivatedAt, Order, 
 use crate::model::{ProviderArchiveOperations, ProviderSessionTombstones};
 #[cfg(host)]
 use crate::{
-    AgentConversationTitle, AgentFamily, AgentId, ConversationEvent, MessageContent,
+    AgentConversationTitle, AgentFamily, AgentRef, ConversationEvent, MessageContent,
     ProviderArchive, ProviderWorkflowState, RunState, Session, SessionDuplicate,
     TerminalWorkflowState, Transcripts, WorkflowState, WorkflowStateChangedAt, WorkflowStateRef,
 };
@@ -278,7 +278,7 @@ type SessionCatalog<'w, 's> = Query<
         &'static LastActivatedAt,
         &'static WorkflowStateChangedAt,
         Option<&'static ArchivedAt>,
-        Option<&'static AgentId>,
+        Option<&'static AgentRef>,
         Option<&'static RunState>,
         Option<&'static AgentConversationTitle>,
     ),
@@ -375,7 +375,7 @@ type ChangedSessions<'w, 's> = Query<
             Changed<LastActivatedAt>,
             Changed<WorkflowStateChangedAt>,
             Changed<ArchivedAt>,
-            Changed<AgentId>,
+            Changed<AgentRef>,
             Changed<RunState>,
             Changed<AgentConversationTitle>,
         )>,
@@ -493,7 +493,7 @@ struct CatalogChanges<'w, 's> {
     removed_orders: RemovedComponents<'w, 's, Order>,
     removed_terminal: RemovedComponents<'w, 's, TerminalWorkflowState>,
     removed_archived_at: RemovedComponents<'w, 's, ArchivedAt>,
-    removed_agents: RemovedComponents<'w, 's, AgentId>,
+    removed_agents: RemovedComponents<'w, 's, AgentRef>,
     removed_profiles: RemovedComponents<'w, 's, vmux_ecs::team::Profile>,
     removed_avatars: RemovedComponents<'w, 's, vmux_ecs::team::Avatar>,
     removed_icons: RemovedComponents<'w, 's, vmux_ecs::team::Icon>,
@@ -639,8 +639,8 @@ fn project(
                 let fallback = profile
                     .as_ref()
                     .map(vmux_ecs::team::ProfileView::name)
-                    .unwrap_or(agent.0.as_str());
-                AgentFamily::of(&agent.0).name(fallback)
+                    .unwrap_or(agent.as_str());
+                AgentFamily::of(agent.as_str()).name(fallback)
             })
             .unwrap_or_default();
         let archived_at = linked_sessions
@@ -672,7 +672,9 @@ fn project(
             last_activated_at: last_activated_at.milliseconds(),
             stage_changed_at: stage_changed_at.milliseconds(),
             archived_at,
-            agent: agent.map(|agent| agent.0.clone()).unwrap_or_default(),
+            agent: agent
+                .map(|agent| agent.as_str().to_string())
+                .unwrap_or_default(),
             agent_name,
             agent_icon: profile
                 .as_ref()

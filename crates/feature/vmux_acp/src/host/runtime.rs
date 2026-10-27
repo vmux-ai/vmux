@@ -27,7 +27,7 @@ use crate::policy::AcpWorkspacePolicy;
 use crate::session::{AcpSessionLink, AcpSessionLinks};
 use vmux_session::host::{ImportedConversation, SessionView};
 use vmux_session::{
-    AgentId, ApprovalPolicy, Id, PromptQueue, Route, RunState, Session, TitlePending,
+    AgentRef, ApprovalPolicy, Id, PromptQueue, Route, RunState, Session, TitlePending,
 };
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -85,7 +85,7 @@ pub(super) struct InitialAcpSessionConfig {
 
 fn info(
     mut reader: MessageReader<AcpAgentInfo>,
-    sessions: Query<(Entity, &Id<Session>, &AgentId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentRef), With<Session>>,
     profiles: Profiles,
     mut commands: Commands,
 ) {
@@ -104,7 +104,10 @@ fn info(
             if profile.name() != name {
                 commands.entity(profile.entity()).insert((
                     Name::new(name.to_string()),
-                    Avatar(vmux_ecs::team::AvatarSpec::for_registry(name, &agent_id.0)),
+                    Avatar(vmux_ecs::team::AvatarSpec::for_registry(
+                        name,
+                        agent_id.as_str(),
+                    )),
                 ));
             }
         }
@@ -313,7 +316,7 @@ fn auto_allow(
 #[allow(clippy::type_complexity)]
 fn session(
     mut reader: MessageReader<AcpSessionCreated>,
-    sessions: Query<(Entity, &Id<Session>, &AgentId), With<Session>>,
+    sessions: Query<(Entity, &Id<Session>, &AgentRef), With<Session>>,
     stacks: Query<(&EntityTarget<Session>, &Children)>,
     mut page_meta: Query<&mut PageMetadata, With<SessionView>>,
     links: AcpSessionLinks,
@@ -327,7 +330,7 @@ fn session(
             links.set(
                 &mut commands,
                 session_entity,
-                &AcpSessionLink::kind(&agent_id.0),
+                &AcpSessionLink::kind(agent_id.as_str()),
                 &ev.acp_session_id,
                 None,
             );
@@ -372,7 +375,7 @@ fn input(
     mut q: Query<(
         Entity,
         &Id<Session>,
-        &AgentId,
+        &AgentRef,
         &mut RunState,
         &mut PromptQueue,
         Has<AcpSpawnQueued>,
@@ -421,7 +424,7 @@ fn input(
         let context = PromptWorkspace::prompt(&policy, handoff, workspace_state, title_pending);
         let preferred_mode = modes
             .as_ref()
-            .and_then(|modes| modes.by_agent.get(&agent_id.0))
+            .and_then(|modes| modes.by_agent.get(agent_id.as_str()))
             .map(|memory| memory.selected.clone())
             .filter(|mode| !mode.is_empty());
         service_requests.write(ServiceRequest(
@@ -469,7 +472,7 @@ mod tests {
             (
                 Session,
                 Id::<Session>::new(sid),
-                AgentId(agent.into()),
+                AgentRef::new(agent),
                 Cwd(cwd.into()),
                 ProcessAnchor(ProcessId::new()),
             )

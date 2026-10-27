@@ -606,7 +606,7 @@ fn ProjectAddItem(
 pub(super) fn ProjectDashboard(detail: ProjectDetailView) -> Element {
     let root = detail.path;
     let project_name = detail.name;
-    let project_identity = detail.id.0;
+    let project_identity = detail.id.into_string();
     let mut requested_git = use_signal(String::new);
     let requested_root = root.clone();
     use_effect(move || {

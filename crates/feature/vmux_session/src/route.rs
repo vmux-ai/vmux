@@ -1,4 +1,4 @@
-use crate::{AgentId, Id, Session};
+use crate::{AgentRef, Id, Session};
 use percent_encoding::percent_decode_str;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,20 +38,20 @@ impl Route {
         }
     }
 
-    pub fn manager_for_agent(agent: &AgentId) -> String {
+    pub fn manager_for_agent(agent: &AgentRef) -> String {
         let query = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("agent", &agent.0)
+            .append_pair("agent", agent.as_str())
             .finish();
         format!("{}?{query}", Self::Manager.url())
     }
 
-    pub fn requested_agent(url: &str) -> Option<AgentId> {
+    pub fn requested_agent(url: &str) -> Option<AgentRef> {
         if Self::parse(url) != Some(Self::Manager) {
             return None;
         }
         let route = vmux_api::VmuxRoute::parse(url)?;
         url::form_urlencoded::parse(route.query()?.as_bytes()).find_map(|(key, value)| {
-            (key == "agent" && !value.is_empty()).then(|| AgentId(value.into()))
+            (key == "agent" && !value.is_empty()).then(|| AgentRef::new(value.into_owned()))
         })
     }
 
@@ -98,12 +98,12 @@ mod tests {
 
     #[test]
     fn manager_agent_is_transient_creation_context() {
-        let url = Route::manager_for_agent(&AgentId("claude acp".into()));
+        let url = Route::manager_for_agent(&AgentRef::new("claude acp"));
 
         assert_eq!(url, "vmux://sessions/?agent=claude+acp");
         assert_eq!(
             Route::requested_agent(&url),
-            Some(AgentId("claude acp".into()))
+            Some(AgentRef::new("claude acp"))
         );
         assert_eq!(Route::parse(&url), Some(Route::Manager));
         assert_eq!(Route::requested_agent("vmux://sessions/session-1"), None);

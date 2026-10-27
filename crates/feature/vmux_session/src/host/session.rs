@@ -31,7 +31,7 @@ use vmux_ecs::{
     PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_session::{
-    AgentConversationTitle, AgentId, CreateRequest, Created, PromptQueue, Route, Session,
+    AgentConversationTitle, AgentRef, CreateRequest, Created, PromptQueue, Route, Session,
 };
 
 type UiChatUpdates = UiState<UiChat>;
@@ -103,7 +103,7 @@ impl StartRequest {
     pub fn from_prompt(
         prompt: impl Into<String>,
         cwd: std::path::PathBuf,
-        agent: AgentId,
+        agent: AgentRef,
         target: PageOpenTarget,
         attachments: Vec<vmux_api::protocol::AgentAttachment>,
     ) -> Self {
@@ -768,7 +768,7 @@ mod tests {
             .write(StartRequest::from_prompt(
                 "Fix session startup",
                 std::path::PathBuf::new(),
-                AgentId("mock".into()),
+                AgentRef::new("mock"),
                 PageOpenTarget::Stack(stack),
                 vec![vmux_api::protocol::AgentAttachment {
                     path: "/tmp/screenshot.png".into(),
@@ -829,7 +829,7 @@ mod tests {
                 .spawn((
                     Session,
                     vmux_session::Id::<Session>::new("session"),
-                    AgentId("mock".into()),
+                    AgentRef::new("mock"),
                     vmux_session::RunState::default(),
                 ))
                 .id();

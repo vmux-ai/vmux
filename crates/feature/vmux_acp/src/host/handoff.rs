@@ -30,7 +30,7 @@ fn load(
         (&ChildOf, &ProviderKey, &ResourceKind, &ExternalId),
         (With<ExternalLink>, Added<ExternalLink>),
     >,
-    sessions: Query<&vmux_session::AgentId, Without<ImportedConversation>>,
+    sessions: Query<&vmux_session::AgentRef, Without<ImportedConversation>>,
     mut commands: Commands,
 ) {
     for (owner, provider, kind, session_id) in &links {
@@ -41,7 +41,7 @@ fn load(
         let Ok(agent_id) = sessions.get(entity) else {
             continue;
         };
-        let Some(imported) = directory.load(&agent_id.0, session_id.as_str()) else {
+        let Some(imported) = directory.load(agent_id.as_str(), session_id.as_str()) else {
             continue;
         };
         commands.entity(entity).insert(imported);
@@ -53,7 +53,7 @@ fn persist(
     mut created: MessageReader<crate::host::event::AcpSessionCreated>,
     sessions: Query<(
         &vmux_session::Id<vmux_session::Session>,
-        &vmux_session::AgentId,
+        &vmux_session::AgentRef,
         &ImportedConversation,
     )>,
 ) {
@@ -62,7 +62,7 @@ fn persist(
             if session_id.as_str() != event.sid || imported.first_prompt.is_none() {
                 continue;
             }
-            if let Err(error) = directory.save(imported, &agent_id.0, &event.acp_session_id) {
+            if let Err(error) = directory.save(imported, agent_id.as_str(), &event.acp_session_id) {
                 bevy::log::warn!("acp: failed to persist handoff metadata: {error}");
             }
         }

@@ -43,7 +43,7 @@ impl Plugin for EntityPlugin {
             .register_required_components::<Session, Description>();
         app.register_persisted::<Session>()
             .register_persisted::<Id<Session>>()
-            .register_persisted::<AgentId>()
+            .register_persisted::<AgentRef>()
             .register_persisted::<ProviderWorkflowState>()
             .register_persisted::<ProviderArchive>()
             .register_persisted::<ProviderSessionTombstone>()
@@ -165,13 +165,30 @@ impl SessionDuplicate {
 #[relationship_target(relationship = SessionDuplicate)]
 pub struct SessionDuplicates(Vec<Entity>);
 
-#[derive(
-    Component, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Reflect)]
+#[type_path = "vmux_session"]
+pub enum Agent {}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize)]
+#[component(immutable)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_session"]
-pub struct AgentId(pub String);
+pub struct AgentRef(Id<Agent>);
+
+impl AgentRef {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(Id::new(value))
+    }
+
+    pub fn id(&self) -> &Id<Agent> {
+        &self.0
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AgentFamily(String);
@@ -293,7 +310,7 @@ pub struct CreateRequest {
     pub name: String,
     pub description: String,
     pub cwd: PathBuf,
-    pub agent: Option<AgentId>,
+    pub agent: Option<AgentRef>,
     created_at: Option<i64>,
     activated_at: Option<i64>,
 }
@@ -303,7 +320,7 @@ impl CreateRequest {
         name: impl Into<String>,
         description: impl Into<String>,
         cwd: PathBuf,
-        agent: Option<AgentId>,
+        agent: Option<AgentRef>,
     ) -> Self {
         Self {
             id: Id::<Session>::new(uuid::Uuid::new_v4().to_string()),
@@ -320,7 +337,7 @@ impl CreateRequest {
         name: impl Into<String>,
         description: impl Into<String>,
         cwd: PathBuf,
-        agent: AgentId,
+        agent: AgentRef,
         created_at: i64,
         activated_at: i64,
     ) -> Self {
@@ -1579,7 +1596,7 @@ mod tests {
             "Task",
             "Description",
             PathBuf::from("/tmp/project"),
-            Some(AgentId("codex".into())),
+            Some(AgentRef::new("codex")),
         );
         let expected_id = request.id.clone();
         app.world_mut()
@@ -1594,7 +1611,7 @@ mod tests {
             &Description,
             &Cwd,
             &WorkflowStateRef,
-            &AgentId,
+            &AgentRef,
         ), With<Session>>();
         let (id, name, description, cwd, state, agent) = sessions.single(app.world()).unwrap();
         assert_eq!(id, &expected_id);
@@ -1602,7 +1619,7 @@ mod tests {
         assert_eq!(description.0, "Description");
         assert_eq!(cwd.0, PathBuf::from("/tmp/project"));
         assert_eq!(state.id().as_str(), "in_progress");
-        assert_eq!(agent.0, "codex");
+        assert_eq!(agent.as_str(), "codex");
     }
 
     #[test]
@@ -1613,7 +1630,7 @@ mod tests {
             "Imported",
             "Provider session",
             PathBuf::from("/tmp/project"),
-            AgentId("codex".into()),
+            AgentRef::new("codex"),
             100,
             200,
         );
@@ -2064,7 +2081,7 @@ mod tests {
 
         assert!(filter.is_allowed::<Session>());
         assert!(filter.is_allowed::<Id<Session>>());
-        assert!(filter.is_allowed::<AgentId>());
+        assert!(filter.is_allowed::<AgentRef>());
         assert!(filter.is_allowed::<ProviderWorkflowState>());
         assert!(filter.is_allowed::<ProviderArchive>());
         assert!(filter.is_allowed::<ProviderSessionTombstone>());

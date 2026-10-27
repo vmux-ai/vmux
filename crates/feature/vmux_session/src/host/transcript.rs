@@ -20,7 +20,7 @@ use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{AvatarSpec, Profiles, User};
 use vmux_ecs::{CreatedAt, EntityTarget, PageMetadata};
 use vmux_session::{
-    AgentConversationTitle, AgentId, ConversationEvent, MessageContent, PromptQueue, Sequence,
+    AgentConversationTitle, AgentRef, ConversationEvent, MessageContent, PromptQueue, Sequence,
     Session, Transcripts,
 };
 use vmux_session::{AgentTurnMeta, RunState};
@@ -57,7 +57,7 @@ struct ChatProjection {
 
 type ChangedSession = (
     Entity,
-    &'static AgentId,
+    &'static AgentRef,
     Ref<'static, Name>,
     Ref<'static, RunState>,
     Option<Ref<'static, AgentTurnMeta>>,
@@ -135,7 +135,7 @@ struct ReadyWorld<'w, 's> {
 }
 
 type SessionProjection = (
-    &'static AgentId,
+    &'static AgentRef,
     &'static Name,
     &'static RunState,
     Option<&'static AgentTurnMeta>,
@@ -330,7 +330,7 @@ fn chat_snapshot_due(streaming: bool, urgent: bool, elapsed: Option<std::time::D
 impl ChatProjection {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        agent_id: &AgentId,
+        agent_id: &AgentRef,
         messages: &[vmux_api::session::Message],
         message_times: &[u64],
         state: &RunState,
@@ -396,7 +396,7 @@ impl ChatProjection {
             status: state.status().to_string(),
             error,
             approval,
-            agent_id: agent_id.0.clone(),
+            agent_id: agent_id.as_str().to_string(),
             agent_name,
             conversation_title: conversation_title
                 .map(|title| title.0.clone())
@@ -691,7 +691,7 @@ mod tests {
 
     #[test]
     fn snapshot_reports_grouped_imported_item_boundary() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
             source_sid: "codex-1".into(),
@@ -737,7 +737,7 @@ mod tests {
 
     #[test]
     fn snapshot_includes_approval_tool_and_input() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let snapshot = ChatProjection::new(
             &agent,
             &[],
@@ -770,7 +770,7 @@ mod tests {
 
     #[test]
     fn snapshot_includes_model_written_conversation_title() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let title = AgentConversationTitle("Refine generated chat summaries".into());
         let snapshot = ChatProjection::new(
             &agent,
@@ -798,7 +798,7 @@ mod tests {
 
     #[test]
     fn snapshot_uses_session_name_until_model_writes_title() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let snapshot = ChatProjection::new(
             &agent,
             &[],
@@ -822,7 +822,7 @@ mod tests {
 
     #[test]
     fn snapshot_uses_the_active_user_profile_avatar() {
-        let agent = AgentId("codex".into());
+        let agent = AgentRef::new("codex");
         let profile = ProfilePresentation::user_named("Personal");
         let snapshot = ChatProjection::new(
             &agent,

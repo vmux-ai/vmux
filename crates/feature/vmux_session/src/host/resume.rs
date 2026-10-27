@@ -13,7 +13,7 @@ use vmux_ecs::team::Profiles;
 use vmux_ecs::{Cwd, Description, LastActivatedAt, PageOpenRequest, PageOpenTarget, UiStateWrite};
 use vmux_git::RepoInfoCache;
 use vmux_session::{
-    AgentFamily, AgentId, Id, ProviderCatalog, ProviderSessionTombstones, Route, Session,
+    AgentFamily, AgentRef, Id, ProviderCatalog, ProviderSessionTombstones, Route, Session,
     SessionDuplicate, Transcripts,
 };
 #[cfg(test)]
@@ -52,7 +52,7 @@ type Sessions<'w, 's> = Query<
         &'static Description,
         &'static Cwd,
         &'static LastActivatedAt,
-        Option<&'static AgentId>,
+        Option<&'static AgentRef>,
     ),
     (With<Session>, Without<SessionDuplicate>),
 >;
@@ -90,8 +90,8 @@ impl ResumeCatalog<'_, '_> {
                     let fallback = profile
                         .as_ref()
                         .map(vmux_ecs::team::ProfileView::name)
-                        .unwrap_or(agent.0.as_str());
-                    AgentFamily::of(&agent.0).name(fallback)
+                        .unwrap_or(agent.as_str());
+                    AgentFamily::of(agent.as_str()).name(fallback)
                 })
                 .filter(|agent| !agent.is_empty())
                 .unwrap_or_else(|| vmux_ui::i18n::translate("sessions-title"));
@@ -214,7 +214,7 @@ impl ResumeCatalog<'_, '_> {
 fn prompt_history(
     trigger: On<UiInput<PromptHistoryRequest>>,
     sessions: Query<
-        (Entity, &Cwd, &AgentId, &LastActivatedAt),
+        (Entity, &Cwd, &AgentRef, &LastActivatedAt),
         (With<Session>, Without<SessionDuplicate>),
     >,
     transcripts: Transcripts,
@@ -224,7 +224,9 @@ fn prompt_history(
     let requested_cwd = Path::new(&request.cwd);
     let mut matching = sessions
         .iter()
-        .filter(|(_, cwd, agent, _)| agent.0 == request.agent && cwd.0.as_path() == requested_cwd)
+        .filter(|(_, cwd, agent, _)| {
+            agent.as_str() == request.agent && cwd.0.as_path() == requested_cwd
+        })
         .map(|(entity, _, _, activated)| (activated.milliseconds(), entity))
         .collect::<Vec<_>>();
     matching.sort_by_key(|(activated, _)| *activated);
@@ -356,7 +358,7 @@ mod tests {
                 Description("Restore delegated session requests".into()),
                 Cwd("/work/vmux".into()),
                 LastActivatedAt::new(2),
-                AgentId("codex".into()),
+                AgentRef::new("codex"),
             ))
             .id()
     }

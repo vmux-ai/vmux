@@ -66,7 +66,7 @@ fn attach(
         let anchor = ProcessId::new();
         commands.entity(*session_entity).insert((
             vmux_ecs::agent::AgentSessionRoot,
-            vmux_session::AgentId(agent_id.to_string()),
+            vmux_session::AgentRef::new(agent_id),
             Cwd(cwd.clone()),
             ProcessAnchor(anchor),
             vmux_session::RunState::default(),

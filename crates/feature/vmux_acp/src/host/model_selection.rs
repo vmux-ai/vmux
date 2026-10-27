@@ -87,7 +87,8 @@ fn load_model_selections(profile: CurrentProfile, mut models: Single<&mut AgentM
     };
     for (agent, mut memory) in saved {
         if !memory.url.is_empty() && SessionRoute::parse(&memory.url).is_none() {
-            memory.url = SessionRoute::manager_for_agent(&vmux_session::AgentId(agent.clone()));
+            memory.url =
+                SessionRoute::manager_for_agent(&vmux_session::AgentRef::new(agent.clone()));
         }
         models.by_agent.insert(agent, memory);
     }

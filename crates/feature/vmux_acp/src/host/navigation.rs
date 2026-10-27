@@ -18,7 +18,7 @@ use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWork
 use vmux_session::event::{ChatSnapshot, ChatTranscriptState};
 use vmux_session::host::{ImportedConversation, SessionManagerView, SessionView};
 use vmux_session::state::{ChatUiState, SessionDetailUiState};
-use vmux_session::{AgentId, Cleanup, Id, PromptQueue, Route, Session};
+use vmux_session::{AgentRef, Cleanup, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 use vmux_ui::i18n::translate;
@@ -554,7 +554,7 @@ fn swap(
         runtime
             .commands
             .entity(session_entity)
-            .insert((AgentId(id.to_string()), Cwd(cwd.clone())));
+            .insert((AgentRef::new(id), Cwd(cwd.clone())));
         let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
         let icon = catalog.icon(id);
         let agent_name = catalog.profile_name(id, cfg);
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn manager_target_preserves_requested_agent() {
-        let url = Route::manager_for_agent(&AgentId("codex".into()));
+        let url = Route::manager_for_agent(&AgentRef::new("codex"));
         let target = AgentChatTarget::parse(&url).unwrap();
 
         assert_eq!(target.url, url);

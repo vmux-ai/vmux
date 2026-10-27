@@ -29,7 +29,7 @@ use vmux_ecs::{
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use vmux_session::host::{SessionManagerView, SessionView, SessionViews};
 use vmux_session::{
-    AgentConversationTitle, AgentFamily, AgentId, ArchiveRequest, ArchiveState,
+    AgentConversationTitle, AgentFamily, AgentRef, ArchiveRequest, ArchiveState,
     ConversationAppendReceived, CreateRequest, Created, ProviderArchive, ProviderArchiveCompleted,
     ProviderArchiveWriteRequest, ProviderCatalog, ProviderSession, Route, Session,
     ProviderSessionTombstones, SessionDuplicate, SnapshotReceived, TranscriptLoading, Transcripts,
@@ -555,14 +555,14 @@ struct PendingImport {
     destination: ResumeDestination,
     deferred_open: bool,
     source: ProviderSession,
-    agent: AgentId,
+    agent: AgentRef,
 }
 
 #[derive(Message, Clone)]
 struct ProviderImportRequest {
     destination: ResumeDestination,
     source: ProviderSession,
-    agent: AgentId,
+    agent: AgentRef,
 }
 
 #[derive(Clone, Copy)]
@@ -1670,12 +1670,12 @@ fn finish(
 fn project(
     snapshot: Res<SourceSnapshot>,
     acp: Res<AcpSnapshot>,
-    imported: Query<(Entity, &AgentId), (With<Session>, Without<SessionDuplicate>)>,
+    imported: Query<(Entity, &AgentRef), (With<Session>, Without<SessionDuplicate>)>,
     changed: Query<
         (),
         (
             With<Session>,
-            Or<(Changed<AgentId>, Changed<SessionDuplicate>)>,
+            Or<(Changed<AgentRef>, Changed<SessionDuplicate>)>,
         ),
     >,
     changed_links: Query<
@@ -1724,7 +1724,7 @@ fn project(
                 .kind()
                 .strip_prefix("acp:")
                 .map(AgentFamily::of)
-                .unwrap_or_else(|| AgentFamily::of(&agent.0));
+                .unwrap_or_else(|| AgentFamily::of(agent.as_str()));
             Some((family, link.id().as_str().to_string()))
         })
         .collect::<HashSet<_>>();
@@ -1767,7 +1767,7 @@ fn project(
 
 fn associate(
     snapshot: Res<SourceSnapshot>,
-    sessions: Query<(Entity, &AgentId, &Name, &vmux_ecs::Cwd, &CreatedAt), With<Session>>,
+    sessions: Query<(Entity, &AgentRef, &Name, &vmux_ecs::Cwd, &CreatedAt), With<Session>>,
     links: AcpSessionLinks,
     mut commands: Commands,
 ) {
@@ -1780,7 +1780,7 @@ fn associate(
         };
         let cwd = cwd.0.to_string_lossy();
         let Some(source) = snapshot.association(
-            &agent.0,
+            agent.as_str(),
             link.id().as_str(),
             name.as_str(),
             &cwd,
@@ -2279,14 +2279,14 @@ struct AgentCatalog<'w, 's> {
 }
 
 impl AgentCatalog<'_, '_> {
-    fn resolve(&self, source: &str) -> AgentId {
+    fn resolve(&self, source: &str) -> AgentRef {
         let family = AgentFamily::of(source);
         if let Some(agent) = self
             .registry
             .iter()
             .find(|agent| agent.id == source && agent.is_installed())
         {
-            return AgentId(agent.id.clone());
+            return AgentRef::new(agent.id.clone());
         }
         if let Some(config) = self
             .settings
@@ -2295,14 +2295,14 @@ impl AgentCatalog<'_, '_> {
             .iter()
             .find(|config| config.id == source)
         {
-            return AgentId(config.id.clone());
+            return AgentRef::new(config.id.clone());
         }
         if let Some(agent) = self
             .registry
             .iter()
             .find(|agent| AgentFamily::of(&agent.id) == family && agent.is_installed())
         {
-            return AgentId(agent.id.clone());
+            return AgentRef::new(agent.id.clone());
         }
         if let Some(config) = self
             .settings
@@ -2311,16 +2311,16 @@ impl AgentCatalog<'_, '_> {
             .iter()
             .find(|config| AgentFamily::of(&config.id) == family)
         {
-            return AgentId(config.id.clone());
+            return AgentRef::new(config.id.clone());
         }
         if let Some(agent) = self
             .registry
             .iter()
             .find(|agent| AgentFamily::of(&agent.id) == family)
         {
-            return AgentId(agent.id.clone());
+            return AgentRef::new(agent.id.clone());
         }
-        AgentId(source.to_string())
+        AgentRef::new(source)
     }
 }
 
@@ -2586,7 +2586,7 @@ mod tests {
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(created.len(), 1);
-        assert_eq!(created[0].agent, Some(AgentId("codex".into())));
+        assert_eq!(created[0].agent, Some(AgentRef::new("codex")));
         let id = created[0].id().clone();
         let opened = app
             .world_mut()
@@ -2721,7 +2721,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Session,
-                AgentId("codex".into()),
+                AgentRef::new("codex"),
                 Name::new("Review pull request"),
                 vmux_ecs::Cwd(PathBuf::from("/work/dashboard")),
                 CreatedAt::new(100),
@@ -2764,7 +2764,7 @@ mod tests {
         let id = Id::<Session>::new("canonical-session");
         let session = app
             .world_mut()
-            .spawn((Session, id.clone(), AgentId("codex".into())))
+            .spawn((Session, id.clone(), AgentRef::new("codex")))
             .id();
         ProviderFixture::spawn_link(app.world_mut(), session, "acp:codex", "provider-session");
         app.update();

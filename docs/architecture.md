@@ -1103,6 +1103,8 @@ and agent pane ownership is runtime routing state, not profile identity.
 Conversation members and events use `Id<Member>` and `Id<ConversationEvent>` across ECS and wire
 contracts. Client deduplication uses `Id<ClientOperation>`; correlation identity does not introduce
 a parallel string-ID type.
+Sessions reference agents through `AgentRef(Id<Agent>)`, and project contracts use `Id<Project>`;
+neither domain introduces a parallel `*Id` string wrapper.
 Agent presentation profiles are owned entities composed from a `Profile` marker, Bevy `Name`,
 `Avatar`, and `Icon`. Sessions resolve that child through `Profiles`, so agent presentation never
 overloads the Session's canonical task name.

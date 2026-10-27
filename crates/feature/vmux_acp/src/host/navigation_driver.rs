@@ -11,7 +11,7 @@ use vmux_ecs::{
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{StartupDir, Tab, TabWorkspace};
 use vmux_session::host::{SessionManagerView, SessionView};
-use vmux_session::{AgentConversationTitle, AgentId, Id, PromptQueue, Route, Session};
+use vmux_session::{AgentConversationTitle, AgentRef, Id, PromptQueue, Route, Session};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::translate;
 
@@ -40,7 +40,7 @@ pub(super) struct PageOpener<'w, 's> {
             &'static Id<Session>,
             &'static Name,
             &'static Cwd,
-            Option<&'static AgentId>,
+            Option<&'static AgentRef>,
             Option<&'static ProcessAnchor>,
         ),
         With<Session>,
@@ -145,7 +145,7 @@ impl PageOpener<'_, '_> {
                         entity,
                         name.as_str().to_string(),
                         cwd.0.clone(),
-                        agent.map(|agent| agent.0.clone()),
+                        agent.map(|agent| agent.as_str().to_string()),
                         self.links
                             .get(entity)
                             .map(|link| link.id().as_str().to_string()),
@@ -239,7 +239,7 @@ impl PageOpener<'_, '_> {
                 );
                 self.commands
                     .entity(session_entity)
-                    .insert(AgentId(agent_id));
+                    .insert(AgentRef::new(agent_id));
                 let operation = self.commands.spawn(request).id();
                 if let Some(webview) = transition_webview {
                     self.commands
