@@ -1,5 +1,6 @@
 use bevy::prelude::*;
-use vmux_api::session::ClientOpId;
+use vmux_api::Id;
+use vmux_api::session::ClientOperation;
 
 pub(crate) use super::client_operation_driver::ClientOperations;
 use super::client_operation_driver::{
@@ -26,9 +27,6 @@ impl Plugin for ClientOperationPlugin {
     }
 }
 
-#[derive(Component, Clone, Eq, PartialEq)]
-struct ClientOperationId(ClientOpId);
-
 #[derive(Component, Clone, Copy)]
 struct ClientOperationSequence(u64);
 
@@ -42,14 +40,14 @@ fn receive_requests(mut inbox: Single<&mut ClientOperationInbox>, mut commands: 
 }
 
 fn release_client_operations(
-    operations: Query<(Entity, &ClientOperationId)>,
+    operations: Query<(Entity, &Id<ClientOperation>)>,
     mut requests: Query<(Entity, &mut ReleaseClientOperation)>,
     mut commands: Commands,
 ) {
     let mut removed = Vec::new();
     for (request_entity, mut request) in &mut requests {
         for (operation_entity, operation) in &operations {
-            if operation.0 != request.id || removed.contains(&operation_entity) {
+            if operation != &request.id || removed.contains(&operation_entity) {
                 continue;
             }
             commands.entity(operation_entity).despawn();
@@ -63,14 +61,14 @@ fn release_client_operations(
 }
 
 fn claim_client_operations(
-    operations: Query<(Entity, &ClientOperationId, &ClientOperationSequence)>,
+    operations: Query<(Entity, &Id<ClientOperation>, &ClientOperationSequence)>,
     mut requests: Query<(Entity, &mut ClaimClientOperation)>,
     mut sequence: Local<u64>,
     mut commands: Commands,
 ) {
     let mut claimed = Vec::new();
     for (entity, id, order) in &operations {
-        claimed.push((entity, id.0.clone(), order.0));
+        claimed.push((entity, id.clone(), order.0));
     }
 
     for (request_entity, mut request) in &mut requests {
@@ -91,7 +89,7 @@ fn claim_client_operations(
             let entity = commands
                 .spawn((
                     Name::new(format!("client operation {}", request.id.as_str())),
-                    ClientOperationId(request.id.clone()),
+                    request.id.clone(),
                     ClientOperationSequence(order),
                 ))
                 .id();
@@ -109,7 +107,7 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
 
-    async fn claim(app: &mut App, operations: ClientOperations, id: ClientOpId) -> bool {
+    async fn claim(app: &mut App, operations: ClientOperations, id: Id<ClientOperation>) -> bool {
         let task = tokio::spawn(async move { operations.claim(id).await });
         while !task.is_finished() {
             tokio::task::yield_now().await;
@@ -127,7 +125,7 @@ mod tests {
         app.world_mut()
             .spawn((Name::new("remote client operations"), runtime));
 
-        let first = ClientOpId::new("first");
+        let first = Id::<ClientOperation>::new("first");
         assert!(claim(&mut app, operations.clone(), first.clone()).await);
         assert!(!claim(&mut app, operations.clone(), first.clone()).await);
 
@@ -138,20 +136,13 @@ mod tests {
             app.update();
         }
         release_task.await.unwrap();
-        assert!(claim(&mut app, operations.clone(), ClientOpId::new("first")).await);
+        assert!(claim(&mut app, operations.clone(), Id::new("first")).await);
 
         for index in 0..MAX_CLIENT_OPERATIONS {
-            assert!(
-                claim(
-                    &mut app,
-                    operations.clone(),
-                    ClientOpId::new(format!("op-{index}")),
-                )
-                .await
-            );
+            assert!(claim(&mut app, operations.clone(), Id::new(format!("op-{index}")),).await);
         }
         let world = app.world_mut();
-        let mut query = world.query::<&ClientOperationId>();
+        let mut query = world.query::<&Id<ClientOperation>>();
         let count = query.iter(world).count();
         assert_eq!(count, MAX_CLIENT_OPERATIONS);
     }

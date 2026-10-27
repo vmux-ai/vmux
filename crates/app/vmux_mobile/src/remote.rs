@@ -4,9 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use vmux_api::Id;
 use vmux_api::protocol::{SharedMessage, SharedResponse};
 use vmux_api::session::{
-    ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteAgent,
-    RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
-    Session,
+    ApprovalRequest, ClientOperation, ConversationEvent, NewChatRequest, PromptRequest,
+    RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession,
+    RemoteStatus, Session,
 };
 use vmux_ui::i18n::translate;
 
@@ -19,13 +19,13 @@ static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct ClientOperationIds;
 
 impl ClientOperationIds {
-    pub(crate) fn next() -> ClientOpId {
+    pub(crate) fn next() -> Id<ClientOperation> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
         let sequence = NEXT_CLIENT_OP_ID.fetch_add(1, Ordering::Relaxed);
-        ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
+        Id::new(format!("mobile:{timestamp}:{sequence}"))
     }
 }
 

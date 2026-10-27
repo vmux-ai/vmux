@@ -315,8 +315,8 @@ mod tests {
         let session = app.world_mut().spawn((Session, session_id.clone())).id();
         app.world_mut().spawn((
             vmux_session::ConversationEvent,
-            vmux_api::session::EventId::new("event-1"),
-            vmux_api::session::MemberId::local(&session_id),
+            Id::<vmux_api::session::ConversationEvent>::new("event-1"),
+            vmux_api::session::Member::local_id(&session_id),
             vmux_session::Sequence(1),
             vmux_session::MessageContent(Message::user("persisted")),
             vmux_ecs::CreatedAt::new(1),

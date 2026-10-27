@@ -1,5 +1,5 @@
-use crate::ProcessId;
-use crate::session::ClientOpId;
+use crate::session::ClientOperation;
+use crate::{Id, ProcessId};
 
 #[vmux_api::contract(Eq)]
 pub struct AgentRequest {
@@ -98,7 +98,7 @@ pub struct AgentFileSearch {
 
 #[vmux_api::agent]
 pub struct AgentNewChat {
-    pub client_op_id: ClientOpId,
+    pub client_op_id: Id<ClientOperation>,
     pub prompt: String,
     pub agent_url: Option<String>,
 }

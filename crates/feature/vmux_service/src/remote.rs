@@ -1,7 +1,7 @@
 pub use vmux_api::Id;
 pub use vmux_api::session::{
-    ApprovalRequest, ClientOpId, ConversationEvent, NewChatRequest, PromptRequest, RemoteApproval,
-    RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus, Session,
+    ApprovalRequest, ClientOperation, ConversationEvent, NewChatRequest, PromptRequest,
+    RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus, Session,
 };
 
 #[cfg(host)]
