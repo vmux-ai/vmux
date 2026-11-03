@@ -84,7 +84,7 @@ mod tests {
 
         let infrastructure = app
             .world_mut()
-            .spawn(WebviewSource::new("chrome-extension://bridge/"))
+            .spawn(WebviewSource::new("https://bridge.example/"))
             .id();
         let browser = app
             .world_mut()
